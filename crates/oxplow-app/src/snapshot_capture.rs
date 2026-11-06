@@ -95,7 +95,7 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 
 /// How long [`SnapshotCaptureService::request_snapshot`] waits before
 /// draining the dirty set, giving the fs-watch debouncer (250 ms in
-/// `workspace_watch`) time to deliver any in-flight events through
+/// `stream_watch`) time to deliver any in-flight events through
 /// the broadcast channel and into the dirty set. Without this, an
 /// edit followed almost immediately by the close (`oxplow.effort.report`) produces an
 /// empty bracket — the edit hasn't propagated yet, so
@@ -553,10 +553,10 @@ impl SnapshotCaptureService {
     /// the `JoinHandle` so callers can await teardown if needed.
     /// Start the fs-watcher and, beside it, the quiet trigger (P2.4). The
     /// returned handle is the watcher's; both end on [`Self::shutdown`].
-    pub fn spawn_watcher(&self) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_watcher(&self, watch: Arc<FsWatcher>) -> tokio::task::JoinHandle<()> {
         self.spawn_quiet_trigger();
         let this = self.clone();
-        tokio::spawn(async move { this.run_watcher().await })
+        tokio::spawn(async move { this.run_watcher(watch).await })
     }
 
     /// Record that the worktree changed (fs-watch), arming the quiet
@@ -735,22 +735,12 @@ impl SnapshotCaptureService {
         Ok(Some(moved.snapshot_id))
     }
 
-    async fn run_watcher(self) {
-        // The root and each kept top-level directory, pruned at
-        // registration (tsk206) and following directories made later
-        // (tsk227, tsk1051) — `FsWatcher::watch_workspace`.
-        let watcher =
-            match FsWatcher::watch_workspace(&self.inner.project_dir, self.workspace_filter()) {
-                Ok(w) => w,
-                Err(e) => {
-                    warn!(error = %e, "snapshot capture: failed to start fs-watch");
-                    return;
-                }
-            };
+    /// `watcher` is this stream's watch, which judges by this stream's filter.
+    async fn run_watcher(self, watcher: Arc<FsWatcher>) {
         // At once, with no window: the dirty set must be current the instant
         // a snapshot is requested, so we mark paths dirty as soon as the OS
         // reports them. The general-purpose `WorkspaceChanged` feed
-        // (workspace_watch) is the one that waits for a burst to end.
+        // (stream_watch) is the one that waits for a burst to end.
         let mut changes = watcher.subscribe();
         loop {
             tokio::select! {
@@ -2129,9 +2119,9 @@ mod tests {
     async fn shutdown_ends_the_spawned_watcher_task() {
         let project = tempdir().unwrap();
         let (svc, _store) = svc_for(project.path()).await;
-        let handle = svc.spawn_watcher();
-        // Give the watcher a moment to start its FsWatcher and park on
-        // `rx.recv()`. Without the shutdown signal it would stay parked
+        let watch = Arc::new(FsWatcher::watch(project.path()).unwrap());
+        let handle = svc.spawn_watcher(watch);
+        // Give the watcher a moment to park on its subscription. Without the shutdown signal it would stay parked
         // forever (no fs events arrive), so the handle would never join.
         tokio::time::sleep(Duration::from_millis(50)).await;
         svc.shutdown();

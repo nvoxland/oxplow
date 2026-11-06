@@ -361,12 +361,11 @@ export interface WorkspaceContext {
   vcsEnabled: boolean;
 }
 
+/** A burst of changes in a stream's worktree. `overflow`: `paths` isn't
+ *  whole, so anything held on that stream may have changed. */
 export interface WorkspaceWatchEvent {
-  id: number;
-  streamId: string;
-  path: string;
-  kind: "created" | "updated" | "deleted";
-  t: number;
+  paths: string[];
+  overflow: boolean;
 }
 
 // Stream + config wrappers. Each call goes straight to the
@@ -1462,13 +1461,7 @@ export function subscribeWorkspaceEvents(
   return subscribeOxplowEvents((event) => {
     if (event.kind !== "workspaceChanged") return;
     if (event.streamId !== streamId) return;
-    onEvent({
-      id: 0,
-      streamId,
-      kind: event.changeKind as WorkspaceWatchEvent["kind"],
-      path: event.path as string,
-      t: Date.now(),
-    });
+    onEvent({ paths: event.paths as string[], overflow: event.overflow as boolean });
   });
 }
 

@@ -79,12 +79,13 @@ impl Router {
                 {
                     // A build writing thousands of files under an ignored
                     // folder (inside a kept directory, where the OS watch
-                    // still sees it) would overflow the channel and make
-                    // every consumer hold it and then rescan.
+                    // still sees it) must cost next to nothing. Only a scope
+                    // that names the path hears it.
+                    self.events.change(path, &kind, false);
                     continue;
                 }
             }
-            self.events.change(path, &kind);
+            self.events.change(path, &kind, true);
             if let Some(route) = &self.route {
                 if path
                     .parent()
@@ -282,7 +283,7 @@ mod tests {
             let filter =
                 WorkspaceFilter::build(&root, Vec::<String>::new(), Vec::<String>::new(), None);
             let events = Subscribers::new(vec![root.clone()], vec![root.clone()]);
-            let heard = events.subscribe();
+            let heard = events.subscribe(None);
             let (follower_tx, messages) = mpsc::channel();
             Self {
                 router: Router {

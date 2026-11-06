@@ -28,7 +28,7 @@ pub use filter::{
 pub use notify::RecursiveMode;
 use notify::{RecommendedWatcher, Watcher};
 use pending::Subscribers;
-pub use pending::{Batch, Subscription};
+pub use pending::{Batch, Feed, Scope, Subscription};
 use router::{FollowMsg, Follower, Route, Router};
 use thiserror::Error;
 
@@ -182,7 +182,13 @@ impl FsWatcher {
     /// instant a snapshot is requested) or [`Subscription::next_batch_after`]
     /// (a burst as one batch: most of the system).
     pub fn subscribe(&self) -> Subscription {
-        self.events.subscribe()
+        self.events.subscribe(None)
+    }
+
+    /// [`Self::subscribe`] for the paths `scope` names, kept by the filter or
+    /// not, and no others.
+    pub fn subscribe_to(&self, scope: Scope) -> Subscription {
+        self.events.subscribe(Some(scope))
     }
 }
 

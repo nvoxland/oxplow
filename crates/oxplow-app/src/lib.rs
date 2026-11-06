@@ -161,6 +161,7 @@ mod source_guards;
 pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
+pub mod stream_watch;
 #[cfg(test)]
 mod subagent_tests;
 pub mod symbol_collector;
@@ -188,11 +189,10 @@ pub mod wiki_pages_watch;
 pub mod work_items;
 pub mod work_items_conformance;
 pub mod workspace_files;
-pub mod workspace_watch;
 pub mod worktrees;
 
 pub use agent_prompt::{build_session_context_block, OtherAgent, Surroundings};
-pub use events::{event_channels, EventBus, OxplowEvent, WorkspaceChangeKind};
+pub use events::{event_channels, EventBus, OxplowEvent};
 pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
@@ -599,6 +599,8 @@ pub struct Services {
     /// here; those about the primary stream's worktree (the wiki watcher)
     /// use `snapshot_captures.primary()`.
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// Each stream's one file watch.
+    pub stream_watches: stream_watch::StreamWatchRegistry,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
@@ -1208,6 +1210,13 @@ impl Services {
                 }),
             },
         );
+        let stream_watches = stream_watch::StreamWatchRegistry::new(
+            streams.clone(),
+            snapshot_captures.clone(),
+            vcs.clone(),
+            event_bus.clone(),
+            ref_moves.clone(),
+        );
         // Register every active stream. Streams whose worktree no
         // longer exists on disk (orphaned) are silently skipped — the
         // registry's `register` returns None for those.
@@ -1562,6 +1571,7 @@ impl Services {
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
+            stream_watches: stream_watches.clone(),
             snapshots: snapshots.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
@@ -1874,6 +1884,7 @@ impl Services {
             threads,
             efforts,
             snapshot_captures,
+            stream_watches,
             stream_store,
             thread_store,
             agent_session_store,

@@ -72,7 +72,15 @@ export interface BufferIO {
   services?(stream: Stream, store: BufferStore): StreamServices;
   /** Follow the stream's worktree: a file changed on disk, renamed or
    *  deleted (by anyone). Returns the stop. */
-  watch?(stream: string, on: { changed(path: string): void; renamed(from: string, to: string): void; deleted(path: string): void }): () => void;
+  watch?(
+    stream: string,
+    on: {
+      changed(path: string): void;
+      everythingChanged(): void;
+      renamed(from: string, to: string): void;
+      deleted(path: string): void;
+    },
+  ): () => void;
 }
 
 /** The daemon's call a save answers (an agent's Save, written as it). */
@@ -158,6 +166,11 @@ export function createBufferStore(io: BufferIO): BufferStore {
       s.services = io.services?.(stream, store);
       s.unwatch = io.watch?.(stream.id, {
         changed: (path) => void store.diskChanged(stream.id, path),
+        everythingChanged: () => {
+          for (const h of [...held.values()]) {
+            if (h.buffer.stream === stream.id) void store.diskChanged(stream.id, h.buffer.path);
+          }
+        },
         renamed: (from, to) => store.renamed(stream.id, from, to),
         deleted: (path) => store.deleted(stream.id, path),
       });

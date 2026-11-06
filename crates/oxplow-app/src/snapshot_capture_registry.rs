@@ -269,15 +269,6 @@ impl SnapshotCaptureRegistry {
         self.get(&id)
     }
 
-    /// Spawn the fs-watch listener for every currently-registered
-    /// service. Safe to call multiple times — each service
-    /// idempotently spawns at most one watcher per `Arc` (in practice
-    /// only main.rs calls this, once at boot).
-    pub fn spawn_all_watchers(&self) -> Vec<tokio::task::JoinHandle<()>> {
-        let services = self.services.read().unwrap_or_else(|e| e.into_inner());
-        services.values().map(|s| s.spawn_watcher()).collect()
-    }
-
     /// Test-only: insert a pre-built service under `id`, replacing any
     /// existing entry. Lets tests override the default builder (with
     /// custom settle / predrain durations, for example) without
@@ -334,8 +325,9 @@ mod tests {
         let reg = SnapshotCaptureRegistry::new(config_for(project.path()));
         let stream = stream_at(project.path());
         let svc = reg.register(&stream).expect("worktree exists");
-        let handle = svc.spawn_watcher();
-        // Let the watcher park on rx.recv().
+        let watch = Arc::new(oxplow_fs_watch::FsWatcher::watch(project.path()).unwrap());
+        let handle = svc.spawn_watcher(watch);
+        // Let the watcher park on its subscription.
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         reg.unregister(&stream.id);

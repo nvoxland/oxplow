@@ -53,12 +53,26 @@ pub async fn run_boot_orchestration(
         .jobs
         .spawn(state.extension_activation.clone(), state.commands.clone());
 
-    // Start the file-snapshot manager's watcher loop for every
-    // registered stream, plus per-stream VcsRefsChanged listeners so a
-    // commit in any worktree re-stamps that stream's latest snapshot.
-    state.snapshot_captures.spawn_all_watchers();
-    for svc in state.snapshot_captures.list() {
-        svc.spawn_git_refs_listener(&state.ref_moves);
+    // Each stream's one watch, and with it the file-snapshot manager's
+    // watcher loop and refs listener, the workspace announcements and the
+    // VCS's refs watch. Off the synchronous boot path: starting them can take
+    // a moment. Whatever reads the disk at boot waits for them (`watching`), so
+    // a change is either in what it read or heard after.
+    let (watching_tx, watching) = tokio::sync::watch::channel(false);
+    {
+        let watches = state.stream_watches.clone();
+        let bts = state.background_tasks.clone();
+        let task = bts.start(StartInput {
+            kind: BackgroundTaskKind::Vcs,
+            label: "Starting workspace watchers".into(),
+            ..Default::default()
+        });
+        let task_id = task.id.clone();
+        tokio::spawn(async move {
+            watches.register_all().await;
+            bts.complete(&task_id, None);
+            let _ = watching_tx.send(true);
+        });
     }
 
     // Startup sweep + cleanup loop operate on the primary stream's
@@ -90,7 +104,9 @@ pub async fn run_boot_orchestration(
             ..Default::default()
         });
         let task_id = task.id.clone();
+        let mut watching = watching.clone();
         tokio::spawn(async move {
+            let _ = watching.wait_for(|up| *up).await;
             let hud_started = std::time::Instant::now();
             match svc.enqueue_startup_diff().await {
                 Ok(0) => {
@@ -289,49 +305,17 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Per-stream fs + .git/refs watchers — bridges file changes onto
-    // the EventBus so clients refresh without polling. Held in a
-    // registry for the life of the daemon. Pushed off the synchronous
-    // boot path: registering recursive watches over a large worktree
-    // can take a moment to settle.
+    // The project root coming under, or leaving, version control.
     {
-        let stream_service = state.streams.clone();
-        let watch_vcs = state.vcs.clone();
-        let watch_bus = event_bus.clone();
-        let watch_moves = state.ref_moves.clone();
-        let watch_project_dir = state.layout.project_dir.clone();
-        // A stream's watches judge by one filter, its capture's.
-        let captures = state.snapshot_captures.clone();
-        let config = state.config.clone();
-        let watch_filter = move |stream: &oxplow_domain::Stream| {
-            captures.workspace_filter(&stream.id).unwrap_or_else(|| {
-                let cfg = crate::config_service::read_config(&config);
-                oxplow_fs_watch::WorkspaceFilter::for_project(
-                    std::path::Path::new(&stream.worktree_path),
-                    &cfg.generated.exclude,
-                    &cfg.generated.include,
-                )
-            })
-        };
-        let bts = state.background_tasks.clone();
-        let task = bts.start(StartInput {
-            kind: BackgroundTaskKind::Vcs,
-            label: "Starting workspace watchers".into(),
-            ..Default::default()
-        });
-        let task_id = task.id.clone();
+        let watches = state.stream_watches.clone();
+        let project_dir = state.layout.project_dir.clone();
+        let vcs = state.vcs.clone();
+        let bus = event_bus.clone();
+        let mut watching = watching.clone();
         tokio::spawn(async move {
-            let registry = crate::workspace_watch::WorkspaceWatchRegistry::spawn(
-                stream_service,
-                watch_vcs,
-                watch_bus,
-                watch_moves,
-                watch_project_dir,
-                watch_filter,
-            )
-            .await;
-            Box::leak(Box::new(registry));
-            bts.complete(&task_id, None);
+            let _ = watching.wait_for(|up| *up).await;
+            let changes = watches.subscribe_primary(oxplow_fs_watch::Scope::default().top_level());
+            crate::stream_watch::follow_project_context(changes, project_dir, vcs, bus);
         });
     }
 
@@ -351,18 +335,21 @@ pub async fn run_boot_orchestration(
             ..Default::default()
         });
         let task_id = task.id.clone();
+        let watches = state.stream_watches.clone();
+        let mut watching = watching.clone();
         tokio::spawn(async move {
-            if let Some(watcher) = crate::wiki_pages_watch::WikiPagesWatcher::spawn(
+            let _ = watching.wait_for(|up| *up).await;
+            // Subscribed before the scan: a change is in it or heard after.
+            let changes = watches.subscribe_primary(crate::wiki_pages_watch::scope());
+            crate::wiki_pages_watch::follow(
+                changes,
                 wiki_dir,
                 wiki_db,
                 wiki_vocabulary,
                 wiki_store,
                 wiki,
             )
-            .await
-            {
-                Box::leak(Box::new(watcher));
-            }
+            .await;
             bts.complete(&task_id, None);
         });
     }
@@ -371,7 +358,9 @@ pub async fn run_boot_orchestration(
     // config changes go live without a restart.
     {
         let cfg_services = state.clone();
+        let mut watching = watching.clone();
         tokio::spawn(async move {
+            let _ = watching.wait_for(|up| *up).await;
             if let Some(watcher) = crate::config_watch::ConfigWatcher::spawn(cfg_services) {
                 Box::leak(Box::new(watcher));
             }

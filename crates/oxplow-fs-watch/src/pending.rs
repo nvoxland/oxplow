@@ -116,6 +116,72 @@ impl Pending {
     }
 }
 
+/// What a subscription hears beyond, or instead of, every kept path: named
+/// paths from the root, whether the filter keeps them or not. A consumer that
+/// follows a few of a tree's paths (the config, the wiki) shares its stream's
+/// one watch this way.
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    files: Vec<PathBuf>,
+    dirs: Vec<PathBuf>,
+    top_level: bool,
+}
+
+impl Scope {
+    /// Add a file, from the root.
+    pub fn file(mut self, rel: impl Into<PathBuf>) -> Self {
+        self.files.push(rel.into());
+        self
+    }
+
+    /// Add everything under a directory, from the root.
+    pub fn dir(mut self, rel: impl Into<PathBuf>) -> Self {
+        self.dirs.push(rel.into());
+        self
+    }
+
+    /// Add what is directly at the root.
+    pub fn top_level(mut self) -> Self {
+        self.top_level = true;
+        self
+    }
+
+    fn covers(&self, rel: &Path) -> bool {
+        self.files.iter().any(|file| file == rel)
+            || self.dirs.iter().any(|dir| rel.starts_with(dir))
+            || (self.top_level && rel.components().count() == 1)
+    }
+
+    /// Whether changes lost under `dir` could be this scope's.
+    fn overlaps(&self, dir: &Path) -> bool {
+        dir.as_os_str().is_empty()
+            || self.files.iter().any(|file| file.starts_with(dir))
+            || self
+                .dirs
+                .iter()
+                .any(|mine| mine.starts_with(dir) || dir.starts_with(mine))
+    }
+}
+
+/// Feeds a subscription by hand, for testing what a subscriber does with a
+/// batch: no OS, no waiting.
+#[derive(Clone, Default)]
+pub struct Feed(Subscribers);
+
+impl Feed {
+    pub fn subscribe(&self) -> Subscription {
+        self.0.subscribe(None)
+    }
+
+    pub fn change(&self, path: &Path, kind: &WatchEventKind) {
+        self.0.change(path, kind, true);
+    }
+
+    pub fn rescan(&self, dir: &Path) {
+        self.0.rescan(dir);
+    }
+}
+
 /// Everyone listening to one watch.
 #[derive(Clone, Default)]
 pub(crate) struct Subscribers {
@@ -124,7 +190,12 @@ pub(crate) struct Subscribers {
     /// What a rescan of everything checks: each directory once, in one
     /// spelling.
     whole: Vec<PathBuf>,
-    list: Arc<Mutex<Vec<Weak<Pending>>>>,
+    list: Arc<Mutex<Vec<Listener>>>,
+}
+
+struct Listener {
+    pending: Weak<Pending>,
+    scope: Option<Scope>,
 }
 
 impl Subscribers {
@@ -136,27 +207,50 @@ impl Subscribers {
         }
     }
 
-    pub(crate) fn subscribe(&self) -> Subscription {
+    pub(crate) fn subscribe(&self, scope: Option<Scope>) -> Subscription {
         let pending = Pending::new(self.roots.clone());
         let mut list = self.list.lock().unwrap_or_else(|e| e.into_inner());
-        list.retain(|p| p.strong_count() > 0);
-        list.push(Arc::downgrade(&pending));
+        list.retain(|l| l.pending.strong_count() > 0);
+        list.push(Listener {
+            pending: Arc::downgrade(&pending),
+            scope,
+        });
         Subscription::new(pending)
     }
 
-    fn each(&self, f: impl Fn(&Pending)) {
+    fn relative<'p>(&self, path: &'p Path) -> Option<&'p Path> {
+        self.roots.iter().find_map(|r| path.strip_prefix(r).ok())
+    }
+
+    /// `kept`: the filter keeps it, so everyone with no scope hears it.
+    pub(crate) fn change(&self, path: &Path, kind: &WatchEventKind, kept: bool) {
         let list = self.list.lock().unwrap_or_else(|e| e.into_inner());
-        for pending in list.iter().filter_map(Weak::upgrade) {
-            f(&pending);
+        for listener in list.iter() {
+            let hears = match &listener.scope {
+                None => kept,
+                Some(scope) => self.relative(path).is_some_and(|rel| scope.covers(rel)),
+            };
+            if hears {
+                if let Some(pending) = listener.pending.upgrade() {
+                    pending.change(path, kind);
+                }
+            }
         }
     }
 
-    pub(crate) fn change(&self, path: &Path, kind: &WatchEventKind) {
-        self.each(|p| p.change(path, kind));
-    }
-
     pub(crate) fn rescan(&self, dir: &Path) {
-        self.each(|p| p.rescan(dir));
+        let list = self.list.lock().unwrap_or_else(|e| e.into_inner());
+        for listener in list.iter() {
+            let hears = match (&listener.scope, self.relative(dir)) {
+                (Some(scope), Some(rel)) => scope.overlaps(rel),
+                _ => true,
+            };
+            if hears {
+                if let Some(pending) = listener.pending.upgrade() {
+                    pending.rescan(dir);
+                }
+            }
+        }
     }
 
     pub(crate) fn rescan_all(&self) {
@@ -166,7 +260,10 @@ impl Subscribers {
     }
 
     pub(crate) fn close(&self) {
-        self.each(Pending::close);
+        let list = self.list.lock().unwrap_or_else(|e| e.into_inner());
+        for pending in list.iter().filter_map(|l| l.pending.upgrade()) {
+            pending.close();
+        }
     }
 }
 
@@ -385,6 +482,49 @@ mod tests {
         pending.close();
         assert!(sub.next_batch().await.is_some());
         assert!(sub.next_batch().await.is_none());
+    }
+
+    /// A scope hears its own paths, kept or not, and rescans that could be
+    /// its own; with no scope, every kept path and every rescan.
+    #[test]
+    fn a_scope_hears_its_paths_and_the_rescans_that_could_be_its_own() {
+        let all = Subscribers::new(vec![PathBuf::from("/r")], vec![PathBuf::from("/r")]);
+        let mut everything = all.subscribe(None);
+        let mut wiki = all.subscribe(Some(
+            Scope::default()
+                .dir(".oxplow/wiki")
+                .file(".oxplow/project.yaml"),
+        ));
+        let mut root = all.subscribe(Some(Scope::default().top_level()));
+
+        all.change(Path::new("/r/src/a.rs"), &MODIFIED, true);
+        assert_eq!(
+            sorted(everything.try_batch().unwrap()),
+            [PathBuf::from("/r/src/a.rs")]
+        );
+        assert!(wiki.try_batch().is_none());
+        assert!(root.try_batch().is_none());
+
+        all.change(Path::new("/r/.oxplow/project.yaml"), &MODIFIED, false);
+        assert!(everything.try_batch().is_none(), "the filter drops it");
+        assert!(wiki.try_batch().is_some(), "named: heard all the same");
+
+        all.change(Path::new("/r/.git"), &MODIFIED, false);
+        assert!(root.try_batch().is_some());
+        assert!(wiki.try_batch().is_none());
+
+        all.rescan(Path::new("/r/src"));
+        assert!(everything.try_batch().is_some());
+        assert!(
+            wiki.try_batch().is_none(),
+            "lost under src is not the wiki's"
+        );
+        all.rescan(Path::new("/r/.oxplow"));
+        assert!(wiki.try_batch().is_some());
+        all.rescan(Path::new("/r/.oxplow/wiki/sub"));
+        assert!(wiki.try_batch().is_some());
+        all.rescan(Path::new("/r"));
+        assert!(wiki.try_batch().is_some());
     }
 
     #[tokio::test(start_paused = true)]

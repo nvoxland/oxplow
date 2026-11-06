@@ -1,9 +1,9 @@
-//! fs watcher that keeps the `wiki_page` rows in sync with the
-//! `.oxplow/wiki/` markdown files: an initial scan on start, then
-//! debounced per-slug re-syncs ([`wiki_pages::sync_page`], logged as
-//! `system:wiki_watch`) on file change. A page `oxplow.knowledge.write_page`
-//! just wrote syncs to a no-op (its body hash matches). Wraps
-//! [`oxplow_fs_watch::FsWatcher`] for the debouncing.
+//! Keeps the `wiki_page` rows in sync with the `.oxplow/wiki/` markdown
+//! files: an initial scan on start, then per-slug re-syncs
+//! ([`wiki_pages::sync_page`], logged as `system:wiki_watch`) on file change,
+//! heard through the primary stream's watch. A page
+//! `oxplow.knowledge.write_page` just wrote syncs to a no-op (its body hash
+//! matches).
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -11,83 +11,69 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_db::{Database, SqliteWikiPageStore};
-use oxplow_fs_watch::{Batch, FsWatcher};
+use oxplow_fs_watch::{Batch, Scope, Subscription};
 use tracing::{info, warn};
 
 use crate::wiki_pages;
 
-/// Spawn a wiki-page watcher. Holding the returned struct keeps the
-/// watcher alive; dropping it cancels the OS handles + the relay
-/// task (channel close).
-pub struct WikiPagesWatcher {
-    _watcher: FsWatcher,
+/// What of a worktree this follows.
+pub fn scope() -> Scope {
+    Scope::default().dir(".oxplow/wiki")
 }
 
-impl WikiPagesWatcher {
-    /// Boot — runs the initial scan synchronously, then attaches the
-    /// debounced fs watcher. Errors during scan are logged but don't
-    /// prevent the watcher from starting. While the wiki isn't the
-    /// project's knowledge store (`wiki`) its files aren't the record's:
-    /// the record left from before is emptied instead, and changes are
-    /// ignored until it is again (`knowledge::KnowledgeSwitch` restates it).
-    pub async fn spawn(
-        project_dir: PathBuf,
-        db: Database,
-        vocabulary: VocabularyHandle,
-        store: Arc<SqliteWikiPageStore>,
-        wiki: Arc<crate::knowledge::WikiFollow>,
-    ) -> Option<Self> {
-        let dir = wiki_pages::wiki_pages_dir(&project_dir);
-        std::fs::create_dir_all(&dir).ok();
+/// Runs the initial scan, then follows `changes` for as long as they come. A
+/// failed scan is logged and doesn't stop that. While the wiki isn't the
+/// project's knowledge store (`wiki`) its files aren't the record's: the
+/// record left from before is emptied instead, and changes are ignored until it
+/// is again (`knowledge::KnowledgeSwitch` restates it).
+pub async fn follow(
+    mut changes: Subscription,
+    project_dir: PathBuf,
+    db: Database,
+    vocabulary: VocabularyHandle,
+    store: Arc<SqliteWikiPageStore>,
+    wiki: Arc<crate::knowledge::WikiFollow>,
+) {
+    let dir = wiki_pages::wiki_pages_dir(&project_dir);
+    std::fs::create_dir_all(&dir).ok();
 
-        let scanned = if wiki.live() {
-            wiki_pages::scan_and_sync_all(&db, &vocabulary, &project_dir, &store).await
-        } else {
-            crate::knowledge::clear_record(&db)
-                .await
-                .map(|()| wiki_pages::ScanReport::default())
-        };
-        match scanned {
-            Ok(report) if report.failures.is_empty() => {
-                info!(dir = %dir.display(), synced = report.synced, "wiki pages initial scan complete");
-            }
-            Ok(report) => {
-                let failed: Vec<&str> = report.failures.iter().map(|(s, _)| s.as_str()).collect();
-                warn!(
-                    synced = report.synced,
-                    ?failed,
-                    "wiki pages initial scan completed with per-page failures"
-                );
-            }
-            Err(err) => warn!(?err, "wiki pages initial scan failed"),
+    let scanned = if wiki.live() {
+        wiki_pages::scan_and_sync_all(&db, &vocabulary, &project_dir, &store).await
+    } else {
+        crate::knowledge::clear_record(&db)
+            .await
+            .map(|()| wiki_pages::ScanReport::default())
+    };
+    match scanned {
+        Ok(report) if report.failures.is_empty() => {
+            info!(dir = %dir.display(), synced = report.synced, "wiki pages initial scan complete");
         }
-
-        let watcher = match FsWatcher::watch(&dir) {
-            Ok(w) => w,
-            Err(err) => {
-                warn!(?err, "wiki pages watcher failed to start");
-                return None;
-            }
-        };
-        // Editors save `.md` files in a few rapid writes; one re-sync per
-        // slug per burst is enough.
-        let mut changes = watcher.subscribe();
-        let sync = Sync {
-            db,
-            vocabulary,
-            project_dir,
-            store,
-        };
-        tokio::spawn(async move {
-            while let Some(batch) = changes.next_batch_after(Duration::from_millis(250)).await {
-                if wiki.live() {
-                    sync.batch(batch).await;
-                }
-            }
-        });
-
-        Some(Self { _watcher: watcher })
+        Ok(report) => {
+            let failed: Vec<&str> = report.failures.iter().map(|(s, _)| s.as_str()).collect();
+            warn!(
+                synced = report.synced,
+                ?failed,
+                "wiki pages initial scan completed with per-page failures"
+            );
+        }
+        Err(err) => warn!(?err, "wiki pages initial scan failed"),
     }
+
+    // Editors save `.md` files in a few rapid writes; one re-sync per slug
+    // per burst is enough.
+    let sync = Sync {
+        db,
+        vocabulary,
+        project_dir,
+        store,
+    };
+    tokio::spawn(async move {
+        while let Some(batch) = changes.next_batch_after(Duration::from_millis(250)).await {
+            if wiki.live() {
+                sync.batch(batch).await;
+            }
+        }
+    });
 }
 
 /// Restates `wiki_page` rows from the files.
@@ -135,7 +121,6 @@ impl Sync {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use std::time::Duration;
 
     /// A page's row follows its file, and when changes were lost every page's
     /// does, with no OS involved.
@@ -173,46 +158,5 @@ mod tests {
         })
         .await;
         assert!(store.body("two").await.unwrap().is_some());
-    }
-
-    /// Touching `.oxplow/wiki/<slug>.md` makes the watcher restate that
-    /// page's row (title and body from the file) — the row write is the
-    /// announcement the UI re-reads on; there is no wiki event of its own.
-    #[tokio::test]
-    async fn watcher_restates_the_row_on_file_change() {
-        let tmp = tempfile::tempdir().unwrap();
-        let project = tmp.path().to_path_buf();
-        let wiki_dir = crate::wiki_pages::wiki_pages_dir(&project);
-        std::fs::create_dir_all(&wiki_dir).unwrap();
-
-        let db = oxplow_db::Database::in_memory();
-        let store = Arc::new(oxplow_db::SqliteWikiPageStore::new(db.clone()));
-        let vocabulary = VocabularyHandle::core();
-
-        let wiki = Arc::new(crate::knowledge::WikiFollow::default());
-        wiki.set_serves_for_test("oxplow");
-        let _watcher =
-            WikiPagesWatcher::spawn(project.clone(), db, vocabulary, store.clone(), wiki)
-                .await
-                .expect("watcher to spawn");
-
-        // The OS-level watcher may still be attaching on a busy machine:
-        // write the file again until its row appears, with a generous
-        // deadline (the debounce is 250ms).
-        let row = tokio::time::timeout(Duration::from_secs(30), async {
-            loop {
-                std::fs::write(wiki_dir.join("hello-world.md"), "# Hello\nbody\n").unwrap();
-                for _ in 0..16 {
-                    if let Some(row) = store.body("hello-world").await.unwrap() {
-                        return row;
-                    }
-                    tokio::time::sleep(Duration::from_millis(25)).await;
-                }
-            }
-        })
-        .await
-        .expect("the page's row within 30s");
-
-        assert_eq!(row, ("Hello".to_string(), "# Hello\nbody\n".to_string()));
     }
 }

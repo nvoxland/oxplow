@@ -15,84 +15,86 @@
 //! without an activation. Sources `extensionSources` points elsewhere are
 //! not watched; they show at the next activation.
 //!
-//! Spawned once at boot from the host binary; the returned handle holds
-//! the `FsWatcher` for the process lifetime (drop cancels the watch).
+//! Spawned once at boot; it hears the project through the primary stream's
+//! watch.
 
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_config::{OXPLOW_CONFIG_FILE, PERSONAL_CONFIG_FILE};
-use oxplow_fs_watch::{Batch, FsWatcher, RecursiveMode};
+use oxplow_fs_watch::{Batch, FsWatcher, Scope, Subscription};
 use tracing::{debug, warn};
 
 use crate::Services;
 
-/// Holds the config-file watcher alive. Drop to stop watching.
+/// Holds the watch of what is outside the project. Drop to stop watching.
 pub struct ConfigWatcher {
-    _fs: FsWatcher,
+    _global: Option<FsWatcher>,
 }
 
 impl ConfigWatcher {
-    /// Start watching `<project>/.oxplow/project.yaml`. Returns `None` if
-    /// the watcher can't be created (logged, non-fatal — the app just won't
-    /// hot-reload config).
+    /// Follow the config. What is in the project comes through the primary
+    /// stream's watch. The user-global metric library
+    /// (`<global_config_dir>/metrics/`), which hot-reloads the three-scope
+    /// catalog (epic tsk213, P3), has a watch of its own, when it exists:
+    /// watching a missing dir errors on some platforms.
     pub fn spawn(services: Arc<Services>) -> Option<Self> {
-        let state_dir = services.layout.state_dir.clone();
-        // Watch the `.oxplow` state dir non-recursively rather than the
-        // file directly: editors (and atomic writers) replace the file via
-        // rename, which breaks a single-file watch but is still visible as
-        // a directory event. (The dir also holds the DB, so events are
-        // filtered by file name below.)
-        let mut watch = vec![(state_dir.clone(), RecursiveMode::NonRecursive)];
-        // Also watch the user-global metric library
-        // (`<global_config_dir>/metrics/`) so an edit there hot-reloads the
-        // three-scope catalog (epic tsk213, P3). Only when it already exists —
-        // watching a missing dir errors on some platforms.
-        let sources_dir = services
-            .layout
+        let layout = &services.layout;
+        let sources_dir = layout
             .project_dir
             .join(oxplow_config::EXTENSION_SOURCES_DIR);
-        // A folder to watch from the first write: a missing one errors on
-        // some platforms, and an empty folder is not committed.
-        if std::fs::create_dir_all(&sources_dir).is_ok() {
-            watch.push((sources_dir.clone(), RecursiveMode::Recursive));
-        }
-        let global_metrics_dir = oxplow_config::global_config_dir().map(|d| d.join("metrics"));
-        if let Some(dir) = global_metrics_dir.as_ref().filter(|d| d.is_dir()) {
-            watch.push((dir.clone(), RecursiveMode::Recursive));
-        }
-        let watcher = match FsWatcher::watch_paths(watch) {
-            Ok(w) => w,
-            Err(e) => {
-                warn!(error = %e, ?state_dir, "config watcher failed to start");
-                return None;
-            }
-        };
-        // A save can fire create+modify; we only need to settle on the final
-        // content.
-        let mut changes = watcher.subscribe();
-        tokio::spawn(async move {
-            while let Some(batch) = changes.next_batch_after(Duration::from_millis(300)).await {
-                let says = what_changed(&batch, &sources_dir, global_metrics_dir.as_deref());
-                if says.sources {
-                    if let Err(e) = services
-                        .extension_activation
-                        .restate_sources(services.clone())
-                        .await
-                    {
-                        warn!(error = %e, "failed to restate the extension listing");
-                    }
-                }
-                if says.config {
-                    match services.reload_config_from_disk() {
-                        Ok(()) => debug!("reloaded project.yaml after on-disk change"),
-                        Err(e) => warn!(error = %e, "failed to reload project.yaml"),
-                    }
-                }
-            }
+        let state_dir = layout
+            .state_dir
+            .strip_prefix(&layout.project_dir)
+            .unwrap_or(Path::new(".oxplow"))
+            .to_path_buf();
+        let changes = services.stream_watches.subscribe_primary(
+            Scope::default()
+                .file(state_dir.join(OXPLOW_CONFIG_FILE))
+                .file(state_dir.join(PERSONAL_CONFIG_FILE))
+                .dir(oxplow_config::EXTENSION_SOURCES_DIR),
+        );
+        let global_metrics_dir = oxplow_config::global_config_dir()
+            .map(|d| d.join("metrics"))
+            .filter(|d| d.is_dir());
+        let global = global_metrics_dir.as_ref().and_then(|dir| {
+            FsWatcher::watch(dir)
+                .inspect_err(|e| warn!(error = %e, ?dir, "global metrics watcher failed to start"))
+                .ok()
         });
-        Some(Self { _fs: watcher })
+        let global_changes = global.as_ref().map(FsWatcher::subscribe);
+        let follow = move |mut changes: Subscription, services: Arc<Services>| {
+            let sources_dir = sources_dir.clone();
+            let global_metrics_dir = global_metrics_dir.clone();
+            tokio::spawn(async move {
+                // A save can fire create+modify; we only need to settle on the
+                // final content.
+                while let Some(batch) = changes.next_batch_after(Duration::from_millis(300)).await {
+                    let says = what_changed(&batch, &sources_dir, global_metrics_dir.as_deref());
+                    if says.sources {
+                        if let Err(e) = services
+                            .extension_activation
+                            .restate_sources(services.clone())
+                            .await
+                        {
+                            warn!(error = %e, "failed to restate the extension listing");
+                        }
+                    }
+                    if says.config {
+                        match services.reload_config_from_disk() {
+                            Ok(()) => debug!("reloaded project.yaml after on-disk change"),
+                            Err(e) => warn!(error = %e, "failed to reload project.yaml"),
+                        }
+                    }
+                }
+            });
+        };
+        follow(changes, services.clone());
+        if let Some(changes) = global_changes {
+            follow(changes, services.clone());
+        }
+        Some(Self { _global: global })
     }
 }
 

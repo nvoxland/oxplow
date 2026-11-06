@@ -18,7 +18,7 @@ use thiserror::Error;
 use oxplow_domain::vcs::{FileStatus, Vcs};
 use oxplow_domain::StreamId;
 
-use crate::events::{EventBus, OxplowEvent, WorkspaceChangeKind};
+use crate::events::{EventBus, OxplowEvent};
 use crate::worktrees::WorktreeRouter;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
@@ -92,8 +92,8 @@ impl WorkspaceFiles {
         if let Some(id) = stream_id.and_then(StreamId::try_from_str) {
             self.events.emit(OxplowEvent::WorkspaceChanged {
                 stream_id: id,
-                change_kind: WorkspaceChangeKind::Updated,
-                path: String::new(),
+                paths: Vec::new(),
+                overflow: false,
             });
         }
     }

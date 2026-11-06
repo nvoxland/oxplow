@@ -12,5 +12,5 @@ path = "junit.xml"
 # event in 60 s during that run, 0.05 s right after it). This doesn't help against
 # a test run in another worktree, which stalls them the same way.
 [[profile.default.overrides]]
-filter = "(package(oxplow-fs-watch) & test(/^tests::/)) | test(/^(wiki_pages_watch|workspace_watch)::/)"
+filter = "(package(oxplow-fs-watch) & test(/^tests::/)) | test(/^stream_watch::tests::an_edit_on_disk/)"
 threads-required = "num-test-threads"

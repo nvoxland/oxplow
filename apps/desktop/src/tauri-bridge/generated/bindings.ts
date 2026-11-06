@@ -4233,12 +4233,12 @@ export type OxplowConfig = {
  */
 export type OxplowEvent =
 /**  Background task progress. */
-({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "backgroundTasksChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The set of known language servers changed (Mason package
  *  installed or removed). Renderer refetches `list_lsp_servers`.
  */
-({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "lspServersChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Per-thread per-pane agent status changed. `state` carries the
  *  derived status so the renderer can update without a refetch
@@ -4264,7 +4264,7 @@ agentSessionId: AgentSessionId | null; state: AgentStatusState;
  *  asked) when `state` is `AwaitingUser`, so the rail dot's tooltip
  *  can show it — `None` for every other transition.
  */
-detail: string | null }) & { actor?: never; changeKind?: never; client?: never; datasets?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+detail: string | null }) & { actor?: never; client?: never; datasets?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A snapshot take recorded something new: a new snapshot (its
  *  `file_count` rows), or — `trigger: HeadMoved`, 0 files — the
@@ -4274,19 +4274,19 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  `snapshot_op` row and the `snapshot.taken` / `vcs.head.moved`
  *  event in the log; this is the UI / reactor wake-up.
  */
-({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
+({ kind: "snapshotTaken"; streamId: StreamId; snapshotId: number; fileCount: number; trigger: SnapshotTrigger; threadId: ThreadId | null; turnId: number | null; effortId: EffortId | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; error?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; state?: never; title?: never; vcsEnabled?: never } |
 /**
  *  An Assistant session changed (`assistant/`): its transcript, its
  *  status or its settings. The panel asks `assistant_snapshot { id,
  *  since }` for what changed. In memory only: no dataset holds it.
  */
-({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "assistantChanged"; id: string; seq: number }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  Published datasets (views) changed: a commit touched a table one of
  *  them reads, directly or through other datasets (P4.6). A page re-runs
  *  when a dataset it read is listed.
  */
-({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "datasetsChanged"; datasets: string[] }) & { actor?: never; agentSessionId?: never; client?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  An open page run re-ran (a dataset one of its loaders read changed):
  *  the loaders whose rows differ, for the window that opened it to
@@ -4302,13 +4302,13 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  list is fail-open — "unknown, refresh anyway" — which is what the
  *  low-frequency emit sites still send. See `.context/metrics.md`.
  */
-({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "metricSamplesChanged"; streamId: StreamId; measures?: string[] }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.oxplow/project.yaml` was reloaded from disk (external edit, e.g. the agent
  *  running `/oxplow:configure`). The in-memory config has been swapped;
  *  the renderer refetches `get_config`.
  */
-({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "configChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  The extension catalog may have changed: a file under the primary
  *  worktree's `.oxplow/extensions/` did, or the `extensions` config key
@@ -4316,7 +4316,7 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  *  extensions contribute — the launcher, pages, panels, slots —
  *  reloads, and a page re-runs its definition.
  */
-({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "extensionsChanged" }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A command running on the daemon calls a scope the window
  *  hosts (`client_host.rs`): the window does `scope`'s `op` with
@@ -4330,24 +4330,26 @@ detail: string | null }) & { actor?: never; changeKind?: never; client?: never; 
  */
 client: string; threadId: ThreadId | null;
 /**  Who ran the command (`agent:thr3`, `human`). */
-actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; changeKind?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; path?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; instance?: never; measures?: never; name?: never; overflow?: never; paths?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  `.git` directory appeared/disappeared at the project root —
  *  "is this a git workspace" flipped. Renderer hides/restores the
  *  git-aware UI on receipt.
  */
-({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
+({ kind: "workspaceContextChanged"; vcsEnabled: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never } |
 /**
- *  A worktree file changed on disk. Renderer-wide: file tree, quick
- *  open, project panel, git dashboard, uncommitted changes view all
- *  refresh in response.
+ *  A stream's worktree changed on disk: one event for a burst. The live
+ *  datasets over its files refresh in response, and an open editor reads
+ *  `paths` (from the root, capped; none: a change with no path of its
+ *  own), or everything it holds when `overflow` says the list is not
+ *  whole.
  */
-({ kind: "workspaceChanged"; streamId: StreamId; changeKind: WorkspaceChangeKind; path: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "workspaceChanged"; streamId: StreamId; paths: string[]; overflow: boolean }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A ref under `.git/refs/` changed. Drives history, branch list,
  *  and ahead/behind refreshes. Coarse per stream.
  */
-({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "vcsRefsChanged"; streamId: StreamId }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A non-primary stream's backing worktree was deleted out from
  *  under us (externally `rm -rf`'d, `git worktree remove`'d, etc.).
@@ -4356,7 +4358,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  rail row vanished. `title` carries the archived stream's display
  *  name.
  */
-({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; path?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
+({ kind: "streamOrphaned"; streamId: StreamId; title: string }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; error?: never; fileCount?: never; id?: never; input?: never; instance?: never; measures?: never; name?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; signIn?: never; snapshotId?: never; state?: never; threadId?: never; trigger?: never; turnId?: never; vcsEnabled?: never } |
 /**
  *  A sign-in for provider instance `instance`'s credential `name`
  *  finished (P9.B3): its token is in the keychain and the instance
@@ -4370,7 +4372,7 @@ actor: string; scope: string; op: string; input: unknown }) & { agentSessionId?:
  *  a row waiting on another sign-in of the same credential
  *  ignores it.
  */
-signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; changeKind?: never; client?: never; datasets?: never; detail?: never; effortId?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; path?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
+signIn: number | null; error: string | null }) & { actor?: never; agentSessionId?: never; client?: never; datasets?: never; detail?: never; effortId?: never; fileCount?: never; id?: never; input?: never; measures?: never; op?: never; overflow?: never; paths?: never; scope?: never; seq?: never; snapshotId?: never; state?: never; streamId?: never; threadId?: never; title?: never; trigger?: never; turnId?: never; vcsEnabled?: never };
 
 /**
  *  When an `on:` collector runs after a triggering event. Empty,
@@ -6867,13 +6869,6 @@ export type WorkItemsFeatures = {
 	 */
 	lists?: boolean,
 };
-
-/**
- *  fs-watch classification mirrored onto the wire so the renderer can
- *  distinguish create / modify / delete / rename without re-stating
- *  every variant of the upstream `notify` crate.
- */
-export type WorkspaceChangeKind = "created" | "updated" | "deleted" | "renamed";
 
 export type WorkspaceContext = {
 	project_dir: string,
