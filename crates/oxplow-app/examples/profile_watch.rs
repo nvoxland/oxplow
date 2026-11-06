@@ -9,7 +9,8 @@
 //! folder first (N kept files, about N/5 directories, nested `.gitignore`s,
 //! M ignored files in `node_modules`- and `target`-like folders at the top
 //! level and nested; one `git` commit of the kept files) and removes it at
-//! the end. One line per step, with milliseconds and counts.
+//! the end. One line per step, with milliseconds and counts, and the load
+//! average and `fseventsd`'s CPU and memory around the watching.
 //!
 //! Macos file events stall while the machine is busy: read the numbers
 //! with the load average (printed at the start) in mind.
@@ -30,9 +31,8 @@ use oxplow_app::vcs::GitProvider;
 use oxplow_db::{Database, FileSnapshot, SnapshotStorage, SqliteSnapshotStore};
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{StreamId, Timestamp};
-use oxplow_fs_watch::{FsWatcher, WorkspaceFilter};
+use oxplow_fs_watch::{FsWatcher, Subscription, WorkspaceFilter};
 use rayon::prelude::*;
-use tokio::sync::broadcast::{self, error::RecvError};
 
 const TOP_DIRS: usize = 20;
 const FILES_PER_DIR: usize = 5;
@@ -71,7 +71,7 @@ fn ms(d: Duration) -> String {
     format!("{:.1} ms", d.as_secs_f64() * 1000.0)
 }
 
-fn step(n: u32, name: &str, line: String) {
+fn step(n: impl std::fmt::Display, name: &str, line: String) {
     println!("step {n} | {name:<34} | {line}");
 }
 
@@ -96,10 +96,16 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed");
 }
 
-/// Where kept directory `k` lives: `src<k % 20>/g<k / 20>`.
+/// Directories per middle folder: 200 directories of 5 files is a folder of
+/// about 1,000 files.
+const DIRS_PER_FOLDER: usize = 200;
+
+/// Where kept directory `k` lives: `src<k % 20>/m<n>/g<j>`.
 fn kept_dir(root: &Path, k: usize) -> PathBuf {
+    let n = k / TOP_DIRS;
     root.join(format!("src{:02}", k % TOP_DIRS))
-        .join(format!("g{}", k / TOP_DIRS))
+        .join(format!("m{}", n / DIRS_PER_FOLDER))
+        .join(format!("g{}", n % DIRS_PER_FOLDER))
 }
 
 /// Build the tree. Returns the kept-file count actually written.
@@ -111,7 +117,7 @@ fn generate(root: &Path, kept: usize, ignored: usize) {
         let dir = kept_dir(root, k);
         std::fs::create_dir_all(&dir).unwrap();
         // A few nested ignore files, each its own rule.
-        if k < TOP_DIRS * 3 && k / TOP_DIRS < 3 {
+        if k / TOP_DIRS < 3 {
             std::fs::write(dir.join(".gitignore"), "*.tmp\n").unwrap();
         }
         for f in 0..FILES_PER_DIR {
@@ -149,13 +155,13 @@ fn write_files(dir: &Path, count: usize) {
     });
 }
 
-/// Counts what one receiver gets.
+/// Counts what one subscription is told.
 #[derive(Default)]
 struct Tally {
-    events: AtomicU64,
-    lagged_skips: AtomicU64,
-    lag_notices: AtomicU64,
-    /// Nanoseconds from `epoch` to the latest event.
+    paths: AtomicU64,
+    rescans: AtomicU64,
+    batches: AtomicU64,
+    /// Nanoseconds from `epoch` to the latest batch.
     last_ns: AtomicU64,
 }
 
@@ -165,45 +171,52 @@ struct Counter {
 }
 
 impl Counter {
-    fn spawn(mut rx: broadcast::Receiver<oxplow_fs_watch::WatchEvent>, epoch: Instant) -> Self {
+    /// Read `sub` as a consumer does: at once (`window` zero) or a burst as
+    /// one batch.
+    fn spawn(mut sub: Subscription, window: Duration, epoch: Instant) -> Self {
         let tally = Arc::new(Tally::default());
         let t = tally.clone();
         tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(_) => {
-                        t.events.fetch_add(1, Ordering::Relaxed);
-                        t.last_ns
-                            .store(epoch.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    }
-                    Err(RecvError::Lagged(n)) => {
-                        t.lagged_skips.fetch_add(n, Ordering::Relaxed);
-                        t.lag_notices.fetch_add(1, Ordering::Relaxed);
-                        t.last_ns
-                            .store(epoch.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    }
-                    Err(RecvError::Closed) => break,
-                }
+            while let Some(batch) = sub.next_batch_after(window).await {
+                t.paths
+                    .fetch_add(batch.paths.len() as u64, Ordering::Relaxed);
+                t.rescans
+                    .fetch_add(batch.rescans.len() as u64, Ordering::Relaxed);
+                t.batches.fetch_add(1, Ordering::Relaxed);
+                t.last_ns
+                    .store(epoch.elapsed().as_nanos() as u64, Ordering::Relaxed);
             }
         });
         Self { tally, epoch }
     }
 
+    fn heard(&self) -> bool {
+        self.tally.batches.load(Ordering::Relaxed) > 0
+    }
+
     fn last_event(&self) -> Instant {
         self.epoch + Duration::from_nanos(self.tally.last_ns.load(Ordering::Relaxed))
+    }
+
+    /// "N paths, M rescans in B batches".
+    fn told(&self) -> String {
+        format!(
+            "{} paths, {} rescans in {} batches",
+            self.tally.paths.load(Ordering::Relaxed),
+            self.tally.rescans.load(Ordering::Relaxed),
+            self.tally.batches.load(Ordering::Relaxed),
+        )
     }
 }
 
 /// Wait until `counters` have all been silent for `quiet`. With
-/// `expect_events`, silence only counts once the first event has arrived
+/// `expect_events`, silence only counts once the first batch has arrived
 /// (a busy machine delays the OS's events by seconds), up to `limit`.
 async fn until_quiet(counters: &[&Counter], expect_events: bool, quiet: Duration, limit: Duration) {
     let started = Instant::now();
     loop {
         let newest = counters.iter().map(|c| c.last_event()).max().unwrap();
-        let heard = counters
-            .iter()
-            .all(|c| c.tally.events.load(Ordering::Relaxed) > 0);
+        let heard = counters.iter().all(|c| c.heard());
         if newest.elapsed() >= quiet && started.elapsed() >= quiet && (heard || !expect_events) {
             return;
         }
@@ -265,10 +278,49 @@ fn kept_files(root: &Path, filter: &WorkspaceFilter) -> Vec<String> {
         .collect()
 }
 
+/// The directory holding the number of kept files nearest `target` (a
+/// folder with at least one), and how many it holds.
+fn folder_near(paths: &[String], target: usize) -> (String, usize) {
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in paths {
+        let mut dir = Path::new(p).parent();
+        while let Some(d) = dir {
+            if d.as_os_str().is_empty() {
+                break;
+            }
+            *counts.entry(d.to_string_lossy().into_owned()).or_default() += 1;
+            dir = d.parent();
+        }
+    }
+    counts
+        .into_iter()
+        .min_by_key(|(d, n)| (n.abs_diff(target), d.clone()))
+        .unwrap_or_default()
+}
+
 fn load_average() -> String {
     let out = Command::new("sysctl").args(["-n", "vm.loadavg"]).output();
     out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default()
+}
+
+/// `fseventsd`'s CPU % and resident MB, now (what a watch costs every
+/// process on the machine). Stops the run above 2 GB.
+fn fseventsd(label: &str) {
+    let out = Command::new("sh")
+        .arg("-c")
+        .arg("ps -o %cpu=,rss= -p $(pgrep -x fseventsd | head -1)")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut it = text.split_whitespace();
+    let (cpu, rss_kb) = (it.next().unwrap_or("?"), it.next().unwrap_or("0"));
+    let mb = rss_kb.parse::<u64>().unwrap_or(0) / 1024;
+    println!("fseventsd {label}: {cpu}% cpu, {mb} MB resident");
+    if mb > 2048 {
+        println!("STOPPING: fseventsd is above 2 GB");
+        std::process::exit(3);
+    }
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -295,31 +347,45 @@ async fn main() {
     };
     println!("root: {}", root.display());
     println!("load average at start: {}", load_average());
+    fseventsd("before watching");
     let epoch = Instant::now();
 
-    // 1. The filter, built as the daemon builds it.
+    // 1. The filter, built as the daemon builds it (it reads no rules yet).
     let t = Instant::now();
     let filter = WorkspaceFilter::for_project(&root, Vec::<String>::new(), Vec::<String>::new());
     let build = t.elapsed();
 
-    // 2. What one ignore-file edit costs.
-    let t = Instant::now();
-    let _again = filter.refreshed();
-    let refresh = t.elapsed();
-
-    // 3. The startup sweep's walk.
+    // 3. The startup sweep's walk (reads each folder's rules as it goes).
     let t = Instant::now();
     let (files, dirs, nested) = walk_kept(&root, &filter);
     let walk = t.elapsed();
+
+    // 2. What one ignore-file edit costs: the file is noted, and the next
+    // path judged reads the rules it needs again.
+    let judged = kept_files(&root, &filter)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
+    let t = Instant::now();
+    filter.note_ignore_file(Path::new(".gitignore"));
+    let noted = t.elapsed();
+    let t = Instant::now();
+    let _ = filter.ignore(Path::new(&judged), false);
+    let judge = t.elapsed();
+
     step(
         1,
         "WorkspaceFilter::for_project",
         format!(
-            "{} (nested .gitignores: {nested}, counted in step 3's walk)",
+            "{} (reads no rules; nested .gitignores: {nested}, counted in step 3's walk)",
             ms(build)
         ),
     );
-    step(2, "WorkspaceFilter::refreshed", ms(refresh));
+    step(
+        2,
+        "note_ignore_file + one judged path",
+        format!("{} noted + {} judged ({judged})", ms(noted), ms(judge)),
+    );
     step(
         3,
         "WalkDir filter_entry(filter.ignore)",
@@ -330,8 +396,9 @@ async fn main() {
     let t = Instant::now();
     let watcher = FsWatcher::watch_workspace(&root, filter.clone()).unwrap();
     step(4, "FsWatcher::watch_workspace", ms(t.elapsed()));
+    fseventsd("after the watch started");
     // Let FSEvents settle; the numbers below are for a quiet tree.
-    let raw0 = Counter::spawn(watcher.subscribe(), epoch);
+    let raw0 = Counter::spawn(watcher.subscribe(), Duration::ZERO, epoch);
     until_quiet(
         &[&raw0],
         false,
@@ -342,7 +409,7 @@ async fn main() {
 
     if generated {
         // 5. Write storm under an ignored folder inside a kept directory.
-        let raw = Counter::spawn(watcher.subscribe(), epoch);
+        let raw = Counter::spawn(watcher.subscribe(), Duration::ZERO, epoch);
         let storm = kept_dir(&root, 0).join("node_modules").join("storm");
         std::fs::create_dir_all(&storm).unwrap();
         let t = Instant::now();
@@ -360,21 +427,16 @@ async fn main() {
             5,
             "write storm, 20000 ignored files",
             format!(
-                "writes took {}; {} events reached subscribe() ({} lag notices, {} skipped); last event {} after the last write",
+                "writes took {}; subscribe() told {}; last batch {} after the last write",
                 ms(wrote),
-                raw.tally.events.load(Ordering::Relaxed),
-                raw.tally.lag_notices.load(Ordering::Relaxed),
-                raw.tally.lagged_skips.load(Ordering::Relaxed),
+                raw.told(),
                 ms(lag_after(&raw, end)),
             ),
         );
 
         // 6. Burst of kept files, seen raw and debounced.
-        let raw = Counter::spawn(watcher.subscribe(), epoch);
-        let deb = Counter::spawn(
-            watcher.subscribe_debounced(Duration::from_millis(250)),
-            epoch,
-        );
+        let raw = Counter::spawn(watcher.subscribe(), Duration::ZERO, epoch);
+        let deb = Counter::spawn(watcher.subscribe(), Duration::from_millis(250), epoch);
         let burst = kept_dir(&root, 1).join("burst");
         std::fs::create_dir_all(&burst).unwrap();
         let t = Instant::now();
@@ -394,36 +456,34 @@ async fn main() {
             6,
             "burst, 5000 kept files",
             format!(
-                "writes took {}; subscribe(): {} events, {} lag notices, {} skipped, last event {} after the last write; debounced 250ms: {} events, {} lag notices, {} skipped, last event {} after",
+                "writes took {}; at once: {}, last batch {} after the last write; next_batch_after(250ms): {}, last batch {} after",
                 ms(wrote),
-                raw.tally.events.load(Ordering::Relaxed),
-                raw.tally.lag_notices.load(Ordering::Relaxed),
-                raw.tally.lagged_skips.load(Ordering::Relaxed),
+                raw.told(),
                 ms(lag_after(&raw, end)),
-                deb.tally.events.load(Ordering::Relaxed),
-                deb.tally.lag_notices.load(Ordering::Relaxed),
-                deb.tally.lagged_skips.load(Ordering::Relaxed),
+                deb.told(),
                 ms(lag_after(&deb, end)),
             ),
         );
 
         // 7. Time from one write to its event, on a quiet tree.
-        let mut rx = watcher.subscribe();
+        let mut sub = watcher.subscribe();
         let file = kept_dir(&root, 2).join("file0.txt");
         let mut delays = Vec::new();
         let mut missed = 0;
         for i in 0..20 {
-            while rx.try_recv().is_ok() {}
+            while sub.try_batch().is_some() {}
             let t = Instant::now();
             std::fs::write(&file, format!("edit {i}\n")).unwrap();
+            // Seen: the file named, or a rescan of a directory above it.
             let seen = tokio::time::timeout(Duration::from_secs(15), async {
-                loop {
-                    match rx.recv().await {
-                        Ok(ev) if ev.path == file => return true,
-                        Ok(_) | Err(RecvError::Lagged(_)) => {}
-                        Err(RecvError::Closed) => return false,
+                while let Some(batch) = sub.next_batch().await {
+                    if batch.paths.iter().any(|(p, _)| *p == file)
+                        || batch.rescans.iter().any(|d| file.starts_with(d))
+                    {
+                        return true;
                     }
                 }
+                false
             })
             .await
             .unwrap_or(false);
@@ -449,6 +509,7 @@ async fn main() {
                 )
             },
         );
+        fseventsd("after the writes");
     } else {
         skip(5, "write storm", "--root is read-only");
         skip(6, "burst", "--root is read-only");
@@ -514,6 +575,37 @@ async fn main() {
     );
     drop(latest);
 
+    // 8b. What a take of a few changed files costs now: ten paths, and one
+    // folder of about 1,000 files.
+    let ten: Vec<String> = (0..10)
+        .map(|i| paths[i * paths.len() / 10].clone())
+        .collect();
+    let t = Instant::now();
+    let got = store
+        .latest_stat_for_paths(StreamId::new(1), &ten)
+        .await
+        .unwrap();
+    step(
+        "8b",
+        "latest_stat_for_paths, 10 paths",
+        format!("{} ({} rows)", ms(t.elapsed()), got.len()),
+    );
+    let (folder, in_folder) = folder_near(&paths, 1000);
+    let t = Instant::now();
+    let got = store
+        .latest_stat_under(StreamId::new(1), &folder)
+        .await
+        .unwrap();
+    step(
+        "8c",
+        "latest_stat_under, one folder",
+        format!(
+            "{} ({} rows; `{folder}` holds {in_folder} kept files, {HISTORY_ROWS} history rows each)",
+            ms(t.elapsed()),
+            got.len()
+        ),
+    );
+
     // 9. What a working-files relist costs: Trees::diff(HEAD, Working).
     if root.join(".git").exists() {
         let trees = Trees::new(
@@ -564,6 +656,7 @@ async fn main() {
     }
 
     println!("load average at end: {}", load_average());
+    fseventsd("at the end");
     drop(work);
     if let Some(temp) = temp {
         let t = Instant::now();
