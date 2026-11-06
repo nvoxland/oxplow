@@ -1204,6 +1204,12 @@ Cleanup runs at runtime startup and again once every 24 hours via
 `runtime.runSnapshotCleanup` (wired in `initialize()`, cleared in
 `dispose()`).
 
+**A take costs what changed.** It reads the latest row of only the paths it
+looks at (`latest_stat_for_paths`), and a rescan of a directory only those under
+it (`latest_stat_under`), each a seek on `idx_file_snapshot_stream_path`. Only a
+stream's first sweep reads every path. `latest_stat_per_path` over all history
+took 15.8 s at 5 million rows.
+
 **Ignoring generated directories.** The fs-watcher and the snapshot
 seeder share one filter: `shouldIgnoreWorkspaceWatchPath` in
 `crates/oxplow-fs-watch/src/lib.rs`. It covers `.git/`, `.oxplow/logs/`,
@@ -1218,10 +1224,10 @@ appearing in future dirty sets.
 
 Toggling the list at runtime (the Directory page's Mark as Generated →
 `oxplow.file.mark_generated`) takes effect immediately, no restart: the
-command rebuilds the `WorkspaceFilter` and calls
-`SnapshotCaptureRegistry::set_workspace_filter`, which swaps the
-filter on every live per-stream `SnapshotCaptureService` (each holds
-it behind an `RwLock`) and on the copy used to build future ones.
+command calls `SnapshotCaptureRegistry::set_generated`, which gives the new
+lists to the filter of every live per-stream `SnapshotCaptureService` (each
+has its own, rooted at its worktree) and keeps them for the services
+registered later.
 
 ### `symbol` + `symbol_capture` — `SqliteSymbolStore` (`crates/oxplow-db/src/symbol_store.rs`, migration `V62__symbols_from_tree_sitter.sql`)
 

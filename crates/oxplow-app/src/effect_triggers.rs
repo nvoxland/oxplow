@@ -1833,9 +1833,10 @@ mod tests {
         );
     }
 
-    /// A script that computes for a while, with no host call to notice a
-    /// revocation by.
-    const SPIN: &str = "def transform(x):\n    n = 0\n    for i in range(700):\n        for j in range(700):\n            n += 1\n    return {\"skip\": \"spun \" + str(n)}\n";
+    /// A script that computes past any test's wait, with no host call to notice
+    /// a revocation by. A shorter one finishes first on a fast interpreter, and
+    /// then nothing is left to cancel.
+    const SPIN: &str = "def transform(x):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n += 1\n    return {\"skip\": \"spun \" + str(n)}\n";
 
     /// An extension turned off while the effect's script runs ends the run
     /// `cancelled`, not `failed`, and it doesn't count toward disabling.
@@ -1886,8 +1887,7 @@ mod tests {
     async fn turning_off_an_extension_stops_a_script_that_is_computing() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let forever = SPIN.replace("range(700)", "range(100000)");
-        extension(svc, MARK_DONE, &[("mark.star", &forever)]).await;
+        extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
         start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
         let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;

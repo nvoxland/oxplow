@@ -848,7 +848,7 @@ mod tests {
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
-                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                generated: Default::default(),
                 open_turn_probe: None,
             },
         );
@@ -867,7 +867,11 @@ mod tests {
                 std::sync::Arc::new(crate::vcs::GitProvider),
                 s.id,
                 1_000_000,
-                oxplow_fs_watch::WorkspaceFilter::default(),
+                oxplow_fs_watch::WorkspaceFilter::for_project(
+                    project.path(),
+                    Vec::<String>::new(),
+                    Vec::<String>::new(),
+                ),
             )
             .with_settle_duration(std::time::Duration::ZERO)
             .with_predrain_delay(std::time::Duration::ZERO),
@@ -1350,9 +1354,10 @@ mod tests {
     #[tokio::test]
     async fn claim_open_effort_file_skips_paths_that_are_never_snapshotted() {
         let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
-        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::with_user_entries([
-            "generated",
-        ]));
+        captures.set_generated(&oxplow_config::GeneratedConfig {
+            exclude: vec!["generated".into()],
+            ..Default::default()
+        });
         let item = "oxplow:oxplow/work_item?id=10&provider=test".to_string();
         open_effort(&svc, &effort_store, &item, tid).await;
         let claimed = svc
@@ -1383,12 +1388,6 @@ mod tests {
         let item = "oxplow:oxplow/work_item?id=12&provider=test".to_string();
         let open = open_effort(&svc, &effort_store, &item, tid).await;
         let edited = ".claude/worktrees/x/src/a.rs";
-        let none = Vec::<String>::new;
-        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
-            project.path(),
-            none(),
-            none(),
-        ));
         assert!(svc
             .claim_open_effort_file(&tid, edited, None)
             .await
@@ -1399,11 +1398,11 @@ mod tests {
             ".claude/worktrees/\n",
         )
         .unwrap();
-        captures.set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
-            project.path(),
-            none(),
-            none(),
-        ));
+        captures
+            .primary()
+            .unwrap()
+            .workspace_filter()
+            .note_ignore_file(std::path::Path::new(".git/info/exclude"));
         assert!(!svc
             .claim_open_effort_file(&tid, ".claude/worktrees/x/src/b.rs", None)
             .await
@@ -1515,7 +1514,7 @@ mod tests {
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
-                workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                generated: Default::default(),
                 open_turn_probe: None,
             },
         );

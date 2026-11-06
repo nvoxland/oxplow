@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Coverage and the installers take hours and no release waits for them, so
+  # they run once a night (and on demand), not on every push.
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,25 +42,17 @@ jobs:
       # webkit2gtk is required by Tauri on Linux; the rest are standard
       # build deps for the Rust→C native deps (libgit2 vendored, etc.).
       - name: Install Linux Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential \
-            xvfb
+        uses: ./.github/actions/linux-tauri-deps
 
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
+      # Third-party crates only: this workspace's own artifacts are rebuilt on
+      # every run anyway. Only this job saves: it builds the most, and when the
+      # first job to finish saved, the cache lacked what this job needs.
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: dev
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install JS deps
         run: bun install --frozen-lockfile
@@ -103,8 +100,8 @@ jobs:
         run: cargo fetch --locked
 
       - name: Cargo test
-        # A full run takes about an hour. A hung test would otherwise run to
-        # the job's six-hour limit, and its log can't be read until it ends.
+        # A hung test would otherwise run to the job's six-hour limit, and its
+        # log can't be read until it ends.
         timeout-minutes: 90
         # Every crate's failures in one run: each crate's tests take long
         # enough that finding them one at a time costs hours.
@@ -185,15 +182,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential
 
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: dev
+          save-if: false
 
       - name: Daemon contract tests
         run: cargo test -p oxplow-daemon
@@ -232,15 +225,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential
 
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: dev
+          save-if: false
 
       - name: Install JS deps
         run: bun install --frozen-lockfile
@@ -319,6 +308,7 @@ jobs:
 
   coverage:
     needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       # A debug build of the workspace, its tests and the app nearly fills the
@@ -344,25 +334,13 @@ jobs:
           components: llvm-tools-preview
 
       - name: Install Linux Tauri deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential \
-            xvfb
+        uses: ./.github/actions/linux-tauri-deps
 
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-cov-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          shared-key: coverage
+          cache-on-failure: true
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -425,8 +403,52 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  # The test job compiles on Linux only. This is what a push needs to know of
+  # the other two platforms: that the code compiles there. The installers
+  # themselves are the package job's, once a night.
+  platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        # Building oxplow builds its own extensions (crates/oxplow-app/build.rs).
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install JS deps
+        run: bun install --frozen-lockfile
+
+      # The desktop crate's build needs the frontend and a file at each
+      # sidecar's path. Nothing here runs them.
+      - name: Build the frontend and stub the sidecars
+        shell: bash
+        run: bun run --cwd apps/desktop build && bash apps/desktop/src-tauri/scripts/stage-sidecars.sh stub
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
+
+      - name: Cargo check
+        run: cargo check --workspace
+
   package:
     needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -446,24 +468,15 @@ jobs:
 
       - name: Install Linux Tauri deps
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential
+        uses: ./.github/actions/linux-tauri-deps
 
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
+      # The release workflow reads this cache. It can't save its own: a cache
+      # saved on a tag is seen only by that tag.
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-build-
+          shared-key: release
+          cache-on-failure: true
 
       - name: Install JS deps
         run: bun install --frozen-lockfile

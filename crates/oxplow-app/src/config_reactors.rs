@@ -12,7 +12,6 @@
 //! These are how config reaches the backend (P7.B6): nothing there
 //! listens to the in-memory `ConfigChanged`, which is the renderer's.
 
-use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
@@ -157,7 +156,6 @@ pub fn register(state: &Arc<crate::Services>) {
 /// include/exclude change applies without a restart.
 pub struct WorkspaceFilterConsumer {
     pub captures: SnapshotCaptureRegistry,
-    pub project_dir: PathBuf,
 }
 
 #[async_trait::async_trait]
@@ -182,12 +180,7 @@ impl AsyncEventConsumer for WorkspaceFilterConsumer {
             serde_json::from_value(change.after)
                 .map_err(|e| DomainError::Invalid(format!("config.changed generated: {e}")))?
         };
-        self.captures
-            .set_workspace_filter(oxplow_fs_watch::WorkspaceFilter::for_project(
-                &self.project_dir,
-                &generated.exclude,
-                &generated.include,
-            ));
+        self.captures.set_generated(&generated);
         Ok(())
     }
 }
@@ -204,8 +197,10 @@ mod tests {
 
     fn ignores(svc: &crate::Services, path: &str) -> bool {
         svc.snapshot_captures
+            .primary()
+            .unwrap()
             .workspace_filter()
-            .ignore(&svc.layout.project_dir.join(Path::new(path)), false)
+            .ignore(Path::new(path), false)
     }
 
     /// tsk515: an agent's `oxplow.config.set` on `generated` (not only the

@@ -43,7 +43,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.98"
 authors = ["Nathan Voxland <nathan@voxland.net>"]
@@ -203,7 +203,9 @@ oxplow-control-plane = { path = "crates/oxplow-control-plane" }
 
 [profile.release]
 codegen-units = 1
-lto = true
+# Thin, not fat: each of the four binaries links in half the time (daemon: 414 s
+# to 195 s) for a download about 6% larger.
+lto = "thin"
 opt-level = 3
 strip = true
 
@@ -225,3 +227,7 @@ split-debuginfo = "off"
 
 [profile.dev.package."*"]
 debug = false
+# The tests and the debug app parse YAML, hash and run regexes on every start;
+# unoptimized, that was most of a simple test's time (826 s -> 495 s for
+# oxplow-app's tests). Clean builds pay for it once.
+opt-level = 1

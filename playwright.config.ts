@@ -13,7 +13,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   // A spec that passes only on a second try is a failure to fix, not hide.
   retries: 0,
-  workers: process.env.CI ? 2 : undefined,
+  workers: process.env.CI ? 3 : undefined,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   // The JUnit report is what oxplow's own collector reads.

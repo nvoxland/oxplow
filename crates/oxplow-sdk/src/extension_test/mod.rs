@@ -448,10 +448,10 @@ async fn examples(
     }
 }
 
-/// How many examples run side by side: half the machine's cores, at most
-/// four — each boots an oxplow of its own.
+/// How many examples run side by side: one per core, at most eight — each
+/// boots an oxplow of its own, and nearly all of its time is CPU.
 fn side_by_side() -> usize {
     std::thread::available_parallelism()
-        .map_or(1, |n| n.get() / 2)
-        .clamp(1, 4)
+        .map_or(1, |n| n.get())
+        .clamp(1, 8)
 }

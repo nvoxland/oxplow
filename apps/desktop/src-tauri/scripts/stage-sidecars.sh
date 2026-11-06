@@ -22,6 +22,8 @@
 #   ./stage-sidecars.sh debug    # debug — enough to satisfy the build
 #                                #   script, and shares the dependency
 #                                #   build with a debug workspace build
+#   ./stage-sidecars.sh stub     # an empty file for each that has none —
+#                                #   enough for `cargo check`, runs nothing
 #
 # **Stage again whenever a sidecar's crate changed.** tauri-build copies
 # each staged file next to the shell (`target/<profile>/<name>`) when
@@ -41,8 +43,9 @@ profile="${1:-release}"
 case "$profile" in
 release) profile_flag="--release"; target_subdir="release" ;;
 debug) profile_flag=""; target_subdir="debug" ;;
+stub) ;;
 *)
-  echo "stage-sidecars: unknown profile '$profile' (want 'release' or 'debug')" >&2
+  echo "stage-sidecars: unknown profile '$profile' (want 'release', 'debug' or 'stub')" >&2
   exit 2
   ;;
 esac
@@ -57,6 +60,15 @@ ext=""
 case "$triple" in
 *windows*) ext=".exe" ;;
 esac
+
+if [ "$profile" = stub ]; then
+  mkdir -p binaries
+  for name in "${sidecars[@]}"; do
+    staged="binaries/$name-$triple$ext"
+    [ -e "$staged" ] || : >"$staged"
+  done
+  exit 0
+fi
 
 # shellcheck disable=SC2086 # profile_flag is intentionally word-split (empty for debug)
 cargo build $profile_flag -p oxplow-daemon -p oxplow-provider-mcp -p oxplow-script --bins --manifest-path "$repo_root/Cargo.toml"

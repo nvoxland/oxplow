@@ -161,6 +161,7 @@ mod source_guards;
 pub mod sql_gateway;
 #[cfg(test)]
 mod stream_service_tests;
+pub mod stream_watch;
 #[cfg(test)]
 mod subagent_tests;
 pub mod symbol_collector;
@@ -188,11 +189,10 @@ pub mod wiki_pages_watch;
 pub mod work_items;
 pub mod work_items_conformance;
 pub mod workspace_files;
-pub mod workspace_watch;
 pub mod worktrees;
 
 pub use agent_prompt::{build_session_context_block, OtherAgent, Surroundings};
-pub use events::{event_channels, EventBus, OxplowEvent, WorkspaceChangeKind};
+pub use events::{event_channels, EventBus, OxplowEvent};
 pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
@@ -599,6 +599,8 @@ pub struct Services {
     /// here; those about the primary stream's worktree (the wiki watcher)
     /// use `snapshot_captures.primary()`.
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// Each stream's one file watch.
+    pub stream_watches: stream_watch::StreamWatchRegistry,
     pub agent_status_store: Arc<dyn AgentStatusStore>,
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
@@ -1174,23 +1176,14 @@ impl Services {
         // Snapshot capture singleton — owned here so anything in
         // Services can request snapshots. The fs-watcher, startup sweep, and
         // cleanup loop are spawned by the host binary (main.rs).
-        let (max_bytes, workspace_filter) = {
+        let (max_bytes, generated) = {
             let g = config_arc.read();
             let max_bytes = g
                 .as_ref()
                 .map(|c| c.snapshot_max_file_bytes)
                 .unwrap_or(5 * 1024 * 1024);
-            let filter = g
-                .as_ref()
-                .map(|c| {
-                    oxplow_fs_watch::WorkspaceFilter::for_project(
-                        &layout.project_dir,
-                        &c.generated.exclude,
-                        &c.generated.include,
-                    )
-                })
-                .unwrap_or_default();
-            (max_bytes, filter)
+            let generated = g.as_ref().map(|c| c.generated.clone()).unwrap_or_default();
+            (max_bytes, generated)
         };
         // Snapshot capture is per-stream: each worktree gets its own
         // service so fs-watch sees edits in the right tree. The
@@ -1203,7 +1196,7 @@ impl Services {
                 snapshot_store: snapshot_store.clone(),
                 blobs: blobs.clone(),
                 max_file_bytes: max_bytes,
-                workspace_filter,
+                generated,
                 open_turn_probe: Some({
                     let turns = agent_turn_store.clone();
                     Arc::new(move |stream| {
@@ -1216,6 +1209,13 @@ impl Services {
                     })
                 }),
             },
+        );
+        let stream_watches = stream_watch::StreamWatchRegistry::new(
+            streams.clone(),
+            snapshot_captures.clone(),
+            vcs.clone(),
+            event_bus.clone(),
+            ref_moves.clone(),
         );
         // Register every active stream. Streams whose worktree no
         // longer exists on disk (orphaned) are silently skipped — the
@@ -1571,6 +1571,7 @@ impl Services {
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
+            stream_watches: stream_watches.clone(),
             snapshots: snapshots.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
@@ -1833,7 +1834,6 @@ impl Services {
         // A `generated` change reaches the snapshot captures (tsk515).
         event_pump.register_async(Arc::new(config_reactors::WorkspaceFilterConsumer {
             captures: snapshot_captures.clone(),
-            project_dir: layout.project_dir.clone(),
         }));
         // An agent's telemetry export is counted once it is logged (P10.M2).
         event_pump.register_async(Arc::new(token_usage::OtlpTokensConsumer {
@@ -1884,6 +1884,7 @@ impl Services {
             threads,
             efforts,
             snapshot_captures,
+            stream_watches,
             stream_store,
             thread_store,
             agent_session_store,
@@ -2107,16 +2108,11 @@ impl Services {
     /// plus defaults (the same thing boot computes).
     pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
         let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
-        let filter = oxplow_fs_watch::WorkspaceFilter::for_project(
-            &self.layout.project_dir,
-            &fresh.generated.exclude,
-            &fresh.generated.include,
-        );
+        self.snapshot_captures.set_generated(&fresh.generated);
         {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
             *guard = fresh;
         }
-        self.snapshot_captures.set_workspace_filter(filter);
         self.config_applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())

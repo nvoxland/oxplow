@@ -408,6 +408,55 @@ such a test again, alone, in its own process
 (`stop_all_reaps_every_live_group` starts `current_exe()` with `--exact`). To
 check a suspect, run the test binary itself with `--test-threads=4`.
 
+### Dependencies are optimized in dev and test builds
+
+`[profile.dev.package."*"]` sets `opt-level = 1`. Unoptimized, parsing YAML,
+hashing and regexes took most of a simple test's time (`oxplow-app` in one
+process: 826 s to 495 s; a full local `test:fast`: 906 s to 339 s, under
+different load). A clean build pays for it once. The workspace's own crates stay
+at 0, so their rebuilds and backtraces don't change.
+
+So don't tune a test script to the interpreter's speed. A "runaway" script loops
+without allocating and can't finish: `n += i` over a large range hits the memory
+cap first, and a loop sized to outlast a sleep ends early on a faster build.
+
+### What CI runs, and why
+
+A push runs `test`, `e2e`, `daemon-contract`, `audit` and `platforms` (`cargo
+check` on macOS and Windows). `coverage` and `package` take hours and no release
+waits for them (`scripts/ci-passed.sh` waits for `test` and `e2e`), so they run
+at night and by `workflow_dispatch`. A coverage floor or an installer that breaks
+shows up the next morning.
+
+Measured when this was set up, on one push each, with a cold Cargo cache after:
+`test` job 119 min to 62 min (`Cargo test` step 65 to 32, extension tests 11 to
+6), browser suite 18-28 min to 10, a push until every job ends about 3.5 hours to
+about 1. Most of the `Cargo test` gain is `opt-level = 1` above. Locally a full
+`test:fast` went from 906 s to about 370 s, under different load.
+
+On macOS the watcher tests can still fail locally, all together, with no event
+for 60 s. `fseventsd` is saturated (seen at 180% CPU) while any test run is going
+on the machine, another worktree's included. They run alone inside one nextest
+run (`.config/nextest.toml`), which doesn't help against another run. If they
+fail like that, run them again when the machine is quiet. CI (Linux, inotify)
+doesn't have this.
+
+- Each Linux job shares one Cargo cache and only `test` saves it. When every job
+  saved, the first to finish won, and one restored inside its own run had files
+  newer than the checkout. Cargo then skipped `build.rs`, the gitignored
+  `dist/` was never built, and hundreds of tests failed with
+  `component.bundle_unreadable`. `rust-cache` removes the workspace's own build
+  output, so this can't recur. If that error shows up on a fresh checkout with an
+  old `target/`, remove `target/debug/build/oxplow-app-*`.
+- A release reads the cache of the nightly `package` job. A cache saved on a tag
+  is seen only by that tag, so a release saves none.
+- `.github/actions/linux-tauri-deps` caches the downloaded packages: the Ubuntu
+  mirror has taken 26 minutes to send these 59 MB.
+- `[profile.release]` is thin LTO, not fat. On the daemon: relink 414 s to 195 s,
+  clean build 819 s to 594 s, 80 MB to 91 MB, and 31.1 MB to 32.9 MB compressed
+  (about 6%). Fat LTO is nearly all of a release's compile time, and it runs once
+  for each of the four binaries.
+
 ### Timing assertions flake under `cargo cov` (tsk175)
 
 `cargo cov` runs every test as its **own process, all concurrently, on an
@@ -660,8 +709,8 @@ this checkout out of what it ships:
   shipped extensions' manifests, pages and scripts (not fixtures or
   `dist/`).
 - `bun run lint:docs` (`scripts/check-docs-portable.py`, CI): `docs/` and
-  `README.md` hold no dev-loop text. `DEV.md` "Run from source" is where
-  building and running from source go.
+  `README.md` hold no dev-loop text (a web link may name a repo path).
+  `DEV.md` "Run from source" is where building and running from source go.
 
 The shell's File ▸ "Install `oxplow` command line…" (`install_cli`,
 `crates/oxplow-tauri-ipc/src/commands/install_cli.rs`) links the running

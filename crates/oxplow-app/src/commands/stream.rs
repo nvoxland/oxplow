@@ -97,6 +97,8 @@ pub struct SetPromptInput {
 pub struct StreamDeps {
     pub streams: oxplow_session::StreamService,
     pub snapshot_captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    /// Each stream's one watch, which starts and stops with it.
+    pub stream_watches: crate::stream_watch::StreamWatchRegistry,
     /// The snapshot implementations: an archive's end takes are the active
     /// one's marks.
     pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
@@ -139,12 +141,10 @@ fn result(stream: &Stream) -> HandlerOutput {
     }
 }
 
-/// A new stream's capture service starts, so its edits land in snapshots.
+/// A new stream's watch starts, and its capture with it, so its edits land in
+/// snapshots and reach the UI.
 fn start_capture(deps: &StreamDeps, stream: &Stream) {
-    if let Some(capture) = deps.snapshot_captures.register(stream) {
-        capture.spawn_watcher();
-        capture.spawn_git_refs_listener(&deps.ref_moves);
-    }
+    deps.stream_watches.register(stream);
 }
 
 /// A folder name for a stream titled `title`: lowercase words joined by
@@ -348,6 +348,8 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         Ok(())
                     })
                     .await?;
+                // Before the worktree goes: its deletion is no one's surprise.
+                deps.stream_watches.unregister(&id);
                 deps.streams
                     .archive_stream(&id, input.delete_worktree)
                     .await

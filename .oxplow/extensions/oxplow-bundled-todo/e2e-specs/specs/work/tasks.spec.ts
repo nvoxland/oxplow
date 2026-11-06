@@ -10,8 +10,8 @@ test("a task made in the UI is on the thread's list", async ({ page }) => {
   const form = page.locator('[data-testid="viz-form"]:visible');
   await form.getByTestId("viz-form-fields-title").fill("Made in the UI");
   await form.getByTestId("viz-form-fields-submit").click();
-  // The form gives way to the item it made.
-  await expect(page.locator('[data-testid="viz-form"]:visible')).toHaveCount(0);
+  // The form gives way to the item it made, whose own page has forms too.
+  await expect(page.getByTestId("viz-form-fields-again")).toHaveCount(0);
   await expandRailSection(page, "ext:oxplow-bundled-todo/work");
   await expect(page.getByTestId("rail-section-ext:oxplow-bundled-todo/work")).toContainText("Made in the UI");
 });

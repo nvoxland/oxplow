@@ -2524,11 +2524,12 @@ steps:
         ".oxplow/extensions/cards/fixtures/drawn.yaml",
         &fixture(5),
     );
-    let errors = test_extension(root, "cards", false)
-        .await
-        .unwrap()
-        .error_lines()
-        .join("\n");
+    let report = test_extension(root, "cards", false).await.unwrap();
+    if !report.skipped.is_empty() {
+        // The display went to sleep between the two runs: the same as above.
+        return;
+    }
+    let errors = report.error_lines().join("\n");
     assert!(
         errors.contains("fixtures/drawn.yaml: steps[0]: ui[5]:")
             && errors.contains("<li>From the bar</li>"),

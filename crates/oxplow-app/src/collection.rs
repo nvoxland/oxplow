@@ -4633,7 +4633,7 @@ mod tests {
                     snapshot_store: snapshots.clone(),
                     blobs: blobs.clone(),
                     max_file_bytes: 1_000_000,
-                    workspace_filter: oxplow_fs_watch::WorkspaceFilter::default(),
+                    generated: Default::default(),
                     open_turn_probe: None,
                 },
             );

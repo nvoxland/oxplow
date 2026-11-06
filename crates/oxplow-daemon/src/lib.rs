@@ -177,9 +177,8 @@ type Forwarder =
     Box<dyn FnOnce(tokio::sync::mpsc::Sender<String>) -> tokio::task::JoinHandle<()> + Send>;
 
 /// A subscription to `rx`, each event framed by `frame`. A lagged
-/// subscriber just drops frames — the renderer's coarse "bucket changed,
-/// refetch" model recovers on the next event (and refetches everything on
-/// reconnect anyway).
+/// subscriber has lost frames, and it says so: the renderer reads everything
+/// again, as it does on a reconnect.
 fn forward<T, F>(mut rx: tokio::sync::broadcast::Receiver<T>, frame: F) -> Forwarder
 where
     T: Clone + Send + 'static,
@@ -198,6 +197,9 @@ where
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!(skipped = n, "events ws forwarder lagged");
+                        if tx.send(RESYNC_FRAME.to_string()).await.is_err() {
+                            break; // client gone
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -205,6 +207,9 @@ where
         })
     })
 }
+
+/// What a client is told when it has lost frames.
+const RESYNC_FRAME: &str = r#"{"channel":"resync"}"#;
 
 fn frame_json<T: serde::Serialize>(channel: &str, event: &T) -> Option<String> {
     match serde_json::to_value(event) {

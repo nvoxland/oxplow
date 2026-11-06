@@ -7,6 +7,7 @@ checkout: no `cargo`, no `bun run`, no `.context/`, no `crates/` or
 
 `DEV.md` is the one file that may name them. The docs may say `oxplow
 extension ...`: the app's "Install `oxplow` command line…" puts it on PATH.
+A web link is fine: a reader can open it without a checkout.
 
 Exit 1 and list the lines when any are found.
 """
@@ -14,6 +15,7 @@ Exit 1 and list the lines when any are found.
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 NEEDLES = [
@@ -25,6 +27,7 @@ NEEDLES = [
     "bun run",
     ".context",
 ]
+URL = re.compile(r"https?://[^\s)>\]]+")
 ROOTS = ["docs", "README.md"]
 EXTS = {".md", ".json", ".yaml", ".yml"}
 
@@ -44,8 +47,9 @@ def main() -> int:
     hits: list[str] = []
     for path in files():
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            prose = URL.sub("", line)
             for needle in NEEDLES:
-                if needle in line:
+                if needle in prose:
                     hits.append(f"  {path}:{n}: `{needle}`")
     if not hits:
         return 0

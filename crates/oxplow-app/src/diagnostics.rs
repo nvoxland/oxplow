@@ -9,7 +9,7 @@
 //!   piling up". A steady-state count means the process is releasing
 //!   handles cleanly; monotonic growth is the signal we care about.
 //! - **streams** — number of stream rows, which equals the number of
-//!   per-stream `WorkspaceWatchRegistry` watcher pairs alive.
+//!   per-stream `StreamWatchRegistry` watches alive.
 //!
 //! Cheap by construction: one `ps` exec, one `read_dir("/dev/fd")`,
 //! one `streams.list()` per minute. No new crate deps.

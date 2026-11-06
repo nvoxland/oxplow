@@ -491,13 +491,6 @@ impl WikiFollow {
     pub fn live(&self) -> bool {
         self.live.load(std::sync::atomic::Ordering::SeqCst)
     }
-
-    /// A test's wiki, active under `id`.
-    #[cfg(test)]
-    pub(crate) fn set_serves_for_test(&self, id: &str) {
-        self.set_serves([id.to_string()]);
-        self.follow(id);
-    }
 }
 
 /// Empty the record — every page row, its edges and touches — when the

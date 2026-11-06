@@ -58,6 +58,11 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
   await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
   // An external item reaches oxplow's models through its collector's read.
+  // Integrations is the last section of a long page, and the choices above
+  // changed the Capabilities table over it: the frame may now be below the
+  // fold, where the browser doesn't run its animation frames, and a click
+  // waits for the button to be stable by those. A person scrolls to it.
+  await page.locator('iframe[aria-label="Integrations"]').scrollIntoViewIfNeeded();
   await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
   await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
   // A tracker's item is on no thread: it is in the datasets all the same.

@@ -890,8 +890,8 @@ fn a_change_names_the_live_datasets_that_follow_it() {
     );
     let files = after(OxplowEvent::WorkspaceChanged {
         stream_id: oxplow_domain::StreamId::new(1),
-        change_kind: crate::events::WorkspaceChangeKind::Created,
-        path: "src/a.rs".into(),
+        paths: vec!["src/a.rs".into()],
+        overflow: false,
     });
     assert!(
         files.contains(&"v_file".to_string()) && files.contains(&"v_zone_unmatched".to_string()),
