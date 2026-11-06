@@ -1,0 +1,25 @@
+name: Install Linux Tauri deps
+description: >
+  webkit2gtk and the rest of what Tauri needs on Linux, with the downloaded
+  packages cached. The Ubuntu mirror has taken 26 minutes to send these 59 MB.
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v6
+      with:
+        path: ~/apt-archives
+        key: apt-tauri-${{ hashFiles('.github/actions/linux-tauri-deps/action.yml') }}
+    - shell: bash
+      run: |
+        mkdir -p ~/apt-archives/partial
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          -o Dir::Cache::archives="$HOME/apt-archives" \
+          -o APT::Keep-Downloaded-Packages=true \
+          libwebkit2gtk-4.1-dev \
+          libayatana-appindicator3-dev \
+          librsvg2-dev \
+          patchelf \
+          build-essential \
+          xvfb
+        sudo chown -R "$USER" ~/apt-archives

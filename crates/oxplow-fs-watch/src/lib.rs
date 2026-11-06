@@ -918,6 +918,12 @@ mod tests {
     use tempfile::tempdir;
     use tokio::time::timeout;
 
+    /// How long a test waits to hear of a change it made. It only waits this
+    /// long if the change never comes. On macOS the news comes through
+    /// FSEvents, a system service that has fallen more than 20 s behind while
+    /// the rest of the suite runs.
+    const HEARD_WITHIN: Duration = Duration::from_secs(60);
+
     #[tokio::test]
     async fn detects_new_file() {
         let dir = tempdir().unwrap();
@@ -931,7 +937,7 @@ mod tests {
         // canonicalized paths so the test is stable across platforms. It
         // can also report the freshly made directory itself first.
         let target = target.canonicalize().unwrap();
-        timeout(Duration::from_secs(20), async {
+        timeout(HEARD_WITHIN, async {
             loop {
                 let evt = rx.recv().await.expect("event ok");
                 if evt.path.canonicalize().ok().as_ref() == Some(&target) {
@@ -988,7 +994,7 @@ mod tests {
         // window ends the count. The debounced view should coalesce 20 writes
         // into a small number of events.
         let mut count = 0;
-        let mut window = Duration::from_secs(20);
+        let mut window = HEARD_WITHIN;
         while let Ok(Ok(_)) = timeout(window, rx.recv()).await {
             count += 1;
             window = Duration::from_millis(800);
@@ -1015,7 +1021,7 @@ mod tests {
         }
 
         let mut seen = HashSet::new();
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let deadline = std::time::Instant::now() + HEARD_WITHIN;
         while std::time::Instant::now() < deadline && seen.len() < targets.len() {
             if let Ok(Ok(evt)) = timeout(Duration::from_millis(500), rx.recv()).await {
                 if let Ok(canon) = evt.path.canonicalize() {
@@ -1100,7 +1106,7 @@ mod tests {
         let early = root.join("oxplow/extensions/mine/extension.yaml");
         // A generous budget: it returns as soon as the event arrives, and
         // under a full concurrent suite FSEvents can take seconds.
-        let seen = seen_within(&mut rx, &early, Duration::from_secs(20)).await;
+        let seen = seen_within(&mut rx, &early, HEARD_WITHIN).await;
         assert!(
             seen.contains(&early),
             "written before its watch landed: {seen:?}"
@@ -1109,7 +1115,7 @@ mod tests {
         let after = late.join("extensions/mine/page.yaml");
         std::fs::write(&after, b"y").unwrap();
         let after = root.join("oxplow/extensions/mine/page.yaml");
-        let seen = seen_within(&mut rx, &after, Duration::from_secs(20)).await;
+        let seen = seen_within(&mut rx, &after, HEARD_WITHIN).await;
         assert!(seen.contains(&after), "written once it's watched: {seen:?}");
     }
 
@@ -1138,7 +1144,7 @@ mod tests {
         let canon = root.canonicalize().unwrap();
         let want = canon.join(".claude/worktrees/x/lib.rs");
         let mut seen = HashSet::new();
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let deadline = std::time::Instant::now() + HEARD_WITHIN;
         while std::time::Instant::now() < deadline && !seen.contains(&want) {
             match timeout(Duration::from_millis(500), rx.recv()).await {
                 Ok(Ok(evt)) => {
@@ -1257,7 +1263,7 @@ mod tests {
 
         let mut saw_a = false;
         let mut saw_b = false;
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let deadline = std::time::Instant::now() + HEARD_WITHIN;
         while std::time::Instant::now() < deadline && !(saw_a && saw_b) {
             if let Ok(Ok(evt)) = timeout(Duration::from_millis(500), rx.recv()).await {
                 let p = evt.path.canonicalize().unwrap_or(evt.path.clone());
@@ -1314,7 +1320,7 @@ mod tests {
         let top = dir.path().join("top.txt");
         std::fs::write(&top, b"y").unwrap();
         let mut top_seen = false;
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let deadline = std::time::Instant::now() + HEARD_WITHIN;
         while std::time::Instant::now() < deadline {
             match timeout(Duration::from_millis(500), rx.recv()).await {
                 Ok(Ok(evt)) => {

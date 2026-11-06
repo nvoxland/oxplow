@@ -102,23 +102,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux Tauri deps
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            build-essential
-      - name: Cache Cargo registry + target
-        uses: actions/cache@v6
+        uses: ./.github/actions/linux-tauri-deps
+      # CI's nightly package job saves this cache. A cache saved on a tag is
+      # seen only by that tag, so saving here would only use up the repo's quota.
+      - name: Cache third-party crates
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-build-${{ hashFiles('Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-build-
+          shared-key: release
+          save-if: false
       - name: Install JS deps
         run: bun install --frozen-lockfile
 

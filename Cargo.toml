@@ -203,7 +203,9 @@ oxplow-control-plane = { path = "crates/oxplow-control-plane" }
 
 [profile.release]
 codegen-units = 1
-lto = true
+# Thin, not fat: each of the four binaries links in half the time (daemon: 414 s
+# to 195 s) for a download about 6% larger.
+lto = "thin"
 opt-level = 3
 strip = true
 

@@ -84,7 +84,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   `specs/components/` (a custom component's frame, the one place the two
   engines are checked apart — the macOS window is WebKit).
 - **CI**: the `e2e` job in `.github/workflows/ci.yml` — Chromium and WebKit,
-  two workers, no retries (a spec that passes only on a second try is a
+  three workers, no retries (a spec that passes only on a second try is a
   failure to fix), the JUnit report uploaded always and traces and daemon
   logs on failure. `daemon-contract` stays browser-free.
 

@@ -407,6 +407,30 @@ So don't tune a test script to the interpreter's speed. A "runaway" script loops
 without allocating and can't finish: `n += i` over a large range hits the memory
 cap first, and a loop sized to outlast a sleep ends early on a faster build.
 
+### What CI runs, and why
+
+A push runs `test`, `e2e`, `daemon-contract`, `audit` and `platforms` (`cargo
+check` on macOS and Windows). `coverage` and `package` take hours and no release
+waits for them (`scripts/ci-passed.sh` waits for `test` and `e2e`), so they run
+at night and by `workflow_dispatch`. A coverage floor or an installer that breaks
+shows up the next morning.
+
+- Each Linux job shares one Cargo cache and only `test` saves it. When every job
+  saved, the first to finish won, and one restored inside its own run had files
+  newer than the checkout. Cargo then skipped `build.rs`, the gitignored
+  `dist/` was never built, and hundreds of tests failed with
+  `component.bundle_unreadable`. `rust-cache` removes the workspace's own build
+  output, so this can't recur. If that error shows up on a fresh checkout with an
+  old `target/`, remove `target/debug/build/oxplow-app-*`.
+- A release reads the cache of the nightly `package` job. A cache saved on a tag
+  is seen only by that tag, so a release saves none.
+- `.github/actions/linux-tauri-deps` caches the downloaded packages: the Ubuntu
+  mirror has taken 26 minutes to send these 59 MB.
+- `[profile.release]` is thin LTO, not fat. On the daemon: relink 414 s to 195 s,
+  clean build 819 s to 594 s, 80 MB to 91 MB, and 31.1 MB to 32.9 MB compressed
+  (about 6%). Fat LTO is nearly all of a release's compile time, and it runs once
+  for each of the four binaries.
+
 ### Timing assertions flake under `cargo cov` (tsk175)
 
 `cargo cov` runs every test as its **own process, all concurrently, on an
