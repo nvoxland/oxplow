@@ -19,7 +19,7 @@ import {
   type LayoutEdit,
   type LayoutSync,
 } from "../Panels/panelLayout.js";
-import { panelChoices, type OpenPanelRun, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
+import { type OpenPanelRun, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
@@ -374,7 +374,7 @@ export function RailHud({
       <ExtensionPanelSection
         key={id}
         panel={panel}
-        runs={panelRuns[panel.id] ?? { body: null, badge: null, collapsed: null, count: null }}
+        runs={panelRuns[panel.id] ?? { body: null, badge: null, collapsed: null, count: null, choices: [] }}
         streamId={streamId ?? null}
         onOpenPage={onOpenPage}
       />
@@ -515,7 +515,7 @@ function ExtensionPanelSection({
   const { choose } = usePanelRuns();
   const extensions = useExtensions();
   // The value in force is the one the body ran with (the daemon's).
-  const toggles = panelChoices(runs.body?.run ?? null);
+  const toggles = runs.choices;
   // A panel's part: its page drawn small.
   const compactPage = (open: OpenPanelRun, testId: string) => (
     <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>

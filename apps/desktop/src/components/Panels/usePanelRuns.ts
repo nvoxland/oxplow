@@ -8,19 +8,23 @@
 /// shows changing opens new ones. What a part runs with is the daemon's
 /// (`open_panel_part`, `crates/oxplow-app/src/pages/panels.rs`): the scope's
 /// id from the stream and thread the rail shows, the body's toggles from the
-/// viewer's picks. `pageCount` and `badgeCount` mirror its `header_count`
-/// over the live runs; its unit tests are the rule.
+/// viewer's picks, and each part's run says what it gives the panel
+/// (`PartView`: whether the header counts by it, the count, the body's
+/// toggles). The window reads those; it decides none of them.
 import { useEffect, useMemo, useState } from "react";
 
 import { windowPageRuns, type PageRuns } from "../../pageRuns.js";
-import { firstLoader } from "../../pages/firstLoader.js";
 import { pageFileUri } from "../../pages/pageFiles.js";
-import type { Extension, ExtensionPanel, ChoiceOption, PageRun } from "../../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPanel, PageRun, PanelChoice, PartView } from "../../tauri-bridge/generated/bindings.js";
+
+export type { PanelChoice };
 
 /** A part's open page run: what its actions are pressed on and what it drew. */
 export interface OpenPanelRun {
   runId: string | null;
   run: PageRun;
+  /** What this run gives the panel, as the daemon says it. */
+  view: PartView | null;
 }
 
 /** A panel's runs: one open page run per part, kept fresh by the daemon. */
@@ -30,24 +34,11 @@ export interface PanelRuns {
   collapsed: OpenPanelRun | null;
   /** The badge page's run, when the panel has one. */
   badge: PageRun | null;
-  /** The header's count: the count page's, else the badge's; null shows none. */
+  /** The header's count, from the part the daemon says it counts by;
+   *  null shows none. */
   count: number | null;
-}
-
-export function badgeCount(badge: PageRun | null): number | null {
-  return badge?.alert?.firing ? badge.alert.count : null;
-}
-
-/** A count page's number: its badge, else its first loader's row count. */
-export function pageCount(count: PageRun | null): number | null {
-  if (!count) return null;
-  if (count.badge !== null && count.badge !== undefined) {
-    const n = typeof count.badge === "number" ? count.badge : Number(count.badge);
-    return Number.isFinite(n) ? n : null;
-  }
-  const first = firstLoader(count.page)?.name;
-  const result = first ? count.loaders[first]?.result : undefined;
-  return result ? result.rows.length : null;
+  /** The body's toggles, each with the value in force (the one it ran with). */
+  choices: PanelChoice[];
 }
 
 /** The viewer's picks for the panels' choice params: by panel
@@ -56,27 +47,6 @@ export type PanelChoices = Record<string, Record<string, string>>;
 
 /** No picks — one value, so it doesn't re-run the panels each render. */
 export const NO_CHOICES: PanelChoices = {};
-
-/** One choice param of a panel's body page, as its header toggle shows
- *  it: the options, and the value in force — the one the body ran with
- *  (the daemon's pick while the page offers it, else its default). */
-export interface PanelChoice {
-  name: string;
-  label: string | null;
-  options: ChoiceOption[];
-  value: string;
-}
-
-export function panelChoices(body: PageRun | null): PanelChoice[] {
-  const params = body?.page.params ?? [];
-  return params
-    .filter((p) => p.options.length > 0)
-    .map((p) => {
-      const ran = body?.params[p.name];
-      const value = ran != null ? String(ran) : String(p.default ?? p.options[0]!.value);
-      return { name: p.name, label: p.label, options: p.options, value };
-    });
-}
 
 export interface PanelAlert {
   /** The badge page (`<extension>/<slug>`). */
@@ -139,8 +109,8 @@ export function useExtensionPanelRuns(
           threadId,
         });
         const take = () => {
-          const { runId, run } = handle.get();
-          setState((s) => ({ ...s, [p.id]: { ...s[p.id], [part]: run ? { runId, run } : null } }));
+          const { runId, run, panel: view } = handle.get();
+          setState((s) => ({ ...s, [p.id]: { ...s[p.id], [part]: run ? { runId, run, view } : null } }));
         };
         take();
         const off = handle.subscribe(take);
@@ -158,11 +128,14 @@ export function useExtensionPanelRuns(
     const out: Record<string, PanelRuns> = {};
     for (const p of panels) {
       const s = state[p.id] ?? {};
-      const badge = s.badge?.run ?? null;
-      // The count page's number wins; else the badge's: an alert's count
-      // while it fires, or the value a `badge:` declares.
-      const count = p.count ? pageCount(s.count?.run ?? null) : badge?.alert ? badgeCount(badge) : badge?.badge != null ? pageCount(badge) : null;
-      out[p.id] = { body: s.body ?? null, collapsed: s.collapsed ?? null, badge, count };
+      const counting = Object.values(s).find((r) => r?.view?.counts);
+      out[p.id] = {
+        body: s.body ?? null,
+        collapsed: s.collapsed ?? null,
+        badge: s.badge?.run ?? null,
+        count: counting?.view?.count ?? null,
+        choices: s.body?.view?.choices ?? [],
+      };
     }
     return out;
   }, [panels, state]);

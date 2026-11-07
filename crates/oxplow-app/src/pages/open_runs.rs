@@ -36,7 +36,16 @@ pub struct RunSnapshot {
     pub run: PageRun,
     #[specta(type = oxplow_domain::JsNumber)]
     pub seq: u64,
+    /// A left-nav panel's part: what this run gives the panel
+    /// (`panels::part_view`); none for a page run.
+    pub panel: Option<super::panels::PartView>,
 }
+
+/// The panel a part run belongs to, and which part it is.
+type PanelRole = (
+    crate::extension::extensions::ExtensionPanel,
+    super::panels::PanelPart,
+);
 
 /// What the change loop tells the open runs.
 #[derive(Debug, Clone)]
@@ -97,6 +106,8 @@ impl Invalidations {
 struct OpenRun {
     req: RunRequest,
     run: PageRun,
+    /// Opened as a panel's part (`open_part`).
+    panel: Option<PanelRole>,
     client: String,
     seq: u64,
     /// A later refresh/parameter request supersedes earlier async work.
@@ -237,6 +248,30 @@ impl PageRuns {
         req: RunRequest,
         client: &str,
     ) -> Result<(String, PageRun), DomainError> {
+        self.open_with(svc, req, client, None).await
+    }
+
+    /// Run `req`, `part` of `panel`, and keep it open for `client`: its
+    /// snapshots carry what it gives the panel (`panels::part_view`).
+    pub async fn open_part(
+        &self,
+        svc: &crate::Services,
+        req: RunRequest,
+        client: &str,
+        panel: &crate::extension::extensions::ExtensionPanel,
+        part: super::panels::PanelPart,
+    ) -> Result<(String, PageRun), DomainError> {
+        self.open_with(svc, req, client, Some((panel.clone(), part)))
+            .await
+    }
+
+    async fn open_with(
+        &self,
+        svc: &crate::Services,
+        req: RunRequest,
+        client: &str,
+        panel: Option<PanelRole>,
+    ) -> Result<(String, PageRun), DomainError> {
         let connection = self.connections.lock().get(client).copied();
         loop {
             let observed = self.revision.lock().serial;
@@ -259,6 +294,7 @@ impl PageRuns {
                 OpenRun {
                     req,
                     run: run.clone(),
+                    panel,
                     client: client.to_string(),
                     seq: 0,
                     revision: 0,
@@ -284,6 +320,10 @@ impl PageRuns {
         self.runs.lock().get(id).map(|r| RunSnapshot {
             run: r.run.clone(),
             seq: r.seq,
+            panel: r
+                .panel
+                .as_ref()
+                .map(|(panel, part)| super::panels::part_view(panel, *part, &r.run)),
         })
     }
 

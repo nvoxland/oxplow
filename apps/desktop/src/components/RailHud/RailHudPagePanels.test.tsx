@@ -48,7 +48,9 @@ function fakeStore(opened: PageKey[]) {
         key.page === "z/badge"
           ? { ...fakeRun(pageOf("badge"), { loaders: { rows: loader(["t"], [["x"]]) } }), alert: { firing: true, count: 2, value: null, message: "2 waiting" } as never }
           : fakeRun(pageOf("body"), { loaders: { rows: loader(["t"], [["body row"]]) } });
-      return { runId: `run-${key.page}`, run };
+      // The daemon's word: the header counts by the badge (no count page).
+      const panel = key.page === "z/badge" ? { counts: true, count: 2, choices: [] } : { counts: false, count: null, choices: [] };
+      return { runId: `run-${key.page}`, run, panel };
     },
     close: async () => {},
     fetch: async () => ({}),

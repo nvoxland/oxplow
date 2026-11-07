@@ -12,13 +12,14 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { subscribeOxplowEvents, unwrapResult } from "./api.js";
 import { getUiClientId } from "./uiClientId.js";
-import { commands, type PageRun, type PanelPart, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
+import { commands, type PageRun, type PanelPart, type PartView, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
 import { onRemoteReconnect } from "./tauri-bridge/transport.js";
 
 /** A left-nav panel's part, as the daemon runs it (`open_panel_part`,
  *  `crates/oxplow-app/src/pages/panels.rs`): the daemon says which page and
  *  with what — the scope's id from the view, the body's toggles from the
- *  viewer's `choices`. */
+ *  viewer's `choices` — and, with each run, what it gives the panel
+ *  (`RunState.panel`). */
 export interface PanelPartKey {
   panel: string;
   part: PanelPart;
@@ -48,7 +49,7 @@ export interface RunChange {
 
 /** How the store reaches the daemon (injected, so tests need none). */
 export interface PageRunsTransport {
-  open(key: PageKey): Promise<{ runId: string; run: PageRun }>;
+  open(key: PageKey): Promise<{ runId: string; run: PageRun; panel?: PartView | null }>;
   close(runId: string): Promise<void>;
   fetch(runIds: string[]): Promise<Record<string, RunSnapshot>>;
   setParams(runId: string, params: Record<string, SqlCell>): Promise<PageRun>;
@@ -69,6 +70,9 @@ export interface RunState {
    *  daemon has opened it. */
   runId: string | null;
   run: PageRun | null;
+  /** A panel part's run: what it gives the panel (the header's count, the
+   *  toggles), as the daemon says it; null for a page. */
+  panel: PartView | null;
   error: string | null;
   /** The run shown is for the previous params; the new one is on its way. */
   stale: boolean;
@@ -104,7 +108,7 @@ interface Entry {
   closeTimer: ReturnType<typeof setTimeout> | null;
 }
 
-const NO_RUN: RunState = { runId: null, run: null, error: null, stale: false };
+const NO_RUN: RunState = { runId: null, run: null, panel: null, error: null, stale: false };
 
 /** How long changes gather before one fetch. */
 export const COALESCE_MS = 50;
@@ -128,7 +132,7 @@ export function keyOf(key: PageKey): string {
 
 export function createPageRuns(transport: PageRunsTransport) {
   const entries = new Map<string, Entry>();
-  const kept = new Map<string, PageRun>();
+  const kept = new Map<string, Pick<RunState, "run" | "panel">>();
   const byRunId = new Map<string, Entry>();
   const rosterListeners = new Set<() => void>();
   const rosterChanged = () => { for (const listener of rosterListeners) listener(); };
@@ -151,7 +155,7 @@ export function createPageRuns(transport: PageRunsTransport) {
     const opening = ++entry.opening;
     inFlightOpens += 1;
     entry.runId = transport.open({ ...entry.key, params: { ...entry.requestParams } }).then(
-      ({ runId, run }) => {
+      ({ runId, run, panel }) => {
         const earlySeq = earlyChanges.get(runId);
         earlyChanges.delete(runId);
         if (opening !== entry.opening) {
@@ -159,7 +163,7 @@ export function createPageRuns(transport: PageRunsTransport) {
           return null;
         }
         byRunId.set(runId, entry);
-        entry.state = { runId, run, error: null, stale: false };
+        entry.state = { runId, run, panel: panel ?? null, error: null, stale: false };
         // The daemon may have announced a change before its open HTTP
         // reply reached this window. Keep notices only while opens are
         // pending, never as a timed history of unrelated events.
@@ -204,7 +208,7 @@ export function createPageRuns(transport: PageRunsTransport) {
         continue;
       }
       entry.seq = snapshot.seq;
-      entry.state = { ...entry.state, runId, run: snapshot.run, error: null, stale: false };
+      entry.state = { ...entry.state, runId, run: snapshot.run, panel: snapshot.panel ?? null, error: null, stale: false };
       notify(entry);
     }
   };
@@ -234,7 +238,12 @@ export function createPageRuns(transport: PageRunsTransport) {
       if (entry.seq !== initialSeq) {
         entry.state = { ...entry.state, stale: false };
         scheduleFetch(runId, 0);
-      } else entry.state = { ...entry.state, runId, run, error: null, stale: false };
+      } else {
+        entry.state = { ...entry.state, runId, run, error: null, stale: false };
+        // A re-run answers with the run alone: a panel part's view comes
+        // with its snapshot.
+        if (entry.key.panel) scheduleFetch(runId, 0);
+      }
     } catch (e) {
       if (!current() || entry.state.runId !== runId) return;
       if (params) entry.requestParams = previousParams;
@@ -299,7 +308,7 @@ export function createPageRuns(transport: PageRunsTransport) {
         runId: Promise.resolve(null),
         // Rows kept from the last run of this page: shown, marked stale
         // with no run id (nothing can be pressed on them), until it answers.
-        state: kept.has(k) ? { runId: null, run: kept.get(k)!, error: null, stale: true } : NO_RUN,
+        state: kept.has(k) ? { ...kept.get(k)!, runId: null, error: null, stale: true } : NO_RUN,
         listeners: new Set(),
         refs: 1,
         shown: 1,
@@ -349,7 +358,7 @@ export function createPageRuns(transport: PageRunsTransport) {
           entries.delete(k);
           if (mine.state.run) {
             kept.delete(k);
-            kept.set(k, mine.state.run);
+            kept.set(k, { run: mine.state.run, panel: mine.state.panel });
             if (kept.size > KEPT_RUNS) kept.delete(kept.keys().next().value!);
           }
           ++mine.opening;

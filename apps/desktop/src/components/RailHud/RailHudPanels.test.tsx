@@ -2,8 +2,9 @@ import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { createRememberedStore, panelScope, RememberedContext } from "../../prefs/remembered.js";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { ExtensionPanel, PageRun, SqlCell } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, PageRun, PartView, SqlCell } from "../../tauri-bridge/generated/bindings.js";
 import { decl, fakePage, fakePageRunsBy, fakeRun, loader, node } from "../../pages/testing/fakeRun.js";
+import type { PageKey } from "../../pageRuns.js";
 
 // An extension panel can name a page its collapsed header shows
 // (a summary, compact) and a page whose row count is its header count.
@@ -33,6 +34,13 @@ const pageRun = (id: string, params: Record<string, SqlCell>): PageRun => {
   });
   return fakeRun(page, { params, loaders: { rows: loader(["t"], rowsOf[id]!) } });
 };
+/** What the daemon says each part gives the panel: the count page counts,
+ *  the body has the toggle at the value it ran with. */
+const viewOf = (key: PageKey, run: PageRun): PartView => ({
+  counts: key.panel?.part === "count",
+  count: key.panel?.part === "count" ? rowsOf["x/n"]!.length : null,
+  choices: key.panel?.part === "body" ? [{ ...MODE, value: String(run.params.mode ?? MODE.default) }] : [],
+});
 const panel: ExtensionPanel = {
   id: "x/w",
   extension: "x",
@@ -59,7 +67,7 @@ const { PanelRunsProvider } = await import("../Panels/PanelRunsContext.js");
 afterEach(cleanup);
 
 test("a collapsed panel shows its collapsed page; its header counts the count page's rows", async () => {
-  const { runs } = fakePageRunsBy((key) => pageRun(key.page, key.params));
+  const { runs } = fakePageRunsBy((key) => pageRun(key.page!, key.params), viewOf);
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
       <RailHud streamId="str1" onOpenPage={() => {}} />
@@ -74,7 +82,7 @@ test("a collapsed panel shows its collapsed page; its header counts the count pa
 
 test("a body page's choice param is a header toggle; picking re-runs the body with it", async () => {
   // As the daemon runs a panel's part: the body with the viewer's picks.
-  const { runs, opened } = fakePageRunsBy((key) => pageRun(key.page!, { ...key.params, ...(key.panel?.choices ?? {}) }));
+  const { runs, opened } = fakePageRunsBy((key) => pageRun(key.page!, { ...key.params, ...(key.panel?.choices ?? {}) }), viewOf);
   const store = createRememberedStore({ load: async () => [], save: async () => {} });
   const view = render(
     <RememberedContext.Provider value={store}>
@@ -96,7 +104,7 @@ test("a count of zero draws no badge in the header", async () => {
   const saved = rowsOf["x/n"];
   rowsOf["x/n"] = [];
   try {
-    const { runs } = fakePageRunsBy((key) => pageRun(key.page, key.params));
+    const { runs } = fakePageRunsBy((key) => pageRun(key.page!, key.params), viewOf);
     const view = render(
       <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
         <RailHud streamId="str1" onOpenPage={() => {}} />

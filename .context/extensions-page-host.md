@@ -297,16 +297,24 @@ the user guide is `docs/guide/pages.md`.
     the stream and thread it's shown for, as every page takes them — and,
     for the body only, the toggles in force), the toggles a body's choice
     params give (`choices`: the viewer's pick while the body offers it, else
-    its default, else its first option), the header's count (`header_count`:
-    the count page's number, else a firing badge's count, else a badge's
-    value) and the alert. `run_panel` runs it whole (`PanelRun`, with
-    `panel_text` for an agent); a fixture's `when: { panel }` tests it that
-    way. The window runs each part live from one owner
+    its default, else its first option), the header's count (the part it
+    counts by, `counting_part`: the count page, else the badge; a count
+    page's number, `part_number`, is its badge, else its first loader's
+    rows; a badge's, `badge_count`, a firing alert's count, else its value)
+    and the alert. What one part's run gives the panel is its `PartView`
+    (`part_view`: whether the header counts by it, the count, the body's
+    toggles at the values it ran with). `run_panel` runs it whole
+    (`PanelRun`, with `panel_text` for an agent); a fixture's `when: { panel
+    }` tests it that way. The window runs each part live from one owner
     (`useExtensionPanelRuns`) through `open_panel_part { panel, part,
-    choices }`, so it writes no param of its own; it reads a toggle's value
-    off the body's run (`params`), and its `pageCount` / `badgeCount` mirror
-    `header_count` over the live runs (a panel-level live run would retire
-    that mirror). The body renders compact; the badge's alert count shows
+    choices }`, so it writes no param of its own. The open run keeps its
+    panel and part (`PageRuns::open_part`), so `OpenedRun.panel` and every
+    `RunSnapshot.panel` (`fetch_page_runs`) carry the part's `PartView` as
+    it re-runs; the window shows the count of the part whose view `counts`
+    and the body's `choices`, and decides neither (a re-run's reply has the
+    run alone, so the store fetches a panel part's snapshot after one). The
+    panels stay ordinary open page runs: actions, visibility and reconnect
+    work on them as on any page. The body renders compact; the badge's alert count shows
     on the panel, and the **Alerts** panel and page (the dock's bell) list
     every firing badge. oxplow-bundled's Waiting on You is a panel whose
     badge is its own page. A page dropped by `public_contracts` takes the

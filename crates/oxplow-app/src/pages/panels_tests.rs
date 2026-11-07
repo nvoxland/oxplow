@@ -175,7 +175,23 @@ async fn a_project_panel_runs_with_no_scope_and_says_itself_as_text() {
 }
 
 #[test]
-fn the_count_is_the_count_page_else_a_firing_badge_else_none() {
+fn the_header_counts_by_the_count_page_else_the_badge() {
+    let p = panel(PanelScope::Thread);
+    assert_eq!(counting_part(&p), Some(PanelPart::Count));
+    let badge_only = ExtensionPanel {
+        count: None,
+        ..p.clone()
+    };
+    assert_eq!(counting_part(&badge_only), Some(PanelPart::Badge));
+    let bare = ExtensionPanel {
+        badge: None,
+        ..badge_only
+    };
+    assert_eq!(counting_part(&bare), None);
+}
+
+#[test]
+fn a_badge_counts_its_firing_alert_else_its_value() {
     use crate::pages::spec::AlertState;
     let alert = |firing| AlertState {
         firing,
@@ -183,19 +199,70 @@ fn the_count_is_the_count_page_else_a_firing_badge_else_none() {
         value: None,
         message: "4 rows".into(),
     };
-    // A count page wins, whatever the badge says.
-    assert_eq!(
-        header_count(Some(Some(5)), Some(&alert(true)), None),
-        Some(5)
-    );
-    // A count page that has no number yet: none, not the badge's.
-    assert_eq!(header_count(Some(None), Some(&alert(true)), None), None);
-    // No count page: a firing alert's count; a quiet one says nothing.
-    assert_eq!(header_count(None, Some(&alert(true)), Some(9)), Some(4));
-    assert_eq!(header_count(None, Some(&alert(false)), Some(9)), None);
+    assert_eq!(badge_count(Some(&alert(true)), Some(9)), Some(4));
+    // A quiet alert says nothing, whatever the value.
+    assert_eq!(badge_count(Some(&alert(false)), Some(9)), None);
     // A badge with a value and no alert: its value.
-    assert_eq!(header_count(None, None, Some(7)), Some(7));
-    assert_eq!(header_count(None, None, None), None);
+    assert_eq!(badge_count(None, Some(7)), Some(7));
+    assert_eq!(badge_count(None, None), None);
+}
+
+#[tokio::test]
+async fn each_part_run_says_what_it_gives_its_panel() {
+    let (_dir, svc) = project().await;
+    let ctx = ViewContext {
+        stream_id: Some(1),
+        thread_id: Some(1),
+        active: None,
+    };
+    let picks = BTreeMap::from([("mode".to_string(), "many".to_string())]);
+    let run = run_panel(&svc, "acme/things", ctx, &picks).await.unwrap();
+    let p = &run.panel;
+    let count = part_view(p, PanelPart::Count, run.count_run.as_ref().unwrap());
+    assert!(count.counts);
+    assert_eq!(count.count, Some(3));
+    // The badge alerts, but the header counts by the count page.
+    let badge = part_view(p, PanelPart::Badge, run.badge.as_ref().unwrap());
+    assert!(!badge.counts);
+    assert_eq!(badge.count, None);
+    // The body says the toggles, with the value it ran with.
+    let body = part_view(p, PanelPart::Body, &run.body);
+    assert!(!body.counts);
+    assert_eq!(body.choices, run.choices);
+    assert_eq!(body.choices[0].value, "many");
+}
+
+#[tokio::test]
+async fn an_open_part_run_carries_its_view_on_every_snapshot() {
+    let (_dir, svc) = project().await;
+    let ctx = ViewContext {
+        stream_id: Some(1),
+        thread_id: Some(1),
+        active: None,
+    };
+    let p = find_panel(&svc, "acme/things").await.unwrap();
+    let req = part_request(&svc, &p, PanelPart::Count, ctx, &BTreeMap::new())
+        .await
+        .unwrap()
+        .unwrap();
+    let (id, _) = svc
+        .page_runs
+        .open_part(&svc, req, "win", &p, PanelPart::Count)
+        .await
+        .unwrap();
+    let snap = svc.page_runs.snapshot(&id).unwrap();
+    let view = snap.panel.expect("a panel part's snapshot says its view");
+    assert!(view.counts);
+    assert_eq!(view.count, Some(3));
+    // A plain page's run has none.
+    let plain = crate::pages::runner::RunRequest {
+        target: crate::pages::runner::RunTarget::Page("acme/plain".into()),
+        params: BTreeMap::new(),
+        ctx: ViewContext::default(),
+        viewer: oxplow_domain::Actor::Human,
+    };
+    let (id, _) = svc.page_runs.open(&svc, plain, "win").await.unwrap();
+    assert!(svc.page_runs.snapshot(&id).unwrap().panel.is_none());
 }
 
 /// What the window opens for each part: the body with the toggles in force

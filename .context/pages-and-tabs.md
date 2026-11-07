@@ -517,7 +517,8 @@ A window opens
 a run (`open_page { page | specYaml, params, streamId, threadId, client }`
 → `{ runId, run }`; a left-nav panel's part is `open_panel_part { panel,
 part, choices?, streamId, threadId, client }`, the daemon saying which page
-and with what) and closes it (`close_page`); a pick, filter or
+and with what, and its reply and snapshots carrying the part's `panel`
+view: the header's count and the toggles) and closes it (`close_page`); a pick, filter or
 switch is `set_page_params`, Refresh `rerun_page`. The change loop
 (`datasets_changed::spawn`) signals `PageRuns` as it tells the assets
 (never a second bus listener): datasets changed, measures landed, or
@@ -936,7 +937,8 @@ holds every panel's runs — `PanelRunsProvider`
 read by the rail, the status bar's bell and the Alerts page — through
 `components/Panels/usePanelRuns.ts` → `useExtensionPanelRuns`: it opens each
 part through `open_panel_part`, and the daemon binds the scope's id from the
-stream and thread it shows (`pages/panels.rs`); it opens new runs when either changes (the daemon re-runs them when
+stream and thread it shows (`pages/panels.rs`), and each part's run says
+what it gives the panel (`PartView`: the header's count, the toggles); it opens new runs when either changes (the daemon re-runs them when
 a read changes), and hands each section its runs. The firing badges come from the same runs
 (`panelAlerts`), so a badge never runs twice. What needs the person —
 proposals, failed operations, undelivered events — isn't a rail panel: it's

@@ -17,7 +17,6 @@ import { AssistantDockBody, useAssistantBadge } from "../Assistant/AssistantDock
 import { ContextDockBody, useContextBadge } from "../Context/ContextDockPanel.js";
 import { AlertsDockBody, useAlertsBadge } from "../Alerts/AlertsDockPanel.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
-import { badgeCount } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 
 export interface DockBodyProps {
@@ -87,7 +86,7 @@ export function extensionDockPanel(panel: ExtensionPanel, extensions: Extension[
     page: panelOpenRef(panel, extensions),
     useBadge() {
       const runs = usePanelRuns().runs[panel.id];
-      const count = runs?.count ?? badgeCount(runs?.badge ?? null);
+      const count = runs?.count;
       return count && count > 0 ? { count } : null;
     },
     Body({ onOpenPage, streamId }) {

@@ -11,6 +11,7 @@ import type {
   Node,
   Page,
   PageRun,
+  PartView,
   RunNode,
   SeeAlso,
   SqlCell,
@@ -284,7 +285,7 @@ export function fakePageRuns(run: PageRun, next?: (params: Record<string, SqlCel
       return { runId: "run-1", run };
     },
     close: async () => {},
-    fetch: async () => ({ "run-1": { run, seq } }),
+    fetch: async () => ({ "run-1": { run, seq, panel: null } }),
     setParams: async (_id, params) => {
       calls.setParams.push(params);
       return next ? next(params) : run;
@@ -306,19 +307,27 @@ export function fakePageRuns(run: PageRun, next?: (params: Record<string, SqlCel
 /** A `PageRuns` store over many pages: `answer` gives each key's run (a
  *  rejection: the open fails), each opened as `run-<n>`; what was opened
  *  is recorded. */
-export function fakePageRunsBy(answer: (key: PageKey) => PageRun | Promise<PageRun>) {
+/** `view`: what a panel part's run gives its panel, as the daemon says it
+ *  (`PartView`); none, a page's run (null). */
+export function fakePageRunsBy(
+  answer: (key: PageKey) => PageRun | Promise<PageRun>,
+  view: (key: PageKey, run: PageRun) => PartView | null = () => null,
+) {
   const opened: { runId: string; key: PageKey }[] = [];
   const byId = new Map<string, PageRun>();
+  const views = new Map<string, PartView | null>();
   const transport: PageRunsTransport = {
     open: async (key) => {
       const run = await answer(key);
       const runId = `run-${opened.length + 1}`;
       opened.push({ runId, key });
       byId.set(runId, run);
-      return { runId, run };
+      views.set(runId, view(key, run));
+      return { runId, run, panel: views.get(runId)! };
     },
     close: async () => {},
-    fetch: async (ids) => Object.fromEntries(ids.flatMap((id) => (byId.has(id) ? [[id, { run: byId.get(id)!, seq: 0 }]] : []))),
+    fetch: async (ids) =>
+      Object.fromEntries(ids.flatMap((id) => (byId.has(id) ? [[id, { run: byId.get(id)!, seq: 0, panel: views.get(id) ?? null }]] : []))),
     setParams: async (id) => byId.get(id)!,
     rerun: async (id) => byId.get(id)!,
     setVisible: async () => false,

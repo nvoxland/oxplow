@@ -25,6 +25,9 @@ use crate::error::IpcError;
 pub struct OpenedRun {
     pub run_id: String,
     pub run: PageRun,
+    /// A panel's part: what this run gives the panel (its snapshots say it
+    /// again as it re-runs); none for a page.
+    pub panel: Option<oxplow_app::pages::panels::PartView>,
 }
 
 /// What to run: a deployed page by id, or an inline page's YAML (a
@@ -66,13 +69,19 @@ pub async fn open_page(
         viewer: Actor::Human,
     };
     let (run_id, run) = svc.page_runs.open(svc, req, &client).await?;
-    Ok(OpenedRun { run_id, run })
+    Ok(OpenedRun {
+        run_id,
+        run,
+        panel: None,
+    })
 }
 
 /// Open `part` of left-nav panel `panel` (`<extension>/<panel>`) for
 /// `client`, as `open_page` does: the daemon says which page the part runs
 /// and with what (`oxplow_app::pages::panels::part_request` — the scope's
-/// id from the view, the body's toggles from the viewer's `choices`).
+/// id from the view, the body's toggles from the viewer's `choices`), and
+/// what the run gives the panel (`part_view`: the header's count, the
+/// toggles), so the window decides neither.
 #[allow(clippy::too_many_arguments)]
 pub async fn open_panel_part(
     svc: &Services,
@@ -89,8 +98,15 @@ pub async fn open_panel_part(
     let req = panels::part_request(svc, &found, part, ctx, &choices.unwrap_or_default())
         .await?
         .ok_or_else(|| DomainError::Invalid(format!("panel `{panel}` has no {part:?} part")))?;
-    let (run_id, run) = svc.page_runs.open(svc, req, &client).await?;
-    Ok(OpenedRun { run_id, run })
+    let (run_id, run) = svc
+        .page_runs
+        .open_part(svc, req, &client, &found, part)
+        .await?;
+    Ok(OpenedRun {
+        panel: Some(panels::part_view(&found, part, &run)),
+        run_id,
+        run,
+    })
 }
 
 pub async fn close_page(svc: &Services, run_id: String) -> Result<(), IpcError> {

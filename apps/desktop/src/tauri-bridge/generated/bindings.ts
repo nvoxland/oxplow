@@ -4026,6 +4026,11 @@ export type OpenedRun = OpenedRun_Serialize | OpenedRun_Deserialize;
 export type OpenedRun_Deserialize = {
 	runId: string,
 	run: PageRun_Deserialize,
+	/**
+	 *  A panel's part: what this run gives the panel (its snapshots say it
+	 *  again as it re-runs); none for a page.
+	 */
+	panel: PartView | null,
 };
 
 /**
@@ -4035,6 +4040,11 @@ export type OpenedRun_Deserialize = {
 export type OpenedRun_Serialize = {
 	runId: string,
 	run: PageRun_Serialize,
+	/**
+	 *  A panel's part: what this run gives the panel (its snapshots say it
+	 *  again as it re-runs); none for a page.
+	 */
+	panel: PartView | null,
 };
 
 /**  Who contributed it. */
@@ -5152,6 +5162,17 @@ export type Page_Serialize = {
 	origin: PageProvenance,
 };
 
+/**
+ *  A choice param of the body, as the panel's header toggle offers it: its
+ *  options and the value in force.
+ */
+export type PanelChoice = {
+	name: string,
+	label: string,
+	options: ChoiceOption[],
+	value: string,
+};
+
 /**  One of a panel's parts. */
 export type PanelPart = "body" | "collapsed" | "count" | "badge";
 
@@ -5231,6 +5252,16 @@ export type ParseFormat =
 "json" |
 /**  A YAML document (JSON is one too), as a tree. */
 "yaml";
+
+/**  What one part's run gives its panel, as the window shows it. */
+export type PartView = {
+	/**  The header counts by this part ([`counting_part`]). */
+	counts: boolean,
+	/**  The header's count while it `counts`; none shows no count. */
+	count: number | null,
+	/**  The body's toggles, each with the value it ran with ([`choices`]). */
+	choices: PanelChoice[],
+};
 
 /**  How a permission request was answered. */
 export type PermissionAnswer = { type: "selected"; optionId: string } | { type: "cancelled" };
@@ -5617,12 +5648,22 @@ export type RunSnapshot = RunSnapshot_Serialize | RunSnapshot_Deserialize;
 export type RunSnapshot_Deserialize = {
 	run: PageRun_Deserialize,
 	seq: number,
+	/**
+	 *  A left-nav panel's part: what this run gives the panel
+	 *  (`panels::part_view`); none for a page run.
+	 */
+	panel: PartView | null,
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */
 export type RunSnapshot_Serialize = {
 	run: PageRun_Serialize,
 	seq: number,
+	/**
+	 *  A left-nav panel's part: what this run gives the panel
+	 *  (`panels::part_view`); none for a page run.
+	 */
+	panel: PartView | null,
 };
 
 /**  How a contribution comes to run. */

@@ -4,9 +4,9 @@
 //! Alerts. This is where what a panel means is decided once: which page each
 //! part runs, with which params, the toggle a body's choice param gives, the
 //! header's count and the alert. A fixture's `when: { panel }` and an agent
-//! read a panel through [`run_panel`]; the window runs each part live and
-//! reads the same rules (`apps/desktop/src/components/Panels/usePanelRuns.ts`
-//! mirrors [`header_count`] and [`choices`]).
+//! read a panel through [`run_panel`]. The window runs each part live
+//! (`open_panel_part`) and every snapshot of a part's run carries its
+//! [`PartView`]: what that run gives the panel, so the window keeps no rule.
 //!
 //! A part's scope id is never a param the caller writes: a stream panel's
 //! pages declare `stream_id`, a thread panel's `thread_id`, and the run takes
@@ -99,20 +99,69 @@ pub fn part_number(run: &PageRun) -> Option<i64> {
     Some(run.loaders.get(&first.name)?.result.rows.len() as i64)
 }
 
-/// The header's count. With a `count` page, its number (none until it has
-/// one), and the badge only alerts. Without, a firing alert's count, else a
-/// badge's value when it has no alert.
-pub fn header_count(
-    count_page: Option<Option<i64>>,
-    badge_alert: Option<&AlertState>,
-    badge_value: Option<i64>,
-) -> Option<i64> {
-    if let Some(count) = count_page {
-        return count;
+/// The part the header counts by: the `count` page, else the badge. The
+/// badge of a panel with a count page only alerts.
+pub fn counting_part(panel: &ExtensionPanel) -> Option<PanelPart> {
+    if panel.count.is_some() {
+        Some(PanelPart::Count)
+    } else if panel.badge.is_some() {
+        Some(PanelPart::Badge)
+    } else {
+        None
     }
-    match badge_alert {
+}
+
+/// A badge's number for the header: a firing alert's count (a quiet one
+/// says nothing), else the badge's value when it has no alert.
+pub fn badge_count(alert: Option<&AlertState>, value: Option<i64>) -> Option<i64> {
+    match alert {
         Some(alert) => alert.firing.then_some(alert.count),
-        None => badge_value,
+        None => value,
+    }
+}
+
+/// What one part's run gives its panel, as the window shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PartView {
+    /// The header counts by this part ([`counting_part`]).
+    pub counts: bool,
+    /// The header's count while it `counts`; none shows no count.
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
+    pub count: Option<i64>,
+    /// The body's toggles, each with the value it ran with ([`choices`]).
+    pub choices: Vec<PanelChoice>,
+}
+
+/// What `run`, a run of `part` of `panel`, gives the panel.
+pub fn part_view(panel: &ExtensionPanel, part: PanelPart, run: &PageRun) -> PartView {
+    let counts = counting_part(panel) == Some(part);
+    let count = match part {
+        _ if !counts => None,
+        PanelPart::Count => part_number(run),
+        _ => badge_count(
+            run.alert.as_ref(),
+            run.badge.as_ref().and_then(|_| part_number(run)),
+        ),
+    };
+    let choices = match part {
+        PanelPart::Body => {
+            let ran: BTreeMap<String, String> = run
+                .params
+                .iter()
+                .filter_map(|(k, v)| match v {
+                    SqlCell::Text(t) => Some((k.clone(), t.clone())),
+                    _ => None,
+                })
+                .collect();
+            self::choices(&run.page, &ran)
+        }
+        _ => Vec::new(),
+    };
+    PartView {
+        counts,
+        count,
+        choices,
     }
 }
 
@@ -125,7 +174,7 @@ pub struct PanelRun {
     pub collapsed: Option<PageRun>,
     pub count_run: Option<PageRun>,
     pub badge: Option<PageRun>,
-    /// The header's count ([`header_count`]).
+    /// The header's count: the counting part's ([`part_view`]).
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub count: Option<i64>,
     /// The badge's alert, firing or not; a firing one is in Alerts.
@@ -221,17 +270,13 @@ pub async fn run_panel(
     let collapsed = runs.remove("collapsed");
     let count_run = runs.remove("count");
     let badge = runs.remove("badge");
-    let count = header_count(
-        panel
-            .count
-            .as_ref()
-            .map(|_| count_run.as_ref().and_then(part_number)),
-        badge.as_ref().and_then(|b| b.alert.as_ref()),
-        badge
-            .as_ref()
-            .filter(|b| b.badge.is_some())
-            .and_then(part_number),
-    );
+    let count = counting_part(&panel).and_then(|part| {
+        let run = match part {
+            PanelPart::Count => count_run.as_ref(),
+            _ => badge.as_ref(),
+        }?;
+        part_view(&panel, part, run).count
+    });
     let alert = badge.as_ref().and_then(|b| b.alert.clone());
     Ok(PanelRun {
         panel,
