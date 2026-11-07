@@ -8,7 +8,7 @@ import type { Page } from "@playwright/test";
 
 import { installExample, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { inFrame, open } from "../../support/ui.js";
+import { inFrame, open, shown } from "../../support/ui.js";
 
 // The triage example (`examples/extensions/triage`): the one thing only the
 // app's shell shows is that a decision survives a reload of the board, in
@@ -114,7 +114,7 @@ test("the decisions made survive a reload on the board", async ({ page, daemon }
 
     // Both survive a reload: the board shows them again.
     await reload(page);
-    await open(page, daemon, "oxplow:oxplow/page?page=triage/todo-board");
+    await expect(shown(page, "page=triage/todo-board")).toHaveCount(1);
     await expect(card(1).locator("select[name=decision]")).toHaveValue("fix-now");
     await expect(card(3).locator("select[name=decision]")).toHaveValue("wontfix");
     expect(await decisions(daemon)).toEqual({ "src/lib.rs:1": "fix-now", "src/lib.rs:3": "wontfix" });
