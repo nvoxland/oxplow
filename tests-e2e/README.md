@@ -91,15 +91,15 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 ## What the specs cover
 
 `shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox and
-an extension's resource; `code/` a commit's diff; `data/` extension pages; `settings/`
-Programs approval and the settings pages; `integrations/` the fake tracker
-(configure, Check, Enable, active, Sync Now), Delivery (a failed reaction,
+an extension's resource; `code/` a commit's diff (file watching over a real daemon is a Rust test, `real_watch_tests.rs`); `data/` extension pages; `settings/`
+Programs approval and the settings pages; `integrations/` the fake tracker's
+Integrations frame (the config form, Check, Enable, the work-list choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
 `review/` the effort page and its verdict chip; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
 filters, navigation, approval-gated `invoke`, and a self-navigation off
-this machine sending no request) and the triage example (its real `todos` collector
-over the `sorter` provider, decisions from the board and the `todos` page,
-surviving a reload).
+this machine sending no request) and the triage example (a decision
+surviving a reload of the board; what the board draws and the collector's sort
+are the example's fixtures').
 
 `pages/` is the page-mechanics suite: each spec installs a tiny extension
 of its own (`installExtension` in `support/pages.ts`) and checks one generic
