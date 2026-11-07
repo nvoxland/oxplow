@@ -235,6 +235,10 @@ describe("refFromTabId", () => {
     expect(diskFilePath("oxplow:oxplow/file?path=src/a@b.ts")).toBe("src/a@b.ts");
     // A pinned revision is a read-only viewer, not the editor's file.
     expect(diskFilePath("oxplow:oxplow/file?path=src/a.ts&rev=git:HEAD")).toBeNull();
+    // A file on another filesystem (the running extensions) isn't in the
+    // working tree, whatever its path; one that names the local one is.
+    expect(diskFilePath("oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions")).toBeNull();
+    expect(diskFilePath("oxplow:oxplow/file?path=src/a.ts&filesystem=oxplow:local")).toBe("src/a.ts");
     expect(diskFilePath("oxplow:oxplow/agent_session?id=ses3")).toBeNull();
     expect(diskFilePath("oxplow:oxplow/wiki?slug=a")).toBeNull();
   });

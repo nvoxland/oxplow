@@ -20,6 +20,7 @@
  */
 
 import type { TabRef } from "./tabState.js";
+import { LOCAL_FS } from "../filesystem.js";
 import { classifyExternalUrl } from "../external-url-allowlist.js";
 import {
   WORKING,
@@ -161,10 +162,14 @@ export function fileRefAt(path: string, line: number | null, version: Revision =
 }
 
 /** The working-tree file a tab id shows, or `null` when the id is not a
- *  file or pins a revision (a read-only viewer, not the editor's file). */
+ *  file, pins a revision (a read-only viewer, not the editor's file), or is
+ *  on another filesystem than the local one (the running extensions'). */
 export function diskFilePath(tabId: string): string | null {
   const r = parseUri(tabId);
-  return r && typeOf(tabId) === "oxplow/file" && !("rev" in r.params) ? (r.params.path ?? null) : null;
+  if (!r || typeOf(tabId) !== "oxplow/file" || "rev" in r.params) return null;
+  const filesystem = r.params.filesystem;
+  if (filesystem !== undefined && filesystem !== LOCAL_FS) return null;
+  return r.params.path ?? null;
 }
 
 export function directoryRef(path: string): TabRef {
