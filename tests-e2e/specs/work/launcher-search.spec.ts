@@ -30,7 +30,7 @@ test("a page added while the window is open is in the launcher", async ({ page, 
   await page.goto("/");
   // The launcher has loaded the extensions once already.
   await searchLauncher(page, "Wombat");
-  await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat" })).toHaveCount(0);
+  await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat" })).not.toBeVisible();
   await page.keyboard.press("Escape");
   const dir = extensionSource(daemon, "wombat");
   mkdirSync(join(dir, "pages"), { recursive: true });

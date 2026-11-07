@@ -8,7 +8,7 @@ import type { Page } from "@playwright/test";
 
 import { installExample, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { inFrame, open } from "../../support/ui.js";
 
 // The triage example (`examples/extensions/triage`): the one thing only the
 // app's shell shows is that a decision survives a reload of the board, in
@@ -100,10 +100,9 @@ test("the decisions made survive a reload on the board", async ({ page, daemon }
     );
     await run(daemon, "oxplow.collector.sync", { collector: "triage/todos" });
     await until("the TODOs to be sorted", 30_000, async () => (await facts(daemon)).length === 2);
-    await page.goto("/");
-    await openFromLauncher(page, "TODO Board");
+    await open(page, daemon, "oxplow:oxplow/page?page=triage/todo-board");
     const board = page.getByTestId("center-tab-body-oxplow:oxplow/page?page=triage/todo-board");
-    const frame = board.frameLocator('[data-testid="custom-component-frame"]');
+    const frame = await inFrame(board);
     const card = (line: number) => frame.locator(".card", { hasText: `src/lib.rs:${line}` });
     await expect(card(3)).toBeVisible();
 
@@ -115,7 +114,7 @@ test("the decisions made survive a reload on the board", async ({ page, daemon }
 
     // Both survive a reload: the board shows them again.
     await reload(page);
-    await openFromLauncher(page, "TODO Board");
+    await open(page, daemon, "oxplow:oxplow/page?page=triage/todo-board");
     await expect(card(1).locator("select[name=decision]")).toHaveValue("fix-now");
     await expect(card(3).locator("select[name=decision]")).toHaveValue("wontfix");
     expect(await decisions(daemon)).toEqual({ "src/lib.rs:1": "fix-now", "src/lib.rs:3": "wontfix" });

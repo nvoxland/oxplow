@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // The Comments inbox is the foundation's `comments` document page: threads
 // grouped by the page they are anchored to, the picked one's conversation
@@ -20,9 +20,8 @@ test("the Comments inbox opens a thread on its page", async ({ page, daemon }) =
   });
   await run(daemon, "oxplow.knowledge.reply_comment", { comment: added.result.comment.id, body: "Checking." });
 
-  await page.goto("/");
-  await openFromLauncher(page, "Comments");
-  const inbox = page.locator('[data-testid="page-file"]:visible');
+  await open(page, daemon, "oxplow:oxplow/page?page=comments");
+  const inbox = shown(page).getByTestId("page-file");
   // The threads are the table; the conversation under it is a list.
   const threads = inbox.getByTestId("viz-table");
   const row = threads.getByTestId("viz-row-0");
@@ -30,7 +29,7 @@ test("the Comments inbox opens a thread on its page", async ({ page, daemon }) =
 
   // Go to location opens the page at the comment: its address carries it.
   await row.getByText("Go to location").click();
-  await expect(page.locator('[data-testid^="center-tab-body-oxplow:oxplow/file?path=otters.md"]:visible')).toHaveAttribute(
+  await expect(shown(page, "oxplow:oxplow/file?path=otters.md")).toHaveAttribute(
     "data-testid",
     /#comment=cmt\d+/,
   );

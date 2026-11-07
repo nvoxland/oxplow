@@ -1,17 +1,16 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { inFrame, open } from "../../support/ui.js";
 
 // Only what the shell shows: the Integrations frame's config form (oxplow's
 // `openForm`), check, toggle and sync, and the right-click choice of the work
 // list. That an item reaches the tracker and comes back on a sync is the
 // provider tests' (`providers/tests.rs`).
 test("a person configures, checks and enables the fake tracker from Integrations", async ({ page, daemon }) => {
-  await page.goto("/");
-  await openFromLauncher(page, "Settings: Integrations");
+  await open(page, daemon, "oxplow:oxplow/page?page=settings#area=integrations");
   // Integrations is oxplow-foundation's own component, in a frame; the
   // config form, like every form it opens, is oxplow's (`openForm`).
-  const integrations = page.frameLocator('iframe[aria-label="Integrations"]');
+  let integrations = await inFrame(page, "Integrations");
   await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Off");
   await integrations.getByTestId("integration-configure-e2e/fake").click();
   await page.getByTestId("custom-page-own-form-fields-team").fill("core");
@@ -47,7 +46,7 @@ test("a person configures, checks and enables the fake tracker from Integrations
   // changed the Capabilities table over it: the frame may now be below the
   // fold, where the browser doesn't run its animation frames, and a click
   // waits for the button to be stable by those. A person scrolls to it.
-  await page.locator('iframe[aria-label="Integrations"]').scrollIntoViewIfNeeded();
+  integrations = await inFrame(page, "Integrations");
   await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
   await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
 });

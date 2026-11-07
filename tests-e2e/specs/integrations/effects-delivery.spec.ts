@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { deploy, extensionSource, ipc, run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open } from "../../support/ui.js";
 
 // The test extension's effect comments on each created task; a title with
 // "[fail]" makes it comment on an item that doesn't exist.
@@ -31,8 +31,7 @@ async function notesOn(daemon: Daemon, title: string): Promise<number> {
 }
 
 test("a failed reaction is in Delivery, and a person's Retry composes it afresh", async ({ page, daemon }) => {
-  await page.goto("/");
-  await openFromLauncher(page, "Settings: Data");
+  await open(page, daemon, "oxplow:oxplow/page?page=settings#area=data");
   await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
   const row = page.locator("tr", { hasText: "tsk999999" });
   await expect(row).toBeVisible();
@@ -73,8 +72,7 @@ test("a person's Backfill reaches what was logged before the effect was deployed
       )[0]?.[0],
     );
   expect(await late()).toBe(0);
-  await page.goto("/");
-  await openFromLauncher(page, "Settings: Data");
+  await open(page, daemon, "oxplow:oxplow/page?page=settings#area=data");
   // The effect's row opens on what a backfill would do; Backfill asks first.
   await page.locator("tr", { hasText: "late/note" }).getByRole("button", { name: "Expand" }).click();
   await expect(page.getByTestId("viz-action-backfill")).toBeVisible();

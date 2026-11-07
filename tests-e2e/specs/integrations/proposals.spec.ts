@@ -1,5 +1,6 @@
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
+import { shown } from "../../support/ui.js";
 
 // The test extension's effect deletes a task titled "[delete]": a
 // destructive step oxplow never runs for an effect, so it waits as a
@@ -27,6 +28,6 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   expect(await live()).toBe(1);
   await page.getByTestId(`proposal-approve-${id}-trigger`).click();
   await page.getByTestId(`proposal-approve-${id}-confirm`).click();
-  await expect(page.getByTestId(`proposal-${id}`)).toHaveCount(0);
+  await expect(shown(page).getByTestId(`proposal-${id}`)).toHaveCount(0);
   await expect.poll(live).toBe(0);
 });

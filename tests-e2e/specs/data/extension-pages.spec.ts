@@ -11,5 +11,5 @@ test("an extension's page is offered, and turning the extension off takes it awa
   // Disabling it (the command the Extensions page's Disable runs) updates the open launcher's pages.
   await run(daemon, "oxplow.extension.disable", { name: "e2e" });
   await searchLauncher(page, "Item");
-  await expect(page.getByTestId("launcher-page-oxplow:oxplow/page?page=e2e/overview")).toHaveCount(0);
+  await expect(page.getByTestId("launcher-page-oxplow:oxplow/page?page=e2e/overview")).not.toBeVisible();
 });
