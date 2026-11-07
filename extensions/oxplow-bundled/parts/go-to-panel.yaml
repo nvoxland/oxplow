@@ -13,20 +13,14 @@ params:
   - value: top
     label: Most visited
 loaders:
+  # What the thread sees: foundation's one rule (Go To's page reads it too).
+  bookmarks:
+    page: oxplow-foundation/thread-bookmarks
+    loader: bookmarks
+    params: { thread_id: { param: thread_id } }
   go_to:
     sql: |
       WITH
-      -- What the thread sees: a page once, at the narrowest scope it's at.
-      bookmark AS (
-        SELECT uri, page_kind, label, added_at, id FROM (
-          SELECT b.*, row_number() OVER (PARTITION BY b.uri ORDER BY
-                   CASE b.scope WHEN 'thread' THEN 0 WHEN 'stream' THEN 1 ELSE 2 END) AS n
-          FROM v_bookmark b
-          WHERE (b.scope = 'thread' AND b.thread_id = :thread_id)
-             OR (b.scope = 'stream' AND b.stream_id = (SELECT stream_id FROM v_thread WHERE id = :thread_id))
-             OR b.scope = 'project'
-        ) WHERE n = 1
-      ),
       visit AS (
         SELECT page_id AS uri, page_kind, label, visited_at,
                row_number() OVER (PARTITION BY page_id ORDER BY visited_at DESC, id DESC) AS latest
@@ -49,8 +43,8 @@ loaders:
       ),
       row AS (
         SELECT 0 AS g, row_number() OVER (ORDER BY added_at DESC, id DESC) AS ord,
-               'Bookmarks' AS grp, uri, page_kind, label, NULL AS visits
-        FROM bookmark
+               'Bookmarks' AS grp, uri, page_kind, title AS label, NULL AS visits
+        FROM bookmarks
         UNION ALL
         SELECT 1, ord, 'History', uri, page_kind, label, NULL FROM recent
         WHERE :mode = 'recent' AND ord <= 5

@@ -15,35 +15,39 @@ given:
   - observe: { visit: { page: "oxplow:oxplow/file?path=f3.rs", kind: file, label: f3.rs, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=f4.rs", kind: file, label: f4.rs, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=f5.rs", kind: file, label: f5.rs, thread: thr1 } }
-when: { part: oxplow-bundled-todo/go-to-panel, params: { thread_id: 1, mode: recent } }
+when: { panel: go-to, thread: thr1 }
 expect:
-  loaders:
-    go_to:
-      rows:
-        - { grp: Bookmarks, title: a.rs }
-        - { grp: Bookmarks, title: Git }
-        - { grp: History, title: f5.rs }
-        - { grp: History, title: f4.rs }
-        - { grp: History, title: f3.rs }
-        - { grp: History, title: f2.rs }
-        - { grp: History, title: f1.rs }
+  choices: [{ name: mode, value: recent }]
+  body:
+    loaders:
+      go_to:
+        rows:
+          - { grp: Bookmarks, title: a.rs }
+          - { grp: Bookmarks, title: Git }
+          - { grp: History, title: f5.rs }
+          - { grp: History, title: f4.rs }
+          - { grp: History, title: f3.rs }
+          - { grp: History, title: f2.rs }
+          - { grp: History, title: f1.rs }
+  collapsed:
+    loaders:
+      go_to_bookmarks:
+        rows:
+          - { title: a.rs, page_kind: file, uri: "oxplow:oxplow/file?path=a.rs" }
+          - { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard" }
+  count: null
 steps:
-  - params: { thread_id: 1, mode: top }
+  - when: { choices: { mode: top } }
     expect:
-      loaders:
-        go_to:
-          rows:
-            - { grp: Bookmarks }
-            - { grp: Bookmarks }
-            - { grp: Most visited, title: "DEV.md · 3×" }
-            - { grp: Most visited }
-            - { grp: Most visited }
-            - { grp: Most visited }
-            - { grp: Most visited }
-  - when: { part: oxplow-bundled-todo/go-to-bookmarks, params: { thread_id: 1 } }
-    expect:
-      loaders:
-        go_to_bookmarks:
-          rows:
-            - { title: a.rs, page_kind: file, uri: "oxplow:oxplow/file?path=a.rs" }
-            - { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard" }
+      choices: [{ name: mode, value: top }]
+      body:
+        loaders:
+          go_to:
+            rows:
+              - { grp: Bookmarks }
+              - { grp: Bookmarks }
+              - { grp: Most visited, title: "DEV.md · 3×" }
+              - { grp: Most visited }
+              - { grp: Most visited }
+              - { grp: Most visited }
+              - { grp: Most visited }

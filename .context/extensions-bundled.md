@@ -266,13 +266,18 @@ screens and the holder's add the review and analysis:
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
-- **Rail panels** (the `panels:` list of oxplow-bundled): Go To
-  (`go-to-panel`, collapsed `go-to-bookmarks`), Waiting on You
-  (`waiting-on-me`, a badge), Comments (`comments-panel`), Uncommitted
-  (`uncommitted`, collapsed `uncommitted-line`, count `uncommitted-count`)
-  and Work (`work`, collapsed `work-line`, count `work-count`). Only the UI
-  moved: stores, commands and views stay core. Each panel's `body` is a
-  part.
+- **Rail panels.** `oxplow-bundled`'s `panels:` has Go To (`go-to-panel`,
+  collapsed `go-to-bookmarks`; its header opens foundation's `go-to` page).
+  Both parts read foundation's `thread-bookmarks` query, the one statement of
+  which bookmarks a thread sees, which the Go To page reads too. Its
+  fixture is a `panel:` one: the panel run whole, as the rail shows it. Still
+  in the holder: Waiting on You (`waiting-on-me`, a badge), Comments
+  (`comments-panel`), Uncommitted (`uncommitted`, collapsed
+  `uncommitted-line`, count `uncommitted-count`) and Work (`work`, collapsed
+  `work-line`, count `work-count`). Each moves the same way: its parts, a
+  `panel:` fixture, and any rule it repeats with a foundation page made one
+  query. Only the UI moved: stores, commands and views stay core. Each
+  panel's `body` is a part.
 - **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
   job `reasoning`, the command `oxplow.effort.infer_reasoning` and the
   effects `infer-reasoning` / `store-reasoning`, writing through core's

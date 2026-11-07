@@ -1,0 +1,22 @@
+title: Go To (collapsed)
+description: The pages you bookmarked, as the thread sees them — the Go To panel collapsed.
+params:
+- name: thread_id
+  label: Thread
+loaders:
+  # What the thread sees: foundation's one rule, newest first.
+  go_to_bookmarks:
+    page: oxplow-foundation/thread-bookmarks
+    loader: bookmarks
+    params: { thread_id: { param: thread_id } }
+view:
+  from: go_to_bookmarks
+  viz: list
+  columns:
+  - key: title
+    label: Page
+    icon: page_kind
+    link:
+      kind: page
+      from: uri
+  empty: No bookmarks

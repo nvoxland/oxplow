@@ -10,7 +10,7 @@ intent:
     Hold the optional features oxplow ships once each has been cleaned up. So
     far that is the review and analysis datasets, their settings and the
     verdict decorators, event types and commands, here so their names stay when
-    oxplow-bundled-todo goes away.
+    oxplow-bundled-todo goes away, and the left nav's Go To panel.
   origin: null
 datasets:
   - name: change_interest
@@ -132,6 +132,11 @@ ui:
   decorators:
     - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
     - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
+panels:
+  # The left nav's Go To: the thread's bookmarks, then its recent or most
+  # visited pages; collapsed, the bookmarks alone. Its header opens
+  # foundation's Go To page.
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
 configuration:
   version: 1
   schema:
