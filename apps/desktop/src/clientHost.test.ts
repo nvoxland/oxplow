@@ -103,3 +103,27 @@ test("it unregisters when the window closes or the host stops", () => {
   h.stop();
   expect(h.unregistered).toEqual(["w1", "w1"]);
 });
+
+// A caller that waits for the window (the browser suite, a link opened at
+// boot) waits for this: a call before it is refused "no window is open".
+test("it says it is registered once the daemon has taken its first registration, and only then", async () => {
+  let acknowledge: () => void = () => {};
+  const registered: string[] = [];
+  const deps: ClientHostDeps = {
+    register: (client) => new Promise<void>((r) => (acknowledge = () => (registered.push(client), r()))),
+    unregister: async () => {},
+    answer: async () => {},
+    subscribe: () => () => {},
+    onReconnect: () => () => {},
+    onClose: () => () => {},
+  };
+  let told = 0;
+  const stop = startClientHost(() => ({ "tabs.write": {} }), deps, "w1", () => (told += 1));
+  await settle();
+  expect(told).toBe(0);
+  acknowledge();
+  await settle();
+  expect(registered).toEqual(["w1"]);
+  expect(told).toBe(1);
+  stop();
+});

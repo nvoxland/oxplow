@@ -127,7 +127,6 @@ import { installCli, openProject, createProject, listRecentProjects, shellAvaila
 import { onRemoteReconnect, triggerRemoteResync } from "./api.js";
 import type { CommandOutcome, Page as PageFile, RecentProjectView } from "./tauri-bridge/generated/bindings.js";
 import { pickFolder } from "./tauri-bridge/nativeDialog.js";
-import { WORKING } from "./revision.js";
 import { isDirty } from "./editor/buffers.js";
 import { buffers } from "./editor/openFiles.js";
 import { recordPageVisit, reportTabs, resolveSymbol } from "./api.js";
@@ -1170,12 +1169,16 @@ export function App() {
   // the first time (no tab list yet — they persist) with no session opens
   // the way the person's `newThreadSession` says: the session picker, no
   // session, or that agent's session.
+  // The thread whose first tabs are still being opened: the window isn't
+  // ready for a navigate until they are, or they would push it aside.
+  const [openingThread, setOpeningThread] = useState<string | null>(null);
   useEffect(() => {
     if (!selectedThreadId || selectedThreadSessions === null) return;
     if (sessions[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
       const threadId = selectedThreadId;
       updateSession(threadId, (session) => session);
-      void openNewThread(threadId);
+      setOpeningThread(threadId);
+      void openNewThread(threadId).finally(() => setOpeningThread((now) => (now === threadId ? null : now)));
       return;
     }
     updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
@@ -1241,14 +1244,14 @@ export function App() {
       "oxplow/file": (ref) => {
         const payload = fileOf(ref);
         if (!payload?.path) return;
-        const version = payload.version ?? WORKING;
         // The working tree's file is read first (a path that isn't one
         // opens no tab); the line it lands on is its view (`#lines=`).
-        if (version === WORKING) {
+        if (diskFilePath(ref.id) !== null) {
           void handleOpenFile(payload.path, ref);
           return;
         }
-        // A file at a revision reads itself.
+        // A file at a revision, or on another filesystem (the running
+        // extensions'), reads itself.
         openTab(ref);
       },
     };
@@ -1574,7 +1577,6 @@ export function App() {
   }, [selectedThreadId, threadStates, closePageTab, updateSession, centerActive, sessions, stream, streams, setCenterActive, handleNavigateInTab]);
   const windowHandlersRef = useRef(windowHandlers);
   windowHandlersRef.current = windowHandlers;
-  useEffect(() => startClientHost(() => windowHandlersRef.current), []);
 
   // Enforce the page-tab cap on the shown thread: past MAX_PAGE_TABS the
   // least recently used tabs close (`evictions`). The active tab, pinned
@@ -1639,6 +1641,30 @@ export function App() {
 
   const extensions = useExtensions();
   extensionsRef.current = extensions;
+  // The window takes the daemon's calls (an agent's or a link's navigate,
+  // `clientHost.ts`) once it can do them as asked: its stream and thread
+  // loaded, the thread's first tabs opened, and the extensions that say what
+  // draws a page loaded. Before that a call is refused "no window is open",
+  // never half done. Once ready it stays the host: a later stream switch
+  // or extensions reload doesn't take it away. The page says so on `<html>`
+  // (`data-oxplow-ready`), for whoever waits for the window.
+  const windowReady =
+    stream !== null &&
+    selectedThreadId !== null &&
+    selectedThreadSessions !== null &&
+    sessions[selectedThreadId] !== undefined &&
+    openingThread !== selectedThreadId &&
+    extensions !== null;
+  const [hosting, setHosting] = useState(false);
+  useEffect(() => {
+    if (windowReady) setHosting(true);
+  }, [windowReady]);
+  useEffect(() => {
+    if (!hosting) return;
+    return startClientHost(() => windowHandlersRef.current, undefined, undefined, () => {
+      document.documentElement.dataset.oxplowReady = "true";
+    });
+  }, [hosting]);
   const foundationErrors = foundationDown(extensions);
   // Which pages can draw each tab of the thread: the daemon's list
   // (`pages/useRenderers.ts`), fetched as tabs appear and remembered.

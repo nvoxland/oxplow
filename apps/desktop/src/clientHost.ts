@@ -73,13 +73,25 @@ async function perform(handlers: ClientHandlers, call: ClientCall): Promise<{ re
 }
 
 /** Host `handlers()` (read at each call, so they see the window's state
- *  now) as window `client` until the returned stop. */
+ *  now) as window `client` until the returned stop. `onRegistered` runs
+ *  once, when the daemon has taken the first registration: from then on a
+ *  call reaches this window. */
 export function startClientHost(
   handlers: () => ClientHandlers,
   deps: ClientHostDeps = DEPS,
   client: string = crypto.randomUUID(),
+  onRegistered: () => void = () => {},
 ): () => void {
-  const register = () => void deps.register(client, Object.keys(handlers())).catch(() => {});
+  let told = false;
+  const register = () =>
+    void deps
+      .register(client, Object.keys(handlers()))
+      .then(() => {
+        if (told) return;
+        told = true;
+        onRegistered();
+      })
+      .catch(() => {});
   const unregister = () => void deps.unregister(client).catch(() => {});
   register();
   const offEvents = deps.subscribe((event) => {

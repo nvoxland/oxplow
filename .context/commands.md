@@ -383,7 +383,13 @@ transaction) and its spec carries the operation (`CommandSpec::op`):
   id, result | error }` (another window's answer is ignored); the run
   waits (15 s), its answer the run's result. A window mints an id when it
   starts and says it's open — and what it hosts — with
-  `register_client_host { client, scopes }` then and on reconnect,
+  `register_client_host { client, scopes }` once it is ready to do a
+  call as asked (App.tsx `windowReady`: its stream and thread loaded,
+  the thread's first tabs opened, the extensions loaded; before that a
+  navigate was refused, pushed aside by those first tabs, or drawn by
+  nothing). Once ready it stays the host, and `<html data-oxplow-ready>`
+  says so to whoever waits for the window (the browser suite). It
+  registers again on reconnect,
   and `unregister_client_host` when it closes (`pagehide`), which refuses
   its unanswered calls at once. With no window, one that doesn't host it,
   closes or doesn't answer, the run is `Unavailable`; a window that

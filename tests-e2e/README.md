@@ -88,8 +88,11 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 - **`support/ui.ts`** — a person's moves, one way each, so a race fixed once
   is fixed everywhere:
   - `open(page, daemon, uri)` opens a page the way a link does, the bus
-    command `oxplow.window.navigate`, once the window has loaded and its rail
-    has the stored layout, then waits until the shown tab holds the page
+    command `oxplow.window.navigate`, once the window is ready for it
+    (`windowReady`: `<html data-oxplow-ready>`, set when the window has
+    registered as the daemon's command host, which it does only once its
+    stream, thread, first tabs and extensions are in; one navigate, no
+    retry), then waits until the shown tab holds the page
     (`oxplow:oxplow/page?page=<extension>/<id>`; core pages have no extension
     prefix, and a Settings area is `page=settings#area=<id>`). Typing into the
     launcher is the slowest and most focus-sensitive path, so

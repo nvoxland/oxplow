@@ -1,6 +1,6 @@
 import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { navigate, open, shown } from "../../support/ui.js";
+import { navigate, shown } from "../../support/ui.js";
 
 // What each file is offered, read-only or not, and the "binary file" wording's data, is
 // the foundation's fixtures'; one smoke that the Text view draws read-only here.
@@ -8,8 +8,6 @@ import { navigate, open, shown } from "../../support/ui.js";
 type Page = import("@playwright/test").Page;
 
 test("a file on the running extensions opens read-only in the Text view", async ({ page, daemon }) => {
-  // The extensions' renderers arrive after the window: a page open is the sign.
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   const uri = "oxplow:oxplow/file?path=oxplow-foundation/extension.yaml&filesystem=oxplow:extensions";
   await navigate(page, daemon, uri);
   const code = shown(page).getByTestId("viz-code");
