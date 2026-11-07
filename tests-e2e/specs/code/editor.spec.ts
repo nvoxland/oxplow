@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // The editor is oxplow-foundation's page over the `editor` viz: a file of
 // the working tree, its unsaved edits marked on its tab (●), saved with
@@ -28,9 +28,9 @@ view:
 
 async function openEmu(page: import("@playwright/test").Page, daemon: Parameters<typeof installExtension>[0]) {
   await installExtension(daemon, "e2e-emu", { files: { "pages/emu.yaml": list } });
-  await openFromLauncher(page, "List Emu");
-  await page.locator('[data-testid="page-file"]:visible').getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
-  const editor = page.getByTestId("viz-editor").filter({ visible: true }).locator(".monaco-editor").first();
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-emu/emu");
+  await shown(page).getByTestId("page-file").getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
+  const editor = shown(page).getByTestId("viz-editor").locator(".monaco-editor").first();
   await expect(editor).toBeVisible();
   await expect(editor).toContainText("emu");
   return editor;
@@ -46,7 +46,7 @@ test("typing marks the tab dirty; Ctrl/Cmd+S writes the file and clears it", asy
   await page.keyboard.type("kiwi ");
   await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
   await page.keyboard.press("ControlOrMeta+s");
-  await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toHaveCount(0);
+  await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).not.toBeVisible();
   expect(readFileSync(join(daemon.project, "emu.txt"), "utf8")).toBe("kiwi emu\n");
 });
 
@@ -60,9 +60,9 @@ test("closing a dirty tab offers Undo, which brings the tab and its draft back",
   await page.keyboard.type("owl ");
   await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
   await page.getByTestId(`center-tab-close-${TAB}`).click();
-  await expect(page.getByTestId(`center-tab-${TAB}`)).toHaveCount(0);
+  await expect(page.getByTestId(`center-tab-${TAB}`)).not.toBeVisible();
   await page.getByTestId("undo-toast-undo").click();
   await expect(page.getByTestId(`center-tab-dirty-${TAB}`)).toBeVisible();
-  await expect(page.getByTestId("viz-editor").filter({ visible: true }).locator(".monaco-editor").first()).toContainText("owl emu");
+  await expect(shown(page).getByTestId("viz-editor").locator(".monaco-editor").first()).toContainText("owl emu");
   expect(readFileSync(join(daemon.project, "emu.txt"), "utf8")).toBe("emu\n");
 });

@@ -1,6 +1,6 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // The Changes page is the foundation's `changes` document, the renderer of
 // an effort's (and a snapshot's, a turn's) page. What its parts say, and what
@@ -22,7 +22,7 @@ test("an effort's page opens from its URI, and the pickers turn it into a range"
   });
   await page.goto("/");
   // The window answers a navigate once its stream is shown: a page open is the sign.
-  await openFromLauncher(page, "Suite Home");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
   await run(daemon, "oxplow.window.navigate", { uri: effortUri });
 
@@ -30,8 +30,8 @@ test("an effort's page opens from its URI, and the pickers turn it into a range"
   await expect(effort).toContainText("Open");
   await expect(page.locator('[data-node="header"]')).toContainText("working tree");
   // Picking an end leaves the effort for a plain comparison.
-  await page.getByTestId("page-param-end-value").filter({ visible: true }).click();
-  await page.getByTestId("page-param-end-edit").filter({ visible: true }).selectOption("working");
+  await shown(page).getByTestId("page-param-end-value").click();
+  await shown(page).getByTestId("page-param-end-edit").selectOption("working");
   // The effort part stays a node of the page, showing no effort and none of
   // its actions (they act on the effort's row).
   await expect(effort.getByRole("button")).toHaveCount(0);
