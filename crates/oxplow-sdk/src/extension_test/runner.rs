@@ -198,6 +198,8 @@ pub(super) async fn dispatch(
         page_example(host, ext, ex, part, PageKind::Part, report).await;
     } else if let Some(query) = ex.when.get("query").and_then(Value::as_str) {
         query_example(host, ext, ex, query, report).await;
+    } else if let Some(panel) = ex.when.get("panel").and_then(Value::as_str) {
+        panel_example(host, ext, ex, panel, report).await;
     } else if let Some(slug) = ex.when.get("form").and_then(Value::as_str) {
         form_example(host, ext, ex, slug, report).await;
     } else if let Some(id) = ex.when.get("job").and_then(Value::as_str) {
@@ -275,6 +277,11 @@ pub(super) const KINDS: &[Kind] = &[
         key: "query",
         when: "{ query: <slug | ext/slug>, params? } or { query: <page>#<loader>, params? } (any page file's loader)",
         expect: "{ rows, columns? }",
+    },
+    Kind {
+        key: "panel",
+        when: "{ panel: <id | ext/id>, thread?, stream?, choices? } (the panel run whole, as the rail shows it)",
+        expect: "{ body?, collapsed?, count_page?, badge? (each a part's run, as a page's expect), count?, alert?, choices?, text? }",
     },
     Kind {
         key: "form",
@@ -399,6 +406,7 @@ pub(super) fn withheld_target(ext: &Extension, input: &Value) -> Option<String> 
             named("query").map(|q| q.split('#').next().unwrap_or(q)),
         ),
         (Kind::Page, named("form")),
+        (Kind::Panel, named("panel")),
         (Kind::Job, named("job")),
         (Kind::CustomComponent, named("component")),
         (Kind::Effect, named("effect")),
@@ -474,7 +482,6 @@ pub(super) fn unsupported(ext: &Extension) -> Vec<String> {
             out.push(format!("{n} {what}"));
         }
     };
-    note(ext.panels.len(), "panel(s)");
     note(ext.ui.decorators.len(), "decorator(s)");
     note(ext.ui.replacements.len(), "replacement(s)");
     note(ext.skills.len(), "skill(s)");

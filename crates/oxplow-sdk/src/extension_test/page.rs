@@ -945,6 +945,21 @@ impl PageAt<'_> {
                 return None;
             }
         };
+        self.check_run(run, &expect, label, report).await
+    }
+
+    /// Check `run`, a run of this page already made, against `expect`
+    /// (already read through the binds): its loaders, its own parts, its
+    /// text and its nodes, each mismatch a finding. The run comes back, for
+    /// the binds.
+    pub(super) async fn check_run(
+        &self,
+        run: oxplow_app::pages::runner::PageRun,
+        expect: &Value,
+        label: &str,
+        report: &mut TestReport,
+    ) -> Option<oxplow_app::pages::runner::PageRun> {
+        let (shown, page) = (self.shown, self.page);
         if let Some(loaders) = expect.get("loaders").and_then(Value::as_object) {
             for (name, want) in loaders {
                 let Some(loader) = loader_at(&run, name) else {

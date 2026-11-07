@@ -305,9 +305,9 @@ pub fn scaffold_with(
             Some("{ rows: { contains: [{ value: todo, label: To do }] } }".to_string()),
         ),
         Kind::Panel => (
-            format!("{{ part: {name}, params: {{ stream_id: 1 }} }}"),
+            format!("{{ panel: {name} }}"),
             "one row per open task in the stream, newest first",
-            Some("{ loaders: { items: { rows: $any } } }".to_string()),
+            Some("{ body: { loaders: { items: { rows: $any } } } }".to_string()),
         ),
         Kind::Extension | Kind::Advisory | Kind::Skill => {
             ("{}".to_string(), "TODO: what a run should show", None)

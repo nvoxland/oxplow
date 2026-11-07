@@ -62,7 +62,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    steps with no app or a sleeping display: not run, so never a pass),
    then one line: how many of each, and what ran (`check, 79 examples, answers`; the JUnit form
    names each example). Its JSON report says the generation, what the extension
-   `contributes`, and what it can't run here (`unsupported`: panels, decorators,
+   `contributes`, and what it can't run here (`unsupported`: decorators,
    replacements, skills — the app shows them).
    **A test runs your extension with what it declares**, plus oxplow's
    own (foundation, and the extensions on by default): another
@@ -92,6 +92,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | page | `{ page: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
 | part | `{ part: <slug \| ext/slug>, params? }` | `{ loaders?, nodes?, text?, alert?, badge?, label?, inactive?, actions?, see_also? }` |
 | query | `{ query: <slug \| ext/slug>, params? } or { query: <page>#<loader>, params? } (any page file's loader)` | `{ rows, columns? }` |
+| panel | `{ panel: <id \| ext/id>, thread?, stream?, choices? } (the panel run whole, as the rail shows it)` | `{ body?, collapsed?, count_page?, badge? (each a part's run, as a page's expect), count?, alert?, choices?, text? }` |
 | form | `{ form: <page \| part>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
@@ -131,6 +132,19 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `view: { stream: str1, thread: thr1 }` runs it from that stream and
      thread; with none, it runs from the project's first stream, so a page
      that declares `stream_id` gets it without a param.
+   - a panel: `when: { panel: <id | ext/id>, thread?, stream?, choices? }`
+     runs the panel whole, as the rail shows it: its `body`, `collapsed`,
+     `count` and `badge` parts, each from the view `thread` / `stream` name
+     (default: the project's first stream, its first thread), the body with
+     the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
+     offer falls back to its default). Never `params`: a part's scope id is
+     the view's. `expect: { body?, collapsed?, count_page?, badge?, count?,
+     alert?, choices?, text? }` — each part is checked as a page's `expect`
+     is (`body: { loaders: { … } }`), `count` is the header's number (the
+     count page's, else a firing badge's), `alert` the badge's, `choices`
+     the toggles in force (`[{ name, value }]`), `text` what an agent reads.
+     Test a panel this way, not its parts one by one: a step's `when: {
+     choices: … }` or `{ thread: … }` re-runs it.
      `expect.see_also` is the page's "See also" links, `[{ title, uri, description? }]`,
      compared like any list (`{ contains: [..] }` for some of them).
      `expect.label` is the text of the page's tab (its `label` filled from

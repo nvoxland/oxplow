@@ -3403,3 +3403,65 @@ async fn a_pages_own_option_list_is_tested_as_a_query_of_its_loader() {
         .join("\n");
     assert!(errors.contains("`query: chooser` names a page"), "{errors}");
 }
+
+/// A panel fixture runs the panel whole, as the rail shows it: the starter's
+/// panel tests its body with no param written, its stream the view's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_panel_is_tested_as_a_panel() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Panel, "open", None).unwrap();
+    let fixture = std::fs::read_to_string(
+        dir.path()
+            .join(".oxplow/extensions/open/fixtures/basic.yaml"),
+    )
+    .unwrap();
+    assert!(fixture.contains("panel: open"), "{fixture}");
+    let report = test_extension(dir.path(), "open", false).await.unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+    assert!(
+        !report.unsupported.iter().any(|u| u.contains("panel")),
+        "{:?}",
+        report.unsupported
+    );
+}
+
+/// A panel's params are its scope's and its toggles': a fixture that writes
+/// `params` is told so; an unknown panel names the panels there are; the
+/// header's count is checked as the panel says it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_panel_fixture_names_its_scope_not_params_and_checks_the_count() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Panel, "open", None).unwrap();
+    let fixtures = ".oxplow/extensions/open/fixtures";
+    write(
+        dir.path(),
+        &format!("{fixtures}/basic.yaml"),
+        "when: { panel: open, params: { stream_id: 1 } }\nexpect: { count: 0 }\n",
+    );
+    write(
+        dir.path(),
+        &format!("{fixtures}/missing.yaml"),
+        "when: { panel: nope }\nexpect: { count: 0 }\n",
+    );
+    write(
+        dir.path(),
+        &format!("{fixtures}/counted.yaml"),
+        "when: { panel: open, stream: str1 }\nexpect: { count: 3 }\n",
+    );
+    let report = test_extension(dir.path(), "open", false).await.unwrap();
+    assert!(!report.ok);
+    let errors = format!("{:?}", report.errors);
+    assert!(
+        errors.contains("`params` isn't a key of a panel's `when`")
+            && errors.contains("thread: thr1"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("no panel `open/nope`") && errors.contains("open/open"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("panel `open/open`'s count is null at `count`, the example expects 3"),
+        "{errors}"
+    );
+}

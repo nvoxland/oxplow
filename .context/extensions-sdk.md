@@ -77,7 +77,8 @@ check already reported is not repeated.
     `{ query: <name> }` expecting a row;
   - `component` — a `custom_components:` entry (a bundle under
     `components/<name>/`) and a page whose `component` node it feeds;
-    `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`);
+    `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`),
+    its example `{ panel: <name> }` checking the body's rows;
   - `collector` — a Starlark collector `items` over `v_work_item` declaring
     entity `item`, a dataset `open_items` over `ref('item')` and a page over
     the dataset; its example runs the collector over fixture rows;
@@ -276,8 +277,13 @@ check already reported is not repeated.
   ran, generation, contributes, unsupported, left }` (diagnostics, with
   `error_lines()` and the like for the rendered lines): `contributes` is the extension's
   descriptors by public id, `unsupported` what only the app shows
-  (panels, decorators, replacements, skills; a slot mount runs in its
-  host page's run, so a fixture of the host page checks it); `render`
+  (decorators, replacements, skills; a slot mount runs in its
+  host page's run, so a fixture of the host page checks it). A panel is
+  run whole by a `when: { panel, thread?, stream?, choices? }` fixture
+  (`extension_test/panel.rs` over `oxplow_app::pages::panels::run_panel`,
+  the rules the rail uses): each part checked as a page's `expect`, and the
+  header's `count`, the `alert` and the toggles in force; a `params` key is
+  refused, since a part's scope id is the view's; `render`
   prints it like `check`'s. Exit 0 / 1 / 2 as `check`. `check` with no
   running oxplow asks a throwaway (with no environment) for its command
   registry. `the_triage_example_reads_the_tree_the_layer_and_a_dataset`
