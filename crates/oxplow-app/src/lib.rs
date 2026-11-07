@@ -137,7 +137,7 @@ pub mod ref_resolver;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;
-pub mod saved_conversations;
+pub(crate) mod saved_conversations;
 pub mod scope_calls;
 #[cfg(test)]
 mod secret_values_tests;
