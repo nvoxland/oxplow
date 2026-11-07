@@ -1769,6 +1769,94 @@ async fn three_items(fx: &EffortFixture) -> Vec<String> {
     refs
 }
 
+/// A person enables the fake and makes it the project's work list: an item
+/// made with no provider named reaches the tracker's own state, and a sync
+/// brings it back into oxplow's datasets.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_item_made_with_no_provider_named_reaches_the_tracker_and_comes_back_on_a_sync() {
+    let (fx, ext) = deployed("").await;
+    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
+    first_read(&fx).await;
+    let one = |sql: &'static str| {
+        let svc = fx.svc.clone();
+        async move {
+            svc.sql
+                .query_sql(sql, vec![], None)
+                .await
+                .unwrap()
+                .rows
+                .len()
+        }
+    };
+    assert_eq!(
+        one("SELECT 1 FROM v_provider_instance WHERE instance = 'tracker/fake' AND enabled = 1 AND state = 'ready'")
+            .await,
+        1,
+        "enabled and ready"
+    );
+    assert_eq!(
+        one("SELECT 1 FROM v_capability_provider WHERE capability = 'work_items' AND provider = 'fake' AND active = 1 AND available = 1")
+            .await,
+        1,
+        "the active work list"
+    );
+    let titles = |fx: &EffortFixture| {
+        let svc = fx.svc.clone();
+        async move {
+            svc.sql
+                .query_sql("SELECT title FROM v_work_item", vec![], None)
+                .await
+                .unwrap()
+                .rows
+                .into_iter()
+                .map(|r| {
+                    serde_json::to_value(r).unwrap()[0]
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                })
+                .collect::<Vec<_>>()
+        }
+    };
+    let state = || {
+        std::fs::read_dir(fx.svc.layout.project_dir.join(".oxplow"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("fake-state-"))
+            .map(|e| std::fs::read_to_string(e.path()).unwrap())
+            .collect::<String>()
+    };
+    for title in ["Kiwi from oxplow", "Kiwi from the command"] {
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "oxplow.work_item.create",
+                json!({ "title": title }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(state().contains(title), "{title} is in the tracker's state");
+    }
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            sync::SYNC,
+            json!({ "instance": INSTANCE, "collector": "work_items" }),
+            false,
+        )
+        .await
+        .unwrap();
+    fx.svc.event_pump.run_once().await.unwrap();
+    let after = titles(&fx).await;
+    for title in ["Kiwi from oxplow", "Kiwi from the command"] {
+        assert!(after.iter().any(|t| t == title), "{title} in {after:?}");
+    }
+}
+
 async fn collector_state(fx: &EffortFixture) -> oxplow_db::CollectorState {
     oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone())
         .get(INSTANCE, "work_items")
