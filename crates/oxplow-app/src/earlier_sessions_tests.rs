@@ -155,12 +155,15 @@ fn row<'a>(rows: &'a [Row], native: &str) -> &'a Row {
         .unwrap_or_else(|| panic!("no row for {native}: {rows:?}"))
 }
 
-/// A session this thread's person closed and its conversation are one row,
-/// and taking it reopens the session.
+/// What taking a row does, by how it came to be: a session the person closed
+/// here and its conversation are one row that reopens it; one closed in
+/// another thread, or by a thread close, or begun outside oxplow, has a free
+/// conversation to resume; one open here is a tab to show; one open in
+/// another thread is nothing to take.
 #[tokio::test]
-async fn a_session_closed_here_and_its_conversation_are_one_reopen_row() {
+async fn each_row_says_what_taking_it_does() {
     let f = fixture().await;
-    let s = session(
+    let closed_here = session(
         &f.fx.svc,
         f.fx.thread,
         "h",
@@ -168,79 +171,58 @@ async fn a_session_closed_here_and_its_conversation_are_one_reopen_row() {
         Some(SessionCloseReason::Closed),
     )
     .await;
-    let rows = list(&f, vec![harness("h", vec![conversation("c1", 5)])]).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].action, "reopen");
-    assert_eq!(
-        rows[0].session.as_deref(),
-        Some(agent_session_uri(s).as_str())
-    );
-    assert_eq!(rows[0].note, "closed here");
-    assert_eq!(rows[0].conversation.as_deref(), Some("c1"));
-}
-
-/// One closed in another thread has its conversation free: resume it here,
-/// the row naming the thread it came from.
-#[tokio::test]
-async fn a_session_closed_in_another_thread_resumes_here() {
-    let f = fixture().await;
     session(
         &f.fx.svc,
         f.other,
         "h",
-        Some("c1"),
+        Some("c2"),
         Some(SessionCloseReason::Closed),
     )
     .await;
-    let rows = list(&f, vec![harness("h", vec![conversation("c1", 5)])]).await;
-    let r = row(&rows, "c1");
-    assert_eq!(r.action, "resume");
-    assert_eq!(r.note, "from elsewhere");
-}
-
-/// A close the thread or stream made isn't the person's to reopen: the
-/// conversation resumes in a new session instead.
-#[tokio::test]
-async fn a_session_a_thread_close_took_resumes_instead_of_reopening() {
-    let f = fixture().await;
+    // A close the thread or stream made isn't the person's to reopen.
     session(
         &f.fx.svc,
         f.fx.thread,
         "h",
-        Some("c1"),
+        Some("c3"),
         Some(SessionCloseReason::ThreadClosed),
     )
     .await;
-    let rows = list(&f, vec![harness("h", vec![conversation("c1", 5)])]).await;
-    assert_eq!(row(&rows, "c1").action, "resume");
-}
-
-/// A conversation begun outside oxplow has no session: resume it.
-#[tokio::test]
-async fn an_outside_conversation_resumes() {
-    let f = fixture().await;
-    let rows = list(&f, vec![harness("h", vec![conversation("x1", 5)])]).await;
-    let r = row(&rows, "x1");
-    assert_eq!(r.action, "resume");
-    assert!(r.session.is_none());
-    assert_eq!(r.note, "not started in oxplow");
-}
-
-/// A conversation open in this thread's session is a tab to show; one open
-/// in another thread's is nothing to take.
-#[tokio::test]
-async fn a_conversation_that_is_open_is_switched_to_or_left() {
-    let f = fixture().await;
     session(&f.fx.svc, f.fx.thread, "h", Some("here"), None).await;
     session(&f.fx.svc, f.other, "h", Some("there"), None).await;
-    let rows = list(
-        &f,
-        vec![harness(
-            "h",
-            vec![conversation("here", 5), conversation("there", 6)],
-        )],
-    )
-    .await;
+    let conversations = ["c1", "c2", "c3", "x1", "here", "there"]
+        .map(|id| conversation(id, 5))
+        .to_vec();
+    let rows = list(&f, vec![harness("h", conversations)]).await;
+    assert_eq!(
+        rows.len(),
+        6,
+        "a session and its conversation are one row: {rows:?}"
+    );
+
+    let c1 = row(&rows, "c1");
+    assert_eq!(c1.action, "reopen", "{c1:?}");
+    assert_eq!(
+        c1.session.as_deref(),
+        Some(agent_session_uri(closed_here).as_str())
+    );
+    assert_eq!(c1.note, "closed here");
+
+    let c2 = row(&rows, "c2");
+    assert_eq!(c2.action, "resume", "closed in another thread: {c2:?}");
+    assert_eq!(c2.note, "from elsewhere");
+
+    assert_eq!(
+        row(&rows, "c3").action,
+        "resume",
+        "a thread close is resumed, not reopened"
+    );
+
+    let x1 = row(&rows, "x1");
+    assert_eq!(x1.action, "resume", "{x1:?}");
+    assert!(x1.session.is_none());
+    assert_eq!(x1.note, "not started in oxplow");
+
     assert_eq!(row(&rows, "here").action, "show");
     let there = row(&rows, "there");
     assert_eq!(there.action, "none");
@@ -268,70 +250,42 @@ async fn a_failing_harness_is_unavailable_and_the_rest_still_list() {
     assert_eq!(rows[0].harness, "h");
 }
 
-/// A closed slot that never started anything is not an earlier session;
-/// one that ran turns is, whatever its harness lists.
-#[tokio::test]
-async fn a_never_started_slot_is_left_out_and_a_used_one_counts_its_turns() {
-    let f = fixture().await;
-    session(
-        &f.fx.svc,
-        f.fx.thread,
-        "h",
-        None,
-        Some(SessionCloseReason::Closed),
-    )
-    .await;
-    let used = session(
-        &f.fx.svc,
-        f.fx.thread,
-        "h",
-        None,
-        Some(SessionCloseReason::Closed),
-    )
-    .await;
-    let id = used.value();
-    let thread = f.fx.thread.value();
+/// A turn of `session` on `thread`, asked `prompt`.
+async fn turn(f: &Fixture, thread: ThreadId, session: AgentSessionId, prompt: &'static str) {
+    let (thread, session) = (thread.value(), session.value());
     f.fx.svc
         .db
         .transaction(move |tx| {
-            for prompt in ["first", "second"] {
-                tx.execute(
-                    "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
-                     VALUES (?1, ?2, ?3, '2026-10-10T10:00:00Z')",
-                    rusqlite::params![thread, id, prompt],
-                )
-                .map_err(oxplow_db::map_sql_err)?;
-            }
+            tx.execute(
+                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
+                 VALUES (?1, ?2, ?3, '2026-10-10T10:00:00Z')",
+                rusqlite::params![thread, session, prompt],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
             Ok(())
         })
         .await
         .unwrap();
-    let rows = list(&f, vec![harness("h", vec![])]).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(
-        rows[0].session.as_deref(),
-        Some(agent_session_uri(used).as_str())
-    );
-    assert_eq!(rows[0].turns, Some(2));
-    assert_eq!(rows[0].label, "second", "named by its last prompt");
-    assert_eq!(rows[0].action, "reopen");
 }
 
-/// A closed session whose conversation its harness didn't list (it is
-/// beyond the limit, or gone) still carries its native id for a resume, and
-/// the person's title, if any, names it.
+/// A session's own row, when its harness lists no conversation for it (or
+/// none that is free): a closed slot that never started anything is not an
+/// earlier session, one that ran turns is (named by its last prompt); one
+/// whose conversation the harness didn't list keeps its native id for a
+/// resume and the person's title; a closed one no one can take (another
+/// thread's, with turns but no conversation) is left out; one open here is a
+/// row to show; one open elsewhere is listed only beside a conversation.
 #[tokio::test]
-async fn an_unlisted_conversation_keeps_its_native_id_and_the_sessions_name() {
+async fn a_session_without_a_listed_conversation_is_a_row_only_when_it_can_be_taken() {
     let f = fixture().await;
-    let other = session(
-        &f.fx.svc,
-        f.other,
-        "h",
-        Some("native-9"),
-        Some(SessionCloseReason::Closed),
-    )
-    .await;
-    let id = other.value();
+    let closed = Some(SessionCloseReason::Closed);
+    session(&f.fx.svc, f.fx.thread, "h", None, closed).await;
+    let used = session(&f.fx.svc, f.fx.thread, "h", None, closed).await;
+    turn(&f, f.fx.thread, used, "first").await;
+    turn(&f, f.fx.thread, used, "second").await;
+
+    let unlisted = session(&f.fx.svc, f.other, "h", Some("native-9"), closed).await;
+    let id = unlisted.value();
     f.fx.svc
         .db
         .transaction(move |tx| {
@@ -344,63 +298,38 @@ async fn an_unlisted_conversation_keeps_its_native_id_and_the_sessions_name() {
         })
         .await
         .unwrap();
-    let rows = list(&f, vec![harness("h", vec![])]).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].action, "resume");
-    assert_eq!(rows[0].conversation.as_deref(), Some("native-9"));
-    assert_eq!(rows[0].label, "The parser");
-}
 
-/// A closed session no one can take — another thread's, with turns but no
-/// conversation to resume — is left out; only a conversation open in another
-/// thread's session is listed with nothing to take.
-#[tokio::test]
-async fn a_closed_session_with_nothing_to_take_is_left_out() {
-    let f = fixture().await;
-    let s = session(
-        &f.fx.svc,
-        f.other,
-        "h",
-        None,
-        Some(SessionCloseReason::Closed),
-    )
-    .await;
-    let id = s.value();
-    let thread = f.other.value();
-    f.fx.svc
-        .db
-        .transaction(move |tx| {
-            tx.execute(
-                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
-                 VALUES (?1, ?2, 'hello', '2026-10-10T10:00:00Z')",
-                rusqlite::params![thread, id],
-            )
-            .map_err(oxplow_db::map_sql_err)?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    session(&f.fx.svc, f.other, "h", Some("busy"), None).await;
-    let rows = list(&f, vec![harness("h", vec![conversation("busy", 5)])]).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].action, "none");
-}
+    let nothing_to_take = session(&f.fx.svc, f.other, "h", None, closed).await;
+    turn(&f, f.other, nothing_to_take, "hello").await;
 
-/// A session open on this thread is a row to show even when its harness
-/// lists no conversation for it; one open elsewhere is listed only beside a
-/// conversation.
-#[tokio::test]
-async fn a_session_open_here_is_listed_without_a_conversation() {
-    let f = fixture().await;
     let here = session(&f.fx.svc, f.fx.thread, "h", None, None).await;
     session(&f.fx.svc, f.other, "h", Some("there"), None).await;
-    let rows = list(&f, vec![harness("h", vec![])]).await;
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].action, "show");
+    session(&f.fx.svc, f.other, "h", Some("busy"), None).await;
+
+    let rows = list(&f, vec![harness("h", vec![conversation("busy", 5)])]).await;
     assert_eq!(
-        rows[0].session.as_deref(),
-        Some(agent_session_uri(here).as_str())
+        rows.len(),
+        4,
+        "only the ones that can be taken or shown: {rows:?}"
     );
+    let by_session = |s: AgentSessionId| {
+        let uri = agent_session_uri(s);
+        rows.iter()
+            .find(|r| r.session.as_deref() == Some(uri.as_str()))
+            .unwrap_or_else(|| panic!("no row for session {uri}: {rows:?}"))
+    };
+
+    let used = by_session(used);
+    assert_eq!(used.turns, Some(2));
+    assert_eq!(used.label, "second", "named by its last prompt");
+    assert_eq!(used.action, "reopen");
+
+    let unlisted = row(&rows, "native-9");
+    assert_eq!(unlisted.action, "resume");
+    assert_eq!(unlisted.label, "The parser");
+
+    assert_eq!(row(&rows, "busy").action, "none");
+    assert_eq!(by_session(here).action, "show");
 }
 
 /// Most recently active first.
