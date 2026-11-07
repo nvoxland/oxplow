@@ -11,11 +11,14 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 - **`playwright.config.ts`** (repo root). Its `webServer` builds the frontend
   once (`vite build`) and serves it with `vite preview` on 127.0.0.1, on a port of the checkout's own (from its path; `E2E_PORT` overrides it, should two collide), so a
-  spec never meets a stale `dist/`.
+  spec never meets a stale `dist/`. Off CI, a server already on that port
+  is used as it is (see "Running it locally"). Every test boots its own
+  daemon, so tests run fully parallel, files included.
 - **`support/global-setup.ts`** builds `oxplow-daemon-sim`,
   `oxplow-harness-fake` and `oxplow-provider-fake` and hands their paths to the
   workers (`OXPLOW_E2E_DAEMON`, `OXPLOW_E2E_HARNESS_FAKE`,
-  `OXPLOW_E2E_PROVIDER_FAKE`).
+  `OXPLOW_E2E_PROVIDER_FAKE`). With `OXPLOW_E2E_BIN=target/debug` it builds
+  nothing and runs the binaries already there.
 - **`fixtures/extension/`** — the test extension `e2e`, copied into every
   project before boot: a fake work-item provider (`bin/provider`, written
   then, runs the fake this checkout built; its `provider.json` is checked
@@ -79,14 +82,38 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   time limit, is fine). `specs/harness/` checks the helpers themselves.
 - **Reports**: a JUnit report at `tests-e2e/.output/junit.xml`, for a
   failed spec its trace under `tests-e2e/.output/results`, and every
-  daemon's log under `tests-e2e/.output/daemons` (all gitignored).
+  daemon's log under `tests-e2e/.output/daemons` (all gitignored). oxplow
+  reads the JUnit report after a local run (the project extension's
+  `tests.e2e_junit` collector), so each spec's flips, mean and max time are
+  in `v_test_case_stat`.
 - **Projects**: `chromium` runs every spec; `webkit` runs
   `specs/components/` (a custom component's frame, the one place the two
   engines are checked apart — the macOS window is WebKit).
 - **CI**: the `e2e` job in `.github/workflows/ci.yml` — Chromium and WebKit,
-  three workers, no retries (a spec that passes only on a second try is a
-  failure to fix), the JUnit report uploaded always and traces and daemon
-  logs on failure. `daemon-contract` stays browser-free.
+  three workers, the JUnit report uploaded always and traces and daemon
+  logs on failure. `daemon-contract` stays browser-free. A failed test is
+  tried once more, and only that retry is traced (tracing every test costs
+  ~15% of the suite's CPU). A spec that passes only on its retry still fails
+  the run (`failOnFlakyTests`): it is a failure to fix, not hide. The retry
+  says which kind it is, a race (passed) or a break (failed again), and the
+  JUnit report marks it `flakyFailure`.
+- **Flake history**: `bun run e2e:flakes [runs=20]` reads the JUnit
+  artifacts of the last runs on main (`gh`) and prints, per spec and
+  project, how many runs it failed or flaked in, and per run the wall time,
+  the sum of test times and the average number of busy workers.
+
+## Running it locally
+
+- `bun run e2e` is the whole suite: about 70 s on 14 cores (the default, half
+  the cores, is the fastest worker count; 4 and 10 are slower).
+- For a loop on a few specs, keep `bun run e2e:serve` running in a
+  terminal: it builds the frontend, rebuilds it on every change (`vite build
+  --watch`), and serves it on the checkout's port. `bun run e2e` then uses
+  that server and skips its own build and start. Add
+  `OXPLOW_E2E_BIN=target/debug` to skip the cargo build too, after a build
+  of your own: one spec then takes about 3 s.
+- `bun run e2e:flake <spec> [times=10]` runs one spec many times at once,
+  the way a race fix is confirmed before it is pushed.
 
 ## What the specs cover
 

@@ -97,6 +97,8 @@ testing:
   - test:junit
   - test:ext
   - extension test
+  - playwright test
+  - bun run e2e
   analysisPatterns:
   - clippy --message-format=json
   - lint:collect

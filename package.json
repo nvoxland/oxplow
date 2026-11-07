@@ -24,7 +24,10 @@
     "run:dev": "sh scripts/run-dev.sh",
     "tauri:build": "bun run --cwd apps/desktop tauri build",
     "tauri:build:app": "bun run --cwd apps/desktop tauri build --bundles app",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:serve": "sh scripts/e2e-serve.sh",
+    "e2e:flake": "sh scripts/e2e-flake.sh",
+    "e2e:flakes": "sh scripts/e2e-flakes.sh"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

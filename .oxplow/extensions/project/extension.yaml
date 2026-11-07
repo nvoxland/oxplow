@@ -418,6 +418,13 @@ collectors:
   report:
     path: apps/desktop/test-report.xml
   on: { run: test }
+- id: tests.e2e_junit
+  doc: The browser suite's cases (`bun run e2e`, Playwright JUnit).
+  records: tests
+  entry: oxplow:junit
+  report:
+    path: tests-e2e/.output/junit.xml
+  on: { run: test }
 - id: lint.clippy
   doc: Clippy findings (lint:collect).
   records: analysis

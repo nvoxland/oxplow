@@ -353,9 +353,14 @@ test reads or relies on the task.
 components, WebKit) against `oxplow-daemon-sim` over a throwaway git
 project — the real app, a real daemon, the fake terminal harness and the fake
 work-item provider; `tests-e2e/README.md` has the harness. It isn't part
-of `test:collect` (it builds the frontend and boots a daemon per spec,
-~40 s); CI runs it as its own `e2e` job. Each checkout serves on a port of its
-own (`tests-e2e/support/port.ts`), so worktrees can run it side by side. **Run it when a change touches
+of `test:collect` (it builds the frontend and boots a daemon per test,
+~70 s); CI runs it as its own `e2e` job, where a spec that passes only on
+its retry fails the run. Each checkout serves on a port of its
+own (`tests-e2e/support/port.ts`), so worktrees can run it side by side.
+For a few specs at a time, keep `bun run e2e:serve` up and pass
+`OXPLOW_E2E_BIN=target/debug`: a spec then takes seconds; `bun run
+e2e:flake <spec>` repeats one to confirm a race fix, `bun run e2e:flakes`
+reads CI's history (`tests-e2e/README.md` "Running it locally"). **Run it when a change touches
 what a person sees or does in the app** — a page, a rail section, a
 command's UI path, a testid. What every page does (select, expand, switch,
 forms, slots, replacements, embeds, components, panels) is

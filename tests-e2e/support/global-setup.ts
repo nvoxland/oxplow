@@ -1,8 +1,8 @@
 // Build the binaries the suite runs, once, and hand their paths to the
 // workers through the environment.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 import { LOG_DIR } from "./daemon.js";
 
@@ -35,6 +35,19 @@ export default function globalSetup(): void {
   const sleeps = sleepsIn(join(import.meta.dirname, "..", "specs"));
   if (sleeps.length > 0) throw new Error(`these specs sleep; wait on what they expect instead:\n${sleeps.join("\n")}`);
   rmSync(LOG_DIR, { recursive: true, force: true });
+  // `OXPLOW_E2E_BIN=target/debug` runs the binaries already there, with no
+  // cargo build: for a run of specs only, after a build of your own. The
+  // daemon is whatever was built last, so not after a Rust change.
+  const prebuilt = process.env.OXPLOW_E2E_BIN && resolve(process.env.OXPLOW_E2E_BIN);
+  if (prebuilt) {
+    const bins = ["oxplow-daemon-sim", "oxplow-harness-fake", "oxplow-provider-fake", "oxplow-script-worker"];
+    const missing = bins.filter((b) => !existsSync(join(prebuilt, b)));
+    if (missing.length > 0) throw new Error(`OXPLOW_E2E_BIN=${prebuilt} has no ${missing.join(", ")}`);
+    process.env.OXPLOW_E2E_DAEMON = join(prebuilt, "oxplow-daemon-sim");
+    process.env.OXPLOW_E2E_HARNESS_FAKE = join(prebuilt, "oxplow-harness-fake");
+    process.env.OXPLOW_E2E_PROVIDER_FAKE = join(prebuilt, "oxplow-provider-fake");
+    return;
+  }
   const output = execFileSync(
     "cargo",
     ["build", "-p", "oxplow-daemon-sim", "-p", "oxplow-harness-fake", "-p", "oxplow-provider-fake", "--message-format=json"],
