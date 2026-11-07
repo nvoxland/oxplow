@@ -2,7 +2,7 @@
 // own global config (`OXPLOW_HOME`), home, shell and git config, so nothing
 // reaches the person's real config, keychain, rc files or shell history.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { chmodSync, cpSync, createWriteStream, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, createWriteStream, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,19 +118,29 @@ async function endGroup(pgid: number): Promise<void> {
 /** Start a daemon over a new project in a temp dir under `tmp`. Whatever
  *  goes wrong before it's listening, the process is killed and the dir
  *  removed; its log is kept and named in the error. `bin` and `tmp` are for
- *  the harness's own spec. */
-export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = tmpdir() }: { bin?: string; tmp?: string } = {}): Promise<Daemon> {
+ *  the harness's own spec.
+ *
+ *  `dir` puts the workspace there instead (made if missing). A `dir` that
+ *  already holds one — a copy of a workspace an earlier daemon left, see
+ *  `fixtures.ts` — is started as it is, its project, home and store
+ *  included. `keep` leaves the dir in place when the daemon stops. */
+export async function startDaemon({
+  bin = process.env.OXPLOW_E2E_DAEMON,
+  tmp = tmpdir(),
+  dir: at,
+  keep = false,
+}: { bin?: string; tmp?: string; dir?: string; keep?: boolean } = {}): Promise<Daemon> {
   const harnessFake = process.env.OXPLOW_E2E_HARNESS_FAKE;
   const providerFake = process.env.OXPLOW_E2E_PROVIDER_FAKE;
   if (!bin || !harnessFake || !providerFake) throw new Error("global setup didn't build the suite's binaries");
-  const dir = mkdtempSync(join(tmp, "oxplow-e2e-"));
+  const dir = at ?? mkdtempSync(join(tmp, "oxplow-e2e-"));
   mkdirSync(LOG_DIR, { recursive: true });
-  const log = join(LOG_DIR, `${basename(dir)}.log`);
+  const log = join(LOG_DIR, `${basename(dir)}-${randomUUID().slice(0, 8)}.log`);
   const env = isolated(dir, harnessFake);
   const project = join(dir, "project");
   let child: ChildProcess | undefined;
   let exited: Promise<void> = Promise.resolve();
-  const stop = async () => {
+  const end = async (remove: boolean) => {
     if (child) {
       // `exit` fires once whether it ends by a code or a signal; listened
       // for from the spawn, so a daemon already dead can't hang this.
@@ -141,16 +151,19 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
       // before the directory is removed under it.
       await endGroup(child.pid!);
     }
-    rmSync(dir, { recursive: true, force: true });
+    if (remove) rmSync(dir, { recursive: true, force: true });
   };
+  const stop = () => end(!keep);
   try {
-    for (const d of [project, env.HOME!, env.OXPLOW_HOME!, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
-    writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml());
-    installTestExtension(project, providerFake);
-    installGithubExample(project);
-    const git = (...args: string[]) => execFileSync("git", args, { cwd: project, env, stdio: "ignore" });
-    git("init", "-q");
-    git("commit", "-q", "--allow-empty", "-m", "init");
+    if (!existsSync(join(project, ".git"))) {
+      for (const d of [project, env.HOME!, env.OXPLOW_HOME!, join(project, ".oxplow")]) mkdirSync(d, { recursive: true });
+      writeFileSync(join(project, ".oxplow", "project.yaml"), projectYaml());
+      installTestExtension(project, providerFake);
+      installGithubExample(project);
+      const git = (...args: string[]) => execFileSync("git", args, { cwd: project, env, stdio: "ignore" });
+      git("init", "-q");
+      git("commit", "-q", "--allow-empty", "-m", "init");
+    }
 
     const token = randomUUID();
     const spawned = spawn(bin, ["--project", project, "--bind", "127.0.0.1:0", "--token-stdin"], {
@@ -199,7 +212,7 @@ export async function startDaemon({ bin = process.env.OXPLOW_E2E_DAEMON, tmp = t
     });
     return { base, token, project, pid: spawned.pid!, log, stop };
   } catch (e) {
-    await stop();
+    await end(true);
     throw e;
   }
 }
@@ -245,13 +258,13 @@ export async function installExample(daemon: Daemon, name: string): Promise<void
   await deploy(daemon, name);
 }
 
-/** Poll `check` every 200 ms until it holds; throw `what` after `ms`. A
+/** Poll `check` every `every` ms (200) until it holds; throw `what` after `ms`. A
  *  check that throws is tried again — the timeout names the last error —
  *  so a call the daemon isn't ready for yet doesn't end the wait. For
  *  daemon state a write settles into in the background (boot's tasks, the
  *  search index), never for the page — specs wait on the page with
  *  web-first `expect`. */
-export async function until(what: string, ms: number, check: () => Promise<boolean>): Promise<void> {
+export async function until(what: string, ms: number, check: () => Promise<boolean>, every = 200): Promise<void> {
   const deadline = Date.now() + ms;
   let last: unknown = null;
   for (;;) {
@@ -265,17 +278,24 @@ export async function until(what: string, ms: number, check: () => Promise<boole
       const why = last === null ? "" : ` (last: ${last instanceof Error ? last.message : String(last)})`;
       throw new Error(`timed out waiting: ${what}${why}`);
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, every));
   }
 }
 
 /** Wait until the daemon's boot work is done: no background task running. A
  *  finished one stays listed for 4 s, for the window's indicator to fade. */
 export async function settle(daemon: Daemon): Promise<void> {
-  await until("background tasks to finish", 120_000, async () => {
-    const tasks = await ipc<Array<{ ended_at: number | null }>>(daemon, "list_background_tasks");
-    return tasks.every((t) => t.ended_at !== null);
-  });
+  // Boot's last tasks end within a few hundred ms of it listening: a short
+  // poll is what a test waits, not the 200 ms step.
+  await until(
+    "background tasks to finish",
+    120_000,
+    async () => {
+      const tasks = await ipc<Array<{ ended_at: number | null }>>(daemon, "list_background_tasks");
+      return tasks.every((t) => t.ended_at !== null);
+    },
+    20,
+  );
 }
 
 /** Do `write`, and resolve with its result once the daemon has said every

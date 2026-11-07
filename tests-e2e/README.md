@@ -69,6 +69,17 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
     what another left behind: work items, streams, settings, git commits. It is settled before any page opens — boot's background tasks
     done and the extensions' datasets published — and carries the `stream`
     and `thread` its pages open on.
+  - **Templates, not boots from nothing.** Booting a workspace from nothing
+    (git project, store, the suite's extensions deployed, their datasets
+    compiled) is the same every time, so a worker does it once per *slot*
+    and keeps a copy of the whole dir (project, home, store) as the slot's
+    template. A test's daemon starts over a fresh copy of a template, at the
+    template's own path: the database and the store hold absolute paths
+    (the stream's worktree, each extension's runtime folder), so a copy
+    elsewhere would point at the template. A worker has two slots: while a
+    test runs on one, the next test's daemon boots on the other, so only a
+    worker's first test waits for a boot. Measured at 3 workers (CI's
+    count): 76 s with one slot, 62 s with two, for 5% more CPU.
   - `storageState` points the page at that daemon (`connectedTo()` builds one
     for a context of a spec's own, e.g. with another token).
   - `page` fails any spec whose page threw.
