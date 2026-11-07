@@ -2466,54 +2466,66 @@ mod tests {
         );
     }
 
-    /// Without the same key on both sides there's nothing to join on:
-    /// counts, and a note saying why; over the row limit, the same.
+    /// A diff that can't join its rows on a key is counts and a note saying
+    /// why: no key on both sides, over the row limit, a key that repeats (one
+    /// row would stand for several) or has a NULL part.
     #[test]
-    fn an_unkeyed_or_oversized_row_diff_is_counts_with_a_note() {
-        let before = side(&["n"], vec![vec![json!(1)]], false);
-        let after = side(&["n"], vec![vec![json!(1)], vec![json!(2)]], false);
-        let diff = row_diff(Some((&before, &[])), Some((&after, &[])));
-        assert_eq!(
-            (diff.before, diff.after, diff.keyed.is_none()),
-            (Some(1), Some(2), true)
-        );
-        assert!(diff.note.unwrap().contains("no key"));
-
-        let key = vec!["n".to_string()];
+    fn a_row_diff_that_cannot_be_joined_is_counts_with_a_note() {
+        let id = vec!["id".to_string()];
+        let n = vec!["n".to_string()];
+        let one = side(&["n"], vec![vec![json!(1)]], false);
+        let two = side(&["n"], vec![vec![json!(1)], vec![json!(2)]], false);
         let big = side(&["n"], vec![vec![json!(1)]], true);
-        let diff = row_diff(Some((&before, &key)), Some((&big, &key)));
-        assert!(diff.keyed.is_none());
-        assert!(
-            diff.note.unwrap().contains(&ROW_DIFF_LIMIT.to_string()),
-            "names the limit"
-        );
-
-        let added = row_diff(None, Some((&after, &key)));
-        assert_eq!((added.before, added.after), (None, Some(2)));
-    }
-
-    /// tsk792: a key that repeats or has a NULL part can't be joined on —
-    /// one row would stand for several — so the diff is counts, saying why.
-    #[test]
-    fn a_repeated_or_null_key_is_counts_with_a_note() {
-        let key = vec!["id".to_string()];
-        let before = side(&["id", "v"], vec![vec![json!(1), json!("a")]], false);
+        let keyed = side(&["id", "v"], vec![vec![json!(1), json!("a")]], false);
         let repeats = side(
             &["id", "v"],
             vec![vec![json!(1), json!("a")], vec![json!(1), json!("b")]],
             false,
         );
-        let diff = row_diff(Some((&before, &key)), Some((&repeats, &key)));
-        assert!(diff.keyed.is_none(), "{diff:?}");
-        assert_eq!((diff.before, diff.after), (Some(1), Some(2)));
-        let note = diff.note.unwrap();
-        assert!(note.contains("repeats") && note.contains("after"), "{note}");
-
         let null = side(&["id", "v"], vec![vec![json!(null), json!("a")]], false);
-        let diff = row_diff(Some((&null, &key)), Some((&before, &key)));
-        assert!(diff.keyed.is_none(), "{diff:?}");
-        let note = diff.note.unwrap();
-        assert!(note.contains("NULL") && note.contains("before"), "{note}");
+        let limit = ROW_DIFF_LIMIT.to_string();
+        // (case, before, after, counts, what the note must say)
+        let cases = [
+            (
+                "no key on either side",
+                Some((&one, &[][..])),
+                Some((&two, &[][..])),
+                (Some(1), Some(2)),
+                vec!["no key"],
+            ),
+            (
+                "a side past the row limit",
+                Some((&one, &n[..])),
+                Some((&big, &n[..])),
+                (Some(1), Some(1)),
+                vec![limit.as_str()],
+            ),
+            (
+                "a key that repeats after",
+                Some((&keyed, &id[..])),
+                Some((&repeats, &id[..])),
+                (Some(1), Some(2)),
+                vec!["repeats", "after"],
+            ),
+            (
+                "a NULL key before",
+                Some((&null, &id[..])),
+                Some((&keyed, &id[..])),
+                (Some(1), Some(1)),
+                vec!["NULL", "before"],
+            ),
+        ];
+        for (case, before, after, counts, needles) in cases {
+            let diff = row_diff(before, after);
+            assert!(diff.keyed.is_none(), "{case}: {diff:?}");
+            assert_eq!((diff.before, diff.after), counts, "{case}");
+            let note = diff.note.unwrap_or_default();
+            for needle in needles {
+                assert!(note.contains(needle), "{case}: wanted {needle:?} in {note}");
+            }
+        }
+        let added = row_diff(None, Some((&two, &n)));
+        assert_eq!((added.before, added.after), (None, Some(2)));
     }
 
     /// tsk792: samples come in key order — 2 before 10 — not text order.
@@ -3089,8 +3101,11 @@ mod tests {
         }
     }
 
+    /// What a provider's change reads as, in a few phrases: a new one as
+    /// everything it declares, a changed one as what differs, and one whose
+    /// change no grant, command or feature shows as its first difference.
     #[test]
-    fn a_new_provider_reads_as_everything_it_declares() {
+    fn a_provider_reads_as_what_it_declares_or_what_differs() {
         let added = ProviderImpact {
             before: None,
             after: Some(grants(&["api.example.com"], &["token"])),
@@ -3104,17 +3119,6 @@ mod tests {
             ],
             ..provider_impact(Change::Added)
         };
-        assert_eq!(
-            provider_phrases(&added),
-            vec![
-                "added — runs bin/p · reaches api.example.com · reads token",
-                "commands: create, delete (destructive)"
-            ]
-        );
-    }
-
-    #[test]
-    fn a_changed_provider_reads_as_what_differs() {
         let changed = ProviderImpact {
             after: Some(grants(&["api.example.com"], &["token"])),
             commands: vec![
@@ -3127,26 +3131,41 @@ mod tests {
             ],
             ..provider_impact(Change::Changed)
         };
-        assert_eq!(
-            provider_phrases(&changed),
-            vec![
-                "now reaches api.example.com (was none)",
-                "command `archive` added (destructive)"
-            ]
-        );
-    }
-
-    #[test]
-    fn a_change_no_grant_command_or_feature_shows_names_its_first_difference() {
         let quiet = ProviderImpact {
             first_difference: Some("`/declarations/version` was 1, now 2".into()),
             ..provider_impact(Change::Changed)
         };
-        assert_eq!(
-            provider_phrases(&quiet),
-            vec!["`/declarations/version` was 1, now 2"]
-        );
-        assert!(provider_phrases(&provider_impact(Change::Unchanged)).is_empty());
+        let cases = [
+            (
+                "a new provider",
+                added,
+                vec![
+                    "added — runs bin/p · reaches api.example.com · reads token",
+                    "commands: create, delete (destructive)",
+                ],
+            ),
+            (
+                "a changed provider",
+                changed,
+                vec![
+                    "now reaches api.example.com (was none)",
+                    "command `archive` added (destructive)",
+                ],
+            ),
+            (
+                "a change no grant, command or feature shows",
+                quiet,
+                vec!["`/declarations/version` was 1, now 2"],
+            ),
+            (
+                "an unchanged provider",
+                provider_impact(Change::Unchanged),
+                vec![],
+            ),
+        ];
+        for (case, impact, want) in cases {
+            assert_eq!(provider_phrases(&impact), want, "{case}");
+        }
     }
 
     #[test]
