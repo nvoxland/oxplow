@@ -95,6 +95,12 @@ source directly: an edit changes nothing until it is deployed.
   their shipped deployment (`extension_store::extract_shipped`); they run
   from disk like any other. What ships is the folder: every file but dot
   entries and `build.exclude`, its build's output included.
+  **A `node_modules` no `build.exclude` names is refused** wherever a source
+  is walked (`extension/stray_folder.rs`, shared with `build.rs`): `extension
+  check` reports it (`extension.source_refused`), a deploy fails, a release
+  build panics, and so does a debug build's first read of a shipped folder,
+  which is every Rust test. It once cost every test boot 67 MB of writes
+  (`.context/performance.md` "What a test boot costs").
   - **A release build compiles them in.** `crates/oxplow-app/build.rs`
     walks each folder into `include_bytes!` arrays, so adding a file to the
     folder ships it; one with a `build:` is built there first (its command,

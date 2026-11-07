@@ -51,3 +51,4 @@ mod extension_sql_config_tests;
 pub(crate) mod extension_state;
 pub mod extension_store;
 pub mod extensions;
+mod stray_folder;

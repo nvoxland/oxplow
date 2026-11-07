@@ -24,6 +24,9 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+#[path = "src/extension/stray_folder.rs"]
+mod stray_folder;
+
 /// The extensions that ship with oxplow, by folder name.
 const BUNDLED: &[&str] = &["oxplow-foundation", "oxplow-bundled"];
 
@@ -173,6 +176,9 @@ fn walk(dir: &Path, skip: &[String]) -> Vec<(String, PathBuf)> {
             }
             let path = entry.path();
             if path.is_dir() {
+                if let Some(why) = stray_folder::refusal(&rel) {
+                    panic!("{}: {why}", dir.display());
+                }
                 go(&path, &rel, skip, out);
             } else {
                 out.push((rel, path));

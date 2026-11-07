@@ -871,6 +871,32 @@ them together cut a close from ~174 s to ~115 s:
 still one foreground command, so collection sees both. Read
 `target/clippy.json` (or rerun plain clippy) when it fails.
 
+## What a test boot costs (2026-11-06)
+
+A full `test:fast` on 14 cores: 1,068 s (470 s build, 598 s tests), with as much
+system time as user time (3,130 s against 3,101 s). 1,132 tests of 4,422 take
+3 s or more and hold 6,065 of the 7,672 test-seconds. Alone, the same tests take
+under a second. So look at what every boot shares, not at the slowest tests.
+
+**An untracked `node_modules` in a shipped extension's folder** was the largest
+cost: each boot wrote its 67 MB to the test's store. It is refused now
+(`extensions-deploy.md`). 13 `ref_resolver` boots:
+
+| | with it | without |
+|---|---|---|
+| `-j1` | 7.9 s, sys 3.2 s | 5.5 s, sys 1.1 s |
+| `-j4` | 3.0 s, sys 5.2 s | 1.8 s, sys 1.5 s |
+| `-j13` | 4.0 s, sys 33.6 s | 1.1 s, sys 7.4 s |
+
+The 140 loader tests (`extension::extensions::tests`): 42 s to 9.9 s. CI never
+had the folder (it is gitignored), so CI's times don't show this.
+
+**Ruled out:** a test fixture without `oxplow-bundled` saves nothing (0.67 s
+against 0.64 s a boot: the cost is core and foundation). Caching parsed shipped
+extensions per process is unsound: `Extension.path` is that project's store
+folder. Hard-linking the store copy would make the checkout read-only, since a
+deployment's files are chmodded.
+
 ## Core's vocabulary is built once per process (2026-10-07)
 
 Building a test's `Services` had crept back to ~0.3 s, and `oxplow-app`'s

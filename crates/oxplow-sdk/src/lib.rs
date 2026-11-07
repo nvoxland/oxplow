@@ -1221,10 +1221,21 @@ pub async fn check(
         ),
         _ => None,
     };
+    // What a deploy would refuse (a symlink, a stray `node_modules`).
+    let source = oxplow_config::extension_settings(root).source(root, name);
+    let mut errors = extension.errors.clone();
+    if source.join("extension.yaml").is_file() {
+        if let Err(why) = oxplow_app::extension::extension_store::source_size(&source) {
+            errors.push(Diagnostic::error(
+                "extension.source_refused",
+                why.to_string(),
+            ));
+        }
+    }
     Ok(CheckReport {
         name: name.to_string(),
-        ok: extension.errors.is_empty(),
-        errors: extension.errors.clone(),
+        ok: errors.is_empty(),
+        errors,
         root: extensions::source_root(root, name).unwrap_or_else(|| extension.root().to_string()),
         warnings: {
             let mut warnings = extension.warnings.clone();
@@ -1910,6 +1921,37 @@ mod tests {
             .await,
             Err(SdkError::NotFound(_))
         ));
+    }
+
+    /// What a deploy would refuse, `check` says first: its source is no
+    /// source a deployment can be copied from.
+    #[tokio::test]
+    async fn check_reports_a_source_a_deploy_would_refuse() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/team/extension.yaml",
+            "manifest: 2\nname: team\nintent:\n  purpose: x\n  examples: [{ name: a }]\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/team/node_modules/dep/index.js",
+            "dep",
+        );
+        let report = check(
+            dir.path(),
+            "team",
+            &ExtensionCatalog::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!report.ok);
+        let text = render_findings(&report, Format::Text);
+        assert!(text.contains("`node_modules`"), "{text}");
+        assert!(text.contains("build.exclude"), "{text}");
     }
 
     /// `check` prints where each effect that names an `after:` runs.

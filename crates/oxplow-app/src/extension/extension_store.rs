@@ -253,6 +253,7 @@ pub(crate) fn shipped_files(source: &Path) -> std::io::Result<Vec<(String, Vec<u
 /// order, without dot entries or the `skip` folders (relative paths).
 /// Symlinks are refused: a deployment is a copy of files, not of what they
 /// point at.
+/// So is a `node_modules` no `skip` names ([`super::stray_folder`]).
 fn source_files(source: &Path, skip: &[&str]) -> std::io::Result<Vec<(String, PathBuf)>> {
     fn walk(
         dir: &Path,
@@ -281,6 +282,9 @@ fn source_files(source: &Path, skip: &[&str]) -> std::io::Result<Vec<(String, Pa
                 )));
             }
             if kind.is_dir() {
+                if let Some(why) = super::stray_folder::refusal(&rel) {
+                    return Err(std::io::Error::other(why));
+                }
                 walk(&entry.path(), &rel, skip, out)?;
             } else {
                 out.push((rel, entry.path()));
@@ -566,6 +570,37 @@ mod tests {
         std::os::unix::fs::symlink("/etc/hosts", source.path().join("hosts")).unwrap();
         let err = source_hash(source.path()).unwrap_err();
         assert!(err.to_string().contains("symlink"), "{err}");
+    }
+
+    /// `node_modules` is a build's tools, not what an extension is: one left
+    /// in a source would be copied into every deployment and, for one that
+    /// ships, into every project's store at every start.
+    #[test]
+    fn a_source_with_an_undeclared_node_modules_is_refused() {
+        let source = tempfile::tempdir().unwrap();
+        write(source.path(), "extension.yaml", "name: x\n");
+        write(source.path(), "web/node_modules/dep/index.js", "dep");
+        for err in [
+            source_hash(source.path()).unwrap_err(),
+            shipped_files(source.path()).unwrap_err(),
+        ] {
+            assert!(err.to_string().contains("web/node_modules"), "{err}");
+            assert!(err.to_string().contains("build.exclude"), "{err}");
+        }
+        write(
+            source.path(),
+            "extension.yaml",
+            "name: x\nbuild: { exclude: [web/node_modules] }\n",
+        );
+        source_hash(source.path()).unwrap();
+        assert_eq!(
+            shipped_files(source.path())
+                .unwrap()
+                .into_iter()
+                .map(|(rel, _)| rel)
+                .collect::<Vec<_>>(),
+            ["extension.yaml"]
+        );
     }
 
     #[test]
