@@ -212,7 +212,8 @@ listing (the `new-session-earlier` page, oxplow-foundation's, over
 `v_agent_session` and `v_agent_conversation`) merges the
 stream's closed oxplow sessions with every harness's saved conversations
 for the worktree (`harness_conversations`, what `v_agent_conversation`
-reads; each harness is asked at once, one
+reads through `Services::saved_conversations`, whose stand-in an
+`oxplow extension test` host uses instead of the machine; each harness is asked at once, one
 that fails or answers `Unavailable` becomes a row with its reason and the
 rest still list), on (harness, native id), newest activity first, and
 decides each row's action itself: **reopen** (this thread's session a
@@ -231,6 +232,7 @@ Nothing is adopted until a person picks it. The page filters in the client
 (title, prompts, thread, agent; ↑/↓, Enter, Escape clears the filter).
 A closed session's ref no longer opens nothing: it opens the
 `session-transcript` page, which has a **Reopen** action.
+The rows are tested by foundation's `new-session-earlier-*` fixtures.
 
 **Read-only session lookup (tsk139).** `lookup_terminal_session({ uri })`
 (core in `crates/oxplow-rpc/src/commands/terminal.rs`; Tauri shim +

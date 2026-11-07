@@ -747,6 +747,89 @@ expect:
     assert!(report.ok, "{:?}", report.errors);
 }
 
+/// `observe: { conversation }` is a conversation a harness saved, as it
+/// lists it; `unavailable` is a harness that can't list. A test's oxplow
+/// lists only those, never the machine's: a harness given nothing lists
+/// nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_observes_saved_conversations() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+    write(
+            dir.path(),
+            ".oxplow/extensions/notes/fixtures/basic.yaml",
+            "given:
+  - observe: { conversation: { harness: claude, id: c1, title: The parser, first_prompt: fix it, updated_at: \"2026-10-10T10:05:00Z\", size_bytes: 300 } }
+  - observe: { conversation: { harness: claude, id: c2 } }
+  - observe: { conversation: { harness: codex, unavailable: the daemon isn't running } }
+when:
+  sql: SELECT harness, native_id, title, first_prompt, updated_at, size_bytes, problem FROM v_agent_conversation ORDER BY harness, native_id
+expect:
+  rows:
+    - { harness: claude, native_id: c1, title: The parser, first_prompt: fix it, updated_at: \"2026-10-10T10:05:00.000000Z\", size_bytes: 300, problem: null }
+    - { harness: claude, native_id: c2, title: null }
+    - { harness: codex, native_id: null, problem: \"$any\" }
+",
+        );
+    let report = test_extension(dir.path(), "notes", false).await.unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+}
+
+/// A conversation of a harness the test's oxplow doesn't have is refused,
+/// naming the ones it has.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_conversation_names_a_registered_harness() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+    write(
+        dir.path(),
+        ".oxplow/extensions/notes/fixtures/basic.yaml",
+        "given:
+  - observe: { conversation: { harness: nope, id: c1 } }
+when:
+  sql: SELECT 1 AS one
+expect:
+  rows: [{ one: 1 }]
+",
+    );
+    let report = test_extension(dir.path(), "notes", false).await.unwrap();
+    assert!(!report.ok);
+    let errors = format!("{:?}", report.errors);
+    assert!(
+        errors.contains("nope") && errors.contains("claude"),
+        "{errors}"
+    );
+}
+
+/// A turn's session is bound to the conversation the hooks name:
+/// `conversation` (default `fixture`), or none with `conversation: null`.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_given_turn_names_its_conversation_or_none() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
+    write(
+        dir.path(),
+        ".oxplow/extensions/notes/fixtures/basic.yaml",
+        "given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: a }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: b }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: c }
+  - observe: { turn: { session: $a.id } }
+  - observe: { turn: { session: $b.id, conversation: c-7 } }
+  - observe: { turn: { session: $c.id, conversation: null } }
+when:
+  sql: SELECT id, resume_session_id FROM v_agent_session ORDER BY id
+expect:
+  rows:
+    - { id: 1, resume_session_id: fixture }
+    - { id: 2, resume_session_id: c-7 }
+    - { id: 3, resume_session_id: \"\" }
+",
+    );
+    let report = test_extension(dir.path(), "notes", false).await.unwrap();
+    assert!(report.ok, "{:?}", report.errors);
+}
+
 /// A test's oxplow has only what is declared on: the required
 /// foundation, the extension tested and what it requires. Oxplow's own
 /// pages run complete without the default extensions adding to them.

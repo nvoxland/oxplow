@@ -60,8 +60,6 @@ pub mod daemon_supervisor;
 pub mod datasets_changed;
 pub mod diagnostics;
 pub mod duplication_scan;
-#[cfg(test)]
-mod earlier_sessions_tests;
 pub mod effect_triggers;
 pub mod effective_config;
 pub mod effects;
@@ -139,6 +137,7 @@ pub mod ref_resolver;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;
+pub mod saved_conversations;
 pub mod scope_calls;
 #[cfg(test)]
 mod secret_values_tests;
@@ -552,6 +551,9 @@ pub struct Services {
     pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    /// Where the harnesses' saved conversations are read: the machine's,
+    /// or a throwaway's stand-in (`saved_conversations`).
+    pub saved_conversations: Arc<saved_conversations::SavedConversations>,
     /// Each agent session's bearer: who a hook, an export or an MCP call
     /// comes from (`.context/agent-model.md` "Caller identity").
     pub session_auth: Arc<session_auth::SessionAuth>,
@@ -1251,6 +1253,7 @@ impl Services {
                 )
             })
         });
+        let saved_conversations = Arc::new(saved_conversations::SavedConversations::default());
         let services_slot = commands::util::ServicesSlot::default();
         // The live datasets (`live_datasets`) read these when a query names them.
         sql.live_datasets().bind(live_datasets::LiveSources {
@@ -1268,6 +1271,7 @@ impl Services {
             streams: stream_store.clone(),
             harnesses: harnesses.clone(),
             vcs: vcs.clone(),
+            saved_conversations: saved_conversations.clone(),
             services: services_slot.clone(),
         });
         let extension_secrets = Arc::new(extension::extension_secrets::ExtensionSecrets::new(
@@ -1906,6 +1910,7 @@ impl Services {
             commands,
             work_items,
             harnesses,
+            saved_conversations,
             session_auth,
             capabilities,
             effort_policies,

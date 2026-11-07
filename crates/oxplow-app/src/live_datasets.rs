@@ -403,6 +403,8 @@ pub struct LiveSources {
     pub workspace_files: Arc<crate::workspace_files::WorkspaceFiles>,
     pub streams: Arc<dyn oxplow_domain::stores::StreamStore>,
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
+    /// Where each harness's saved conversations are read.
+    pub saved_conversations: Arc<crate::saved_conversations::SavedConversations>,
     pub vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     /// The services, once built (`v_extension_change` reviews with them).
     pub services: crate::commands::util::ServicesSlot,
@@ -930,7 +932,7 @@ impl LiveSources {
             async move {
                 (
                     h.id().to_string(),
-                    harness_conversations(h.as_ref(), stream).await,
+                    self.saved_conversations.list(h.as_ref(), stream).await,
                 )
             }
         }))

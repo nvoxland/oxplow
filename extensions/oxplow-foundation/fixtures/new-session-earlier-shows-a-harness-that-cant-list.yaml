@@ -1,0 +1,13 @@
+# A harness that can't list its saved conversations is a line on New Session
+# saying why, with nothing to take; the other harnesses' rows still come, and
+# come first.
+given:
+  - observe: { conversation: { harness: codex, unavailable: the daemon isn't running } }
+  - observe: { conversation: { harness: claude, id: c1, updated_at: "2026-10-10T10:05:00Z" } }
+when: { page: oxplow-foundation/new-session, params: { stream_id: 1, thread_id: 1 } }
+expect:
+  loaders:
+    earlier:
+      rows:
+        - { harness: claude, conversation: c1, can_resume: 1 }
+        - { harness: codex, label: "codex couldn't list its saved sessions: the daemon isn't running", note: unavailable, can_resume: 0, can_reopen: 0, tone: muted }

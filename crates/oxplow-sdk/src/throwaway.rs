@@ -6,8 +6,10 @@
 //! `check` asks for a command registry when no oxplow is running.
 //!
 //! It never touches the project's own data: its database is in memory, its
-//! keychain is in memory, its global config is under its own folder, and
-//! the environment its programs see is the one it is given. Model calls go
+//! keychain is in memory, its global config is under its own folder, its
+//! harnesses' saved conversations are only those a fixture gives
+//! (`observe: { conversation }`), and the environment its programs see is
+//! the one it is given. Model calls go
 //! to a fixture model answering from the example's replies — never a
 //! provider, never a paid call.
 
@@ -217,6 +219,8 @@ impl Host {
         )
         .await
         .map_err(|e| e.to_string())?;
+        // The machine's saved conversations aren't the test's data.
+        svc.saved_conversations.stand_in();
         // The copy's streams live in the copy's folder, not the one it was
         // copied from: a stage or a commit runs where its files are.
         {
@@ -272,6 +276,8 @@ impl Host {
         )
         .await
         .map_err(|e| e.to_string())?;
+        // The machine's saved conversations aren't the test's data.
+        svc.saved_conversations.stand_in();
         // Boot deploys nothing; the author's own test run deploys what it
         // copied, as they would, confirmed.
         let mut deploys = Vec::new();

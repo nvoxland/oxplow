@@ -1,0 +1,34 @@
+# New Session's earlier sessions: each row says what taking it does, by how it
+# came to be, newest first. A session the person closed here and its
+# conversation are one row that reopens it; one closed in another thread, or
+# by its thread's close, or begun outside oxplow, has a conversation to
+# resume; one open here is a tab to show; one open in another thread is
+# nothing to take, so it comes last.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: elsewhere } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude, resume: c1 }, bind: c1 }
+  - { command: oxplow.agent_session.close, input: { session: $c1.id } }
+  - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: c2 }, bind: c2 }
+  - { command: oxplow.agent_session.close, input: { session: $c2.id } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude, resume: c3 } }
+  - { command: oxplow.thread.close, input: { thread: thr1 } }
+  - { command: oxplow.thread.reopen, input: { thread: thr1 } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude, resume: here } }
+  - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: there } }
+  - observe: { conversation: { harness: claude, id: c1, updated_at: "2026-10-10T10:06:00Z" } }
+  - observe: { conversation: { harness: claude, id: c2, updated_at: "2026-10-10T10:05:00Z" } }
+  - observe: { conversation: { harness: claude, id: c3, updated_at: "2026-10-10T10:04:00Z" } }
+  - observe: { conversation: { harness: claude, id: x1, title: about x1, updated_at: "2026-10-10T10:03:00Z" } }
+  - observe: { conversation: { harness: claude, id: here, updated_at: "2026-10-10T10:02:00Z" } }
+  - observe: { conversation: { harness: claude, id: there, updated_at: "2026-10-10T10:09:00Z" } }
+when: { page: oxplow-foundation/new-session, params: { stream_id: 1, thread_id: 1 } }
+expect:
+  loaders:
+    earlier:
+      rows:
+        - { conversation: c1, can_reopen: 1, can_resume: 0, note: closed here, session: "oxplow:oxplow/agent_session?id=ses1" }
+        - { conversation: c2, can_reopen: 0, can_resume: 1, note: from elsewhere }
+        - { conversation: c3, can_reopen: 0, can_resume: 1 }
+        - { conversation: x1, can_resume: 1, session: null, label: about x1, note: not started in oxplow }
+        - { conversation: here, can_reopen: 0, can_resume: 0, session_uri: $any, note: open in this thread }
+        - { conversation: there, can_reopen: 0, can_resume: 0, session_uri: null, tone: muted }

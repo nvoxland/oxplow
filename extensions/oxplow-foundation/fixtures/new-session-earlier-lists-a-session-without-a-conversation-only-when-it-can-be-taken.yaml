@@ -1,0 +1,34 @@
+# A session's own row on New Session, when its harness lists no conversation
+# for it: a closed session that never started anything isn't an earlier
+# session, and one that ran turns is (named by its last prompt). One whose
+# conversation the harness didn't list keeps its id for a resume and the
+# person's title. A closed one no one can take (another thread's, with turns
+# but no conversation) is left out. One open here is a row to show, and one
+# open elsewhere is listed only beside its conversation.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: elsewhere } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: idle }
+  - { command: oxplow.agent_session.close, input: { session: $idle.id } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: used }
+  - observe: { turn: { session: $used.id, prompt: first, conversation: null } }
+  - observe: { turn: { session: $used.id, prompt: second, conversation: null } }
+  - { command: oxplow.agent_session.close, input: { session: $used.id } }
+  - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: native-9 }, bind: unlisted }
+  - { command: oxplow.agent_session.rename, input: { session: $unlisted.id, title: The parser } }
+  - { command: oxplow.agent_session.close, input: { session: $unlisted.id } }
+  - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude }, bind: nothing }
+  - observe: { turn: { thread: thr2, session: $nothing.id, prompt: hello, conversation: null } }
+  - { command: oxplow.agent_session.close, input: { session: $nothing.id } }
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude } }
+  - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: there } }
+  - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: busy } }
+  - observe: { conversation: { harness: claude, id: busy, updated_at: "2026-10-10T10:05:00Z" } }
+when: { page: oxplow-foundation/new-session, params: { stream_id: 1, thread_id: 1 } }
+expect:
+  loaders:
+    earlier:
+      rows:
+        - { label: $any, session_uri: "oxplow:oxplow/agent_session?id=ses5" }
+        - { label: The parser, conversation: native-9, can_resume: 1 }
+        - { label: second, turns: 2, can_reopen: 1, session: "oxplow:oxplow/agent_session?id=ses2" }
+        - { conversation: busy, can_reopen: 0, can_resume: 0, tone: muted }

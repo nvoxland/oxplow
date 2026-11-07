@@ -77,9 +77,10 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "token_usage" => observe_token_usage(host, body).await,
         "hint" => observe_hint(host, body).await,
         "nudge" => observe_nudge(host, body).await,
+        "conversation" => observe_conversation(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint` or `nudge`"
+                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
             ))
         }
     }?;
@@ -695,6 +696,63 @@ pub(super) async fn observe_refs(host: &Host, body: &Value) -> Result<(), String
 /// `visit: { page, kind?, label?, thread?, duration_ms? }`: a page the person
 /// opened (`page` its ref, `kind` its page kind, `page` by default), recorded
 /// as the shell's `record_page_visit` does (`PageVisitStore::record`).
+/// `conversation: { harness, id, title?, first_prompt?, started_at?,
+/// updated_at?, size_bytes?, parent? }`: a conversation `harness` saved, as it
+/// lists it in `v_agent_conversation`; `{ harness, unavailable: <why> }` is
+/// one that can't list. A test's oxplow lists only these
+/// (`SavedConversations::stand_in`).
+pub(super) async fn observe_conversation(host: &Host, body: &Value) -> Result<(), String> {
+    const KEYS: [&str; 9] = [
+        "harness",
+        "id",
+        "title",
+        "first_prompt",
+        "started_at",
+        "updated_at",
+        "size_bytes",
+        "parent",
+        "unavailable",
+    ];
+    for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
+        if !KEYS.contains(&key.as_str()) {
+            return Err(format!(
+                "`conversation.{key}` — fix: one of {}",
+                KEYS.map(|k| format!("`{k}`")).join(", ")
+            ));
+        }
+    }
+    let text = |key: &str| body.get(key).and_then(Value::as_str).map(str::to_string);
+    let harness = text("harness").ok_or("`conversation.harness` is the harness that saved it")?;
+    host.svc
+        .harnesses
+        .get(&harness)
+        .map_err(|e| format!("`conversation.harness`: {e}"))?;
+    let saved = &host.svc.saved_conversations;
+    if let Some(why) = text("unavailable") {
+        saved.unavailable(&harness, &why);
+        return Ok(());
+    }
+    let time = |key: &str| match text(key) {
+        Some(t) => oxplow_domain::Timestamp::parse(&t)
+            .map(Some)
+            .map_err(|e| format!("`conversation.{key}`: {e}")),
+        None => Ok(None),
+    };
+    saved.give(
+        &harness,
+        oxplow_domain::agent::harness::NativeConversation {
+            id: text("id").ok_or("`conversation.id` is its id, what a resume names")?,
+            title: text("title"),
+            first_prompt: text("first_prompt"),
+            started_at: time("started_at")?,
+            updated_at: time("updated_at")?,
+            size_bytes: body.get("size_bytes").and_then(Value::as_u64),
+            parent: text("parent"),
+        },
+    );
+    Ok(())
+}
+
 pub(super) async fn observe_visit(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_db::analytics_stores::PageVisitStore as _;
     let text = |key: &str| body.get(key).and_then(Value::as_str);
@@ -1031,11 +1089,12 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             "session",
             "subagent",
             "peer",
+            "conversation",
         ]
         .contains(&key.as_str())
         {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent` or `peer`"
+                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer` or `conversation`"
             ));
         }
     }
@@ -1049,6 +1108,17 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         ),
         None => None,
     };
+    // The conversation the hooks name, which the session is bound to; none
+    // with `conversation: null`.
+    let conversation = match body.get("conversation") {
+        None => Some("fixture".to_string()),
+        Some(Value::Null) => None,
+        Some(c) => Some(
+            c.as_str()
+                .ok_or("`turn.conversation` is the harness's id for it, or null")?
+                .to_string(),
+        ),
+    };
     let envelope = |kind: HookKind, payload: Value| HookEnvelope {
         session_title: None,
         turn_run: None,
@@ -1056,7 +1126,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         thread_id: Some(thread),
         stream_id: None,
         agent_session_id: session,
-        session_id: Some("fixture".into()),
+        session_id: conversation.clone(),
         payload_json: payload.to_string(),
         prompt: None,
         decision: None,

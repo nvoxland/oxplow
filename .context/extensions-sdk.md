@@ -513,10 +513,17 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
   `run` (`extension_run_store::record_tx`; `days_ago` through
   `RunContext::began_at`), `health` (`disable_tx`), `token_usage`, `hint`
-  and `nudge` (their stores), a `project:` given (keys of
+  and `nudge` (their stores), `conversation` (a harness's saved
+  conversation as `v_agent_conversation` lists it, `{ harness, id, title?,
+  first_prompt?, started_at?, updated_at?, size_bytes?, parent? }`, or `{
+  harness, unavailable: <why> }`: `SavedConversations`, whose stand-in a
+  throwaway turns on at boot, so a fixture never reads the machine's
+  conversations or runs its `codex`; a harness given nothing lists nothing),
+  a `project:` given (keys of
   `.oxplow/project.yaml`, then `reload_config_from_disk`), and a `turn` that
-  also takes `thread`, `session`, `prompt: null` + `subagent` (a hand-back)
-  and `pre: true` on a tool; none can set the time of a hook (a tool call
+  also takes `thread`, `session`, `conversation` (what the hooks name and the
+  session is bound to: default `fixture`, `null` for none), `prompt: null` +
+  `subagent` (a hand-back) and `pre: true` on a tool; none can set the time of a hook (a tool call
   or a turn is as old as the run), only a `run`'s `days_ago`,
   `analyze` (`change_analysis::ensure_change`: a working or commit change
   analyzed to the end; real files come from `turn.write` and real commits from
