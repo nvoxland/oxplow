@@ -278,7 +278,10 @@ digits and `_`, never a dataset's (`v_*`, `m_*`).
   of objects (a row each), else one `value` row; `items: <field>` takes a
   list inside the result as the rows.
 - `page`: another page's loader (`{ page, loader, params }`). Pages nest 8
-  deep (`MAX_DEPTH`).
+  deep (`MAX_DEPTH`). It may name another extension's page or query
+  (`<ext>/<slug>`): a rule several pages share lives once, as a query, and
+  each reads it — foundation's `thread-bookmarks` (the bookmarks a thread
+  sees) is read by its Go To page and by oxplow-bundled's Go To panel.
 - `rows`: inline rows, the first row's keys the columns.
 - `parse`: one text as rows (`pages/parse.rs`): `{ parse: csv | tsv | json
   | yaml, text: <arg> }`, the text an arg (`{ from: content.text }` for the

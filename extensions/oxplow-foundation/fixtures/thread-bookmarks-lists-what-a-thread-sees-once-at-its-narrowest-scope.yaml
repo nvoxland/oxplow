@@ -1,0 +1,23 @@
+# The bookmarks a thread sees: its own, its stream's and the project's, a
+# page once, at the narrowest scope it is bookmarked at, newest first.
+# Go To and the rail's Go To panel both read this query.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Helper } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=alerts", page_kind: alerts, label: Alerts, scope: project, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, scope: stream, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=a.rs", page_kind: file, label: a.rs, scope: project, thread: thr1 } }
+  - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=a.rs", page_kind: file, label: a.rs, scope: thread, thread: thr1 } }
+when: { query: 'thread-bookmarks', params: { thread_id: 1 } }
+expect:
+  rows:
+    - { title: a.rs, page_kind: file, uri: "oxplow:oxplow/file?path=a.rs", scope: thread, thread: thr1 }
+    - { title: Git, page_kind: git-dashboard, uri: "oxplow:oxplow/page?page=git-dashboard", scope: stream, thread: thr1 }
+    - { title: Alerts, page_kind: alerts, uri: "oxplow:oxplow/page?page=alerts", scope: project, thread: thr1 }
+steps:
+  # Another thread of the stream: not thr1's own, so a.rs is the project's.
+  - when: { query: 'thread-bookmarks', params: { thread_id: 2 } }
+    expect:
+      rows:
+        - { title: a.rs, scope: project, thread: thr2 }
+        - { title: Git, scope: stream, thread: thr2 }
+        - { title: Alerts, scope: project, thread: thr2 }
