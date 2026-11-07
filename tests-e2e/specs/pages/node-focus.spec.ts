@@ -16,7 +16,7 @@ view:
 `;
 
 test("opening a page URI with #node= scrolls to the node and marks it", async ({ page, daemon }) => {
-  await page.goto("/");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
   const made = await run<{ result: { uri: string; opened: boolean; why?: string } }>(daemon, "oxplow.page.show", { spec });
   expect(made.result.opened, made.result.why).toBe(true);
