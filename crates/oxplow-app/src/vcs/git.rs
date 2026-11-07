@@ -282,6 +282,10 @@ impl CleanBaseline for GitBaseline {
             .map(|oid| ObjectId(oid.to_string()))
     }
 
+    fn head_object(&self, path: &str) -> Option<ObjectId> {
+        self.0.head_oid(path).map(|oid| ObjectId(oid.to_string()))
+    }
+
     fn candidates(&self) -> usize {
         self.0.candidate_count()
     }

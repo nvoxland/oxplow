@@ -1208,8 +1208,9 @@ Cleanup runs at runtime startup and again once every 24 hours via
 tree, but a worktree stream holds only the files it touched. So in its sweeps and
 rescans (`with_sparse_history`, set from the stream's kind), a file with no row that
 is clean against HEAD records nothing. It has no history here, and nothing changed.
-A row for each would be its whole tree "added" to an open effort. A file with a row,
-an offline edit and a new file record as anywhere else.
+A row for each would be its whole tree "added" to an open effort. When git's stat can't vouch for it (every file of a fresh worktree was written in the
+same second as its index), the bytes are compared with HEAD first. A file with a
+row, an offline edit and a new file record as anywhere else.
 
 **A take costs what changed.** It reads the latest row of only the paths it
 looks at (`latest_stat_for_paths`), and a rescan of a directory only those under

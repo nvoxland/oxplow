@@ -257,6 +257,11 @@ impl GitCleanBaseline {
     }
 
     /// Number of git-back candidate paths (clean-in-index tracked files).
+    /// `rel`'s HEAD blob OID, whatever is on disk now.
+    pub fn head_oid(&self, rel: &str) -> Option<&str> {
+        self.head_oids.get(rel).map(String::as_str)
+    }
+
     pub fn candidate_count(&self) -> usize {
         self.head_oids.len()
     }

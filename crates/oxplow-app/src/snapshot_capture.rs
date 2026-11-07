@@ -1352,6 +1352,16 @@ impl SnapshotCaptureService {
                         // Genuinely dirty/new → read + hash + blob.
                         let bytes = std::fs::read(&path).ok()?;
                         bytes_read.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+                        // Git's stat couldn't vouch for it, as for every file
+                        // of a fresh worktree. With no history here, the same
+                        // bytes as HEAD are no change either.
+                        if sparse && prior_storage.is_none() {
+                            let rel = path.strip_prefix(&project_dir).unwrap_or(&path);
+                            let head = clean_baseline.head_object(&rel.to_string_lossy());
+                            if head.is_some_and(|head| head == objects.id_of(&bytes)) {
+                                return None;
+                            }
+                        }
                         let hash = BlobStore::hash(&bytes);
                         let prior = prior_storage
                             .as_ref()
@@ -2123,6 +2133,30 @@ mod tests {
         let latest = store.latest_stat_per_path(TEST_STREAM).await.unwrap();
         assert_eq!(latest["a.txt"].storage, SnapshotStorage::Git, "clean again");
         assert!(latest["gone.txt"].storage.is_deleted());
+    }
+
+    /// A file git's stat can't vouch for (written in the same second as the
+    /// index, as all of a fresh worktree's are; or rewritten with the same bytes)
+    /// is compared with HEAD before it counts as a change.
+    #[tokio::test]
+    async fn a_sparse_sweep_records_nothing_for_the_same_bytes_as_head() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        init_git_repo_with(
+            root,
+            &[("rewritten.txt", "same\n"), ("edited.txt", "old\n")],
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(root.join("rewritten.txt"), "same\n").unwrap();
+        std::fs::write(root.join("edited.txt"), "new\n").unwrap();
+        let (svc, store) = sparse_svc_for(root).await;
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let latest = store.latest_stat_per_path(TEST_STREAM).await.unwrap();
+        assert!(!latest.contains_key("rewritten.txt"), "{:?}", latest.keys());
+        assert!(latest.contains_key("edited.txt"));
     }
 
     /// The primary stream keeps its whole baseline.

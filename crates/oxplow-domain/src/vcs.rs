@@ -314,6 +314,9 @@ pub trait CleanBaseline: Send + Sync {
     /// in the head, edited, or touched too close to the VCS's last stat
     /// to tell).
     fn clean_object(&self, path: &str, size: u64, mtime: (i64, u32)) -> Option<ObjectId>;
+    /// The object `path` is in the head, whatever is on disk now; `None`
+    /// when it isn't in the head, or is staged differently.
+    fn head_object(&self, path: &str) -> Option<ObjectId>;
     /// How many files it can vouch for at most.
     fn candidates(&self) -> usize;
 }
