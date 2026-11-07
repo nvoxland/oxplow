@@ -10,10 +10,11 @@ import { installExample, ipc, run, until, type Daemon } from "../../support/daem
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-// The triage example (`examples/extensions/triage`): its `todos` collector
-// sorts the code's TODO comments with a model, and the board draws the
-// decisions made on them, in Chromium and WebKit. The model is a TypeSafe (`typesafe` kind)
-// provider at a stand-in for Jev's API here, which decides offline.
+// The triage example (`examples/extensions/triage`): the one thing only the
+// app's shell shows is that a decision survives a reload of the board, in
+// Chromium and WebKit. What the board draws and does, and the collector's sort
+// by a model, are the example's fixtures'. The model is a TypeSafe (`typesafe`
+// kind) provider at a stand-in for Jev's API here, which decides offline.
 
 type JevQuestion = { type: string; criteria?: Record<string, null> };
 
@@ -78,7 +79,7 @@ async function decisions(daemon: Daemon): Promise<Record<string, string>> {
   return decided;
 }
 
-test("TODOs are sorted by the model, and the decisions made survive a reload on the board", async ({ page, daemon }) => {
+test("the decisions made survive a reload on the board", async ({ page, daemon }) => {
   const model = await jev();
   try {
     await install(daemon);
@@ -99,22 +100,15 @@ test("TODOs are sorted by the model, and the decisions made survive a reload on 
     );
     await run(daemon, "oxplow.collector.sync", { collector: "triage/todos" });
     await until("the TODOs to be sorted", 30_000, async () => (await facts(daemon)).length === 2);
-    expect(await facts(daemon)).toEqual([
-      ["src/lib.rs", 1, "bug"],
-      ["src/lib.rs", 3, "cleanup"],
-    ]);
     await page.goto("/");
     await openFromLauncher(page, "TODO Board");
     const board = page.getByTestId("center-tab-body-oxplow:oxplow/page?page=triage/todo-board");
     const frame = board.frameLocator('[data-testid="custom-component-frame"]');
     const card = (line: number) => frame.locator(".card", { hasText: `src/lib.rs:${line}` });
-    await expect(frame.locator(".column", { hasText: "bug" }).locator(".card")).toHaveCount(1);
     await expect(card(3)).toBeVisible();
-    await expect(frame.locator("#status")).toHaveText("");
 
-    // Decisions from the board's card form, and from the `todos` page's
-    // `Decide…` row, are the example's fixtures'; here they are made as the
-    // command, so the reload has both.
+    // Made as the command (the card form is the example's fixture's), so the
+    // reload has both.
     await run(daemon, "triage.todos.decide", { path: "src/lib.rs", line: 1, decision: "fix-now" });
     await run(daemon, "triage.todos.decide", { path: "src/lib.rs", line: 3, decision: "wontfix" });
     await until("the decisions to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
