@@ -480,6 +480,65 @@ mod tests {
         assert!(saw, "expected StreamOrphaned");
     }
 
+    /// What changed in a worktree stream while oxplow was off is in a snapshot
+    /// once it has swept; a clean file isn't; and an effort can't start on that
+    /// stream until then.
+    #[tokio::test]
+    async fn every_stream_sweeps_once_at_start_and_its_gate_holds_until_then() {
+        let rig = rig().await;
+        let repo = git2::Repository::open(&rig.project).unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("user.name", "t").unwrap();
+        config.set_str("user.email", "t@example.com").unwrap();
+        std::fs::write(rig.project.join("clean.txt"), "c\n").unwrap();
+        std::fs::write(rig.project.join("edited.txt"), "old\n").unwrap();
+        crate::test_fixtures::commit_all(&rig.project, "files");
+        let captures = rig.registry.inner.captures.clone();
+        let streams = rig.svc.list_streams().await.unwrap();
+        let primary = captures.register(&streams[0]).unwrap();
+        captures.set_primary(streams[0].id);
+        let side = rig
+            .svc
+            .create_worktree("side", "Side", "side", "HEAD")
+            .await
+            .unwrap();
+        let capture = captures.register(&side).unwrap();
+        // While oxplow was off.
+        let tree = Path::new(&side.worktree_path);
+        std::fs::write(tree.join("edited.txt"), "changed while off\n").unwrap();
+        std::fs::write(tree.join("new.txt"), "new\n").unwrap();
+
+        for svc in [&primary, &capture] {
+            svc.begin_initial_sweep();
+        }
+        assert!(
+            timeout(Duration::from_millis(50), capture.await_initial_ready())
+                .await
+                .is_err(),
+            "the gate holds until its own sweep ends"
+        );
+        crate::boot::sweep_all(
+            &captures,
+            &crate::background_task::BackgroundTaskStore::new(),
+        )
+        .await;
+        timeout(Duration::from_secs(5), capture.await_initial_ready())
+            .await
+            .expect("the gate opens");
+
+        let latest = capture.store().latest_stat_per_path(side.id).await.unwrap();
+        assert!(latest.contains_key("edited.txt"), "{:?}", latest.keys());
+        assert!(latest.contains_key("new.txt"));
+        assert!(!latest.contains_key("clean.txt"), "it has no history here");
+        // The primary's whole baseline, as ever.
+        let whole = primary
+            .store()
+            .latest_stat_per_path(streams[0].id)
+            .await
+            .unwrap();
+        assert!(whole.contains_key("clean.txt"));
+    }
+
     fn modified(path: &str) -> (PathBuf, WatchEventKind) {
         (PathBuf::from(path), WatchEventKind::Modified)
     }

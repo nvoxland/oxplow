@@ -15,6 +15,82 @@ use std::sync::Arc;
 use crate::background_task::{StartInput, UpdateInput};
 use crate::{BackgroundTaskKind, Services};
 
+/// Sweep each stream in turn, the primary first, and take a snapshot of what it
+/// finds. One at a time: a sweep reads the whole tree.
+pub(crate) async fn sweep_all(
+    captures: &crate::snapshot_capture_registry::SnapshotCaptureRegistry,
+    bts: &crate::background_task::BackgroundTaskStore,
+) {
+    let primary = captures.primary();
+    let others = captures
+        .list()
+        .into_iter()
+        .filter(|svc| !primary.as_ref().is_some_and(|p| Arc::ptr_eq(p, svc)));
+    for svc in primary.iter().cloned().chain(others) {
+        sweep_stream(&svc, bts).await;
+    }
+}
+
+/// Any file whose current content doesn't match the stream's latest snapshot
+/// row gets queued + captured now.
+async fn sweep_stream(
+    svc: &crate::snapshot_capture::SnapshotCaptureService,
+    bts: &crate::background_task::BackgroundTaskStore,
+) {
+    let task = bts.start(StartInput {
+        kind: BackgroundTaskKind::Snapshot,
+        label: "Scanning worktree for snapshot changes".into(),
+        ..Default::default()
+    });
+    let task_id = task.id.clone();
+    let hud_started = std::time::Instant::now();
+    match svc.enqueue_startup_diff().await {
+        Ok(0) => {
+            tracing::info!(
+                elapsed_ms = hud_started.elapsed().as_millis() as u64,
+                "startup snapshot HUD: nothing to capture",
+            );
+            bts.complete(&task_id, Some(serde_json::json!({"captured": 0})));
+        }
+        Ok(n) => {
+            tracing::info!(queued = n, "startup snapshot sweep: queued files");
+            bts.update(
+                &task_id,
+                UpdateInput {
+                    label: Some(format!("Capturing {n} changed files")),
+                    ..Default::default()
+                },
+            );
+            match svc
+                .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
+                .await
+            {
+                Ok(parent) => {
+                    tracing::info!(
+                        snapshot_id = ?parent,
+                        queued = n,
+                        elapsed_ms = hud_started.elapsed().as_millis() as u64,
+                        "startup snapshot HUD: complete",
+                    );
+                    bts.complete(&task_id, Some(serde_json::json!({"snapshotId": parent})))
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "startup snapshot sweep: capture failed");
+                    bts.fail(&task_id, e.to_string(), None);
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "startup snapshot sweep: walk failed");
+            bts.fail(&task_id, e.to_string(), None);
+        }
+    }
+    // Release the effort-start gate on every path — including failure. A
+    // failed sweep leaves a best-effort baseline; blocking efforts forever
+    // would be worse than a partial one.
+    svc.mark_initial_complete();
+}
+
 /// Run recovery + seed the primary stream, then spawn the standard
 /// background tasks (snapshot watchers + startup sweep + cleanup,
 /// comment cleanup, workspace + wiki + config watchers, diagnostics,
@@ -75,84 +151,27 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Startup sweep + cleanup loop operate on the primary stream's
-    // service. Each per-stream worktree has its own service via the
-    // registry; only the primary needs the sweep at boot.
+    // The cleanup loop below operates on the primary stream's service.
     let snapshot_svc = state
         .snapshot_captures
         .primary()
         .expect("primary snapshot capture registered at boot");
 
-    // Hold the effort-start gate closed until the initial sweep below
-    // completes, so an agent dispatched during the sweep can't open an
-    // effort whose start snapshot reflects a half-captured tree. Set
-    // synchronously here (before the spawn) so the gate is up the
-    // instant boot returns.
-    snapshot_svc.begin_initial_sweep();
-
-    // Startup sweep: any file whose current content doesn't match the
-    // latest snapshot row (or was never snapshotted) gets queued +
-    // captured now. Backfills changes that landed while the daemon
-    // wasn't running. Spawned off the boot path because hashing a
-    // large worktree can take a few seconds.
+    // Startup sweep: backfills changes that landed while the daemon wasn't
+    // running, on every stream. Off the boot path because hashing a large
+    // worktree can take a few seconds. Each stream's effort-start gate is up
+    // the instant boot returns, so an agent dispatched during the sweep can't
+    // open an effort whose start snapshot reflects a half-captured tree.
     {
-        let svc = snapshot_svc.clone();
+        let captures = state.snapshot_captures.clone();
+        for svc in captures.list() {
+            svc.begin_initial_sweep();
+        }
         let bts = state.background_tasks.clone();
-        let task = bts.start(StartInput {
-            kind: BackgroundTaskKind::Snapshot,
-            label: "Scanning worktree for snapshot changes".into(),
-            ..Default::default()
-        });
-        let task_id = task.id.clone();
         let mut watching = watching.clone();
         tokio::spawn(async move {
             let _ = watching.wait_for(|up| *up).await;
-            let hud_started = std::time::Instant::now();
-            match svc.enqueue_startup_diff().await {
-                Ok(0) => {
-                    tracing::info!(
-                        elapsed_ms = hud_started.elapsed().as_millis() as u64,
-                        "startup snapshot HUD: nothing to capture",
-                    );
-                    bts.complete(&task_id, Some(serde_json::json!({"captured": 0})));
-                }
-                Ok(n) => {
-                    tracing::info!(queued = n, "startup snapshot sweep: queued files");
-                    bts.update(
-                        &task_id,
-                        UpdateInput {
-                            label: Some(format!("Capturing {n} changed files")),
-                            ..Default::default()
-                        },
-                    );
-                    match svc
-                        .request_snapshot(oxplow_domain::snapshot::SnapshotTrigger::Startup)
-                        .await
-                    {
-                        Ok(parent) => {
-                            tracing::info!(
-                                snapshot_id = ?parent,
-                                queued = n,
-                                elapsed_ms = hud_started.elapsed().as_millis() as u64,
-                                "startup snapshot HUD: complete",
-                            );
-                            bts.complete(&task_id, Some(serde_json::json!({"snapshotId": parent})))
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "startup snapshot sweep: capture failed");
-                            bts.fail(&task_id, e.to_string(), None);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "startup snapshot sweep: walk failed");
-                    bts.fail(&task_id, e.to_string(), None);
-                }
-            }
-            // Release the effort-start gate on every path — including
-            // failure. A failed sweep leaves a best-effort baseline;
-            // blocking efforts forever would be worse than a partial one.
-            svc.mark_initial_complete();
+            sweep_all(&captures, &bts).await;
         });
     }
 

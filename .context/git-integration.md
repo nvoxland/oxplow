@@ -24,6 +24,12 @@ user-global metrics folder, outside every project.
 Boot starts the watches first. What reads the disk at boot (the startup sweep,
 the wiki scan) waits for them, so a change is in what it read or heard after.
 
+Every stream then sweeps, one at a time with the primary first (`boot::sweep_all`), so
+what changed in any worktree while oxplow was off is in a snapshot soon after start.
+Each stream's effort-start gate holds until its own sweep ends. A stream made after
+boot needs none: nothing can have changed while oxplow was off. A worktree stream's
+history is sparse, so its sweep records only real changes (`data-model.md`).
+
 ### Batches, and events as hints (the `FsWatcher` contract)
 
 **OS events are hints, not the record.** They come late, and macOS drops them
