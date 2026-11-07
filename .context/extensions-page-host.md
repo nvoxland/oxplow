@@ -291,12 +291,22 @@ the user guide is `docs/guide/pages.md`.
     load in `parse_panels`: a valid, unique id; pages that exist — body,
     badge, collapsed, count — a badge page with a `badge` or an `alert`,
     and a `stream` / `thread` scope's pages declaring `stream_id` /
-    `thread_id`). The nav binds those itself (`panelParams`: the stream's and
-    thread's row ids for the stream and thread it's shown for, re-run when
-    they change) rather than leaving the backend to infer the thread from
-    the selection, and runs every panel's pages from one owner
-    (`useExtensionPanelRuns`), each distinct page once per refresh whatever
-    roles it plays. The body renders compact; the badge's alert count shows
+    `thread_id`). **A panel is one thing, defined once in core**
+    (`crates/oxplow-app/src/pages/panels.rs`): which page each part runs
+    (`page_of`), with what (`part_request`: the scope's id from the view —
+    the stream and thread it's shown for, as every page takes them — and,
+    for the body only, the toggles in force), the toggles a body's choice
+    params give (`choices`: the viewer's pick while the body offers it, else
+    its default, else its first option), the header's count (`header_count`:
+    the count page's number, else a firing badge's count, else a badge's
+    value) and the alert. `run_panel` runs it whole (`PanelRun`, with
+    `panel_text` for an agent); a fixture's `when: { panel }` tests it that
+    way. The window runs each part live from one owner
+    (`useExtensionPanelRuns`) through `open_panel_part { panel, part,
+    choices }`, so it writes no param of its own; it reads a toggle's value
+    off the body's run (`params`), and its `pageCount` / `badgeCount` mirror
+    `header_count` over the live runs (a panel-level live run would retire
+    that mirror). The body renders compact; the badge's alert count shows
     on the panel, and the **Alerts** panel and page (the dock's bell) list
     every firing badge. oxplow-bundled's Waiting on You is a panel whose
     badge is its own page. A page dropped by `public_contracts` takes the

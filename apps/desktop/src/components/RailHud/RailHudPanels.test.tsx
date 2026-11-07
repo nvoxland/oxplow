@@ -73,7 +73,8 @@ test("a collapsed panel shows its collapsed page; its header counts the count pa
 });
 
 test("a body page's choice param is a header toggle; picking re-runs the body with it", async () => {
-  const { runs, opened } = fakePageRunsBy((key) => pageRun(key.page, key.params));
+  // As the daemon runs a panel's part: the body with the viewer's picks.
+  const { runs, opened } = fakePageRunsBy((key) => pageRun(key.page!, { ...key.params, ...(key.panel?.choices ?? {}) }));
   const store = createRememberedStore({ load: async () => [], save: async () => {} });
   const view = render(
     <RememberedContext.Provider value={store}>
@@ -85,7 +86,7 @@ test("a body page's choice param is a header toggle; picking re-runs the body wi
   const top = await waitFor(() => view.getByTestId("rail-panel-choice-mode-top"));
   expect(view.getByTestId("rail-panel-choice-mode-recent").getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(top);
-  await waitFor(() => expect(opened.some((o) => o.key.page === "x/body" && o.key.params.mode === "top")).toBe(true));
+  await waitFor(() => expect(opened.some((o) => o.key.page === "x/body" && o.key.panel?.choices.mode === "top")).toBe(true));
   await waitFor(() => expect(view.getByTestId("rail-panel-choice-mode-top").getAttribute("aria-pressed")).toBe("true"));
   // The pick is the panel's memory, not the browser's.
   expect(store.get(panelScope("x/w"), "choices")).toEqual({ mode: "top" });

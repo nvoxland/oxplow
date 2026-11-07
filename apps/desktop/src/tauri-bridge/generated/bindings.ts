@@ -186,6 +186,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	openPanelPart: (panel: string, part: PanelPart, choices: { [key in string]: string } | null, streamId: string | null, threadId: string | null, client: string) => typedError<OpenedRun_Serialize, IpcError_Serialize>(__TAURI_INVOKE("open_panel_part", { panel, part, choices, streamId, threadId, client })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	closePage: (runId: string) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("close_page", { runId })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -5146,6 +5151,9 @@ export type Page_Serialize = {
 	seeAlso: SeeAlsoDecl[],
 	origin: PageProvenance,
 };
+
+/**  One of a panel's parts. */
+export type PanelPart = "body" | "collapsed" | "count" | "badge";
 
 /**  One panel's place in the layout. */
 export type PanelPlacement = {

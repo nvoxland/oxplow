@@ -74,9 +74,11 @@ test("the body page drawn small, the badge page's alert as the count and an Aler
     </PanelRunsProvider>,
   );
   await waitFor(() => expect(view.getByTestId("rail-panel-body").textContent).toContain("body row"));
-  expect(opened.map((k) => [k.page, k.params])).toEqual([
-    ["z/body", { stream_id: 1 }],
-    ["z/badge", { stream_id: 1 }],
+  // Each part is the daemon's to bind (`open_panel_part`): the window names
+  // the panel and the part, never the stream's id.
+  expect(opened.map((k) => [k.page, k.panel, k.params, k.streamId])).toEqual([
+    ["z/body", { panel: "z/w", part: "body", choices: {} }, {}, "str1"],
+    ["z/badge", { panel: "z/w", part: "badge", choices: {} }, {}, "str1"],
   ]);
   await waitFor(() => expect(view.getByTestId("rail-section-toggle-ext:z/w").textContent).toContain("2"));
   expect(view.getByTestId("alerts").textContent).toBe("2 waiting@oxplow:oxplow/page?page=z/badge");

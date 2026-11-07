@@ -12,14 +12,27 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import { subscribeOxplowEvents, unwrapResult } from "./api.js";
 import { getUiClientId } from "./uiClientId.js";
-import { commands, type PageRun, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
+import { commands, type PageRun, type PanelPart, type RunSnapshot, type SqlCell } from "./tauri-bridge/generated/bindings.js";
 import { onRemoteReconnect } from "./tauri-bridge/transport.js";
 
+/** A left-nav panel's part, as the daemon runs it (`open_panel_part`,
+ *  `crates/oxplow-app/src/pages/panels.rs`): the daemon says which page and
+ *  with what — the scope's id from the view, the body's toggles from the
+ *  viewer's `choices`. */
+export interface PanelPartKey {
+  panel: string;
+  part: PanelPart;
+  choices: Record<string, string>;
+}
+
 /** What to run: a page by id (a deployed one, or a temp view,
- *  `temp/<id>`), or an inline page's YAML (a markdown block's). */
+ *  `temp/<id>`), an inline page's YAML (a markdown block's), or a panel's
+ *  part (`panel`; its `page` is the part's page, as the panel names it,
+ *  and its `params` empty: the daemon's). */
 export interface PageKey {
   page?: string;
   specYaml?: string;
+  panel?: PanelPartKey;
   params: Record<string, SqlCell>;
   streamId: string | null;
   threadId: string | null;
@@ -109,7 +122,8 @@ export function keyOf(key: PageKey): string {
   const params = Object.keys(key.params)
     .sort()
     .map((k) => [k, key.params[k]]);
-  return JSON.stringify([key.page ?? null, key.specYaml ?? null, params, key.streamId, key.threadId]);
+  const panel = key.panel ? [key.panel.panel, key.panel.part, Object.keys(key.panel.choices).sort().map((k) => [k, key.panel!.choices[k]])] : null;
+  return JSON.stringify([key.page ?? null, key.specYaml ?? null, params, key.streamId, key.threadId, panel]);
 }
 
 export function createPageRuns(transport: PageRunsTransport) {
@@ -420,14 +434,16 @@ export function daemonTransport(): PageRunsTransport {
   return {
     open: async (key) =>
       unwrapResult(
-        await commands.openPage(
-          key.page ?? null,
-          key.specYaml ?? null,
-          key.params,
-          key.streamId,
-          key.threadId,
-          getUiClientId(),
-        ),
+        key.panel
+          ? await commands.openPanelPart(key.panel.panel, key.panel.part, key.panel.choices, key.streamId, key.threadId, getUiClientId())
+          : await commands.openPage(
+              key.page ?? null,
+              key.specYaml ?? null,
+              key.params,
+              key.streamId,
+              key.threadId,
+              getUiClientId(),
+            ),
       ),
     close: async (runId) => {
       unwrapResult(await commands.closePage(runId));

@@ -232,6 +232,7 @@ pub const MANIFEST: &[Capability] = &[
     // A window's open page runs: it opens one, hears which loaders
     // changed and fetches them. An agent runs a page once (`run_page`).
     ui("open_page", "a window keeps a page run open to hear its changes"),
+    ui("open_panel_part", "a window keeps a left-nav panel's part open, the daemon saying which page it runs and with what"),
     ui("close_page", "a window drops a page run it no longer shows"),
     ui("set_page_params", "a pick, filter or switch in the page a window shows"),
     ui("rerun_page", "Refresh on the page a window shows"),

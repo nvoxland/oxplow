@@ -197,3 +197,39 @@ fn the_count_is_the_count_page_else_a_firing_badge_else_none() {
     assert_eq!(header_count(None, None, Some(7)), Some(7));
     assert_eq!(header_count(None, None, None), None);
 }
+
+/// What the window opens for each part: the body with the toggles in force
+/// (a pick it no longer offers is its default), every other part with no
+/// param of its own, and nothing for a part the panel hasn't.
+#[tokio::test]
+async fn a_part_request_names_its_page_and_only_the_body_takes_the_toggles() {
+    use crate::pages::runner::RunTarget;
+    let (_dir, svc) = project().await;
+    let things = find_panel(&svc, "acme/things").await.unwrap();
+    let ctx = ViewContext {
+        stream_id: Some(1),
+        thread_id: Some(1),
+        active: None,
+    };
+    let gone = BTreeMap::from([("mode".to_string(), "gone".to_string())]);
+    let body = part_request(&svc, &things, PanelPart::Body, ctx.clone(), &gone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(&body.target, RunTarget::Page(p) if p == "acme/body"));
+    assert_eq!(
+        body.params,
+        BTreeMap::from([("mode".to_string(), SqlCell::Text("few".into()))])
+    );
+    let count = part_request(&svc, &things, PanelPart::Count, ctx.clone(), &gone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(&count.target, RunTarget::Page(p) if p == "acme/n"));
+    assert!(count.params.is_empty());
+    let plain = find_panel(&svc, "acme/plain").await.unwrap();
+    assert!(part_request(&svc, &plain, PanelPart::Badge, ctx, &gone)
+        .await
+        .unwrap()
+        .is_none());
+}

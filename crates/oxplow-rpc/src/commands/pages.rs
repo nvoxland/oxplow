@@ -69,6 +69,30 @@ pub async fn open_page(
     Ok(OpenedRun { run_id, run })
 }
 
+/// Open `part` of left-nav panel `panel` (`<extension>/<panel>`) for
+/// `client`, as `open_page` does: the daemon says which page the part runs
+/// and with what (`oxplow_app::pages::panels::part_request` — the scope's
+/// id from the view, the body's toggles from the viewer's `choices`).
+#[allow(clippy::too_many_arguments)]
+pub async fn open_panel_part(
+    svc: &Services,
+    panel: String,
+    part: oxplow_app::pages::panels::PanelPart,
+    choices: Option<BTreeMap<String, String>>,
+    stream_id: Option<String>,
+    thread_id: Option<String>,
+    client: String,
+) -> Result<OpenedRun, IpcError> {
+    use oxplow_app::pages::panels;
+    let found = panels::find_panel(svc, &panel).await?;
+    let ctx = context(svc, stream_id.as_deref(), thread_id.as_deref()).await;
+    let req = panels::part_request(svc, &found, part, ctx, &choices.unwrap_or_default())
+        .await?
+        .ok_or_else(|| DomainError::Invalid(format!("panel `{panel}` has no {part:?} part")))?;
+    let (run_id, run) = svc.page_runs.open(svc, req, &client).await?;
+    Ok(OpenedRun { run_id, run })
+}
+
 pub async fn close_page(svc: &Services, run_id: String) -> Result<(), IpcError> {
     svc.page_runs.close(&run_id);
     Ok(())

@@ -151,22 +151,6 @@ pub async fn find_panel(svc: &crate::Services, id: &str) -> Result<ExtensionPane
     )))
 }
 
-async fn run_part(
-    svc: &crate::Services,
-    page: &str,
-    params: BTreeMap<String, SqlCell>,
-    ctx: &ViewContext,
-) -> Result<PageRun, DomainError> {
-    PageRunner::of(svc)
-        .run(RunRequest {
-            target: RunTarget::Page(page.into()),
-            params,
-            ctx: ctx.clone(),
-            viewer: Actor::Human,
-        })
-        .await
-}
-
 /// The params `part` runs with: the body takes the toggles' values in force;
 /// every part's scope id comes from the view.
 pub fn part_params(part: PanelPart, choices: &[PanelChoice]) -> BTreeMap<String, SqlCell> {
@@ -179,6 +163,44 @@ pub fn part_params(part: PanelPart, choices: &[PanelChoice]) -> BTreeMap<String,
     }
 }
 
+/// The body's toggles for the viewer's `picks`, read from its page.
+async fn body_choices(
+    svc: &crate::Services,
+    panel: &ExtensionPanel,
+    picks: &BTreeMap<String, String>,
+) -> Result<Vec<PanelChoice>, DomainError> {
+    let body = svc
+        .extension_catalog
+        .find_page(svc.worktrees.project_dir(), &panel.body)?;
+    Ok(choices(&body, picks))
+}
+
+/// What running `part` of `panel` for the view `ctx` is: its page, with
+/// [`part_params`]. `None` when the panel has no such part. The one way a
+/// part is run, by [`run_panel`] and by the window's live runs
+/// (`open_panel_part`).
+pub async fn part_request(
+    svc: &crate::Services,
+    panel: &ExtensionPanel,
+    part: PanelPart,
+    ctx: ViewContext,
+    picks: &BTreeMap<String, String>,
+) -> Result<Option<RunRequest>, DomainError> {
+    let Some(page) = page_of(panel, part) else {
+        return Ok(None);
+    };
+    let choices = match part {
+        PanelPart::Body => body_choices(svc, panel, picks).await?,
+        _ => Vec::new(),
+    };
+    Ok(Some(RunRequest {
+        target: RunTarget::Page(page.into()),
+        params: part_params(part, &choices),
+        ctx,
+        viewer: Actor::Human,
+    }))
+}
+
 /// Run panel `id` for the view `ctx`, the body with the viewer's `picks`.
 pub async fn run_panel(
     svc: &crate::Services,
@@ -187,17 +209,13 @@ pub async fn run_panel(
     picks: &BTreeMap<String, String>,
 ) -> Result<PanelRun, DomainError> {
     let panel = find_panel(svc, id).await?;
-    let body_page = svc
-        .extension_catalog
-        .find_page(svc.worktrees.project_dir(), &panel.body)?;
-    let choices = choices(&body_page, picks);
+    let choices = body_choices(svc, &panel, picks).await?;
     let mut runs: BTreeMap<&str, PageRun> = BTreeMap::new();
     for part in PanelPart::ALL {
-        let Some(page) = page_of(&panel, part) else {
+        let Some(req) = part_request(svc, &panel, part, ctx.clone(), picks).await? else {
             continue;
         };
-        let run = run_part(svc, page, part_params(part, &choices), &ctx).await?;
-        runs.insert(part_key(part), run);
+        runs.insert(part_key(part), PageRunner::of(svc).run(req).await?);
     }
     let body = runs.remove("body").expect("a panel always has a body");
     let collapsed = runs.remove("collapsed");

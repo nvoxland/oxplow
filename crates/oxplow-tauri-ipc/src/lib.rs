@@ -128,6 +128,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::component_form,
             commands::generated::list_services,
             commands::generated::open_page,
+            commands::generated::open_panel_part,
             commands::generated::close_page,
             commands::generated::set_page_params,
             commands::generated::rerun_page,

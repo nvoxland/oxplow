@@ -5,15 +5,17 @@
 /// derived from the same runs (`panelAlerts`), so a badge never runs twice
 /// and the header count and Alerts can't disagree. Live: the daemon
 /// re-runs them when what they read changes; the stream or thread the rail
-/// shows changing opens new ones. The nav states each scope's binding
-/// (`panelParams`) rather than leaving the backend to infer the thread.
+/// shows changing opens new ones. What a part runs with is the daemon's
+/// (`open_panel_part`, `crates/oxplow-app/src/pages/panels.rs`): the scope's
+/// id from the stream and thread the rail shows, the body's toggles from the
+/// viewer's picks. `pageCount` and `badgeCount` mirror its `header_count`
+/// over the live runs; its unit tests are the rule.
 import { useEffect, useMemo, useState } from "react";
 
-import { streamRowId, threadRowId } from "../../modelIds.js";
 import { windowPageRuns, type PageRuns } from "../../pageRuns.js";
 import { firstLoader } from "../../pages/firstLoader.js";
 import { pageFileUri } from "../../pages/pageFiles.js";
-import type { Extension, ExtensionPanel, ChoiceOption, PageRun, PanelScope, SqlCell } from "../../tauri-bridge/generated/bindings.js";
+import type { Extension, ExtensionPanel, ChoiceOption, PageRun } from "../../tauri-bridge/generated/bindings.js";
 
 /** A part's open page run: what its actions are pressed on and what it drew. */
 export interface OpenPanelRun {
@@ -48,25 +50,6 @@ export function pageCount(count: PageRun | null): number | null {
   return result ? result.rows.length : null;
 }
 
-/** What a panel's pages are bound to, by its scope: the stream's row id
- *  as `stream_id`, the thread's as `thread_id`, nothing for a project
- *  panel. Without a thread (or stream) to bind, a scoped panel binds
- *  nothing and its page falls back to its default. */
-export function panelParams(
-  scope: PanelScope,
-  streamId: string | null,
-  threadId: string | null,
-): Record<string, SqlCell> {
-  switch (scope) {
-    case "project":
-      return {};
-    case "stream":
-      return streamId ? { stream_id: streamRowId(streamId) } : {};
-    case "thread":
-      return threadId ? { thread_id: threadRowId(threadId) } : {};
-  }
-}
-
 /** The viewer's picks for the panels' choice params: by panel
  *  id, each param's chosen value. */
 export type PanelChoices = Record<string, Record<string, string>>;
@@ -75,8 +58,8 @@ export type PanelChoices = Record<string, Record<string, string>>;
 export const NO_CHOICES: PanelChoices = {};
 
 /** One choice param of a panel's body page, as its header toggle shows
- *  it: the options, and the value in force — the viewer's pick while the
- *  page still offers it, else the default. */
+ *  it: the options, and the value in force — the one the body ran with
+ *  (the daemon's pick while the page offers it, else its default). */
 export interface PanelChoice {
   name: string;
   label: string | null;
@@ -84,13 +67,13 @@ export interface PanelChoice {
   value: string;
 }
 
-export function panelChoices(body: PageRun | null, picked: Readonly<Record<string, string>>): PanelChoice[] {
+export function panelChoices(body: PageRun | null): PanelChoice[] {
   const params = body?.page.params ?? [];
   return params
     .filter((p) => p.options.length > 0)
     .map((p) => {
-      const pick = picked[p.name];
-      const value = pick != null && p.options.some((o) => o.value === pick) ? pick : String(p.default ?? p.options[0]!.value);
+      const ran = body?.params[p.name];
+      const value = ran != null ? String(ran) : String(p.default ?? p.options[0]!.value);
       return { name: p.name, label: p.label, options: p.options, value };
     });
 }
@@ -123,9 +106,9 @@ export function panelAlerts(
 type Part = "body" | "collapsed" | "badge" | "count";
 
 /** Every panel's runs, by panel id, for the stream and thread shown: one
- *  open page run per part, its params the panel's scope's (`stream_id` /
- *  `thread_id`) and, for the body, the viewer's picks. The daemon re-runs
- *  them when what they read changes. */
+ *  open run per part, which the daemon binds (`open_panel_part`), the body
+ *  with the viewer's picks. The daemon re-runs them when what they read
+ *  changes. */
 export function useExtensionPanelRuns(
   panels: readonly ExtensionPanel[],
   streamId: string | null,
@@ -140,7 +123,6 @@ export function useExtensionPanelRuns(
     const offs: (() => void)[] = [];
     setState({});
     for (const p of panels) {
-      const params = panelParams(p.scope, streamId, threadId);
       const parts: [Part, string | null][] = [
         ["body", p.body],
         ["collapsed", p.collapsed],
@@ -151,7 +133,8 @@ export function useExtensionPanelRuns(
         if (!page) continue;
         const handle = runs.open({
           page,
-          params: part === "body" ? { ...params, ...(choices[p.id] ?? {}) } : params,
+          panel: { panel: p.id, part, choices: part === "body" ? (choices[p.id] ?? {}) : {} },
+          params: {},
           streamId,
           threadId,
         });

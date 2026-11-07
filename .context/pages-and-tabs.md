@@ -515,7 +515,9 @@ retry. Unrelated writes (including records from its own command loaders) do not
 starve opening. A later change finds the published run. This closes the query/registration gap without a timed missed-event cache.
 A window opens
 a run (`open_page { page | specYaml, params, streamId, threadId, client }`
-→ `{ runId, run }`) and closes it (`close_page`); a pick, filter or
+→ `{ runId, run }`; a left-nav panel's part is `open_panel_part { panel,
+part, choices?, streamId, threadId, client }`, the daemon saying which page
+and with what) and closes it (`close_page`); a pick, filter or
 switch is `set_page_params`, Refresh `rerun_page`. The change loop
 (`datasets_changed::spawn`) signals `PageRuns` as it tells the assets
 (never a second bus listener): datasets changed, measures landed, or

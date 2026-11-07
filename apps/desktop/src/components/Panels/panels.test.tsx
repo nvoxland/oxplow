@@ -4,7 +4,7 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { Extension, ExtensionPanel, PageRun } from "../../tauri-bridge/generated/bindings.js";
 import { decl, fakePage, fakePageRunsBy, fakeRun, loader, node } from "../../pages/testing/fakeRun.js";
 import { extPageUri } from "../../uri/uri.js";
-import { badgeCount, pageCount, panelAlerts, panelChoices, panelParams, useExtensionPanelRuns } from "./usePanelRuns.js";
+import { badgeCount, pageCount, panelAlerts, panelChoices, useExtensionPanelRuns } from "./usePanelRuns.js";
 import { panelOpenRef } from "./panelLayout.js";
 
 const panel = (scope: ExtensionPanel["scope"], over: Partial<ExtensionPanel> = {}): ExtensionPanel =>
@@ -28,17 +28,6 @@ test("a firing badge's count; a quiet one has none", () => {
   expect(badgeCount(null)).toBeNull();
 });
 
-// A panel's scope says what its pages are bound to, and the nav states
-// that binding rather than leaving the backend to infer the thread from
-// the selection — so a thread-scoped panel follows the thread the person
-// is looking at.
-test("a panel's scope binds the stream or thread it's shown for", () => {
-  expect(panelParams("project", "str2", "thr7")).toEqual({});
-  expect(panelParams("stream", "str2", "thr7")).toEqual({ stream_id: 2 });
-  expect(panelParams("thread", "str2", "thr7")).toEqual({ thread_id: 7 });
-  expect(panelParams("thread", "str2", null)).toEqual({});
-});
-
 // One owner opens every panel's pages — each body and badge once — and
 // both the panel's header and the Alerts panel read from those runs, so a
 // badge never runs twice and the two never disagree.
@@ -52,10 +41,18 @@ test("the rail opens each panel's body and badge once; a thread-scoped panel ope
   await waitFor(() => expect(view.result.current["x/q"]?.badge?.page.id).toBe("x/q-badge"));
   await waitFor(() => expect(view.result.current["x/p"]?.body?.run.page.id).toBe("x/body"));
   expect(opened.map((o) => o.key.page).sort()).toEqual(["x/body", "x/q-badge", "x/q-body"]);
-  expect(opened.find((o) => o.key.page === "x/body")?.key).toEqual({ page: "x/body", params: { thread_id: 1 }, streamId: "str2", threadId: "thr1" });
+  // The daemon runs the part (`open_panel_part`): it binds the scope's id
+  // from the view, so the window writes no param of its own.
+  expect(opened.find((o) => o.key.page === "x/body")?.key).toEqual({
+    page: "x/body",
+    panel: { panel: "x/p", part: "body", choices: {} },
+    params: {},
+    streamId: "str2",
+    threadId: "thr1",
+  });
   view.rerender({ threadId: "thr2" });
   await waitFor(() => expect(opened.filter((o) => o.key.page === "x/body").length).toBe(2));
-  expect(opened.filter((o) => o.key.page === "x/body")[1]?.key.params).toEqual({ thread_id: 2 });
+  expect(opened.filter((o) => o.key.page === "x/body")[1]?.key.threadId).toBe("thr2");
   view.unmount();
   cleanup();
 });
@@ -112,39 +109,38 @@ test("the rail opens a panel's collapsed and count pages with its body", async (
 });
 
 // A body page's choice params are the panel's header toggle; the
-// viewer's pick binds the body page only (the others don't declare it).
-test("a choice param binds the viewer's pick to the body page only", async () => {
+// viewer's pick goes with the body part only (the others don't declare it).
+test("a choice param sends the viewer's pick with the body part only", async () => {
   const { runs, opened } = fakePageRunsBy((key) => runOf(key.page));
   const panels = [panel("thread", { body: "x/body", collapsed: "x/line" })];
   const view = renderHook(() => useExtensionPanelRuns(panels, "str2", "thr7", { "x/p": { mode: "top" } }, runs));
   await waitFor(() => expect(view.result.current["x/p"]?.collapsed?.run.page.id).toBe("x/line"));
-  const of = (page: string) => opened.find((o) => o.key.page === page)?.key.params;
-  expect(of("x/body")).toEqual({ thread_id: 7, mode: "top" });
-  expect(of("x/line")).toEqual({ thread_id: 7 });
+  const of = (page: string) => opened.find((o) => o.key.page === page)?.key.panel;
+  expect(of("x/body")).toEqual({ panel: "x/p", part: "body", choices: { mode: "top" } });
+  expect(of("x/line")).toEqual({ panel: "x/p", part: "collapsed", choices: {} });
   view.unmount();
   cleanup();
 });
 
-test("the toggle shows each choice param at the pick, else its default", () => {
+// The value in force is the daemon's (`pages/panels.rs` `choices`: the pick
+// while the body offers it, else its default), read off the body's run.
+test("the toggle shows each choice param at the value the body ran with", () => {
   const options = [{ value: "recent", label: "Recent" }, { value: "top", label: "Most visited" }];
-  const body = fakeRun(
-    fakePage(node.viz("rows", "rows"), {
-      params: [
-        { name: "thread_id", label: null, default: null, options: [] },
-        { name: "mode", label: "Show", default: "recent", options },
-      ] as never,
-    }),
-  );
-  expect(panelChoices(body, {})).toEqual([{ name: "mode", label: "Show", value: "recent", options }]);
-  expect(panelChoices(body, { mode: "top" })[0]!.value).toBe("top");
-  // A pick the page no longer offers falls back to the default.
-  expect(panelChoices(body, { mode: "gone" })[0]!.value).toBe("recent");
-  expect(panelChoices(null, {})).toEqual([]);
+  const page = fakePage(node.viz("rows", "rows"), {
+    params: [
+      { name: "thread_id", label: null, default: null, options: [] },
+      { name: "mode", label: "Show", default: "recent", options },
+    ] as never,
+  });
+  const ran = (mode: string) => ({ ...fakeRun(page), params: { thread_id: 7, mode } }) as PageRun;
+  expect(panelChoices(ran("recent"))).toEqual([{ name: "mode", label: "Show", value: "recent", options }]);
+  expect(panelChoices(ran("top"))[0]!.value).toBe("top");
+  expect(panelChoices(null)).toEqual([]);
 });
 
-// One open page run per part, bound to its scope; the badge page's alert
+// One open page run per part, the body with the picks; the badge page's alert
 // or badge is the count and the Alerts row, and a count page wins.
-test("a panel opens a run per part, bound to its scope, the body with the picks", async () => {
+test("a panel opens a run per part, the body with the picks", async () => {
   const { runs, opened } = fakePageRunsBy((key) => {
     if (key.page === "y/badge") return runOf(key.page, 2, { alert: { firing: true, count: 4, value: null, message: "4 waiting" } } as never);
     if (key.page === "y/count") return runOf(key.page, 2, { badge: 9 } as never);
@@ -156,10 +152,10 @@ test("a panel opens a run per part, bound to its scope, the body with the picks"
   ];
   const view = renderHook(() => useExtensionPanelRuns(panels, "str2", "thr7", { "y/p": { mode: "top" } }, runs));
   await waitFor(() => expect(view.result.current["y/p"]?.collapsed?.run.page.id).toBe("y/line"));
-  const of = (page: string) => opened.find((o) => o.key.page === page)?.key.params;
-  expect(of("y/body")).toEqual({ thread_id: 7, mode: "top" });
-  expect(of("y/line")).toEqual({ thread_id: 7 });
-  expect(of("y/body2")).toEqual({});
+  const of = (page: string) => opened.find((o) => o.key.page === page)?.key.panel;
+  expect(of("y/body")).toEqual({ panel: "y/p", part: "body", choices: { mode: "top" } });
+  expect(of("y/line")).toEqual({ panel: "y/p", part: "collapsed", choices: {} });
+  expect(of("y/body2")).toEqual({ panel: "y/q", part: "body", choices: {} });
   await waitFor(() => expect(view.result.current["y/p"]?.count).toBe(4));
   await waitFor(() => expect(view.result.current["y/q"]?.count).toBe(9));
   expect(view.result.current["y/p"]?.body?.runId).toBe("run-1");

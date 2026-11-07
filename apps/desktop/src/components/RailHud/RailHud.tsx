@@ -512,9 +512,10 @@ function ExtensionPanelSection({
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
 }) {
-  const { choices, choose } = usePanelRuns();
+  const { choose } = usePanelRuns();
   const extensions = useExtensions();
-  const toggles = panelChoices(runs.body?.run ?? null, choices[panel.id] ?? {});
+  // The value in force is the one the body ran with (the daemon's).
+  const toggles = panelChoices(runs.body?.run ?? null);
   // A panel's part: its page drawn small.
   const compactPage = (open: OpenPanelRun, testId: string) => (
     <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
