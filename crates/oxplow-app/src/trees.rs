@@ -53,7 +53,7 @@ pub struct ChangedPath {
 
 /// Past this many changed paths, looking each one up costs more than comparing
 /// the trees.
-const MAX_STATUS_PATHS: usize = 5_000;
+pub const MAX_PATHS_ASKED: usize = 5_000;
 
 /// Where a path's bytes are.
 #[derive(Clone, Debug)]
@@ -323,11 +323,23 @@ impl Trees {
             .map(|e| &e.path)
             .chain(&status.moved)
             .collect();
-        if at_head.as_ref() != Some(rev) || includes || paths.len() > MAX_STATUS_PATHS {
+        if at_head.as_ref() != Some(rev) || includes || paths.len() > MAX_PATHS_ASKED {
             return full().await;
         }
+        self.diff_paths(ws, rev, paths).await
+    }
+
+    /// What differs from `rev` in the working tree among `paths` alone: a
+    /// path the filter drops, or with the same bytes as at `rev`, says nothing.
+    /// It costs what is asked about, not the size of the tree.
+    pub async fn diff_paths(
+        &self,
+        ws: &Path,
+        rev: &str,
+        paths: impl IntoIterator<Item = &String>,
+    ) -> Result<Vec<DiffEntry>, DomainError> {
         let filter = self.filter(ws);
-        let mut heads = Vec::with_capacity(paths.len());
+        let mut heads = Vec::new();
         for path in paths {
             if !filter.ignore_in_trees(Path::new(path), false) {
                 let id = self.vcs.object_at(ws, rev, path).await?;
@@ -859,6 +871,54 @@ mod tests {
         let d = by_path(&d);
         assert_eq!(d.get("w.txt"), Some(&(FileStatus::Added, 3, 0)));
         assert!(!d.contains_key("tracked.txt"), "{d:?}");
+    }
+
+    /// Asking about some paths says what the whole compare says of them: an
+    /// edit, an addition, a deletion, and nothing for a clean, an unknown, an
+    /// ignored or an excluded one.
+    #[tokio::test]
+    async fn a_diff_of_some_paths_is_what_the_whole_diff_says_of_them() {
+        let f = services_with_effort().await;
+        let ws = f.svc.layout.project_dir.clone();
+        std::fs::write(ws.join(".gitignore"), "ignored.txt\n").unwrap();
+        for path in ["edit.txt", "gone.txt", "same.txt", "elsewhere.txt"] {
+            std::fs::write(ws.join(path), "one\ntwo\n").unwrap();
+        }
+        let head = commit_all(&ws, "c1");
+        std::fs::write(ws.join("edit.txt"), "one\nchanged\n").unwrap();
+        std::fs::remove_file(ws.join("gone.txt")).unwrap();
+        std::fs::write(ws.join("same.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(ws.join("new.txt"), "new\n").unwrap();
+        std::fs::write(ws.join("ignored.txt"), "x\n").unwrap();
+        std::fs::write(ws.join("elsewhere.txt"), "not asked about\n").unwrap();
+        let asked: Vec<String> = [
+            "edit.txt",
+            "gone.txt",
+            "same.txt",
+            "new.txt",
+            "ignored.txt",
+            "nowhere.txt",
+        ]
+        .map(String::from)
+        .to_vec();
+        let d = f.svc.trees.diff_paths(&ws, &head, &asked).await.unwrap();
+        let full = f
+            .svc
+            .trees
+            .diff(&ws, Some(&Revision::git(head)), &Revision::Working)
+            .await
+            .unwrap();
+        let expected: Vec<_> = full
+            .iter()
+            .filter(|e| asked.contains(&e.path))
+            .cloned()
+            .collect();
+        assert_eq!(d, expected);
+        let d = by_path(&d);
+        assert_eq!(d.get("edit.txt"), Some(&(FileStatus::Modified, 1, 1)));
+        assert_eq!(d.get("gone.txt").map(|e| e.0), Some(FileStatus::Deleted));
+        assert_eq!(d.get("new.txt"), Some(&(FileStatus::Added, 1, 0)));
+        assert_eq!(d.len(), 3, "{d:?}");
     }
 
     /// Asking git what changed gives what comparing the whole trees gives:

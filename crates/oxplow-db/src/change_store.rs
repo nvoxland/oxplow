@@ -364,6 +364,47 @@ impl SqliteChangeStore {
             .await
     }
 
+    /// Stage one for some paths alone: `paths`' rows give way to `files` (those
+    /// of them that still differ), and the rest of the list stands. Whether it
+    /// was written: a list that saw later events stands instead.
+    pub async fn store_path_files(
+        &self,
+        id: i64,
+        paths: Vec<String>,
+        files: Vec<ChangeFileRow>,
+        events_to: i64,
+    ) -> Result<bool, DomainError> {
+        let at = serde_json::to_value(oxplow_domain::Timestamp::now())
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        self.db
+            .transaction(move |tx| {
+                if newer_list_stored(tx, id, events_to)? {
+                    return Ok(false);
+                }
+                for path in &paths {
+                    tx.execute(
+                        "DELETE FROM change_file WHERE change_id = ?1 AND path = ?2",
+                        rusqlite::params![id, path],
+                    )
+                    .map_err(map_sql_err)?;
+                }
+                for f in &files {
+                    insert_file(
+                        tx,
+                        id,
+                        f,
+                        f.staged.map(i64::from),
+                        f.untracked.map(i64::from),
+                    )?;
+                }
+                stamp_files(tx, id, &at, events_to)?;
+                Ok(true)
+            })
+            .await
+    }
+
     /// Replace the change's duplicates (they arrive later, from a slower
     /// scan) — when they belong to its latest analysis (`events_to`); a
     /// newer analysis supersedes them. Whether they were stored.
@@ -467,14 +508,25 @@ impl SqliteChangeStore {
     }
 }
 
-/// Replace `id`'s file rows and stamp their freshness, unless the stored
-/// list saw later events (stage one and the deep analysis both write it).
-/// Whether they were written.
-fn write_files(
+/// What `write_files` stamps: this list is the latest.
+fn stamp_files(
     tx: &rusqlite::Transaction<'_>,
     id: i64,
-    files: &[ChangeFileRow],
     at: &str,
+    events_to: i64,
+) -> Result<(), DomainError> {
+    tx.execute(
+        "UPDATE change SET files_at = ?2, files_events_to = ?3 WHERE id = ?1",
+        rusqlite::params![id, at, events_to],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// Whether the stored list saw later events than `events_to`: it wins.
+fn newer_list_stored(
+    tx: &rusqlite::Transaction<'_>,
+    id: i64,
     events_to: i64,
 ) -> Result<bool, DomainError> {
     let stored: Option<i64> = tx
@@ -486,7 +538,47 @@ fn write_files(
         .optional()
         .map_err(map_sql_err)?
         .flatten();
-    if stored.is_some_and(|s| s > events_to) {
+    Ok(stored.is_some_and(|s| s > events_to))
+}
+
+fn insert_file(
+    tx: &rusqlite::Transaction<'_>,
+    id: i64,
+    f: &ChangeFileRow,
+    staged: Option<i64>,
+    untracked: Option<i64>,
+) -> Result<(), DomainError> {
+    tx.execute(
+        "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test,
+                                  staged, untracked)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![
+            id,
+            f.path,
+            f.status,
+            f.additions,
+            f.deletions,
+            f.zone,
+            i64::from(f.is_test),
+            staged,
+            untracked,
+        ],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
+/// Replace `id`'s file rows and stamp their freshness, unless the stored
+/// list saw later events (stage one and the deep analysis both write it).
+/// Whether they were written.
+fn write_files(
+    tx: &rusqlite::Transaction<'_>,
+    id: i64,
+    files: &[ChangeFileRow],
+    at: &str,
+    events_to: i64,
+) -> Result<bool, DomainError> {
+    if newer_list_stored(tx, id, events_to)? {
         return Ok(false);
     }
     // A list that doesn't ask git keeps what was stored for a path.
@@ -503,29 +595,15 @@ fn write_files(
         .map_err(map_sql_err)?;
     for f in files {
         let (was_staged, was_untracked) = kept.get(&f.path).copied().unwrap_or((None, None));
-        tx.execute(
-            "INSERT INTO change_file (change_id, path, status, additions, deletions, zone, is_test,
-                                      staged, untracked)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            rusqlite::params![
-                id,
-                f.path,
-                f.status,
-                f.additions,
-                f.deletions,
-                f.zone,
-                i64::from(f.is_test),
-                f.staged.map(i64::from).or(was_staged),
-                f.untracked.map(i64::from).or(was_untracked),
-            ],
-        )
-        .map_err(map_sql_err)?;
+        insert_file(
+            tx,
+            id,
+            f,
+            f.staged.map(i64::from).or(was_staged),
+            f.untracked.map(i64::from).or(was_untracked),
+        )?;
     }
-    tx.execute(
-        "UPDATE change SET files_at = ?2, files_events_to = ?3 WHERE id = ?1",
-        rusqlite::params![id, at, events_to],
-    )
-    .map_err(map_sql_err)?;
+    stamp_files(tx, id, at, events_to)?;
     Ok(true)
 }
 
@@ -569,6 +647,98 @@ mod tests {
     /// An effort analyzed while open (head: the working tree) that has since
     /// closed (head: its end snapshot) must be recomputed; the store says
     /// when the head moved.
+    fn file_row(path: &str, additions: i64, staged: Option<bool>) -> ChangeFileRow {
+        ChangeFileRow {
+            path: path.into(),
+            status: "modified".into(),
+            additions,
+            deletions: 0,
+            zone: None,
+            is_test: false,
+            staged,
+            untracked: staged.map(|_| false),
+        }
+    }
+
+    /// Only those paths' rows change: a path that still differs is replaced, one
+    /// that doesn't goes, and the rest stand. A list that saw later events wins.
+    #[tokio::test]
+    async fn store_path_files_replaces_only_those_paths_and_a_newer_list_wins() {
+        let db = Database::in_memory();
+        let store = SqliteChangeStore::new(db.clone());
+        let (row, _) = store
+            .get_or_create(
+                1,
+                "working",
+                "",
+                Some(&Revision::git("abc")),
+                &Revision::Working,
+            )
+            .await
+            .unwrap();
+        store
+            .store_files(
+                row.id,
+                vec![
+                    file_row("edited", 1, Some(false)),
+                    file_row("undone", 1, Some(false)),
+                    file_row("other", 1, Some(true)),
+                ],
+                10,
+                Some(0),
+                None,
+            )
+            .await
+            .unwrap();
+        let listed = || {
+            let db = db.clone();
+            async move {
+                db.call(move |conn| {
+                    let mut stmt = conn
+                        .prepare("SELECT path, additions, staged FROM change_file ORDER BY path")?;
+                    let rows = stmt.query_map([], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, Option<i64>>(2)?,
+                        ))
+                    })?;
+                    rows.collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert!(store
+            .store_path_files(
+                row.id,
+                vec!["edited".into(), "undone".into(), "new".into()],
+                vec![
+                    file_row("edited", 2, Some(true)),
+                    file_row("new", 3, Some(false))
+                ],
+                11,
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            listed().await,
+            [
+                ("edited".to_string(), 2, Some(1)),
+                ("new".to_string(), 3, Some(0)),
+                ("other".to_string(), 1, Some(1)),
+            ]
+        );
+        assert!(
+            !store
+                .store_path_files(row.id, vec!["other".into()], Vec::new(), 5)
+                .await
+                .unwrap(),
+            "older than what is stored"
+        );
+        assert_eq!(listed().await.len(), 3);
+    }
+
     #[tokio::test]
     async fn get_or_create_reports_a_moved_head() {
         let store = SqliteChangeStore::new(Database::in_memory());
