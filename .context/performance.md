@@ -908,6 +908,23 @@ The first one is what a nextest test pays: it also reads and hashes the shipped
 folders (about 65 ms). `shipped_hash` by itself is 4 ms, so caching it isn't worth
 it. The store copy is about 27 ms.
 
+**A crowded temp folder.** The fake language server ran `python3 -c`, which puts
+the working directory on `sys.path`, and its tests run in the machine's temp
+folder: with 236,000 entries there (12 s to list, most from other projects),
+each `import json` listed it, and each test took 17 to 24 s against 0.2 s alone. It
+runs with `-I` now, and `test:fast` gives tests a temp folder of their own
+(`scripts/test-tmpdir.sh`). So look at `$TMPDIR` when a test that starts a program
+is slow only in a full run.
+
+**Other choices, measured.** `oxplow-sdk`'s tests of every example run one test
+per example (`tests/every_example.rs`, made at run time): two series of 33 s each
+are 19 tests in 11 s. A lock-wait test sets its wait (`Database::with_lock_wait`)
+instead of outlasting the real 5 s. The target sweep's cap is above a worktree's
+working set (`scripts/sweep-target.sh`), or a run rebuilds the dependencies.
+`oxplow-app` at `-j14` against `-j8`: 97 s against 105 s, system time 520 s against
+210 s. So `test-threads` stays at the default; on a machine doing other work, `-j8`
+costs little.
+
 **Ruled out:** a test fixture without `oxplow-bundled` saves nothing (0.67 s
 against 0.64 s a boot: the cost is core and foundation). Caching parsed shipped
 extensions per process is unsound: `Extension.path` is that project's store

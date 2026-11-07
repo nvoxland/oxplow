@@ -2120,8 +2120,16 @@ mod tests {
         svc.request_snapshot(SnapshotTrigger::Startup)
             .await
             .unwrap();
-        // Back to what's committed, as git's stat would see it.
+        // Back to what's committed, as git's stat would see it: written well
+        // before the index, or git can't vouch for it in this same second.
         std::fs::write(root.join("a.txt"), "committed\n").unwrap();
+        let earlier = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(root.join("a.txt"))
+            .unwrap()
+            .set_modified(earlier)
+            .unwrap();
         let repo = git2::Repository::open(root).unwrap();
         let mut index = repo.index().unwrap();
         index.add_path(std::path::Path::new("a.txt")).unwrap();

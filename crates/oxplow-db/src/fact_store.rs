@@ -3861,13 +3861,17 @@ mod tests {
     async fn a_store_write_outlasts_another_writers_lock() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("facts.sqlite");
-        let store = SqliteFactStore::new(Database::open(&path).unwrap());
+        let store = SqliteFactStore::new(
+            Database::open(&path)
+                .unwrap()
+                .with_lock_wait(std::time::Duration::from_millis(50)),
+        );
         let (held, holding) = std::sync::mpsc::channel();
         let holder = std::thread::spawn(move || {
             let conn = rusqlite::Connection::open(&path).unwrap();
             conn.execute_batch("BEGIN IMMEDIATE").unwrap();
             held.send(()).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(6_500));
+            std::thread::sleep(std::time::Duration::from_millis(200));
             conn.execute_batch("COMMIT").unwrap();
         });
         holding.recv().unwrap();

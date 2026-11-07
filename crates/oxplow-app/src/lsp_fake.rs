@@ -115,6 +115,9 @@ pub fn config(language: &str, extensions: &[&str]) -> LspServerConfig {
         language_id: language.into(),
         extensions: extensions.iter().map(|e| e.to_string()).collect(),
         command: "python3".into(),
-        args: vec!["-c".into(), SCRIPT.to_string()],
+        // `-I`: no working directory on `sys.path`. Its tests run in the
+        // machine's temp folder, and listing that for `import json` took
+        // these tests 18 s each with 200,000 entries in it.
+        args: vec!["-I".into(), "-c".into(), SCRIPT.to_string()],
     }
 }

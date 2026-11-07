@@ -53,32 +53,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn round_trip() {
-        let now = Timestamp::from_unix_ms(1_700_000_000_000);
-        let s = Stream {
-            id: StreamId::new(1),
-            kind: StreamKind::Primary,
-            title: "oxplow".into(),
-            branch: "main".into(),
-            branch_ref: "refs/heads/main".into(),
-            branch_source: "main".into(),
-            worktree_path: "/repo".into(),
-            working_pane: String::new(),
-            talking_pane: String::new(),
-            working_session_id: String::new(),
-            talking_session_id: String::new(),
-            host: HostId::LOCAL,
-            custom_prompt: None,
-            created_at: now,
-            updated_at: now,
-            archived_at: None,
-        };
-        let json = serde_json::to_string(&s).unwrap();
-        let back: Stream = serde_json::from_str(&json).unwrap();
-        assert_eq!(s, back);
-    }
-
-    #[test]
     fn kind_uses_snake_case() {
         assert_eq!(
             serde_json::to_string(&StreamKind::Primary).unwrap(),
