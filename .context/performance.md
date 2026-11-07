@@ -1386,6 +1386,41 @@ the whole diff, which the first try of this showed).
   8–13). Read the ratios, not the seconds; the warm numbers swing by 2–3x
   inside one run. The Linux column ran in a quiet container.
 
+### The status of only some paths (measured 2026-11-06)
+
+`Vcs::status_of(ws, paths)` asks libgit2 for the status of the paths given
+(each named literally, renames not looked for) where `vcs.status` asks for
+all. The example times it for one path (an edited file) and for ten (that one
+and nine clean ones spread over the tree), three times each, next to the full
+`vcs.status`.
+
+| ms, cold then warm, warm | metabase (23k files) | 100k kept (1M ignored) | 500k kept (100k ignored) | Linux, 100k kept |
+|---|---|---|---|---|
+| `vcs.status` alone, one edit | 1,054, 1,239, 1,236 (8 entries) | 700, 784, 790 | 8,315, 8,508, 8,534 | 283, 264, 272 |
+| `status_of`, 1 path | 58, 48, 32 | 34, 34, 34 | 224, 214, 216 | 28, 29, 29 |
+| `status_of`, 10 paths | 83, 38, 29 | 38, 37, 38 | 229, 228, 228 | 29, 30, 29 |
+| Load average at start | 15 | 8.6 | 4.8 | 5.4 (1.7 in the container) |
+
+- **It does not walk the tree.** Ten paths cost no more than one, and at 500k
+  kept files asking about one path takes 0.2 s where the whole status takes
+  8.3 s (at 100k: 34 ms against 0.7 s). Raw libgit2 on
+  metabase: opening the repository and reading the index takes 18 ms; one
+  literal pathspec takes 22–30 ms whether it asks for the index side, the
+  working side, with or without untracked files; the whole status takes
+  0.9–1.2 s.
+- **What is left is a floor that follows the number of tracked files**:
+  reading the index (23k files: 30 ms, 100k: 34 ms, 500k: 215 ms). Do not
+  expect a status of some paths to fall below it.
+- **`status` ran two scans until now.** `get_repo_conflict_state` counts the
+  unmerged paths with a second `worktree_status`, and `status` called it for
+  the operation in progress alone; it reads the marker files now
+  (`detect_git_operation`). So the `vcs.status` rows measured before this
+  change (the table above on the relist from the status, the first one on
+  this page) include that second scan: metabase read 1.44–1.53 s then and
+  1.05–1.24 s after, on a busier machine. The `status_of` rows did not exist
+  before the fix: its first try took 727 ms on metabase, half the status,
+  for that reason.
+
 ### On Linux (measured 2026-11-06)
 
 Per-directory inotify watches. The same Mac, in an OrbStack Docker container
