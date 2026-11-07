@@ -10,8 +10,8 @@ test("a page holding the wrong token says its token was refused", async ({ brows
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto("/");
   await expect(page.getByTestId("remote-banner-refused")).toContainText("token was refused");
-  await expect(page.getByTestId("remote-banner-down")).toHaveCount(0);
-  await expect(page.getByText("Backend daemon disconnected")).toHaveCount(0);
+  await expect(page.getByTestId("remote-banner-down")).not.toBeVisible();
+  await expect(page.getByText("Backend daemon disconnected")).not.toBeVisible();
   expect(errors).toEqual([]);
   await context.close();
 });
@@ -25,7 +25,7 @@ test("a token in the URL fragment wins over the stored one", async ({ browser, b
   // Connected: the window shows its stream (the home tab varies with what
   // other specs did on this daemon).
   await expect(page.getByTestId("title-bar-search")).toBeVisible();
-  await expect(page.getByTestId("remote-banner-down")).toHaveCount(0);
+  await expect(page.getByTestId("remote-banner-down")).not.toBeVisible();
   expect(errors).toEqual([]);
   await context.close();
 });

@@ -50,7 +50,7 @@ test("an ended terminal session says so and its tab closes it", async ({ page, d
   const tabTestId = (await tab.getAttribute("data-testid")) ?? "";
   const id = tabTestId.slice("center-tab-".length);
   await page.getByTestId(`center-tab-close-${id}`).click();
-  await expect(page.getByTestId(tabTestId)).toHaveCount(0);
+  await expect(page.getByTestId(tabTestId)).not.toBeVisible();
 });
 
 /// A launch that fails before any process exists (Codex, which the daemon's
@@ -122,8 +122,8 @@ test("a session's tab shows its alias, and its fallback once the alias is cleare
   // (`about_when`): this one is open, so it isn't offered, and the ☰ has no
   // "Tasks" submenu for the commands about the session.
   await expect(page.getByTestId("menu-item-action-page-action-rename")).toBeVisible();
-  await expect(page.getByTestId("menu-item-ref-command-oxplow.agent_session.reopen")).toHaveCount(0);
-  await expect(page.getByTestId("menu-item-page-submenu-Tasks")).toHaveCount(0);
+  await expect(page.getByTestId("menu-item-ref-command-oxplow.agent_session.reopen")).not.toBeVisible();
+  await expect(page.getByTestId("menu-item-page-submenu-Tasks")).not.toBeVisible();
   await body.getByTestId("menu-item-action-page-action-rename").click();
   // The form is the tab's modal: headed without the menu's ellipsis, about
   // the session by its name (never its id), its Name starting on the
@@ -161,7 +161,7 @@ test("search starts an enabled agent's session directly", async ({ page, daemon 
   await page.goto("/");
   await expect(newSessionPage(page)).toBeVisible();
   await searchLauncher(page, "new claude session");
-  await expect(page.getByTestId("launcher-command-oxplow.agent_session.open_claude")).toHaveCount(0);
+  await expect(page.getByTestId("launcher-command-oxplow.agent_session.open_claude")).not.toBeVisible();
   await page.keyboard.press("Escape");
   await searchLauncher(page, "new codex session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open_codex").click();
@@ -190,7 +190,7 @@ test("the picker closes, and stays closed", async ({ page, daemon }) => {
   await expect(newSessionPage(page)).toHaveCount(0);
   await page.reload();
   await expect(page.getByTestId("navigator-strip")).toBeVisible();
-  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+  await expect(page.getByTestId(PICKER_CLOSE)).not.toBeVisible();
 });
 
 /// Remember This makes the agent chosen what new threads start with.
@@ -205,6 +205,6 @@ test("a remembered choice is what new threads start with", async ({ page, daemon
 
   await addThread(page, daemon, "Busy");
   await expect(page.locator('[data-testid^="center-tab-oxplow:oxplow/agent_session?"]')).toHaveCount(1);
-  await expect(page.getByTestId(PICKER_CLOSE)).toHaveCount(0);
+  await expect(page.getByTestId(PICKER_CLOSE)).not.toBeVisible();
   await expect(page.getByTestId("terminal-ended")).toBeVisible();
 });
