@@ -1125,18 +1125,15 @@ mod core_tests {
     }
 
     /// Wait (up to 5 s) for `check` to hold.
-    async fn eventually<F, Fut>(what: &str, mut check: F)
+    async fn eventually<F, Fut>(what: &str, check: F)
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = bool>,
     {
-        for _ in 0..200 {
-            if check().await {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        panic!("never: {what}");
+        assert!(
+            crate::test_fixtures::until(Duration::from_secs(5), check).await,
+            "never: {what}"
+        );
     }
 
     /// The index's `(ref_id, stream)` entries of `kind`.
@@ -1371,7 +1368,7 @@ mod core_tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         task(&svc, thread.id, "Quux the sprocket").await;
-        change_loop(&svc);
+        let assets = change_loop(&svc);
         eventually("indexed", || {
             found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
         })
@@ -1390,15 +1387,14 @@ mod core_tests {
                 .unwrap()
         };
         // Settled: the last build is the one a restart compares against.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        assets.quiesce().await;
         let first = computed(svc.clone()).await;
         // Hear every commit from here on — a rewrite of the index touches
         // `search_entry` (rowids alone can't tell: a delete and re-insert
         // hands the same ones back).
         let mut commits = svc.db.subscribe_changes();
         // A restart: a new change loop registers every kind again.
-        change_loop(&svc);
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        change_loop(&svc).quiesce().await;
         assert_eq!(computed(svc.clone()).await, first, "not recomputed");
         let mut touched = Vec::new();
         while let Ok(changed) = commits.try_recv() {

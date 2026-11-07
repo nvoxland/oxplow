@@ -110,18 +110,15 @@ impl Fx {
         id: &str,
         pred: impl Fn(&AssistantSnapshot) -> bool,
     ) -> AssistantSnapshot {
-        let started = Instant::now();
-        loop {
+        let last = std::cell::RefCell::new(None);
+        let reached = crate::test_fixtures::until_some(Duration::from_secs(30), || async {
             let snap = self.snapshot(id);
-            if pred(&snap) {
-                return snap;
-            }
-            assert!(
-                started.elapsed() < Duration::from_secs(30),
-                "timed out: {snap:#?}"
-            );
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+            let held = pred(&snap);
+            *last.borrow_mut() = Some(snap.clone());
+            held.then_some(snap)
+        })
+        .await;
+        reached.unwrap_or_else(|| panic!("timed out: {:#?}", last.borrow()))
     }
 
     async fn idle(&self, id: &str) -> AssistantSnapshot {

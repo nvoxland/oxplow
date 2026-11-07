@@ -31,6 +31,45 @@ impl ShownErrors for crate::extension::extensions::Extension {
     }
 }
 
+/// How often [`until`] looks.
+const UNTIL_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Polls `probe` every 10 ms until it gives `Some`, for at most `deadline`;
+/// the value, or `None` if the time ran out. For a test that waits for
+/// something to happen — never for one that asserts nothing did (that waits
+/// on the loop's own done signal, not a clock).
+pub(crate) async fn until_some<T, F, Fut>(deadline: std::time::Duration, mut probe: F) -> Option<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<T>>,
+{
+    let end = tokio::time::Instant::now() + deadline;
+    loop {
+        if let Some(found) = probe().await {
+            return Some(found);
+        }
+        if tokio::time::Instant::now() >= end {
+            return None;
+        }
+        tokio::time::sleep(UNTIL_POLL).await;
+    }
+}
+
+/// Polls `cond` every 10 ms until it holds, for at most `deadline`; whether
+/// it held. Callers assert on the answer with what they waited for.
+pub(crate) async fn until<F, Fut>(deadline: std::time::Duration, mut cond: F) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    until_some(deadline, || {
+        let held = cond();
+        async move { held.await.then_some(()) }
+    })
+    .await
+    .is_some()
+}
+
 use oxplow_tasks::work_item_ref;
 use std::path::Path;
 use std::sync::Arc;

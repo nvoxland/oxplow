@@ -4496,22 +4496,31 @@ dimensions:
         p
     }
 
+    /// Nothing written means every default: one empty project, each key
+    /// absent. (A key that must read back what was written has its own
+    /// round-trip test.)
     #[test]
-    fn load_defaults_when_file_absent() {
+    fn an_empty_project_is_every_default() {
         let dir = tempdir().unwrap();
         let cfg = load_project_config(dir.path()).unwrap();
         assert!(cfg.agents.is_empty(), "every registered harness");
+        assert_eq!(
+            cfg.project_name,
+            dir.path().file_name().unwrap().to_string_lossy(),
+            "the folder's name"
+        );
         assert_eq!(cfg.snapshot_retention_days, DEFAULT_SNAPSHOT_RETENTION_DAYS);
         assert!(cfg.lsp_servers.is_empty());
         assert!(cfg.inject_session_context);
-    }
-
-    #[test]
-    fn project_name_falls_back_to_basename() {
-        let dir = tempdir().unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        let basename = dir.path().file_name().unwrap().to_string_lossy();
-        assert_eq!(cfg.project_name, basename);
+        assert_eq!(cfg.icon_tint, None);
+        assert!(cfg.generated.exclude.is_empty());
+        assert!(cfg.generated.include.is_empty());
+        assert!(cfg.zones.is_empty());
+        assert_eq!(cfg.testing, TestingConfig::default());
+        let parallelism = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(cfg.scripts.max_concurrent, parallelism.min(4));
+        assert_eq!(cfg.scripts.memory_bytes, 512 * 1024 * 1024);
+        assert_eq!(cfg.scripts, ScriptsConfig::default());
     }
 
     #[test]
@@ -4648,15 +4657,6 @@ lsp:
     }
 
     #[test]
-    fn generated_defaults_to_empty_when_absent() {
-        let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agents: [claude]\n").unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert!(cfg.generated.exclude.is_empty());
-        assert!(cfg.generated.include.is_empty());
-    }
-
-    #[test]
     fn rejects_generated_absolute_path() {
         let dir = tempdir().unwrap();
         std::fs::write(
@@ -4725,13 +4725,6 @@ lsp:
             vec!["crates/oxplow-db/**".to_string()]
         );
         assert_eq!(cfg.zones[1].color.as_deref(), Some("#ea580c"));
-    }
-
-    #[test]
-    fn zones_default_to_empty_when_absent() {
-        let dir = tempdir().unwrap();
-        std::fs::write(cfg_path(dir.path()), "agents: [claude]\n").unwrap();
-        assert!(load_project_config(dir.path()).unwrap().zones.is_empty());
     }
 
     /// `other` and `external` are COMPUTED sentinels (unmatched file /
@@ -5180,13 +5173,6 @@ lsp:
     }
 
     #[test]
-    fn testing_defaults_empty_when_absent() {
-        let dir = tempdir().unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        assert_eq!(cfg.testing, TestingConfig::default());
-    }
-
-    #[test]
     fn parses_testing_block() {
         let dir = tempdir().unwrap();
         std::fs::write(
@@ -5210,16 +5196,6 @@ testing:
         );
         assert_eq!(cfg.testing.run_patterns, vec!["cargo cov", "bun test"]);
         assert_eq!(cfg.testing.analysis_patterns, vec!["lint:collect"]);
-    }
-
-    #[test]
-    fn scripts_default_to_a_bounded_pool_and_512_mib() {
-        let dir = tempdir().unwrap();
-        let cfg = load_project_config(dir.path()).unwrap();
-        let parallelism = std::thread::available_parallelism().map_or(1, |n| n.get());
-        assert_eq!(cfg.scripts.max_concurrent, parallelism.min(4));
-        assert_eq!(cfg.scripts.memory_bytes, 512 * 1024 * 1024);
-        assert_eq!(cfg.scripts, ScriptsConfig::default());
     }
 
     #[test]

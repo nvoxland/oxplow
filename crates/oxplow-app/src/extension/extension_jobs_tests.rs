@@ -133,23 +133,19 @@ async fn until(fx: &Fixture, id: &str, done: impl Fn(&Value) -> bool) -> Value {
 }
 
 async fn until_on(svc: &crate::Services, id: &str, done: impl Fn(&Value) -> bool) -> Value {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
+    let last = std::cell::RefCell::new(Value::Null);
+    let reached = crate::test_fixtures::until_some(Duration::from_secs(10), || async {
         let snapshot = run_on(
             svc,
             "triage.summary.result",
             json!({ "job_run": id.to_string() }),
         )
         .await;
-        if done(&snapshot) {
-            return snapshot;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the job never got there: {snapshot}"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+        *last.borrow_mut() = snapshot.clone();
+        done(&snapshot).then_some(snapshot)
+    })
+    .await;
+    reached.unwrap_or_else(|| panic!("the job never got there: {}", last.borrow()))
 }
 
 /// An active extension's AI profile is a role, in `v_ai_role`.

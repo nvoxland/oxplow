@@ -270,7 +270,7 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     };
     let assets = crate::assets::Assets::new(fx.svc.db.clone(), Duration::from_millis(50));
     assets.sync_datasets().await.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    assets.quiesce().await;
     assert_eq!(limit().await, json!([[7]]));
 
     fx.svc
@@ -290,6 +290,6 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
         .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assets.sync_datasets().await.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    assets.quiesce().await;
     assert_eq!(limit().await, json!([[9]]));
 }
