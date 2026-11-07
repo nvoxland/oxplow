@@ -1366,15 +1366,16 @@ the whole diff, which the first try of this showed).
 | | metabase (8 changed, as it is) | 500k kept, 5,001 changed | 500k kept, one edit | 100k kept (1M ignored), 5,001 changed | 100k kept, one edit | Linux, 100k kept, 5,001 changed | Linux, one edit |
 |---|---|---|---|---|---|---|---|
 | `Trees::diff`, ms (cold, warm, warm) | 4,113, 1,785, 1,819 | 89,831, 88,631, 26,277 | 23,328, 31,851, 44,264 | 23,175, 16,806, 11,439 | 10,337, 9,893, 5,150 | 1,548, 1,216, 1,208 | 1,445, 1,350, 1,498 |
-| `vcs.status` alone, ms | 1,488, 1,499, 1,530 | 18,677, 19,133, 30,311 | 27,782, 26,975, 15,509 | 6,972, 6,511, 6,168 | 2,282, 2,214, 1,684 | 604, 600, 682 | 929, 951, 777 |
+| `vcs.status` alone, ms (re-measured after the double-scan fix below; first try: 1,488, 18,677, 27,782, 6,972, 2,282, 604, 929 ms cold) | 1,054, 1,239, 1,236 | 7,076, 7,150, 7,035 | 8,315, 8,508, 8,534 | 799, 822, 744 | 700, 784, 790 | 349, 296, 260 | 283, 264, 272 |
 | `diff_from_status`, ms | 21.6, 22.5, 20.3 | 24,207, 29,177, 54,315 | 4.1, 2.8, 32.5 | 14,523, 10,615, 11,335 | 1.5, 1.0, 1.4 | 1,130, 1,165, 1,297 | 1.3, 1.5, 0.8 |
 | Load average at start | 9.1 | 22.7 | 22.7 | 30.0 | 30.0 | 6.1 (in the container) | 6.1 |
 
 - **For a few edits the relist is now the status.** `diff_from_status` takes
   1–32 ms for 1–8 paths at every size, so a relist costs `vcs.status` and
-  nothing else: 1.5 s on metabase, 1.7–2.3 s at 100k kept files, 15–28 s at
-  500k (under load; the walk of the same tree took 25 s here and 5 s on the
-  quiet run). The whole diff of the same trees took 1.8 s (metabase, warm),
+  nothing else: 1.1–1.2 s on metabase, 0.7–0.8 s at 100k kept files, 7–8.5 s
+  at 500k, 0.26–0.35 s on Linux at 100k (re-measured after the double-scan fix
+  below; the first try, 1.5 s, 1.7–2.3 s and 15–28 s, was slowed by it and by a
+  machine at load 20–40). The whole diff of the same trees took 1.8 s (metabase, warm),
   5–10 s (100k kept) and 26–44 s (500k kept) with one edit.
 - **`vcs.status` is what is left**, and it follows the tree's size: `git
   status` stats every kept file. Whether the watcher's batch (the paths it told)
@@ -1414,12 +1415,49 @@ and nine clean ones spread over the tree), three times each, next to the full
 - **`status` ran two scans until now.** `get_repo_conflict_state` counts the
   unmerged paths with a second `worktree_status`, and `status` called it for
   the operation in progress alone; it reads the marker files now
-  (`detect_git_operation`). So the `vcs.status` rows measured before this
-  change (the table above on the relist from the status, the first one on
-  this page) include that second scan: metabase read 1.44–1.53 s then and
-  1.05–1.24 s after, on a busier machine. The `status_of` rows did not exist
+  (`detect_git_operation`). So the `vcs.status` rows of the table on the
+  relist from the status were measured before this change and have been
+  measured again (they say so). The `status_of` rows did not exist
   before the fix: its first try took 727 ms on metabase, half the status,
   for that reason.
+
+### One edit's relist, end to end (measured 2026-11-06)
+
+The change list's relist is `change_analysis::refresh_files` (the whole list)
+or `refresh_paths` (only the paths the watch heard). The example times the
+real pieces they call, without building `Services`: for the whole list
+`vcs.status`, `Trees::diff_from_status` and `SqliteChangeStore::store_files`;
+for the paths `change_store.find` and `list_state`, `vcs.status_of`,
+`Trees::diff_paths` and `store_path_files`. It does not compute zones and test
+flags for the rows, which cost next to nothing for one file. Each is run three
+times after an edit of one tracked file, on a temp database. metabase was
+edited in a clone of it (`--copy-of`, `git clone --local`: the original is
+never written), so it has no ignored build output; its whole relist is not the
+1.1–1.2 s of the real directory (`vcs.status` alone, one edit, above).
+
+| ms, three runs | metabase clone (23k files) | 100k kept (1M ignored) | 500k kept (100k ignored) |
+|---|---|---|---|
+| Whole relist | 255, 272, 457 | 710, 713, 730 | 6,608, 6,529, 6,734 |
+| of which `vcs.status` | 253, 270, 455 | 709, 712, 729 | 6,604, 6,511, 6,731 |
+| Relist of the paths | 19.7, 20.2, 19.7 | 35.4, 34.8, 34.5 | 214, 200, 201 |
+| of which `status_of` | 18.2, 18.6, 18.3 | 34.6, 34.1, 33.8 | 214, 199, 200 |
+| of which `diff_paths` | 1.3, 1.5, 1.3 | 0.6, 0.5, 0.5 | 0.5, 0.5, 0.6 |
+| `find`+`list_state`, `store_path_files` | 0.1 + 0.1 | 0.0 + 0.1 | 0.0 + 0.1 |
+| Load average at start | 7.2 | 12.5 | 3.0 |
+
+- **One edit on metabase relists in 20 ms**, against 255–457 ms for the whole
+  list (the target was under 100 ms). Against the real metabase directory,
+  where an edit was not allowed, `status_of` alone took 29–58 ms (load 15,
+  one path, the tree as it is) and `diff_from_status` 21 ms.
+- **The only cost that grows is the index read in `status_of`**: 18 ms at 23k
+  files, 34 ms at 100k, 200 ms at 500k. Everything else (finding the change,
+  the diff of the paths, writing the rows) is under 2 ms at every size. The
+  whole list is `vcs.status`, which grows with the tree: 0.25 s, 0.7 s, 6.6 s.
+- **At 500k kept files the paths' relist is 33 times faster than the whole one**
+  (0.2 s against 6.6 s), and 20 times at 100k.
+- Not measured: `refresh_paths` itself (it needs `Services`); a relist of
+  more than one file; the work after the relist (the change event, the
+  page's re-read).
 
 ### On Linux (measured 2026-11-06)
 
