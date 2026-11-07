@@ -1,6 +1,6 @@
 import { ipc } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, shown } from "../../support/ui.js";
+import { openFromLauncher, shown, load } from "../../support/ui.js";
 
 // A bookmark is of the page's whole address, view included. The same page at
 // another view shows the star as "bookmarked at other values", and its popover
@@ -8,7 +8,7 @@ import { openFromLauncher, shown } from "../../support/ui.js";
 test("the star offers to move a bookmark made at another filter value", async ({ page, daemon }) => {
   const bookmarked = async () =>
     (await ipc<{ rows: string[][] }>(daemon, "query_sql", { sql: "SELECT uri FROM v_bookmark" })).rows.map((r) => String(r[0]));
-  await page.goto("/");
+  await load(page);
   await openFromLauncher(page, "Local History");
   const star = page.getByTestId("page-nav-bookmark").filter({ visible: true });
   await star.click();

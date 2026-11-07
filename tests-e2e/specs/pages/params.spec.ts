@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import type { Daemon } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, reload } from "../../support/ui.js";
 
 /// A page of the browser suite's own: its rows stand in for commits, and its
 /// filters are the kinds a page declares (a date range with a custom end, a
@@ -122,7 +122,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(row).toHaveAttribute("aria-selected", "true");
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Add the numbat");
   // A reload brings the tab back with its values.
-  await page.reload();
+  await reload(page);
   await expect(filters.getByTestId("page-param-q-value")).toHaveText("numbat");
 
   // A custom range opens over the page; Escape closes it.

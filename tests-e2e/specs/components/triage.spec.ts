@@ -8,7 +8,7 @@ import type { Page } from "@playwright/test";
 
 import { installExample, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { inFrame, open, shown } from "../../support/ui.js";
+import { inFrame, open, shown, reload } from "../../support/ui.js";
 
 // The triage example (`examples/extensions/triage`): the one thing only the
 // app's shell shows is that a decision survives a reload of the board, in
@@ -62,9 +62,9 @@ async function facts(daemon: Daemon): Promise<unknown[][]> {
 
 /** Reload once the page has no request in flight: WebKit reports a fetch
  *  the reload cancels as an error the page threw. */
-async function reload(page: Page) {
+async function reloadWhenIdle(page: Page) {
   await page.waitForLoadState("networkidle");
-  await page.reload();
+  await reload(page);
 }
 
 /** What was decided, by `<path>:<line>`, as the extension reads it back. */
@@ -113,7 +113,7 @@ test("the decisions made survive a reload on the board", async ({ page, daemon }
     await until("the decisions to be stored", 15_000, async () => (await decisions(daemon))["src/lib.rs:3"] === "wontfix");
 
     // Both survive a reload: the board shows them again.
-    await reload(page);
+    await reloadWhenIdle(page);
     await expect(shown(page, "page=triage/todo-board")).toHaveCount(1);
     await expect(card(1).locator("select[name=decision]")).toHaveValue("fix-now");
     await expect(card(3).locator("select[name=decision]")).toHaveValue("wontfix");

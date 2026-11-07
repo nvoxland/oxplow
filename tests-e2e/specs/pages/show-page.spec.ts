@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../support/fixtures.js";
 import { run } from "../../support/daemon.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, load, reload } from "../../support/ui.js";
 
 type Daemon = Parameters<typeof run>[0];
 const source = (title: string, prefix: string) => `# Keep the source comment
@@ -15,7 +15,7 @@ view: { id: count, viz: number, from: count }
 `;
 
 async function show(page: Page, daemon: Daemon, spec: string) {
-  await page.goto("/");
+  await load(page);
   // An open page and settled rail mean the window can answer a show call.
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
@@ -38,7 +38,7 @@ test("show_page opens a temp page (a file on oxplow:temp) whose live run survive
   const body = shown(page).getByTestId("page-file");
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
   await expect(body.locator('[data-node="count"]')).toContainText("0");
-  await page.reload();
+  await reload(page);
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
   await run(daemon, "oxplow.work_item.create", { title: "Shown Quoll evidence", thread: daemon.thread });
   await expect(body.locator('[data-node="count"]')).toContainText("1");
@@ -69,7 +69,7 @@ test("a view whose file is gone says so, and the tab stays", async ({ page, daem
   const uri = await show(page, daemon, source("Gone Numbat Count", "Gone Numbat "));
   const id = uri.slice(uri.lastIndexOf("/") + 1);
   rmSync(join(daemon.project, ".oxplow", "runtime", "temp", `${id}.yaml`));
-  await page.reload();
+  await reload(page);
   await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
   await expect(shown(page).getByTestId("view-gone")).toContainText("This view is gone");
 });

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { deploy, extensionSource, run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { searchLauncher, load } from "../../support/ui.js";
 
 test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
   const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
@@ -13,7 +13,7 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
   await run(daemon, "oxplow.knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
   await searchable(daemon, "quokka", "work_item");
   await searchable(daemon, "quokka", "wiki");
-  await page.goto("/");
+  await load(page);
   // A hit opens the foundation's resource page for its URI.
   await searchLauncher(page, "quokka");
   await page.getByTestId(`launcher-hit-${created.result.uri}`).click();
@@ -27,7 +27,7 @@ test("search finds a task and a wiki page, and opens them", async ({ page, daemo
 // An extension added while the page is open — the agent writes
 // one — shows in the launcher without a reload.
 test("a page added while the window is open is in the launcher", async ({ page, daemon }) => {
-  await page.goto("/");
+  await load(page);
   // The launcher has loaded the extensions once already.
   await searchLauncher(page, "Wombat");
   await expect(page.locator('[data-testid^="launcher-page-"]').filter({ hasText: "Wombat" })).not.toBeVisible();

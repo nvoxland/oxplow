@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, reload } from "../../support/ui.js";
 
 const spec = `title: Switch Dingo
 category: Data
@@ -47,7 +47,7 @@ test("only the switched child shows, and changing the param switches it", async 
   await expect(host.getByTestId("node-desert")).toBeVisible();
 
   // The choice is in the tab's address: a reload keeps it.
-  await page.reload();
+  await reload(page);
   await expect(host.getByTestId("node-desert")).toBeVisible();
   await expect(host.getByTestId("node-coast")).toHaveCount(0);
 });

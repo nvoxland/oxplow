@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, reload } from "../../support/ui.js";
 
 const spec = `title: Select Marsupial
 category: Data
@@ -46,7 +46,7 @@ test("a row click writes the page's param and a section that reads it fills", as
   await expect(facts).toContainText("Fact about numbat");
   // The pick is in the tab's address, so a reload keeps it.
   await expect(shown(page)).toHaveAttribute("data-testid", /animal=numbat/);
-  await page.reload();
+  await reload(page);
   await expect(facts).toContainText("Fact about numbat");
 
   // Another row replaces the pick.

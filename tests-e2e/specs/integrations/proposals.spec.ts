@@ -1,13 +1,13 @@
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { shown } from "../../support/ui.js";
+import { shown, load } from "../../support/ui.js";
 
 // The test extension's effect deletes a task titled "[delete]": a
 // destructive step oxplow never runs for an effect, so it waits as a
 // proposal for a person.
 
 test("an effect's destructive step waits in Alerts until a person approves it", async ({ page, daemon }) => {
-  await page.goto("/");
+  await load(page);
   await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.thread });
   // The dock's Alerts icon counts it once the effect has run (it runs in the
   // background, so wait for that). It opens the Alerts panel, which links

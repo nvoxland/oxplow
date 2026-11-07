@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, load } from "../../support/ui.js";
 
 // The editor is oxplow-foundation's page over the `editor` viz: a file of
 // the working tree, its unsaved edits marked on its tab (●), saved with
@@ -38,7 +38,7 @@ async function openEmu(page: import("@playwright/test").Page, daemon: Parameters
 
 test("typing marks the tab dirty; Ctrl/Cmd+S writes the file and clears it", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
-  await page.goto("/");
+  await load(page);
   const editor = await openEmu(page, daemon);
   // The caret at the start of the first line.
   await editor.locator(".view-line").first().click();
@@ -52,7 +52,7 @@ test("typing marks the tab dirty; Ctrl/Cmd+S writes the file and clears it", asy
 
 test("closing a dirty tab offers Undo, which brings the tab and its draft back", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "emu\n");
-  await page.goto("/");
+  await load(page);
   const editor = await openEmu(page, daemon);
   // The caret at the start of the first line.
   await editor.locator(".view-line").first().click();

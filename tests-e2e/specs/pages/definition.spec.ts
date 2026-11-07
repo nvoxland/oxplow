@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, load } from "../../support/ui.js";
 
 // Definition is a display mode of a page's YAML file: Definition in About this page opens
 // the page's running copy drawn as Definition, and the Text view (the raw
@@ -80,7 +80,7 @@ test("Definition drawn again after another tab was shown still names its file an
 
 test("Definition of a page whose file is open in the Text view is another tab: both stay", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-defn", { files: { "pages/numbat.yaml": numbat } });
-  await page.goto("/");
+  await load(page);
   const openDefinition = async () => {
     await open(page, daemon, "oxplow:oxplow/page?page=e2e-defn/numbat", { new_tab: true });
     await page.getByTestId("page-nav-menu").filter({ visible: true }).click();

@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, load } from "../../support/ui.js";
 
 // Oxplow's own pages are complete with every enhancement off: with only
 // oxplow-foundation on, a page shows its own content, and nothing another
@@ -52,7 +52,7 @@ async function nothingAdded(page: Page) {
 test("oxplow's pages are complete with every enhancement off", async ({ page, daemon }) => {
   history(daemon);
   for (const name of OTHERS) await run(daemon, "oxplow.extension.disable", { name });
-  await page.goto("/");
+  await load(page);
   const host = shown(page).getByTestId("page-host");
 
   // The VCS pages: their own content.

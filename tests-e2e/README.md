@@ -105,6 +105,11 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - `inFrame(from, label?)` is a custom component's frame, scrolled into view
     first: a frame below the fold gets no animation frames, and a click never
     sees its button as stable.
+  - `load(page, path?)` and `reload(page)` load the app and wait until the
+    window is ready (`windowReady`). Before that no thread is shown, so a
+    click opens nothing: a spec that clicked the dock's Alerts as soon as its
+    badge showed (the badge comes from the daemon, before the stream) opened
+    no page, once in a CI run.
   - `expandRailSection`, `searchLauncher`, `newSessionPage`, `workItemIdOf`.
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
   `waitForModels` or `until`, never a sleep. Global setup refuses a spec that
@@ -113,7 +118,9 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   that has `openFromLauncher(` outside `work/launcher-search`, `work/goto` and
   `shell/agent-session`; `frameLocator(` anywhere (use `inFrame`); or
   `toHaveCount(0)` on `expect(page.…)` without `shown(page)` (a chrome item,
-  such as a menu, toast or tab, is `.not.toBeVisible()`). `specs/harness/`
+  such as a menu, toast or tab, is `.not.toBeVisible()`); or `page.goto(` or
+  `page.reload(` outside `shell/connect` (whose refused window is never
+  ready): `load` and `reload`. `specs/harness/`
   checks the helpers themselves.
 - **Reports**: a JUnit report at `tests-e2e/.output/junit.xml`, for a
   failed spec its trace under `tests-e2e/.output/results`, and every

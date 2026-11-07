@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, reload } from "../../support/ui.js";
 
 type Daemon = Parameters<typeof ipc>[0];
 interface DashboardPage {
@@ -86,7 +86,7 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
   const saved = await ipc<{ yaml: string }>(daemon, "page_spec", { page: id });
   expect(saved.yaml).toContain("# Preserve this dashboard explanation");
 
-  await page.reload();
+  await reload(page);
   await expect(shown(page).getByTestId("dashboard-title-edit")).toHaveText("Dunnart release overview");
   await expect(activeGrid(page)).toContainText("Dunnart coverage evidence");
   await expect(activeGrid(page)).not.toContainText("Dunnart test evidence");

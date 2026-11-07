@@ -94,13 +94,16 @@ test("the sleep ban sees a timer by any spelling", async () => {
   }
 });
 
-test("the ui lint names a launcher open, a bare frame and an unscoped zero count", async () => {
+test("the ui lint names a launcher open, a bare frame, an unscoped zero count and a load that doesn't wait", async () => {
   const dir = mkdtempSync(join(tmpdir(), "oxplow-e2e-ui-"));
   try {
     mkdirSync(join(dir, "work"));
     mkdirSync(join(dir, "pages"));
+    mkdirSync(join(dir, "shell"));
     const launcher = "await openFromLauncher(page, 'Go To');\n";
     writeFileSync(join(dir, "work", "goto.spec.ts"), launcher);
+    // A refused token: that window is never ready.
+    writeFileSync(join(dir, "shell", "connect.spec.ts"), "await page.goto('/');\n");
     writeFileSync(
       join(dir, "pages", "a.spec.ts"),
       [
@@ -110,9 +113,18 @@ test("the ui lint names a launcher open, a bare frame and an unscoped zero count
         "await expect(shown(page).getByTestId('x')).toHaveCount(0);",
         "await expect(form.getByTestId('x')).toHaveCount(0);",
         "await expect(frame.getByText('x')).toHaveCount(0);",
+        "await page.goto('/');",
+        "await page.reload();",
+        "await load(page);",
       ].join("\n"),
     );
-    expect(uiRulesIn(dir).map((l) => l.split(": ")[0])).toEqual(["pages/a.spec.ts:1", "pages/a.spec.ts:3", "pages/a.spec.ts:4"]);
+    expect(uiRulesIn(dir).map((l) => l.split(": ")[0])).toEqual([
+      "pages/a.spec.ts:1",
+      "pages/a.spec.ts:3",
+      "pages/a.spec.ts:4",
+      "pages/a.spec.ts:8",
+      "pages/a.spec.ts:9",
+    ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

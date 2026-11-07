@@ -16,10 +16,24 @@ export function shown(page: Page, needle?: string): Locator {
 /** Wait until the window takes the daemon's calls: it has loaded its stream
  *  and thread, opened the thread's first tabs and loaded the extensions,
  *  and registered (`data-oxplow-ready` on `<html>`, App.tsx). A navigate
- *  before that is refused, or would be pushed aside by those first tabs. */
+ *  before that is refused, or would be pushed aside by those first tabs,
+ *  and a click opens nothing, since no thread is shown yet. */
 export async function windowReady(page: Page): Promise<void> {
   if (page.url() === "about:blank") await page.goto("/");
   await expect(page.locator("html[data-oxplow-ready]")).toHaveCount(1);
+}
+
+/** Load the app at `path` and wait until the window is ready. */
+export async function load(page: Page, path = "/"): Promise<void> {
+  await page.goto(path);
+  await windowReady(page);
+}
+
+/** Reload the window and wait until it is ready again (a reloaded page is
+ *  a new document: not ready until it registers again). */
+export async function reload(page: Page): Promise<void> {
+  await page.reload();
+  await windowReady(page);
 }
 
 /** Send the window to `uri` with the bus command `oxplow.window.navigate`

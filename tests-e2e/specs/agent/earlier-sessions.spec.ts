@@ -1,6 +1,6 @@
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { newSessionPage, searchLauncher } from "../../support/ui.js";
+import { newSessionPage, searchLauncher, load } from "../../support/ui.js";
 
 interface Opened {
   result: { id: string };
@@ -18,7 +18,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
   const id = opened.result.id;
   await run(daemon, "oxplow.agent_session.close", { session: id });
 
-  await page.goto("/");
+  await load(page);
   await expect(newSessionPage(page)).toBeVisible();
   const row = newSessionPage(page).getByRole("row", { name: /Parser work/ });
   await expect(row).toContainText("closed here");
@@ -44,7 +44,7 @@ test("a closed session found by search opens its transcript, which can reopen it
   await run(daemon, "oxplow.agent_session.close", { session: id });
   await searchable(daemon, "Zebrafinch", "agent_session");
 
-  await page.goto("/");
+  await load(page);
   await searchLauncher(page, "Zebrafinch");
   await page.getByTestId(`launcher-hit-oxplow:oxplow/agent_session?id=${id}`).click();
   // Its transcript (it has no turns yet, so nothing is listed), not a tab
@@ -66,7 +66,7 @@ test("picking a session open here shows it and keeps the New Session page", asyn
   });
   const id = opened.result.id;
 
-  await page.goto("/");
+  await load(page);
   await searchLauncher(page, "new agent session");
   await page.getByTestId("launcher-command-oxplow.agent_session.open").click();
   const row = newSessionPage(page).getByRole("row", { name: /Lexer work/ });

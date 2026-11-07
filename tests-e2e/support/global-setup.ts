@@ -31,6 +31,10 @@ export function sleepsIn(dir: string): string[] {
   return out;
 }
 
+/** The specs whose window is never ready (a refused token), the only ones
+ *  that load the app without waiting for it. */
+const WINDOW_NEVER_READY = ["shell/connect.spec.ts"];
+
 /** The specs about the launcher itself, the only ones that type into it. */
 const LAUNCHER_SPECS = ["work/launcher-search.spec.ts", "work/goto.spec.ts", "shell/agent-session.spec.ts"];
 
@@ -42,6 +46,8 @@ const LAUNCHER_SPECS = ["work/launcher-search.spec.ts", "work/goto.spec.ts", "sh
  *    launcher's own specs;
  *  - `frameLocator(` skips the scroll that gives a frame below the fold its
  *    animation frames: `inFrame`;
+ *  - `page.goto(` and `page.reload(` don't wait for the window, and a click
+ *    or navigate before it is ready opens nothing: `load` and `reload`;
  *  - `toHaveCount(0)` on the page itself (`expect(page.…)`) counts what the
  *    hidden tabs hold too, the New Session tab's own form and buttons among
  *    them: under `shown(page)`, or a form/frame/host locator made from it
@@ -62,6 +68,7 @@ export function uiRulesIn(dir: string, base = dir): string[] {
         const at = `${rel}:${i + 1}:`;
         if (/\bopenFromLauncher\(/.test(line) && !LAUNCHER_SPECS.includes(rel)) out.push(`${at} open the page with open(page, daemon, uri), not the launcher`);
         if (/\bframeLocator\(/.test(line)) out.push(`${at} use inFrame(...), which scrolls the frame into view`);
+        if (/\bpage\.(goto|reload)\(/.test(line) && !WINDOW_NEVER_READY.includes(rel)) out.push(`${at} use load(page) or reload(page), which wait until the window is ready`);
         if (/\btoHaveCount\(0\)/.test(line)) {
           // The statement: from its `expect(` (a few lines up, when the call wraps) to here.
           const lines = readFileSync(path, "utf8").split("\n");

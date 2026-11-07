@@ -1,6 +1,6 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, load } from "../../support/ui.js";
 
 // The Changes page is the foundation's `changes` document, the renderer of
 // an effort's (and a snapshot's, a turn's) page. What its parts say, and what
@@ -20,7 +20,7 @@ test("an effort's page opens from its URI, and the pickers turn it into a range"
     effortUri = (out.rows[0]?.[0] as string | undefined) ?? "";
     return effortUri !== "";
   });
-  await page.goto("/");
+  await load(page);
   // The window answers a navigate once its stream is shown: a page open is the sign.
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");

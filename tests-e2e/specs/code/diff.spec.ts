@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { expect, test } from "../../support/fixtures.js";
-import { open, shown } from "../../support/ui.js";
+import { open, shown, reload } from "../../support/ui.js";
 
 test("a committed change shows its hunk", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "emu.txt"), "first emu line\nsecond emu line\n");
@@ -20,7 +20,7 @@ test("a committed change shows its hunk", async ({ page, daemon }) => {
   await expect(page.getByTestId("viz-diff")).toContainText("second emu line");
   // The diff is the foundation's `diff` page. A diff is its address: a reload draws the same diff, its base named.
   const named = await page.getByTestId("viz-diff").getByText(/^vs /).textContent();
-  await page.reload();
+  await reload(page);
   await expect(page.getByTestId("viz-diff")).toContainText("second emu line");
   await expect(page.getByTestId("viz-diff").getByText(/^vs /)).toHaveText(named!);
 });

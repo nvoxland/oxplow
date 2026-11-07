@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { navigate, open, shown } from "../../support/ui.js";
+import { navigate, open, shown, load, reload } from "../../support/ui.js";
 
 const overviewTitle = (page: import("@playwright/test").Page) => page.getByTestId("page-nav-title").filter({ visible: true });
 
@@ -27,7 +27,7 @@ async function followItem(page: import("@playwright/test").Page, title: string) 
 
 test("Cmd+[ goes back through the tab's pages and Cmd+] goes forward", async ({ page, daemon }) => {
   await item(daemon, "Kestrel follow-up");
-  await page.goto("/");
+  await load(page);
   await openOverview(page, daemon, "Kestrel follow-up");
   await followItem(page, "Kestrel follow-up");
 
@@ -40,11 +40,11 @@ test("Cmd+[ goes back through the tab's pages and Cmd+] goes forward", async ({ 
 
 test("the active tab and its history survive a reload", async ({ page, daemon }) => {
   await item(daemon, "Osprey follow-up");
-  await page.goto("/");
+  await load(page);
   await openOverview(page, daemon, "Osprey follow-up");
   await followItem(page, "Osprey follow-up");
 
-  await page.reload();
+  await reload(page);
   await expect(overviewTitle(page)).toHaveText("Item");
   await page.keyboard.press("Meta+[");
   await expect(overviewTitle(page)).toHaveText("Item overview");
@@ -149,7 +149,7 @@ test("window.navigate pushes by default and replaces on request", async ({ page,
 // entry of the same tab, and Back returns to the first.
 test("a file opened at a line lands at its #lines view, and Back returns to the line before", async ({ page, daemon }) => {
   writeFileSync(join(daemon.project, "lines.txt"), Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n") + "\n");
-  await page.goto("/");
+  await load(page);
   // The window answers a navigate once its stream is shown: a page open is the sign.
   await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
@@ -173,7 +173,7 @@ test("after a reload, tabs not yet shown keep their titles and mount only when s
   const labels = () => strip.evaluateAll((els) => els.map((e) => (e.textContent ?? "").replace("×", "").trim()));
   await expect.poll(labels).toContain("Suite Second");
   const before = await labels();
-  await page.reload();
+  await reload(page);
   await expect(strip.first()).toBeVisible();
   await expect.poll(labels).toEqual(before);
   // Only the shown tab has a body.

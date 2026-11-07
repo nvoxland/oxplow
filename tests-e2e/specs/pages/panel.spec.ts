@@ -1,7 +1,7 @@
 import { run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { expandRailSection } from "../../support/ui.js";
+import { expandRailSection, load } from "../../support/ui.js";
 
 const body = `title: Glider body
 loaders:
@@ -28,7 +28,7 @@ test("a left-nav panel draws its body page, and its badge page's number", async 
     manifest: "panels:\n  - { id: gliders, title: Gliders, icon: bell, scope: project, body: glider-body, badge: glider-count }\n",
     files: { "parts/glider-body.yaml": body, "parts/glider-count.yaml": count },
   });
-  await page.goto("/");
+  await load(page);
   const id = "ext:e2e-panel/gliders";
   await expandRailSection(page, id);
   const section = page.getByTestId(`rail-section-${id}`);
