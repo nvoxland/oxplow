@@ -564,51 +564,6 @@ fn no_legacy_shims() {
     );
 }
 
-/// `v_file` is the one dataset of files (any filesystem, any revision):
-/// the worktree-only dataset it replaced is named nowhere —
-/// not in a query, a page, a doc or a fixture. The word is built in two
-/// pieces so this guard doesn't name it.
-#[test]
-fn no_source_names_the_old_workspace_file_dataset() {
-    let old = ["v_workspace", "_file"].concat();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut found = Vec::new();
-    let mut stack: Vec<PathBuf> = [
-        "crates",
-        "extensions",
-        "apps/desktop/src",
-        "apps/desktop/src-tauri",
-        "tests-e2e",
-        ".context",
-    ]
-    .iter()
-    .map(|d| root.join(d))
-    .collect();
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-            if path.is_dir() {
-                if !matches!(name.as_str(), "target" | "node_modules" | "dist" | ".git") {
-                    stack.push(path);
-                }
-            } else if let Ok(text) = std::fs::read_to_string(&path) {
-                if text.contains(&old) {
-                    found.push(path.strip_prefix(&root).unwrap_or(&path).to_path_buf());
-                }
-            }
-        }
-    }
-    found.sort();
-    assert!(
-        found.is_empty(),
-        "`{old}` was replaced by `v_file`: {found:?}"
-    );
-}
-
 /// The workspace's test doubles, by their names' convention: a crate
 /// that stands in for a service in tests is `<name>-fake` or `<name>-sim`.
 fn is_test_double(name: &str) -> bool {

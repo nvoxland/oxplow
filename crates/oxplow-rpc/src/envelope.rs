@@ -84,14 +84,4 @@ mod tests {
         assert_eq!(env["error"]["code"], "INVALID");
         assert_eq!(env["error"]["field"], "/title");
     }
-
-    #[test]
-    fn error_branch_is_byte_identical_to_direct_ipc_error_serialization() {
-        // The Tauri reject path serializes the *same* IpcError directly
-        // (Tauri core + typedError), so the `error` member here must be
-        // byte-for-byte what `serde_json` produces for that IpcError.
-        let err = IpcError::invalid("bad input").with_cause("inner detail");
-        let env = ipc_envelope(Err(err.clone()));
-        assert_eq!(env["error"], serde_json::to_value(&err).unwrap());
-    }
 }

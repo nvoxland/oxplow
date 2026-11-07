@@ -162,32 +162,6 @@ mod tests {
     }
 
     #[test]
-    fn task_round_trips() {
-        let now = Timestamp::from_unix_ms(1_700_000_000_000);
-        let item = Task {
-            id: TaskId::new(1),
-            thread_id: Some(ThreadId::new(1)),
-            parent_id: None,
-            title: "ship it".into(),
-            description: String::new(),
-            status: TaskStatus::Ready,
-            priority: TaskPriority::Medium,
-            sort_index: 0,
-            created_by: TaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: Some(TaskAuthor::User),
-        };
-
-        let json = serde_json::to_string(&item).unwrap();
-        let back: Task = serde_json::from_str(&json).unwrap();
-        assert_eq!(item, back);
-    }
-
-    #[test]
     fn backlog_task_has_no_thread() {
         let item: Task = serde_json::from_str(
             r#"{

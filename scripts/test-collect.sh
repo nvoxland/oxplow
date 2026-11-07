@@ -4,6 +4,7 @@
 # skip the frontend's tests and their report (tsk1012). llvm-cov doesn't
 # create its output directory, which `cargo clean` removes (tsk1075).
 sh "$(dirname "$0")/test-prereqs.sh" || exit 1
+. "$(dirname "$0")/test-tmpdir.sh"
 mkdir -p target/coverage
 cargo cov
 rust=$?

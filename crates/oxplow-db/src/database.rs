@@ -222,6 +222,8 @@ pub struct Database {
     writing: Arc<std::sync::atomic::AtomicUsize>,
     /// Which tables commits touched, published after each call (P4.6).
     changes: Arc<crate::changes::Changes>,
+    /// How long a call waits for the write lock.
+    lock_waits: LockWaits,
 }
 
 /// How many connections background work may hold at once: all but two,
@@ -256,6 +258,7 @@ const MAX_YIELD: std::time::Duration = std::time::Duration::from_millis(1500);
 /// background work, of its share of it.
 pub(crate) struct DbPermit {
     interactive: bool,
+    lock_wait: std::time::Duration,
     _gate: OwnedSemaphorePermit,
     _background: Option<OwnedSemaphorePermit>,
     /// An interactive write: counted while it waits and runs.
@@ -304,12 +307,29 @@ const INTERACTIVE_LOCK_WAIT: std::time::Duration = std::time::Duration::from_sec
 /// person's writes and must not fail because it did.
 const BACKGROUND_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long a call waits for the write lock before giving up with `Busy`.
+#[derive(Clone, Copy)]
+struct LockWaits {
+    interactive: std::time::Duration,
+    background: std::time::Duration,
+}
+
+impl Default for LockWaits {
+    fn default() -> Self {
+        Self {
+            interactive: INTERACTIVE_LOCK_WAIT,
+            background: BACKGROUND_LOCK_WAIT,
+        }
+    }
+}
+
 /// What the SQLite busy handler on this thread needs to know about the
 /// call running on it: set for the length of a database call
 /// ([`LockWait::enter`]). A plain `fn` is all SQLite's handler can be, so
 /// the call's state rides the thread.
 struct LockWait {
     interactive: bool,
+    limit: std::time::Duration,
     waiting: Arc<std::sync::atomic::AtomicUsize>,
     /// Counted as an interactive writer from the first time it waits.
     counted: Option<InteractiveWrite>,
@@ -328,6 +348,7 @@ impl LockWaitScope {
         LOCK_WAIT.with(|l| {
             *l.borrow_mut() = Some(LockWait {
                 interactive: permit.interactive,
+                limit: permit.lock_wait,
                 waiting: permit.waiting.clone(),
                 counted: None,
                 started: None,
@@ -365,12 +386,7 @@ fn busy_handler(count: i32) -> bool {
             wait.started = Some(std::time::Instant::now());
         }
         let started = *wait.started.get_or_insert_with(std::time::Instant::now);
-        let limit = if wait.interactive {
-            INTERACTIVE_LOCK_WAIT
-        } else {
-            BACKGROUND_LOCK_WAIT
-        };
-        if started.elapsed() >= limit {
+        if started.elapsed() >= wait.limit {
             return false;
         }
         if wait.interactive {
@@ -508,6 +524,7 @@ impl Database {
             interactive_writers: Arc::default(),
             writing: Arc::default(),
             changes,
+            lock_waits: LockWaits::default(),
         })
     }
 
@@ -564,6 +581,7 @@ impl Database {
             interactive_writers: Arc::default(),
             writing: Arc::default(),
             changes,
+            lock_waits: LockWaits::default(),
         })
     }
 
@@ -616,6 +634,7 @@ impl Database {
             interactive_writers: Arc::default(),
             writing: Arc::default(),
             changes,
+            lock_waits: LockWaits::default(),
         }
     }
 
@@ -671,11 +690,27 @@ impl Database {
         let gate = self.gate.clone().acquire_owned().await.map_err(closed)?;
         Ok(DbPermit {
             interactive,
+            lock_wait: if interactive {
+                self.lock_waits.interactive
+            } else {
+                self.lock_waits.background
+            },
             _gate: gate,
             _background: background,
             interactive_write,
             waiting: self.interactive_writers.clone(),
         })
+    }
+
+    /// This handle's calls give up on the write lock after `wait`: a test of
+    /// what happens past the wait doesn't sit through the real one.
+    #[cfg(test)]
+    pub(crate) fn with_lock_wait(mut self, wait: std::time::Duration) -> Self {
+        self.lock_waits = LockWaits {
+            interactive: wait,
+            background: wait,
+        };
+        self
     }
 
     /// The shared memo cells (see [`QueryMemo`]). Scoped to this `Database`,
@@ -2093,7 +2128,9 @@ mod tests {
     async fn a_transaction_that_cant_begin_is_retried() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("busy.sqlite");
-        let db = Database::open(&path).unwrap();
+        let db = Database::open(&path)
+            .unwrap()
+            .with_lock_wait(std::time::Duration::from_millis(50));
         db.transaction(|tx| {
             tx.execute("CREATE TABLE t (x INTEGER)", [])
                 .map_err(map_sql_err)?;
@@ -2101,13 +2138,13 @@ mod tests {
         })
         .await
         .unwrap();
-        // Another writer holds the lock past the pool's 5 s wait.
+        // Another writer holds the lock past the wait.
         let (held, holding) = std::sync::mpsc::channel();
         let holder = std::thread::spawn(move || {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch("BEGIN IMMEDIATE").unwrap();
             held.send(()).unwrap();
-            std::thread::sleep(std::time::Duration::from_millis(6_500));
+            std::thread::sleep(std::time::Duration::from_millis(200));
             conn.execute_batch("COMMIT").unwrap();
         });
         holding.recv().unwrap();

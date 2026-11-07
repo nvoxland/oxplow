@@ -36,6 +36,12 @@ oxplow-provider-fake = { workspace = true }
 oxplow-harness-fake = { workspace = true }
 # Scaffolds are checked against the extension schema.
 jsonschema = { version = "0.58", default-features = false }
+libtest-mimic = "0.8"
+
+# One test per example, made at run time (the file says why).
+[[test]]
+name = "every_example"
+harness = false
 
 [lints]
 workspace = true
