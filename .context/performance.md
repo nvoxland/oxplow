@@ -942,8 +942,12 @@ unit's features and builds nothing. Linking isn't worth looking at: 0.8 s for
 **Ruled out:** a test fixture without `oxplow-bundled` saves nothing (0.67 s
 against 0.64 s a boot: the cost is core and foundation). Caching parsed shipped
 extensions per process is unsound: `Extension.path` is that project's store
-folder. Hard-linking the store copy would make the checkout read-only, since a
-deployment's files are chmodded.
+folder. Hard-linking the store copy from the checkout would make the checkout
+read-only, since a deployment's files are chmodded. Hard-linking it from one shared
+copy is slower: `oxplow-app`'s tests 97 s to 142 s, system time 520 s to 1,110 s, as
+linking and unlinking the same files contend harder than writing small ones. A folder
+symlink is refused (`extensions.rs`). Tests leave about 100 folders per run; the daily
+clean of `scripts/test-tmpdir.sh` takes them, so they aren't worth chasing.
 
 ## Core's vocabulary is built once per process (2026-10-07)
 
