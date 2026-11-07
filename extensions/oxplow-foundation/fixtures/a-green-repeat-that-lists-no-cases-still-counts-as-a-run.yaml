@@ -1,0 +1,18 @@
+# A later run that lists no case at all is a green run: it closes the red
+# and the time to green runs to it.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.100Z", cases: [{ name: a, status: failed }, { name: b, status: passed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.105Z", cases: [] } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+when:
+  sql: SELECT dims_json, value FROM v_fact WHERE measure_key = 'oxplow.effort_test_outcome' ORDER BY dims_json
+expect:
+  rows:
+    - { dims_json: '{"oxplow.tests_stat":"at_close"}', value: 0.0 }
+    - { dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 1.0 }
+    - { dims_json: '{"oxplow.tests_stat":"peak"}', value: 1.0 }
+    - { dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 1.0 }
+steps:
+  - when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.effort_time_to_green'" }
+    expect: { rows: [{ value: 5.0 }] }

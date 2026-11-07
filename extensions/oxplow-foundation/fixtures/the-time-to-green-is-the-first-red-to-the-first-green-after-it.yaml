@@ -1,0 +1,21 @@
+# green, red, red, green, red: the time to green is from the first red to the
+# green after it, whatever follows.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00Z", cases: [{ name: a, status: passed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.100Z", cases: [{ name: a, status: failed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.250Z", cases: [{ name: a, status: failed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.400Z", cases: [{ name: a, status: passed }] } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.500Z", cases: [{ name: b, status: failed }] } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+when:
+  sql: SELECT dims_json, value FROM v_fact WHERE measure_key = 'oxplow.effort_test_outcome' ORDER BY dims_json
+expect:
+  rows:
+    - { dims_json: '{"oxplow.tests_stat":"at_close"}', value: 1.0 }
+    - { dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 2.0 }
+    - { dims_json: '{"oxplow.tests_stat":"peak"}', value: 1.0 }
+    - { dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 3.0 }
+steps:
+  - when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.effort_time_to_green'" }
+    expect: { rows: [{ value: 300.0 }] }

@@ -1,0 +1,9 @@
+# An effort with no recorded test run has no outcome to count: the collector
+# makes no fact at all.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+when:
+  sql: SELECT value FROM v_fact WHERE measure_key IN ('oxplow.effort_test_outcome', 'oxplow.effort_time_to_green')
+expect:
+  rows: []

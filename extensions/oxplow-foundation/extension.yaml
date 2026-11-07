@@ -149,6 +149,24 @@ intent:
     - name: asserted-failures-have-no-identity-so-distinct-falls-back-to-the-peak
       input: { sql: v_fact }
       expect: a run with only a failure count names no test, so distinct falls back to the peak
+    - name: a-project-with-no-test-runs-records-no-test-outcome
+      input: { sql: v_fact }
+      expect: an effort with no recorded test run makes no test outcome fact
+    - name: a-single-green-run-is-all-zeros-with-no-time-to-green
+      input: { sql: v_fact }
+      expect: one passing run is four zeros and has no time to green
+    - name: a-run-that-lists-its-failures-needs-no-count-fallback
+      input: { sql: v_fact }
+      expect: a report that names its failing tests is counted by the names, not the failure count it asserts
+    - name: a-green-repeat-that-lists-no-cases-still-counts-as-a-run
+      input: { sql: v_fact }
+      expect: a later run listing no case is a green run that closes the red
+    - name: the-time-to-green-is-the-first-red-to-the-first-green-after-it
+      input: { sql: v_fact }
+      expect: the time to green runs from the first red to the green after it, whatever follows
+    - name: the-time-to-green-needs-a-green-after-a-red
+      input: { sql: v_fact }
+      expect: red twice and never green again makes the counts but no time to green
     - name: snapshots-lists-newest-first-with-trigger-and-budget
       input: { page: snapshots }
       expect: snapshots come newest first, each with its parent, trigger and whether it ran over budget

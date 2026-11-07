@@ -87,8 +87,6 @@ pub mod file_ref_version;
 #[cfg(test)]
 pub(crate) mod filesystem_conformance;
 pub(crate) mod filesystems;
-#[cfg(test)]
-mod foundation_collectors_tests;
 pub mod grants;
 pub mod harness_conformance;
 pub mod harnesses;

@@ -1,0 +1,16 @@
+# One passing run is four zeros, and with no red there is no time to green.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:00.100Z", cases: [{ name: a, status: passed }, { name: b, status: passed }, { name: c, status: passed }] } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+when:
+  sql: SELECT dims_json, value FROM v_fact WHERE measure_key = 'oxplow.effort_test_outcome' ORDER BY dims_json
+expect:
+  rows:
+    - { dims_json: '{"oxplow.tests_stat":"at_close"}', value: 0.0 }
+    - { dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 0.0 }
+    - { dims_json: '{"oxplow.tests_stat":"peak"}', value: 0.0 }
+    - { dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 0.0 }
+steps:
+  - when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.effort_time_to_green'" }
+    expect: { rows: [] }
