@@ -804,7 +804,7 @@ mod tests {
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
         assets.sync_datasets().await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assets.quiesce().await;
         assert_eq!(rows().await, 1);
 
         compile(
@@ -814,7 +814,7 @@ mod tests {
         )
         .await;
         assets.sync_datasets().await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assets.quiesce().await;
         assert_eq!(rows().await, 1, "the recreated table is refilled");
     }
 

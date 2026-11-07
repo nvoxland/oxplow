@@ -477,6 +477,34 @@ impl Assets {
         }
     }
 
+    /// Returns once no asset is pending: each has built what it was asked
+    /// to, and an asset that reads another has followed it. The done signal
+    /// of a test that asserts a change was (or was not) acted on, in place
+    /// of a clock. Call it after the `changed` it waits on; one on a clock
+    /// is left out (it runs when due, not when asked).
+    #[cfg(test)]
+    pub(crate) async fn quiesce(&self) {
+        let idle = || {
+            self.entries
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .filter(|e| e.materializer.every().is_none())
+                .all(|e| !e.pending())
+        };
+        // An asset marks the ones that read it right after it is done; two
+        // looks apart see past that hand-over.
+        let settled = crate::test_fixtures::until(Duration::from_secs(10), || async {
+            if !idle() {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            idle()
+        })
+        .await;
+        assert!(settled, "the assets never settled");
+    }
+
     /// Anything may have changed (a lagged listener): every asset is dirty
     /// (but one on a clock, as [`Assets::changed`] says).
     pub fn all_changed(&self) {
@@ -1006,7 +1034,7 @@ mod tests {
             async move {
                 let assets = Assets::new(db, Duration::from_millis(20));
                 assets.register(Arc::new(Scratch { runs, definition }));
-                tokio::time::sleep(Duration::from_millis(300)).await;
+                assets.quiesce().await;
             }
         };
         boot(None).await;
@@ -1071,7 +1099,7 @@ mod tests {
             inputs: vec!["cube".into()],
             log: log.clone(),
         }));
-        let settle = || tokio::time::sleep(Duration::from_millis(600));
+        let settle = || assets.quiesce();
         settle().await;
         assets.changed(&oxplow_db::changes::Changed::inserted(["fact".to_string()]));
         settle().await;

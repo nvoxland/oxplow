@@ -183,7 +183,7 @@ mod tests {
 
     impl AppProbe {
         async fn until(&self, want: impl Fn(usize) -> bool) {
-            for _ in 0..200 {
+            crate::test_fixtures::until(Duration::from_secs(5), || async {
                 let n = self
                     .svc
                     .diagnostic_store
@@ -191,11 +191,9 @@ mod tests {
                     .await
                     .unwrap()
                     .len();
-                if want(n) {
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(25)).await;
-            }
+                want(n)
+            })
+            .await;
         }
 
         async fn notify(&self, method: &str, params: serde_json::Value) {
