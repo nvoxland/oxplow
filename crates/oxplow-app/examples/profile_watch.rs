@@ -709,6 +709,40 @@ async fn main() {
                 }
                 from_status.push(t.elapsed());
             }
+            // The status of only the paths a change names: one changed path
+            // (an edited file; in a tree not generated here, the first the
+            // status named), and that one with nine clean ones from across
+            // the tree.
+            let one = if generated {
+                kept_dir(&root, 2)
+                    .join("file0.txt")
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            } else {
+                vcs.status(&root)
+                    .await
+                    .ok()
+                    .and_then(|s| s.entries.first().map(|e| e.path.clone()))
+                    .unwrap_or_else(|| paths[0].clone())
+            };
+            let mut ten = vec![one.clone()];
+            ten.extend((1..10).map(|i| paths[i * paths.len() / 10].clone()));
+            let mut of_counts = (0, 0);
+            let mut of_times = [Vec::new(), Vec::new()];
+            for _ in 0..3 {
+                for (k, set) in [vec![one.clone()], ten.clone()].into_iter().enumerate() {
+                    let t = Instant::now();
+                    let got = vcs.status_of(&root, &set).await.unwrap();
+                    of_times[k].push(t.elapsed());
+                    if k == 0 {
+                        of_counts.0 = got.entries.len();
+                    } else {
+                        of_counts.1 = got.entries.len();
+                    }
+                }
+            }
             let three = |t: &[Duration]| {
                 format!(
                     "{} cold, then {} and {}",
@@ -727,6 +761,16 @@ async fn main() {
                 format!("{tag}b"),
                 "vcs.status alone",
                 format!("{} ({entries} entries; {phase})", three(&status_times)),
+            );
+            step(
+                format!("{tag}d"),
+                "vcs.status_of, 1 path",
+                format!("{} ({} entries; {phase})", three(&of_times[0]), of_counts.0),
+            );
+            step(
+                format!("{tag}e"),
+                "vcs.status_of, 10 paths",
+                format!("{} ({} entries; {phase})", three(&of_times[1]), of_counts.1),
             );
             step(
                 format!("{tag}c"),

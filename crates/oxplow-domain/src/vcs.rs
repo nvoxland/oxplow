@@ -480,6 +480,11 @@ pub trait Vcs: Send + Sync {
 
     // --- status, branches, blame ---
     async fn status(&self, ws: &Path) -> Result<WorkspaceStatus, VcsError>;
+    /// [`Self::status`] of only `paths` (from the root): what it says of
+    /// each and of nothing else, at a cost that follows the paths, not the
+    /// size of the tree. A rename is not looked for (it shows as a deletion
+    /// and an addition), so `moved` is empty.
+    async fn status_of(&self, ws: &Path, paths: &[String]) -> Result<WorkspaceStatus, VcsError>;
     async fn branches(&self, ws: &Path) -> Result<Vec<Branch>, VcsError>;
     /// Every tag, sorted by name.
     async fn tags(&self, ws: &Path) -> Result<Vec<Tag>, VcsError>;

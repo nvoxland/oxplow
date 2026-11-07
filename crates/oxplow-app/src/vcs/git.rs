@@ -309,6 +309,54 @@ async fn blocking<R: Send + 'static>(
         .map_err(|e| VcsError::Failed(format!("git call didn't finish: {e}")))?
 }
 
+/// A scan of the working tree as the VCS capability states it: entries
+/// sorted by path, conflicts apart from the rest, the other ends of renames,
+/// and the operation in progress. Shared by `status` and `status_of`.
+fn workspace_status(ws: &Path, scan: oxplow_git::WorktreeStatus) -> WorkspaceStatus {
+    let (conflicted, staged) = (scan.conflicted, scan.staged);
+    let mut moved: Vec<String> = scan
+        .renamed
+        .into_iter()
+        .filter(|path| !scan.statuses.contains_key(path) && !conflicted.contains(path))
+        .collect();
+    moved.sort();
+    let mut entries: Vec<StatusEntry> = scan
+        .statuses
+        .into_iter()
+        .filter(|(p, _)| !conflicted.contains(p))
+        .map(|(path, s)| StatusEntry {
+            staged: staged.contains(&path),
+            path,
+            status: match s {
+                oxplow_git::GitFileStatus::Added => FileStatus::Added,
+                oxplow_git::GitFileStatus::Modified => FileStatus::Modified,
+                oxplow_git::GitFileStatus::Deleted => FileStatus::Deleted,
+                oxplow_git::GitFileStatus::Renamed => FileStatus::Renamed,
+                oxplow_git::GitFileStatus::Untracked => FileStatus::Untracked,
+            },
+        })
+        .chain(conflicted.iter().map(|p| StatusEntry {
+            path: p.clone(),
+            status: FileStatus::Conflicted,
+            staged: false,
+        }))
+        .collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    // The operation alone: `get_repo_conflict_state` counts the unmerged
+    // paths too, with a second scan of the whole tree.
+    let in_progress = oxplow_git::detect_git_operation(ws).map(|op| match op {
+        oxplow_git::GitOperationKind::Merge => InProgressOp::Merge,
+        oxplow_git::GitOperationKind::Rebase => InProgressOp::Rebase,
+        oxplow_git::GitOperationKind::CherryPick => InProgressOp::CherryPick,
+        oxplow_git::GitOperationKind::Revert => InProgressOp::Revert,
+    });
+    WorkspaceStatus {
+        entries,
+        moved,
+        in_progress,
+    }
+}
+
 fn repo_check(ws: &Path) -> Result<(), VcsError> {
     if git2::Repository::open(ws).is_ok() {
         Ok(())
@@ -589,50 +637,19 @@ impl Vcs for GitProvider {
         let ws = ws.to_path_buf();
         blocking(move || {
             repo_check(&ws)?;
-            let scan = oxplow_git::worktree_status(&ws);
-            let (conflicted, staged) = (scan.conflicted, scan.staged);
-            let mut moved: Vec<String> = scan
-                .renamed
-                .into_iter()
-                .filter(|path| !scan.statuses.contains_key(path) && !conflicted.contains(path))
-                .collect();
-            moved.sort();
-            let mut entries: Vec<StatusEntry> = scan
-                .statuses
-                .into_iter()
-                .filter(|(p, _)| !conflicted.contains(p))
-                .map(|(path, s)| StatusEntry {
-                    staged: staged.contains(&path),
-                    path,
-                    status: match s {
-                        oxplow_git::GitFileStatus::Added => FileStatus::Added,
-                        oxplow_git::GitFileStatus::Modified => FileStatus::Modified,
-                        oxplow_git::GitFileStatus::Deleted => FileStatus::Deleted,
-                        oxplow_git::GitFileStatus::Renamed => FileStatus::Renamed,
-                        oxplow_git::GitFileStatus::Untracked => FileStatus::Untracked,
-                    },
-                })
-                .chain(conflicted.iter().map(|p| StatusEntry {
-                    path: p.clone(),
-                    status: FileStatus::Conflicted,
-                    staged: false,
-                }))
-                .collect();
-            entries.sort_by(|a, b| a.path.cmp(&b.path));
-            let in_progress =
-                oxplow_git::get_repo_conflict_state(&ws)
-                    .operation
-                    .map(|op| match op {
-                        oxplow_git::GitOperationKind::Merge => InProgressOp::Merge,
-                        oxplow_git::GitOperationKind::Rebase => InProgressOp::Rebase,
-                        oxplow_git::GitOperationKind::CherryPick => InProgressOp::CherryPick,
-                        oxplow_git::GitOperationKind::Revert => InProgressOp::Revert,
-                    });
-            Ok(WorkspaceStatus {
-                entries,
-                moved,
-                in_progress,
-            })
+            Ok(workspace_status(&ws, oxplow_git::worktree_status(&ws)))
+        })
+        .await
+    }
+
+    async fn status_of(&self, ws: &Path, paths: &[String]) -> Result<WorkspaceStatus, VcsError> {
+        let (ws, paths) = (ws.to_path_buf(), paths.to_vec());
+        blocking(move || {
+            repo_check(&ws)?;
+            Ok(workspace_status(
+                &ws,
+                oxplow_git::worktree_status_of(&ws, &paths),
+            ))
         })
         .await
     }
@@ -961,6 +978,29 @@ mod tests {
         std::fs::write(dir.join("cfg.txt"), contents).unwrap();
         git(dir, &["add", "-A"]);
         git(dir, &["commit", "-q", "-m", message]);
+    }
+
+    /// Both reads of the status name the operation in progress, from git's
+    /// marker files, and a clean tree under one has no entries.
+    #[tokio::test]
+    async fn status_names_the_operation_in_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path();
+        git(ws, &["init", "-q"]);
+        git(ws, &["config", "user.email", "t@example.com"]);
+        git(ws, &["config", "user.name", "t"]);
+        write_commit(ws, "a\n", "first");
+        assert_eq!(GitProvider.status(ws).await.unwrap().in_progress, None);
+        let head = git(ws, &["rev-parse", "HEAD"]);
+        std::fs::write(ws.join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
+        let paths = ["cfg.txt".to_string()];
+        for status in [
+            GitProvider.status(ws).await.unwrap(),
+            GitProvider.status_of(ws, &paths).await.unwrap(),
+        ] {
+            assert_eq!(status.in_progress, Some(InProgressOp::Merge));
+            assert!(status.entries.is_empty());
+        }
     }
 
     /// tsk550: a rev or name that reads as an option never reaches git's

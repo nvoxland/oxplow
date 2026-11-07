@@ -173,6 +173,22 @@ pub async fn status_reports_edits_and_is_clean_after_commit(p: &dyn Vcs, ws: &Pa
         ]
     );
     assert_eq!(status.in_progress, None);
+    // `status_of` names the paths asked about as `status` does, and no others.
+    let asked = ["kept.txt", "fresh/deep/b.txt", "untouched.txt"].map(String::from);
+    let some = p.status_of(ws, &asked).await.unwrap();
+    let some: Vec<(&str, FileStatus)> = some
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e.status))
+        .collect();
+    assert_eq!(
+        some,
+        vec![
+            ("fresh/deep/b.txt", FileStatus::Untracked),
+            ("kept.txt", FileStatus::Modified),
+        ]
+    );
+    assert!(p.status_of(ws, &[]).await.unwrap().entries.is_empty());
     commit(p, ws, "all of it").await;
     assert!(p.status(ws).await.unwrap().entries.is_empty());
 }

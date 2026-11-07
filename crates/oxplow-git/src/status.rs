@@ -34,19 +34,50 @@ pub struct WorktreeStatus {
 /// one scan of its tree (a scan is the cost: the three were once three
 /// scans, 30 ms apiece here). Empty when not a git repo.
 pub fn worktree_status(repo_path: &Path) -> WorktreeStatus {
-    let mut out = WorktreeStatus::default();
-    let Ok(repo) = git2::Repository::open(repo_path) else {
-        return out;
-    };
+    let mut opts = scan_options();
+    opts.renames_head_to_index(true)
+        .renames_index_to_workdir(true);
+    scan(repo_path, &mut opts)
+}
+
+/// [`worktree_status`] of only `paths` (from the root, as git names them):
+/// what the scan says of each, and of nothing else. Renames are not looked
+/// for, since a rename needs both of its ends in view: a renamed file shows
+/// as a deletion and an addition. Costs what the paths ask, not the size of
+/// the tree: git is told which files to look at, and looks at those. A
+/// folder named as a path brings what changed under it.
+pub fn worktree_status_of(repo_path: &Path, paths: &[String]) -> WorktreeStatus {
+    if paths.is_empty() {
+        return WorktreeStatus::default();
+    }
+    let mut opts = scan_options();
+    // The paths as they are written, not as patterns, so a folder asked
+    // about names none of what is inside it.
+    opts.disable_pathspec_match(true);
+    for path in paths {
+        opts.pathspec(path);
+    }
+    scan(repo_path, &mut opts)
+}
+
+/// What every scan looks for.
+fn scan_options() -> git2::StatusOptions {
     let mut opts = git2::StatusOptions::new();
     // A new folder's files by their own paths, not the folder (`lib/`).
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false)
-        .include_unmodified(false)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true);
-    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+        .include_unmodified(false);
+    opts
+}
+
+/// One scan of `repo_path` with `opts`, classified.
+fn scan(repo_path: &Path, opts: &mut git2::StatusOptions) -> WorktreeStatus {
+    let mut out = WorktreeStatus::default();
+    let Ok(repo) = git2::Repository::open(repo_path) else {
+        return out;
+    };
+    let Ok(statuses) = repo.statuses(Some(opts)) else {
         return out;
     };
     let in_index = git2::Status::INDEX_NEW
@@ -407,6 +438,124 @@ mod tests {
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "more", &tree, &[&head])
             .unwrap();
+    }
+
+    /// A repo with every kind of state: an edited, a staged, a deleted and
+    /// a clean tracked file, an untracked file, one in an untracked folder,
+    /// and an edit and an untracked file outside what is asked about.
+    fn varied_repo() -> tempfile::TempDir {
+        let dir = init_repo();
+        commit_files(
+            dir.path(),
+            &[
+                ("edited.txt", "1"),
+                ("deleted.txt", "1"),
+                ("clean.txt", "1"),
+                ("other_edit.txt", "1"),
+                ("staged_edit.txt", "1"),
+            ],
+        );
+        std::fs::write(dir.path().join("edited.txt"), "2").unwrap();
+        std::fs::write(dir.path().join("other_edit.txt"), "2").unwrap();
+        std::fs::remove_file(dir.path().join("deleted.txt")).unwrap();
+        std::fs::write(dir.path().join("untracked.txt"), "u").unwrap();
+        std::fs::write(dir.path().join("other_untracked.txt"), "u").unwrap();
+        std::fs::create_dir_all(dir.path().join("lib/deep")).unwrap();
+        std::fs::write(dir.path().join("lib/deep/b.rs"), "b").unwrap();
+        std::fs::write(dir.path().join("lib/deep/c.rs"), "c").unwrap();
+        std::fs::write(dir.path().join("staged_new.txt"), "s").unwrap();
+        std::fs::write(dir.path().join("staged_edit.txt"), "2").unwrap();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(Path::new("staged_new.txt")).unwrap();
+        idx.add_path(Path::new("staged_edit.txt")).unwrap();
+        idx.write().unwrap();
+        dir
+    }
+
+    /// Only the paths asked about are named, each as `worktree_status` names
+    /// it: an edit, a staged new file and a staged edit, a deletion, an
+    /// untracked file, one in an untracked folder; a clean file is absent.
+    #[test]
+    fn status_of_names_only_those_paths() {
+        let dir = varied_repo();
+        let asked: Vec<String> = [
+            "edited.txt",
+            "staged_new.txt",
+            "staged_edit.txt",
+            "deleted.txt",
+            "untracked.txt",
+            "lib/deep/b.rs",
+            "clean.txt",
+            "never_existed.txt",
+        ]
+        .map(String::from)
+        .to_vec();
+        let all = worktree_status(dir.path());
+        let some = worktree_status_of(dir.path(), &asked);
+        for path in &asked {
+            assert_eq!(some.statuses.get(path), all.statuses.get(path), "{path}");
+            assert_eq!(
+                some.staged.contains(path),
+                all.staged.contains(path),
+                "{path}"
+            );
+        }
+        assert_eq!(
+            some.statuses.get("edited.txt"),
+            Some(&GitFileStatus::Modified)
+        );
+        assert_eq!(
+            some.statuses.get("staged_new.txt"),
+            Some(&GitFileStatus::Added)
+        );
+        assert_eq!(
+            some.statuses.get("deleted.txt"),
+            Some(&GitFileStatus::Deleted)
+        );
+        assert_eq!(
+            some.statuses.get("untracked.txt"),
+            Some(&GitFileStatus::Untracked)
+        );
+        assert_eq!(
+            some.statuses.get("lib/deep/b.rs"),
+            Some(&GitFileStatus::Untracked)
+        );
+        assert!(!some.statuses.contains_key("clean.txt"));
+        assert!(some.staged.contains("staged_new.txt") && some.staged.contains("staged_edit.txt"));
+        // Nothing outside the paths: not the other edit, the other untracked
+        // files, nor the folder's other file.
+        let mut named: Vec<&String> = some.statuses.keys().collect();
+        named.sort();
+        assert_eq!(
+            named,
+            vec![
+                "deleted.txt",
+                "edited.txt",
+                "lib/deep/b.rs",
+                "staged_edit.txt",
+                "staged_new.txt",
+                "untracked.txt"
+            ]
+        );
+        assert!(some.conflicted.is_empty() && some.renamed.is_empty());
+    }
+
+    /// No paths, no answer; a repository that isn't one, no answer; and a
+    /// folder named as a path brings what changed under it, as in git.
+    #[test]
+    fn status_of_nothing_names_nothing() {
+        let dir = varied_repo();
+        assert!(worktree_status_of(dir.path(), &[]).statuses.is_empty());
+        assert!(
+            worktree_status_of(&dir.path().join("nowhere"), &["a".to_string()])
+                .statuses
+                .is_empty()
+        );
+        let folder = worktree_status_of(dir.path(), &["lib".to_string()]);
+        let mut named: Vec<&String> = folder.statuses.keys().collect();
+        named.sort();
+        assert_eq!(named, vec!["lib/deep/b.rs", "lib/deep/c.rs"]);
     }
 
     #[test]

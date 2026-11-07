@@ -35,7 +35,9 @@ pub fn get_repo_conflict_state(worktree_path: impl AsRef<Path>) -> RepoConflictS
     }
 }
 
-fn detect_git_operation(worktree_path: &Path) -> Option<GitOperationKind> {
+/// The operation in progress in `worktree_path` (a merge, a rebase, …), from
+/// the marker files git leaves: no scan of the tree.
+pub fn detect_git_operation(worktree_path: &Path) -> Option<GitOperationKind> {
     let git_dir = resolve_git_dir(worktree_path)?;
     if exists_marker(&git_dir, "MERGE_HEAD") {
         return Some(GitOperationKind::Merge);
