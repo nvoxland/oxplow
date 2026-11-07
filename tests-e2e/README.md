@@ -85,12 +85,33 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - `page` fails any spec whose page threw.
 - **`support/pages.ts`** — `installExtension` writes an extension of the spec's
   own (manifest, pages, component files) into the project and deploys it.
-- **`support/ui.ts`** — a person's moves (`expandRailSection`,
-  `openFromLauncher` — which waits for the query's own row before Enter).
+- **`support/ui.ts`** — a person's moves, one way each, so a race fixed once
+  is fixed everywhere:
+  - `open(page, daemon, uri)` opens a page the way a link does, the bus
+    command `oxplow.window.navigate`, once the window has loaded and its rail
+    has the stored layout, then waits until the shown tab holds the page
+    (`oxplow:oxplow/page?page=<extension>/<id>`; core pages have no extension
+    prefix, and a Settings area is `page=settings#area=<id>`). Typing into the
+    launcher is the slowest and most focus-sensitive path, so
+    `openFromLauncher` (which waits for the query's own row before Enter) is
+    only for the launcher's own specs.
+  - `shown(page)` (or `shown(page, needle)`, a tab whose id holds `needle`) is
+    the one locator for the shown tab's body. Every tab's body stays in the
+    DOM, hidden, and the New Session tab has forms and buttons of its own, so
+    a page-wide locator can meet a hidden tab's.
+  - `inFrame(from, label?)` is a custom component's frame, scrolled into view
+    first: a frame below the fold gets no animation frames, and a click never
+    sees its button as stable.
+  - `expandRailSection`, `searchLauncher`, `newSessionPage`, `workItemIdOf`.
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
-  `waitForModels` or `until`, never a sleep: global setup refuses a spec
-  that names `waitForTimeout` or `setTimeout` (`test.setTimeout`, a spec's
-  time limit, is fine). `specs/harness/` checks the helpers themselves.
+  `waitForModels` or `until`, never a sleep. Global setup refuses a spec that
+  names `waitForTimeout` or `setTimeout` (`test.setTimeout`, a spec's time
+  limit, is fine), and, by `uiRulesIn` (checked in `specs/harness/`), a spec
+  that has `openFromLauncher(` outside `work/launcher-search`, `work/goto` and
+  `shell/agent-session`; `frameLocator(` anywhere (use `inFrame`); or
+  `toHaveCount(0)` on `expect(page.…)` without `shown(page)` (a chrome item,
+  such as a menu, toast or tab, is `.not.toBeVisible()`). `specs/harness/`
+  checks the helpers themselves.
 - **Reports**: a JUnit report at `tests-e2e/.output/junit.xml`, for a
   failed spec its trace under `tests-e2e/.output/results`, and every
   daemon's log under `tests-e2e/.output/daemons` (all gitignored). oxplow
