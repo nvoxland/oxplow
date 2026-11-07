@@ -440,6 +440,13 @@ Measured when this was set up, on one push each, with a cold Cargo cache after:
 about 1. Most of the `Cargo test` gain is `opt-level = 1` above. Locally a full
 `test:fast` went from 906 s to about 370 s, under different load.
 
+Then the test boot work (the stray-folder rule, the manifest line index, an
+in-memory database that frees its threads; `.context/performance.md`), one push
+each, `c0f56fb8e` to `0acbec4ca`: `Cargo test` 1,557 s to 936 s, extension tests
+410 s to 236 s, staging the sidecar 305 s to 195 s, building the app 299 s to
+184 s, clippy 203 s to 129 s. The builds fell with the cache of third-party
+crates, the tests with the boot work.
+
 On macOS the watcher tests can still fail locally, all together, with no event
 for 60 s. `fseventsd` is saturated (seen at 180% CPU) while any test run is going
 on the machine, another worktree's included. They run alone inside one nextest
