@@ -1,7 +1,7 @@
 import { run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open } from "../../support/ui.js";
 
 // The ☰ menu of a page: Open with is offered only where a URI has more than
 // one renderer, and a page action is offered only while its `when` holds.
@@ -57,16 +57,15 @@ test("Open with is absent for a URI with one renderer, and an action whose `when
     manifest: manifest.replace("datasets:", "permissions: [commands:oxplow.window.navigate]\ndatasets:"),
     files: { "datasets/thing.sql": dataset, "pages/thing.yaml": thing, "pages/gated.yaml": gated },
   });
-  await page.goto("/");
-  await openFromLauncher(page, "Gated Numbat");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-one/gated");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-action-when-true")).toBeVisible();
-  await expect(page.getByTestId("menu-item-action-page-action-when-false")).toHaveCount(0);
+  await expect(page.getByTestId("menu-item-action-page-action-when-false")).not.toBeVisible();
   await page.keyboard.press("Escape");
 
   await run(daemon, "oxplow.window.navigate", { uri: "oxplow:e2e-one/thing?id=1" });
   await expect(page.getByTestId("center-tab-oxplow:e2e-one/thing?id=1")).toBeVisible();
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-about")).toBeVisible();
-  await expect(page.getByTestId("menu-item-page-open-with")).toHaveCount(0);
+  await expect(page.getByTestId("menu-item-page-open-with")).not.toBeVisible();
 });

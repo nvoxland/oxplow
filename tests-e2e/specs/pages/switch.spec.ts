@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const spec = `title: Switch Dingo
 category: Data
@@ -21,9 +21,8 @@ view:
 
 test("only the switched child shows, and changing the param switches it", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-switch", { files: { "pages/dingo.yaml": spec } });
-  await page.goto("/");
-  await openFromLauncher(page, "Switch Dingo");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-switch/dingo");
+  const host = shown(page).getByTestId("page-host");
   await expect(host.getByTestId("node-coast")).toContainText("Dingoes of the coast.");
   await expect(host.getByTestId("node-desert")).toHaveCount(0);
 
@@ -37,7 +36,7 @@ test("only the switched child shows, and changing the param switches it", async 
   await expect(host.getByTestId("node-coast")).toHaveCount(0);
   await expect(host.getByTestId("page-section-desert")).toHaveAttribute("aria-current", "page");
   // The section is the tab's view: its id carries the param, and the page stays mounted.
-  await expect(page.locator('[data-testid^="center-tab-body-"][data-testid$="#area=desert"]:visible')).toHaveCount(1);
+  await expect(shown(page, "#area=desert")).toHaveCount(1);
   await expect(host.getByTestId("page-file")).toHaveAttribute("data-mounted-once", "yes");
 
   // A section pushes an entry: Back shows the first child again.

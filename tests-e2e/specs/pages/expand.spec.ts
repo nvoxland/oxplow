@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const list = `title: Expand Wallaby
 category: Data
@@ -32,9 +32,8 @@ view:
 
 test("a row expands to the expand page's rows, given that row's values, and folds back", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-expand", { files: { "pages/wallaby.yaml": list, "parts/wallaby-detail.yaml": detail } });
-  await page.goto("/");
-  await openFromLauncher(page, "Expand Wallaby");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-expand/wallaby");
+  const host = shown(page).getByTestId("page-host");
   await expect(host).toContainText("Bilby");
   await expect(host).not.toContainText("Habitat of");
 

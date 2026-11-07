@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const spec = `title: Select Marsupial
 category: Data
@@ -30,9 +30,8 @@ view:
 
 test("a row click writes the page's param and a section that reads it fills", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-select", { files: { "pages/marsupial.yaml": spec } });
-  await page.goto("/");
-  await openFromLauncher(page, "Select Marsupial");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-select/marsupial");
+  const host = shown(page).getByTestId("page-host");
   const animals = host.locator('[data-node="animals"]');
   const facts = host.locator('[data-node="facts"]');
   await expect(animals).toContainText("Numbat");
@@ -46,7 +45,7 @@ test("a row click writes the page's param and a section that reads it fills", as
   await expect(row).toHaveAttribute("aria-selected", "true");
   await expect(facts).toContainText("Fact about numbat");
   // The pick is in the tab's address, so a reload keeps it.
-  await expect(page.locator('[data-testid^="center-tab-body-"]:visible')).toHaveAttribute("data-testid", /animal=numbat/);
+  await expect(shown(page)).toHaveAttribute("data-testid", /animal=numbat/);
   await page.reload();
   await expect(facts).toContainText("Fact about numbat");
 
