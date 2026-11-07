@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 use oxplow_app::blob_store::BlobStore;
 use oxplow_app::trees::Trees;
 use oxplow_app::vcs::GitProvider;
-use oxplow_db::{Database, FileSnapshot, SnapshotStorage, SqliteSnapshotStore};
+use oxplow_db::{
+    ChangeFileRow as FileSnapshotRow, Database, FileSnapshot, SnapshotStorage, SqliteSnapshotStore,
+};
 use oxplow_domain::vcs::{Revision, Vcs};
 use oxplow_domain::{StreamId, Timestamp};
 use oxplow_fs_watch::{FsWatcher, Subscription, WorkspaceFilter};
@@ -41,7 +43,13 @@ const HISTORY_ROWS: usize = 10;
 
 enum Source {
     Existing(PathBuf),
-    Generate { kept: usize, ignored: usize },
+    /// A local clone of a repository, made in a temp folder: its own tree, so
+    /// the edits a relist needs never touch the original.
+    CopyOf(PathBuf),
+    Generate {
+        kept: usize,
+        ignored: usize,
+    },
 }
 
 fn parse_args() -> Source {
@@ -55,13 +63,18 @@ fn parse_args() -> Source {
     if let Some(root) = value("--root") {
         return Source::Existing(PathBuf::from(root));
     }
+    if let Some(repo) = value("--copy-of") {
+        return Source::CopyOf(PathBuf::from(repo));
+    }
     match (value("--kept"), value("--ignored")) {
         (Some(k), Some(m)) => Source::Generate {
             kept: k.parse().expect("--kept N"),
             ignored: m.parse().expect("--ignored M"),
         },
         _ => {
-            eprintln!("usage: profile_watch --root <dir> | --kept N --ignored M");
+            eprintln!(
+                "usage: profile_watch --root <dir> | --copy-of <repo> | --kept N --ignored M"
+            );
             std::process::exit(2);
         }
     }
@@ -345,6 +358,26 @@ async fn main() {
     let source = parse_args();
     let (root, generated, temp) = match source {
         Source::Existing(p) => (p.canonicalize().expect("--root exists"), false, None),
+        Source::CopyOf(repo) => {
+            let temp = tempfile::Builder::new()
+                .prefix("oxplow-profile-watch-")
+                .tempdir()
+                .unwrap();
+            let root = temp.path().canonicalize().unwrap().join("tree");
+            df("before cloning", temp.path());
+            let t = Instant::now();
+            // `--local` hardlinks the objects: nothing is written in `repo`.
+            let status = Command::new("git")
+                .args(["clone", "-q", "--local"])
+                .arg(repo.canonicalize().expect("--copy-of exists"))
+                .arg(&root)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git clone failed");
+            println!("cloned in {}", ms(t.elapsed()));
+            df("after cloning", temp.path());
+            (root, false, Some(temp))
+        }
         Source::Generate { kept, ignored } => {
             let temp = tempfile::Builder::new()
                 .prefix("oxplow-profile-watch-")
@@ -362,6 +395,7 @@ async fn main() {
             (root, true, Some(temp))
         }
     };
+    let copied = temp.is_some() && !generated;
     println!("root: {}", root.display());
     println!("load average at start: {}", load_average());
     fseventsd("before watching");
@@ -561,7 +595,7 @@ async fn main() {
             .await
             .unwrap();
     }
-    let store = Arc::new(SqliteSnapshotStore::new(db));
+    let store = Arc::new(SqliteSnapshotStore::new(db.clone()));
     let t = Instant::now();
     let mut batch = Vec::with_capacity(20_000);
     let mut rows = 0usize;
@@ -781,6 +815,31 @@ async fn main() {
                 ),
             );
         }
+
+        // 10. One edit's relist, end to end through the real pieces (the
+        // `change_analysis` ones, without `Services`): the whole list
+        // (`vcs.status`, `diff_from_status`, `store_files`) beside the paths
+        // alone (`status_of`, `diff_paths`, `store_path_files`).
+        let edit_file = if generated {
+            Some(kept_dir(&root, 2).join("file0.txt"))
+        } else if copied {
+            let pick = paths
+                .iter()
+                .find(|p| p.ends_with(".clj") || p.ends_with(".md") || p.ends_with(".txt"))
+                .unwrap_or(&paths[0]);
+            Some(root.join(pick))
+        } else {
+            None
+        };
+        if let Some(edit) = edit_file {
+            relist(&root, &edit, &db, &vcs, &trees).await;
+        } else {
+            skip(
+                10,
+                "one edit's relist",
+                "--root is read-only (use --copy-of)",
+            );
+        }
     } else {
         skip(9, "Trees::diff(HEAD, Working)", "not a git repository");
     }
@@ -793,6 +852,157 @@ async fn main() {
         drop(temp);
         println!("removed the generated tree in {}", ms(t.elapsed()));
         df("after removing", &std::env::temp_dir());
+    }
+}
+
+/// Step 10: a relist after one edit, whole and by paths, each in its parts.
+async fn relist(root: &Path, edit: &Path, db: &Database, vcs: &Arc<GitProvider>, trees: &Trees) {
+    use oxplow_domain::vcs::{FileStatus, WorkspaceStatus};
+    let changes = oxplow_db::SqliteChangeStore::new(db.clone());
+    let sha = vcs.resolve(root, "HEAD").await.unwrap();
+    let base = Revision::git(sha.clone());
+    let (row, _) = changes
+        .get_or_create(1, "working", "working", Some(&base), &Revision::Working)
+        .await
+        .unwrap();
+    let rel = edit
+        .strip_prefix(root)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    // As `change_analysis::changed_rows` makes them (without zones and tests).
+    let rows = |entries: Vec<oxplow_app::trees::DiffEntry>, status: &WorkspaceStatus| {
+        entries
+            .into_iter()
+            .map(|e| {
+                let entry = status.entries.iter().find(|s| s.path == e.path);
+                FileSnapshotRow {
+                    staged: Some(entry.is_some_and(|s| s.staged)),
+                    untracked: Some(entry.is_some_and(|s| s.status == FileStatus::Untracked)),
+                    status: e.status.as_str().to_string(),
+                    additions: e.additions as i64,
+                    deletions: e.deletions as i64,
+                    path: e.path,
+                    ..FileSnapshotRow::default()
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut seq = 0i64;
+    let mut edits = 0;
+    let edit_once = |edits: &mut i32| {
+        *edits += 1;
+        let text = std::fs::read_to_string(edit).unwrap_or_default();
+        let text = text
+            .lines()
+            .filter(|l| !l.starts_with("// profile_watch edit"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(edit, format!("{text}\n// profile_watch edit {edits}\n")).unwrap();
+    };
+    git(root, &["checkout", "-q", "--", "."]);
+    // The list as it stands before the edit: made whole once, not timed.
+    {
+        let status = vcs.status(root).await.unwrap();
+        let entries = trees
+            .diff_from_status(root, Some(&Revision::git(sha.clone())), &status)
+            .await
+            .unwrap();
+        seq += 1;
+        changes
+            .store_files(row.id, rows(entries, &status), seq, Some(0), None)
+            .await
+            .unwrap();
+    }
+    let mut whole = Vec::new();
+    let mut by_paths = Vec::new();
+    for _ in 0..3 {
+        edit_once(&mut edits);
+        let t = Instant::now();
+        let status = vcs.status(root).await.unwrap();
+        let status_ms = t.elapsed();
+        let t = Instant::now();
+        let entries = trees
+            .diff_from_status(root, Some(&Revision::git(sha.clone())), &status)
+            .await
+            .unwrap();
+        let diff_ms = t.elapsed();
+        let t = Instant::now();
+        seq += 1;
+        let n = entries.len();
+        changes
+            .store_files(row.id, rows(entries, &status), seq, Some(0), None)
+            .await
+            .unwrap();
+        let store_ms = t.elapsed();
+        whole.push((status_ms, diff_ms, store_ms, n));
+    }
+    for _ in 0..3 {
+        edit_once(&mut edits);
+        let all = Instant::now();
+        let t = Instant::now();
+        let found = changes
+            .find(1, "working", "working")
+            .await
+            .unwrap()
+            .unwrap();
+        let (listed, ..) = changes.list_state(found.id).await.unwrap();
+        assert!(listed);
+        let state_ms = t.elapsed();
+        let t = Instant::now();
+        let status = vcs
+            .status_of(root, std::slice::from_ref(&rel))
+            .await
+            .unwrap();
+        let status_ms = t.elapsed();
+        let looked_at: std::collections::BTreeSet<String> = std::iter::once(rel.clone())
+            .chain(status.entries.iter().map(|e| e.path.clone()))
+            .collect();
+        let t = Instant::now();
+        let entries = trees.diff_paths(root, &sha, &looked_at).await.unwrap();
+        let diff_ms = t.elapsed();
+        let t = Instant::now();
+        seq += 1;
+        let n = entries.len();
+        let wrote = changes
+            .store_path_files(
+                found.id,
+                looked_at.into_iter().collect(),
+                rows(entries, &status),
+                seq,
+            )
+            .await
+            .unwrap();
+        assert!(wrote);
+        let store_ms = t.elapsed();
+        by_paths.push((state_ms, status_ms, diff_ms, store_ms, n, all.elapsed()));
+    }
+    for (i, (status, diff, store, n)) in whole.iter().enumerate() {
+        step(
+            format!("10a.{}", i + 1),
+            "whole relist after one edit",
+            format!(
+                "{} = status {} + diff_from_status {} + store_files {} ({n} files listed)",
+                ms(*status + *diff + *store),
+                ms(*status),
+                ms(*diff),
+                ms(*store)
+            ),
+        );
+    }
+    for (i, (state, status, diff, store, n, all)) in by_paths.iter().enumerate() {
+        step(
+            format!("10b.{}", i + 1),
+            "relist of the paths after one edit",
+            format!(
+                "{} = find+list_state {} + status_of {} + diff_paths {} + store_path_files {} ({n} files)",
+                ms(*all),
+                ms(*state),
+                ms(*status),
+                ms(*diff),
+                ms(*store)
+            ),
+        );
     }
 }
 
