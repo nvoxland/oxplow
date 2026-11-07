@@ -1,6 +1,6 @@
 # A worktree on `feat`, one commit ahead of main and one behind: Git Status
 # says each on its own line, with the buttons that act on it, and the Streams
-# row's expansion says the same. Merge out lands the work on main's stream.
+# page's row (and its expansion) says the same. Merge out lands the work on main's stream.
 given:
   - observe: { turn: { prompt: base, write: { path: base.txt, body: "x\n" } } }
   - { command: oxplow.vcs.stage, input: { stream: str1, paths: [base.txt] } }
@@ -32,16 +32,19 @@ expect:
           is_behind: 1
           can_merge_out: 1
           target_stream: 1
-    streams:
-      rows:
-        - other: main
-          stream_id: 2
-          target_stream: 1
-          can_join: 1
-          can_merge_out: 1
   nodes:
     - { id: upstream, actions: [merge-out, merge-base, rebase-base, publish, push, pull, fetch] }
 steps:
+  - when: { page: oxplow-foundation/streams, params: { stream_id: 2 }, view: { stream: $feat.id } }
+    expect:
+      loaders:
+        streams:
+          rows:
+            - other: main
+              stream_id: 2
+              target_stream: 1
+              can_join: 1
+              can_merge_out: 1
   - when:
       part: oxplow-foundation/git-dashboard-between
       params: { base: feat, head: main, stream_id: 2, target_stream: 1 }

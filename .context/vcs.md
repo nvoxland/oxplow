@@ -317,7 +317,8 @@ foundation fixture's, which runs with only foundation on —
 [work-items.md](./work-items.md), "Conformance"). The commit and
 Uncommitted pages are foundation documents (their mounts are
 `oxplow-foundation/commit.sections` and
-`oxplow-foundation/uncommitted-changes.sections`); Git History is a
+`oxplow-foundation/uncommitted-changes.sections`; Git Status embeds the
+Uncommitted page); Git History is a
 declared page with a replaceable part.
 
 `oxplow_app::vcs_conformance` (test-only) holds the contract as

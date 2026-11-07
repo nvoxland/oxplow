@@ -1,5 +1,6 @@
-# Git Status: the stream's branch with no upstream, the working tree, the
-# last commits; with no other stream the rest is empty.
+# Git Status: the stream's branch with no upstream, the working tree's
+# changed files with the commit form (the Uncommitted page, embedded), and
+# the last commits. The commit form commits from Git Status.
 given:
   - observe: { turn: { prompt: new, write: { path: new.txt, body: "x\n" } } }
   - observe: { analyze: { kind: working } }
@@ -14,8 +15,12 @@ expect:
     row: { rows: [{ branch: main }] }
     upstream: { rows: [{ branch: main, heading: Repository, remote: No remote, can_publish: 0, can_push: 0, has_upstream: 0, on_worktree: 0, compared: null }] }
     recent: { rows: [{ subject: first, commit_ref: $any }] }
-    streams: { rows: 0 }
-    uncommitted: { rows: [{ changes: $any }] }
+    uncommitted/files: { rows: { contains: [{ id: new.txt, icon: added }] } }
+    uncommitted/commit_form: { rows: [{ stream: str1 }] }
 steps:
+  - submit: { node: uncommitted/commit, input: { stream: str1, message: Add new } }
+    expect: { ok: true }
+  - when: { command: oxplow.vcs.log, input: { stream_id: str1, limit: 1 } }
+    expect: { ok: true, result: { revisions: [{ subject: Add new }] } }
   - when: { part: oxplow-foundation/git-dashboard-between, params: { base: main, head: main, stream_id: 1, target_stream: 1 } }
     expect: { loaders: { git_dashboard_between: { rows: 0 } } }

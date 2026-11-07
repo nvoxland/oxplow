@@ -517,8 +517,10 @@ is the receiver, `rev` the branch sent), so that stream's working files
 change and any conflicts stop in its checkout. An agent can't run it from
 another stream (`vcs_op` keeps an agent to its own stream), and a person
 confirms every run. Git Status offers it as **Merge out**, on the callout's
-Ahead line, in a Streams row's expansion and in the row's right-click menu
-("Merge current into this"). The target is the stream that has the branch
+Ahead line; the Streams page (`streams`, the other streams, which Git Status
+links to) offers it in a row's expansion and in the row's right-click menu
+("Merge current into this"). Git Status embeds the Uncommitted page under
+its callout, so the changed files and the commit form are on it too. The target is the stream that has the branch
 checked out; with none, it isn't offered. Its confirmation can't name the
 target branch: the operation's input holds only `stream` and `rev`.
 

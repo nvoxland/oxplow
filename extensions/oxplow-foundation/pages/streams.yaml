@@ -1,0 +1,81 @@
+title: Streams
+description: "The other streams beside this one: each one's branch, whether its agent is working, its working tree and how far apart the branches are, with merges and rebases either way."
+icon: git-branch
+category: Git
+needs:
+- vcs
+params:
+- name: stream_id
+loaders:
+  row:
+    sql: |
+      SELECT s.branch AS branch FROM v_stream s WHERE s.id = :stream_id
+    columns:
+    - key: branch
+  streams:
+    sql: |
+      WITH apart AS (
+        SELECT d.head AS branch, d.ahead, d.behind FROM v_branch_divergence d WHERE d.base = :branch
+      )
+      SELECT s.title, s.branch AS other, :branch AS base, s.branch AS head,
+             :stream_id AS stream_id, s.id AS target_stream,
+             EXISTS (SELECT 1 FROM v_agent_status a JOIN v_thread t ON t.id = a.thread_id
+                      WHERE t.stream_id = s.id AND a.state = 'running') AS working,
+             coalesce((SELECT '↑' || a.ahead || ' ↓' || a.behind FROM apart a WHERE a.branch = s.branch), '') AS apart,
+             coalesce((SELECT CASE WHEN count(*) = 0 THEN 'clean' ELSE count(*) || ' changed' END
+                         FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                        WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = s.id), 'clean') AS uncommitted,
+             coalesce((SELECT a.ahead > 0 FROM apart a WHERE a.branch = s.branch), 0) AS can_join,
+             coalesce((SELECT a.behind > 0 FROM apart a WHERE a.branch = s.branch), 0) AS can_merge_out
+      FROM v_stream s
+      WHERE s.id <> :stream_id AND s.archived_at IS NULL
+      ORDER BY s.kind <> 'primary', s.title
+    params:
+      branch:
+        from: row.branch
+view:
+  stack:
+  - id: streams
+    title: Streams
+    hide_title: true
+    from: streams
+    viz: list
+    columns:
+    - key: title
+      label: Stream
+      expand: oxplow-foundation/git-dashboard-between
+    - key: other
+      label: Branch
+    - key: working
+      label: Agent
+      format: badge
+    - key: uncommitted
+      label: Working tree
+    - key: apart
+      label: Apart
+    empty: No other streams.
+    actions:
+    - id: merge
+      label: Merge into current
+      command: oxplow.vcs.merge
+      row: true
+      when: can_join
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.other}}'
+    - id: merge-out
+      label: Merge current into this
+      command: oxplow.vcs.merge_out
+      row: true
+      when: can_merge_out
+      input:
+        stream: str{{row.target_stream}}
+        rev: '{{row.base}}'
+    - id: rebase
+      label: Rebase current onto
+      command: oxplow.git.rebase
+      row: true
+      when: can_join
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.other}}'

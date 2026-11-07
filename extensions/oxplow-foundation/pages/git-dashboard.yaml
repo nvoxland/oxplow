@@ -1,5 +1,5 @@
 title: Git Status
-description: The stream's branch against its upstream, the working tree, the recent commits and the other streams.
+description: "The stream's branch against its upstream, its uncommitted files with a commit form, and the recent commits."
 icon: git-branch
 category: Git
 needs:
@@ -50,21 +50,6 @@ loaders:
         from: row.branch
       base:
         from: base.name
-  uncommitted:
-    sql: |
-      WITH w AS (
-        SELECT c.id FROM v_change c WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = :stream_id
-      ), f AS (
-        SELECT cf.status, cf.untracked FROM v_change_file cf JOIN w ON cf.change_id = w.id
-      )
-      SELECT CASE WHEN count(*) = 0 THEN 'No uncommitted files'
-                  ELSE count(*) || ' changed'
-                       || CASE WHEN sum(status = 'modified' AND untracked = 0) > 0 THEN ' · ' || sum(status = 'modified' AND untracked = 0) || ' modified' ELSE '' END
-                       || CASE WHEN sum(status = 'added' AND untracked = 0) > 0 THEN ' · ' || sum(status = 'added' AND untracked = 0) || ' added' ELSE '' END
-                       || CASE WHEN sum(status = 'deleted') > 0 THEN ' · ' || sum(status = 'deleted') || ' deleted' ELSE '' END
-                       || CASE WHEN sum(untracked = 1) > 0 THEN ' · ' || sum(untracked = 1) || ' untracked' ELSE '' END END AS changes,
-             uri('oxplow/page', 'page', 'uncommitted-changes') AS view
-      FROM f
   recent:
     sql: |
       WITH RECURSIVE head(sha) AS (SELECT s.head_sha FROM v_stream s WHERE s.id = :stream_id),
@@ -82,27 +67,6 @@ loaders:
                 FROM v_commit_file f WHERE f.sha = c.sha) AS stats
       FROM chain JOIN v_commit c ON c.sha = chain.sha
       ORDER BY chain.n
-  streams:
-    sql: |
-      WITH apart AS (
-        SELECT d.head AS branch, d.ahead, d.behind FROM v_branch_divergence d WHERE d.base = :branch
-      )
-      SELECT s.title, s.branch AS other, :branch AS base, s.branch AS head,
-             :stream_id AS stream_id, s.id AS target_stream,
-             EXISTS (SELECT 1 FROM v_agent_status a JOIN v_thread t ON t.id = a.thread_id
-                      WHERE t.stream_id = s.id AND a.state = 'running') AS working,
-             coalesce((SELECT '↑' || a.ahead || ' ↓' || a.behind FROM apart a WHERE a.branch = s.branch), '') AS apart,
-             coalesce((SELECT CASE WHEN count(*) = 0 THEN 'clean' ELSE count(*) || ' changed' END
-                         FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-                        WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = s.id), 'clean') AS uncommitted,
-             coalesce((SELECT a.ahead > 0 FROM apart a WHERE a.branch = s.branch), 0) AS can_join,
-             coalesce((SELECT a.behind > 0 FROM apart a WHERE a.branch = s.branch), 0) AS can_merge_out
-      FROM v_stream s
-      WHERE s.id <> :stream_id AND s.archived_at IS NULL
-      ORDER BY s.kind <> 'primary', s.title
-    params:
-      branch:
-        from: row.branch
 view:
   stack:
   - id: upstream
@@ -183,14 +147,8 @@ view:
         stream: str{{param.stream_id}}
   - id: uncommitted
     title: Uncommitted
-    from: uncommitted
-    viz: detail
-    columns:
-    - key: changes
-      label: Changes
-      link:
-        kind: page
-        from: view
+    embed:
+      page: oxplow-foundation/uncommitted-changes
   - id: recent
     title: Recent Commits
     collapsible: true
@@ -215,47 +173,5 @@ view:
     - key: stats
       label: Changed
     empty: No commits yet. Commits on this branch show up here as they're made.
-  - id: streams
-    title: Streams
-    collapsible: true
-    from: streams
-    viz: list
-    columns:
-    - key: title
-      label: Stream
-      expand: oxplow-foundation/git-dashboard-between
-    - key: other
-      label: Branch
-    - key: working
-      label: Agent
-      format: badge
-    - key: uncommitted
-      label: Working tree
-    - key: apart
-      label: Apart
-    empty: No other streams.
-    actions:
-    - id: merge
-      label: Merge into current
-      command: oxplow.vcs.merge
-      row: true
-      when: can_join
-      input:
-        stream: str{{param.stream_id}}
-        rev: '{{row.other}}'
-    - id: merge-out
-      label: Merge current into this
-      command: oxplow.vcs.merge_out
-      row: true
-      when: can_merge_out
-      input:
-        stream: str{{row.target_stream}}
-        rev: '{{row.base}}'
-    - id: rebase
-      label: Rebase current onto
-      command: oxplow.git.rebase
-      row: true
-      when: can_join
-      input:
-        stream: str{{param.stream_id}}
-        rev: '{{row.other}}'
+see_also:
+  - { page: oxplow-foundation/streams }
