@@ -144,6 +144,10 @@ pub fn augmented_path() -> Option<String> {
 /// agent's command). Each harness adds its own session markers
 /// (`AgentHarness::env_markers`). `OXPLOW_HOOK_DEBUG` is the person's hook
 /// recording: an agent's own oxplow (its test runs) would append to it.
+/// `TERM_SESSION_ID` is the window of the terminal oxplow was started
+/// from: every terminal oxplow opens would share it, and macOS zsh restores
+/// that one window's session into each of them. [`base_pty_env`] names
+/// oxplow as the terminal instead, so nothing needs a session id.
 pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_HOOK_TOKEN",
     "OXPLOW_HOOK_BASE_URL",
@@ -152,6 +156,7 @@ pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_SESSION",
     "OXPLOW_BIN",
     "OXPLOW_HOOK_DEBUG",
+    "TERM_SESSION_ID",
 ];
 
 /// What a spawn removes from the environment: [`NOT_INHERITED`] and every
@@ -171,11 +176,18 @@ pub fn not_inherited(harnesses: &oxplow_domain::agent::registry::HarnessRegistry
 }
 
 /// The env every agent/terminal PTY is spawned with. One place so the
-/// spawn sites can't drift on whether they widen PATH.
+/// spawn sites can't drift on whether they widen PATH. `TERM_PROGRAM` and
+/// its version name oxplow, replacing the terminal oxplow was started from
+/// (with `Apple_Terminal`, macOS zsh runs Terminal.app's session restore).
 pub fn base_pty_env() -> Vec<(String, String)> {
     let mut env = vec![
         ("TERM".to_string(), "xterm-256color".to_string()),
         ("COLORTERM".to_string(), "truecolor".to_string()),
+        ("TERM_PROGRAM".to_string(), "Oxplow".to_string()),
+        (
+            "TERM_PROGRAM_VERSION".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        ),
     ];
     if let Some(path) = augmented_path() {
         env.push(("PATH".to_string(), path));
@@ -208,6 +220,9 @@ mod tests {
             // The person's hook recording: an agent's own test runs would
             // append their hooks to it.
             "OXPLOW_HOOK_DEBUG",
+            // The terminal oxplow was started from: a shell that thinks it
+            // is that terminal's window restores that window's session.
+            "TERM_SESSION_ID",
         ] {
             assert!(dropped.iter().any(|d| d == marker), "{marker} is inherited");
         }
@@ -337,5 +352,19 @@ mod tests {
             .iter()
             .any(|(k, v)| k == "TERM" && v == "xterm-256color"));
         assert!(env.iter().any(|(k, _)| k == "COLORTERM"));
+    }
+
+    /// A terminal oxplow opens says it is oxplow's, not the terminal oxplow
+    /// was started from (macOS zsh runs Terminal.app's session restore
+    /// when `TERM_PROGRAM` is `Apple_Terminal`).
+    #[test]
+    fn base_pty_env_names_oxplow_as_the_terminal_program() {
+        let env = base_pty_env();
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "TERM_PROGRAM" && v == "Oxplow"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "TERM_PROGRAM_VERSION" && v == env!("CARGO_PKG_VERSION")));
     }
 }
