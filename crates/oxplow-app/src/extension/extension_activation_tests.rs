@@ -193,17 +193,55 @@ async fn a_waiting_publication_names_the_readers_it_waits_for() {
     );
 }
 
-/// A panic after the generation's database state committed doesn't leave
-/// the boundary refusing every reader: the activation stages again from
-/// what committed and serves it.
+/// A panic while an activation publishes is recovered, in three places over
+/// one project: after the database state committed (the boundary doesn't
+/// refuse every reader: the activation stages again from what committed and
+/// serves it); on that staging again too (no third try: the activation fails
+/// naming the host, the boundary refuses readers rather than serve maps it
+/// can't vouch for, and the next activation brings it back); and once the
+/// maps are published, before the boundary shows the generation.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_panic_after_commit_recovers_the_generation() {
+async fn a_panic_while_publishing_is_recovered_wherever_it_lands() {
+    use crate::extension::extension_activation::PanicPoint;
     let (dir, svc) = project().await;
+
     write_ext(dir.path(), "alpha", 2, "");
     svc.extension_activation.panic_once_after_commit();
     crate::test_fixtures::activate_with_problems(&svc).await;
-    assert!(svc.extension_activation.pin().await.is_ok());
+    assert!(svc.extension_activation.pin().await.is_ok(), "after commit");
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
+
+    write_ext(dir.path(), "alpha", 3, "");
+    svc.extension_activation
+        .panic_at(PanicPoint::AfterCommit, 2);
+    let Err(error) = deploy_and_activate(&svc).await else {
+        panic!("two panics are not recovered");
+    };
+    let text = format!("{error:?}");
+    assert!(
+        text.contains("<host>") && text.contains("staging it again failed"),
+        "{text}"
+    );
+    let refused = svc
+        .extension_activation
+        .pin()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("unavailable"), "{refused}");
+    crate::test_fixtures::activate_with_problems(&svc).await;
+    assert_eq!(answer(&svc, "alpha").await, Ok(json!(3)), "the restage too");
+
+    write_ext(dir.path(), "alpha", 4, "");
+    svc.extension_activation
+        .panic_at(PanicPoint::BeforeBoundary, 1);
+    crate::test_fixtures::activate_with_problems(&svc).await;
+    assert_eq!(
+        answer(&svc, "alpha").await,
+        Ok(json!(4)),
+        "before the boundary"
+    );
+    assert_eq!(problems(&svc), "{}");
 }
 
 /// Disabling an extension withdraws its commands with the next generation.
@@ -422,50 +460,6 @@ async fn an_edit_during_activation_rejects_it_and_the_next_carries_the_edit() {
 
     crate::test_fixtures::activate_with_problems(&svc).await;
     assert_eq!(answer(&svc, "alpha").await, Ok(json!(3)));
-}
-
-/// A panic on the staging again too has no third try: the activation fails
-/// naming the host, the boundary refuses readers rather than serve maps it
-/// can't vouch for, and the next activation brings it back.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_panic_on_the_restage_too_leaves_the_boundary_unavailable() {
-    use crate::extension::extension_activation::PanicPoint;
-    let (dir, svc) = project().await;
-    write_ext(dir.path(), "alpha", 2, "");
-    svc.extension_activation
-        .panic_at(PanicPoint::AfterCommit, 2);
-    let Err(error) = deploy_and_activate(&svc).await else {
-        panic!("two panics are not recovered");
-    };
-    let text = format!("{error:?}");
-    assert!(
-        text.contains("<host>") && text.contains("staging it again failed"),
-        "{text}"
-    );
-    let refused = svc
-        .extension_activation
-        .pin()
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(refused.contains("unavailable"), "{refused}");
-
-    crate::test_fixtures::activate_with_problems(&svc).await;
-    assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
-}
-
-/// A panic once the maps are published, before the boundary shows the
-/// generation, is recovered the same way.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_panic_after_the_maps_are_published_recovers_the_generation() {
-    use crate::extension::extension_activation::PanicPoint;
-    let (dir, svc) = project().await;
-    write_ext(dir.path(), "alpha", 2, "");
-    svc.extension_activation
-        .panic_at(PanicPoint::BeforeBoundary, 1);
-    crate::test_fixtures::activate_with_problems(&svc).await;
-    assert_eq!(answer(&svc, "alpha").await, Ok(json!(2)));
-    assert_eq!(problems(&svc), "{}");
 }
 
 /// Reading the activated generation's declarations takes a pin: a reader
