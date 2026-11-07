@@ -5,7 +5,7 @@ import type { Page } from "@playwright/test";
 
 import { deploy, extensionSource, ipc, run, until, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { inFrame, open, shown } from "../../support/ui.js";
 
 // The github example's PR Lifetimes: the custom component
 // that made `custom_components` stable, in its sandboxed frame — in
@@ -27,9 +27,8 @@ async function collect(daemon: Daemon, count: number) {
  *  the page. */
 async function openLifetimes(page: Page, daemon: Daemon, count = 2, bars = 2) {
   await collect(daemon, count);
-  await page.goto("/");
-  await openFromLauncher(page, "PR Lifetimes");
-  const frame = page.frameLocator('[data-testid="custom-component-frame"]');
+  await open(page, daemon, "oxplow:oxplow/page?page=github/pr-lifetimes");
+  const frame = await inFrame(shown(page));
   await expect(frame.locator(".bar")).toHaveCount(bars);
   return frame;
 }
@@ -85,7 +84,7 @@ test("PR lifetimes is badged custom, syncs under its permissions and opens a bar
 
   await frame.locator("#sync").click();
   await expect(frame.locator("#status")).toHaveText("Synced.");
-  await expect(page.getByTestId("custom-component-refused")).toHaveCount(0);
+  await expect(shown(page).getByTestId("custom-component-refused")).toHaveCount(0);
 
   await frame.locator('[data-ref="oxplow:github/pr?id=12"] rect').click();
   await expect(page.getByText("#12 Fix the hover state").first()).toBeVisible();

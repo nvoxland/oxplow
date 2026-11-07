@@ -10,7 +10,7 @@ import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
 
 import { ipc, startDaemon, until, type Daemon } from "../../support/daemon.js";
-import { sleepsIn } from "../../support/global-setup.js";
+import { sleepsIn, uiRulesIn } from "../../support/global-setup.js";
 
 test("until retries a check that throws, and a timeout says what it last saw", async () => {
   let calls = 0;
@@ -89,6 +89,30 @@ test("the sleep ban sees a timer by any spelling", async () => {
     writeFileSync(join(dir, "b.spec.ts"), `const pause = page.${wait};\nawait pause.call(page, 500);\n`);
     writeFileSync(join(dir, "c.spec.ts"), `test.${timer}(60_000);\nawait expect(page.getByText("x")).toBeVisible();\n`);
     expect(sleepsIn(dir).map((p) => p.slice(dir.length + 1))).toEqual(["a.spec.ts", "b.spec.ts"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the ui lint names a launcher open, a bare frame and an unscoped zero count", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "oxplow-e2e-ui-"));
+  try {
+    mkdirSync(join(dir, "work"));
+    mkdirSync(join(dir, "pages"));
+    const launcher = "await openFromLauncher(page, 'Go To');\n";
+    writeFileSync(join(dir, "work", "goto.spec.ts"), launcher);
+    writeFileSync(
+      join(dir, "pages", "a.spec.ts"),
+      [
+        launcher,
+        "const f = page.frameLocator('iframe');",
+        "await expect(page.getByTestId('x')).toHaveCount(0);",
+        "await expect(shown(page).getByTestId('x')).toHaveCount(0);",
+        "await expect(form.getByTestId('x')).toHaveCount(0);",
+        "await expect(frame.getByText('x')).toHaveCount(0);",
+      ].join("\n"),
+    );
+    expect(uiRulesIn(dir).map((l) => l.split(": ")[0])).toEqual(["pages/a.spec.ts:1", "pages/a.spec.ts:3", "pages/a.spec.ts:4"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { inFrame, open, shown } from "../../support/ui.js";
 
 const page = `title: Component Quoll
 category: Data
@@ -36,11 +36,10 @@ test("a component node is fed the page's loader data and its own props", async (
     manifest: "custom_components:\n  - { id: echo, title: Echo }\n",
     files: { "pages/quoll.yaml": page, "components/echo/index.html": index, "components/echo/app.js": app },
   });
-  await win.goto("/");
-  await openFromLauncher(win, "Component Quoll");
-  const host = win.getByTestId("page-host").filter({ visible: true });
+  await open(win, daemon, "oxplow:oxplow/page?page=e2e-component/quoll");
+  const host = shown(win).getByTestId("page-host");
   await expect(host.getByTestId("node-before")).toContainText("Above the component.");
-  const frame = host.getByTestId("node-echo").frameLocator('[data-testid="custom-component-frame"]');
+  const frame = await inFrame(host.getByTestId("node-echo"));
   await expect(frame.locator("li")).toHaveText(["spotted", "northern"]);
   await expect(frame.locator("#props")).toHaveText("mood calm");
 });

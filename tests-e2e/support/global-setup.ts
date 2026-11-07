@@ -2,7 +2,7 @@
 // workers through the environment.
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 import { LOG_DIR } from "./daemon.js";
 
@@ -31,9 +31,58 @@ export function sleepsIn(dir: string): string[] {
   return out;
 }
 
+/** The specs about the launcher itself, the only ones that type into it. */
+const LAUNCHER_SPECS = ["work/launcher-search.spec.ts", "work/goto.spec.ts", "shell/agent-session.spec.ts"];
+
+/** The lines under `dir` that open, look or wait their own way, as
+ *  `path:line: what to do instead` (paths relative to `dir`). Specs open
+ *  and look the same way, so a race fixed once is fixed everywhere:
+ *  - `openFromLauncher(` types into the launcher, the slowest and most
+ *    focus-sensitive path: `open(page, daemon, uri)` instead, outside the
+ *    launcher's own specs;
+ *  - `frameLocator(` skips the scroll that gives a frame below the fold its
+ *    animation frames: `inFrame`;
+ *  - `toHaveCount(0)` on the page itself (`expect(page.…)`) counts what the
+ *    hidden tabs hold too, the New Session tab's own form and buttons among
+ *    them: under `shown(page)`, or a form/frame/host locator made from it
+ *    (a menu, which sits outside the tab, is `not.toBeVisible()`). */
+export function uiRulesIn(dir: string, base = dir): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir).sort()) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) {
+      out.push(...uiRulesIn(path, base));
+      continue;
+    }
+    if (!/\.ts$/.test(name)) continue;
+    const rel = relative(base, path);
+    readFileSync(path, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        const at = `${rel}:${i + 1}:`;
+        if (/\bopenFromLauncher\(/.test(line) && !LAUNCHER_SPECS.includes(rel)) out.push(`${at} open the page with open(page, daemon, uri), not the launcher`);
+        if (/\bframeLocator\(/.test(line)) out.push(`${at} use inFrame(...), which scrolls the frame into view`);
+        if (/\btoHaveCount\(0\)/.test(line)) {
+          // The statement: from its `expect(` (a few lines up, when the call wraps) to here.
+          const lines = readFileSync(path, "utf8").split("\n");
+          let start = i;
+          while (start > i - 4 && start > 0 && !/\bexpect\(/.test(lines[start] ?? "")) start -= 1;
+          const statement = lines.slice(start, i + 1).join(" ");
+          if (/\bexpect\(\s*(?:page|win)\b/.test(statement) && !/\bshown\(/.test(statement)) {
+            out.push(`${at} toHaveCount(0) on the page counts hidden tabs: scope it under shown(page) or a form/frame locator`);
+          }
+        }
+      });
+  }
+  return out;
+}
+
 export default function globalSetup(): void {
-  const sleeps = sleepsIn(join(import.meta.dirname, "..", "specs"));
+  const specs = join(import.meta.dirname, "..", "specs");
+  const sleeps = sleepsIn(specs);
   if (sleeps.length > 0) throw new Error(`these specs sleep; wait on what they expect instead:\n${sleeps.join("\n")}`);
+  const loose = uiRulesIn(specs).filter((l) => !l.startsWith("harness/"));
+  if (loose.length > 0) throw new Error(`these specs open or look their own way:\n${loose.join("\n")}`);
   rmSync(LOG_DIR, { recursive: true, force: true });
   // `OXPLOW_E2E_BIN=target/debug` runs the binaries already there, with no
   // cargo build: for a run of specs only, after a build of your own. The

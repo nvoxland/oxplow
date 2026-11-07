@@ -1,7 +1,7 @@
 import { run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const host = `title: Slot Possum
 category: Data
@@ -34,9 +34,8 @@ test("a page mounted at another page's slot shows inside it, given the host's va
     manifest: "ui:\n  mounts:\n    - { page: possum-extras, at: e2e-slot-host/possum.extras, title: Extras }\n",
     files: { "parts/possum-extras.yaml": mounted },
   });
-  await page.goto("/");
-  await openFromLauncher(page, "Slot Possum");
-  const body = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-slot-host/possum");
+  const body = shown(page).getByTestId("page-host");
   await expect(body.getByTestId("node-first")).toContainText("The host's own section.");
   // The mount is drawn in the host, its nodes under the mounted page's id
   // (`/` written `.`), and it read the host's row.

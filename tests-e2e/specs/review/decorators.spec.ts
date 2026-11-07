@@ -1,6 +1,6 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open } from "../../support/ui.js";
 
 // oxplow-bundled decorates an effort with its latest verdict: a chip
 // in the effort page's header.
@@ -24,7 +24,7 @@ test("an accepted effort's page carries the review's verdict chip", async ({ pag
   await run(daemon, "oxplow.review.accept", { effort: new URL(effort).searchParams.get("id") });
   await page.goto("/");
   // The window answers a navigate once its stream is shown: a page open is the sign.
-  await openFromLauncher(page, "Suite Home");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
   await expect(page.getByTestId("rail-hud")).toHaveAttribute("aria-busy", "false");
   // The effort's own page.
   await run(daemon, "oxplow.window.navigate", { uri: effort });

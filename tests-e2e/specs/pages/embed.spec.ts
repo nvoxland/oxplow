@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const outer = `title: Embed Echidna
 category: Data
@@ -27,9 +27,8 @@ view:
 
 test("an embedded page's nodes show in the host, with ids <embed>/<child>", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-embed", { files: { "pages/echidna.yaml": outer, "parts/echidna-inner.yaml": inner } });
-  await page.goto("/");
-  await openFromLauncher(page, "Embed Echidna");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-embed/echidna");
+  const host = shown(page).getByTestId("page-host");
   await expect(host.getByTestId("node-intro")).toContainText("Outer echidna");
   // The embedded page's nodes keep the embed's id as a prefix, and read the
   // params the embed gave.

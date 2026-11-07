@@ -1,6 +1,6 @@
 import { ipc } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { openFromLauncher, shown } from "../../support/ui.js";
 
 // A bookmark is of the page's whole address, view included. The same page at
 // another view shows the star as "bookmarked at other values", and its popover
@@ -16,18 +16,18 @@ test("the star offers to move a bookmark made at another filter value", async ({
   await expect(star).toHaveText("★");
   // The star's popover closes with a second click on the star.
   await star.click();
-  await expect(page.getByTestId("page-nav-bookmark-popover").filter({ visible: true })).toHaveCount(0);
+  await expect(page.getByTestId("page-nav-bookmark-popover").filter({ visible: true })).not.toBeVisible();
   await expect.poll(bookmarked).toEqual([expect.stringContaining("local-history")]);
   const before = (await bookmarked())[0];
   expect(before).not.toContain("mode=by-commit");
 
   // Another value of the page's filter: the star is off, but says why.
-  await page.getByTestId("page-param-mode-value").filter({ visible: true }).click();
-  await page.getByTestId("page-param-mode-edit").filter({ visible: true }).selectOption("by-commit");
+  await shown(page).getByTestId("page-param-mode-value").click();
+  await shown(page).getByTestId("page-param-mode-edit").selectOption("by-commit");
   await expect(star).toHaveText("☆");
   await expect(star).toHaveAttribute("title", "Bookmarked at other values");
   // The filter is in the tab's address.
-  await expect(page.locator('[data-testid^="center-tab-body-"][data-testid$="#mode=by-commit"]:visible')).toHaveCount(1);
+  await expect(shown(page, "#mode=by-commit")).toHaveCount(1);
 
   await star.click();
   await page.getByTestId("page-nav-bookmark-update").filter({ visible: true }).click();

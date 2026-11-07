@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import { run } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // What any page's actions do in the shell, over one small extension: a row's
 // right-click menu opens a form (a modal, or a prompt strip when it asks for
@@ -99,19 +99,18 @@ view:
       - { name: token, secret: true }
 `;
 
-async function open(page: Page, daemon: Parameters<typeof installExtension>[0], title = "Action Wallaby") {
+async function openPage(page: Page, daemon: Parameters<typeof installExtension>[0], id = "wallaby") {
   await installExtension(daemon, "e2e-actions", {
     manifest,
     files: { "pages/wallaby.yaml": pageYaml, "pages/form.yaml": formPage, "handlers/save.star": handler },
   });
-  await page.goto("/");
-  await openFromLauncher(page, title);
-  return page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, `oxplow:oxplow/page?page=e2e-actions/${id}`);
+  return shown(page).getByTestId("page-host");
 }
 
 test("a row's menu opens a form, the form submits, and the page shows the result", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Wallaby one", thread: daemon.thread });
-  const host = await open(page, daemon);
+  const host = await openPage(page, daemon);
   const row = host.getByRole("row", { name: /Wallaby one/ });
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-copy").click();
@@ -127,7 +126,7 @@ test("a row's menu opens a form, the form submits, and the page shows the result
 
 test("a form of one text field is a prompt strip, and Enter submits it", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Wallaby two", thread: daemon.thread });
-  const host = await open(page, daemon);
+  const host = await openPage(page, daemon);
   await host.getByRole("row", { name: /Wallaby two/ }).click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-rename").click();
   const field = page.getByTestId("viz-action-form-fields-title");
@@ -140,7 +139,7 @@ test("a form of one text field is a prompt strip, and Enter submits it", async (
 
 test("a command that asks is confirmed in a strip before it runs", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Wallaby three", thread: daemon.thread });
-  const host = await open(page, daemon);
+  const host = await openPage(page, daemon);
   const row = host.getByRole("row", { name: /Wallaby three/ });
   await row.click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-remove").click();
@@ -154,17 +153,17 @@ test("a command that asks is confirmed in a strip before it runs", async ({ page
 test("an action whose `when` is false is not offered on that row", async ({ page, daemon }) => {
   await run(daemon, "oxplow.work_item.create", { title: "Wallaby locked", thread: daemon.thread });
   await run(daemon, "oxplow.work_item.create", { title: "Wallaby open", thread: daemon.thread });
-  const host = await open(page, daemon);
+  const host = await openPage(page, daemon);
   await host.getByRole("row", { name: /Wallaby locked/ }).click({ button: "right" });
   await expect(page.getByTestId("menu-item-viz-action-copy")).toBeVisible();
-  await expect(page.getByTestId("menu-item-viz-action-rename")).toHaveCount(0);
+  await expect(page.getByTestId("menu-item-viz-action-rename")).not.toBeVisible();
   await page.keyboard.press("Escape");
   await host.getByRole("row", { name: /Wallaby open/ }).click({ button: "right" });
   await expect(page.getByTestId("menu-item-viz-action-rename")).toBeVisible();
 });
 
 test("a node's own action button opens a form, and a secret field is masked and never echoed", async ({ page, daemon }) => {
-  const host = await open(page, daemon);
+  const host = await openPage(page, daemon);
   await expect(host).toContainText("No wallabies.");
   await host.getByTestId("viz-action-add").click();
   const form = page.getByTestId("viz-action-form");
@@ -183,7 +182,7 @@ test("a node's own action button opens a form, and a secret field is masked and 
 });
 
 test("a form node's secret field is masked, and the page never shows it", async ({ page, daemon }) => {
-  const host = await open(page, daemon, "Form Wallaby");
+  const host = await openPage(page, daemon, "form");
   const form = host.locator('[data-node="keep"]');
   const secret = form.getByTestId("viz-form-fields-token");
   await expect(secret).toHaveAttribute("type", "password");

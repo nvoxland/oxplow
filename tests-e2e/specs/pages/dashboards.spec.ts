@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 
 import { ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 type Daemon = Parameters<typeof ipc>[0];
 interface DashboardPage {
@@ -10,15 +10,15 @@ interface DashboardPage {
   view: { kind: string; children: Array<{ id: string; kind: string; page: string }> };
 }
 
-const activeHost = (page: Page) => page.getByTestId("page-host").filter({ visible: true });
-const activeGrid = (page: Page) => page.getByTestId("dashboard-grid").filter({ visible: true });
+const activeHost = (page: Page) => shown(page).getByTestId("page-host");
+const activeGrid = (page: Page) => shown(page).getByTestId("dashboard-grid");
 
 function dashboard(daemon: Daemon, id: string) {
   return ipc<DashboardPage>(daemon, "get_page", { id });
 }
 
-async function pin(page: Page, title: string, dashboardId: string) {
-  await openFromLauncher(page, title);
+async function pin(page: Page, daemon: Daemon, slug: string, title: string, dashboardId: string) {
+  await open(page, daemon, `oxplow:oxplow/page?page=e2e-dashboard-pages/${slug}`);
   await expect(activeHost(page)).toContainText(title);
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-pin").click();
@@ -44,10 +44,9 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
     spec: "# Preserve this dashboard explanation\ntitle: Dunnart board\ncategory: Dashboards\nview: { grid: [] }\n",
     deploy: true,
   });
-  await page.goto("/");
-  await pin(page, "Dunnart test summary", id);
+  await pin(page, daemon, "tests", "Dunnart test summary", id);
   await expect(activeGrid(page)).toContainText("Dunnart test evidence");
-  await pin(page, "Dunnart coverage summary", id);
+  await pin(page, daemon, "coverage", "Dunnart coverage summary", id);
   await expect(activeGrid(page)).toContainText("Dunnart coverage evidence");
   await expect.poll(async () => (await dashboard(daemon, id)).view.children.map((tile) => tile.page))
     .toEqual([`${extension}/tests`, `${extension}/coverage`]);
@@ -79,8 +78,8 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
     .toEqual([second.id]);
   await expect(tile(first.id)).toHaveCount(0);
 
-  await page.getByTestId("dashboard-title-edit").filter({ visible: true }).click();
-  const renamed = page.getByTestId("dashboard-title-input").filter({ visible: true });
+  await shown(page).getByTestId("dashboard-title-edit").click();
+  const renamed = shown(page).getByTestId("dashboard-title-input");
   await renamed.fill("Dunnart release overview");
   await renamed.press("Enter");
   await expect.poll(async () => (await dashboard(daemon, id)).title).toBe("Dunnart release overview");
@@ -88,7 +87,7 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
   expect(saved.yaml).toContain("# Preserve this dashboard explanation");
 
   await page.reload();
-  await expect(page.getByTestId("dashboard-title-edit").filter({ visible: true })).toHaveText("Dunnart release overview");
+  await expect(shown(page).getByTestId("dashboard-title-edit")).toHaveText("Dunnart release overview");
   await expect(activeGrid(page)).toContainText("Dunnart coverage evidence");
   await expect(activeGrid(page)).not.toContainText("Dunnart test evidence");
   await expect(activeGrid(page).locator(':scope > [data-testid^="dashboard-tile-"]')).toHaveCount(1);

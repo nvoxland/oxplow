@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open } from "../../support/ui.js";
 
 // The Assistant: a page's ☰ → Ask the Assistant opens its dock panel about
 // that page; a question typed there is answered by the model bound to the
@@ -36,8 +36,7 @@ test("ask the Assistant about a page and an answer appears in the panel", async 
   try {
     await run(daemon, "oxplow.ai.set_provider", { id: "stand-in", kind: "openai_compatible", base_url: stub.url, key: "sk-e2e" });
     await run(daemon, "oxplow.ai.set_role", { role: "assistant", provider: "stand-in", model: "m" });
-    await page.goto("/");
-    await openFromLauncher(page, "Suite Home");
+    await open(page, daemon, "oxplow:oxplow/page?page=e2e/home");
     await page.locator('[data-testid="page-nav-menu"]:visible').click();
     await page.getByTestId("menu-item-page-ask-assistant").click();
 

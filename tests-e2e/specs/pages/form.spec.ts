@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const spec = `title: Form Numbat
 category: Data
@@ -28,12 +28,11 @@ test("a page's form action submits, and the page shows the result", async ({ pag
     manifest: "permissions: [commands:oxplow.work_item.create]\n",
     files: { "pages/numbat.yaml": spec },
   });
-  await page.goto("/");
-  await openFromLauncher(page, "Form Numbat");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-form/numbat");
+  const host = shown(page).getByTestId("page-host");
   await expect(host).toContainText("Nothing filed yet.");
-  await page.getByTestId("action-page-action-file").filter({ visible: true }).click();
-  const title = page.getByTestId("viz-action-form-fields-title").filter({ visible: true });
+  await shown(page).getByTestId("action-page-action-file").click();
+  const title = shown(page).getByTestId("viz-action-form-fields-title");
   await expect(title).toHaveValue("Form numbat ");
   await title.fill("Form numbat one");
   await title.press("Enter");

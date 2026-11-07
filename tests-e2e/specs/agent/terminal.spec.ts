@@ -1,9 +1,9 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // The Terminal page is a plain shell in the stream's worktree.
-test("a terminal opens a shell in the project", async ({ page }) => {
+test("a terminal opens a shell in the project", async ({ page, daemon }) => {
   // The terminal's web font arrives only once its pane is on screen, as on
   // a first load. The terminal measures its rows once, when it opens, so it
   // must open in that font, not in the fallback the font then replaces:
@@ -27,8 +27,7 @@ test("a terminal opens a shell in the project", async ({ page }) => {
       observer.disconnect();
     }).observe(document, { childList: true, subtree: true });
   });
-  await page.goto("/");
-  await openFromLauncher(page, "Terminal");
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   await expect(page.getByTestId("terminal-mount")).toBeVisible();
   releaseFont();
   const terminal = page.locator(".xterm");
@@ -50,9 +49,8 @@ test("a terminal opens a shell in the project", async ({ page }) => {
 // Keys typed the moment the terminal shows — before its shell is up —
 // arrive, all of them, in the order typed: the daemon holds them for the
 // PTY, and one socket keeps them in order.
-test("a burst typed as the terminal appears arrives whole and in order", async ({ page }) => {
-  await page.goto("/");
-  await openFromLauncher(page, "Terminal");
+test("a burst typed as the terminal appears arrives whole and in order", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   const terminal = page.locator(".xterm");
   await expect(terminal).toBeVisible();
   await terminal.click();
@@ -65,9 +63,8 @@ test("a burst typed as the terminal appears arrives whole and in order", async (
 
 // tsk1026: a session whose process exited says so, takes no keys, and Start
 // Again opens a fresh one in the same pane.
-test("an exited shell says so, and Start Again opens a new one", async ({ page }) => {
-  await page.goto("/");
-  await openFromLauncher(page, "Terminal");
+test("an exited shell says so, and Start Again opens a new one", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   const terminal = page.locator(".xterm");
   await expect(terminal).toBeVisible();
   await terminal.click();
@@ -75,7 +72,7 @@ test("an exited shell says so, and Start Again opens a new one", async ({ page }
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("terminal-ended")).toContainText("Session ended");
   await page.getByTestId("terminal-start-again").click();
-  await expect(page.getByTestId("terminal-ended")).toHaveCount(0);
+  await expect(shown(page).getByTestId("terminal-ended")).toHaveCount(0);
   await expect(page.locator(".xterm-rows")).toContainText("started again");
   await terminal.click();
   await page.keyboard.type("echo again-$((6*7))");
@@ -88,8 +85,7 @@ test("an exited shell says so, and Start Again opens a new one", async ({ page }
 test("a terminal is a row: closed with its shell, and New opens another", async ({ page, daemon }) => {
   const rows = async () =>
     (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT id, uri, title FROM v_terminal" })).rows;
-  await page.goto("/");
-  await openFromLauncher(page, "Terminal");
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   await expect(page.locator(".xterm")).toBeVisible();
   await until("the first terminal's row", 15_000, async () => (await rows()).length === 1);
   const [id, uri, title] = (await rows())[0] as [number, string, string];
@@ -109,8 +105,7 @@ test("a terminal is a row: closed with its shell, and New opens another", async 
 test("a second terminal from the strip is picked, renamed and closed", async ({ page, daemon }) => {
   const rows = async () =>
     (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT id, title FROM v_terminal ORDER BY position, id" })).rows;
-  await page.goto("/");
-  await openFromLauncher(page, "Terminal");
+  await open(page, daemon, "oxplow:oxplow/page?page=terminal");
   await expect(page.locator(".xterm").first()).toBeVisible();
   await until("the first terminal's row", 15_000, async () => (await rows()).length === 1);
   await run(daemon, "oxplow.terminal.open", { stream: "str1" });
@@ -137,5 +132,5 @@ test("a second terminal from the strip is picked, renamed and closed", async ({ 
   await page.getByTestId("menu-item-terminal.close").click();
   await page.getByTestId("viz-action-confirm-run").click();
   await until("the close", 15_000, async () => (await rows()).length === 1);
-  await expect(page.getByTestId("terminal-tab-strip")).toHaveCount(0);
+  await expect(shown(page).getByTestId("terminal-tab-strip")).toHaveCount(0);
 });

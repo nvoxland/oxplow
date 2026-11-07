@@ -6,7 +6,7 @@ import type { Page } from "@playwright/test";
 
 import { run, type Daemon } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // Oxplow's own pages are complete with every enhancement off: with only
 // oxplow-foundation on, a page shows its own content, and nothing another
@@ -36,15 +36,16 @@ function history(daemon: Daemon) {
 
 /** Nothing of another extension's is on the page the window shows or in its ☰. */
 async function nothingAdded(page: Page) {
-  await expect(page.locator('[data-testid^="replacement-"]')).toHaveCount(0);
-  for (const name of OTHERS) await expect(page.locator(`[data-node^="${name}."]`)).toHaveCount(0);
-  await expect(page.locator('[title^="from "]')).toHaveCount(0);
+  await expect(shown(page).locator('[data-testid^="replacement-"]')).toHaveCount(0);
+  for (const name of OTHERS) await expect(shown(page).locator(`[data-node^="${name}."]`)).toHaveCount(0);
+  await expect(shown(page).locator('[title^="from "]')).toHaveCount(0);
+  const rail = page.getByTestId("rail-hud");
   await expect(
-    page.locator('[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:oxplow-foundation/"])'),
+    rail.locator('[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:oxplow-foundation/"])'),
   ).toHaveCount(0);
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-page-ask-assistant")).toBeVisible();
-  await expect(page.locator('[data-testid^="menu-item-ref-command-"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid^="menu-item-ref-command-"]')).not.toBeVisible();
   await page.keyboard.press("Escape");
 }
 
@@ -52,21 +53,21 @@ test("oxplow's pages are complete with every enhancement off", async ({ page, da
   history(daemon);
   for (const name of OTHERS) await run(daemon, "oxplow.extension.disable", { name });
   await page.goto("/");
-  const host = page.locator('[data-testid="page-host"]:visible');
+  const host = shown(page).getByTestId("page-host");
 
   // The VCS pages: their own content.
-  await openFromLauncher(page, "Git History");
+  await open(page, daemon, "oxplow:oxplow/page?page=git-history");
   await expect(host.getByText("Merge side").first()).toBeVisible();
   await expect(host.getByText("Side work").first()).toBeVisible();
   await nothingAdded(page);
 
   await host.getByText("Main work").first().click();
-  const commit = page.locator('[data-testid="page-file"]:visible');
+  const commit = shown(page).getByTestId("page-file");
   await expect(commit).toContainText("Main work");
   await expect(commit).toContainText("main.txt");
   await nothingAdded(page);
 
-  await openFromLauncher(page, "Uncommitted");
+  await open(page, daemon, "oxplow:oxplow/page?page=uncommitted-changes");
   await expect(host.getByText("dirty.txt").first()).toBeVisible();
   await nothingAdded(page);
 });

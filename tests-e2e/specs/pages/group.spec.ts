@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 const spec = `title: Group Marsupial
 category: Data
@@ -17,9 +17,8 @@ view:
 
 test("rows sit under a heading per group value, and a heading folds its rows", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-group", { files: { "pages/marsupial.yaml": spec } });
-  await page.goto("/");
-  await openFromLauncher(page, "Group Marsupial");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-group/marsupial");
+  const host = shown(page).getByTestId("page-host");
   await expect(host.getByTestId("viz-group-heading")).toHaveCount(2);
   await expect(host).toContainText("Quokka");
   await expect(host).toContainText("Kangaroo");

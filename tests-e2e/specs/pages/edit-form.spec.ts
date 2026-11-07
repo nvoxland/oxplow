@@ -1,6 +1,6 @@
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 // A form node in `edit` mode edits what is saved: it starts from the saved
 // value, Save is on only while the form is changed, and a markdown field is the
@@ -25,9 +25,8 @@ test("an edit form saves only when changed, takes rich text, and reads back afte
     manifest: "permissions: [commands:oxplow.stream.set_prompt]\n",
     files: { "pages/quokka.yaml": spec },
   });
-  await page.goto("/");
-  await openFromLauncher(page, "Edit Quokka");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-edit/quokka");
+  const host = shown(page).getByTestId("page-host");
   // The prompt is markdown: the rich text editor's surface.
   const box = host.locator('[contenteditable="true"]');
   const save = host.getByRole("button", { name: "Save" });

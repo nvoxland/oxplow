@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import type { Daemon } from "../../support/daemon.js";
 import { installExtension } from "../../support/pages.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher } from "../../support/ui.js";
+import { open, shown } from "../../support/ui.js";
 
 /// A page of the browser suite's own: its rows stand in for commits, and its
 /// filters are the kinds a page declares (a date range with a custom end, a
@@ -61,9 +61,8 @@ const ROUTE = "oxplow:oxplow/page?page=e2e-params/history";
 
 async function openHistory(page: Page, daemon: Daemon) {
   await installExtension(daemon, "e2e-params", { files: { "pages/history.yaml": history } });
-  await page.goto("/");
-  await openFromLauncher(page, "Params History");
-  const host = page.getByTestId("page-host").filter({ visible: true });
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e-params/history");
+  const host = shown(page).getByTestId("page-host");
   return {
     host,
     body: host.getByTestId("page-file"),
@@ -92,7 +91,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(page.getByTestId("page-about-definition")).toHaveText("e2e-params/pages/history.yaml");
   await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=e2e-params/history");
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("page-about-modal")).toHaveCount(0);
+  await expect(page.getByTestId("page-about-modal")).not.toBeVisible();
 
   await expect(commits).toContainText("Add the numbat");
   await expect(commits).toContainText("Add the wombat");
@@ -110,7 +109,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
 
   // The page's view is its tab's entry: the search and the pick are in
   // its id, so a bookmark or a reopened tab keeps them.
-  const tab = page.locator(`[data-testid^="center-tab-body-${ROUTE}"]:visible`);
+  const tab = shown(page, ROUTE);
   await expect(tab).toHaveAttribute("data-testid", /q=numbat/);
   await expect(tab).toHaveAttribute("data-testid", /commit=/);
   // Picking pushed an entry: Back un-selects, the filter stays, and
@@ -131,7 +130,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await filters.getByTestId("page-param-range-edit").selectOption("__custom__");
   await expect(page.getByTestId("page-param-range-custom")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(page.getByTestId("page-param-range-custom")).toHaveCount(0);
+  await expect(shown(page).getByTestId("page-param-range-custom")).toHaveCount(0);
   await expect(filters.getByTestId("page-param-range-value")).toBeFocused();
 
   // Merges only: none of these is one. The section stays and says so.

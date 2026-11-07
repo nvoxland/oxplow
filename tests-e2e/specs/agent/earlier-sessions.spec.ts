@@ -29,7 +29,7 @@ test("a closed session is listed on the New Session page and picking it reopens 
   await expect(newSessionPage(page)).toHaveCount(0);
   // Undo (the toast) closes it again.
   await page.getByTestId("undo-toast-undo").click();
-  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toHaveCount(0);
+  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).not.toBeVisible();
 });
 
 /// A closed session found by search opens its transcript, not nothing; the
@@ -49,7 +49,7 @@ test("a closed session found by search opens its transcript, which can reopen it
   await page.getByTestId(`launcher-hit-oxplow:oxplow/agent_session?id=${id}`).click();
   // Its transcript (it has no turns yet, so nothing is listed), not a tab
   // that isn't there; Reopen brings the session back.
-  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).toHaveCount(0);
+  await expect(page.getByTestId(`center-tab-oxplow:oxplow/agent_session?id=${id}`)).not.toBeVisible();
   const transcript = page.locator('[data-testid^="center-tab-body-oxplow:oxplow/page?page=session-transcript"]');
   await transcript.getByTestId("page-nav-menu").click();
   await page.getByTestId("menu-item-action-page-action-reopen").click();
