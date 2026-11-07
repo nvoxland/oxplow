@@ -240,8 +240,13 @@ async fn the_scaffolded_metric_activates_and_the_first_capture_records_a_fact_pe
     assert_eq!(p.run_status().await, ("ok".to_string(), None));
 }
 
+/// A delta capture carries forward the files it did not touch, and the series
+/// it leaves reads the same through every door: the metric grid's captures,
+/// `v_metric_point` for every metric at once (one metric when pinned, sliced
+/// when it pins a dimension), and the grid by day sliced by area and
+/// filtered by a dimension.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_delta_capture_carries_forward_the_files_it_did_not_touch() {
+async fn a_delta_capture_carries_forward_what_it_did_not_touch_and_the_series_reads_alike() {
     let (p, at) = project(|_| {}).await;
     p.baseline().await;
     assert_eq!(p.headline().await, 4.0);
@@ -286,21 +291,9 @@ async fn a_delta_capture_carries_forward_the_files_it_did_not_touch() {
         .map(|r| int(&r[0]))
         .collect();
     assert_eq!(series, [4, 5]);
-}
 
-/// `v_metric_point` is the metric grid's capture rows for every metric at
-/// once: the same series, one metric when pinned, sliced when it pins a
-/// dimension.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_metric_points_are_the_series_for_every_metric_pinned_or_sliced() {
-    let (p, _) = project(|_| {}).await;
-    p.baseline().await;
-    let (plan, _) = rust(&[("calm", 0)]);
-    let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
-    write(p.dir.path(), "engine/plan.rs", &plan);
-    write(p.dir.path(), "ui/theme.rs", &theme);
-    p.delta().await;
-
+    // `v_metric_point` is the metric grid's capture rows for every metric at
+    // once.
     let pinned: Vec<i64> = p
         .rows(&format!(
             "SELECT CAST(value AS INTEGER) FROM v_metric_point WHERE metric = '{MEASURE}' ORDER BY captured_at"
@@ -329,6 +322,27 @@ async fn the_metric_points_are_the_series_for_every_metric_pinned_or_sliced() {
         .map(|r| (text(&r[1]), int(&r[2])))
         .collect();
     assert_eq!(latest, [("engine".to_string(), 1), ("ui".to_string(), 4)]);
+
+    // The metric by area, and filtered by a dimension.
+    // The latest day's value per area.
+    let by_area = p
+        .rows(&format!(
+            "SELECT \"{AREA}\", CAST(MEASURE('{MEASURE}') AS INTEGER) \
+             FROM metric_grid('day', '{AREA}') ORDER BY \"{AREA}\""
+        ))
+        .await;
+    let by_area: Vec<(String, i64)> = by_area.iter().map(|r| (text(&r[0]), int(&r[1]))).collect();
+    // engine: run.rs (1); ui: view.rs (1) + theme.rs (3).
+    assert_eq!(by_area, [("engine".to_string(), 1), ("ui".to_string(), 4)]);
+
+    // A dimension filter keeps one area's slice.
+    let ui = p
+        .rows(&format!(
+            "SELECT CAST(MEASURE('{MEASURE}') AS INTEGER) \
+             FROM metric_grid('day', '{AREA}') WHERE \"{AREA}\" = 'ui'"
+        ))
+        .await;
+    assert_eq!(ui.iter().map(|r| int(&r[0])).collect::<Vec<_>>(), [4]);
 }
 
 /// Loader `loader` of foundation's page `page`, run as a person with
@@ -388,8 +402,91 @@ async fn run_page(
 #[tokio::test(flavor = "multi_thread")]
 async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     use crate::pages::actions::{run_page_action, PageActionCall};
-    let (p, _) = project(|_| {}).await;
+    let (p, at) = project(|_| {}).await;
     p.baseline().await;
+
+    // The page's rows carry file refs to the path and line, as the first
+    // capture left them.
+
+    let ext = p
+        .svc
+        .extension_catalog
+        .unpinned(p.dir.path(), "a test reads declarations")
+        .iter()
+        .find(|e| e.name == NAME)
+        .cloned()
+        .expect("the extension loads");
+    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
+    let page = &ext.page_files[0];
+    let run = run_page(&p.svc, &page.id, vec![]).await;
+    let config = page
+        .nodes()
+        .into_iter()
+        .find_map(|n| match &n.kind {
+            crate::pages::schema::NodeKind::Viz { config, .. } => Some(config.clone()),
+            _ => None,
+        })
+        .expect("a viz node");
+    let result = &run.loaders["findings"].result;
+
+    // `path` links as a `file` at the `line` column.
+    let link = config
+        .columns
+        .iter()
+        .find_map(|c| c.link.as_ref().map(|l| (c.key.as_str(), l)))
+        .expect("a linked column");
+    assert_eq!(link.0, "path");
+    assert_eq!(link.1.kind, crate::pages::spec::LinkKind::File);
+    let (path_col, line_col) = (
+        result.columns.iter().position(|c| c == "path").unwrap(),
+        result
+            .columns
+            .iter()
+            .position(|c| Some(c.as_str()) == link.1.line.as_deref())
+            .unwrap(),
+    );
+    // Each row names a file and a line that resolve as a canonical ref.
+    let refs: Vec<String> = result
+        .rows
+        .iter()
+        .map(|r| {
+            let r#ref = oxplow_domain::uri::build::file_uri_at(
+                &text(&r[path_col]),
+                None,
+                None,
+                Some(&int(&r[line_col]).to_string()),
+            );
+            oxplow_domain::uri::OxplowUri::parse(&r#ref)
+                .unwrap_or_else(|e| panic!("{}: {}", r#ref, e.reason()));
+            r#ref
+        })
+        .collect();
+    // Worst first, then by path.
+    assert_eq!(
+        refs,
+        [
+            oxplow_domain::uri::build::file_uri_at(
+                "engine/plan.rs",
+                None,
+                None,
+                Some(&at.plan.to_string())
+            ),
+            oxplow_domain::uri::build::file_uri_at(
+                "engine/run.rs",
+                None,
+                None,
+                Some(&at.run.to_string())
+            ),
+            oxplow_domain::uri::build::file_uri_at(
+                "ui/view.rs",
+                None,
+                None,
+                Some(&at.view.to_string())
+            ),
+        ]
+    );
+
+    // Then a delta: the trend has two captures.
     let (plan, _) = rust(&[("calm", 0)]);
     let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
     write(p.dir.path(), "engine/plan.rs", &plan);
@@ -490,121 +587,6 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
     // reseeds, which a test project doesn't do.
     let err = act("enable").await.unwrap_err().to_string();
     assert!(err.contains("isn't offered"), "{err}");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_metric_slices_by_area_and_filters_by_a_dimension() {
-    let (p, _) = project(|_| {}).await;
-    p.baseline().await;
-    let (plan, _) = rust(&[("calm", 0)]);
-    let (theme, _) = rust(&[("calm", 0), ("a", 11), ("b", 11), ("c", 13)]);
-    write(p.dir.path(), "engine/plan.rs", &plan);
-    write(p.dir.path(), "ui/theme.rs", &theme);
-    p.delta().await;
-
-    // The latest day's value per area.
-    let by_area = p
-        .rows(&format!(
-            "SELECT \"{AREA}\", CAST(MEASURE('{MEASURE}') AS INTEGER) \
-             FROM metric_grid('day', '{AREA}') ORDER BY \"{AREA}\""
-        ))
-        .await;
-    let by_area: Vec<(String, i64)> = by_area.iter().map(|r| (text(&r[0]), int(&r[1]))).collect();
-    // engine: run.rs (1); ui: view.rs (1) + theme.rs (3).
-    assert_eq!(by_area, [("engine".to_string(), 1), ("ui".to_string(), 4)]);
-
-    // A dimension filter keeps one area's slice.
-    let ui = p
-        .rows(&format!(
-            "SELECT CAST(MEASURE('{MEASURE}') AS INTEGER) \
-             FROM metric_grid('day', '{AREA}') WHERE \"{AREA}\" = 'ui'"
-        ))
-        .await;
-    assert_eq!(ui.iter().map(|r| int(&r[0])).collect::<Vec<_>>(), [4]);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_page_rows_carry_file_refs_to_the_path_and_line() {
-    let (p, at) = project(|_| {}).await;
-    p.baseline().await;
-
-    let ext = p
-        .svc
-        .extension_catalog
-        .unpinned(p.dir.path(), "a test reads declarations")
-        .iter()
-        .find(|e| e.name == NAME)
-        .cloned()
-        .expect("the extension loads");
-    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    let page = &ext.page_files[0];
-    let run = run_page(&p.svc, &page.id, vec![]).await;
-    let config = page
-        .nodes()
-        .into_iter()
-        .find_map(|n| match &n.kind {
-            crate::pages::schema::NodeKind::Viz { config, .. } => Some(config.clone()),
-            _ => None,
-        })
-        .expect("a viz node");
-    let result = &run.loaders["findings"].result;
-
-    // `path` links as a `file` at the `line` column.
-    let link = config
-        .columns
-        .iter()
-        .find_map(|c| c.link.as_ref().map(|l| (c.key.as_str(), l)))
-        .expect("a linked column");
-    assert_eq!(link.0, "path");
-    assert_eq!(link.1.kind, crate::pages::spec::LinkKind::File);
-    let (path_col, line_col) = (
-        result.columns.iter().position(|c| c == "path").unwrap(),
-        result
-            .columns
-            .iter()
-            .position(|c| Some(c.as_str()) == link.1.line.as_deref())
-            .unwrap(),
-    );
-    // Each row names a file and a line that resolve as a canonical ref.
-    let refs: Vec<String> = result
-        .rows
-        .iter()
-        .map(|r| {
-            let r#ref = oxplow_domain::uri::build::file_uri_at(
-                &text(&r[path_col]),
-                None,
-                None,
-                Some(&int(&r[line_col]).to_string()),
-            );
-            oxplow_domain::uri::OxplowUri::parse(&r#ref)
-                .unwrap_or_else(|e| panic!("{}: {}", r#ref, e.reason()));
-            r#ref
-        })
-        .collect();
-    // Worst first, then by path.
-    assert_eq!(
-        refs,
-        [
-            oxplow_domain::uri::build::file_uri_at(
-                "engine/plan.rs",
-                None,
-                None,
-                Some(&at.plan.to_string())
-            ),
-            oxplow_domain::uri::build::file_uri_at(
-                "engine/run.rs",
-                None,
-                None,
-                Some(&at.run.to_string())
-            ),
-            oxplow_domain::uri::build::file_uri_at(
-                "ui/view.rs",
-                None,
-                None,
-                Some(&at.view.to_string())
-            ),
-        ]
-    );
 }
 
 /// What the author gets wrong fails the run with the documented reason, so

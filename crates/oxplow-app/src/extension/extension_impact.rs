@@ -2471,7 +2471,7 @@ mod tests {
     /// row would stand for several) or has a NULL part.
     #[test]
     fn a_row_diff_that_cannot_be_joined_is_counts_with_a_note() {
-        let id = vec!["id".to_string()];
+        let id = ["id".to_string()];
         let n = vec!["n".to_string()];
         let one = side(&["n"], vec![vec![json!(1)]], false);
         let two = side(&["n"], vec![vec![json!(1)], vec![json!(2)]], false);
