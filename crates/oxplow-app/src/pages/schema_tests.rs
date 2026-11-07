@@ -304,122 +304,136 @@ view:
 
 // --- what is refused ---------------------------------------------------
 
+/// What a page's load-time checks refuse, one row per case: the case, the
+/// page, and what the refusal must say. A failure names the case.
 #[test]
-fn a_loader_names_exactly_one_kind() {
-    let e = refused(
-        "title: T\nloaders:\n  x: { sql: SELECT 1, rows: [] }\nview: { viz: table, from: x }\n",
-    );
-    assert!(
-        e.contains("loader `x`") && e.contains("exactly one of"),
-        "{e}"
-    );
-    let e = refused("title: T\nloaders:\n  x: {}\nview: { viz: table, from: x }\n");
-    assert!(e.contains("exactly one of"), "{e}");
-}
-
-#[test]
-fn a_loader_name_is_a_plain_identifier_and_not_a_dataset() {
-    let e = refused(
-        "title: T\nloaders:\n  v_commit: { sql: SELECT 1 }\nview: { viz: table, from: v_commit }\n",
-    );
-    assert!(e.contains("`v_commit`") && e.contains("dataset"), "{e}");
-    let e = refused(
-        "title: T\nloaders:\n  Bad-Name: { sql: SELECT 1 }\nview: { viz: table, from: Bad-Name }\n",
-    );
-    assert!(e.contains("`Bad-Name`"), "{e}");
-}
-
-#[test]
-fn a_loader_reads_only_earlier_loaders() {
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT * FROM b }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
-    );
-    assert!(
-        e.contains("loader `a` reads `b`") && e.contains("before"),
-        "{e}"
-    );
-    let e = refused(
-        "title: T\nloaders:\n  a: { command: acme.ci.x, args: { n: { from: b.n } }, reads: [v_x] }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n",
-    );
-    assert!(e.contains("loader `a`") && e.contains("`b`"), "{e}");
-}
-
-#[test]
-fn a_node_binds_a_loader_that_exists() {
-    let e =
-        refused("title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: nope }\n");
-    assert!(e.contains("`nope`") && e.contains("no loader"), "{e}");
-    let e = refused("title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table }\n");
-    assert!(e.contains("needs `from`"), "{e}");
-}
-
-#[test]
-fn a_command_loader_says_what_refreshes_it() {
-    let e =
-        refused("title: T\nloaders:\n  a: { command: acme.ci.x }\nview: { viz: table, from: a }\n");
-    assert!(e.contains("`reads`") && e.contains("`refresh`"), "{e}");
+fn the_load_checks_refuse_each_case_naming_what_is_wrong() {
+    let q = "title: T\nloaders:\n  a: { sql: SELECT 1 }\n";
+    let cases: Vec<(&str, String, Vec<&str>)> = vec![
+        (
+            "a loader with a sql and rows",
+            "title: T\nloaders:\n  x: { sql: SELECT 1, rows: [] }\nview: { viz: table, from: x }\n".into(),
+            vec!["loader `x`", "exactly one of"],
+        ),
+        (
+            "a loader with no kind",
+            "title: T\nloaders:\n  x: {}\nview: { viz: table, from: x }\n".into(),
+            vec!["exactly one of"],
+        ),
+        (
+            "a loader named for a dataset",
+            "title: T\nloaders:\n  v_commit: { sql: SELECT 1 }\nview: { viz: table, from: v_commit }\n".into(),
+            vec!["`v_commit`", "dataset"],
+        ),
+        (
+            "a loader named with a dash",
+            "title: T\nloaders:\n  Bad-Name: { sql: SELECT 1 }\nview: { viz: table, from: Bad-Name }\n".into(),
+            vec!["`Bad-Name`"],
+        ),
+        (
+            "a sql loader reading a later loader",
+            "title: T\nloaders:\n  a: { sql: SELECT * FROM b }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n".into(),
+            vec!["loader `a` reads `b`", "before"],
+        ),
+        (
+            "a command loader taking an arg from a later loader",
+            "title: T\nloaders:\n  a: { command: acme.ci.x, args: { n: { from: b.n } }, reads: [v_x] }\n  b: { sql: SELECT 1 AS n }\nview: { viz: table, from: a }\n".into(),
+            vec!["loader `a`", "`b`"],
+        ),
+        (
+            "a node bound to no loader of the page",
+            format!("{q}view: {{ viz: table, from: nope }}\n"),
+            vec!["`nope`", "no loader"],
+        ),
+        (
+            "a viz node with no from",
+            format!("{q}view: {{ viz: table }}\n"),
+            vec!["needs `from`"],
+        ),
+        (
+            "a command loader that says neither what it reads nor what refreshes it",
+            "title: T\nloaders:\n  a: { command: acme.ci.x }\nview: { viz: table, from: a }\n".into(),
+            vec!["`reads`", "`refresh`"],
+        ),
+        (
+            "an arg from a param the page doesn't declare",
+            "title: T\nloaders:\n  a: { command: acme.ci.x, args: { n: { param: nope } }, reads: [v_x] }\nview: { viz: table, from: a }\n".into(),
+            vec!["param `nope`"],
+        ),
+        (
+            "two nodes with one id",
+            format!("{q}view:\n  stack:\n    - {{ title: A, viz: table, from: a }}\n    - {{ title: B, viz: list, from: a }}\n"),
+            vec!["node id `a`", "twice"],
+        ),
+        (
+            "a switch on a param the page doesn't declare",
+            format!("{q}view: {{ switch: {{ param: area, children: [{{ id: a, title: A, viz: table, from: a }}] }} }}\n"),
+            vec!["param `area`"],
+        ),
+        (
+            "a column selecting a param the page doesn't declare",
+            "title: T\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a, columns: [{ key: n, select: nope }] }\n".into(),
+            vec!["nope", "select"],
+        ),
+        (
+            "a tree viz missing what it needs",
+            format!("{q}view: {{ viz: tree, from: a }}\n"),
+            vec!["tree"],
+        ),
+        (
+            "a badge on a loader the page doesn't have",
+            format!("{q}view: {{ viz: table, from: a }}\nbadge: {{ loader: nope }}\n"),
+            vec!["badge", "`nope`"],
+        ),
+        (
+            "an answer with a param the page doesn't have",
+            format!("{q}view: {{ viz: table, from: a }}\nanswers: [{{ question: Why, params: {{ nope: 1 }} }}]\n"),
+            vec!["answer", "`nope`"],
+        ),
+        (
+            "a top-level key that isn't one",
+            "title: T\nquery: SELECT 1\nview: { markdown: hi, id: m }\n".into(),
+            vec!["query"],
+        ),
+        (
+            "a node key that isn't one",
+            "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a, bogus: [] }\n".into(),
+            vec!["bogus"],
+        ),
+        (
+            "hidden, which is gone",
+            format!("title: T\nhidden: true\n{BODY}"),
+            vec![
+                "`hidden` is no longer a key",
+                "a page with no `category` isn't listed",
+                "a part (parts/)",
+            ],
+        ),
+        (
+            "hide_empty, which is gone",
+            "title: P\nloaders:\n  l: { sql: \"SELECT 1 AS n\" }\nview: { id: v, viz: list, from: l, hide_empty: true }\n".into(),
+            vec!["`hide_empty` is no longer a key"],
+        ),
+        (
+            "a sections viz with no sections block",
+            "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: sections, from: q }\n".into(),
+            vec!["viz `sections` needs `sections: { title: <column> }`"],
+        ),
+        (
+            "a sections viz with a block that has no title",
+            "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: sections, from: q, sections: { body: a } }\n".into(),
+            vec!["title: <column>"],
+        ),
+    ];
+    for (case, yaml, needles) in cases {
+        let why = page(&yaml).expect_err(&format!("{case}: refused"));
+        for needle in needles {
+            assert!(why.contains(needle), "{case}: wanted {needle:?} in {why}");
+        }
+    }
+    // A command loader that names its refresh is fine.
     page("title: T\nloaders:\n  a: { command: acme.ci.x, refresh: manual }\nview: { viz: table, from: a }\n")
         .unwrap();
-}
-
-#[test]
-fn an_arg_comes_from_a_param_an_earlier_column_or_a_literal() {
-    let e = refused(
-        "title: T\nloaders:\n  a: { command: acme.ci.x, args: { n: { param: nope } }, reads: [v_x] }\nview: { viz: table, from: a }\n",
-    );
-    assert!(e.contains("param `nope`"), "{e}");
-}
-
-#[test]
-fn node_ids_are_unique() {
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview:\n  stack:\n    - { title: A, viz: table, from: a }\n    - { title: B, viz: list, from: a }\n",
-    );
-    assert!(e.contains("node id `a`") && e.contains("twice"), "{e}");
-}
-
-#[test]
-fn a_switch_param_is_a_declared_filter_and_its_children_have_ids() {
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { switch: { param: area, children: [{ id: a, title: A, viz: table, from: a }] } }\n",
-    );
-    assert!(e.contains("param `area`"), "{e}");
-}
-
-#[test]
-fn a_select_names_a_page_param() {
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 AS n }\nview: { viz: table, from: a, columns: [{ key: n, select: nope }] }\n",
-    );
-    assert!(e.contains("nope") && e.contains("select"), "{e}");
-}
-
-#[test]
-fn a_viz_node_has_what_its_viz_needs() {
-    let e = refused("title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: tree, from: a }\n");
-    assert!(e.contains("tree"), "{e}");
-}
-
-#[test]
-fn badges_and_answers_name_what_the_page_has() {
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nbadge: { loader: nope }\n",
-    );
-    assert!(e.contains("badge") && e.contains("`nope`"), "{e}");
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a }\nanswers: [{ question: Why, params: { nope: 1 } }]\n",
-    );
-    assert!(e.contains("answer") && e.contains("`nope`"), "{e}");
-}
-
-#[test]
-fn unknown_keys_are_refused() {
-    let e = refused("title: T\nquery: SELECT 1\nview: { markdown: hi, id: m }\n");
-    assert!(e.contains("query"), "{e}");
-    let e = refused(
-        "title: T\nloaders:\n  a: { sql: SELECT 1 }\nview: { viz: table, from: a, bogus: [] }\n",
-    );
-    assert!(e.contains("bogus"), "{e}");
 }
 
 /// An inline page (a markdown block's, an agent's one-off) only reads.
@@ -907,19 +921,6 @@ fn a_query_is_rows_only_and_has_no_view() {
     assert_eq!(page.default_loader().map(|l| l.name.as_str()), Some("a"));
 }
 
-/// `hidden` is gone: a page with no `category` isn't listed, and a thing
-/// never opened on its own is a part or a query. The error says so.
-#[test]
-fn hidden_is_gone_and_the_error_says_what_replaces_it() {
-    let why = refused(&format!("title: T\nhidden: true\n{BODY}"));
-    assert!(why.contains("`hidden` is no longer a key"), "{why}");
-    assert!(
-        why.contains("a page with no `category` isn't listed"),
-        "{why}"
-    );
-    assert!(why.contains("a part (parts/)"), "{why}");
-}
-
 /// A page and a part show something, so each needs a `view:`.
 #[test]
 fn a_page_and_a_part_need_a_view() {
@@ -1118,23 +1119,6 @@ fn a_sections_viz_parses_its_role_block() {
     );
 }
 
-/// A `sections` viz with no `title` column is refused at load, naming the
-/// block to write.
-#[test]
-fn a_sections_viz_without_a_title_column_is_refused() {
-    let why = refused(
-        "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: sections, from: q }\n",
-    );
-    assert!(
-        why.contains("viz `sections` needs `sections: { title: <column> }`"),
-        "{why}"
-    );
-    let why = refused(
-        "title: T\nloaders:\n  q: { rows: [{ a: 1 }] }\nview: { viz: sections, from: q, sections: { body: a } }\n",
-    );
-    assert!(why.contains("title: <column>"), "{why}");
-}
-
 /// A column's `format: items` says its value is a list of items; it loads on
 /// a table, a list, a detail and a sections viz, and a made-up format is
 /// refused.
@@ -1186,17 +1170,6 @@ fn a_table_may_hide_its_header() {
     };
     assert!(view(", hide_header: true").contains("\"hideHeader\":true"));
     assert!(view("").contains("\"hideHeader\":false"));
-}
-
-/// `hide_empty` is gone: a page keeps one shape, every section on it with
-/// its `empty:` line; the error says so.
-#[test]
-fn hide_empty_is_gone_and_the_error_says_what_replaces_it() {
-    let err = page(
-        "title: P\nloaders:\n  l: { sql: \"SELECT 1 AS n\" }\nview: { id: v, viz: list, from: l, hide_empty: true }\n",
-    )
-    .unwrap_err();
-    assert!(err.contains("`hide_empty` is no longer a key"), "{err}");
 }
 
 /// `fold: true` starts a viz's rows closed under their count.
