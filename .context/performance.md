@@ -925,6 +925,13 @@ working set (`scripts/sweep-target.sh`), or a run rebuilds the dependencies.
 210 s. So `test-threads` stays at the default; on a machine doing other work, `-j8`
 costs little.
 
+**A rebuild after an edit** is short when the incremental caches are there. One
+edit in `oxplow-app`, warm: its test binary 11 to 19 s, the whole workspace about
+30 s, `cargo check` 3.5 s. A cold one is 200 s, so a slow rebuild usually means the
+cache is gone: a merge, or a sweep (`scripts/sweep-target.sh`, which once kept too few
+of them). To measure this, make a real edit on a warm tree. A first build of a kind
+after a merge says nothing about an edit, and that misled this doc's author once.
+
 **Ruled out:** a test fixture without `oxplow-bundled` saves nothing (0.67 s
 against 0.64 s a boot: the cost is core and foundation). Caching parsed shipped
 extensions per process is unsound: `Extension.path` is that project's store

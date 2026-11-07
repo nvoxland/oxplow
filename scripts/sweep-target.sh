@@ -6,7 +6,7 @@
 # 8 of them unused since the morning's merges), and three worktrees filled
 # the disk. cargo-sweep drops artifacts of toolchains no longer installed,
 # then the oldest until `target/` is under the cap (incremental caches,
-# which cargo-sweep doesn't count, are trimmed to each crate's newest two). The
+# which cargo-sweep doesn't count, are trimmed to each crate's newest ten). The
 # cap has to stay above one worktree's working set as cargo-sweep counts it, a
 # full test + clippy + coverage + binary build plus the stale copies that gather
 # between sweeps: 64 GiB by a day's work, measured with `cargo sweep --maxsize
@@ -31,11 +31,13 @@ fi
 mkdir -p target
 # Incremental caches first: cargo-sweep doesn't count them, and each
 # dependency change starts a crate a new one (`<crate>-<hash>`) beside the
-# old — 808 of them, 65 GB, in one worktree. A crate builds from its
-# newest, so keep the two newest per crate per profile.
+# old — 808 of them, 65 GB, in one worktree. So keep the newest ten per crate per
+# profile. A crate uses several at once, one each for its library, its tests,
+# `check` and clippy (oxplow-app: 8): keeping two made the next edit's build
+# start cold, 200 s against 19 s, each time this ran.
 for dir in target/*/incremental; do
   [ -d "$dir" ] || continue
-  ls -t "$dir" | awk '{ crate = $0; sub(/-[^-]*$/, "", crate); if (++seen[crate] > 2) print }' |
+  ls -t "$dir" | awk '{ crate = $0; sub(/-[^-]*$/, "", crate); if (++seen[crate] > 10) print }' |
     while read -r stale; do rm -rf "${dir:?}/$stale"; done
 done
 cargo sweep --installed >/dev/null 2>&1
