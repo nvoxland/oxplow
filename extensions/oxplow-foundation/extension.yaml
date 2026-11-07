@@ -440,6 +440,11 @@ intent:
     - name: the-extension-page-links-each-contribution-to-its-definition
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
       expect: each contribution table opens the definition, not the data
+panels:
+  # The left nav's Go To, beside the Go To page its header opens: the
+  # thread's bookmarks, then its recent or most visited pages; collapsed,
+  # the bookmarks alone.
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
 # What the coding agent reads about the work list: its commands (with no
 # list they're a sink), and oxplow's tasks' ready queue while they are it.
 skills:

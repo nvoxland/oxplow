@@ -705,9 +705,6 @@ pub async fn run_as_page_in(
             "context",
             "delivered",
         ),
-        ("oxplow-foundation/go-to-bookmarks", "go-to", "bookmarks"),
-        ("oxplow-foundation/go-to-recent", "go-to", "recent"),
-        ("oxplow-foundation/go-to-top", "go-to", "top"),
         (
             "oxplow-foundation/git-dashboard-upstream",
             "git-dashboard",

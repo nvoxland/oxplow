@@ -13,7 +13,7 @@ params:
   - value: top
     label: Most visited
 loaders:
-  # What the thread sees: foundation's one rule (Go To's page reads it too).
+  # What the thread sees: the one rule, which the Go To page reads too.
   bookmarks:
     page: oxplow-foundation/thread-bookmarks
     loader: bookmarks

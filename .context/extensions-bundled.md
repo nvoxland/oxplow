@@ -266,9 +266,10 @@ screens and the holder's add the review and analysis:
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
-- **Rail panels.** `oxplow-bundled`'s `panels:` has Go To (`go-to-panel`,
-  collapsed `go-to-bookmarks`; its header opens foundation's `go-to` page).
-  Both parts read foundation's `thread-bookmarks` query, the one statement of
+- **Rail panels.** A panel lives in the extension that has its page:
+  foundation's `panels:` has Go To (`go-to-panel`, collapsed
+  `go-to-bookmarks`; its header opens the `go-to` page beside them). Both
+  parts read foundation's `thread-bookmarks` query, the one statement of
   which bookmarks a thread sees, which the Go To page reads too. Its
   fixture is a `panel:` one: the panel run whole, as the rail shows it. Still
   in the holder: Waiting on You (`waiting-on-me`, a badge), Comments
@@ -319,7 +320,7 @@ shows trend, recordings, stats and Enable.
 **Also stays in core** (it is substrate other features need): snapshots,
 collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, the Go To page and
-bookmarks (`v_bookmark`; the rail's Go To pane is the extension's).
+bookmarks (`v_bookmark`; the rail's Go To panel is foundation's, beside its page).
 
 New in the extension: the **effort review packet**, all live exception
 pages:
