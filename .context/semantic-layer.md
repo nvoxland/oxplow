@@ -1435,7 +1435,8 @@ oxplow-bundled change cards) only read them.
   it, every open effort on the stream otherwise — so the lists are always
   current. `watch_working_files` restates the same working-headed lists
   on a ref or index move, and on an edit on disk: the stream's file
-  watcher (250 ms debounce) calls `ref_moves.index_moved`, so an edit
+  watcher (250 ms debounce) calls `ref_moves.paths_moved`, and the relist looks
+  at those paths alone (`git-integration.md` "The working-files list"), so an edit
   made outside oxplow shows in `v_change_file` (and the rail's
   Uncommitted panel) without waiting for a snapshot take. Moves queued
   during a relist are folded into one relist per stream. The deep analysis is

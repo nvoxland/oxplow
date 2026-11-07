@@ -525,7 +525,7 @@ pub async fn refresh_files(
     // are staged or untracked, how many conflict, what is in progress. That
     // also says which files to look at.
     let status = if kind == "working" {
-        Some(svc.vcs.status(&root).await?)
+        Some(status_with_renames_apart(svc, &root).await?)
     } else {
         None
     };
@@ -537,49 +537,11 @@ pub async fn refresh_files(
         }
         None => svc.trees.diff(&root, base.as_ref(), &head).await?,
     };
-    let flags: std::collections::HashMap<&str, (bool, bool)> = status
-        .iter()
-        .flat_map(|s| s.entries.iter())
-        .map(|e| {
-            (
-                e.path.as_str(),
-                (
-                    e.staged,
-                    e.status == oxplow_domain::vcs::FileStatus::Untracked,
-                ),
-            )
-        })
-        .collect();
-    let files: Vec<ChangedFile> = entries
+    let entries: Vec<_> = entries
         .into_iter()
         .filter(|e| only.as_ref().is_none_or(|own| own.contains(&e.path)))
-        .map(|e| {
-            let flag = status.is_some().then(|| {
-                flags
-                    .get(e.path.as_str())
-                    .copied()
-                    .unwrap_or((false, false))
-            });
-            ChangedFile {
-                status: e.status.as_str().to_string(),
-                additions: e.additions as i64,
-                deletions: e.deletions as i64,
-                base: None,
-                head: None,
-                staged: flag.map(|f| f.0),
-                untracked: flag.map(|f| f.1),
-                path: e.path,
-            }
-        })
         .collect();
-    let rows = {
-        let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
-        file_rows(
-            &files,
-            &ZoneRules::from_config(&cfg.zones),
-            &TestPaths::from_config(&cfg.testing.test_paths),
-        )
-    };
+    let rows = changed_rows(svc, entries, status.as_ref());
     let (conflicted, in_progress) = if let Some(status) = status {
         let conflicted = status
             .entries
@@ -601,6 +563,148 @@ pub async fn refresh_files(
         .get(row.id)
         .await?
         .ok_or(DomainError::NotFound)
+}
+
+/// What git says of the working tree, with each end of a rename said on its
+/// own: a rename hides that its new end is untracked, or which end is staged, and
+/// the list shows a rename as a deletion and an addition.
+async fn status_with_renames_apart(
+    svc: &crate::Services,
+    root: &std::path::Path,
+) -> Result<oxplow_domain::vcs::WorkspaceStatus, oxplow_domain::DomainError> {
+    use oxplow_domain::vcs::FileStatus;
+    let mut status = svc.vcs.status(root).await?;
+    let ends: Vec<String> = status
+        .entries
+        .iter()
+        .filter(|e| e.status == FileStatus::Renamed)
+        .map(|e| e.path.clone())
+        .chain(status.moved.iter().cloned())
+        .collect();
+    if ends.is_empty() {
+        return Ok(status);
+    }
+    let apart = svc.vcs.status_of(root, &ends).await?;
+    status.entries.retain(|e| !ends.contains(&e.path));
+    status.entries.extend(apart.entries);
+    status.entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(status)
+}
+
+/// `entries` as rows of `v_change_file`, with what `status` says of each.
+fn changed_rows(
+    svc: &crate::Services,
+    entries: Vec<crate::trees::DiffEntry>,
+    status: Option<&oxplow_domain::vcs::WorkspaceStatus>,
+) -> Vec<ChangeFileRow> {
+    let flags: std::collections::HashMap<&str, (bool, bool)> = status
+        .iter()
+        .flat_map(|s| s.entries.iter())
+        .map(|e| {
+            (
+                e.path.as_str(),
+                (
+                    e.staged,
+                    e.status == oxplow_domain::vcs::FileStatus::Untracked,
+                ),
+            )
+        })
+        .collect();
+    let files: Vec<ChangedFile> = entries
+        .into_iter()
+        .map(|e| {
+            let flag = status.is_some().then(|| {
+                flags
+                    .get(e.path.as_str())
+                    .copied()
+                    .unwrap_or((false, false))
+            });
+            ChangedFile {
+                status: e.status.as_str().to_string(),
+                additions: e.additions as i64,
+                deletions: e.deletions as i64,
+                base: None,
+                head: None,
+                staged: flag.map(|f| f.0),
+                untracked: flag.map(|f| f.1),
+                path: e.path,
+            }
+        })
+        .collect();
+    let cfg = svc.config.read().unwrap_or_else(|e| e.into_inner());
+    file_rows(
+        &files,
+        &ZoneRules::from_config(&cfg.zones),
+        &TestPaths::from_config(&cfg.testing.test_paths),
+    )
+}
+
+/// [`refresh_files`] when only `paths` changed: their rows alone, at a cost that
+/// follows them and not the tree. False when that can't be trusted and the whole
+/// list is needed: there is no list yet, it was made against another base, or a
+/// merge is under way (how many files conflict is a question for the whole
+/// index). A range headed at the working tree has no status to name what is
+/// under a folder, so a folder needs the whole list there.
+pub async fn refresh_paths(
+    svc: &crate::Services,
+    target: ChangeTarget,
+    paths: &BTreeSet<String>,
+) -> Result<bool, oxplow_domain::DomainError> {
+    let (stream, kind, key, base, head) = resolve(svc, target).await?;
+    let (Some(Revision::Vcs { rev, .. }), Revision::Working) = (&base, &head) else {
+        return Ok(false);
+    };
+    let Some(row) = svc.change_store.find(stream.value(), kind, &key).await? else {
+        return Ok(false);
+    };
+    let (listed, conflicted, in_progress) = svc.change_store.list_state(row.id).await?;
+    if !listed || row.base_revision != base {
+        return Ok(false);
+    }
+    let root = svc
+        .worktrees
+        .resolve(Some(&stream.to_string()))
+        .await
+        .into_local_path();
+    let events_to = events_to(svc).await?;
+    let (status, looked_at) = if kind == "working" {
+        if conflicted != 0 || in_progress {
+            return Ok(false);
+        }
+        let asked: Vec<String> = paths.iter().cloned().collect();
+        let status = svc.vcs.status_of(&root, &asked).await?;
+        let conflicted = status
+            .entries
+            .iter()
+            .any(|e| e.status == oxplow_domain::vcs::FileStatus::Conflicted);
+        if status.in_progress.is_some() || conflicted {
+            return Ok(false);
+        }
+        // A path that names a folder (one moved here, or from here) brings
+        // what changed under it.
+        let looked_at: BTreeSet<String> = paths
+            .iter()
+            .cloned()
+            .chain(status.entries.iter().map(|e| e.path.clone()))
+            .collect();
+        (Some(status), looked_at)
+    } else {
+        for path in paths {
+            let file = root.join(path);
+            let gone_unknown =
+                !file.exists() && svc.vcs.object_at(&root, rev, path).await?.is_none();
+            if file.is_dir() || gone_unknown {
+                return Ok(false);
+            }
+        }
+        (None, paths.clone())
+    };
+    let entries = svc.trees.diff_paths(&root, rev, &looked_at).await?;
+    let rows = changed_rows(svc, entries, status.as_ref());
+    svc.change_store
+        .store_path_files(row.id, looked_at.into_iter().collect(), rows, events_to)
+        .await?;
+    Ok(true)
 }
 
 async fn resolve(

@@ -364,9 +364,45 @@ impl SqliteChangeStore {
             .await
     }
 
-    /// Stage one for some paths alone: `paths`' rows give way to `files` (those
-    /// of them that still differ), and the rest of the list stands. Whether it
-    /// was written: a list that saw later events stands instead.
+    /// Whether the change has a list of files yet, and for a working tree what
+    /// that list said of a merge: how many files conflict, and whether an
+    /// operation was in progress.
+    pub async fn list_state(&self, id: i64) -> Result<(bool, i64, bool), DomainError> {
+        self.db
+            .call(move |c| {
+                c.query_row(
+                    "SELECT files_at IS NOT NULL, coalesce(conflicted, 0), in_progress IS NOT NULL
+                     FROM change WHERE id = ?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+            })
+            .await
+    }
+
+    /// The change `stream_id` has of this kind and target, if it has one yet.
+    pub async fn find(
+        &self,
+        stream_id: i64,
+        kind: &str,
+        target: &str,
+    ) -> Result<Option<ChangeRow>, DomainError> {
+        let (kind, target) = (kind.to_string(), target.to_string());
+        self.db
+            .call(move |c| {
+                let mut st = c.prepare(&format!(
+                    "{SELECT_ROW} WHERE stream_id = ?1 AND kind = ?2 AND target = ?3"
+                ))?;
+                let mut rows = st.query_map(rusqlite::params![stream_id, kind, target], row_of)?;
+                rows.next().transpose()
+            })
+            .await
+    }
+
+    /// Stage one for some paths alone: the rows of `paths`, and of what is under
+    /// a path that names a folder, give way to `files` (those of them that still
+    /// differ), and the rest of the list stands. Whether it was written: a list
+    /// that saw later events stands instead.
     pub async fn store_path_files(
         &self,
         id: i64,
@@ -385,7 +421,8 @@ impl SqliteChangeStore {
                 }
                 for path in &paths {
                     tx.execute(
-                        "DELETE FROM change_file WHERE change_id = ?1 AND path = ?2",
+                        "DELETE FROM change_file WHERE change_id = ?1
+                           AND (path = ?2 OR (path > ?2 || '/' AND path < ?2 || '0'))",
                         rusqlite::params![id, path],
                     )
                     .map_err(map_sql_err)?;

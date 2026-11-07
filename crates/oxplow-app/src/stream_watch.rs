@@ -249,11 +249,16 @@ fn announce(
     if paths.is_empty() && batch.rescans.is_empty() {
         return;
     }
+    // What was lost could be anything; what was heard is all a relist needs.
+    if batch.rescans.is_empty() {
+        ref_moves.paths_moved(stream_id, paths.iter().cloned());
+    } else {
+        ref_moves.index_moved(stream_id);
+    }
     let overflow = !batch.rescans.is_empty() || paths.len() > MAX_ANNOUNCED_PATHS;
     if overflow {
         paths.clear();
     }
-    ref_moves.index_moved(stream_id);
     events.emit(OxplowEvent::WorkspaceChanged {
         stream_id,
         paths,
@@ -556,6 +561,7 @@ mod tests {
         let root = Path::new("/r");
         let mut said = |batch: Batch| {
             announce(&bus, &ref_moves, stream, root, batch);
+            let _ = ref_moves.take_working(stream);
             let mut out = Vec::new();
             while let Ok(event) = ui.try_recv() {
                 if let OxplowEvent::WorkspaceChanged {
@@ -593,6 +599,44 @@ mod tests {
             rescans: vec![PathBuf::from("/r/src")],
         };
         assert_eq!(said(lost), (vec![(vec![], true)], 1));
+    }
+
+    /// A relist is told what the watch heard, and to look at everything when
+    /// the watch says it lost something.
+    #[test]
+    fn a_batch_tells_the_relist_its_paths_and_a_rescan_tells_it_everything() {
+        let bus = EventBus::new();
+        let moves = crate::ref_moves::RefMoves::new(bus.clone());
+        let stream = StreamId::new(4);
+        let root = Path::new("/r");
+        announce(
+            &bus,
+            &moves,
+            stream,
+            root,
+            Batch {
+                paths: vec![modified("/r/src/a.rs"), modified("/r/a.swp")],
+                rescans: Vec::new(),
+            },
+        );
+        assert_eq!(
+            moves.take_working(stream),
+            crate::ref_moves::WorkingMove::Paths(["src/a.rs".to_string()].into())
+        );
+        announce(
+            &bus,
+            &moves,
+            stream,
+            root,
+            Batch {
+                paths: vec![modified("/r/src/a.rs")],
+                rescans: vec![PathBuf::from("/r/lib")],
+            },
+        );
+        assert_eq!(
+            moves.take_working(stream),
+            crate::ref_moves::WorkingMove::Full
+        );
     }
 
     /// Through a real watch: an edit made the instant before a take is in it,

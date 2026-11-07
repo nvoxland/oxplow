@@ -9,6 +9,9 @@
 //! hears [`Moved::Missed`] instead — any stream may have moved. Every
 //! listener's work is idempotent, so it does it as if its stream(s) did.
 
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
+
 use oxplow_domain::StreamId;
 use tokio::sync::broadcast;
 
@@ -21,7 +24,18 @@ pub struct RefMoves {
     /// A stream's index or working tree moved by a VCS write (stage,
     /// discard, …) without its refs moving.
     index_tx: broadcast::Sender<StreamId>,
+    /// What each stream's next working-files relist needs to look at.
+    working: Arc<Mutex<HashMap<StreamId, WorkingMove>>>,
     events: EventBus,
+}
+
+/// What a stream's working-files relist needs to look at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkingMove {
+    /// Only these paths changed, as far as anyone heard.
+    Paths(BTreeSet<String>),
+    /// Anything may have: look at the whole tree.
+    Full,
 }
 
 impl RefMoves {
@@ -31,8 +45,37 @@ impl RefMoves {
         Self {
             tx,
             index_tx,
+            working: Arc::default(),
             events,
         }
+    }
+
+    fn working(&self) -> std::sync::MutexGuard<'_, HashMap<StreamId, WorkingMove>> {
+        self.working.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `paths` of `stream`'s working tree changed, and the watch heard all of
+    /// it: a relist can look at them alone.
+    pub fn paths_moved(&self, stream: StreamId, paths: impl IntoIterator<Item = String>) {
+        {
+            let mut working = self.working();
+            let entry = working
+                .entry(stream)
+                .or_insert_with(|| WorkingMove::Paths(BTreeSet::new()));
+            if let WorkingMove::Paths(held) = entry {
+                held.extend(paths);
+                if held.len() > crate::trees::MAX_PATHS_ASKED {
+                    *entry = WorkingMove::Full;
+                }
+            }
+        }
+        let _ = self.index_tx.send(stream);
+    }
+
+    /// What `stream`'s next relist needs to look at, once: the whole tree
+    /// unless only paths were heard of.
+    pub fn take_working(&self, stream: StreamId) -> WorkingMove {
+        self.working().remove(&stream).unwrap_or(WorkingMove::Full)
     }
 
     /// `stream`'s index or working tree changed through a VCS write (a
@@ -40,6 +83,7 @@ impl RefMoves {
     /// lists the working tree's files hears it here. The UI has
     /// `WorkspaceChanged` for these.
     pub fn index_moved(&self, stream: StreamId) {
+        self.working().insert(stream, WorkingMove::Full);
         let _ = self.index_tx.send(stream);
     }
 
@@ -53,6 +97,7 @@ impl RefMoves {
     /// `stream`'s refs moved: the backend hears it here, the UI as
     /// `VcsRefsChanged`.
     pub fn moved(&self, stream: StreamId) {
+        self.working().insert(stream, WorkingMove::Full);
         let _ = self.tx.send(stream);
         self.events
             .emit(OxplowEvent::VcsRefsChanged { stream_id: stream });
@@ -122,6 +167,40 @@ impl Listener {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Paths accumulate until taken; anything that isn't a heard path makes
+    /// the next relist look at everything, and stays that way until taken.
+    #[test]
+    fn a_relist_looks_at_paths_only_when_only_paths_were_heard() {
+        let moves = RefMoves::new(EventBus::new());
+        let stream = StreamId::new(1);
+        let set = |p: &[&str]| WorkingMove::Paths(p.iter().map(|p| p.to_string()).collect());
+        assert_eq!(
+            moves.take_working(stream),
+            WorkingMove::Full,
+            "nothing heard"
+        );
+
+        moves.paths_moved(stream, ["a".to_string()]);
+        moves.paths_moved(stream, ["b".to_string()]);
+        assert_eq!(moves.take_working(stream), set(&["a", "b"]));
+        assert_eq!(moves.take_working(stream), WorkingMove::Full, "once");
+
+        moves.paths_moved(stream, ["a".to_string()]);
+        moves.index_moved(stream);
+        moves.paths_moved(stream, ["b".to_string()]);
+        assert_eq!(moves.take_working(stream), WorkingMove::Full, "a VCS write");
+
+        moves.paths_moved(stream, ["a".to_string()]);
+        moves.moved(stream);
+        assert_eq!(moves.take_working(stream), WorkingMove::Full, "refs moved");
+
+        moves.paths_moved(
+            stream,
+            (0..=crate::trees::MAX_PATHS_ASKED).map(|i| i.to_string()),
+        );
+        assert_eq!(moves.take_working(stream), WorkingMove::Full, "too many");
+    }
 
     #[tokio::test]
     async fn a_move_reaches_its_listeners_and_the_ui() {

@@ -195,14 +195,28 @@ and no announcement; a `Scope` names it for the capture alone.
 
 Every burst of edits relists the stream's working files
 (`change_reactor::watch_working_files`, one run at a time), so what a relist costs
-matters more than any watch. A full `Trees::diff(HEAD, Working)` lists the head's
-tree and walks and stats the whole tree: 42–57 s at 500,000 files. So
-`Trees::diff_from_status` looks only at the paths git status names (`entries`, and
-`moved` for a rename's other end), one `object_at` each. It gives what the full
-diff gives (`a_diff_from_status_is_what_a_full_diff_says`) and falls back to it for
-a base other than the head, a `generated.include` (it keeps files git ignores, so
-git doesn't report them), or more than 5,000 paths. A range headed at the working
-tree still takes the full diff.
+matters more than any watch. The watch knows what changed, so a relist looks at that
+alone (`change_analysis::refresh_paths`):
+
+- `RefMoves::paths_moved` holds the paths a batch heard, per stream.
+- `Vcs::status_of` asks git about those paths, for their `staged` and `untracked`
+  flags. It reads the index and doesn't walk the tree: 30–80 ms on metabase, about
+  210 ms at 500,000 files, against 1 s and 8 s for `status`. A path naming a folder
+  brings what changed under it, which is how a folder moved in one event is seen.
+- `Trees::diff_paths` compares each with the base, one `object_at` each.
+- `store_path_files` replaces those paths' rows, and the rest of the list stands.
+
+The whole list (`refresh_files`) is made instead whenever a partial one can't be
+trusted: a VCS write, a refs move or a rescan (`RefMoves::take_working` says `Full`),
+more than 5,000 paths, no list yet, a base that is no longer HEAD, or a merge under way
+(how many files conflict is a question for the whole index). It also runs once a
+stream that was relisted by paths has been quiet for 60 s (`RECONCILE_AFTER`): a partial
+list can't see what no watch reports, such as `git add` from a terminal, which changes
+only `.git/index`. So such a staged flag can be up to a minute behind. A whole list's
+`Trees::diff_from_status` still costs the status. The two are pinned equal, change by
+change (`a_relist_of_some_paths_gives_what_a_full_relist_gives`). A rename is a
+deletion and an addition in both: `status` hides that its new end is untracked, so
+a whole list asks about the ends apart (`status_with_renames_apart`).
 
 ### Version control appearing
 

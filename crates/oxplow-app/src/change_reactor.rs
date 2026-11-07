@@ -27,6 +27,7 @@
 //! It holds `Services` weakly: the pump that runs it is part of it.
 
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use oxplow_domain::{DomainError, StoredEvent};
@@ -134,25 +135,52 @@ pub fn target_of(job: &str) -> Option<ChangeTarget> {
 /// write (stage, discard, commit, …) changes its index. Stage one only —
 /// the deep analysis stays the pump consumer's. Runs until the services go.
 pub async fn watch_working_files(svc: Arc<Services>) {
-    use crate::ref_moves::Moved;
+    follow_working_files(svc, RECONCILE_AFTER).await;
+}
+
+/// How long a stream stays quiet after a relist of some paths before its whole
+/// list is made again. A partial list can't see what no watch reports: `git add`
+/// from a terminal changes only `.git/index`.
+const RECONCILE_AFTER: Duration = Duration::from_secs(60);
+
+async fn follow_working_files(svc: Arc<Services>, reconcile_after: Duration) {
+    use crate::ref_moves::{Moved, WorkingMove};
     use oxplow_domain::stores::StreamStore as _;
     let streams = svc.stream_store.list().await.unwrap_or_default();
     // Listen before the first pass, so a move during it isn't lost.
     let mut refs = svc.ref_moves.subscribe();
     let mut index = svc.ref_moves.subscribe_index();
-    let list = |stream: oxplow_domain::StreamId| {
+    let targets = |stream: oxplow_domain::StreamId| {
         let svc = svc.clone();
         async move {
-            let targets = match working_targets(&svc, stream).await {
-                Ok(t) => t,
-                Err(error) => {
-                    tracing::debug!(%error, %stream, "listing a stream's ranges failed");
-                    return;
-                }
-            };
-            for target in targets {
+            working_targets(&svc, stream).await.unwrap_or_else(|error| {
+                tracing::debug!(%error, %stream, "listing a stream's ranges failed");
+                Vec::new()
+            })
+        }
+    };
+    let list = |stream: oxplow_domain::StreamId| {
+        let (svc, targets) = (svc.clone(), &targets);
+        async move {
+            for target in targets(stream).await {
                 if let Err(error) = crate::change_analysis::refresh_files(&svc, target).await {
                     tracing::debug!(%error, %stream, "listing a working tree's files failed");
+                }
+            }
+        }
+    };
+    // Its paths alone where that can be trusted; each target says.
+    let list_paths = |stream: oxplow_domain::StreamId,
+                      paths: std::collections::BTreeSet<String>| {
+        let (svc, targets) = (svc.clone(), &targets);
+        async move {
+            for target in targets(stream).await {
+                let partial =
+                    crate::change_analysis::refresh_paths(&svc, target.clone(), &paths).await;
+                if !matches!(partial, Ok(true)) {
+                    if let Err(error) = crate::change_analysis::refresh_files(&svc, target).await {
+                        tracing::debug!(%error, %stream, "listing a working tree's files failed");
+                    }
                 }
             }
         }
@@ -162,10 +190,28 @@ pub async fn watch_working_files(svc: Arc<Services>) {
             list(s.id).await;
         }
     }
+    // The streams listed by paths since their whole list was last made, and
+    // when each last moved.
+    let mut unreconciled: std::collections::HashMap<oxplow_domain::StreamId, tokio::time::Instant> =
+        std::collections::HashMap::new();
     loop {
+        let due = unreconciled.values().min().map(|at| *at + reconcile_after);
         let moved = tokio::select! {
             m = refs.recv() => m,
             m = index.recv() => m,
+            () = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => {
+                let now = tokio::time::Instant::now();
+                let ready: Vec<_> = unreconciled
+                    .iter()
+                    .filter(|(_, at)| **at + reconcile_after <= now)
+                    .map(|(stream, _)| *stream)
+                    .collect();
+                for stream in ready {
+                    unreconciled.remove(&stream);
+                    list(stream).await;
+                }
+                continue;
+            }
         };
         let Some(first) = moved else { break };
         // A burst of edits queues many moves: list each stream once.
@@ -175,6 +221,8 @@ pub async fn watch_working_files(svc: Arc<Services>) {
         if heard.contains(&Moved::Missed) {
             for s in svc.stream_store.list().await.unwrap_or_default() {
                 if s.archived_at.is_none() {
+                    let _ = svc.ref_moves.take_working(s.id);
+                    unreconciled.remove(&s.id);
                     list(s.id).await;
                 }
             }
@@ -190,7 +238,16 @@ pub async fn watch_working_files(svc: Arc<Services>) {
         streams.sort_by_key(|s| s.value());
         streams.dedup();
         for s in streams {
-            list(s).await;
+            match svc.ref_moves.take_working(s) {
+                WorkingMove::Full => {
+                    unreconciled.remove(&s);
+                    list(s).await;
+                }
+                WorkingMove::Paths(paths) => {
+                    list_paths(s, paths).await;
+                    unreconciled.insert(s, tokio::time::Instant::now());
+                }
+            }
         }
     }
 }
@@ -587,6 +644,263 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(flags().await, want);
+    }
+
+    /// What the list says of every path, for comparing two ways of making it.
+    async fn working_rows(svc: &Services) -> Vec<Vec<oxplow_db::SqlCell>> {
+        svc.sql
+            .query_sql(
+                "SELECT f.path, f.status, f.additions, f.deletions, f.staged, f.untracked
+                 FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                 WHERE c.kind = 'working' ORDER BY f.path",
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap()
+            .rows
+    }
+
+    /// Looking only at the paths that changed leaves the list as making the
+    /// whole of it would, through every kind of change.
+    #[tokio::test]
+    async fn a_relist_of_some_paths_gives_what_a_full_relist_gives() {
+        use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        repo(&root);
+        let write = |rel: &str, text: &str| {
+            let path = root.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write(".gitignore", "ignored.txt\n");
+        for path in [
+            "keep.txt",
+            "staged.txt",
+            "gone.txt",
+            "moved.txt",
+            "dir/one.txt",
+            "dir/two.txt",
+        ] {
+            write(path, "one\ntwo\n");
+        }
+        crate::test_fixtures::commit_all(&root, "files");
+        let stream = svc.streams.list_streams().await.unwrap()[0].id.to_string();
+        let target = || ChangeTarget::Working {
+            stream_id: stream.clone(),
+        };
+        refresh_files(svc, target()).await.unwrap();
+        let index = |add: &[&str], remove: &[&str]| {
+            let repo = git2::Repository::open(&root).unwrap();
+            let mut index = repo.index().unwrap();
+            for path in add {
+                index.add_path(std::path::Path::new(path)).unwrap();
+            }
+            for path in remove {
+                index.remove_path(std::path::Path::new(path)).unwrap();
+            }
+            index.write().unwrap();
+        };
+        // Each step changes the tree, names the paths the watch would hear, and
+        // must leave what a whole relist would.
+        let check = {
+            let target = &target;
+            move |step: &'static str, paths: &[&str]| {
+                let paths: std::collections::BTreeSet<String> =
+                    paths.iter().map(|p| p.to_string()).collect();
+                async move {
+                    assert!(
+                        refresh_paths(svc, target(), &paths).await.unwrap(),
+                        "{step}: it could look at paths alone"
+                    );
+                    let partial = working_rows(svc).await;
+                    refresh_files(svc, target()).await.unwrap();
+                    assert_eq!(partial, working_rows(svc).await, "{step}");
+                    partial
+                }
+            }
+        };
+
+        write("keep.txt", "one\nchanged\n");
+        assert!(!check("an edit", &["keep.txt"]).await.is_empty());
+        write("new/deep/new.txt", "new\n");
+        check("a new file", &["new/deep/new.txt"]).await;
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+        check("a deletion", &["gone.txt"]).await;
+        write("keep.txt", "one\ntwo\n");
+        check("an edit undone: its row goes", &["keep.txt"]).await;
+        write("staged.txt", "staged\n");
+        index(&["staged.txt"], &[]);
+        check("staged", &["staged.txt"]).await;
+        write("staged.txt", "staged, then changed\n");
+        check("staged, then changed again", &["staged.txt"]).await;
+        write("ignored.txt", "x\n");
+        check("an ignored file", &["ignored.txt"]).await;
+        std::fs::rename(root.join("moved.txt"), root.join("renamed.txt")).unwrap();
+        check("a rename", &["moved.txt", "renamed.txt"]).await;
+        write("staged-moved.txt", "one\ntwo\nthree\nfour\n");
+        index(&["staged-moved.txt"], &[]);
+        crate::test_fixtures::commit_index(&root, "one to rename");
+        refresh_files(svc, target()).await.unwrap();
+        std::fs::rename(
+            root.join("staged-moved.txt"),
+            root.join("staged-renamed.txt"),
+        )
+        .unwrap();
+        index(&["staged-renamed.txt"], &["staged-moved.txt"]);
+        check(
+            "a staged rename",
+            &["staged-moved.txt", "staged-renamed.txt"],
+        )
+        .await;
+        // A folder moved is one event for the folder, none for what is in it.
+        std::fs::rename(root.join("dir"), root.join("elsewhere")).unwrap();
+        check("a folder moved", &["dir", "elsewhere"]).await;
+        std::fs::rename(root.join("elsewhere"), root.join("dir")).unwrap();
+        check("a folder moved back", &["dir", "elsewhere"]).await;
+        svc.config.write().unwrap().generated.exclude = vec!["new".into()];
+        check("what generated excludes", &["new/deep/new.txt"]).await;
+        // Lifting it, a rescan makes the whole list again.
+        svc.config.write().unwrap().generated = Default::default();
+        refresh_files(svc, target()).await.unwrap();
+        write("ignored.txt", "y\n");
+        svc.config.write().unwrap().generated.include = vec!["ignored.txt".into()];
+        check("what generated includes", &["ignored.txt"]).await;
+    }
+
+    /// The whole list is made when a partial one couldn't be trusted.
+    #[tokio::test]
+    async fn a_merge_in_progress_or_a_moved_head_takes_the_full_relist() {
+        use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        repo(&root);
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "a");
+        let stream = svc.streams.list_streams().await.unwrap()[0].id.to_string();
+        let target = || ChangeTarget::Working {
+            stream_id: stream.clone(),
+        };
+        let paths: std::collections::BTreeSet<String> = ["a.txt".to_string()].into();
+        assert!(
+            !refresh_paths(svc, target(), &paths).await.unwrap(),
+            "no list yet"
+        );
+        refresh_files(svc, target()).await.unwrap();
+        assert!(refresh_paths(svc, target(), &paths).await.unwrap());
+
+        std::fs::write(root.join("a.txt"), "b\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "b");
+        assert!(
+            !refresh_paths(svc, target(), &paths).await.unwrap(),
+            "HEAD moved"
+        );
+        refresh_files(svc, target()).await.unwrap();
+
+        let git_dir = git2::Repository::open(&root).unwrap().path().to_path_buf();
+        std::fs::write(git_dir.join("MERGE_HEAD"), "0\n").unwrap();
+        assert!(
+            !refresh_paths(svc, target(), &paths).await.unwrap(),
+            "a merge under way"
+        );
+    }
+
+    /// A range headed at the working tree follows by paths too, and takes the
+    /// whole list for a folder, whose insides it has no status to name.
+    #[tokio::test]
+    async fn a_range_headed_at_the_working_tree_follows_by_paths() {
+        use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        repo(&root);
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        let base = crate::test_fixtures::commit_all(&root, "a");
+        let stream = svc.streams.list_streams().await.unwrap()[0].id.to_string();
+        let target = || ChangeTarget::Range {
+            stream_id: Some(stream.clone()),
+            base: Some(format!("git:{base}")),
+            head: "working".into(),
+        };
+        refresh_files(svc, target()).await.unwrap();
+        std::fs::write(root.join("a.txt"), "changed\n").unwrap();
+        let paths: std::collections::BTreeSet<String> = ["a.txt".to_string()].into();
+        assert!(refresh_paths(svc, target(), &paths).await.unwrap());
+        let rows = svc
+            .sql
+            .query_sql(
+                "SELECT f.path, f.status FROM v_change c JOIN v_change_file f ON f.change_id = c.id
+                 WHERE c.kind = 'range'",
+                Vec::new(),
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(rows.len(), 1, "{rows:?}");
+
+        std::fs::create_dir(root.join("folder")).unwrap();
+        let folder: std::collections::BTreeSet<String> = ["folder".to_string()].into();
+        assert!(!refresh_paths(svc, target(), &folder).await.unwrap());
+    }
+
+    /// A relist of some paths is followed by one of everything once the stream
+    /// is quiet, which finds what no watch reports: `git add` from a terminal.
+    #[tokio::test]
+    async fn a_relist_by_paths_is_reconciled_once_the_stream_is_quiet() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        repo(&root);
+        std::fs::write(root.join("heard.txt"), "1\n").unwrap();
+        std::fs::write(root.join("added.txt"), "1\n").unwrap();
+        tokio::spawn(follow_working_files(
+            f.svc.clone(),
+            Duration::from_millis(400),
+        ));
+        let staged = |path: &'static str| {
+            let svc = f.svc.clone();
+            async move {
+                working_rows(&svc)
+                    .await
+                    .into_iter()
+                    .find(|row| row[0] == oxplow_db::SqlCell::Text(path.into()))
+                    .map(|row| row[4].clone())
+            }
+        };
+        let unstaged = oxplow_db::SqlCell::Int(0);
+        let stagedly = oxplow_db::SqlCell::Int(1);
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while staged("added.txt").await != Some(unstaged.clone()) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("listed at boot");
+
+        let repo_at = git2::Repository::open(&root).unwrap();
+        let mut index = repo_at.index().unwrap();
+        index.add_path(std::path::Path::new("added.txt")).unwrap();
+        index.write().unwrap();
+        let stream = f.svc.streams.list_streams().await.unwrap()[0].id;
+        f.svc
+            .ref_moves
+            .paths_moved(stream, ["heard.txt".to_string()]);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            staged("added.txt").await,
+            Some(unstaged),
+            "a relist of other paths doesn't look at it"
+        );
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while staged("added.txt").await != Some(stagedly.clone()) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("the whole list, once quiet");
     }
 
     /// Every stream's working change is there from boot, before anything
