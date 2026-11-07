@@ -458,6 +458,16 @@ doesn't have this.
   is seen only by that tag, so a release saves none.
 - `.github/actions/linux-tauri-deps` caches the downloaded packages: the Ubuntu
   mirror has taken 26 minutes to send these 59 MB.
+- The `e2e` job (about 11 min, not the critical path: `test` is) spends
+  about 280 s building the daemon and the fakes and about 290 s in the suite.
+  Third-party crates come from the cache in about 20 s; `oxplow-app` alone is
+  about 220 s on the runner's 4 cores. A workspace-crate cache for this job
+  was measured against and left out: about 60% of commits change a crate, so
+  it would save that build on a minority of pushes, and the repo's caches
+  already exceed GitHub's 10 GB (11 GB on 2026-11-07), so another 2–3 GB would
+  evict the `dev` cache `test` restores. The browsers (36 s) are not cached for
+  the same reason. The suite's own time is what `bun run e2e:flakes` tracks
+  (wall, test-time sum, busy workers per run).
 - `[profile.release]` is thin LTO, not fat. On the daemon: relink 414 s to 195 s,
   clean build 819 s to 594 s, 80 MB to 91 MB, and 31.1 MB to 32.9 MB compressed
   (about 6%). Fat LTO is nearly all of a release's compile time, and it runs once
