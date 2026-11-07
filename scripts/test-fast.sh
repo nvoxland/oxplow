@@ -43,4 +43,5 @@ if pure "$@"; then
 else
   sh scripts/test-prereqs.sh
 fi
+. scripts/test-tmpdir.sh
 exec cargo nextest run "$@"
