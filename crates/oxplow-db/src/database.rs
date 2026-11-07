@@ -617,8 +617,13 @@ impl Database {
             crate::sql_functions::register(c)?;
             hooks.install(c)
         });
+        // The one connection is the database: closing it when idle or old
+        // (r2d2's defaults, 10 and 30 minutes) would drop the data, and the
+        // reaper doing so keeps the pool's threads up to 30 s past a drop.
         let pool = Pool::builder()
             .max_size(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
             .build(manager)
             .expect("in-memory sqlite pool builds");
         let mut conn = pool.get().expect("in-memory sqlite connection");
@@ -1696,6 +1701,20 @@ mod tests {
         assert_eq!(background_permits(1), 1);
     }
     use super::*;
+
+    /// An in-memory database is its one connection, so its pool never closes
+    /// it: an idle timeout or a lifetime would drop the data with it. With
+    /// neither, the pool schedules no reaper, and its worker threads end
+    /// when it is dropped, not up to 30 s later.
+    #[test]
+    fn an_in_memory_database_never_closes_its_connection() {
+        let db = Database::in_memory();
+        let copy = db.copy_in_memory().unwrap();
+        for pool in [&db.pool, &copy.pool] {
+            assert_eq!(pool.idle_timeout(), None);
+            assert_eq!(pool.max_lifetime(), None);
+        }
+    }
 
     /// A write transaction counts as open exactly while its closure runs
     /// (committed, rolled back or aborted), and not before or after.

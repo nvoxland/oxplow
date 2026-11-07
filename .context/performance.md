@@ -949,6 +949,14 @@ linking and unlinking the same files contend harder than writing small ones. A f
 symlink is refused (`extensions.rs`). Tests leave about 100 folders per run; the daily
 clean of `scripts/test-tmpdir.sh` takes them, so they aren't worth chasing.
 
+**A dropped `Database` frees its threads.** r2d2 gives each pool three
+`r2d2-worker` threads, and they run the jobs already scheduled before they exit.
+With an idle timeout or a lifetime set, that includes the reaper, which runs
+every 30 s, so the threads lived up to 30 s after the pool was dropped. An
+in-memory database is its one connection, so its pool has neither
+(`Database::memory`): closing that connection would lose the data. `Services`
+itself is freed when a test's runtime ends.
+
 ## Core's vocabulary is built once per process (2026-10-07)
 
 Building a test's `Services` had crept back to ~0.3 s, and `oxplow-app`'s
