@@ -8,8 +8,9 @@
 # then the oldest until `target/` is under the cap (incremental caches,
 # which cargo-sweep doesn't count, are trimmed to each crate's newest two). The
 # cap has to stay above one worktree's working set as cargo-sweep counts it, a
-# full test + clippy + coverage + binary build: 41 GiB, measured with `cargo
-# sweep --maxsize <cap> --dry-run`. The oldest artifacts are the third-party
+# full test + clippy + coverage + binary build plus the stale copies that gather
+# between sweeps: 64 GiB by a day's work, measured with `cargo sweep --maxsize
+# <cap> --dry-run`. Above the cap it removes the oldest first, and the oldest are the third-party
 # dependencies, which are live and the slowest to build: a 30 GB cap made a run
 # rebuild them every 30 minutes (470 of a full run's 1,068 s). When the disk
 # runs short, `cargo clean` a worktree that isn't in use.
@@ -18,7 +19,7 @@
 #                                    # and lint runs call it this way)
 #   scripts/sweep-target.sh --now    # now (`bun run clean:target`)
 cd "$(dirname "$0")/.."
-CAP=60GB
+CAP=80GB
 STAMP=target/.sweep-stamp
 if ! command -v cargo-sweep >/dev/null 2>&1; then
   echo "sweep-target: cargo-sweep isn't installed, so target/ grows unbounded (cargo install cargo-sweep --locked)" >&2
