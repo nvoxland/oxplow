@@ -34,8 +34,8 @@ that run through public commands and the SDK only:
   edited bundle that has to be redeployed; a stale compare-exchange is
   refused.
   Tests: `crates/oxplow-sdk/tests/trials.rs`; the browser spec
-  `tests-e2e/specs/components/triage.spec.ts` drives the board and the
-  page form.
+  `tests-e2e/specs/components/triage.spec.ts` checks that a decision survives
+  a reload; the board and the page form are the example's fixtures'.
 - **Producer and consumer** (effort-review → review-badges). The import
   resolves, reads real reviews, and degrades — pages and the task-page
   slot withheld, the rest loaded, the reason printed — when the producer

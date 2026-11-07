@@ -129,6 +129,8 @@ pub mod post_tool_reactors;
 pub mod providers;
 #[cfg(test)]
 mod reading_data_tests;
+#[cfg(test)]
+mod real_watch_tests;
 pub mod reasoning;
 pub mod recovery;
 pub mod ref_moves;

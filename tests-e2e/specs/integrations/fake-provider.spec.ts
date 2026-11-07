@@ -1,26 +1,12 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
-/** What the fake tracker's service holds (its state files), as text. */
-function fakeState(project: string): string {
-  const dir = join(project, ".oxplow");
-  return readdirSync(dir)
-    .filter((f) => f.startsWith("fake-state-"))
-    .map((f) => readFileSync(join(dir, f), "utf8"))
-    .join("\n");
-}
-
-/** The titles of the work items in oxplow's datasets. */
-async function titles(daemon: Parameters<typeof run>[0]): Promise<string[]> {
-  const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT title FROM v_work_item" });
-  return out.rows.map((r) => String(r[0]));
-}
-
-test("a person configures, checks and enables the fake tracker, and an item reaches it", async ({ page, daemon }) => {
+// Only what the shell shows: the Integrations frame's config form (oxplow's
+// `openForm`), check, toggle and sync, and the right-click choice of the work
+// list. That an item reaches the tracker and comes back on a sync is the
+// provider tests' (`providers/tests.rs`).
+test("a person configures, checks and enables the fake tracker from Integrations", async ({ page, daemon }) => {
   await page.goto("/");
   await openFromLauncher(page, "Settings: Integrations");
   // Integrations is oxplow-foundation's own component, in a frame; the
@@ -54,9 +40,8 @@ test("a person configures, checks and enables the fake tracker, and an item reac
     });
     return out.rows.length === 1;
   });
-  // Made with no provider named: the active one, which Settings → Capabilities chose.
+  // An item on the active work list, so the frame's sync has one to bring.
   await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
-  await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from oxplow");
   // An external item reaches oxplow's models through its collector's read.
   // Integrations is the last section of a long page, and the choices above
   // changed the Capabilities table over it: the frame may now be below the
@@ -65,12 +50,4 @@ test("a person configures, checks and enables the fake tracker, and an item reac
   await page.locator('iframe[aria-label="Integrations"]').scrollIntoViewIfNeeded();
   await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
   await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
-  // A tracker's item is on no thread: it is in the datasets all the same.
-  await expect.poll(() => titles(daemon)).toContain("Kiwi from oxplow");
-  // A second item, made with no provider named, reaches the tracker and,
-  // after the next sync, oxplow's datasets.
-  await run(daemon, "oxplow.work_item.create", { title: "Kiwi from the command" });
-  await expect.poll(() => fakeState(daemon.project)).toContain("Kiwi from the command");
-  await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
-  await expect.poll(() => titles(daemon)).toContain("Kiwi from the command");
 });
