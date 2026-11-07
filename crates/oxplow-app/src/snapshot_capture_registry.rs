@@ -118,7 +118,8 @@ impl SnapshotCaptureRegistry {
             stream.id,
             self.config.max_file_bytes,
             filter,
-        );
+        )
+        .with_sparse_history(matches!(stream.kind, oxplow_domain::StreamKind::Worktree));
         if let Some(probe) = &self.config.open_turn_probe {
             svc = svc.with_open_turn_probe(probe.clone());
         }
@@ -338,6 +339,20 @@ mod tests {
             joined.is_ok(),
             "unregister must shut the watcher down, but it stayed parked",
         );
+    }
+
+    /// A worktree stream's history holds only what it touched; the primary's
+    /// holds its whole tree.
+    #[tokio::test]
+    async fn only_a_worktree_streams_history_is_sparse() {
+        let project = tempfile::tempdir().unwrap();
+        let reg = SnapshotCaptureRegistry::new(config_for(project.path()));
+        let primary = reg.register(&stream_at(project.path())).unwrap();
+        assert!(!primary.has_sparse_history());
+        let mut stream = stream_at(project.path());
+        stream.id = StreamId::new(2);
+        stream.kind = StreamKind::Worktree;
+        assert!(reg.register(&stream).unwrap().has_sparse_history());
     }
 
     /// Each stream is judged by its own worktree's ignore files, and a

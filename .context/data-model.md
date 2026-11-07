@@ -1204,6 +1204,13 @@ Cleanup runs at runtime startup and again once every 24 hours via
 `runtime.runSnapshotCleanup` (wired in `initialize()`, cleared in
 `dispose()`).
 
+**A worktree stream's history is sparse.** The primary's history holds its whole
+tree, but a worktree stream holds only the files it touched. So in its sweeps and
+rescans (`with_sparse_history`, set from the stream's kind), a file with no row that
+is clean against HEAD records nothing. It has no history here, and nothing changed.
+A row for each would be its whole tree "added" to an open effort. A file with a row,
+an offline edit and a new file record as anywhere else.
+
 **A take costs what changed.** It reads the latest row of only the paths it
 looks at (`latest_stat_for_paths`), and a rescan of a directory only those under
 it (`latest_stat_under`), each a seek on `idx_file_snapshot_stream_path`. Only a

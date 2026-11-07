@@ -236,6 +236,10 @@ struct Inner {
     /// (`.git`, `.oxplow`, `target`, `node_modules`, …) are always
     /// in effect even with an empty user list.
     ///
+    /// Whether this stream's history holds only what it touched (a worktree
+    /// stream), not its whole tree. A sweep then records no clean file it has
+    /// no row for.
+    sparse_history: bool,
     /// Whether a watch is feeding this service, so a take can send a marker
     /// through it.
     watching: std::sync::atomic::AtomicBool,
@@ -348,6 +352,7 @@ impl SnapshotCaptureService {
                 stream_id,
                 max_file_bytes,
                 workspace_filter,
+                sparse_history: false,
                 watching: std::sync::atomic::AtomicBool::new(false),
                 marker_wait: DEFAULT_MARKER_WAIT,
                 markers: Mutex::default(),
@@ -471,6 +476,20 @@ impl SnapshotCaptureService {
     /// such paths out of a claim entirely (tsk249).
     pub fn excluded_from_capture(&self, rel: &Path) -> bool {
         self.inner.workspace_filter.ignore(rel, false)
+    }
+
+    /// This stream's history holds only what it touched: a worktree stream.
+    pub fn with_sparse_history(mut self, sparse: bool) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.sparse_history = sparse;
+        } else {
+            warn!("with_sparse_history called after the service was shared; ignoring");
+        }
+        self
+    }
+
+    pub fn has_sparse_history(&self) -> bool {
+        self.inner.sparse_history
     }
 
     /// Override the settle window (default [`DEFAULT_SETTLE_DURATION`]).
@@ -1095,6 +1114,7 @@ impl SnapshotCaptureService {
         let max_bytes = self.inner.max_file_bytes;
         let blobs = self.inner.blobs.clone();
         let keep_bytes = self.content_policy().keeps();
+        let sparse = self.inner.sparse_history;
         let vcs = self.inner.vcs.clone();
         let objects = vcs.object_store(&project_dir);
         let filter = self.workspace_filter();
@@ -1289,6 +1309,12 @@ impl SnapshotCaptureService {
                                 .map(|id| id.0)
                         });
                         if let Some(oid) = clean_oid {
+                            // A stream that holds only what it touched has no
+                            // history of this file, and nothing changed. A row
+                            // now would be every file in the tree "added".
+                            if sparse && prior_storage.is_none() {
+                                return None;
+                            }
                             // Prior row already at this OID → unchanged.
                             if prior_hash.as_deref() == Some(oid.as_str()) {
                                 return None;
@@ -2013,6 +2039,105 @@ mod tests {
         assert_eq!(dirty.len(), 1);
         assert_eq!(dirty[0].storage, SnapshotStorage::Oxplow);
         assert!(svc.inner.blobs.has(dirty[0].blob_hash.as_ref().unwrap()));
+    }
+
+    /// A service as a worktree stream's is: its history holds only what it
+    /// touched.
+    async fn sparse_svc_for(
+        project: &std::path::Path,
+    ) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>) {
+        let (svc, store) = svc_for(project).await;
+        (svc.with_sparse_history(true), store)
+    }
+
+    /// A worktree stream has no row for a file it never touched. A rescan of
+    /// its root must not record them all as new: an open effort would see
+    /// thousands of files added.
+    #[tokio::test]
+    async fn a_rescan_of_a_sparse_stream_records_no_clean_file_it_has_no_history_for() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        init_git_repo_with(root, &[("a.txt", "a\n"), ("b.txt", "b\n")]);
+        let (svc, store) = sparse_svc_for(root).await;
+        svc.on_batch(oxplow_fs_watch::Batch {
+            paths: Vec::new(),
+            rescans: vec![root.to_path_buf()],
+        })
+        .await;
+        assert!(
+            svc.inner.dirty.lock().unwrap().is_empty(),
+            "nothing changed, so nothing is queued"
+        );
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+        assert!(store
+            .latest_stat_per_path(TEST_STREAM)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    /// What really changed while no one watched is recorded: an edit of a
+    /// tracked file with no history, and a new file. A clean neighbour isn't.
+    #[tokio::test]
+    async fn a_sparse_sweep_records_an_offline_edit_and_an_untracked_file() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        init_git_repo_with(root, &[("edited.txt", "old\n"), ("clean.txt", "c\n")]);
+        std::fs::write(root.join("edited.txt"), "changed while off\n").unwrap();
+        std::fs::write(root.join("new.txt"), "new\n").unwrap();
+        let (svc, store) = sparse_svc_for(root).await;
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 2);
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let latest = store.latest_stat_per_path(TEST_STREAM).await.unwrap();
+        assert_eq!(latest["edited.txt"].storage, SnapshotStorage::Oxplow);
+        assert_eq!(latest["new.txt"].storage, SnapshotStorage::Oxplow);
+        assert!(!latest.contains_key("clean.txt"), "{:?}", latest.keys());
+    }
+
+    /// A file with history is followed as ever: going back to clean is a
+    /// change, and so is going away.
+    #[tokio::test]
+    async fn a_file_with_history_going_clean_is_still_recorded() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        init_git_repo_with(root, &[("a.txt", "committed\n"), ("gone.txt", "g\n")]);
+        std::fs::write(root.join("a.txt"), "edited\n").unwrap();
+        std::fs::write(root.join("gone.txt"), "edited too\n").unwrap();
+        let (svc, store) = sparse_svc_for(root).await;
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        // Back to what's committed, as git's stat would see it.
+        std::fs::write(root.join("a.txt"), "committed\n").unwrap();
+        let repo = git2::Repository::open(root).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("a.txt")).unwrap();
+        index.write().unwrap();
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 2);
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+        let latest = store.latest_stat_per_path(TEST_STREAM).await.unwrap();
+        assert_eq!(latest["a.txt"].storage, SnapshotStorage::Git, "clean again");
+        assert!(latest["gone.txt"].storage.is_deleted());
+    }
+
+    /// The primary stream keeps its whole baseline.
+    #[tokio::test]
+    async fn a_stream_with_whole_history_still_records_clean_files() {
+        let project = tempdir().unwrap();
+        let root = project.path();
+        init_git_repo_with(root, &[("a.txt", "a\n")]);
+        let (svc, store) = svc_for(root).await;
+        assert_eq!(svc.enqueue_startup_diff().await.unwrap(), 1);
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let latest = store.latest_stat_per_path(TEST_STREAM).await.unwrap();
+        assert_eq!(latest["a.txt"].storage, SnapshotStorage::Git);
     }
 
     #[tokio::test]
