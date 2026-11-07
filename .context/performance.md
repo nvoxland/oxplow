@@ -932,6 +932,13 @@ cache is gone: a merge, or a sweep (`scripts/sweep-target.sh`, which once kept t
 of them). To measure this, make a real edit on a warm tree. A first build of a kind
 after a merge says nothing about an edit, and that misled this doc's author once.
 
+**A cold CI build** compiled 25 of our crates twice, for the sidecars and again for
+the app: `schemars` as a build-time dependency had different features in each, which
+`cargo-hakari` left alone at `unify-target-host = "none"`. To see why a selection
+rebuilds: `RUSTC_BOOTSTRAP=1 cargo build --unit-graph -Z unstable-options` lists each
+unit's features and builds nothing. Linking isn't worth looking at: 0.8 s for
+`oxplow-app`'s 375 MB test binary.
+
 **Ruled out:** a test fixture without `oxplow-bundled` saves nothing (0.67 s
 against 0.64 s a boot: the cost is core and foundation). Caching parsed shipped
 extensions per process is unsound: `Extension.path` is that project's store

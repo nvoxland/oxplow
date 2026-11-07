@@ -18,7 +18,10 @@ resolver = "2"
 # resolver keeps them: unifying them into the app's would ship what only
 # a build script asked for (`tauri-build` → `cargo_metadata` turns on
 # serde_json's `unbounded_depth`, which drops its recursion limit).
-unify-target-host = "none"
+# One feature set for a crate built for the target and as a build-time dependency:
+# with "none", schemars differed between `-p oxplow-daemon` and `-p oxplow-desktop`
+# and a cold build compiled 25 of our crates twice.
+unify-target-host = "replicate-target-on-host"
 
 # Add triples corresponding to platforms commonly used by developers here.
 # https://doc.rust-lang.org/rustc/platform-support.html

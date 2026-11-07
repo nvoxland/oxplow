@@ -5364,6 +5364,7 @@ dependencies = [
  "rustix",
  "rustls",
  "rustls-webpki",
+ "schemars 0.8.22",
  "schemars 1.2.2",
  "serde",
  "serde_core",
