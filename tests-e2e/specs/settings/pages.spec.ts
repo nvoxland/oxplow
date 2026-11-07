@@ -41,5 +41,9 @@ test("New Stream forks a branch into a stream and gives way to it", async ({ pag
   await form.getByTestId("viz-form-fields-new_branch").fill("side-work");
   await form.getByRole("button", { name: "New Stream" }).click();
   await expect(page.locator('[data-testid^="navigator-strip-stream-"]')).toHaveCount(2);
-  await expect(page.locator('[data-testid="viz-form"]:visible')).toHaveCount(0);
+  // The new stream's own first page is a form too (New Session), so only this
+  // form's own fields say it gave way.
+  await expect(form.getByTestId("viz-form-fields-new_branch")).toHaveCount(0);
+  await expect(form.getByTestId("viz-form-fields-source")).toHaveCount(0);
+  await expect(form.getByRole("button", { name: "Start a new session" })).toBeVisible();
 });
