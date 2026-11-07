@@ -648,8 +648,15 @@ name but prefixes a `command -v` preflight that reports the real cause
 (`shared::program_and_guard`).
 
 `agent_path::base_pty_env` is the single source of the env every PTY
-spawns with (`TERM`, `COLORTERM`, the widened `PATH`); every spawn site
-calls it. One that hand-rolls its env reopens this bug for the tools the
+spawns with (`TERM`, `COLORTERM`, the widened `PATH`, and
+`TERM_PROGRAM=Oxplow` with oxplow's version as `TERM_PROGRAM_VERSION`);
+every spawn site calls it. The terminal names oxplow, never the terminal
+oxplow was started from: with `TERM_PROGRAM=Apple_Terminal` and that
+window's `TERM_SESSION_ID`, macOS zsh runs Terminal.app's session restore
+in every terminal oxplow opens, and all of them share one saved session
+("Restored session: …" and a mixed history). `TERM_SESSION_ID` is in
+`NOT_INHERITED` and isn't set: nothing reads it once the program isn't
+Terminal.app. One that hand-rolls its env reopens this bug for the tools the
 agent shells out to, which the absolute path doesn't cover. Known limit:
 version-manager shims (mise, nvm, volta) live in versioned dirs no fixed
 list can guess; capturing a login shell's env (`$SHELL -ilc`) was
