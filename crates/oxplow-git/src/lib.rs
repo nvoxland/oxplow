@@ -34,7 +34,8 @@ pub use branch_ops::{
     restore_path, BranchOpError,
 };
 pub use conflict::{
-    get_repo_conflict_state, list_conflicted_paths, GitOperationKind, RepoConflictState,
+    detect_git_operation, get_repo_conflict_state, list_conflicted_paths, GitOperationKind,
+    RepoConflictState,
 };
 pub use divergence::{compute_divergence, Divergence, MergeReadiness};
 pub use log::{
