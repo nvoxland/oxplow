@@ -19,7 +19,8 @@ use super::Extension;
 /// and its entry's line in `manifest`, a page's file, a dataset's SQL),
 /// never the folder it was loaded from: that is a machine path.
 pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
-    use super::manifest_v2::{entry_line, item_lines, kind_line};
+    use super::manifest_v2::{kind_line, ManifestLines};
+    let lines = ManifestLines::new(manifest);
     let line_of = |line: Option<usize>| line.and_then(|l| u32::try_from(l).ok());
     let owner = Owner {
         extension: ext.name.clone(),
@@ -33,17 +34,12 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
     // The manifest entry of `block` whose `key` is `value`, else the block.
     let entry = |block: &str, key: &str, value: &str| DeclaredAt {
         file: "extension.yaml".into(),
-        line: line_of(entry_line(manifest, block, key, value).or(kind_line(manifest, block))),
+        line: line_of(lines.entry(block, key, value).or(lines.kind(block))),
     };
     // The `n`th item of list `block` (`ui.mounts`), else the block.
     let item = |block: &str, n: usize| DeclaredAt {
         file: "extension.yaml".into(),
-        line: line_of(
-            item_lines(manifest, block)
-                .get(n)
-                .copied()
-                .or(kind_line(manifest, block)),
-        ),
+        line: line_of(lines.item(block, n).or(lines.kind(block))),
     };
     let new = |kind: ContributionKind, local: &str, trigger: RunsOn| {
         Descriptor::new(

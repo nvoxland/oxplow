@@ -408,13 +408,18 @@ fn contract_json(d: &DatasetDecl) -> serde_json::Value {
     serde_json::json!({ "columns": contract_columns(&d.fields), "key": d.key })
 }
 
-/// The 1-based line of the declaration `name: <dataset>` in `text`.
-fn decl_line(text: &str, dataset: &str) -> Option<usize> {
-    text.lines().enumerate().find_map(|(i, line)| {
+/// The 1-based line of each declaration `name: <dataset>` in `text`, the first
+/// when a name repeats.
+fn decl_lines(text: &str) -> HashMap<&str, usize> {
+    let mut lines = HashMap::new();
+    for (i, line) in text.lines().enumerate() {
         let rest = line.trim_start().trim_start_matches("- ").trim_start();
-        let value = rest.strip_prefix("name:")?.trim();
-        (value.trim_matches(|c| c == '"' || c == '\'') == dataset).then_some(i + 1)
-    })
+        if let Some(value) = rest.strip_prefix("name:") {
+            let name = value.trim().trim_matches(|c| c == '"' || c == '\'');
+            lines.entry(name).or_insert(i + 1);
+        }
+    }
+    lines
 }
 
 /// An `every:` clock is one the grammar reads; an incremental dataset's
@@ -652,8 +657,9 @@ pub fn sources_from(
     let decls: Vec<DatasetDecl> =
         serde_yaml::from_str(yaml).map_err(|e| invalid(format!("{dir}/datasets.yaml: {e}")))?;
     let declared_in = format!("{dir}/datasets.yaml");
+    let lines = decl_lines(yaml);
     for d in &decls {
-        let at = match decl_line(yaml, &d.name) {
+        let at = match lines.get(d.name.as_str()) {
             Some(line) => format!("{declared_in}:{line}"),
             None => declared_in.clone(),
         };

@@ -13,6 +13,9 @@
 use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 /// The manifest version this loader writes and prefers.
 pub const CURRENT: u32 = 2;
@@ -289,34 +292,49 @@ pub fn line_under(text: &str, key: &str, needle: &str) -> Option<usize> {
 /// is exactly `value` (`key: value`, `key: "value"`, `{ key: value, … }`)
 /// — not one whose value merely starts with it.
 pub fn entry_line(text: &str, block: &str, key: &str, value: &str) -> Option<usize> {
-    let start = key_line(text, block)?;
-    let pattern = format!("{key}:");
-    let names_it = |line: &str| {
-        line.match_indices(&pattern).any(|(at, _)| {
-            let before = line[..at].chars().next_back();
-            if !before.is_none_or(|c| matches!(c, ' ' | '{' | ',' | '-')) {
-                return false;
-            }
-            let rest = line[at + pattern.len()..].trim_start();
-            let (quote, rest) = match rest.chars().next() {
-                Some(q @ ('"' | '\'')) => (Some(q), &rest[1..]),
-                _ => (None, rest),
-            };
-            let Some(after) = rest.strip_prefix(value) else {
-                return false;
-            };
-            match quote {
-                Some(q) => after.starts_with(q),
-                None => after.is_empty() || after.starts_with([' ', ',', '}', '#']),
-            }
-        })
+    block_lines_with(text, block, key)
+        .into_iter()
+        .find(|(_, line)| names_entry(line, key, value))
+        .map(|(number, _)| number)
+}
+
+/// The 1-based lines inside top-level `block` that hold `key:`, with their
+/// text: what [`entry_line`] looks through.
+fn block_lines_with<'a>(text: &'a str, block: &str, key: &str) -> Vec<(usize, &'a str)> {
+    let Some(start) = key_line(text, block) else {
+        return Vec::new();
     };
+    let pattern = format!("{key}:");
     text.lines()
         .enumerate()
         .skip(start)
         .take_while(|(_, l)| l.starts_with(' ') || l.starts_with('-') || l.trim().is_empty())
-        .find(|(_, l)| names_it(l))
-        .map(|(i, _)| i + 1)
+        .filter(|(_, l)| l.contains(&pattern))
+        .map(|(i, l)| (i + 1, l))
+        .collect()
+}
+
+/// Whether `line` says `key: value`, exactly: `name: a` isn't `name: abc`.
+fn names_entry(line: &str, key: &str, value: &str) -> bool {
+    let pattern = format!("{key}:");
+    line.match_indices(&pattern).any(|(at, _)| {
+        let before = line[..at].chars().next_back();
+        if !before.is_none_or(|c| matches!(c, ' ' | '{' | ',' | '-')) {
+            return false;
+        }
+        let rest = line[at + pattern.len()..].trim_start();
+        let (quote, rest) = match rest.chars().next() {
+            Some(q @ ('"' | '\'')) => (Some(q), &rest[1..]),
+            _ => (None, rest),
+        };
+        let Some(after) = rest.strip_prefix(value) else {
+            return false;
+        };
+        match quote {
+            Some(q) => after.starts_with(q),
+            None => after.is_empty() || after.starts_with([' ', ',', '}', '#']),
+        }
+    })
 }
 
 /// The line of a kind's key: a top-level key, or `<key>.<sub>` — a key
@@ -365,6 +383,62 @@ pub fn item_lines(text: &str, kind: &str) -> Vec<usize> {
         }
     }
     out
+}
+
+/// The line lookups of one manifest, each block read once: for a caller that
+/// asks per item. Scanning the text per item is quadratic in the manifest and
+/// was most of what loading an extension costs (`.context/performance.md`
+/// "What a test boot costs"). Answers what the functions above answer.
+pub struct ManifestLines<'a> {
+    text: &'a str,
+    items: RefCell<HashMap<String, Rc<[usize]>>>,
+    kinds: RefCell<HashMap<String, Option<usize>>>,
+    entries: BlockLines<'a>,
+}
+
+type BlockLines<'a> = RefCell<HashMap<(String, String), Rc<[(usize, &'a str)]>>>;
+
+impl<'a> ManifestLines<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            items: RefCell::default(),
+            kinds: RefCell::default(),
+            entries: RefCell::default(),
+        }
+    }
+
+    /// [`item_lines`]' `n`th.
+    pub fn item(&self, kind: &str, n: usize) -> Option<usize> {
+        let mut items = self.items.borrow_mut();
+        let lines = items
+            .entry(kind.to_string())
+            .or_insert_with(|| item_lines(self.text, kind).into());
+        lines.get(n).copied()
+    }
+
+    /// [`kind_line`].
+    pub fn kind(&self, kind: &str) -> Option<usize> {
+        *self
+            .kinds
+            .borrow_mut()
+            .entry(kind.to_string())
+            .or_insert_with(|| kind_line(self.text, kind))
+    }
+
+    /// [`entry_line`].
+    pub fn entry(&self, block: &str, key: &str, value: &str) -> Option<usize> {
+        let lines = self
+            .entries
+            .borrow_mut()
+            .entry((block.to_string(), key.to_string()))
+            .or_insert_with(|| block_lines_with(self.text, block, key).into())
+            .clone();
+        lines
+            .iter()
+            .find(|(_, line)| names_entry(line, key, value))
+            .map(|(number, _)| *number)
+    }
 }
 
 /// Each entry of list `kind` (`intent.examples`, `ui.slots`, …) typed as
@@ -868,6 +942,46 @@ mod tests {
         assert_eq!(line_under(text, "slot_mounts", "page: y"), Some(5));
         assert_eq!(line_under(text, "slot_mounts", "advisories"), None);
         assert_eq!(key_line(text, "nope"), None);
+    }
+
+    /// The memo answers what the scans answer, in every shape they read.
+    #[test]
+    fn manifest_lines_answers_what_a_scan_answers() {
+        let text = "manifest: 2\ncommands:\n  - name: abc\n    summary: s\n  - name: a\n  - { name: \"b\", x: 1 }\nui:\n  mounts:\n    - page: x\n    - page: y\n  slots: [a, b]\nflow: [a]\nlast:\n- name: z\n";
+        let lines = ManifestLines::new(text);
+        for _ in 0..2 {
+            for kind in [
+                "commands",
+                "ui.mounts",
+                "ui.slots",
+                "flow",
+                "last",
+                "manifest",
+                "nope",
+                "ui.nope",
+            ] {
+                assert_eq!(lines.kind(kind), kind_line(text, kind), "{kind}");
+                let items = item_lines(text, kind);
+                for n in 0..=items.len() {
+                    assert_eq!(lines.item(kind, n), items.get(n).copied(), "{kind} {n}");
+                }
+            }
+            for (block, key, value) in [
+                ("commands", "name", "a"),
+                ("commands", "name", "abc"),
+                ("commands", "name", "b"),
+                ("commands", "name", "z"),
+                ("commands", "summary", "s"),
+                ("last", "name", "z"),
+                ("nope", "name", "a"),
+            ] {
+                assert_eq!(
+                    lines.entry(block, key, value),
+                    entry_line(text, block, key, value),
+                    "{block} {key} {value}"
+                );
+            }
+        }
     }
 
     /// An entry's line is the one whose `key:` is exactly that value, in

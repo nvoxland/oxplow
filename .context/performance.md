@@ -891,6 +891,23 @@ cost: each boot wrote its 67 MB to the test's store. It is refused now
 The 140 loader tests (`extension::extensions::tests`): 42 s to 9.9 s. CI never
 had the folder (it is gitignored), so CI's times don't show this.
 
+**Line numbers read per item** were most of what remained.
+`needed_permissions`, `descriptors::describe` and `decl_line` each rescanned the
+manifest for each item it declares, to say where that item is written. They read
+each block once now (`manifest_v2::ManifestLines`, `decl_lines`). The other
+callers look up once per block, so they keep the plain scans. Measured with
+`cargo run -q -p oxplow-app --example profile_boot` (a debug build, as the tests):
+
+| | before | after |
+|---|---|---|
+| `load_extensions` | 265 ms | 65 ms |
+| `Services::in_memory`, median | 337 ms | 134 ms |
+| `Services::in_memory`, first in a process | 485 ms | 249 ms |
+
+The first one is what a nextest test pays: it also reads and hashes the shipped
+folders (about 65 ms). `shipped_hash` by itself is 4 ms, so caching it isn't worth
+it. The store copy is about 27 ms.
+
 **Ruled out:** a test fixture without `oxplow-bundled` saves nothing (0.67 s
 against 0.64 s a boot: the cost is core and foundation). Caching parsed shipped
 extensions per process is unsound: `Extension.path` is that project's store

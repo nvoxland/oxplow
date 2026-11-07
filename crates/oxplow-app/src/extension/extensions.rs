@@ -2417,7 +2417,8 @@ fn needed_permissions(
     manifest: &str,
 ) -> Vec<(Option<usize>, String, Permissions)> {
     let mut out = Vec::new();
-    let line = |kind: &str, i: usize| item_lines(manifest, kind).get(i).copied();
+    let lines = manifest_v2::ManifestLines::new(manifest);
+    let line = |kind: &str, i: usize| lines.item(kind, i);
     for (i, p) in ext.providers.iter().enumerate() {
         let runs = p.entry.is_some()
             || matches!(
