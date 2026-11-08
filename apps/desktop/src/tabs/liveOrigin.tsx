@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { recordOpError } from "../opErrors.js";
+import { logUi } from "../logger.js";
 import { resolveLiveOrigin } from "../viz/linkOrigin.js";
 import { nodeById, nodeRunOf } from "../viz/nodeRun.js";
 import { usePageRunsStore, usePageRunWith } from "../pageRuns.js";
@@ -63,8 +63,16 @@ export function LiveOriginResolver({ live, streamId, onItems }: { live: LiveOrig
     // `live` is read through the run it keyed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [run, hash]);
+  // Its page couldn't run: it is gone (removed, or renamed), or failed.
+  // Up and Down then have nothing to step through. It is no command the
+  // person ran, so it isn't recorded as one (usability.md "A person's
+  // command that fails"); the log keeps why.
   useEffect(() => {
-    if (state.error) recordOpError({ label: "Up and Down", message: state.error });
+    if (!state.error) return;
+    logUi("info", "a tab's Up/Down list didn't run", { node: live.node, error: state.error });
+    onItemsRef.current([]);
+    // `live` is read through the run it keyed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.error]);
   return null;
 }

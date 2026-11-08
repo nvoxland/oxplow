@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 
-import { resolvedOrigin } from "./liveOrigin.js";
+import { cleanup, render, waitFor } from "@testing-library/react";
+
+import { createPageRuns, PageRunsContext } from "../pageRuns.js";
+import { LiveOriginResolver, resolvedOrigin } from "./liveOrigin.js";
 import { fileRef } from "./pageRefs.js";
 import type { Origin } from "./session.js";
 
@@ -40,4 +43,28 @@ test("a page node's live origin reads the node's rows of its page's run", async 
   expect(liveOriginNodeRun({ node: "acme/other#items", params: {}, column: "k" }, run)).toBeNull();
   expect(liveOriginNodeRun({ node: "acme/list#gone", params: {}, column: "k" }, run)).toBeNull();
   expect(liveOriginNodeRun({ node: "acme/list", params: {}, column: "k" }, run)).toBeNull();
+});
+
+// A saved list can name a page that is gone (removed, or renamed when ids
+// moved to namespaces): Up and Down then have nothing to step through. It is
+// no command the person ran, so nothing is recorded.
+test("a live origin whose page is gone has no items, and records nothing", async () => {
+  const runs = createPageRuns({
+    open: async () => Promise.reject(new Error("no page `oxplow-foundation/extensions`")),
+    close: async () => {},
+    fetch: async () => ({}),
+    setParams: async () => Promise.reject(new Error("no")),
+    rerun: async () => Promise.reject(new Error("no")),
+    setVisible: async () => false,
+    onChange: () => () => {},
+    onReconnect: () => () => {},
+  });
+  const got: unknown[][] = [];
+  render(
+    <PageRunsContext.Provider value={runs}>
+      <LiveOriginResolver live={{ node: "oxplow-foundation/extensions#rows", params: {}, column: "uri" }} streamId={null} onItems={(i) => got.push(i)} />
+    </PageRunsContext.Provider>,
+  );
+  await waitFor(() => expect(got).toEqual([[]]));
+  cleanup();
 });
