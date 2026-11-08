@@ -31,7 +31,8 @@ import {
   type Stream,
   type WorkspaceContext,
 } from "./api.js";
-import { buildMenuBar, buildNativeMenuSnapshots, bookmarkIdFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX, type GoRow } from "./menuBar.js";
+import { GoMenuFeed } from "./components/Panels/GoMenuFeed.js";
 import type { EditorNavigationTarget } from "./lsp.js";
 import { Navigator } from "./components/Navigator.js";
 import { StatusBar } from "./components/StatusBar.js";
@@ -849,12 +850,14 @@ export function App() {
   // The menu bar (File, Edit) and what search lists: the bus's offers,
   // and the shell's project commands.
   const menuGroups = useMemo(() => buildMenuBar(offers), [offers]);
-  // The stars the thread sees; the Bookmarks menu follows them (it re-reads
-  // when `v_bookmark` changes) and the thread/stream selection.
+  // The stars the thread sees (a page's star says where it is starred).
   const bookmarks = useBookmarks(selectedThreadId, stream?.id ?? null);
+  // The Go menu is what the Go To pane shows (`GoMenuFeed`, inside the
+  // panels' provider, hands it up as the pane's run changes).
+  const [goRows, setGoRows] = useState<GoRow[]>([]);
   const nativeMenuSnapshots = useMemo(
-    () => buildNativeMenuSnapshots(menuGroups, recentProjects, bookmarks),
-    [menuGroups, recentProjects, bookmarks],
+    () => buildNativeMenuSnapshots(menuGroups, recentProjects, goRows),
+    [menuGroups, recentProjects, goRows],
   );
 
   // The launcher (QuickOpen) is the single discovery surface — pages,
@@ -922,10 +925,10 @@ export function App() {
         });
         return;
       }
-      const bookmarkId = bookmarkIdFromMenuId(commandId);
-      if (bookmarkId !== null) {
-        const star = bookmarks.find((b) => b.ref.id === bookmarkId);
-        if (star) flushSync(() => handleOpenPageRef.current?.(star.ref));
+      const goUri = goUriFromMenuId(commandId);
+      if (goUri !== null) {
+        const ref = refFromTabId(goUri);
+        if (ref) flushSync(() => handleOpenPageRef.current?.(ref));
         return;
       }
       if (commandId === INSTALL_CLI_ID) {
@@ -949,7 +952,7 @@ export function App() {
       const run = command.run;
       flushSync(() => { void run(); });
     });
-  }, [menuGroups, bookmarks]);
+  }, [menuGroups]);
 
   const pageTabsForActiveThread = selectedThreadId ? threadPageTabs[selectedThreadId] ?? [] : [];
   const availableCenterIds = useMemo(() => new Set(pageTabsForActiveThread.map((ref) => ref.id)), [pageTabsForActiveThread]);
@@ -1944,6 +1947,7 @@ export function App() {
     // One owner of every extension panel's runs, read by the rail, the
     // status bar's bell and the Alerts page.
     <PanelRunsProvider streamId={stream?.id ?? null} threadId={selectedThreadId}>
+    <GoMenuFeed onRows={setGoRows} />
     {(sessions[selectedThreadId ?? ""]?.tabs ?? []).map((t) => {
       const live = currentEntry(t).from?.live;
       return live ? (

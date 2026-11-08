@@ -5,11 +5,11 @@
 /// … Select All): the OS's responder chain does those, never our
 /// dispatch — WKWebView only delivers ⌘C/⌘V with them in the menu.
 import type { MenuGroup as SharedMenuGroup, MenuItem } from "./menu.js";
-import type { Bookmark } from "./tabs/bookmarks.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type {
   MenuGroupSnapshot as NativeMenuGroupSnapshot,
   MenuItemSnapshot as NativeMenuItemSnapshot,
+  PageRun,
 } from "./tauri-bridge/generated/bindings.js";
 
 export type MenuId = "file" | "edit";
@@ -85,24 +85,56 @@ export function menuItemById(groups: MenuGroup[], id: string): MenuItem | undefi
 /// trailing path in a new window.
 export const OPEN_RECENT_PREFIX = "project.openRecent:";
 
-/// Menu-command id prefix for a "Bookmarks ▸ <page>" entry; the rest is
-/// the starred page's id (its URI), which the dispatch opens.
-export const BOOKMARK_PREFIX = "bookmarks.open:";
+/// Menu-command id prefix for a "Go ▸ <page>" entry; the rest is the
+/// page's URI, which the dispatch opens.
+export const GO_PREFIX = "go.open:";
 
-/// The page id a Bookmarks menu id opens, or null for any other id.
-export function bookmarkIdFromMenuId(menuId: string): string | null {
-  return menuId.startsWith(BOOKMARK_PREFIX) ? menuId.slice(BOOKMARK_PREFIX.length) : null;
+/// The URI a Go menu id opens, or null for any other id.
+export function goUriFromMenuId(menuId: string): string | null {
+  return menuId.startsWith(GO_PREFIX) ? menuId.slice(GO_PREFIX.length) : null;
 }
 
-/// The Bookmarks items: the starred pages by title, case-insensitive; one
-/// disabled hint when there are none.
-export function bookmarksMenuItems(bookmarks: Bookmark[]): NativeMenuItemSnapshot[] {
-  if (bookmarks.length === 0) {
-    return [{ id: "bookmarks.none", label: "No bookmarks yet — star a page to add it", shortcut: null, enabled: false, checked: null }];
+/// One line of the Go To pane: the group it is under (Bookmarks, History,
+/// Most visited), what it says and the page it opens.
+export interface GoRow {
+  group: string;
+  title: string;
+  uri: string;
+}
+
+/// The Go To pane's lines, read off its body's run (the `go-to` panel's
+/// `go-to-panel` part): the loader whose rows have `grp`, `title` and `uri`.
+export function goRowsOf(run: PageRun | null): GoRow[] {
+  if (!run) return [];
+  for (const loader of Object.values(run.loaders)) {
+    const cols = loader?.result?.columns ?? [];
+    const [g, t, u] = ["grp", "title", "uri"].map((c) => cols.indexOf(c));
+    if (g === undefined || t === undefined || u === undefined || g < 0 || t < 0 || u < 0) continue;
+    return loader!.result!.rows.flatMap((r) =>
+      typeof r[u] === "string" && r[u] !== "" ? [{ group: String(r[g] ?? ""), title: String(r[t] ?? r[u]), uri: String(r[u]) }] : [],
+    );
   }
-  return bookmarks
-    .map((b) => ({ id: `${BOOKMARK_PREFIX}${b.ref.id}`, label: b.label || b.ref.id, shortcut: null, enabled: true, checked: null }))
-    .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }) || a.id.localeCompare(b.id));
+  return [];
+}
+
+/// The Go items: what the Go To pane shows, each group under its heading
+/// (a disabled item), a separator between; one disabled hint when empty.
+export function goMenuItems(rows: GoRow[]): NativeMenuItemSnapshot[] {
+  if (rows.length === 0) {
+    return [{ id: "go.none", label: "Nothing yet — star a page or open one", shortcut: null, enabled: false, checked: null }];
+  }
+  const out: NativeMenuItemSnapshot[] = [];
+  let group: string | null = null;
+  let separators = 0;
+  for (const row of rows) {
+    if (row.group !== group) {
+      if (group !== null) out.push({ id: `native.separator.${900 + separators++}`, label: "", shortcut: null, enabled: true, checked: null });
+      group = row.group;
+      out.push({ id: `go.heading:${group}`, label: group, shortcut: null, enabled: false, checked: null });
+    }
+    out.push({ id: `${GO_PREFIX}${row.uri}`, label: row.title, shortcut: null, enabled: true, checked: null });
+  }
+  return out;
 }
 
 /// The File item that puts the `oxplow` command on the PATH (the shell's).
@@ -113,11 +145,11 @@ const OPEN_RECENT_AFTER = "oxplow.project.open_in_new_window";
 
 /// The native-menu snapshot: `groups` plus a File ▸ Open Recent ▸
 /// <project> submenu built from the recents list (the in-window Menubar
-/// shows `groups` as they are), then a Bookmarks menu of the starred pages.
+/// shows `groups` as they are), then the Go menu: what the Go To pane shows.
 export function buildNativeMenuSnapshots(
   groups: MenuGroup[],
   recents: { path: string; title: string; exists: boolean }[],
-  bookmarks: Bookmark[] = [],
+  go: GoRow[] = [],
 ): NativeMenuGroupSnapshot[] {
   const native = groups.map((group) => {
     const items = group.items.map(nativeItem);
@@ -148,7 +180,7 @@ export function buildNativeMenuSnapshots(
     }
     return { id: group.id, label: group.label, items };
   });
-  return [...native, { id: "bookmarks", label: "Bookmarks", items: bookmarksMenuItems(bookmarks) }];
+  return [...native, { id: "go", label: "Go", items: goMenuItems(go) }];
 }
 
 /// A menu item as the shell's `MenuItemSnapshot`: what it draws, no more

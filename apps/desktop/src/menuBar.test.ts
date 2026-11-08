@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { buildMenuBar, buildNativeMenuSnapshots, bookmarkIdFromMenuId, BOOKMARK_PREFIX, bookmarksMenuItems, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
+import { buildMenuBar, buildNativeMenuSnapshots, GO_PREFIX, goMenuItems, goRowsOf, goUriFromMenuId, INSTALL_CLI_ID, menuItemById, OPEN_RECENT_PREFIX } from "./menuBar.js";
 import type { CommandEntry } from "./components/quickOpenResults.js";
 import type { MenuItemSnapshot } from "./tauri-bridge/generated/bindings.js";
 
@@ -124,39 +124,47 @@ test("File ▸ Install `oxplow` command line… is in the native menu", () => {
   expect(item?.enabled).toBe(true);
 });
 
-const star = (id: string, label: string | null) => ({ ref: { id }, label, scope: "project" as const });
+// The Go menu is what the Go To pane shows: its groups (Bookmarks, then
+// History or Most visited, as its toggle is), each under its heading.
+const goRows = [
+  { group: "Bookmarks", title: "Git", uri: "oxplow:oxplow/page?page=git-dashboard" },
+  { group: "Bookmarks", title: "a.rs", uri: "oxplow:oxplow/file?path=a.rs" },
+  { group: "History", title: "DEV.md", uri: "oxplow:oxplow/file?path=DEV.md" },
+];
 
-test("the Bookmarks menu lists the starred pages alphabetically, ignoring case", () => {
-  const groups = buildNativeMenuSnapshots(buildMenuBar([]), [], [
-    star("work-next", "work"),
-    star("board", "Board"),
-    star("alerts", "alerts"),
+test("the Go menu lists the Go To pane's rows under their headings, last in the bar", () => {
+  const groups = buildNativeMenuSnapshots(buildMenuBar([]), [], goRows);
+  const go = groups[groups.length - 1]!;
+  expect([go.id, go.label]).toEqual(["go", "Go"]);
+  expect(groups.some((g) => g.id === "bookmarks")).toBe(false);
+  expect(go.items.map((i) => [i.label, i.enabled])).toEqual([
+    ["Bookmarks", false],
+    ["Git", true],
+    ["a.rs", true],
+    ["", true],
+    ["History", false],
+    ["DEV.md", true],
   ]);
-  const bm = groups.find((g) => g.id === "bookmarks")!;
-  expect(groups[groups.length - 1].id).toBe("bookmarks");
-  expect(bm.label).toBe("Bookmarks");
-  expect(bm.items.map((i) => i.label)).toEqual(["alerts", "Board", "work"]);
-  expect(bm.items.map((i) => i.id)).toEqual([
-    `${BOOKMARK_PREFIX}alerts`,
-    `${BOOKMARK_PREFIX}board`,
-    `${BOOKMARK_PREFIX}work-next`,
-  ]);
-  expect(bm.items.every((i) => i.enabled && i.shortcut === null)).toBe(true);
+  expect(go.items[3]!.id).toMatch(/^native\.separator\.\d+$/);
+  expect(go.items[1]!.id).toBe(`${GO_PREFIX}oxplow:oxplow/page?page=git-dashboard`);
 });
 
-test("a star with no label shows its page id", () => {
-  const items = bookmarksMenuItems([star("git-dashboard", null)]);
-  expect(items[0].label).toBe("git-dashboard");
-});
-
-test("with nothing starred, Bookmarks is one disabled hint", () => {
-  const items = bookmarksMenuItems([]);
-  expect(items).toEqual([
-    { id: "bookmarks.none", label: "No bookmarks yet — star a page to add it", shortcut: null, enabled: false, checked: null },
+test("with nothing to go to, the Go menu is one disabled hint", () => {
+  expect(goMenuItems([])).toEqual([
+    { id: "go.none", label: "Nothing yet — star a page or open one", shortcut: null, enabled: false, checked: null },
   ]);
 });
 
-test("a bookmark's menu id gives back the page it opens", () => {
-  expect(bookmarkIdFromMenuId(`${BOOKMARK_PREFIX}a:b?x=1`)).toBe("a:b?x=1");
-  expect(bookmarkIdFromMenuId("oxplow.editor.save")).toBeNull();
+test("a Go item's menu id gives back the page it opens", () => {
+  expect(goUriFromMenuId(`${GO_PREFIX}a:b?x=1`)).toBe("a:b?x=1");
+  expect(goUriFromMenuId("oxplow.editor.save")).toBeNull();
+});
+
+test("the Go To pane's rows are read off its body's run: group, title and URI", () => {
+  const run = {
+    page: { loaders: [{ name: "go_to" }] },
+    loaders: { go_to: { result: { columns: ["grp", "title", "page_kind", "uri"], rows: [["Bookmarks", "Git", "git-dashboard", "oxplow:x"]] } } },
+  } as never;
+  expect(goRowsOf(run)).toEqual([{ group: "Bookmarks", title: "Git", uri: "oxplow:x" }]);
+  expect(goRowsOf(null)).toEqual([]);
 });

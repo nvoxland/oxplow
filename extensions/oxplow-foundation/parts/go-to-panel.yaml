@@ -18,6 +18,8 @@ loaders:
     page: oxplow-foundation/thread-bookmarks
     loader: bookmarks
     params: { thread_id: { param: thread_id } }
+  # Its rows are also the app's Go menu (macOS): it reads `grp`, `title`
+  # and `uri`, so keep those names.
   go_to:
     sql: |
       WITH
