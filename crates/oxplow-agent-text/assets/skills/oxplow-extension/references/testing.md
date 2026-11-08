@@ -135,8 +135,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a panel: `when: { panel: <id | ext/id>, thread?, stream?, choices? }`
      runs the panel whole, as the rail shows it: its `body`, `collapsed`,
      `count` and `badge` parts, each from the view `thread` / `stream` name
-     (default: the project's first stream, its first thread), the body with
-     the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
+     (default: the project's first stream, its first thread), the body and
+     the collapsed view with the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
      offer falls back to its default). Never `params`: a part's scope id is
      the view's. `expect: { body?, collapsed?, count_page?, badge?, count?,
      alert?, choices?, text? }` — each part is checked as a page's `expect`

@@ -268,15 +268,16 @@ screens and the holder's add the review and analysis:
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
 - **Rail panels.** A panel lives in the extension that has its page:
-  foundation's `panels:` has Go To (`go-to-panel`, collapsed
-  `go-to-bookmarks`; its header opens the `go-to` page beside them). Both
-  parts read foundation's `thread-bookmarks` query, the one statement of
-  which bookmarks a thread sees, which the Go To page reads too. Its
-  fixture is a `panel:` one: the panel run whole, as the rail shows it. Still
-  in the holder: Waiting on You (`waiting-on-me`, a badge), Comments
-  (`comments-panel`), Uncommitted (`uncommitted`, collapsed
-  `uncommitted-line`, count `uncommitted-count`) and Work (`work`, collapsed
-  `work-line`, count `work-count`). Each moves the same way: its parts, a
+  foundation's `panels:` has Go To (`go-to-panel`, collapsed `go-to-icons`;
+  its header opens the `go-to` page beside them). Both parts read
+  foundation's `thread-go-to` query, which reads the `thread-bookmarks`
+  query, the one statement of which bookmarks a thread sees; the Go To page
+  reads it too. Uncommitted (`uncommitted`, collapsed `uncommitted-line`,
+  count `uncommitted-count`) is foundation's too, beside the
+  `uncommitted-changes` page its header opens. Each has a `panel:` fixture:
+  the panel run whole, as the rail shows it. Still in the holder: Waiting on
+  You (`waiting-on-me`, a badge), Comments (`comments-panel`) and Work
+  (`work`, collapsed `work-line`, count `work-count`). Each moves the same way: its parts, a
   `panel:` fixture, and any rule it repeats with a foundation page made one
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.

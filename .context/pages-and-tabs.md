@@ -932,8 +932,8 @@ disclosure (a row's `expand`, a group's fold, a tree's branch, a hunk, a
 collapsible section's toggle) draws the one `DisclosureGlyph`
 (`kit/Disclosure.tsx`, a 16px chevron), and a cell's expand glyph leads
 its first line with the text wrapping beside it, never under it.
-The rail's panels are extensions' (`go-to` is foundation's; `waiting`, `comments`,
-`uncommitted`, `work` still the holder's): pages over the existing views and commands. One owner
+The rail's panels are extensions' (`go-to` and `uncommitted` are foundation's; `waiting`,
+`comments`, `work` still the holder's): pages over the existing views and commands. One owner
 holds every panel's runs — `PanelRunsProvider`
 (`components/Panels/PanelRunsContext.tsx`, around the app),
 read by the rail, the status bar's bell and the Alerts page — through
@@ -1181,7 +1181,7 @@ zone grouping); each appears only when it has content:
    finished. The header count (`work-count`) is in progress + ready, never
    an alert. Rows link (Cmd-click opens a new tab) and offer Add to
    Context on right-click.
-3. **Uncommitted** — an `oxplow-bundled` panel, stream-scoped,
+3. **Uncommitted** — an `oxplow-foundation` panel, stream-scoped,
    over the working change's stage-one file list (`v_change_file` /
    `v_change.conflicted` / `in_progress`, kept current by `change.analyze`
    on every move — the app no longer polls git for it). The body page
