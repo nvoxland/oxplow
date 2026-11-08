@@ -65,10 +65,20 @@ test("a failure with no control on screen is left to the toast", async () => {
   expect(claims.shown("ev2")).toBe(false);
 });
 
-test("a field error, a confirmation and a cancel are not recorded", async () => {
+test("a field error is a failure where no field shows it", async () => {
+  const { reports, runner } = setup();
+  const out = await runner.run("Finish", () => Promise.reject(new IpcCallError("required", "INVALID", "/title")));
+  expect(out).toEqual({ ok: false, failure: { kind: "failed", message: "required", code: "INVALID" } });
+  expect(reports.map((r) => r.message)).toEqual(["required"]);
+});
+
+test("a field error a form shows, a confirmation and a cancel are not recorded", async () => {
   const { reports, failures, runner } = setup();
   failures.mount("form/x");
-  const field = await runner.run("Save", () => Promise.reject(new IpcCallError("required", "INVALID", "/title")), { anchor: "form/x" });
+  const field = await runner.run("Save", () => Promise.reject(new IpcCallError("required", "INVALID", "/title")), {
+    anchor: "form/x",
+    showsFields: true,
+  });
   expect(field).toEqual({ ok: false, failure: { kind: "field", errors: { title: "required" } } });
   await runner.run("Save", () => Promise.reject(new IpcCallError("asks", "NEEDS_CONFIRMATION")), { anchor: "form/x" });
   await runner.run("Save", () => Promise.reject({ code: "CANCELLED", message: "closed" }), { anchor: "form/x" });

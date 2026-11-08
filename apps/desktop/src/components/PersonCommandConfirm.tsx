@@ -17,6 +17,7 @@ export function PersonCommandConfirm() {
         command={pending.command}
         onConfirm={() => void personCommands.confirm()}
         onCancel={personCommands.cancel}
+        details={pending.details}
         testIdPrefix="person-command-confirm"
       />
     </div>

@@ -1,5 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+
+import { createFailureStore, createInlineClaims } from "../commands/actionFailures.js";
+import { createRunner } from "../commands/runForPerson.js";
+import { RunnerContext } from "../commands/RunnerContext.js";
 
 import { formatShortcut } from "../keybindings.js";
 import { ContextMenu, MenuList } from "./ContextMenu.js";
@@ -63,4 +67,28 @@ test("a menu item shows its shortcut in this platform's keys", () => {
   const text = getByTestId("menu-item-new").textContent ?? "";
   expect(text).not.toContain("Ctrl/Cmd");
   expect(text).toContain(formatShortcut("Ctrl/Cmd+Shift+N"));
+});
+
+// A menu item whose run fails is the person's failed command: recorded,
+// and (the menu closing) the toast's. The menu still closes.
+test("a menu item that fails is recorded, and the menu closes", async () => {
+  const reports: string[] = [];
+  const runner = createRunner({
+    report: async (e) => (reports.push(`${e.label}: ${e.message}`), null),
+    failures: createFailureStore(),
+    claims: createInlineClaims(),
+    now: () => 0,
+  });
+  let closed = 0;
+  const { getByTestId } = render(
+    <RunnerContext.Provider value={runner}>
+      <MenuList
+        items={[{ id: "push", label: "Push", enabled: true, run: async () => Promise.reject(new Error("rejected: non-fast-forward")) }]}
+        onAction={() => (closed += 1)}
+      />
+    </RunnerContext.Provider>,
+  );
+  fireEvent.click(getByTestId("menu-item-push"));
+  await waitFor(() => expect(closed).toBe(1));
+  expect(reports).toEqual(["Push: rejected: non-fast-forward"]);
 });

@@ -1,6 +1,12 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, renderHook } from "@testing-library/react";
 
+import type { ReactNode } from "react";
+
+import { createFailureStore, createInlineClaims } from "../commands/actionFailures.js";
+import { createRunner } from "../commands/runForPerson.js";
+import { RunnerContext } from "../commands/RunnerContext.js";
+import { IpcCallError } from "../ipc-error.js";
 import type { CommandOutcome } from "../tauri-bridge/generated/bindings.js";
 
 // A form's submit toasts when it ran; one whose command came back undoable
@@ -51,4 +57,33 @@ test("a commit's toast names the commit; its Undo says the changes are back", as
   });
   expect(undone).toEqual([9]);
   expect(toasts.at(-1)?.message).toBe("Commit undone: the changes are back in the working tree");
+});
+
+// A field the command refused goes under that field, not to the record; any
+// other failure is recorded once and shows beside the form's submit.
+test("an invalid field is the form's to show; any other failure is recorded and shown by the submit", async () => {
+  const reports: string[] = [];
+  const runner = createRunner({
+    report: async (e) => (reports.push(`${e.label}: ${e.message}`), "ev1"),
+    failures: createFailureStore(),
+    claims: createInlineClaims(),
+    now: () => 1,
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => <RunnerContext.Provider value={runner}>{children}</RunnerContext.Provider>;
+  let fail: Error = new IpcCallError("title is empty", "INVALID", "/title");
+  const { result } = renderHook(
+    () =>
+      useFormSubmit("Rename", async () => {
+        throw fail;
+      }, () => {}),
+    { wrapper },
+  );
+  await act(() => result.current.submit({ title: "" }, false));
+  expect(result.current.serverErrors).toEqual({ title: "title is empty" });
+  expect(result.current.failure).toBeNull();
+  expect(reports).toEqual([]);
+  fail = new IpcCallError("the task is closed", "FAILED");
+  await act(() => result.current.submit({ title: "x" }, false));
+  expect(reports).toEqual(["Rename: the task is closed"]);
+  expect(result.current.failure?.message).toBe("the task is closed");
 });

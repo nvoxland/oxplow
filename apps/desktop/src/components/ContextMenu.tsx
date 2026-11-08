@@ -9,6 +9,7 @@ import {
 } from "./contextMenuPosition.js";
 
 import type { MenuItem, MenuPosition } from "../menu.js";
+import { useRunner } from "../commands/RunnerContext.js";
 import { ICONS } from "../icons.js";
 import { formatShortcut } from "../keybindings.js";
 
@@ -115,6 +116,7 @@ const headerStyle: CSSProperties = {
 };
 
 export function MenuList({ items, header, onAction, minWidth = 220, framed = true }: MenuListProps) {
+  const runner = useRunner();
   const [openSubmenuId, setOpenSubmenuId] = useState<string | null>(null);
   const submenuRefs = useRef(new Map<string, HTMLButtonElement | null>());
 
@@ -148,8 +150,10 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
                   setOpenSubmenuId(item.id);
                   return;
                 }
+                // The person's command: a failure is recorded, and with the
+                // menu closing, it is the toast's.
                 try {
-                  await Promise.resolve(item.run?.());
+                  await runner.run(typeof item.label === "string" ? item.label : item.id, async () => item.run?.());
                 } finally {
                   onAction?.();
                 }

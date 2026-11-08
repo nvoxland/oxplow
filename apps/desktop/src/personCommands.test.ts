@@ -1,8 +1,19 @@
 import { expect, test } from "bun:test";
 
+import { createFailureStore, createInlineClaims } from "./commands/actionFailures.js";
+import { createRunner } from "./commands/runForPerson.js";
 import { IpcCallError } from "./ipc-error.js";
 import { createPersonCommands } from "./personCommands.js";
 import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";
+
+/** A runner whose record is `errors` (`<label>: <message>`). */
+const recording = (errors: string[] = []) =>
+  createRunner({
+    report: async (e) => (errors.push(`${e.label}: ${e.message}`), null),
+    failures: createFailureStore(),
+    claims: createInlineClaims(),
+    now: () => 0,
+  }).run;
 
 // A command the person runs outside a page (a launcher entry): it runs;
 // when it asks, it waits for the person, then runs confirmed.
@@ -17,10 +28,10 @@ test("a command that asks waits for the person, then runs confirmed; Cancel drop
     },
     undo: async () => {},
     toast: (m) => toasts.push(m),
-    recordError: () => {},
+    run: recording(),
   });
   await store.run("New Bug", "oxplow.work_item.create", { title: "Bug" });
-  expect(store.pending()).toEqual({ label: "New Bug", command: "oxplow.work_item.create", input: { title: "Bug" } });
+  expect(store.pending()).toEqual({ label: "New Bug", command: "oxplow.work_item.create", input: { title: "Bug" }, details: [] });
   await store.confirm();
   expect(calls).toEqual([
     ["oxplow.work_item.create", { title: "Bug" }, false],
@@ -43,7 +54,7 @@ test("a failure is recorded, not thrown", async () => {
     },
     undo: async () => {},
     toast: () => {},
-    recordError: (label, message) => errors.push(`${label}: ${message}`),
+    run: recording(errors),
   });
   await store.run("New Bug", "oxplow.work_item.create", {});
   expect(errors).toEqual(["New Bug: bad input"]);
@@ -67,7 +78,7 @@ test("an undoable command's toast offers Undo, which undoes that run", async () 
       undone.push(auditId);
     },
     toast: (m, undo) => toasts.push([m, undo]),
-    recordError: () => {},
+    run: recording(),
   });
   await store.run("Move to Done", "oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: "done" });
   await store.run("Comment", "oxplow.work_item.comment", {});
@@ -90,7 +101,7 @@ test("a result that names a thing gets an Open link on its toast", async () => {
     undo: async () => {},
     toast: (_m, _undo, open) => links.push(open),
     openPage: (uri) => opened.push(uri),
-    recordError: () => {},
+    run: recording(),
   });
   await store.run("New", "a", {});
   await store.run("Other", "b", {});

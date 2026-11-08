@@ -100,11 +100,16 @@ export function proposalsFromResult(result: SqlQueryResult): Proposal[] {
   }));
 }
 
-/** The pending proposals, newest first, and what was read. */
+/** The pending proposals, newest first, and what was read. One being run
+ *  (an External command's approval is claimed `approved` first and goes
+ *  back to `pending` if the run fails) stays in the list, so its card isn't
+ *  dropped and drawn again mid-run. */
 export async function readPendingProposals(): Promise<{ proposals: Proposal[]; reads: Reads }> {
   const res = await querySql(
     `SELECT id, uri, created_at, command, input, actor_kind, actor_id, thread_id, ${THREAD_TITLE}, key, preview, dry_run
-       FROM v_command_proposal p WHERE decision = 'pending' ORDER BY id DESC`,
+       FROM v_command_proposal p
+       WHERE decision = 'pending' OR (decision = 'approved' AND audit_id IS NULL)
+       ORDER BY id DESC`,
     [],
     1_000,
   );

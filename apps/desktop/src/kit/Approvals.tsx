@@ -1,9 +1,11 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
 
+import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { configUri, idOf } from "../uri/uri.js";
 import { decide, summarizeProposal, useProposals, type Proposal } from "../proposals.js";
+import { InlineError } from "./InlineError.js";
 
 /** The pending proposals an agent raised, read here and decided through
  *  the person-only path (`decideProposal`): the one place they are drawn.
@@ -55,8 +57,10 @@ export function ProposalList({
 /** One agent proposal with Approve and Decline (P6b.A4). Approving *is*
  *  the confirmation: it runs the command as the person — except that a
  *  destructive one is tinted and its Approve asks inline first
- *  (`InlineConfirm`). A failed decision shows next to the buttons; the
- *  list re-reads itself when the proposal is decided. */
+ *  (`InlineConfirm`). A decision runs through the person's runner: a
+ *  failure is recorded and shows next to the buttons, kept by the proposal
+ *  so the card drawn again by a re-read still shows it; the list re-reads
+ *  itself when the proposal is decided. */
 export function ProposalCard({
   proposal,
   compact,
@@ -69,19 +73,21 @@ export function ProposalCard({
 }) {
   const s = summarizeProposal(proposal);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const id = proposal.id;
+  const anchor = `proposal/${id}`;
+  const failure = useActionAnchor(anchor);
+  const runner = useRunner();
   const run = async (approve: boolean) => {
     setBusy(true);
-    setError(null);
     try {
-      await onDecide(proposal, approve);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      await runner.run(`${approve ? "Approve" : "Decline"}: ${s.title}`, () => onDecide(proposal, approve), {
+        anchor,
+        command: proposal.command,
+      });
     } finally {
       setBusy(false);
     }
   };
-  const id = proposal.id;
   return (
     <div
       data-testid={`proposal-${id}`}
@@ -148,11 +154,7 @@ export function ProposalCard({
         >
           Decline
         </button>
-        {error ? (
-          <span data-testid={`proposal-error-${id}`} style={{ color: "var(--diff-del-fg, #f85149)" }}>
-            {error}
-          </span>
-        ) : null}
+        {failure ? <InlineError failure={failure} testId={`proposal-error-${id}`} /> : null}
       </div>
     </div>
   );

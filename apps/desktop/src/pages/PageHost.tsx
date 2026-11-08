@@ -26,7 +26,7 @@ import { LoadingScreen } from "../kit/Loading.js";
 import { LOADING_AFTER_MS, useDelayed } from "../kit/useDelayed.js";
 import { ActionForm, useVizActions } from "../viz/VizView.js";
 import { FormSourceContext } from "../viz/formSource.js";
-import { actionDoes, offeredWholePage } from "../viz/vizActions.js";
+import { actionAnchor, actionDoes, offeredWholePage } from "../viz/vizActions.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { useTabVisible } from "../tabs/TabVisible.js";
 import { usePageRunsStore, usePageRunWith, type PageKey, type PageRuns } from "../pageRuns.js";
@@ -155,6 +155,8 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
       prominent: a.prominent,
       submenu: a.submenu ?? undefined,
       icon: a.icon ?? undefined,
+      // Its failure shows beside its button (`useVizActions` runs it with this key).
+      anchor: actionAnchor(page!.id, a.id),
       run: () => actions.run(a, null),
     })),
     ...(whole

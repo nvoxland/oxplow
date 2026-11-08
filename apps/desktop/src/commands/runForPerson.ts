@@ -2,8 +2,9 @@
 /// command that fails"): every page action, form, component invoke,
 /// proposal decision and core control runs through `run`, which tells what
 /// a failure was and shows it the one way:
-/// - invalid input naming a field: the caller shows it under the field;
-///   not recorded;
+/// - invalid input naming a field: a caller with fields (`showsFields`, a
+///   form) shows it under the field, not recorded; for any other caller it
+///   is a failure like the rest;
 /// - the command asks first: the caller asks (`runAsking` runs it again
 ///   confirmed); not recorded;
 /// - cancelled: nothing;
@@ -30,6 +31,9 @@ export interface RunOptions {
   command?: string;
   /** The thread it ran for; absent, the one on screen. */
   threadId?: string | null;
+  /** The caller draws fields (a form): invalid input naming one is its to
+   *  show under that field. Without, it is a failure like any other. */
+  showsFields?: boolean;
 }
 
 export interface RunnerDeps {
@@ -74,7 +78,8 @@ export function createRunner(deps: RunnerDeps) {
     try {
       return { ok: true, value: await call() };
     } catch (e) {
-      const failure = classifyFailure(e);
+      let failure = classifyFailure(e);
+      if (failure.kind === "field" && !opts.showsFields) failure = { kind: "failed", message: messageOf(e), code: codeOf(e) };
       if (failure.kind !== "failed") return { ok: false, failure };
       const report = deps.report({
         label,

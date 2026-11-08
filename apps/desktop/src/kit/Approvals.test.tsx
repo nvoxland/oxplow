@@ -2,6 +2,9 @@ import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
 import type { Proposal } from "../proposals.js";
+import { createFailureStore, createInlineClaims } from "../commands/actionFailures.js";
+import { createRunner } from "../commands/runForPerson.js";
+import { RunnerContext } from "../commands/RunnerContext.js";
 import { narrow, ProposalCard, ProposalList } from "./Approvals.js";
 
 afterEach(cleanup);
@@ -72,6 +75,37 @@ test("a failed decision shows its error on the card", async () => {
   );
   fireEvent.click(view.getByTestId("proposal-approve-7"));
   await waitFor(() => expect(view.getByTestId("proposal-error-7").textContent).toContain("already declined"));
+});
+
+// The list re-reads as the run touches the proposals: the card is drawn
+// again, and the failure is still on it (it is kept by the proposal, not by
+// the card). It is recorded once, as the person's failed operation.
+test("a failed approval stays on the card when the list draws it again, recorded once", async () => {
+  const reports: { label: string; command?: string }[] = [];
+  const runner = createRunner({
+    report: async (e) => (reports.push({ label: e.label, command: e.command }), "ev1"),
+    failures: createFailureStore(),
+    claims: createInlineClaims(),
+    now: () => 1,
+  });
+  const draw = () =>
+    render(
+      <RunnerContext.Provider value={runner}>
+        <ProposalList
+          proposals={[proposal]}
+          onDecide={async () => {
+            throw new Error("the schema of `oxplow_bundled.accepted@1` changed");
+          }}
+        />
+      </RunnerContext.Provider>,
+    );
+  const first = draw();
+  fireEvent.click(first.getByTestId("proposal-approve-7"));
+  await waitFor(() => expect(first.getByTestId("proposal-error-7").textContent).toContain("changed"));
+  cleanup();
+  const again = draw();
+  expect(again.getByTestId("proposal-error-7").textContent).toContain("changed");
+  expect(reports).toEqual([{ label: "Approve: Set agentPromptAppend", command: "oxplow.config.set" }]);
 });
 
 test("a list narrows to a thread and to a setting, and draws nothing when empty", () => {

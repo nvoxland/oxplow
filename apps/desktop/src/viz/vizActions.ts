@@ -4,7 +4,7 @@
 /// page's (`page_text`), Add to Context its menu's. See
 /// `.context/extensions-pages.md`.
 import { fieldsOf, secretFields, shownFields, type Field } from "../components/SchemaForm/schemaFormModel.js";
-import { IpcCallError, needsConfirmation } from "../ipc-error.js";
+import type { Runner } from "../commands/runForPerson.js";
 import type { CommandOutcome, Drop, FormStart, PageAction, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { ranMessage, resultUri } from "../commandToast.js";
 
@@ -24,7 +24,11 @@ export interface VizActionDeps {
   toast(message: string, undo?: () => void, open?: () => void): void;
   /** Undo the run recorded as `auditId`, as the person. */
   undo(auditId: number): Promise<unknown>;
-  recordError(label: string, message: string): void;
+  /** The person's runner (`commands/runForPerson.ts`): a failure is
+   *  recorded once and shows beside `anchor`'s control. */
+  run: Runner["run"];
+  /** The control the action was pressed from (`actionAnchor`). */
+  anchor?: string;
   /** The page the command opens after a run with `result` (its
    *  `ui.open_after`, bound by the server), or null. */
   openAfter(command: string, result: unknown): Promise<string | null>;
@@ -108,30 +112,45 @@ export async function performVizAction(
   deps: VizActionDeps,
   drop: Drop | null = null,
 ): Promise<VizActionOutcome> {
-  try {
-    const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop);
-    // An `open` action ran nothing: it says the URI to open, as a link does.
-    if (action.open) {
-      const uri = (outcome.result as { opened?: unknown } | null)?.opened;
-      if (typeof uri !== "string") throw new Error(`${action.label}: the row has no URI to open`);
-      deps.openPage(uri, false);
-      return "done";
-    }
-    // A run that came back undoable offers its Undo.
-    const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
-    const uri = resultUri(outcome.result);
-    deps.toast(
-      ranMessage(action.label, outcome.result),
-      auditId === null ? undefined : () => void deps.undo(auditId).catch((e: unknown) => deps.recordError(`Undo ${action.label}`, e instanceof Error ? e.message : String(e))),
-      uri === null ? undefined : () => deps.openPage(uri, false),
-    );
-    await openAfterAction(action, outcome, deps);
-    return "done";
-  } catch (e) {
-    if (!confirmed && needsConfirmation(e)) return { confirm: e instanceof IpcCallError ? e.details : [] };
-    deps.recordError(action.label, e instanceof Error ? e.message : String(e));
-    return "failed";
+  const ran = await deps.run(
+    action.label,
+    async () => {
+      const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop);
+      // An `open` action ran nothing: it says the URI to open, as a link does.
+      if (action.open) {
+        const uri = (outcome.result as { opened?: unknown } | null)?.opened;
+        if (typeof uri !== "string") throw new Error(`${action.label}: the row has no URI to open`);
+      }
+      return outcome;
+    },
+    { anchor: deps.anchor, ...(action.command ? { command: action.command } : {}) },
+  );
+  if ("failure" in ran) {
+    const failure = ran.failure;
+    if (failure.kind === "confirm" && !confirmed) return { confirm: failure.details };
+    return failure.kind === "cancelled" ? "done" : "failed";
   }
+  const outcome = ran.value;
+  if (action.open) {
+    deps.openPage((outcome.result as { opened: string }).opened, false);
+    return "done";
+  }
+  // A run that came back undoable offers its Undo.
+  const auditId = outcome.inverse && outcome.audit_id != null ? outcome.audit_id : null;
+  const uri = resultUri(outcome.result);
+  deps.toast(
+    ranMessage(action.label, outcome.result),
+    auditId === null ? undefined : () => void deps.run(`Undo ${action.label}`, () => deps.undo(auditId)),
+    uri === null ? undefined : () => deps.openPage(uri, false),
+  );
+  await openAfterAction(action, outcome, deps);
+  return "done";
+}
+
+/** The key a page's action shows its failure by (`useActionAnchor`): its
+ *  button on that page. */
+export function actionAnchor(page: string, action: string): string {
+  return `viz/${page}/${action}`;
 }
 
 /** A command that declares where a person goes after it (`ui.open_after`)
@@ -143,19 +162,15 @@ export async function performVizAction(
 export async function openAfterAction(
   action: Pick<PageAction, "label" | "command" | "then">,
   outcome: CommandOutcome,
-  deps: Pick<VizActionDeps, "openAfter" | "openPage" | "closePage" | "recordError">,
+  deps: Pick<VizActionDeps, "openAfter" | "openPage" | "closePage" | "run" | "anchor">,
 ): Promise<void> {
   if (action.then === "stay") return;
   if (action.then === "close") {
     deps.closePage?.();
     return;
   }
-  try {
-    const page = await deps.openAfter(action.command ?? "", outcome.result);
-    if (page) deps.openPage(page, action.then === "replace");
-  } catch (e) {
-    deps.recordError(action.label, e instanceof Error ? e.message : String(e));
-  }
+  const page = await deps.run(action.label, () => deps.openAfter(action.command ?? "", outcome.result), { anchor: deps.anchor });
+  if (page.ok && page.value) deps.openPage(page.value, action.then === "replace");
 }
 
 /** The one text field a form action's form asks for, when that is all it

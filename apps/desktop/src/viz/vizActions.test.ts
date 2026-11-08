@@ -1,11 +1,23 @@
 import { expect, test } from "bun:test";
 
+import { createFailureStore, createInlineClaims } from "../commands/actionFailures.js";
+import { createRunner } from "../commands/runForPerson.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
 import { actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: false };
+
+/** A runner whose record is the log: `error <label>: <message>`. */
+function runnerTo(log: string[]) {
+  return createRunner({
+    report: async (e) => (log.push(`error ${e.label}: ${e.message}`), null),
+    failures: createFailureStore(),
+    claims: createInlineClaims(),
+    now: () => 0,
+  }).run;
+}
 
 function deps(fail?: Error, openPage: string | null = null) {
   const log: string[] = [];
@@ -16,7 +28,7 @@ function deps(fail?: Error, openPage: string | null = null) {
       return { result: {}, audit_id: 1, event_id: null, inverse: null };
     },
     toast: (m) => log.push(`toast ${m}`),
-    recordError: (label, m) => log.push(`error ${label}: ${m}`),
+    run: runnerTo(log),
     openAfter: async (command, result) => {
       log.push(`open_after ${command} ${JSON.stringify(result)}`);
       return openPage;
@@ -119,7 +131,7 @@ test("an undoable action's toast offers Undo, which undoes the run as the person
     undo: async (auditId) => {
       log.push(`undo ${auditId}`);
     },
-    recordError: () => {},
+    run: runnerTo([]),
     openAfter: async () => null,
     openPage: () => {},
   };
@@ -196,7 +208,7 @@ test("an `open` action opens the URI the press answered, with no toast, undo or 
     press: async () => ({ result: { opened: "oxplow:oxplow/file?path=a.rs" }, audit_id: null, event_id: null, inverse: null }),
     toast: (m) => log.push(`toast ${m}`),
     undo: async () => {},
-    recordError: (label, m) => log.push(`error ${label}: ${m}`),
+    run: runnerTo(log),
     openAfter: async () => {
       log.push("open_after");
       return null;
@@ -225,7 +237,7 @@ test("an action whose result names a thing offers an Open link to it", async () 
       log.push(`toast ${m} ${open ? "with open" : "without"}`);
       open?.();
     },
-    recordError: () => {},
+    run: runnerTo([]),
     openAfter: async () => null,
     openPage: (page) => log.push(`open ${page}`),
   };

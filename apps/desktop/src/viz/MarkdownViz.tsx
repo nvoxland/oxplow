@@ -10,6 +10,7 @@
  * the action's edited field (`editField`) as a form action's input;
  * Save keeps the page.
  */
+import { InlineError } from "../kit/InlineError.js";
 import { useState } from "react";
 
 import type { VizRun } from "../api.js";
@@ -102,6 +103,7 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: VizRun; streamI
           command={action.command ?? ""}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
+          details={form.pendingDetails}
           testIdPrefix="viz-markdown-confirm"
         />
       ) : null}
@@ -120,6 +122,8 @@ function MarkdownEditor({ run, streamId, action, saved }: { run: VizRun; streamI
         <p data-testid="viz-markdown-error" className="ox-error">
           {error}
         </p>
+      ) : form.failure ? (
+        <InlineError failure={form.failure} testId="viz-markdown-error" />
       ) : null}
       <div className="ox-markdown-editor-actions">
         <button type="button" data-testid="viz-markdown-save" disabled={!dirty || form.busy} onClick={() => draft !== null && save(draft)}>

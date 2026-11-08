@@ -4,9 +4,8 @@
 /// again confirmed. Pages that hold their own confirm (page actions, form
 /// pages) keep it inline; this is for runs with nowhere to show it.
 import { runCommand, undoCommand } from "./api.js";
-import { recordOpError } from "./opErrors.js";
+import { runner, type Runner } from "./commands/runForPerson.js";
 import { showToast } from "./components/toastStore.js";
-import { needsConfirmation } from "./ipc-error.js";
 import type { CommandOutcome } from "./tauri-bridge/generated/bindings.js";
 import { ranMessage, resultUri, undoneMessage } from "./commandToast.js";
 
@@ -14,6 +13,9 @@ export interface PendingCommand {
   label: string;
   command: string;
   input: unknown;
+  /** What it asks about beyond itself, one line each (the permissions a
+   *  deploy adds). */
+  details?: string[];
 }
 
 export interface PersonCommandDeps {
@@ -24,7 +26,9 @@ export interface PersonCommandDeps {
   toast(message: string, undo?: () => void, open?: () => void): void;
   /** Open the page a result's `uri` names. */
   openPage?(uri: string): void;
-  recordError(label: string, message: string): void;
+  /** The person's runner (`commands/runForPerson.ts`): a failure is
+   *  recorded once; with no control to show it beside, it is the toast's. */
+  run: Runner["run"];
 }
 
 export function createPersonCommands(deps: PersonCommandDeps) {
@@ -38,16 +42,18 @@ export function createPersonCommands(deps: PersonCommandDeps) {
    *  person's confirmation (truthy exactly when it ran). */
   // Taking a toast's Undo: the run undone, as the person (tsk975).
   const undo = async (label: string, auditId: number, result?: unknown) => {
-    try {
-      await deps.undo(auditId);
-      deps.toast(undoneMessage(label, result));
-    } catch (e) {
-      deps.recordError(`Undo ${label}`, e instanceof Error ? e.message : String(e));
-    }
+    const ran = await deps.run(`Undo ${label}`, () => deps.undo(auditId));
+    if (ran.ok) deps.toast(undoneMessage(label, result));
   };
   const attempt = async (p: PendingCommand, confirmed: boolean): Promise<CommandOutcome | null> => {
-    try {
-      const out = await deps.runCommand(p.command, p.input, confirmed);
+    const ran = await deps.run(p.label, () => deps.runCommand(p.command, p.input, confirmed), { command: p.command });
+    if ("failure" in ran) {
+      const f = ran.failure;
+      set(f.kind === "confirm" && !confirmed ? { label: p.label, command: p.command, input: p.input, details: f.details } : null);
+      return null;
+    }
+    {
+      const out = ran.value;
       set(null);
       // A run that came back undoable offers its Undo.
       const auditId = out.inverse && out.audit_id != null ? out.audit_id : null;
@@ -58,14 +64,6 @@ export function createPersonCommands(deps: PersonCommandDeps) {
         uri && deps.openPage ? () => deps.openPage?.(uri) : undefined,
       );
       return out;
-    } catch (e) {
-      if (!confirmed && needsConfirmation(e)) {
-        set(p);
-        return null;
-      }
-      set(null);
-      deps.recordError(p.label, e instanceof Error ? e.message : String(e));
-      return null;
     }
   };
   return {
@@ -104,5 +102,5 @@ export const personCommands: PersonCommands = createPersonCommands({
   toast: (message, undo, open) =>
     showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
   openPage: openPersonUri,
-  recordError: (label, message) => recordOpError({ label, message }),
+  run: runner.run,
 });

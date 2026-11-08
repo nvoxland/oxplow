@@ -95,7 +95,9 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { actionAnchor, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
+import { InlineError } from "../kit/InlineError.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
 import {
   chainedDrops,
@@ -277,9 +279,7 @@ function MarksBar({ run, actions, marks }: { run: VizRun; actions: VizActionsSta
         {marked.length} selected
       </span>
       {bulkOffers(run, marked).map(({ action, rows }) => (
-        <button key={action.id} type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
-          {actions.busy === action.id ? `${action.label}…` : action.label}
-        </button>
+        <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} />
       ))}
       <button type="button" data-testid="viz-marks-clear" onClick={() => marks.set([], null)}>
         Clear
@@ -324,11 +324,12 @@ interface VizViewProps {
  *  the viz is on (in its place with `replace`), else the window. */
 function useOpenAfter() {
   const nav = useOptionalPageNavigation();
+  const { run } = useRunner();
   return {
     openAfter: commandOpenAfter,
     openPage: (page: string, replace: boolean) => void (nav?.openRef ?? openRefInWindow)(page, { replace }),
     closePage: nav?.close,
-    recordError: (label: string, message: string) => recordOpError({ label, message }),
+    run,
   };
 }
 
@@ -376,7 +377,10 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
     try {
       for (let i = 0; i < presses.length; i++) {
         const p = presses[i]!;
-        const quiet = i < presses.length - 1 ? { ...deps, toast: () => {} } : deps;
+        // A failure shows beside the action's button on this page (a row's
+        // action has none there: it is the toast's).
+        const anchored = { ...deps, anchor: actionAnchor(run.config.id, action.id) };
+        const quiet = i < presses.length - 1 ? { ...anchored, toast: () => {} } : anchored;
         const outcome = await performVizAction(action, run, p.row, streamId, confirmed, quiet, p.drop);
         if (typeof outcome === "object") {
           setPending({ action, presses: presses.slice(i), details: outcome.confirm });
@@ -424,10 +428,27 @@ function PartButtons({ run, actions }: { run: VizRun; actions: VizActionsState }
 }
 
 function PartButton({ action: a, run, actions }: { action: VizRun["config"]["actions"][number]; run: VizRun; actions: VizActionsState }) {
+  const failure = useActionAnchor(actionAnchor(run.config.id, a.id));
   return (
-    <button type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
-      {actions.busy === a.id ? `${a.label}…` : a.label}
-    </button>
+    <>
+      <button type="button" className="ox-button" data-testid={`viz-action-${a.id}`} disabled={actions.busy !== null || !actionEnabled(a, run.result)} title={actionDoes(a)} onClick={() => actions.run(a, null)}>
+        {actions.busy === a.id ? `${a.label}…` : a.label}
+      </button>
+      {failure ? <InlineError failure={failure} testId={`viz-action-error-${a.id}`} /> : null}
+    </>
+  );
+}
+
+/** A bulk action's button while rows are marked; its failure beside it. */
+function BulkButton({ run, action, rows, actions }: { run: VizRun; action: DeclaredPageAction; rows: Record<string, SqlCell>[]; actions: VizActionsState }) {
+  const failure = useActionAnchor(actionAnchor(run.config.id, action.id));
+  return (
+    <>
+      <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
+        {actions.busy === action.id ? `${action.label}…` : action.label}
+      </button>
+      {failure ? <InlineError failure={failure} testId={`viz-action-error-${action.id}`} /> : null}
+    </>
   );
 }
 
@@ -1247,6 +1268,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
           command={start.command.id}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
+          details={form.pendingDetails}
           testIdPrefix="viz-form-confirm"
         />
       ) : null}
@@ -1278,6 +1300,7 @@ function FormViz({ run, streamId }: { run: VizRun; streamId: string | null }) {
         }
         testIdPrefix="viz-form-fields"
       />
+      {form.failure ? <InlineError failure={form.failure} testId="viz-form-error" /> : null}
     </div>
   );
 }
@@ -1403,6 +1426,7 @@ function ActionPrompt({
           command={start.command.id}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
+          details={form.pendingDetails}
           testIdPrefix={`${testId}-confirm`}
         />
       ) : null}
@@ -1416,6 +1440,7 @@ function ActionPrompt({
         onCancel={onClose}
         testId={`${testId}-fields`}
       />
+      {form.failure ? <InlineError failure={form.failure} testId={`${testId}-error`} /> : null}
     </div>
   );
 }
@@ -1450,6 +1475,7 @@ export function FormModal({
           command={start.command.id}
           onConfirm={() => void form.submit(form.pending!, true)}
           onCancel={form.cancel}
+          details={form.pendingDetails}
           testIdPrefix={`${testId}-confirm`}
         />
       ) : null}
@@ -1469,6 +1495,7 @@ export function FormModal({
           testIdPrefix={`${testId}-fields`}
         />
       ) : null}
+      {form.failure ? <InlineError failure={form.failure} testId={`${testId}-error`} /> : null}
     </TabModal>
   );
 }
