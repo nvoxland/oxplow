@@ -213,6 +213,48 @@ mod tests {
     /// What a person's run opens next is bound here, by the bus's own
     /// tokenizer, from the run's result: a field the result lacks opens
     /// nothing and says why, rather than a page with an empty id.
+    /// A person's run that fails says which audit row recorded it, so the
+    /// window's record of the failure links the run.
+    #[tokio::test]
+    async fn a_failed_run_says_its_audit_row() {
+        let (svc, _dir) = services().await;
+        let err = crate::dispatch(
+            "run_command",
+            json!({
+                "id": "oxplow.work_item.transition",
+                "input": { "uri": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow", "to": "done" },
+                "confirmed": true,
+            }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        let audit = err.audit_id.expect("the failed run's audit row").get();
+        let row = svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT command, outcome FROM command_audit WHERE id = ?1",
+                    [audit],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(row.0, "oxplow.work_item.transition");
+        assert_ne!(row.1, "ok");
+        // A run that succeeds, or fails before any run, names none.
+        let unknown = crate::dispatch(
+            "run_command",
+            json!({ "id": "oxplow.nope", "input": {}, "confirmed": true }),
+            &svc,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(unknown.audit_id, None);
+    }
+
     #[tokio::test]
     async fn the_page_a_run_opens_is_bound_from_its_result() {
         let (svc, _dir) = services().await;

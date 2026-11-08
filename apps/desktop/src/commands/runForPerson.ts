@@ -12,7 +12,7 @@
 ///   shown beside the control that ran it (`anchor`), and toasted only when
 ///   no such control is on screen.
 /// It never throws, and never toasts a success (callers keep their Undo).
-import { fieldErrors, ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
+import { fieldErrors, ipcErrorAuditId, ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
 import { reportOpError, type OpErrorInput } from "../opErrors.js";
 import { failureStore, inlineClaims, type FailureStore, type InlineClaims } from "./actionFailures.js";
 
@@ -31,6 +31,8 @@ export interface RunOptions {
   command?: string;
   /** The thread it ran for; absent, the one on screen. */
   threadId?: string | null;
+  /** An approval: the proposal it decided, for the record. */
+  proposal?: number;
   /** The caller draws fields (a form): invalid input naming one is its to
    *  show under that field. Without, it is a failure like any other. */
   showsFields?: boolean;
@@ -86,6 +88,9 @@ export function createRunner(deps: RunnerDeps) {
         message: failure.message,
         ...(opts.command ? { command: opts.command } : {}),
         ...(opts.threadId !== undefined ? { threadId: opts.threadId } : {}),
+        // What recorded the run: the daemon's audit row, an approval's proposal.
+        ...(ipcErrorAuditId(e) !== null ? { auditId: ipcErrorAuditId(e) } : {}),
+        ...(opts.proposal !== undefined ? { proposalId: opts.proposal } : {}),
       });
       if (anchor) {
         const at = deps.now();

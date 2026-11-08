@@ -291,13 +291,16 @@ markdown itself, nor edits it in a `<textarea>`.
   component or core screen keeps its own error state for a command, and
   an extension needs no error code: a component draws only a field error.
   The record is `recordOpError` / `reportOpError` (`opErrors.ts`) as
-  `oxplow.ui.report_error`, and the dataset `v_op_error` — the client keeps
+  `oxplow.ui.report_error` (with the failed run's audit row, which the
+  daemon's error names, and an approval's proposal), and the dataset
+  `v_op_error` — the client keeps
   nothing, so the list survives a reload and the agent reads the same rows
   (the always-on agent text and the `oxplow-codebase` skill say so, so
   "can you see that error?" needs no screenshot). The bell counts it
   (red), and the **Alerts page** lists it under Failed operations, each
   row expanding (`columns[].expand`, the `alerts-operation` page) into how
-  it ended and its output. Mark Seen runs `oxplow.op_error.mark_seen` (it
+  it ended and its output, its Run column linking what recorded it (an
+  approval's proposal, else the command's page, which lists its runs). Mark Seen runs `oxplow.op_error.mark_seen` (it
   stops being red), Dismiss `oxplow.op_error.dismiss`, "Clear failed
   operations" `dismiss_all`. A failure that isn't a person's command (a
   read, a load) uses `recordOpError` directly; the window-wide banner in

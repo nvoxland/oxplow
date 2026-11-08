@@ -1,6 +1,6 @@
 //! What the person saw go wrong in the app (tsk1072): `oxplow.ui.report_error`
 //! records an operation that failed in front of them — a merge, a save,
-//! a query — as `ui.op_failed@1`, so the agent can read what they read
+//! a query — as `ui.op_failed@2`, so the agent can read what they read
 //! (`v_op_error`, the output through `read_event_content`). A person's
 //! only: the app reports what it showed, and an agent never reports one.
 //! The `ui` namespace expires like the agent's (30 days, output 14).
@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use oxplow_db::event_content_store::put_json_tx;
 use oxplow_db::event_log_store::anchors_for_thread_tx;
-use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV1};
+use oxplow_domain::events::schema::{UiOpFailed, UiOpFailedV2};
 use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::{Anchors, CommandError, StreamId, ThreadId};
 use schemars::JsonSchema;
@@ -57,6 +57,14 @@ pub struct ReportErrorInput {
     /// Captured stdout: stored as the event's `output` body.
     #[serde(default)]
     pub stdout: Option<String>,
+    /// A command whose run failed: the audit row that recorded it
+    /// (`command_audit.id`, the window's IPC error says it).
+    #[serde(default)]
+    pub audit_id: Option<i64>,
+    /// An approval that failed: the proposal (`command_proposal.id`), also
+    /// the event's subject.
+    #[serde(default)]
+    pub proposal: Option<i64>,
 }
 
 /// An empty string is nothing to show.
@@ -98,7 +106,7 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
     } else {
         Some(put_json_tx(ctx.conn, "ui", &Value::Object(body))?)
     };
-    let mut event = ctx.events.typed::<UiOpFailed>(&UiOpFailedV1 {
+    let mut event = ctx.events.typed::<UiOpFailed>(&UiOpFailedV2 {
         label: input.label,
         command: given(input.command),
         message: given(input.message),
@@ -107,6 +115,8 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
         signal: given(input.signal),
         duration_ms: input.duration_ms,
         output,
+        audit_id: input.audit_id,
+        proposal: input.proposal,
     });
     if let Some(thread) = thread {
         event = event
@@ -117,6 +127,12 @@ fn report(ctx: &TxCtx<'_>, input: ReportErrorInput) -> Result<HandlerOutput, Com
             stream_id: Some(stream),
             ..Anchors::default()
         });
+    }
+    // An approval that failed is about its proposal too.
+    if let Some(proposal) = input.proposal {
+        let mut subject = event.subject.clone();
+        subject.push(oxplow_domain::uri::build::proposal_uri(proposal));
+        event = event.with_subject(subject);
     }
     Ok(HandlerOutput {
         result: json!({ "event": event.id.as_str() }),

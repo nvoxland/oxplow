@@ -36,6 +36,10 @@ export interface OpErrorInput {
   durationMs?: number;
   /** Signal name if the child was killed by signal (SIGKILL, SIGTERM, …). */
   signal?: string | null;
+  /** A command whose run failed: the audit row that recorded it. */
+  auditId?: number | null;
+  /** An approval that failed: its proposal. */
+  proposalId?: number | null;
 }
 
 /** A failed operation as `v_op_error` holds it. */
@@ -79,6 +83,8 @@ export function reportInput(entry: OpErrorInput, at: { thread: string | null; st
   else if (at.stream !== null) input.stream = at.stream;
   if (entry.signal) input.signal = entry.signal;
   if (entry.durationMs != null) input.duration_ms = Math.round(entry.durationMs);
+  if (entry.auditId != null) input.audit_id = entry.auditId;
+  if (entry.proposalId != null) input.proposal = entry.proposalId;
   return input;
 }
 

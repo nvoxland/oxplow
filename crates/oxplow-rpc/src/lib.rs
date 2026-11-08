@@ -100,7 +100,9 @@ macro_rules! rpc_dispatch {
             } else {
                 args
             };
-            match name {
+            // A person's run that fails says which audit row recorded it
+            // (`IpcError::audit_id`), so the window's record links the run.
+            let (out, audited) = ::oxplow_app::commands::tracking_failed_audit(Box::pin(async move { match name {
                 $(
                     $cname => {
                         #[derive(serde::Deserialize)]
@@ -156,7 +158,11 @@ macro_rules! rpc_dispatch {
                     }
                 )*
                 _ => Err($crate::IpcError::not_found()),
-            }
+            } })).await;
+            out.map_err(|mut e| {
+                e.audit_id = e.audit_id.or(audited.and_then(std::num::NonZeroI64::new));
+                e
+            })
         }
 
         /// Every command wire-name registered in this dispatch table.

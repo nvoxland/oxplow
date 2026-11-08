@@ -19,7 +19,8 @@ use oxplow_session::{SessionError, ThreadError};
 pub struct IpcError {
     pub code: String,
     pub message: String,
-    pub cause: Option<String>,
+    /// Boxed, which keeps the error small (clippy's `result_large_err`).
+    pub cause: Option<Box<str>>,
     /// For `INVALID` input, the field it names (a JSON pointer, `/title`),
     /// so a form shows the message under that field.
     #[serde(default)]
@@ -29,6 +30,13 @@ pub struct IpcError {
     /// adds).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub details: Vec<String>,
+    /// A person's command whose run failed: the audit row that recorded it
+    /// (`command_audit.id`), so the window's record of the failure
+    /// (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
+    /// (row ids start at 1), which keeps the error small.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(type = Option<oxplow_domain::JsNumber>)]
+    pub audit_id: Option<std::num::NonZeroI64>,
 }
 
 impl IpcError {
@@ -39,6 +47,7 @@ impl IpcError {
             cause: None,
             field: None,
             details: Vec::new(),
+            audit_id: None,
         }
     }
 
@@ -49,6 +58,7 @@ impl IpcError {
             cause: None,
             field: None,
             details: Vec::new(),
+            audit_id: None,
         }
     }
 
@@ -59,11 +69,12 @@ impl IpcError {
             cause: None,
             field: None,
             details: Vec::new(),
+            audit_id: None,
         }
     }
 
     pub fn with_cause(mut self, cause: impl ToString) -> Self {
-        self.cause = Some(cause.to_string());
+        self.cause = Some(cause.to_string().into_boxed_str());
         self
     }
 }
@@ -104,6 +115,7 @@ impl From<oxplow_domain::CommandError> for IpcError {
             cause: None,
             field,
             details,
+            audit_id: None,
         }
     }
 }
@@ -123,6 +135,7 @@ impl From<DomainError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             DomainError::NotFound => Self::not_found(),
             DomainError::Invariant(msg) => Self {
@@ -131,6 +144,7 @@ impl From<DomainError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             DomainError::Constraint(msg) => Self {
                 code: "CONSTRAINT".into(),
@@ -138,6 +152,7 @@ impl From<DomainError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             DomainError::Busy(msg) => Self {
                 code: "BUSY".into(),
@@ -145,6 +160,7 @@ impl From<DomainError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             DomainError::Storage(msg) => Self {
                 code: "STORAGE".into(),
@@ -152,6 +168,7 @@ impl From<DomainError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
         }
     }
@@ -166,6 +183,7 @@ impl From<SessionError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             SessionError::InWorktree(p) => Self {
                 code: "IN_WORKTREE".into(),
@@ -173,6 +191,7 @@ impl From<SessionError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             SessionError::PrimaryExists => Self {
                 code: "PRIMARY_EXISTS".into(),
@@ -180,6 +199,7 @@ impl From<SessionError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             SessionError::PrimaryMissing => Self {
                 code: "PRIMARY_MISSING".into(),
@@ -187,6 +207,7 @@ impl From<SessionError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             SessionError::NotAWorktree(p) => Self {
                 code: "INVALID".into(),
@@ -194,6 +215,7 @@ impl From<SessionError> for IpcError {
                 cause: None,
                 field: Some("/worktree".into()),
                 details: Vec::new(),
+                audit_id: None,
             },
             SessionError::DuplicateWorktreeSlug(slug) => Self {
                 code: "DUPLICATE_WORKTREE_SLUG".into(),
@@ -201,6 +223,7 @@ impl From<SessionError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             SessionError::Vcs(e) => IpcError::from(DomainError::from(e.clone())),
             SessionError::Storage(e) => IpcError::from(e.clone()),
@@ -218,6 +241,7 @@ impl From<ThreadError> for IpcError {
                 cause: None,
                 field: None,
                 details: Vec::new(),
+                audit_id: None,
             },
             ThreadError::Storage(e) => IpcError::from(e),
         }

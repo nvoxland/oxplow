@@ -50,4 +50,9 @@ test("approving a proposal whose run fails keeps the failure on its card, record
   const failed = async () =>
     (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_op_error" })).rows[0]?.[0];
   await expect.poll(failed).toBe(1);
+  // The record links the proposal and the audit row of the run that failed.
+  const linked = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
+    sql: "SELECT o.proposal_id, a.outcome FROM v_op_error o JOIN v_command_audit a ON a.id = o.audit_id",
+  });
+  expect(linked.rows).toEqual([[Number(id), "error"]]);
 });

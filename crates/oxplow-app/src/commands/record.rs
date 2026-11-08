@@ -5,6 +5,29 @@
 use super::*;
 use oxplow_domain::run::RunContext;
 
+tokio::task_local! {
+    /// The audit row of the last run that failed in this task (a caller's
+    /// [`tracking_failed_audit`] scope).
+    static FAILED_AUDIT: std::cell::Cell<Option<i64>>;
+}
+
+fn note_failed_audit(id: i64) {
+    let _ = FAILED_AUDIT.try_with(|c| c.set(Some(id)));
+}
+
+/// Run `fut`, and say which audit row recorded a run in it that failed —
+/// the last one (a composite's own, after its children's). The window's
+/// front door (`oxplow_rpc::dispatch`) hands it to the window with the
+/// error, so the window's record of the failure links the run.
+pub async fn tracking_failed_audit<F: std::future::Future>(fut: F) -> (F::Output, Option<i64>) {
+    FAILED_AUDIT
+        .scope(std::cell::Cell::new(None), async {
+            let out = fut.await;
+            (out, FAILED_AUDIT.with(|c| c.get()))
+        })
+        .await
+}
+
 impl CommandBus {
     /// Audit a run that wrote nothing (invalid input, a denied invoker, a
     /// failed handler). Best effort: an audit failure must not mask the
@@ -57,15 +80,17 @@ impl CommandBus {
             _ => oxplow_domain::run::Outcome::Failed,
         };
         let (run_c, error_c) = (run.clone(), row.error.clone());
-        if let Err(e) = self
+        match self
             .db
             .transaction(move |tx| {
-                insert_tx(tx, &row)?;
-                oxplow_db::extension_run_store::record_tx(tx, &run_c, ended, error_c.as_deref())
+                let id = insert_tx(tx, &row)?;
+                oxplow_db::extension_run_store::record_tx(tx, &run_c, ended, error_c.as_deref())?;
+                Ok(id)
             })
             .await
         {
-            tracing::warn!(error = %e, command = %spec.id, "command audit write failed");
+            Ok(id) => note_failed_audit(id),
+            Err(e) => tracing::warn!(error = %e, command = %spec.id, "command audit write failed"),
         }
     }
 

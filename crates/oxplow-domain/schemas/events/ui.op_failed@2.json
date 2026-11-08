@@ -27,8 +27,16 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`ui.op_failed@1` (tsk1072): an operation the person started in the\napp failed, as the app showed it (`oxplow.ui.report_error`). Its captured\nstderr and stdout are the `output` body.",
+  "description": "`ui.op_failed@2`: an operation the person started in the app failed, as\nthe app showed it (`oxplow.ui.report_error`). Its captured stderr and\nstdout are the `output` body. v2 adds the run's audit row and an\napproval's proposal (v1 had neither: it upcasts unchanged).",
   "properties": {
+    "audit_id": {
+      "description": "A command whose run failed: its audit row (`command_audit.id`).",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "command": {
       "description": "The command it ran, shell-style (\"git merge bugfixes\").",
       "type": [
@@ -74,6 +82,14 @@
       ],
       "description": "Its captured output, `{ stderr?, stdout? }`."
     },
+    "proposal": {
+      "description": "An approval that failed: its proposal (`command_proposal.id`).",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "signal": {
       "description": "The signal that killed the process (`SIGKILL`).",
       "type": [
@@ -92,6 +108,6 @@
   "required": [
     "label"
   ],
-  "title": "UiOpFailedV1",
+  "title": "UiOpFailedV2",
   "type": "object"
 }

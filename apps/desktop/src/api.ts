@@ -25,7 +25,7 @@ import {
   metricSpecs as metricSpecRows,
   type MetricSpec,
 } from "./metricsSql.js";
-import { IpcCallError, ipcErrorCode, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
+import { IpcCallError, ipcErrorCode, ipcErrorAuditId, ipcErrorDetails, ipcErrorField, ipcErrorMessage } from "./ipc-error.js";
 import type {
   AiSettings,
   AssistantContext,
@@ -81,6 +81,7 @@ function unwrap<T>(result: { status: "ok"; data: T } | { status: "error"; error:
     ipcErrorCode(result.error),
     ipcErrorField(result.error),
     ipcErrorDetails(result.error),
+    ipcErrorAuditId(result.error),
   );
 }
 

@@ -2072,12 +2072,13 @@ impl EventType for KnowledgePageRecorded {
     type Payload = KnowledgePageRecordedV2;
 }
 
-/// `ui.op_failed@1` (tsk1072): an operation the person started in the
-/// app failed, as the app showed it (`oxplow.ui.report_error`). Its captured
-/// stderr and stdout are the `output` body.
+/// `ui.op_failed@2`: an operation the person started in the app failed, as
+/// the app showed it (`oxplow.ui.report_error`). Its captured stderr and
+/// stdout are the `output` body. v2 adds the run's audit row and an
+/// approval's proposal (v1 had neither: it upcasts unchanged).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct UiOpFailedV1 {
+pub struct UiOpFailedV2 {
     /// What the person was doing ("Merge bugfixes into current").
     pub label: String,
     /// The command it ran, shell-style ("git merge bugfixes").
@@ -2101,13 +2102,28 @@ pub struct UiOpFailedV1 {
     /// Its captured output, `{ stderr?, stdout? }`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<ContentRef>,
+    /// A command whose run failed: its audit row (`command_audit.id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_id: Option<i64>,
+    /// An approval that failed: its proposal (`command_proposal.id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<i64>,
 }
 
 pub struct UiOpFailed;
 impl EventType for UiOpFailed {
     const TYPE: &'static str = "ui.op_failed";
-    const V: u32 = 1;
-    type Payload = UiOpFailedV1;
+    const V: u32 = 2;
+    type Payload = UiOpFailedV2;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            // v1 is v2 with neither link.
+            1 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "ui.op_failed@{from_v} has no upcast"
+            ))),
+        }
+    }
 }
 
 /// The failed operation a person's mark is about: a `ui.op_failed` event.
@@ -2394,7 +2410,7 @@ mod tests {
                 ("thread.checkpoint", 2),
                 ("ui.op_error.dismissed", 1),
                 ("ui.op_error.seen", 1),
-                ("ui.op_failed", 1),
+                ("ui.op_failed", 2),
                 ("vcs.commit.indexed", 2),
                 ("vcs.head.moved", 2),
                 ("work_item.commented", 2),

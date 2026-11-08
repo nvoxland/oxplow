@@ -84,6 +84,7 @@ export function ProposalCard({
       await runner.run(`${approve ? "Approve" : "Decline"}: ${s.title}`, () => onDecide(proposal, approve), {
         anchor,
         command: proposal.command,
+        proposal: id,
       });
     } finally {
       setBusy(false);

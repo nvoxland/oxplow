@@ -3336,6 +3336,7 @@ export type IpcError = IpcError_Serialize | IpcError_Deserialize;
 export type IpcError_Deserialize = {
 	code: string,
 	message: string,
+	/**  Boxed, which keeps the error small (clippy's `result_large_err`). */
 	cause: string | null,
 	/**
 	 *  For `INVALID` input, the field it names (a JSON pointer, `/title`),
@@ -3348,6 +3349,13 @@ export type IpcError_Deserialize = {
 	 *  adds).
 	 */
 	details?: string[],
+	/**
+	 *  A person's command whose run failed: the audit row that recorded it
+	 *  (`command_audit.id`), so the window's record of the failure
+	 *  (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
+	 *  (row ids start at 1), which keeps the error small.
+	 */
+	auditId?: number | null,
 };
 
 /**
@@ -3361,6 +3369,7 @@ export type IpcError_Deserialize = {
 export type IpcError_Serialize = {
 	code: string,
 	message: string,
+	/**  Boxed, which keeps the error small (clippy's `result_large_err`). */
 	cause: string | null,
 	/**
 	 *  For `INVALID` input, the field it names (a JSON pointer, `/title`),
@@ -3373,6 +3382,13 @@ export type IpcError_Serialize = {
 	 *  adds).
 	 */
 	details?: string[],
+	/**
+	 *  A person's command whose run failed: the audit row that recorded it
+	 *  (`command_audit.id`), so the window's record of the failure
+	 *  (`oxplow.ui.report_error`) links the run. Set by `dispatch`. Non-zero
+	 *  (row ids start at 1), which keeps the error small.
+	 */
+	auditId?: number | null,
 };
 
 export type ItemBody =

@@ -1,0 +1,15 @@
+# A person's command that failed links what recorded it: an approval its
+# proposal, any other run its command (whose page lists the runs, this
+# one's audit row among them). One the app reported with neither links none.
+given:
+  - { command: oxplow.ui.report_error, input: { label: "Approve: Delete the task", command: oxplow.work_item.delete, message: no such task, audit_id: 41, proposal: 3 } }
+  - { command: oxplow.ui.report_error, input: { label: Finish, command: oxplow.work_item.transition, message: closed, audit_id: 42 } }
+  - { command: oxplow.ui.report_error, input: { label: Copy, message: no clipboard } }
+when: { page: alerts }
+expect:
+  loaders:
+    operations:
+      rows:
+        - { label: Copy, run: null, run_uri: null }
+        - { label: Finish, run: oxplow.work_item.transition, run_uri: "oxplow:oxplow/command?command=oxplow.work_item.transition" }
+        - { label: "Approve: Delete the task", run: Proposal 3, run_uri: "oxplow:oxplow/proposal?id=3" }

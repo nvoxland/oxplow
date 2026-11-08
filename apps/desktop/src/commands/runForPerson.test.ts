@@ -54,6 +54,17 @@ test("a failure is recorded once and shown at the control that ran it", async ()
   off();
 });
 
+// The record links what recorded the run: the audit row the daemon's error
+// names, and an approval's proposal.
+test("a failure's record names the run's audit row and the proposal it decided", async () => {
+  const { reports, runner } = setup();
+  await runner.run("Approve: Delete", () => Promise.reject(new IpcCallError("gone", "INVALID", null, [], 41)), {
+    command: "oxplow.work_item.delete",
+    proposal: 3,
+  });
+  expect(reports).toEqual([{ label: "Approve: Delete", message: "gone", command: "oxplow.work_item.delete", auditId: 41, proposalId: 3 }]);
+});
+
 test("a failure with no control on screen is left to the toast", async () => {
   const { reports, claims, runner } = setup();
   await runner.run("Close", () => Promise.reject(new Error("gone")), { anchor: "action/close" });

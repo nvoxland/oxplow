@@ -59,6 +59,9 @@ export class IpcCallError extends Error {
     /** What a `NEEDS_CONFIRMATION` asks about beyond the command, one line
      *  each (the permissions a deploy adds). */
     readonly details: string[] = [],
+    /** A person's command whose run failed: the audit row that recorded it
+     *  (`command_audit.id`), for the window's record of the failure. */
+    readonly auditId: number | null = null,
   ) {
     super(message);
     this.name = "IpcCallError";
@@ -77,6 +80,15 @@ export function fieldErrors(e: unknown): Record<string, string> | null {
 /** The command needs the person to confirm it; call again confirmed. */
 export function needsConfirmation(e: unknown): boolean {
   return e instanceof IpcCallError && e.code === "NEEDS_CONFIRMATION";
+}
+
+/** The audit row a failed call's error names (`auditId`), or null. */
+export function ipcErrorAuditId(err: unknown): number | null {
+  if (err && typeof err === "object") {
+    const id = (err as { auditId?: unknown }).auditId;
+    if (typeof id === "number") return id;
+  }
+  return null;
 }
 
 /** What a failed call's error lists for the person (`details`), if anything. */

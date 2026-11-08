@@ -4,11 +4,13 @@
     code;
     field;
     details;
-    constructor(message, code, field = null, details = []) {
+    auditId;
+    constructor(message, code, field = null, details = [], auditId = null) {
       super(message);
       this.code = code;
       this.field = field;
       this.details = details;
+      this.auditId = auditId;
       this.name = "IpcCallError";
     }
   }

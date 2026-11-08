@@ -7,6 +7,8 @@ SELECT e.id AS event_id, e.at, e.stream_id,
        CAST(json_extract(e.payload, '$.signal') AS TEXT) AS signal,
        CAST(json_extract(e.payload, '$.duration_ms') AS INTEGER) AS duration_ms,
        CAST(json_extract(e.payload, '$.output.size') AS INTEGER) AS output_size,
+       CAST(json_extract(e.payload, '$.audit_id') AS INTEGER) AS audit_id,
+       CAST(json_extract(e.payload, '$.proposal') AS INTEGER) AS proposal_id,
        e.payload_expired_at,
        -- Dismissing it is seeing it.
        CAST(EXISTS (SELECT 1 FROM ref('event') m
