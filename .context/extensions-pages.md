@@ -216,7 +216,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   is shown, so it is in the `#` and a change replaces the entry; a
   `switch`'s param is a filter by default. `selection` is derived, never
   written: a column `select`s the param, the rail shows the picked row
-  instead of an input, it is in the `#`, and a pick pushes an entry. `view`
+  instead of an input (not on a page that fills: its viz draws the picks), it is in the `#`, and a pick pushes an entry. `view`
   rides the `#` like a filter but is state the page or the system sets:
   the rail never draws it (not in Filters, not counted for Reset) and a
   person never edits it; a `for:` page may take one (`ParamRole::rides_view`
