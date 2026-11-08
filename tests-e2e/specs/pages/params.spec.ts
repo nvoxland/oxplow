@@ -57,11 +57,11 @@ view:
     empty: Click a commit to see its files.
 `;
 
-const ROUTE = "oxplow:oxplow/page?page=e2e-params/history";
+const ROUTE = "oxplow:oxplow/page?page=e2e_params/history";
 
 async function openHistory(page: Page, daemon: Daemon) {
   await installExtension(daemon, "e2e-params", { files: { "pages/history.yaml": history } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-params/history");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_params/history");
   const host = shown(page).getByTestId("page-host");
   return {
     host,
@@ -89,7 +89,7 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(page.getByTestId("menu-item-action-page-copy")).toBeVisible();
   await page.getByTestId("menu-item-action-page-about").click();
   await expect(page.getByTestId("page-about-definition")).toHaveText("e2e-params/pages/history.yaml");
-  await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=e2e-params/history");
+  await expect(page.getByTestId("page-about-uri")).toContainText("oxplow:oxplow/page?page=e2e_params/history");
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("page-about-modal")).not.toBeVisible();
 

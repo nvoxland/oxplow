@@ -21,7 +21,7 @@ view:
 
 test("only the switched child shows, and changing the param switches it", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-switch", { files: { "pages/dingo.yaml": spec } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-switch/dingo");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_switch/dingo");
   const host = shown(page).getByTestId("page-host");
   await expect(host.getByTestId("node-coast")).toContainText("Dingoes of the coast.");
   await expect(host.getByTestId("node-desert")).toHaveCount(0);

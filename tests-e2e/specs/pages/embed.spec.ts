@@ -10,7 +10,7 @@ loaders:
 view:
   stack:
   - { id: intro, title: Intro, viz: table, from: intro, columns: [{ key: line, label: Line }] }
-  - { id: inner, embed: { page: e2e-embed/echidna-inner, params: { name: spiny } } }
+  - { id: inner, embed: { page: e2e_embed/echidna-inner, params: { name: spiny } } }
 `;
 
 const inner = `title: Echidna inner
@@ -27,7 +27,7 @@ view:
 
 test("an embedded page's nodes show in the host, with ids <embed>/<child>", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-embed", { files: { "pages/echidna.yaml": outer, "parts/echidna-inner.yaml": inner } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-embed/echidna");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_embed/echidna");
   const host = shown(page).getByTestId("page-host");
   await expect(host.getByTestId("node-intro")).toContainText("Outer echidna");
   // The embedded page's nodes keep the embed's id as a prefix, and read the

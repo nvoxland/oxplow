@@ -71,7 +71,7 @@ test("Alt+Down steps to the next file of the list it was opened from", async ({ 
   writeFileSync(join(daemon.project, "aa.txt"), "first\n");
   writeFileSync(join(daemon.project, "bb.txt"), "second\n");
   await installExtension(daemon, "e2e-tree", { files: { "pages/heron.yaml": fileTree } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-tree/heron");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_tree/heron");
   await shown(page).getByTestId("page-file").getByRole("button", { name: "aa.txt" }).filter({ visible: true }).click();
   // The file has opened once its editor is up; focus then rests on the tab,
   // not in the editor (which keeps the keys for typing).

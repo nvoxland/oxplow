@@ -9,7 +9,7 @@ const manifest = `datasets:
   - name: thing
     version: 1
     key: [uri]
-    description: "One thing, as an \`e2e-one/thing\` URI."
+    description: "One thing, as an \`e2e_one/thing\` URI."
     fields:
       - { name: uri, type: TEXT, doc: "The thing's URI." }
       - { name: title, type: TEXT, doc: "Its title." }
@@ -20,11 +20,11 @@ resources:
     resolve: thing
     icon: box
 `;
-const dataset = `SELECT CAST(uri('e2e-one/thing', 'id', '1') AS TEXT) AS uri, CAST('Only thing' AS TEXT) AS title
+const dataset = `SELECT CAST(uri('e2e_one/thing', 'id', '1') AS TEXT) AS uri, CAST('Only thing' AS TEXT) AS title
 `;
 const thing = `title: Thing
 description: The one renderer of a thing.
-for: e2e-one/thing
+for: e2e_one/thing
 default: true
 params:
 - name: uri
@@ -43,12 +43,12 @@ actions:
 - id: when-true
   label: Shown action
   command: oxplow.window.navigate
-  input: { uri: 'oxplow:e2e-one/thing?id=1' }
+  input: { uri: 'oxplow:e2e_one/thing?id=1' }
   when: shown
 - id: when-false
   label: Hidden action
   command: oxplow.window.navigate
-  input: { uri: 'oxplow:e2e-one/thing?id=1' }
+  input: { uri: 'oxplow:e2e_one/thing?id=1' }
   when: hidden
 `;
 
@@ -57,14 +57,14 @@ test("Open with is absent for a URI with one renderer, and an action whose `when
     manifest: manifest.replace("datasets:", "permissions: [commands:oxplow.window.navigate]\ndatasets:"),
     files: { "datasets/thing.sql": dataset, "pages/thing.yaml": thing, "pages/gated.yaml": gated },
   });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-one/gated");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_one/gated");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-action-when-true")).toBeVisible();
   await expect(page.getByTestId("menu-item-action-page-action-when-false")).not.toBeVisible();
   await page.keyboard.press("Escape");
 
-  await run(daemon, "oxplow.window.navigate", { uri: "oxplow:e2e-one/thing?id=1" });
-  await expect(page.getByTestId("center-tab-oxplow:e2e-one/thing?id=1")).toBeVisible();
+  await run(daemon, "oxplow.window.navigate", { uri: "oxplow:e2e_one/thing?id=1" });
+  await expect(page.getByTestId("center-tab-oxplow:e2e_one/thing?id=1")).toBeVisible();
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-action-page-about")).toBeVisible();
   await expect(page.getByTestId("menu-item-page-open-with")).not.toBeVisible();

@@ -104,7 +104,7 @@ async function openPage(page: Page, daemon: Parameters<typeof installExtension>[
     manifest,
     files: { "pages/wallaby.yaml": pageYaml, "pages/form.yaml": formPage, "handlers/save.star": handler },
   });
-  await open(page, daemon, `oxplow:oxplow/page?page=e2e-actions/${id}`);
+  await open(page, daemon, `oxplow:oxplow/page?page=e2e_actions/${id}`);
   return shown(page).getByTestId("page-host");
 }
 

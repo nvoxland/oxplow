@@ -12,7 +12,7 @@ view:
   viz: table
   from: animals
   columns:
-  - { key: id, label: Id, expand: e2e-expand/wallaby-detail }
+  - { key: id, label: Id, expand: e2e_expand/wallaby-detail }
   - { key: name, label: Name }
 `;
 
@@ -32,7 +32,7 @@ view:
 
 test("a row expands to the expand page's rows, given that row's values, and folds back", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-expand", { files: { "pages/wallaby.yaml": list, "parts/wallaby-detail.yaml": detail } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-expand/wallaby");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_expand/wallaby");
   const host = shown(page).getByTestId("page-host");
   await expect(host).toContainText("Bilby");
   await expect(host).not.toContainText("Habitat of");

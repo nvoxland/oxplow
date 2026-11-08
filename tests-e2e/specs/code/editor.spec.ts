@@ -28,7 +28,7 @@ view:
 
 async function openEmu(page: import("@playwright/test").Page, daemon: Parameters<typeof installExtension>[0]) {
   await installExtension(daemon, "e2e-emu", { files: { "pages/emu.yaml": list } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-emu/emu");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_emu/emu");
   await shown(page).getByTestId("page-file").getByRole("button", { name: "emu.txt" }).filter({ visible: true }).first().click();
   const editor = shown(page).getByTestId("viz-editor").locator(".monaco-editor").first();
   await expect(editor).toBeVisible();

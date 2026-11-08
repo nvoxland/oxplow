@@ -28,7 +28,7 @@ test("a page's form action submits, and the page shows the result", async ({ pag
     manifest: "permissions: [commands:oxplow.work_item.create]\n",
     files: { "pages/numbat.yaml": spec },
   });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-form/numbat");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_form/numbat");
   const host = shown(page).getByTestId("page-host");
   await expect(host).toContainText("Nothing filed yet.");
   await shown(page).getByTestId("action-page-action-file").click();

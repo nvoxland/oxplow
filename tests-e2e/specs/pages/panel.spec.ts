@@ -29,7 +29,7 @@ test("a left-nav panel draws its body page, and its badge page's number", async 
     files: { "parts/glider-body.yaml": body, "parts/glider-count.yaml": count },
   });
   await load(page);
-  const id = "ext:e2e-panel/gliders";
+  const id = "ext:e2e_panel/gliders";
   await expandRailSection(page, id);
   const section = page.getByTestId(`rail-section-${id}`);
   await expect(section).toContainText("Gliders");

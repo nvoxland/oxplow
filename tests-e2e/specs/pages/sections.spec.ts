@@ -49,7 +49,7 @@ view:
 
 test("a subsection per row, headed below its parent, with its arrow, facts and body, and in Contents", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-sections", { files: { "pages/marsupial.yaml": few } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-sections/marsupial");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_sections/marsupial");
   const host = shown(page).getByTestId("page-host");
   await expect(host.locator("h2.ox-section-title")).toHaveText(["Animals"]);
   await expect(host.locator("h3.ox-section-title")).toHaveText(["Quokka", "Kangaroo", "Wombat", "Koala"]);
@@ -69,7 +69,7 @@ test("a subsection per row, headed below its parent, with its arrow, facts and b
 
 test("more subsections than the cap are drawn, but Contents lists ten, then how many more", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-sections-long", { files: { "pages/long.yaml": many } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-sections-long/long");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_sections_long/long");
   const host = shown(page).getByTestId("page-host");
   await expect(host.locator("h3.ox-section-title")).toHaveCount(14);
   const contents = shown(page).getByTestId("viz-rail-contents");
@@ -102,7 +102,7 @@ view:
 
 test("grouped rows nest under their group's heading, with the arrow on the group, and Contents nests both levels", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-sections-grouped", { files: { "pages/grouped.yaml": grouped } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-sections-grouped/grouped");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_sections_grouped/grouped");
   const host = shown(page).getByTestId("page-host");
   await expect(host.locator("h2.ox-section-title")).toHaveText(["Problems"]);
   await expect(host.locator("h3.ox-section-title")).toHaveText(["Alpha", "Beta"]);

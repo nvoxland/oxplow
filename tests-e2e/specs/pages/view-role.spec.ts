@@ -22,7 +22,7 @@ view:
 
 test("a page whose only param is a view param has no Filters group and draws no input for it", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-viewrole", { files: { "pages/numbat.yaml": numbat } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-viewrole/numbat");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_viewrole/numbat");
   const file = shown(page).getByTestId("page-file");
   await expect(file).toContainText("Numbat in first");
   await expect(shown(page).getByTestId("page-rail-filters")).toHaveCount(0);

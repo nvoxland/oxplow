@@ -75,9 +75,10 @@ export function SaveViewForm({ kind, specYaml, initialTitle, onClose, onSaved }:
             onSaved(wikiUri(slug));
           } else {
             const name = extension.trim();
-            await command("oxplow.extension.write_page", { extension: name, page: slug, spec: yaml, deploy: true });
+            const out = await command("oxplow.extension.write_page", { extension: name, page: slug, spec: yaml, deploy: true });
             rememberExtension(name);
-            onSaved(pageUri(`${name}/${slug}`));
+            // The page's id is its extension's namespace's (`page` in the result).
+            onSaved(pageUri((out as { result: { page: string } }).result.page));
           }
         },
         { anchor: "save-view", command: kind === "wiki" ? "oxplow.knowledge.write_page" : "oxplow.extension.write_page" },

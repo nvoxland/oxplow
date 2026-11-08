@@ -17,7 +17,7 @@ view:
 
 test("rows sit under a heading per group value, and a heading folds its rows", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-group", { files: { "pages/marsupial.yaml": spec } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-group/marsupial");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_group/marsupial");
   const host = shown(page).getByTestId("page-host");
   await expect(host.getByTestId("viz-group-heading")).toHaveCount(2);
   await expect(host).toContainText("Quokka");

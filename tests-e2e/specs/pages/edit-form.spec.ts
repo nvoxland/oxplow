@@ -25,7 +25,7 @@ test("an edit form saves only when changed, takes rich text, and reads back afte
     manifest: "permissions: [commands:oxplow.stream.set_prompt]\n",
     files: { "pages/quokka.yaml": spec },
   });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-edit/quokka");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_edit/quokka");
   const host = shown(page).getByTestId("page-host");
   // The prompt is markdown: the rich text editor's surface.
   const box = host.locator('[contenteditable="true"]');

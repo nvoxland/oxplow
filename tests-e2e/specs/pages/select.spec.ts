@@ -30,7 +30,7 @@ view:
 
 test("a row click writes the page's param and a section that reads it fills", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-select", { files: { "pages/marsupial.yaml": spec } });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-select/marsupial");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_select/marsupial");
   const host = shown(page).getByTestId("page-host");
   const animals = host.locator('[data-node="animals"]');
   const facts = host.locator('[data-node="facts"]');

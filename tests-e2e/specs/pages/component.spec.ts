@@ -36,7 +36,7 @@ test("a component node is fed the page's loader data and its own props", async (
     manifest: "custom_components:\n  - { id: echo, title: Echo }\n",
     files: { "pages/quoll.yaml": page, "components/echo/index.html": index, "components/echo/app.js": app },
   });
-  await open(win, daemon, "oxplow:oxplow/page?page=e2e-component/quoll");
+  await open(win, daemon, "oxplow:oxplow/page?page=e2e_component/quoll");
   const host = shown(win).getByTestId("page-host");
   await expect(host.getByTestId("node-before")).toContainText("Above the component.");
   const frame = await inFrame(host.getByTestId("node-echo"));

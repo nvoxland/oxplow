@@ -51,7 +51,7 @@ test("Save as Page writes the view's file as a deployed page and opens it", asyn
   const form = shown(page).getByTestId("save-view-form");
   await form.getByTestId("save-view-title").fill("Saved Wombat View");
   await form.getByTestId("save-view-title").press("Enter");
-  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=my-pages/saved-wombat-view")).toBeVisible();
+  await expect(page.getByTestId("center-tab-oxplow:oxplow/page?page=my_pages/saved-wombat-view")).toBeVisible();
   await expect(shown(page).getByTestId("page-file").locator('[data-node="count"]')).toContainText("0");
 });
 

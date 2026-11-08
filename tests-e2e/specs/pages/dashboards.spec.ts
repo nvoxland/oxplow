@@ -18,7 +18,7 @@ function dashboard(daemon: Daemon, id: string) {
 }
 
 async function pin(page: Page, daemon: Daemon, slug: string, title: string, dashboardId: string) {
-  await open(page, daemon, `oxplow:oxplow/page?page=e2e-dashboard-pages/${slug}`);
+  await open(page, daemon, `oxplow:oxplow/page?page=e2e_dashboard_pages/${slug}`);
   await expect(activeHost(page)).toContainText(title);
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-pin").click();
@@ -28,7 +28,9 @@ async function pin(page: Page, daemon: Daemon, slug: string, title: string, dash
 
 test("pinning, reordering, removing and renaming edit the dashboard page and survive reload", async ({ page, daemon }) => {
   const extension = "e2e-dashboard-pages";
-  const id = `${extension}/dunnart-board`;
+  // Its pages' ids are its namespace's.
+  const ns = "e2e_dashboard_pages";
+  const id = `${ns}/dunnart-board`;
   for (const [slug, title, text] of [
     ["tests", "Dunnart test summary", "Dunnart test evidence"],
     ["coverage", "Dunnart coverage summary", "Dunnart coverage evidence"],
@@ -49,7 +51,7 @@ test("pinning, reordering, removing and renaming edit the dashboard page and sur
   await pin(page, daemon, "coverage", "Dunnart coverage summary", id);
   await expect(activeGrid(page)).toContainText("Dunnart coverage evidence");
   await expect.poll(async () => (await dashboard(daemon, id)).view.children.map((tile) => tile.page))
-    .toEqual([`${extension}/tests`, `${extension}/coverage`]);
+    .toEqual([`${ns}/tests`, `${ns}/coverage`]);
   const pinned = (await dashboard(daemon, id)).view.children;
   const first = pinned[0]!;
   const second = pinned[1]!;

@@ -18,14 +18,15 @@ function form(kind: "page" | "wiki", command: (name: string, input: unknown) => 
 
 test("Save as Page writes and deploys the exact view and remembers its extension", async () => {
   const calls: [string, unknown][] = [];
-  const f = form("page", async (name, input) => { calls.push([name, input]); });
-  fireEvent.change(f.view.getByTestId("save-view-extension"), { target: { value: "personal" } });
+  // The daemon says the page's id: its extension's namespace's, not its name.
+  const f = form("page", async (name, input) => { calls.push([name, input]); return { result: { page: "my_personal/busy-tasks" } }; });
+  fireEvent.change(f.view.getByTestId("save-view-extension"), { target: { value: "my-personal" } });
   fireEvent.submit(f.view.getByTestId("save-view-form"));
-  await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/page?page=personal/busy-tasks"]));
+  await waitFor(() => expect(f.opened).toEqual(["oxplow:oxplow/page?page=my_personal/busy-tasks"]));
   expect(calls[0][0]).toBe("oxplow.extension.write_page");
-  expect(calls[0][1]).toMatchObject({ extension: "personal", page: "busy-tasks", deploy: true });
+  expect(calls[0][1]).toMatchObject({ extension: "my-personal", page: "busy-tasks", deploy: true });
   expect((calls[0][1] as { spec: string }).spec).toContain("# Comment");
-  expect(f.prefs.get("app", "pages.extension")).toBe("personal");
+  expect(f.prefs.get("app", "pages.extension")).toBe("my-personal");
   expect(f.closed()).toBe(1);
 });
 

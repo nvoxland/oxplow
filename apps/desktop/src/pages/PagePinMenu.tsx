@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { querySql, runCommand } from "../api.js";
-import { refFromTabId, extPageRef } from "../tabs/pageRefs.js";
+import { refFromTabId } from "../tabs/pageRefs.js";
+import { pageUri } from "../uri/uri.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { useAppPreference } from "../prefs/remembered.js";
@@ -63,7 +64,8 @@ export function PagePinMenu({ tile, testId, onOpenPage, onDone, style }: {
           const out = await runCommand("oxplow.extension.new_dashboard", { extension, title: name });
           const id = (out.result as { page: string }).page;
           const spec = await authoring.read(id);
-          await pin({ id, title: name, uri: extPageRef(spec.extension, spec.slug).id });
+          // Its id is its namespace's (`spec.page`), not its extension's name.
+          await pin({ id, title: name, uri: pageUri(spec.page) });
         }
       }, { anchor });
     } finally { saving.current = false; setBusy(false); }

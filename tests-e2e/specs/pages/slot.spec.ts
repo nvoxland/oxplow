@@ -31,15 +31,15 @@ view:
 test("a page mounted at another page's slot shows inside it, given the host's values", async ({ page, daemon }) => {
   await installExtension(daemon, "e2e-slot-host", { files: { "pages/possum.yaml": host } });
   await installExtension(daemon, "e2e-slot-guest", {
-    manifest: "ui:\n  mounts:\n    - { page: possum-extras, at: e2e-slot-host/possum.extras, title: Extras }\n",
+    manifest: "ui:\n  mounts:\n    - { page: possum-extras, at: e2e_slot_host/possum.extras, title: Extras }\n",
     files: { "parts/possum-extras.yaml": mounted },
   });
-  await open(page, daemon, "oxplow:oxplow/page?page=e2e-slot-host/possum");
+  await open(page, daemon, "oxplow:oxplow/page?page=e2e_slot_host/possum");
   const body = shown(page).getByTestId("page-host");
   await expect(body.getByTestId("node-first")).toContainText("The host's own section.");
   // The mount is drawn in the host, its nodes under the mounted page's id
   // (`/` written `.`), and it read the host's row.
-  const mount = body.locator('[data-node^="e2e-slot-guest.possum-extras"]').first();
+  const mount = body.locator('[data-node^="e2e_slot_guest.possum-extras"]').first();
   await expect(mount).toContainText("Mounted ringtail");
 
   // With the mounting extension off the slot draws nothing.
