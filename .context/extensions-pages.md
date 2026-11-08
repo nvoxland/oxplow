@@ -573,6 +573,11 @@ reads the page's first loader's one row. A drag action also binds
 `{{before.x}}`, `{{after.x}}`, `{{onto.x}}`, `{{group.value}}`, and
 `{{order.x}}` (a list of column `x` in the new order).
 
+An action that fails needs nothing from the page: core records it once
+(Failed operations on the Alerts page) and shows it beside the button
+that ran it, with Details; one pressed from a row's menu, whose control
+is gone, is the toast's (usability.md "A person's command that fails").
+
 - **`all: true` is a whole-viz action over every row the viz shows** (a
   Clear, an Enable All, a Retry all): the app offers its button only while
   the viz has rows (above). It is
@@ -605,8 +610,10 @@ reads the page's first loader's one row. A drag action also binds
   modal, `TabModal`, or, when the form less its `fixed` fields is one text
   field, a prompt strip above the rows). What the person fills in runs,
   its `fixed` fields put back to the bound values. A refusal naming a
-  field (`INVALID` with `field`) shows under that field. A run that came
-  back undoable toasts with Undo. The form is for a person:
+  field (`INVALID` with `field`) shows under that field; any other failure
+  is recorded and shows beside the submit (usability.md "A person's
+  command that fails"). A run that came back undoable toasts with Undo.
+  The form is for a person:
   - the heading and the submit are the action's `label` less a trailing
     `…`; Cancel and Escape close it; the submit is the primary button,
     off only while a required field is empty (its hover says which);

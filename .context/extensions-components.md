@@ -101,9 +101,12 @@ extension's namespace needs `commands:<pattern>` in the manifest
 approved those permissions when the extension was deployed. An `invoke`
 of a command that the loaded bundle does not declare is `Invalid`. An
 `invoke` from a version that is not the current one is `Denied` (the
-frame must reload), and the host shows a refusal's
-reason under the frame (`custom-component-refused`, `componentRefusal`)
-— the component's own code may not. A component that declares no
+frame must reload). Every `invoke` runs through the person's runner
+(usability.md "A person's command that fails"): any failure but a field
+error is recorded once and shown under the frame
+(`custom-component-refused`, an `InlineError` anchored `component/<ext>/<id>`),
+whatever the component's own code does — the frame still gets its
+rejection, and need only draw a field error. A component that declares no
 commands only shows and reads.
 
 **What runs is what was deployed.** Before it shows a frame the host
@@ -394,7 +397,8 @@ differ from what the frame last got (`createBridgeHost` takes the run
 `init` carried). A second `ready` is ignored. The frame is keyed by its
 bundle URL (`ComponentFrame`): a stream switch mounts a new frame whose
 first `load` is its own, and a failure is remembered per URL. An invoke
-that asks shows the host's `CommandConfirm`; confirming re-runs it
+that asks shows the host's `CommandConfirm` with what it asks about
+(`details`, the bridge's `confirm(command, details)`); confirming re-runs it
 confirmed, declining answers `CANCELLED`. No `ready` within 3 s, or a
 second `load` (the frame navigated itself), tears it down and shows the
 table. `ready` records `usage { kind: "custom_component", key: <ext>/<id>

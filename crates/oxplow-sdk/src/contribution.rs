@@ -283,7 +283,8 @@ pub(crate) fn build(
                  // handed over the page's loaders:\n\
                  //   component.data                    each loader's rows by name ({ items: { columns, rows } })\n\
                  //   component.onUpdate(fn)            a loader changed: fn({ data, params, changed })\n\
-                 //   component.invoke(command, input)  a command listed in `commands`\n\
+                 //   component.invoke(command, input)  a command listed in `commands`; oxplow shows\n\
+                 //                                     and records a failure itself (draw only a `field` error)\n\
                  //   component.navigate(ref)           open one of oxplow's pages\n\
                  oxplow.connect().then((component) => {\n\
                  \x20 component.applyTheme();\n\

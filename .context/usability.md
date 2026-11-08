@@ -260,26 +260,58 @@ markdown itself, nor edits it in a `<textarea>`.
   Terminal page) is the shared `ox-button`, never a link. Two quiet
   exceptions: a disclosure ("More (n)", a row's fold) and a heading-corner
   action (the Filters group's Reset) stay text.
-- **Async-op failures don't `alert`.** Record them:
-  `recordOpError({ label, command?, stderr?, stdout?, exitCode?,
-  message? })` (`opErrors.ts`) reports it to the daemon, fire-and-forget,
-  as `oxplow.ui.report_error`, and the record is the dataset,
-  `v_op_error` — the client keeps nothing, so the list survives a reload
-  and the agent reads the same rows (the always-on agent text and the
-  `oxplow-codebase` skill say so, so "can you see that error?" needs no
-  screenshot). A failure is one of the things that need the person
-  (below): a toast as it arrives ("<label> — Review"), the status bar's
-  bell counts it (red), and the **Alerts page** lists it under Failed
-  operations (`v_op_error`, those not dismissed), each row expanding
-  (`columns[].expand`, the `alerts-operation` page) into how it ended and
-  its output. Mark Seen runs `oxplow.op_error.mark_seen` (it stops being
-  red), Dismiss `oxplow.op_error.dismiss`, "Clear failed operations"
-  `dismiss_all`. For
-  ops that already have a page focus when they fail (e.g. `runOp` in
-  GitDashboardPage), call `onOpenPage(alertsRef())` after recording so
-  the person lands where it's shown. A report, or a read of the list,
-  that fails is logged with `logUi`, never recorded as another op error
-  (it would loop).
+- **A person's command that fails shows one way, and core shows it.**
+  Every command a person starts — a page action, a form, a launcher or
+  menu offer, a custom component's `invoke`, Approve / Decline, a core
+  control (the branch picker, dashboard rename and pin, Save view, the
+  thread commands) — runs through the one runner
+  (`commands/runForPerson.ts`, `useRunner()`; a test passes its own through
+  `RunnerContext`), which tells what a failure was:
+
+  | Failure | Shows | Recorded? |
+  |---|---|---|
+  | `INVALID` naming a field, from a caller that draws fields (`showsFields`: a form, a component) | under that field | no |
+  | `NEEDS_CONFIRMATION` | `CommandConfirm` with its `details`, then run again confirmed | no |
+  | `CANCELLED` | nothing | no |
+  | anything else | once as an op error, a red line beside the control that ran it with **Details** (the Alerts page), the toast only when no such control is on screen | yes, once |
+
+  A control says where its failures show with an anchor key
+  (`useActionAnchor(key)`, drawn with `InlineError`): `ActionButtons` and
+  a page's action buttons (`actionAnchor(page, action)`), a form's submit,
+  a proposal card (`proposal/<id>`), a component's frame
+  (`component/<ext>/<id>`, the `custom-component-refused` slot), the
+  branch picker. The failure is kept by the key, not the control, so one
+  drawn again still shows it; pressing again clears it. A menu item, a
+  launcher offer or a drag has no control left on screen: its failure is
+  the toast's. Which recorded failures were shown beside their control is
+  the runner's (`commands/actionFailures.ts` `InlineClaims`, with a 750 ms
+  grace for a control drawn again); the toast (`useAlertToasts`) waits for
+  those to settle and skips them, and a failure this window recorded is
+  toasted even in the first moments after the window opens. No page,
+  component or core screen keeps its own error state for a command, and
+  an extension needs no error code: a component draws only a field error.
+  The record is `recordOpError` / `reportOpError` (`opErrors.ts`) as
+  `oxplow.ui.report_error`, and the dataset `v_op_error` — the client keeps
+  nothing, so the list survives a reload and the agent reads the same rows
+  (the always-on agent text and the `oxplow-codebase` skill say so, so
+  "can you see that error?" needs no screenshot). The bell counts it
+  (red), and the **Alerts page** lists it under Failed operations, each
+  row expanding (`columns[].expand`, the `alerts-operation` page) into how
+  it ended and its output. Mark Seen runs `oxplow.op_error.mark_seen` (it
+  stops being red), Dismiss `oxplow.op_error.dismiss`, "Clear failed
+  operations" `dismiss_all`. A failure that isn't a person's command (a
+  read, a load) uses `recordOpError` directly; the window-wide banner in
+  `App.tsx` is only for loading the window, switching or making a stream
+  and opening a file. A report, or a read of the list, that fails is
+  logged with `logUi`, never recorded as another op error (it would loop).
+- **Who caused an alert is one chip.** `SourceChip` (`kit/SourceChip.tsx`):
+  an agent (the thread's title, opening the thread), you, an extension
+  (its page) or a page acting for an agent, with the kind's icon. A page
+  draws it with a `format: source` column (`{kind, label, uri?}`): the
+  Alerts page's notices and failed reactions use it, and a proposal card
+  shows it beside its title. An extension's "Needs your approval to run"
+  row, while an agent's request to deploy it waits, points to that
+  decision instead of asking twice.
 - **The Extensions page shows the grant, not only the verdict.** Each
   row lists the extension's permissions, and what a deploy, roll back or
   enable would add is shown in the confirmation before it runs
@@ -400,12 +432,19 @@ markdown itself, nor edits it in a `<textarea>`.
 - **Approving is the confirmation.** An effect's run that asks, or a
   handler's consent check (a deploy that adds permissions), waits as a
   proposal; its
-  `ProposalCard` (`components/Proposals/ProposalCard.tsx`) shows who
-  proposed it, what it would change (a composite's commands) and Approve / Decline. Approve runs it as the
+  `ProposalCard` (`kit/Approvals.tsx`) shows what it would do, who asked
+  as the **source chip** on the right of its first line (`SourceChip`,
+  `proposals.ts` `sourceOf`: the agent's thread by its title, a page
+  acting for an agent, or the extension whose effect it is), what it would
+  change (a composite's commands) and Approve / Decline. Approve runs it as the
   person with no modal; a destructive one is tinted and its Approve is an
   `InlineConfirm` (the per-row destructive rule: one click arms, the
-  second runs). A failed decision shows its error on the card, next to
-  the buttons. Cards appear in the **Approvals** rail panel. Testids:
+  second runs). A decision runs through the person's runner (below): a
+  failed one is recorded and shows on the card, next to the buttons, kept
+  by the proposal (`proposal/<id>`) so the card drawn again by a re-read
+  still shows it; a proposal being run (an External command's claimed
+  approval) stays in the list (`readPendingProposals`). Cards appear on
+  the Alerts page, under Needs your decision. Testids:
   `proposal-<id>`, `proposal-approve-<id>` (a destructive one's:
   `proposal-approve-<id>-trigger` / `-confirm`), `proposal-decline-<id>`,
   `proposal-error-<id>`, `rail-alert-proposals`.

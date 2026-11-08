@@ -4,7 +4,10 @@
 // A component runs in a sandboxed frame: scripts and forms, no network,
 // no storage. A form submits nowhere (the frame's CSP): handle `submit` in
 // your script and run a command with `invoke`; a refused one rejects with
-// `{ code, message, field? }`, `field` the input it names (`/title`). oxplow hands it one end of a MessageChannel in an `init`
+// `{ code, message, field? }`, `field` the input it names (`/title`). oxplow
+// itself records every failure but a field error and shows it under your
+// frame, so a component draws only a field error, and nothing for
+// `CANCELLED` (the person closed a form or declined). oxplow hands it one end of a MessageChannel in an `init`
 // message; this wraps that protocol. Load it before your own script:
 //
 //   <script src="/component-lib/oxplow-component.js"></script>

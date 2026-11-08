@@ -54,8 +54,10 @@ left half-edited never goes live by itself.
 - **It doesn't load or prepare:** the deploy fails with the problems and
   the previous deployment keeps running. Fix the source and deploy again.
 - **It asks for approval:** a deploy that adds `permissions:` or a new or
-  changed `build:` command becomes a proposal. The person approves it;
-  tell them what it asks for and why.
+  changed `build:` command becomes a proposal. The person approves it on
+  the Alerts page; tell them what it asks for and why. `v_command_proposal`
+  lists the proposals (`decision` pending, approved, declined; `input` names
+  the extension), so you can see whether yours still waits.
 - **A deployment that ran before is now held** (oxplow changed and it no
   longer activates): it stays the chosen deployment and every activation
   tries it again. `v_extension.errors` says why it doesn't run. Fix the

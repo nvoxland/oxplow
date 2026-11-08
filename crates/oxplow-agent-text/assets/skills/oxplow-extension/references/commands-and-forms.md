@@ -128,9 +128,13 @@
   person's gestures.
 - **In a component**, a `<form>` is fine: handle `submit` in your script
   (`preventDefault`) and run the command with `invoke`. A refusal rejects
-  with `{ code, message, field? }`; show `message` under the field it
-  names. The kit has `ox-form`, `ox-field`, `ox-label`, `ox-input`,
-  `ox-select`, `ox-textarea`, `ox-error`.
+  with `{ code, message, field? }`: when it names a `field`, show `message`
+  under that field. Anything else oxplow records and shows under your
+  frame by itself, so catch it and draw nothing (`alert()` is blocked in
+  the frame anyway). A `CANCELLED` is the person closing a form or
+  declining a confirmation: nothing to show. The kit has `ox-form`,
+  `ox-field`, `ox-label`, `ox-input`, `ox-select`, `ox-textarea`,
+  `ox-error`. A page's own `actions:` need no error handling at all.
 - **Workflow state** no provider owns (a triage decision) lives in the
   extension's private state: a script command reads the stamp with
   `scope("state.read", …)` and composes your `state.write/compare_exchange`
