@@ -12,9 +12,9 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // renderer drops the key). One renderer draws nothing.
 
 const renderer = (page: string, title: string, over: Partial<Renderer> = {}): Renderer => ({ page, title, default: false, ...over });
-const editor = renderer("oxplow-foundation/editor", "Editor", { default: true });
-const two = [editor, renderer("oxplow-foundation/markdown", "Markdown")];
-const four = [...two, renderer("oxplow-foundation/data-file", "Tree"), renderer("oxplow-foundation/file-viewer", "Text view")];
+const editor = renderer("oxplow/editor", "Editor", { default: true });
+const two = [editor, renderer("oxplow/markdown", "Markdown")];
+const four = [...two, renderer("oxplow/data-file", "Tree"), renderer("oxplow/file-viewer", "Text view")];
 
 afterEach(cleanup);
 
@@ -39,41 +39,41 @@ function shown(renderers: Renderer[], patches: unknown[], viewParams: Record<str
 test("two or three modes are a segmented control; the one drawing is pressed and a press swaps", async () => {
   const patches: unknown[] = [];
   const view = shown(two, patches);
-  const current = await waitFor(() => view.getByTestId("page-nav-mode-oxplow-foundation/editor"));
+  const current = await waitFor(() => view.getByTestId("page-nav-mode-oxplow/editor"));
   expect(current.getAttribute("aria-pressed")).toBe("true");
   expect(current.textContent).toBe("Editor");
-  const other = view.getByTestId("page-nav-mode-oxplow-foundation/markdown");
+  const other = view.getByTestId("page-nav-mode-oxplow/markdown");
   expect(other.getAttribute("aria-pressed")).toBe("false");
   expect(view.queryByTestId("page-nav-modes")).toBeNull();
   fireEvent.click(other);
-  await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": "oxplow-foundation/markdown" }]));
+  await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": "oxplow/markdown" }]));
 });
 
 test("pressing the default mode drops the key, as View as does", async () => {
   const patches: unknown[] = [];
-  const view = shown(two, patches, { "oxplow.renderer": "oxplow-foundation/markdown" });
-  const markdown = await waitFor(() => view.getByTestId("page-nav-mode-oxplow-foundation/markdown"));
+  const view = shown(two, patches, { "oxplow.renderer": "oxplow/markdown" });
+  const markdown = await waitFor(() => view.getByTestId("page-nav-mode-oxplow/markdown"));
   expect(markdown.getAttribute("aria-pressed")).toBe("true");
-  fireEvent.click(view.getByTestId("page-nav-mode-oxplow-foundation/editor"));
+  fireEvent.click(view.getByTestId("page-nav-mode-oxplow/editor"));
   await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": undefined }]));
 });
 
 test("four or more modes are one button named for the current mode that lists the rest", async () => {
   const patches: unknown[] = [];
-  const view = shown(four, patches, { "oxplow.renderer": "oxplow-foundation/data-file" });
+  const view = shown(four, patches, { "oxplow.renderer": "oxplow/data-file" });
   const button = await waitFor(() => view.getByTestId("page-nav-modes"));
   expect(button.textContent).toContain("Tree");
-  expect(view.queryByTestId("page-nav-mode-oxplow-foundation/editor")).toBeNull();
+  expect(view.queryByTestId("page-nav-mode-oxplow/editor")).toBeNull();
   fireEvent.click(button);
-  const item = await waitFor(() => view.getByTestId("menu-item-page-mode-oxplow-foundation/markdown"));
-  expect(view.getByTestId("menu-item-page-mode-oxplow-foundation/data-file").textContent).toContain("✓");
+  const item = await waitFor(() => view.getByTestId("menu-item-page-mode-oxplow/markdown"));
+  expect(view.getByTestId("menu-item-page-mode-oxplow/data-file").textContent).toContain("✓");
   fireEvent.click(item);
-  await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": "oxplow-foundation/markdown" }]));
+  await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": "oxplow/markdown" }]));
 });
 
 test("one mode draws no control", async () => {
   const view = shown([editor], []);
   await new Promise((r) => setTimeout(r, 20));
   expect(view.queryByTestId("page-nav-modes")).toBeNull();
-  expect(view.queryByTestId("page-nav-mode-oxplow-foundation/editor")).toBeNull();
+  expect(view.queryByTestId("page-nav-mode-oxplow/editor")).toBeNull();
 });

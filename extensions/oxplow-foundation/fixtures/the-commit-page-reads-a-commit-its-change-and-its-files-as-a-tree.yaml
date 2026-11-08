@@ -9,7 +9,7 @@ given:
   - observe: { turn: { prompt: top, write: { path: top.txt, body: "t\n" } } }
   - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/deep/a.rs, top.txt] } }
   - { command: oxplow.vcs.commit, input: { stream: str1, message: "add things\n\nwith a body" }, bind: change }
-when: { page: oxplow-foundation/commit, params: { stream_id: 1, sha: $change.rev } }
+when: { page: oxplow/commit, params: { stream_id: 1, sha: $change.rev } }
 expect:
   loaders:
     row: { rows: [{ change_id: $any, head_revision: $any }] }

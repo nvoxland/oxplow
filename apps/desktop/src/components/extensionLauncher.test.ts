@@ -17,7 +17,7 @@ const ext = (over: Partial<Extension>): Extension =>
 
 // Page files (`pages/*.yaml`, or a part when `kind` says so): what the launcher lists.
 const file = (extension: string, slug: string, over: Record<string, unknown> = {}) => ({
-  id: `${extension}/${slug}`,
+  id: `${extension.startsWith("oxplow-") ? "oxplow" : extension.replace(/-/g, "_")}/${slug}`,
   extension,
   slug,
   title: slug,
@@ -56,8 +56,8 @@ test("the launcher never lists a resource page (a page with `for:`), though it h
 
 test("a page file's badge count is its badge, and zero shows none", () => {
   const exts = [ext({ name: "oxplow-foundation", namespace: "oxplow", pageFiles: [file("oxplow-foundation", "backlog", { title: "Backlog", category: "Work", badge: { loader: "n", column: null } })] } as never)];
-  expect(launcherPages(exts, { "oxplow-foundation/backlog": 4 })[0]?.badge).toBe(4);
-  expect(launcherPages(exts, { "oxplow-foundation/backlog": 0 })[0]?.badge).toBeUndefined();
+  expect(launcherPages(exts, { "oxplow/backlog": 4 })[0]?.badge).toBe(4);
+  expect(launcherPages(exts, { "oxplow/backlog": 0 })[0]?.badge).toBeUndefined();
 });
 
 test("a page file whose view is a switch lists each other section by name, opening on it", () => {
@@ -101,12 +101,12 @@ test("the counts are each badge page's one-shot run's badge, for the stream", as
   ];
   const counts = await launcherCounts(exts, "str1", async (page, streamId) => {
     asked.push([page, streamId]);
-    if (page === "oxplow-foundation/broken") throw new Error("no");
-    return { badge: page === "oxplow-foundation/backlog" ? 3 : null };
+    if (page === "oxplow/broken") throw new Error("no");
+    return { badge: page === "oxplow/backlog" ? 3 : null };
   });
   expect(asked).toEqual([
-    ["oxplow-foundation/backlog", "str1"],
-    ["oxplow-foundation/broken", "str1"],
+    ["oxplow/backlog", "str1"],
+    ["oxplow/broken", "str1"],
   ]);
-  expect(counts).toEqual({ "oxplow-foundation/backlog": 3, "oxplow-foundation/broken": 0 });
+  expect(counts).toEqual({ "oxplow/backlog": 3, "oxplow/broken": 0 });
 });

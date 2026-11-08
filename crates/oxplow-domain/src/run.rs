@@ -202,7 +202,11 @@ impl std::fmt::Debug for HostGenerationPin {
 /// Which contribution a run belongs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionRef {
+    /// Its id, named in its namespace.
     pub id: ContributionId,
+    /// The extension that declares it: whose grants, credentials and
+    /// deployment the run runs under.
+    pub extension: String,
     /// The extension's declared `version`, when it has one.
     pub version: Option<String>,
     /// The extension catalog's generation the run was built against.
@@ -512,7 +516,13 @@ impl RunContext {
 
     /// The extension it belongs to.
     pub fn extension(&self) -> Option<&str> {
-        self.contribution.as_ref().map(|c| c.id.extension.as_str())
+        self.contribution.as_ref().map(|c| c.extension.as_str())
+    }
+
+    /// The namespace its contribution is named in: what its own names
+    /// (an AI profile, a collector) are qualified with.
+    pub fn namespace(&self) -> Option<&str> {
+        self.contribution.as_ref().map(|c| c.id.namespace.as_str())
     }
 
     /// Whether a host attached an explicit declaration for this scope.
@@ -708,7 +718,8 @@ mod tests {
 
     fn effect(generation: &str) -> ContributionRef {
         ContributionRef {
-            id: ContributionId::new("acme", ContributionKind::Effect, "note"),
+            id: ContributionId::new("acme_tools", ContributionKind::Effect, "note"),
+            extension: "acme-tools".into(),
             version: Some("1.2.0".into()),
             generation: Some(generation.into()),
             deployment: None,
@@ -727,7 +738,8 @@ mod tests {
         assert_ne!(child.run(), parent.run());
         assert_eq!(child.actor(), &Actor::Human);
         assert!(child.budget().ceiling <= Duration::from_secs(5));
-        assert_eq!(child.extension(), Some("acme"));
+        // The extension that declares it, not the namespace it is named in.
+        assert_eq!(child.extension(), Some("acme-tools"));
         parent.cancel().cancel();
         assert!(child.cancel().is_cancelled());
         assert!(child.check_authority().is_err());

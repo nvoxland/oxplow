@@ -178,7 +178,7 @@ into a foundation page, list it under `ui.mounts` in `extension.yaml`:
 ```yaml
 ui:
   mounts:
-    - { page: commit-tokens, at: oxplow-foundation/commit.sections }
+    - { page: commit-tokens, at: oxplow/commit.sections }
 ```
 
 The mounted part gets the host's params by name, so it declares the ones it
@@ -186,10 +186,10 @@ needs.
 
 | Slot | Page | Param |
 |---|---|---|
-| `oxplow-foundation/diff-view.sections` | an effort's or a range's diff | `effort_id`, `change_id` |
-| `oxplow-foundation/commit.sections` | a commit's page | `change_id` (the page's row) |
-| `oxplow-foundation/uncommitted-changes.sections` | Uncommitted Changes; `at: { before: commit }` puts a strip above everything | `change_id` (the page's row) |
-| `oxplow-foundation/new-session.sections` | the New Session page (sections `start`, `earlier`) | `thread_id` |
+| `oxplow/diff-view.sections` | an effort's or a range's diff | `effort_id`, `change_id` |
+| `oxplow/commit.sections` | a commit's page | `change_id` (the page's row) |
+| `oxplow/uncommitted-changes.sections` | Uncommitted Changes; `at: { before: commit }` puts a strip above everything | `change_id` (the page's row) |
+| `oxplow/new-session.sections` | the New Session page (sections `start`, `earlier`) | `thread_id` |
 
 `at` is `start`, `end` (the default) or `{ before | after: <sibling id> }`.
 `change_id` points at the page's change in `v_change`, with its analysis in

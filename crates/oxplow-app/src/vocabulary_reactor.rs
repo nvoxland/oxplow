@@ -27,7 +27,7 @@ use std::sync::Arc;
 use oxplow_db::event_retention::{restate_declared_tx, DeclaredRetention};
 use oxplow_db::event_type_store::{recorded_schema_tx, restate_tx, EventTypeRow};
 use oxplow_domain::diagnostic::Diagnostic;
-use oxplow_domain::events::schema::{extension_namespace, EventSchemaRegistry};
+use oxplow_domain::events::schema::EventSchemaRegistry;
 use oxplow_domain::vocabulary::Vocabulary;
 use oxplow_domain::DomainError;
 
@@ -51,6 +51,9 @@ pub type WorkItemIds = Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>;
 #[derive(serde::Serialize)]
 struct Declares {
     extension: String,
+    /// Its manifest's `namespace:`: what its types are named under and its
+    /// retention is kept by.
+    namespace: String,
     /// Its `event_types:`.
     types: EventTypes,
     /// Its `resources:`.
@@ -167,6 +170,7 @@ fn declarations(extensions: &[Extension]) -> Declared {
         .filter(|extension| extension.enabled)
         .map(|extension| Declares {
             extension: extension.name.clone(),
+            namespace: extension.namespace.clone(),
             types: extension.event_types.clone(),
             resources: extension.resources.clone(),
             subscriptions: extension.subscriptions.clone(),
@@ -218,16 +222,23 @@ fn build_tx(
     let mut errors = VocabularyErrors::new();
     let mut retention = Vec::new();
     for Declares {
-        extension, types, ..
+        extension,
+        namespace,
+        types,
+        ..
     } in declared
     {
-        let namespace = extension_namespace(extension);
         retention.push(DeclaredRetention {
-            namespace,
+            namespace: namespace.clone(),
             extension: extension.clone(),
-            window: types
-                .retention
-                .map(|r| (r.payload_days.into(), r.content_days.into())),
+            window: match types.retention {
+                Some(r) => Some((r.payload_days.into(), r.content_days.into())),
+                None if !types.types.is_empty() => {
+                    let d = oxplow_domain::events::retention::EXTENSION_DEFAULT;
+                    Some((d.payload_days, d.content_days))
+                }
+                None => None,
+            },
         });
         for d in &types.types {
             let refused = match recorded_schema_tx(tx, &d.event_type, d.v)? {
@@ -246,7 +257,7 @@ fn build_tx(
                     )),
                 ),
                 _ => events
-                    .register_declared(extension, d.declared())
+                    .register_declared(extension, namespace, d.declared())
                     .err()
                     .map(|e| declared_at("event_type.refused", &d.declared_at, e.to_string())),
             };
@@ -851,9 +862,9 @@ resources:
         };
         assert!(errors("acme-pr").is_empty(), "{:?}", errors("acme-pr"));
         assert!(
-            errors("acme_pr")
-                .iter()
-                .any(|e| e.message.contains("isn't an extension name")),
+            errors("acme_pr").iter().any(|e| e
+                .message
+                .contains("must be lowercase letters, digits and single dashes")),
             "{:?}",
             errors("acme_pr")
         );

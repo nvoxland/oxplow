@@ -48,9 +48,10 @@ effects:
   its fixtures (a tool round, a cancel); `--from effort-review`
   starts one per finished effort, its tool reading the effort's evidence,
   and comments the answer on the work item.
-- Your command namespace is your name with `-` as `_`: extension
-  `effort-review` has commands `effort_review.review.ask`, while its
-  its contributions' refs keep the dash (`oxplow:oxplow/job?job=effort-review/review`).
+- Your namespace is your name with `-` as `_`, and it names everything
+  you contribute: extension `effort-review` has commands
+  `effort_review.review.ask` and its job is
+  `oxplow:oxplow/job?job=effort_review/review`.
 
 ## AI profiles
 
@@ -59,4 +60,4 @@ choose, declare `ai_profiles: [{ id, description, fallback: main|summarize|decid
 features? }]` rather than hard-coding a role, and name it by its id: a job
 request's `role: <id>`, a collector's `ai_classify(..., role = "<id>")`.
 `$OXPLOW_BIN extension check` shows what serves it. Until a person binds
-`<extension>/<id>` in Settings → AI, the fallback role's model is used.
+`<namespace>/<id>` in Settings → AI, the fallback role's model is used.

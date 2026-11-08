@@ -1,7 +1,7 @@
 # What a thing is, is a paragraph under the About heading, above its facts
 # (the node's `lead:`), not a "What it is" row and not a section of its own.
 when:
-  page: oxplow-foundation/dataset-definition
+  page: oxplow/dataset-definition
   params:
     uri: "oxplow:oxplow/dataset?dataset=work_item"
 expect:

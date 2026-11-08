@@ -1,7 +1,7 @@
 # A folder of the running extensions' files: a lazy tree whose folder and
 # file links both carry the filesystem, and which offers no writes.
 when:
-  page: oxplow-foundation/directory
+  page: oxplow/directory
   params: { stream_id: 1, path: "oxplow-foundation", filesystem: "oxplow:extensions" }
 expect:
   loaders:

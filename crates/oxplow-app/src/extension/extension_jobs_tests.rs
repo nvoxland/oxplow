@@ -156,7 +156,7 @@ async fn an_active_extensions_ai_profile_is_a_role() {
         .svc
         .sql
         .query_sql(
-            "SELECT role, extension, fallback FROM v_ai_role WHERE extension IS NOT NULL",
+            "SELECT role, namespace, fallback FROM v_ai_role WHERE namespace IS NOT NULL",
             vec![],
             None,
         )

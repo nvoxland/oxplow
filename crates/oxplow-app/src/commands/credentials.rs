@@ -67,8 +67,8 @@ pub struct RevokeSecretInput {
     pub reference: SecretRef,
 }
 
-/// The extension a collector belongs to, from its URI or `<extension>/<id>`.
-fn extension_of(collector: &str) -> Result<String, CommandError> {
+/// The namespace a collector is named in, from its URI or `<namespace>/<id>`.
+fn namespace_of(collector: &str) -> Result<String, CommandError> {
     let id = oxplow_domain::uri::oxplow_uri::OxplowUri::parse(collector)
         .ok()
         .and_then(|u| u.param("collector").map(str::to_string))
@@ -79,7 +79,7 @@ fn extension_of(collector: &str) -> Result<String, CommandError> {
         .ok_or_else(|| {
             invalid(
                 "/collector",
-                "name a collector as `<extension>/<id>` or its URI",
+                "name a collector as `<namespace>/<id>` or its URI",
             )
         })
 }
@@ -97,20 +97,21 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 Box::pin(async move {
                     let input: SetCredentialInput = parse(input)?;
                     let svc = services.get()?;
-                    let extension = extension_of(&input.collector)?;
+                    let namespace = namespace_of(&input.collector)?;
                     let root = svc.worktrees.resolve(None).await.into_local_path();
                     let given = input.value.as_deref().is_some_and(|v| !v.trim().is_empty());
                     collector_runner::set_credential(
                         &Collectors::of(&svc, &root),
-                        &extension,
+                        &namespace,
                         &input.name,
                         input.value.as_deref(),
                     )
                     .map_err(|e| match e {
                         oxplow_domain::DomainError::Invalid(m) => invalid("/name", m),
-                        oxplow_domain::DomainError::NotFound => {
-                            invalid("/collector", format!("no extension `{extension}`"))
-                        }
+                        oxplow_domain::DomainError::NotFound => invalid(
+                            "/collector",
+                            format!("no extension in namespace `{namespace}`"),
+                        ),
                         other => failed(other),
                     })?;
                     let events = svc.events.clone();
@@ -119,7 +120,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                         result: json!({ "collector": input.collector, "name": input.name, "set": given }),
                         after_commit: Some(Box::new(move || {
                             events.emit(OxplowEvent::CredentialChanged {
-                                instance: extension,
+                                instance: namespace,
                                 name,
                                 sign_in: None,
                                 error: None,

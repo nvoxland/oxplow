@@ -126,11 +126,18 @@ impl CatalogSnapshot {
                 .filter(|e| e.enabled)
                 .map(|e| e.name.clone())
                 .collect();
+            // An import names its contribution by namespace.
+            let present_namespaces: std::collections::BTreeSet<String> = admitted
+                .iter()
+                .filter(|e| e.enabled)
+                .map(|e| e.namespace.clone())
+                .collect();
             let absent = |r: &String| !present.contains(r);
             let missing = admitted.iter().position(|e| {
                 e.enabled
                     && (e.public_contracts.imports.iter().any(|import| {
-                        !import.optional && !present.contains(&import.contribution.extension)
+                        !import.optional
+                            && !present_namespaces.contains(&import.contribution.namespace)
                     }) || e.requires.iter().any(absent))
             });
             let Some(index) = missing else { break };
@@ -146,8 +153,8 @@ impl CatalogSnapshot {
                 .public_contracts
                 .imports
                 .iter()
-                .filter(|i| !i.optional && !present.contains(&i.contribution.extension))
-                .map(|i| format!("`{}`", i.contribution.extension))
+                .filter(|i| !i.optional && !present_namespaces.contains(&i.contribution.namespace))
+                .map(|i| format!("`{}`", i.contribution.namespace))
                 .collect();
             if !owners.is_empty() {
                 why.push(Diagnostic::error(
@@ -583,21 +590,35 @@ impl ExtensionCatalog {
         Ok(ext.clone())
     }
 
-    /// One page by `<extension>/<slug>`.
+    /// One page by `<namespace>/<slug>`: the one an extension in that
+    /// namespace declares (`oxplow` holds several; they never share a
+    /// slug). One only a disabled extension declares is an error saying so.
     pub fn find_page(
         &self,
         root: &Path,
         id: &str,
     ) -> Result<crate::pages::schema::Page, DomainError> {
-        let (ext, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
-        if ext == crate::pages::schema::TEMP_EXTENSION {
+        let (namespace, slug) = id.split_once('/').ok_or(DomainError::NotFound)?;
+        if namespace == crate::pages::schema::TEMP_EXTENSION {
             return self.temp_page(root, slug);
         }
-        self.named(root, ext)?
-            .page_files
-            .into_iter()
+        let all = self.unpinned(root, "a page lookup reads one snapshot");
+        let declaring = || {
+            all.iter()
+                .filter(|e| e.namespace == namespace)
+                .filter(|e| e.page_files.iter().any(|p| p.slug == slug))
+        };
+        if let Some(page) = declaring()
+            .filter(|e| e.enabled)
+            .flat_map(|e| e.page_files.iter())
             .find(|p| p.slug == slug)
-            .ok_or(DomainError::NotFound)
+        {
+            return Ok(page.clone());
+        }
+        match declaring().next() {
+            Some(ext) => self.named(root, &ext.name).and(Err(DomainError::NotFound)),
+            None => Err(DomainError::NotFound),
+        }
     }
 
     /// The temp page `temp/<id>`: the file `<id>.yaml` on `oxplow:temp`,
@@ -625,8 +646,8 @@ impl ExtensionCatalog {
         Ok(page)
     }
 
-    /// The page a page URI's `page` param names: `<extension>/<slug>`, or a
-    /// bare slug for one of oxplow's own extensions (core-named, as
+    /// The page a page URI's `page` param names: `<namespace>/<slug>`, or
+    /// a bare slug for one in oxplow's own namespace (core-named, as
     /// `oxplow:oxplow/page?page=tasks`).
     pub fn page_named(
         &self,
@@ -636,13 +657,10 @@ impl ExtensionCatalog {
         if page.contains('/') {
             return self.find_page(root, page);
         }
-        self.get(root)
-            .iter()
-            .filter(|e| e.enabled && e.namespace == crate::extension::extensions::CORE_NAMESPACE)
-            .flat_map(|e| e.page_files.iter())
-            .find(|p| p.slug == page)
-            .cloned()
-            .ok_or(DomainError::NotFound)
+        self.find_page(
+            root,
+            &format!("{}/{page}", crate::extension::extensions::CORE_NAMESPACE),
+        )
     }
 
     /// How many full loads have run. A hit doesn't count.

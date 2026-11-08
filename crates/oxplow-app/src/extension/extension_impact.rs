@@ -1162,7 +1162,7 @@ fn pair_by<'a, T, K: Ord + Clone>(
 /// `extension`'s datasets before and after: added, removed, and a changed
 /// one's first contract difference (a SQL-only change keeps the contract).
 pub fn datasets_diff(
-    extension: &str,
+    namespace: &str,
     before: &[DatasetSource],
     after: &[DatasetSource],
 ) -> Vec<DatasetImpact> {
@@ -1201,7 +1201,7 @@ pub fn datasets_diff(
                 _ => None,
             };
             DatasetImpact {
-                view: extension_view(extension, &name),
+                view: extension_view(namespace, &name),
                 change,
                 changed,
                 before_columns: cols(b),
@@ -1310,6 +1310,7 @@ fn side_vocabulary(
 ) -> oxplow_domain::vocabulary::Vocabulary {
     layer.vocabulary().with_declared(
         &v.extension.name,
+        &v.extension.namespace,
         v.extension.event_types.types.iter().map(|d| d.declared()),
     )
 }
@@ -1709,7 +1710,6 @@ pub async fn impact_within(
 ) -> ImpactReport {
     let deadline = std::time::Instant::now() + deadline;
     let mut out_of_time = Vec::new();
-    let name = &after.extension.name;
     let texts_before = before
         .as_ref()
         .map(|b| page_texts(b.extension, b.pages))
@@ -1723,7 +1723,7 @@ pub async fn impact_within(
             let ok = |r: Option<&Result<String, String>>| r.and_then(|r| r.as_ref().ok().cloned());
             let error = a.or(b).and_then(|r| r.as_ref().err().cloned());
             PageImpact {
-                id: format!("{name}/{slug}"),
+                id: format!("{}/{slug}", after.extension.namespace),
                 change: match (b, a) {
                     (None, _) => Change::Added,
                     (_, None) => Change::Removed,
@@ -1738,8 +1738,9 @@ pub async fn impact_within(
         })
         .collect();
     let empty: Vec<DatasetSource> = Vec::new();
+    let namespace = after.extension.namespace.as_str();
     let mut datasets = datasets_diff(
-        name,
+        namespace,
         before.as_ref().map_or(&empty, |b| &b.extension.datasets),
         &after.extension.datasets,
     );
@@ -1750,7 +1751,7 @@ pub async fn impact_within(
         v.extension
             .datasets
             .iter()
-            .find(|m| extension_view(name, &m.decl.name) == view)
+            .find(|m| extension_view(&v.extension.namespace, &m.decl.name) == view)
             .map(|m| m.decl.key.clone())
             .unwrap_or_default()
     };

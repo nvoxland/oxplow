@@ -7,7 +7,7 @@ stored name onto them.
 
 **The words.** A **resource** is a kind of thing in oxplow — a file, a
 wiki page, an effort, a work item, an extension's pull request — named
-`<extension>/<name>` (`oxplow/file`, `github/pr`). A **URI** names one
+`<namespace>/<name>` (`oxplow/file`, `github/pr`). A **URI** names one
 thing of a resource: `oxplow:oxplow/effort?id=eff12`. The direction is the
 web's: a URI names the thing, a page that shows it is one **renderer** of
 it, and how that renderer shows it (a line, a filter, a pick, a mode, an
@@ -106,7 +106,7 @@ oxplow:github/pr?id=12
   `part=input|output|prompt|result|summary` (an event's body),
   `part=request|response` (a model call's), `part=result` (a subagent's
   last message). Keys core will read from now on are `oxplow.*`
-  (`#oxplow.renderer=<extension>/<page>` is a view key the desktop reads:
+  (`#oxplow.renderer=<namespace>/<page>` is a view key the desktop reads:
   it picks which renderer draws the URI when the daemon offers several).
 - **A revision is a param.** `rev=git:HEAD`, `rev=snap:3`: the
   `Revision` strings (`revision.ts`), never `@…`. Only files, directories
@@ -150,11 +150,11 @@ have none: `file?path=&rev=&filesystem=`, `dir?path=&filesystem=`, `symbol?path=
 
 **Event sources aren't URIs.** An event's `source` says who emitted it —
 `human`, `system:<component>`, `agent:thr3`, `provider:<instance>`,
-`effect:<extension>/<id>`, `effect:effort_policy:<id>` — built by
+`effect:<namespace>/<id>`, `effect:effort_policy:<id>` — built by
 `uri::build::{system_source, effect_source, provider_source}` and
 `Actor::source()`, read with `effect_of_source`. A provider instance or
 an effort policy isn't a resource. Nor are a ui-preference scope's
-`resource:<ext>/<name>` and `component:<ext>/<id>`.
+`resource:<namespace>/<name>` and `component:<namespace>/<id>`.
 
 ## Resources are declared
 
@@ -178,12 +178,12 @@ resources:
 - **The extension segment** is the extension's name, or `oxplow` for the
   extension whose namespace is oxplow's (only a bundled one may take it).
   `resolve` and `searchable` name the extension's own datasets
-  (`v_<ext>_<dataset>`), or core's for the oxplow namespace
+  (`v_<namespace>_<dataset>`), or core's for the oxplow namespace
   (`resolve: agent_turn`). A `pattern` is anchored and kept in one form
   both regex engines read alike (`param_pattern.rs`).
 - **Loading.** `crates/oxplow-app/src/extension/extension_resources.rs` parses the
   block (`ResourceEntry` → `ResourceDecl`); each resource is a contribution
-  of kind `resource` (`oxplow:oxplow/resource?resource=<ext>/<name>`), so a
+  of kind `resource` (`oxplow:oxplow/resource?resource=<namespace>/<name>`), so a
   resource two extensions declare is the later one's load error. A
   resource has no `page:`: it opens as itself, and the pages that render
   it say so with `pages[].for` ([extensions-pages.md](./extensions-pages.md)

@@ -9,7 +9,7 @@ given:
       refs:
         branches: [{ name: main, head: c2, stream: 1 }, { name: side, head: c3 }]
         heads: [{ stream: 1, sha: c2 }]
-when: { page: oxplow-foundation/recent-commits, params: { stream_id: 1, limit: 5 } }
+when: { page: oxplow/recent-commits, params: { stream_id: 1, limit: 5 } }
 expect:
   loaders:
     row: { rows: [{ branch: main }] }

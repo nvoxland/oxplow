@@ -6,7 +6,7 @@
 # values, its loaders, its nodes and its actions where they sit. The tab is
 # named for the file; the raw YAML is the Text view's, one View as away.
 when:
-  page: oxplow-foundation/definition
+  page: oxplow/definition
   params:
     uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions"
     path: oxplow-foundation/pages/commit.yaml
@@ -18,11 +18,11 @@ expect:
     about:
       rows:
         - title: Commit
-          id: oxplow-foundation/commit
+          id: oxplow/commit
           extension: oxplow-foundation
           origin: ships with oxplow
           source: oxplow-foundation/pages/commit.yaml
-          source_target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/commit.yaml#oxplow.renderer=oxplow-foundation/file-viewer"
+          source_target: "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/commit.yaml#oxplow.renderer=oxplow/file-viewer"
     description:
       rows: 1
     usage:
@@ -51,7 +51,7 @@ expect:
         - { id: stack, kind: stack }
         - { id: detail, kind: viz, viz: detail, loader: detail, columns: "committed_at (Date), author (Author), sha (Commit), on_branch (On this branch), parent (Parent), merged (Merged)" }
         - { id: files, kind: viz, viz: tree, loader: files, columns: name (File) }
-        - { id: sections, kind: slot, detail: "`oxplow-foundation/commit.sections`" }
+        - { id: sections, kind: slot, detail: "`oxplow/commit.sections`" }
     view:
       rows:
         - text: |-
@@ -66,7 +66,7 @@ expect:
                 - id: column `id`
                 - parent: column `parent`
                 - label: column `name`
-              - Slot `oxplow-foundation/commit.sections`
+              - Slot `oxplow/commit.sections`
     actions:
       rows:
         - { label: Cherry-pick, command: oxplow.git.cherry_pick, on: page }

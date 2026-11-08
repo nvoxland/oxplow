@@ -18,7 +18,7 @@ mock.module("../api.js", () => ({
       panels: [],
       pageFiles: [
         {
-          id: "oxplow-foundation/tasks",
+          id: "oxplow/tasks",
           extension: "oxplow-foundation",
           slug: "tasks",
           title: "Tasks",

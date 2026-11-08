@@ -1,7 +1,7 @@
 # Settings → Integrations → Capabilities: each choosable capability's
 # implementations and a default row; choosing writes `activeProviders` in its
 # layer, and the default row resets it.
-when: { page: oxplow-foundation/settings, params: { area: integrations } }
+when: { page: oxplow/settings, params: { area: integrations } }
 expect:
   loaders:
     capabilities:

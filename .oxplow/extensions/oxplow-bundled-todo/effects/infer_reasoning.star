@@ -1,4 +1,4 @@
-# oxplow-bundled-todo/infer-reasoning: a finished effort's unrecorded decisions
+# oxplow/infer-reasoning: a finished effort's unrecorded decisions
 # and the claims its answers made are asked about (`effort.infer_reasoning` builds the request). With no
 # model to ask, it skips and says why — nothing is queued to fail.
 

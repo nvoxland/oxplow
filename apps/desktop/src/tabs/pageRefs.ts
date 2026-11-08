@@ -66,13 +66,13 @@ export function withPageParams(tabId: string, params: Record<string, ParamValue>
   return formatUri({ ...u, params: merged });
 }
 
-/** What a page tab carries: whose page (`null` for oxplow's own, which are
- *  core-named), its id and the params that say what it shows (its id's
+/** What a page tab carries: the namespace its page is named in (`null`
+ *  for oxplow's own, which are core-named), its id and the params that say what it shows (its id's
  *  `?`). Nothing rides beside the id: how it shows it is the id's `#`
  *  view (`viewParamsOf`), what only one step of a tab keeps is that entry's
  *  history state. */
 export interface PagePayload {
-  extension: string | null;
+  namespace: string | null;
   page: string;
   params: Record<string, string>;
 }
@@ -89,35 +89,37 @@ export function pageTabRef(page: string, params?: Record<string, ParamValue>, vi
   return { id: pageUri(page, clean, view) };
 }
 
-/** An extension's page (`page=<extension>/<id>`) — `uri`, when it opens one
- *  of the extension's resources. */
+/** A page named in another namespace (`page=<namespace>/<id>`) — `uri`,
+ *  when it opens one of its resources. */
 export function extPageRef(
-  extension: string,
+  namespace: string,
   page: string,
   params?: Record<string, ParamValue>,
   view?: Record<string, ParamValue>,
 ): TabRef {
   const clean = cleanParams(params);
-  return { id: extPageUri(extension, page, clean, view) };
+  return { id: extPageUri(namespace, page, clean, view) };
 }
 
 /** A route's page and params, read from its URI (`page=<id>` for oxplow's
- *  own, `page=<extension>/<id>` for another's); null for any other tab. */
+ *  own, `page=<namespace>/<id>` for another's); null for any other tab. */
 export function pagePayload(ref: TabRef | null | undefined): PagePayload | null {
   const u = ref ? parseUri(ref.id) : null;
   if (!u || typeOf(ref!.id) !== "oxplow/page") return null;
   const { page: head = "", ...params } = u.params;
   const slash = head.indexOf("/");
-  if (slash === -1) return head ? { extension: null, page: head, params } : null;
-  const extension = head.slice(0, slash);
+  if (slash === -1) return head ? { namespace: null, page: head, params } : null;
+  const namespace = head.slice(0, slash);
   const page = head.slice(slash + 1);
-  return extension && page && !page.includes("/") ? { extension, page, params } : null;
+  // `page=oxplow/<id>` is oxplow's own too, as a bare id names it.
+  if (namespace === "oxplow") return page && !page.includes("/") ? { namespace: null, page, params } : null;
+  return namespace && page && !page.includes("/") ? { namespace, page, params } : null;
 }
 
-/** Whether `ref` is the page `page` (oxplow's own unless `extension`). */
-export function isPage(ref: TabRef | null | undefined, page: string, extension: string | null = null): boolean {
+/** Whether `ref` is the page `page` (oxplow's own unless `namespace`). */
+export function isPage(ref: TabRef | null | undefined, page: string, namespace: string | null = null): boolean {
   const p = pagePayload(ref);
-  return p !== null && p.page === page && p.extension === extension;
+  return p !== null && p.page === page && p.namespace === namespace;
 }
 
 /** What a tab shows, as visits and bookmarks record it: a route's page
@@ -125,7 +127,7 @@ export function isPage(ref: TabRef | null | undefined, page: string, extension: 
  *  web page's scheme. */
 export function recordedPageKind(ref: TabRef): string {
   const p = pagePayload(ref);
-  if (p) return p.extension ? `${p.extension}/${p.page}` : p.page;
+  if (p) return p.namespace ? `${p.namespace}/${p.page}` : p.page;
   return typeOf(ref.id) ?? /^(https?):\/\//i.exec(ref.id)?.[1]?.toLowerCase() ?? "link";
 }
 

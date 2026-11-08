@@ -41,7 +41,7 @@ async function nothingAdded(page: Page) {
   await expect(shown(page).locator('[title^="from "]')).toHaveCount(0);
   const rail = page.getByTestId("rail-hud");
   await expect(
-    rail.locator('[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:oxplow-foundation/"])'),
+    rail.locator('[data-testid^="rail-section-ext:"]:not([data-testid^="rail-section-ext:oxplow/"])'),
   ).toHaveCount(0);
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await expect(page.getByTestId("menu-item-page-ask-assistant")).toBeVisible();

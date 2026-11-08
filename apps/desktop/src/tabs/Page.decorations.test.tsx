@@ -31,18 +31,18 @@ mock.module("../api.js", () => ({
         slots: [],
         commands: [],
         decorators: [
-          { id: "oxplow-bundled/0", extension: "oxplow-bundled", view: "v_oxplow_bundled_verdict", resource: "oxplow/effort", placement: "ref-chip", label: "label", color: "color" },
+          { id: "oxplow/0", extension: "oxplow-bundled", view: "v_oxplow_verdict", resource: "oxplow/effort", placement: "ref-chip", label: "label", color: "color" },
         ],
       },
     },
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
-    if (sql.includes("FROM v_oxplow_bundled_verdict")) {
+    if (sql.includes("FROM v_oxplow_verdict")) {
       return {
         columns: ["uri", "label", "color"],
         rows: [["oxplow:oxplow/effort?id=eff7", "Changes requested", "red"]],
         truncated: false,
-        reads: { datasets: ["v_oxplow_bundled_verdict"], tables: [], measures: [] },
+        reads: { datasets: ["v_oxplow_verdict"], tables: [], measures: [] },
         freshness: {},
       };
     }

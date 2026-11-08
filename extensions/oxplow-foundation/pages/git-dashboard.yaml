@@ -148,7 +148,7 @@ view:
   - id: uncommitted
     title: Uncommitted
     embed:
-      page: oxplow-foundation/uncommitted-changes
+      page: oxplow/uncommitted-changes
   - id: recent
     title: Recent Commits
     collapsible: true
@@ -174,4 +174,4 @@ view:
       label: Changed
     empty: No commits yet. Commits on this branch show up here as they're made.
 see_also:
-  - { page: oxplow-foundation/streams }
+  - { page: oxplow/streams }

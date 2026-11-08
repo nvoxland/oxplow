@@ -6,7 +6,7 @@
 use std::io::{self, Write};
 
 use oxplow_domain::{
-    contribution::valid_extension_name,
+    contribution::valid_namespace,
     extension_state::{Scope, Stamp},
     DomainError,
 };
@@ -20,24 +20,25 @@ const MAX_CONFIG_BYTES: usize = 1_048_576;
 const MAX_CONFIG_DEPTH: usize = 64;
 const MAX_REVISION: u64 = i64::MAX as u64;
 
-/// A host-derived extension namespace. It cannot be deserialized from an
+/// A host-derived extension namespace (its `namespace:`: the extensions
+/// sharing one share their settings). It cannot be deserialized from an
 /// extension request and carries no authority by itself.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ConfigNamespace {
-    extension: String,
+    namespace: String,
     scope: Scope,
 }
 
 impl ConfigNamespace {
-    pub fn new(extension: String, scope: Scope) -> Result<Self, ConfigStoreError> {
-        if extension.len() > MAX_NAMESPACE_BYTES || !valid_extension_name(&extension) {
+    pub fn new(namespace: String, scope: Scope) -> Result<Self, ConfigStoreError> {
+        if namespace.len() > MAX_NAMESPACE_BYTES || !valid_namespace(&namespace) {
             return Err(ConfigStoreError::InvalidData);
         }
-        Ok(Self { extension, scope })
+        Ok(Self { namespace, scope })
     }
 
-    pub fn extension(&self) -> &str {
-        &self.extension
+    pub fn namespace(&self) -> &str {
+        &self.namespace
     }
 
     pub fn scope(&self) -> Scope {
@@ -131,12 +132,12 @@ pub fn read_tx(
     validate_namespace(namespace)?;
     let mut statement = conn
         .prepare(
-            "SELECT extension, scope, schema_version, revision, values_json
-             FROM extension_config WHERE extension = ?1 AND scope = ?2",
+            "SELECT namespace, scope, schema_version, revision, values_json
+             FROM extension_config WHERE namespace = ?1 AND scope = ?2",
         )
         .map_err(storage)?;
     let mut rows = statement
-        .query(params![namespace.extension, scope_name(namespace.scope)])
+        .query(params![namespace.namespace, scope_name(namespace.scope)])
         .map_err(storage)?;
     let Some(row) = rows.next().map_err(storage)? else {
         return Ok(None);
@@ -144,7 +145,7 @@ pub fn read_tx(
 
     let extension = row.get_ref(0).map_err(storage)?;
     let scope = row.get_ref(1).map_err(storage)?;
-    if !text_equals(extension, namespace.extension.as_bytes())
+    if !text_equals(extension, namespace.namespace.as_bytes())
         || !text_equals(scope, scope_name(namespace.scope).as_bytes())
     {
         return Err(ConfigStoreError::InvalidData);
@@ -183,11 +184,11 @@ pub fn inspect_tx(
     let mut statement = conn
         .prepare(
             "SELECT schema_version, revision FROM extension_config
-             WHERE extension = ?1 AND scope = ?2",
+             WHERE namespace = ?1 AND scope = ?2",
         )
         .map_err(storage)?;
     let mut rows = statement
-        .query(params![namespace.extension, scope_name(namespace.scope)])
+        .query(params![namespace.namespace, scope_name(namespace.scope)])
         .map_err(storage)?;
     let Some(row) = rows.next().map_err(storage)? else {
         return Ok(None);
@@ -239,9 +240,9 @@ pub fn compare_exchange_tx(
         Some(stamp) => conn.execute(
             "UPDATE extension_config
              SET schema_version = ?3, revision = ?4, values_json = ?5
-             WHERE extension = ?1 AND scope = ?2 AND schema_version = ?6 AND revision = ?7",
+             WHERE namespace = ?1 AND scope = ?2 AND schema_version = ?6 AND revision = ?7",
             params![
-                namespace.extension,
+                namespace.namespace,
                 scope_name(namespace.scope),
                 i64::from(schema_version),
                 revision as i64,
@@ -251,10 +252,10 @@ pub fn compare_exchange_tx(
             ],
         ),
         None => conn.execute(
-            "INSERT INTO extension_config (extension, scope, schema_version, revision, values_json)
-             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (extension, scope) DO NOTHING",
+            "INSERT INTO extension_config (namespace, scope, schema_version, revision, values_json)
+             VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (namespace, scope) DO NOTHING",
             params![
-                namespace.extension,
+                namespace.namespace,
                 scope_name(namespace.scope),
                 i64::from(schema_version),
                 revision as i64,
@@ -322,9 +323,7 @@ fn checked_stamp(schema_version: i64, revision: i64) -> Result<Stamp, ConfigStor
 }
 
 fn validate_namespace(namespace: &ConfigNamespace) -> Result<(), ConfigStoreError> {
-    if namespace.extension.len() > MAX_NAMESPACE_BYTES
-        || !valid_extension_name(&namespace.extension)
-    {
+    if namespace.namespace.len() > MAX_NAMESPACE_BYTES || !valid_namespace(&namespace.namespace) {
         return Err(ConfigStoreError::InvalidData);
     }
     Ok(())
@@ -414,13 +413,14 @@ fn map_tx_error(error: TxError<ConfigStoreError>) -> ConfigStoreError {
     }
 }
 
-/// Forget everything `extension` stored here, every scope: it was removed.
+/// Forget everything namespace `extension` stored here, every scope: its
+/// last extension was removed.
 pub fn forget_extension_tx(
     conn: &rusqlite::Connection,
     extension: &str,
 ) -> Result<(), oxplow_domain::DomainError> {
     conn.execute(
-        "DELETE FROM extension_config WHERE extension = ?1",
+        "DELETE FROM extension_config WHERE namespace = ?1",
         rusqlite::params![extension],
     )
     .map_err(crate::database::map_sql_err)?;

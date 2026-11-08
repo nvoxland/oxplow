@@ -19,7 +19,6 @@ use oxplow_db::Database;
 use oxplow_domain::events::schema::{
     ContributionDisabled, ContributionDisabledV1, ContributionEnabled, ContributionEnabledV1,
 };
-use oxplow_domain::uri::build::extension_uri;
 use oxplow_domain::{CommandError, DomainError, Envelope};
 use serde::Deserialize;
 
@@ -78,7 +77,7 @@ fn disabled_event(key: &ContributionKey, reason: &str) -> Envelope {
             reason: reason.to_string(),
         },
     )
-    .with_subject([key.id().to_string(), extension_uri(&key.extension)])
+    .with_subject([key.id().to_string()])
 }
 
 impl ContributionHealth {
@@ -180,7 +179,7 @@ impl ContributionHealth {
                         contribution: key.id().to_string(),
                     },
                 )
-                .with_subject([key.id().to_string(), extension_uri(&key.extension)]);
+                .with_subject([key.id().to_string()]);
                 oxplow_db::event_log_store::append_tx(tx, &vocabulary.current(), &event).map(|_| ())
             })
             .await
@@ -254,8 +253,8 @@ impl Kind {
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EnableInput {
-    /// The extension.
-    extension: String,
+    /// The namespace it is named in (its extension's).
+    namespace: String,
     /// `provider`, `collector` or `effect`: two kinds may share an id.
     kind: Kind,
     /// Its provider's, collector's or effect's id.
@@ -273,7 +272,7 @@ async fn enable_one(
     kind: Kind,
     source: &str,
 ) -> Result<Option<ContributionHealthRow>, CommandError> {
-    let instance = format!("{}/{}", key.extension, key.contribution);
+    let instance = format!("{}/{}", key.namespace, key.contribution);
     if health.get(&key).await?.is_none()
         && (kind != Kind::Provider || providers.find(&instance).is_none())
     {
@@ -293,7 +292,7 @@ async fn enable_one(
     Ok(health.get(&key).await?)
 }
 
-/// `oxplow.contribution.enable { extension, kind, contribution }`: a person
+/// `oxplow.contribution.enable { namespace, kind, contribution }`: a person
 /// turns a contribution back on on this machine, clearing an automatic disable. A provider
 /// instance starts again when the project's config enables it; a
 /// collector runs at its next trigger. Human
@@ -313,7 +312,7 @@ pub fn enable_op(
             let (health, providers) = (health.clone(), providers.clone());
             Box::pin(async move {
                 let EnableInput {
-                    extension,
+                    namespace,
                     kind,
                     contribution,
                 } = serde_json::from_value(input).map_err(|e| CommandError::Invalid {
@@ -324,7 +323,7 @@ pub fn enable_op(
                     message: "the provider registry is gone".into(),
                 })?;
                 let key = ContributionKey {
-                    extension,
+                    namespace,
                     contribution,
                     kind: kind.as_str(),
                 };
@@ -341,14 +340,14 @@ pub fn enable_op(
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EnableAllInput {
-    /// Only this extension's contributions; every extension's when absent.
+    /// Only this namespace's contributions; every one's when absent.
     #[serde(default)]
-    extension: Option<String>,
+    namespace: Option<String>,
 }
 
-/// `oxplow.contribution.enable_all { extension? }`: a person turns back on
+/// `oxplow.contribution.enable_all { namespace? }`: a person turns back on
 /// every contribution that stopped after repeated failures (one
-/// extension's, or all), each as `oxplow.contribution.enable` does it —
+/// namespace's, or all), each as `oxplow.contribution.enable` does it —
 /// one `contribution.enabled@1` apiece. Human only. The result lists the
 /// rows it enabled.
 pub fn enable_all_op(
@@ -364,7 +363,7 @@ pub fn enable_all_op(
             let actor = invocation.actor().clone();
             let (health, providers) = (health.clone(), providers.clone());
             Box::pin(async move {
-                let EnableAllInput { extension } =
+                let EnableAllInput { namespace } =
                     serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                         field: None,
                         message: e.to_string(),
@@ -375,7 +374,7 @@ pub fn enable_all_op(
                 let mut enabled = Vec::new();
                 for row in health.list().await? {
                     if row.state != "disabled"
-                        || extension.as_deref().is_some_and(|e| e != row.extension)
+                        || namespace.as_deref().is_some_and(|n| n != row.namespace)
                     {
                         continue;
                     }
@@ -383,7 +382,7 @@ pub fn enable_all_op(
                         continue;
                     };
                     let key = ContributionKey {
-                        extension: row.extension,
+                        namespace: row.namespace,
                         contribution: row.contribution,
                         kind: kind.as_str(),
                     };
@@ -405,7 +404,7 @@ mod tests {
 
     fn key() -> ContributionKey {
         ContributionKey {
-            extension: "tracker".into(),
+            namespace: "tracker".into(),
             contribution: "fake".into(),
             kind: "provider",
         }
@@ -531,9 +530,9 @@ mod enable_all_tests {
     use oxplow_domain::Actor;
     use serde_json::json;
 
-    fn collector(extension: &str, id: &str) -> ContributionKey {
+    fn collector(namespace: &str, id: &str) -> ContributionKey {
         ContributionKey {
-            extension: extension.into(),
+            namespace: namespace.into(),
             contribution: id.into(),
             kind: "collector",
         }
@@ -570,7 +569,7 @@ mod enable_all_tests {
             .run(
                 &Actor::Human,
                 ENABLE_ALL,
-                json!({ "extension": "one" }),
+                json!({ "namespace": "one" }),
                 false,
             )
             .await

@@ -3,7 +3,7 @@
   about: oxplow/effort
   skill: README.md
   reaches:
-    sql: SELECT c.id, c.statement, c.kind FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri WHERE c.effort_id = 1 AND s.verified = 0
+    sql: SELECT c.id, c.statement, c.kind FROM v_claim c JOIN v_oxplow_claim_status s ON s.uri = c.uri WHERE c.effort_id = 1 AND s.verified = 0
   shape: { columns: [id, statement, kind] }
 - question: Which decisions did oxplow infer for this effort that nobody has reviewed?
   about: oxplow/effort
@@ -17,5 +17,5 @@
   about: oxplow/effort
   skill: README.md
   reaches:
-    sql: SELECT path, change_kind FROM v_oxplow_bundled_deviation WHERE effort_id = 1
+    sql: SELECT path, change_kind FROM v_oxplow_deviation WHERE effort_id = 1
   shape: { columns: [path, change_kind] }

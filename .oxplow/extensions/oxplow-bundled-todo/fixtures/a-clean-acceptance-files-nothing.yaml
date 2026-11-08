@@ -22,5 +22,5 @@ when:
 expect:
   ok: true
 steps:
-  - when: { sql: "SELECT (SELECT count(*) FROM v_work_item WHERE title LIKE 'Verify what the review of %') AS follow_ups, (SELECT group_concat(state) FROM v_effect_run WHERE effect = 'oxplow-bundled-todo/verify-unchecked') AS reacted" }
+  - when: { sql: "SELECT (SELECT count(*) FROM v_work_item WHERE title LIKE 'Verify what the review of %') AS follow_ups, (SELECT group_concat(state) FROM v_effect_run WHERE effect = 'oxplow/verify-unchecked') AS reacted" }
     expect: { rows: [{ follow_ups: 0, reacted: skipped }] }

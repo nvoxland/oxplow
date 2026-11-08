@@ -53,7 +53,7 @@ const B = "oxplow:oxplow/terminal?id=trm2";
 function runOf(rows: SqlCell[][], picked: SqlCell = null): VizRun {
   return {
     config: {
-      id: "oxplow-foundation/terminal",
+      id: "oxplow/terminal",
       viz: "terminal",
       terminal: { of: "uri", title: "title", conversation: null },
       columns: [{ key: "title", select: "terminal" }],
@@ -135,7 +135,7 @@ test("an agent session's row is its agent: what it's bound to comes from the row
   const S = "oxplow:oxplow/agent_session?id=ses4";
   const run = {
     config: {
-      id: "oxplow-foundation/agent-session-terminal",
+      id: "oxplow/agent-session-terminal",
       viz: "terminal",
       terminal: { of: "uri", title: null, conversation: "conversation", thread: "thread" },
       columns: [],

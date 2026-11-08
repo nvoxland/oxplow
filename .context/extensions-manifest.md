@@ -24,11 +24,11 @@ extensions may share a name) is the one place those facts live.
 **A contribution's only public name is its URI** (`ContributionId::reference`,
 its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
 `oxplow/<kind>` with the kind's own name as the key param,
-`oxplow:oxplow/<kind>?<kind>=<extension>/<id>`
-— `oxplow:oxplow/job?job=effort-review/review`,
+`oxplow:oxplow/<kind>?<kind>=<namespace>/<id>`
+— `oxplow:oxplow/job?job=effort_review/review`,
 `oxplow:oxplow/collector?collector=triage/todos`,
 `oxplow:oxplow/page?page=github/pr`,
-`oxplow:oxplow/dataset?dataset=effort-review/reviews` — or,
+`oxplow:oxplow/dataset?dataset=effort_review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
 command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
@@ -60,11 +60,52 @@ advisories, skills (global: the name), implementations (global:
 `<capability>/<id>`), providers (global: the id, which is also the default
 instance's id, its URIs' segment and its commands' namespace), measures,
 metrics and dimensions (global: the key), datasets (global: the
-`v_<ext>_<name>` view), event types (global: the type string; one
+`v_<namespace>_<name>` view), event types (global: the type string; one
 descriptor per type, its highest `v` the contract version), resources
-(global: `<extension>/<name>`), pages,
+(global: `<namespace>/<name>`), pages,
 panels, slot mounts (`<host>.<slot>-<n>`), decorators (`decorator-<n>`),
 replacements and custom components (all mounted, no global name).
+
+**Every name comes from the namespace, never the name.** A dataset's view
+(`v_<namespace>_<name>`), an entity's table and view (`ext__<namespace>__<entity>`,
+`v_<namespace>_<entity>`), an event type (`<namespace>.<…>`), a command id,
+and every contribution's id — `ContributionId { namespace, kind, local }`,
+`<namespace>/<local>`: pages, panels, effects, collectors, jobs, AI
+profiles (`<namespace>/<profile>` in `ai.yaml`), advisories, custom
+components, providers and their instances (`extensionInstances:` keys),
+resources — are named by the manifest's `namespace:` (default: the name,
+`-` → `_`). So is what is stored under them: `contribution_health`
+(`namespace` column), `collector_run.owner` (a collector's owner is its
+namespace), `effect_state`/`effect_run`, jobs, `panel_layout`, settings
+(`extension_config.namespace`), private state (`extension_state.namespace`),
+collector and instance credentials and extension secrets (keychain
+accounts). Everything oxplow ships is in `oxplow`, so a user sees
+`v_oxplow_verdict`, `oxplow.review.accepted` and `oxplow/collectors`
+whichever shipped extension declares them, and a piece moves between
+foundation, bundled and the holder without a stored or shown name
+changing. `oxplow` is the only namespace extensions share
+(`refuse_shared_namespaces` refuses any other, `check_namespace` keeps
+`oxplow` to what ships). Sharing one shares its names, so its extensions
+coordinate: a second one declaring an id or a global name the first has is
+refused (`Registry::add`'s id and global-name checks, `descriptor.collision`;
+the "already belongs to" check in `datasets::compile_extensions`), and
+their `configuration:` declarations merge into one document
+(`share_configuration`, `config_schema::merge`: one `version`, no key two
+declare; the later one is refused, `configuration.shared`). Settings and
+state are forgotten only with a namespace's last extension.
+
+What says *who declares* a thing stays the extension: `Descriptor::owner`,
+`v_contribution.extension` (beside `v_contribution.namespace`),
+`run::ContributionRef::extension` (whose grants, files and deployment a run
+has; `RunContext::extension()` vs `namespace()`), `dataset.owner`, an event
+type's registrant (only it emits the type), a retention window
+(`extension_event_retention` is keyed `(namespace, extension)`), an entity
+drop (`collector_store::drop_extension` drops the tables behind the owner's
+own `dataset` rows, never by the shared `ext__<namespace>__` prefix), a
+metric capture's scope, and decorator ids (positional, never stored). To
+find the extension behind an id, look in its namespace for the one that
+declares it (`extensions::declarer`, `ExtensionCatalog::find_page`); a
+health row's extension is `v_contribution`'s for its `uri`.
 
 The id rules each kind used to restate are the domain's: `valid_local`
 (effects, advisories, pages, panels, skills, custom components),
@@ -87,7 +128,7 @@ The same transaction restates `extension_listing` (V74,
 (V110) `page`, `page_answer` and `page_param` from every enabled extension's
 page files (`extension_generation::page_rows`), read as `v_page`,
 `v_page_answer` and `v_page_param`. (V113 dropped the old UI table,
-`thread_answer` and dashboard tables.) A page's URI is `oxplow:oxplow/page?page=<extension>/<slug>`
+`thread_answer` and dashboard tables.) A page's URI is `oxplow:oxplow/page?page=<namespace>/<slug>`
 (`page=<slug>` for an extension in the `oxplow` namespace), stored in the row.
 Two kinds of listing row follow something other than a generation: those
 for an extension with no deployment running (`undeployed`, `not_here`) follow
@@ -116,7 +157,7 @@ dataset references and withholds contributions before catalog publication.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
-- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=effort-review/reviews`). An
+- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=effort_review/reviews`). An
   import of a globally named kind (`oxplow:oxplow/command?command=acme.pr.merge`) is of
   whichever extension declares that name.
   An import has a consumer-local binding name, a positive integer contract
@@ -459,10 +500,10 @@ over a database file); adversarial and concurrency coverage is still to do.
 >     mechanics and decisions are in
 >     [semantic-layer.md](./semantic-layer.md) → "User and extension
 >     sources", and a tested example is in `examples/extensions/github/`;
->   - **slots** on pages (`oxplow-foundation/diff-view.sections`,
+>   - **slots** on pages (`oxplow/diff-view.sections`,
 >     `commit.sections`, `uncommitted-changes.sections`,
 >     `new-session.sections`, `diff.file-header`; oxplow-bundled's
->     `oxplow-bundled-todo/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
+>     `oxplow/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
 >   - page alerts, panels, and extension-declared measures, metrics,
 >     dimensions and fact collectors (see extensions-jobs.md "Contributing metrics");
 >   - whole-page and row actions;
@@ -552,11 +593,11 @@ collectors:  [...]   # entity collectors (exec / starlark / jaq / read → entit
                      # see semantic-layer.md "Collectors"
 ui:                  # what it adds to the core UI (a command's own `ui:` puts it in core menus: see extensions-commands.md "Commands")
   slots:             # pages mounted at other pages' slots; see extensions-slots.md "Slots"
-    - { page: change-review, at: oxplow-foundation/diff-view.sections }
+    - { page: change-review, at: oxplow/diff-view.sections }
   decorators: …      # labels from its datasets on core URIs (stable since P10; see extensions-slots.md "Decorators")
   replacements: …    # a page in place of a named core component (see extensions-slots.md "Replacements")
 advisories:  [...]   # see extensions-commands.md "Advisories"
-datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<ext>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
+datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<namespace>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see extensions-commands.md "Commands")
 resources: …        # kinds of thing a URI can name (see extensions-events.md "Resources"); each has an optional one-sentence `description:`
@@ -601,7 +642,7 @@ delete the YAML files in `lenses/`: they are what the loader refuses.
   over 200 characters, a table of more than 8 columns, a param no loader reads);
 - lifecycle: `engine`, when given, is `>=MAJOR.MINOR[.PATCH]`;
 - cross-references: a `ui.mounts` page is in `pages/` and its slot name
-  has the shape `<extension>/<page>.<name>`; a slot mount whose host page
+  has the shape `<namespace>/<page>.<name>`; a slot mount whose host page
   is not loaded, or has no such slot node, is a warning (it shows
   nowhere); a `panels` body and a replacement's page are the extension's
   own pages; a replacement page declares every prop of its target's

@@ -26,7 +26,10 @@ pub struct PreparedExtensionDatabase {
     /// The declarations of the extensions whose datasets read their own
     /// configuration (`config()`): their effective values are resolved in the
     /// publishing transaction and compiled into the views.
+    /// Each is `(extension, namespace, declaration)`: settings are stored
+    /// under the namespace.
     configurations: Vec<(
+        String,
         String,
         crate::extension::extensions::config_schema::ConfigurationFile,
     )>,
@@ -58,7 +61,7 @@ pub fn config_signature_tx(
             let declaration = extension.configuration.as_ref()?;
             let signed = match crate::extension::extension_configuration::effective_values(
                 conn,
-                &extension.name,
+                &extension.namespace,
                 declaration,
             ) {
                 Ok(values) => values.to_string(),
@@ -104,6 +107,7 @@ impl PreparedExtensionDatabase {
             .filter(|extension| extension.enabled && !extension.datasets.is_empty())
             .map(|extension| ExtensionDatasets {
                 extension: extension.name.clone(),
+                namespace: extension.namespace.clone(),
                 sources: extension.datasets.clone(),
                 config: None,
             })
@@ -132,7 +136,11 @@ impl PreparedExtensionDatabase {
             .iter()
             .filter(|extension| extension.enabled && reads_configuration(extension))
             .filter_map(|extension| {
-                Some((extension.name.clone(), extension.configuration.clone()?))
+                Some((
+                    extension.name.clone(),
+                    extension.namespace.clone(),
+                    extension.configuration.clone()?,
+                ))
             })
             .collect();
         Self {
@@ -208,10 +216,10 @@ impl PreparedExtensionDatabase {
         let result = (|| {
             oxplow_db::collector_store::ensure_entities_tx(tx, &self.entities)?;
             let mut candidate = self.datasets.clone();
-            for (extension, declaration) in &self.configurations {
+            for (extension, namespace, declaration) in &self.configurations {
                 let values = crate::extension::extension_configuration::effective_values(
                     tx,
-                    extension,
+                    namespace,
                     declaration,
                 )
                 .map_err(|error| {
@@ -290,11 +298,7 @@ fn page_rows(
 ) {
     use oxplow_db::catalog_listing_store::{PageAnswerRow, PageParamRow, PageRow};
     for page in &extension.page_files {
-        let uri = if extension.namespace == crate::extension::extensions::CORE_NAMESPACE {
-            oxplow_domain::uri::build::page_uri(&page.slug, &[])
-        } else {
-            oxplow_domain::uri::build::extension_page_uri(&page.extension, &page.slug)
-        };
+        let uri = oxplow_domain::uri::build::extension_page_uri(page.namespace(), &page.slug);
         pages.push(PageRow {
             uri: uri.clone(),
             extension: page.extension.clone(),

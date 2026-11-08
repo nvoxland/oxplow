@@ -1,6 +1,5 @@
-# An acceptance logged before the payload named its effort by bare id
-# (`oxplow_bundled.accepted@1`, the effort a URI) is read as the current
-# version: the follow-up still files, about the effort.
+# An acceptance that left a claim unverified files one follow-up about the
+# effort.
 given:
   - { command: oxplow.work_item.create, input: { title: Add CSV export }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri }, bind: effort }
@@ -8,10 +7,10 @@ given:
     input: { effort: eff1, claims: [{ statement: Tests pass., kind: tests_pass }] }
 when:
   event:
-    type: oxplow_bundled.accepted
+    type: oxplow.review.accepted
     v: 1
     subject: ["oxplow:oxplow/effort?id=eff1", "oxplow:oxplow/claim?id=1"]
-    payload: { effort: "oxplow:oxplow/effort?id=eff1", work_item: $item.uri, unverified: 1, inferred: 0, deviated: 0 }
+    payload: { effort: eff1, work_item: $item.uri, unverified: 1, inferred: 0, deviated: 0 }
 expect:
-  effects: [{ id: oxplow-bundled-todo/verify-unchecked, state: ok }]
+  effects: [{ id: oxplow/verify-unchecked, state: ok }]
   commands: [oxplow.work_item.create]

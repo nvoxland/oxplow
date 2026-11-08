@@ -52,7 +52,7 @@ test("new alerts are the items not seen before, once each", () => {
 // A hint raised to the person is a notice: it counts, toasts once, and
 // isn't a problem.
 test("a hint for the person counts and toasts once", () => {
-  const hint = { id: 4, kind: "oxplow-bundled/landed-in-progress", message: "“t” is still in progress", threadTitle: "Main" };
+  const hint = { id: 4, kind: "oxplow/landed-in-progress", message: "“t” is still in progress", threadTitle: "Main" };
   expect(alertsSummary({ ...none, hints: [hint] })).toEqual({ count: 1, tone: "accent" });
   expect(newAlerts(alertKeys(none), { ...none, hints: [hint] }).map((a) => a.message)).toEqual(["“t” is still in progress"]);
   expect(newAlerts(alertKeys({ ...none, hints: [hint] }), { ...none, hints: [hint] })).toEqual([]);

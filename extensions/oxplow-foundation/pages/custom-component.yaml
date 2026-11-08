@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Custom component
 answers:
-- {"question":"What does this custom component draw, and which commands may it run?","about":"oxplow/custom_component","params":{"uri":"oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations"},"skill":"oxplow-extension"}
+- {"question":"What does this custom component draw, and which commands may it run?","about":"oxplow/custom_component","params":{"uri":"oxplow:oxplow/custom_component?custom_component=oxplow/integrations"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |
@@ -22,7 +22,7 @@ loaders:
              CASE WHEN f.rel IS NOT NULL THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
                     || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
-                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+                    || 'oxplow.renderer=oxplow/file-viewer' END AS declared_target
       FROM f JOIN v_custom_component k ON k.uri = f.uri
   facts:
     sql: |
@@ -31,7 +31,7 @@ loaders:
       FROM v_custom_component k WHERE k.uri = :uri
   commands:
     sql: |
-      SELECT json_group_array(json_object('text', j.value, 'hint', v.summary, 'uri', v.uri || '#oxplow.renderer=oxplow-foundation/command')) AS items
+      SELECT json_group_array(json_object('text', j.value, 'hint', v.summary, 'uri', v.uri || '#oxplow.renderer=oxplow/command')) AS items
       FROM v_custom_component k, json_each(k.commands) j LEFT JOIN v_command v ON v.id = j.value
       WHERE k.uri = :uri HAVING count(*) > 0
   # The extension that declares it: one link.

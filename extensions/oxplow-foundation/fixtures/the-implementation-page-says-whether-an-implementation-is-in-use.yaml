@@ -1,5 +1,5 @@
 # An implementation page says which capability it implements, whether it is in use and what it can do.
-when: { page: oxplow-foundation/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow" } }
+when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow" } }
 expect:
   label: oxplow's tasks
   loaders:

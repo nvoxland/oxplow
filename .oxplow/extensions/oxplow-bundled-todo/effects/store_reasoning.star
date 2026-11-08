@@ -1,4 +1,4 @@
-# oxplow-bundled-todo/store-reasoning: a `reasoning` job's answer becomes the
+# oxplow/store-reasoning: a `reasoning` job's answer becomes the
 # effort's inferred decisions and claims (replacing any it had; a claim a
 # reviewer acted on stays, core keeps it). The job's intent key
 # (`reasoning:<effort id>`, as `reasoning:eff3`, `…@<n>` when asked again) says which effort.

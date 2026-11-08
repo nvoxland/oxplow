@@ -22,10 +22,10 @@ when:
   confirmed: true
 expect: { ok: true }
 steps:
-  - when: { sql: "SELECT v.type, v.source, json_extract(v.payload, '$.unverified') AS unverified, json_extract(v.payload, '$.inferred') AS inferred, json_extract(v.payload, '$.deviated') AS deviated, json_extract(v.payload, '$.note') AS note, json_array_length(v.subject) AS about, (v.subject LIKE '%/claim?%') AS names_claim, (v.subject LIKE '%/decision?%') AS names_decision, (SELECT c.type FROM v_event c WHERE c.id = v.cause) AS cause FROM v_event v WHERE v.type LIKE 'oxplow_bundled.%' ORDER BY v.seq" }
+  - when: { sql: "SELECT v.type, v.source, json_extract(v.payload, '$.unverified') AS unverified, json_extract(v.payload, '$.inferred') AS inferred, json_extract(v.payload, '$.deviated') AS deviated, json_extract(v.payload, '$.note') AS note, json_array_length(v.subject) AS about, (v.subject LIKE '%/claim?%') AS names_claim, (v.subject LIKE '%/decision?%') AS names_decision, (SELECT c.type FROM v_event c WHERE c.id = v.cause) AS cause FROM v_event v WHERE v.type LIKE 'oxplow.review.%' ORDER BY v.seq" }
     expect:
       rows:
-        - type: oxplow_bundled.changes_requested
+        - type: oxplow.review.changes_requested
           source: "oxplow:oxplow/command?command=oxplow.review.request_changes"
           unverified: 1
           inferred: 1
@@ -35,11 +35,11 @@ steps:
           cause: command.executed
   - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
     expect: { ok: true }
-  - when: { sql: "SELECT v.type, v.source, json_extract(v.payload, '$.unverified') AS unverified, json_extract(v.payload, '$.inferred') AS inferred, json_extract(v.payload, '$.deviated') AS deviated, json_extract(v.payload, '$.note') AS note, json_array_length(v.subject) AS about, (v.subject LIKE '%/claim?%') AS names_claim, (v.subject LIKE '%/decision?%') AS names_decision, (SELECT c.type FROM v_event c WHERE c.id = v.cause) AS cause FROM v_event v WHERE v.type LIKE 'oxplow_bundled.%' ORDER BY v.seq" }
+  - when: { sql: "SELECT v.type, v.source, json_extract(v.payload, '$.unverified') AS unverified, json_extract(v.payload, '$.inferred') AS inferred, json_extract(v.payload, '$.deviated') AS deviated, json_extract(v.payload, '$.note') AS note, json_array_length(v.subject) AS about, (v.subject LIKE '%/claim?%') AS names_claim, (v.subject LIKE '%/decision?%') AS names_decision, (SELECT c.type FROM v_event c WHERE c.id = v.cause) AS cause FROM v_event v WHERE v.type LIKE 'oxplow.review.%' ORDER BY v.seq" }
     expect:
       rows:
-        - { type: oxplow_bundled.changes_requested }
-        - type: oxplow_bundled.accepted
+        - { type: oxplow.review.changes_requested }
+        - type: oxplow.review.accepted
           source: "oxplow:oxplow/command?command=oxplow.review.accept"
           unverified: 1
           inferred: 1
@@ -50,5 +50,5 @@ steps:
           cause: command.executed
   - when: { command: oxplow.review.accept, input: { effort: eff999 }, confirmed: true }
     expect: { ok: false, refused: eff999 }
-  - when: { sql: "SELECT count(*) AS verdicts FROM v_event WHERE type LIKE 'oxplow_bundled.%'" }
+  - when: { sql: "SELECT count(*) AS verdicts FROM v_event WHERE type LIKE 'oxplow.review.%'" }
     expect: { rows: [{ verdicts: 2 }] }

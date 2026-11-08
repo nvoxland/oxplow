@@ -32,7 +32,10 @@ use oxplow_domain::diagnostic::Diagnostic;
 #[serde(rename_all = "camelCase")]
 pub struct EffectDecl {
     pub id: String,
+    /// The extension that declares it: whose script and grants it runs.
     pub extension: String,
+    /// The namespace it is named in: its name's first part.
+    pub namespace: String,
     pub summary: String,
     /// The event types it reacts to.
     pub on: Vec<String>,
@@ -54,9 +57,10 @@ pub struct EffectDecl {
 }
 
 impl EffectDecl {
-    /// `<extension>/<id>`: its actor (`Actor::Effect`), approval and state.
+    /// `<namespace>/<id>`: its actor (`Actor::Effect`), approval, state
+    /// and health — kept when it moves to a sibling in the namespace.
     pub fn name(&self) -> String {
-        format!("{}/{}", self.extension, self.id)
+        format!("{}/{}", self.namespace, self.id)
     }
 }
 
@@ -94,6 +98,7 @@ fn valid_id(id: &str) -> bool {
 /// defining `transform`); what's wrong is `file:line`.
 pub fn parse_effects(
     extension: &str,
+    namespace: &str,
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -131,7 +136,7 @@ pub fn parse_effects(
             Some(n) => format!("{file}:{n}"),
             None => file.to_string(),
         };
-        match decl_of(extension, f, read, knows_event, declared_at) {
+        match decl_of(extension, namespace, f, read, knows_event, declared_at) {
             Ok(d) if out.iter().any(|o| o.id == d.id) => errors.push(
                 at(
                     "effect.duplicate",
@@ -150,6 +155,7 @@ pub fn parse_effects(
 
 fn decl_of(
     extension: &str,
+    namespace: &str,
     f: EffectFile,
     read: &dyn Fn(&str) -> Option<String>,
     knows_event: &dyn Fn(&str) -> bool,
@@ -189,6 +195,7 @@ fn decl_of(
     Ok(EffectDecl {
         id: f.id,
         extension: extension.to_string(),
+        namespace: namespace.to_string(),
         summary: f.summary,
         on,
         filter,
@@ -434,7 +441,7 @@ pub fn ran(audit_id: i64, failed: Option<String>) -> oxplow_db::effect_run_store
 /// An attempt at an effect's reaction to one event ended: its
 /// `effect_run` row (its `started` claim finished) and `effect.result@4`
 /// (which attempt, started by what), from the effect,
-/// about the event and the extension, caused by `cause` (its run's
+/// about the event and the effect, caused by `cause` (its run's
 /// `command.executed`, its proposal's `command.proposed`; none when no
 /// command ran). `Invalid` when the reaction already ended.
 pub fn finished_tx(
@@ -457,7 +464,14 @@ pub fn finished_tx(
         RunState::Proposed => EffectOutcome::Proposed,
         RunState::Started | RunState::Failed => EffectOutcome::Failed,
     };
-    let extension = key.effect.split('/').next().unwrap_or_default();
+    // The effect is named in its namespace: its own ref says what it is.
+    let (namespace, id) = key.effect.split_once('/').unwrap_or(("", &key.effect));
+    let effect_ref = oxplow_domain::contribution::ContributionId::new(
+        namespace,
+        oxplow_domain::contribution::ContributionKind::Effect,
+        id,
+    )
+    .to_string();
     let event_ref = oxplow_domain::uri::build::event_uri(&key.event_id.to_string());
     let mut result = oxplow_domain::Envelope::typed::<EffectResult>(
         oxplow_domain::uri::build::effect_source(&key.effect),
@@ -477,10 +491,7 @@ pub fn finished_tx(
             },
         },
     )
-    .with_subject([
-        event_ref,
-        oxplow_domain::uri::build::extension_uri(extension),
-    ]);
+    .with_subject([event_ref, effect_ref]);
     result.cause = cause;
     oxplow_db::event_log_store::append_tx(tx, vocabulary, &result)?;
     Ok(())

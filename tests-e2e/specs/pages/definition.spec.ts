@@ -41,9 +41,9 @@ test("Definition in About this page opens the running copy drawn as Definition, 
 
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-open-with").click();
-  await expect(page.getByTestId("menu-item-page-open-with-oxplow-foundation/definition")).toContainText("✓");
-  await expect(page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer")).toBeVisible();
-  await page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer").click();
+  await expect(page.getByTestId("menu-item-page-open-with-oxplow/definition")).toContainText("✓");
+  await expect(page.getByTestId("menu-item-page-open-with-oxplow/file-viewer")).toBeVisible();
+  await page.getByTestId("menu-item-page-open-with-oxplow/file-viewer").click();
   await expect(shown(page).getByTestId("viz-code")).toContainText("title: Defined Numbat");
 });
 
@@ -92,7 +92,7 @@ test("Definition of a page whose file is open in the Text view is another tab: b
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Definition: numbat.yaml");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-open-with").click();
-  await page.getByTestId("menu-item-page-open-with-oxplow-foundation/file-viewer").click();
+  await page.getByTestId("menu-item-page-open-with-oxplow/file-viewer").click();
   await expect(shown(page).getByTestId("viz-code")).toContainText("title: Defined Numbat");
   // The page file's tabs, by id: the file's own (the display mode is the tab's state, not part of its id).
   const fileTabs = page.locator('[data-testid^="center-tab-oxplow:"][data-testid*="numbat.yaml"]');

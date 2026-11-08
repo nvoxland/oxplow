@@ -44,7 +44,7 @@ loaders:
     sql: |
       SELECT title, page AS id, extension, uri('oxplow/extension', 'name', extension) AS extension_target,
              c.path AS source,
-             c.uri || '#oxplow.renderer=oxplow-foundation/file-viewer' AS source_target,
+             c.uri || '#oxplow.renderer=oxplow/file-viewer' AS source_target,
              CASE WHEN bundled THEN 'ships with oxplow' ELSE 'yours' END AS origin,
              CASE WHEN deployment IS NULL THEN 'loaded from its source'
                   ELSE 'deployment ' || substr(deployment, 1, 12) END AS runs

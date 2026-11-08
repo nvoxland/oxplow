@@ -39,8 +39,11 @@ loaders:
                json_array_length(e.pending) AS awaiting
         FROM v_extension e LEFT JOIN v_extension_source s ON s.name = e.name
              LEFT JOIN v_extension_deployment d ON d.name = e.name AND d.hash = e.hash
-             LEFT JOIN (SELECT extension, sum(state = 'failing') AS failing, sum(state = 'disabled') AS disabled
-                        FROM v_contribution_health GROUP BY extension) h ON h.extension = e.name
+             -- Health is the namespace's; a row counts for the extension that
+             -- declares it now.
+             LEFT JOIN (SELECT COALESCE((SELECT c.extension FROM v_contribution c WHERE c.uri = h.uri), (SELECT x.name FROM v_extension x WHERE x.namespace = h.namespace ORDER BY x.name LIMIT 1)) AS extension,
+                               sum(h.state = 'failing') AS failing, sum(h.state = 'disabled') AS disabled
+                        FROM v_contribution_health h GROUP BY 1) h ON h.extension = e.name
         WHERE :extension IS NULL OR e.name = :extension
       )
       SELECT *

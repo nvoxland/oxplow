@@ -5,12 +5,12 @@ given:
   - observe: { turn: { prompt: base, write: { path: tracked.txt, body: "x\n" } } }
   - { command: oxplow.vcs.stage, input: { stream: str1, paths: [tracked.txt] } }
   - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
-when: { page: oxplow-foundation/uncommitted-changes, params: { stream_id: 1 } }
+when: { page: oxplow/uncommitted-changes, params: { stream_id: 1 } }
 expect:
   loaders:
     clean: { rows: [{ message: Nothing to commit. }] }
     commit_form: { rows: [] }
     files: { rows: [] }
 steps:
-  - when: { page: oxplow-foundation/directory, params: { stream_id: 1, scope: uncommitted } }
+  - when: { page: oxplow/directory, params: { stream_id: 1, scope: uncommitted } }
     expect: { loaders: { tree: { rows: [] } } }

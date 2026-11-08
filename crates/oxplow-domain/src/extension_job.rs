@@ -75,6 +75,8 @@ impl IntentKey {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobOwner {
+    /// The job, named in its namespace: whichever extension declares it
+    /// there now runs it, so a job outlives a move between siblings.
     pub contribution: ContributionId,
     /// Exact optional package identity from `ContributionRef::version`.
     /// A private unversioned extension does not get an invented package version.
@@ -91,7 +93,7 @@ pub struct JobOwner {
 
 impl JobOwner {
     fn validate(&self) -> Result<(), TransitionError> {
-        if self.contribution.extension.len() > 128
+        if self.contribution.namespace.len() > 128
             || self.contribution.local.len() > MAX_OWNER_IDENTITY_BYTES
             || self.contribution.problem().is_some()
             || self

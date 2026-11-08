@@ -1,5 +1,5 @@
 # A resource page says how its URIs are written and lists the pages that draw it.
-when: { page: oxplow-foundation/resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/commit" } }
+when: { page: oxplow/resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow/commit" } }
 expect:
   label: Commit
   loaders:

@@ -84,7 +84,7 @@ is written elsewhere), and fact collectors (a `collectors:` entry with
 
 ## Jobs
 
-A **job** is what an extension declares (`job:<extension>/<id>`); a **job
+A **job** is what an extension declares (`job:<namespace>/<id>`); a **job
 run** is one execution of it (`job_run:<id>`, a row of `v_job_run`). A job
 is model work an extension asks for that runs outside any
 transaction and outlives a restart (`operation: ai.complete_typed`). It
@@ -278,7 +278,7 @@ commands:
 - **Its end** is the event `contribution.job.completed@2 { job_run, job,
   version, attempt, fence, outcome: succeeded | failed | cancelled |
   interrupted }` (`job_run` and `job` URIs; an effect keeps to one job with
-  `where: { job: "job:<extension>/<id>" }`), logged once, at the real end, in the
+  `where: { job: "job:<namespace>/<id>" }`), logged once, at the real end, in the
   transaction that ended it (however it ended: completion, cancel,
   recovery; an attempt queued again logs nothing) with the anchors and
   cause the job was asked with. It carries no request or result: an
@@ -303,10 +303,10 @@ the built-in roles `main | summarize | decide` (required), `features` of
 `text | tool_calling | streaming | image`) into `Extension.ai_profiles`
 (`AiProfileDecl`), each a contribution `<ext>/ai_profile/<id>`
 (`ContributionKind::AiProfile`, `RunsOn::Declared`). It is a declaration
-only: the person binds `<extension>/<id>` to a dataset, else the fallback
+only: the person binds `<namespace>/<id>` to a dataset, else the fallback
 role's dataset serves it; `features` are what a bound dataset must support.
 The extension names it by its bare id — a job request's `role`
-(`extension_jobs::enqueue` qualifies it and stores `<ext>/<id>`, refusing
+(`extension_jobs::enqueue` qualifies it and stores `<namespace>/<id>`, refusing
 a name the extension doesn't declare), a collector's `role=` (qualified
 with the run's extension by `CollectorOracle`). `ai_profiles::profiles_of`
 feeds `AiService::set_profiles` from the catalog; resolution, features

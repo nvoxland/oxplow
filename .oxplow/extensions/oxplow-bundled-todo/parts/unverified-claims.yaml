@@ -10,7 +10,7 @@ loaders:
              CASE WHEN c.provenance = 'recorded' THEN 'Stated' ELSE 'Read' END AS source,
              CASE WHEN c.review = 'dismissed' THEN 'Dismissed' ELSE 'Unverified' END AS state,
              c.evidence, c.id AS claim
-      FROM v_claim c LEFT JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
+      FROM v_claim c LEFT JOIN v_oxplow_claim_status s ON s.uri = c.uri
       WHERE c.effort_id = :effort_id AND (s.verified = 0 OR c.review = 'dismissed')
       ORDER BY c.review IS NOT NULL, c.created_at
 view:

@@ -12,7 +12,7 @@ when:
       - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
 expect:
   state: succeeded
-  effects: [{ id: oxplow-bundled-todo/store-reasoning, state: ok }]
+  effects: [{ id: oxplow/store-reasoning, state: ok }]
   commands: [oxplow.effort.replace_inferred_decisions, oxplow.effort.replace_inferred_claims]
 model:
   replies: ["{\"claims\": []}"]

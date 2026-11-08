@@ -75,7 +75,7 @@ pub(super) async fn test_provider(
         }
     };
     let launch = Launch {
-        name: spec.approval_name(&ext.name),
+        name: spec.approval_name(&ext.namespace),
         // The kit tests the program, as its default instance.
         instance_id: spec.id.clone(),
         ext_dir: dir.clone(),
@@ -695,7 +695,10 @@ pub(super) async fn suite(
             svc.secrets
                 .set(
                     &oxplow_app::collector_runner::instance_credential_account(
-                        &project, &ext.name, &spec.id, &name,
+                        &project,
+                        &ext.namespace,
+                        &spec.id,
+                        &name,
                     ),
                     &value,
                 )
@@ -706,7 +709,7 @@ pub(super) async fn suite(
             .map_err(|e| e.to_string())?
             .extension_instances
             .insert(
-                format!("{}/{}", ext.name, spec.id),
+                format!("{}/{}", ext.namespace, spec.id),
                 oxplow_config::ExtensionInstanceConfig {
                     enabled: true,
                     config,
@@ -715,7 +718,10 @@ pub(super) async fn suite(
                 },
             );
         publish_generation(&svc).await?;
-        match svc.providers.health(&format!("{}/{}", ext.name, spec.id)) {
+        match svc
+            .providers
+            .health(&format!("{}/{}", ext.namespace, spec.id))
+        {
             // A start that merely failed stays enabled; the suite reports it.
             Some(health)
                 if matches!(
@@ -811,7 +817,9 @@ pub(super) async fn suite(
             }
             other => return Err(format!("no conformance suite for `{other}`")),
         };
-        svc.providers.stop(&spec.approval_name(&ext.name)).await;
+        svc.providers
+            .stop(&spec.approval_name(&ext.namespace))
+            .await;
         Ok::<_, String>(findings)
     };
     match run.await {

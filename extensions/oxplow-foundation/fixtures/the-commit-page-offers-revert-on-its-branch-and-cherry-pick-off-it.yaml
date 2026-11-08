@@ -11,7 +11,7 @@ given:
       refs:
         branches: [{ name: main, head: c2, stream: 1 }, { name: side, head: m1 }]
         heads: [{ stream: 1, sha: c2 }]
-when: { page: oxplow-foundation/commit, params: { stream_id: 1, sha: c2 } }
+when: { page: oxplow/commit, params: { stream_id: 1, sha: c2 } }
 expect:
   loaders:
     branch: { rows: [{ in_history: 1, not_in_history: 0 }] }

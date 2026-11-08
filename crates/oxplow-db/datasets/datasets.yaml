@@ -266,7 +266,7 @@
     - { name: "peer_end_line", type: "INTEGER", doc: "Last line of the copy." }
 - name: change_file
   version: 2
-  description: "Each file a change touched, with its zone and whether it's a test. (v2: the \"look here first\" score moved to oxplow-bundled's `v_oxplow_bundled_change_interest`.)"
+  description: "Each file a change touched, with its zone and whether it's a test. (v2: the \"look here first\" score moved to oxplow-bundled's `v_oxplow_change_interest`.)"
   fields:
     - { name: "change_id", type: "INTEGER", doc: "The change (v_change.id)." }
     - { name: "path", type: "TEXT", doc: "Repo-relative path." }
@@ -338,7 +338,7 @@
     - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)" }
     - { name: "statement", type: "TEXT", doc: "The claim in words." }
     - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
-    - { name: "evidence", type: "TEXT", doc: "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)" }
+    - { name: "evidence", type: "TEXT", doc: "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)" }
     - { name: "review", type: "TEXT", doc: "A reviewer's verdict: `verified` (`oxplow.effort.verify_claim`, with what backs it in `evidence`) or `dismissed` (the agent didn't claim it, or didn't mean it: `oxplow.effort.dismiss_claim`); NULL while unreviewed. Reading the effort again, or reporting again, replaces only that source's unreviewed claims. (v7)" }
     - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent stated it in `oxplow.effort.report`'s `claims`) or `inferred` (a model read it in the effort's answers). The review treats both alike. (v8)" }
     - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
@@ -1094,14 +1094,14 @@
   tests:
     - { not_null: effect }
 - name: extension_run
-  version: 6
+  version: 7
   key: [run_id]
   description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
   fields:
     - { name: "run_id", type: "TEXT", doc: "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`." }
     - { name: "parent_run_id", type: "TEXT", doc: "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run." }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`." }
+    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
     - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
@@ -1237,11 +1237,11 @@
     - { not_null: resource }
     - { unique: resource }
 - name: contribution_health
-  version: 5
+  version: 6
   description: "Each extension contribution's health on this machine: a provider instance, a collector or an effect, under one failure policy — three failures in a row disable it until a person runs `oxplow.contribution.enable`."
   fields:
     - { name: "uri", type: "TEXT", doc: "The contribution's URI (`effect:tracker/fake`): the same as its `v_contribution.uri`." }
-    - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
+    - { name: "namespace", type: "TEXT", doc: "The namespace it is named in (its extension's): a contribution keeps its health when it moves to another extension in the namespace." }
     - { name: "contribution", type: "TEXT", doc: "The provider's, collector's or effect's id within it." }
     - { name: "kind", type: "TEXT", doc: "`provider`, `collector` or `effect`." }
     - { name: "state", type: "TEXT", doc: "`ok`, `failing` or `disabled`." }
@@ -1254,9 +1254,9 @@
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
     - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `uri`) or of events whose subject names it (its `uri`)." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)" }
-    - { name: "repair_item", type: "TEXT", doc: "The open repair work item for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open." }
+    - { name: "repair_item", type: "TEXT", doc: "The open repair work item for it — the one whose title starts `Repair <namespace> <contribution>:`, filed by the bundled repair effect; NULL when none is open." }
   tests:
-    - { not_null: extension }
+    - { not_null: namespace }
 - name: snapshot
   version: 4
   description: "Snapshots: point-in-time captures of a stream's worktree, used to bracket efforts and diffs."
@@ -1506,13 +1506,14 @@
     - { not_null: subject }
     - { relationships: { column: stream_id, to: stream, field: id } }
 - name: collector
-  version: 2
+  version: 3
   key: [uri]
   description: "Every enabled extension's collectors, one row each, with their standing: whether this machine has them on, their last run and its outcome, and when the next scheduled run is due. What Settings → Data lists. Run one with `oxplow.collector.sync` (`input.collector` is `<extension>/<id>`); turn a disabled one back on with `oxplow.contribution.enable`. Its network and credential standing on this machine is `v_collector_state` and `v_collector_credential` (join on `uri`); its declaration is `v_contribution`; its run history is `v_extension_run`."
   fields:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<extension>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
+    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/collector?collector=<namespace>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it (`project` for the project's own)." }
-    - { name: "id", type: "TEXT", doc: "Its id within the extension; `<extension>/<id>` is what `oxplow.collector.sync` takes as `collector`." }
+    - { name: "namespace", type: "TEXT", doc: "The namespace it is named in (`project` for the project's own); `<namespace>/<id>` is what `oxplow.collector.sync` takes as `collector`." }
+    - { name: "id", type: "TEXT", doc: "Its id within the namespace." }
     - { name: "description", type: "TEXT", doc: "One sentence saying what it collects: its `doc:` in the manifest. Joins `v_contribution` on `uri`." }
     - { name: "trigger", type: "TEXT", doc: "How it comes to run: `call` (manual), `schedule` (`every:`), `events` (`on:`) or `run` (after a test or analysis run)." }
     - { name: "enabled", type: "INT", doc: "1 unless failures disabled it on this machine (`disabled_reason` says why)." }
@@ -1554,12 +1555,13 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 10
+  version: 11
   key: [uri]
   description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the dataset that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   fields:
-    - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
+    - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
+    - { name: "namespace", type: "TEXT", doc: "The namespace it is named in (its extension's `namespace:`): the first part of a local kind's id, kept when it moves to another extension in the namespace." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …" }
     - { name: "local", type: "TEXT", doc: "Its id within the extension, or its global name (a command's bus id, a metric's key)." }
     - { name: "origin", type: "TEXT", doc: "`project` or `bundled`." }
@@ -2229,13 +2231,13 @@
     - { not_null: capture_id }
     - { not_null: path }
 - name: ai_role
-  version: 1
+  version: 2
   key: [role]
-  description: "oxplow's AI roles — the built-ins (`main`, `summarize`, `decide`), then each active extension's AI profiles (`<extension>/<name>`) — with the provider and model each is bound to and would use now, what a person forbids it (`restrict`), and whether that provider has a key. Read live when a query names it (ai.yaml, project.yaml and the keychain change with no hook): the key itself is never in any model. The person manages roles in Settings → AI."
+  description: "oxplow's AI roles — the built-ins (`main`, `summarize`, `decide`), then each active extension's AI profiles (`<namespace>/<name>`) — with the provider and model each is bound to and would use now, what a person forbids it (`restrict`), and whether that provider has a key. Read live when a query names it (ai.yaml, project.yaml and the keychain change with no hook): the key itself is never in any model. The person manages roles in Settings → AI."
   fields:
-    - { name: "role", type: "TEXT", doc: "`main`, `summarize`, `decide`, or `<extension>/<profile>`." }
+    - { name: "role", type: "TEXT", doc: "`main`, `summarize`, `decide`, or `<namespace>/<profile>`." }
     - { name: "description", type: "TEXT", doc: "What the role is for: oxplow's text for a built-in, the declaring extension's for a profile." }
-    - { name: "extension", type: "TEXT", doc: "The extension declaring a profile; NULL for a built-in." }
+    - { name: "namespace", type: "TEXT", doc: "The namespace a profile is named in (its extension's); NULL for a built-in." }
     - { name: "fallback", type: "TEXT", doc: "The built-in role an unbound profile uses; NULL for a built-in." }
     - { name: "provider", type: "TEXT", doc: "The provider (`v_ai_provider.id`) of the role's own binding; NULL when it has none." }
     - { name: "model", type: "TEXT", doc: "The model of the role's own binding; NULL when it has none." }
@@ -2364,7 +2366,7 @@
     - { name: "uri", type: "TEXT", doc: "Its `v_contribution.uri`." }
     - { name: "extension", type: "TEXT", doc: "The extension that mounts the page." }
     - { name: "id", type: "TEXT", doc: "Its id among the extension's mounts." }
-    - { name: "host", type: "TEXT", doc: "The page whose slot it is (`oxplow-foundation/commit`)." }
+    - { name: "host", type: "TEXT", doc: "The page whose slot it is (`oxplow/commit`)." }
     - { name: "slot", type: "TEXT", doc: "The slot's name in that page." }
     - { name: "page", type: "TEXT", doc: "The page it shows there (`<extension>/<slug>`)." }
     - { name: "description", type: "TEXT", doc: "What the mount does, in a sentence." }

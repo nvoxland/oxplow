@@ -10,7 +10,7 @@ given:
           - { name: old, kind: remote, remote: origin, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
           - { name: new, kind: remote, remote: origin, head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
         heads: [{ stream: 1, sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
-when: { page: oxplow-bundled-todo/remote-branches, params: { stream_id: 1 } }
+when: { page: oxplow/remote-branches, params: { stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ branch: main }] }

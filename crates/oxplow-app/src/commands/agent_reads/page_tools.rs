@@ -492,15 +492,10 @@ fn show_op(services: ServicesSlot) -> Op {
                 let ctx = context(&svc, &invocation, None, None).await?;
                 let (uri, target) = match (&p.page, &p.spec) {
                     (Some(page), None) => {
-                        let (ext, slug) = page.split_once('/').ok_or_else(|| {
-                            invalid("/page", format!("`{page}` isn't `<extension>/<slug>`"))
+                        let (namespace, slug) = page.split_once('/').ok_or_else(|| {
+                            invalid("/page", format!("`{page}` isn't `<namespace>/<slug>`"))
                         })?;
-                        let core = svc
-                            .extension_catalog
-                            .named(&svc.layout.project_dir, ext)
-                            .is_ok_and(|e| {
-                                e.namespace == crate::extension::extensions::CORE_NAMESPACE
-                            });
+                        let core = namespace == crate::extension::extensions::CORE_NAMESPACE;
                         let named = if core { slug.to_string() } else { page.clone() };
                         if let Ok(file) = svc
                             .extension_catalog
@@ -639,7 +634,6 @@ fn run_op(services: ServicesSlot) -> Op {
                     let page = p.page.as_deref().ok_or_else(|| {
                         invalid("/draft", "a draft is of a page: give `page`".to_string())
                     })?;
-                    let extension = page.split_once('/').map_or(page, |(e, _)| e).to_string();
                     let stream =
                         stream_or_actors(&svc, invocation.actor(), p.stream_id.clone()).await?;
                     let checkout = svc
@@ -647,6 +641,19 @@ fn run_op(services: ServicesSlot) -> Op {
                         .resolve(stream.as_deref())
                         .await
                         .into_local_path();
+                    // The page is named in its namespace: the source there
+                    // that declares it.
+                    let extension = crate::extension::extensions::source_declaring_page(
+                        &svc.layout.project_dir,
+                        &checkout,
+                        page,
+                    )
+                    .ok_or_else(|| {
+                        invalid(
+                            "/page",
+                            format!("no extension in {} declares `{page}`", checkout.display()),
+                        )
+                    })?;
                     let runner = PageRunner::draft(&svc, &checkout, &extension)
                         .await
                         .map_err(|e| page_error(&name, e))?;
@@ -1037,7 +1044,7 @@ async fn described_page(
             let (Some(kind), Some(slug)) = (PageKind::of_folder(folder), page_slug(file)) else {
                 return Ok(None);
             };
-            let id = format!("{ext}/{slug}");
+            let id = format!("{}/{slug}", namespace_of(svc, ext));
             let running = svc.extension_catalog.find_page(project, &id).ok();
             if let Some(page) = &running {
                 if rev.is_none() || page.origin.deployment.as_deref() == rev {

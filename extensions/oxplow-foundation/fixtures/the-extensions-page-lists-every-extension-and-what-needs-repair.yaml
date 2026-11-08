@@ -3,7 +3,7 @@
 # permissions, and its problems ("no", else how many, linking to the
 # problems page).
 when:
-  page: oxplow-foundation/extensions
+  page: oxplow/extensions
 expect:
   label: Extensions
   loaders:

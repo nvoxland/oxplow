@@ -182,7 +182,7 @@ pub fn bundle_problems(
         };
         out.extend(page_problems(&html, true).into_iter().map(|p| {
             p.at(&rel, None)
-                .contribution(format!("{}/{}", ext.name, c.id))
+                .contribution(format!("{}/{}", ext.namespace, c.id))
         }));
     }
     out
@@ -233,7 +233,7 @@ pub fn bundle_warnings(
                             ),
                         )
                         .at(&rel, None)
-                        .contribution(format!("{}/{}", ext.name, c.id)),
+                        .contribution(format!("{}/{}", ext.namespace, c.id)),
                     );
                 }
             }

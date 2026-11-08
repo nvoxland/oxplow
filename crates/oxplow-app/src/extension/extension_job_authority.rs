@@ -313,6 +313,7 @@ impl JobAuthorityHost {
         let run = RunContext::job(
             ContributionRef {
                 id: job.job.owner.contribution.clone(),
+                extension: descriptor.owner.extension.clone(),
                 version: job.job.owner.package_version.clone(),
                 // A job belongs to its extension's deployment, not to one
                 // catalog generation: `live` checks that deployment is current.
@@ -350,7 +351,7 @@ fn current_descriptor(
         .map_err(|_| JobAuthorityError::Denied)?;
     let snapshot = catalog.live_snapshot(project);
     let extension =
-        crate::extension::extensions::owner(snapshot.extensions(), &owner.contribution.extension)
+        crate::extension::extensions::declarer(snapshot.extensions(), &owner.contribution)
             .filter(|extension| {
                 extension.enabled
                     && extension.version == owner.package_version

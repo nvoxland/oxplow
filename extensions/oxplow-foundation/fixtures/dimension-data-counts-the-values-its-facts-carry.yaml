@@ -4,7 +4,7 @@
 given:
   - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, dims: { oxplow.model: opus } }, { value: 5, dims: { oxplow.model: opus } }, { value: 7, dims: { oxplow.model: haiku } }] } }
 when:
-  page: oxplow-foundation/dimension-data
+  page: oxplow/dimension-data
   params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.model" }
 expect:
   label: Model data

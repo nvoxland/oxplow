@@ -1,7 +1,7 @@
 # The Extension page lists its pages as a table: a row each, the page's
 # title linking to its running file's Definition, its description beside it.
 when:
-  page: oxplow-foundation/extension
+  page: oxplow/extension
   params:
     uri: "oxplow:oxplow/extension?name=oxplow-foundation"
     name: oxplow-foundation
@@ -12,5 +12,5 @@ expect:
     resource_pages:
       rows:
         contains:
-          - { title: Commit, id: oxplow-foundation/commit, link: $any }
+          - { title: Commit, id: oxplow/commit, link: $any }
   text: { contains: ["Commit"] }

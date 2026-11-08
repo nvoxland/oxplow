@@ -10,7 +10,7 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
   // `[[item:<n>]]` is the test extension's wikilink for `oxplow:e2e/item?id=%3Cn%3E`.
   writeFileSync(join(daemon.project, "platypus-notes.md"), `# Platypus notes\n\nThe item is [[item:${n}]].\n`);
   await ready(page, daemon);
-  await navigate(page, daemon, "oxplow:oxplow/file?path=platypus-notes.md#oxplow.renderer=oxplow-foundation/markdown");
+  await navigate(page, daemon, "oxplow:oxplow/file?path=platypus-notes.md#oxplow.renderer=oxplow/markdown");
   await shown(page).getByTestId("page-file").locator(`a[href="oxplow:e2e/item?id=${n}"]`).click();
   // The link shows the item's title; its page is a table over `v_e2e_item`.
   await expect(shown(page).getByTestId("page-file").getByTestId("viz-row-0")).toContainText("Platypus item");

@@ -9,9 +9,9 @@ given:
         files:
           - { path: src/a.rs, additions: 10, deletions: 4 }
           - { path: src/b.rs, status: added, additions: 6 }
-  - observe: { collect: { effort: eff1, collectors: [oxplow_bundled.effort_churn] } }
+  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_churn] } }
 when:
-  sql: SELECT value FROM v_fact WHERE measure_key = 'oxplow_bundled.effort_churn_lines'
+  sql: SELECT value FROM v_fact WHERE measure_key = 'oxplow.effort_churn_lines'
 expect:
   rows:
     - { value: 20.0 }

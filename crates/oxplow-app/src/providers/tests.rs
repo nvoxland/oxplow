@@ -130,7 +130,7 @@ async fn enable_on(
     // reloads the config, so the in-memory entry is written after.
     crate::test_fixtures::activate_with_problems(svc).await;
     svc.config.write().unwrap().extension_instances.insert(
-        spec::instance_name(&ext.name, &spec.id),
+        spec::instance_name(&ext.namespace, &spec.id),
         oxplow_config::ExtensionInstanceConfig {
             enabled: true,
             config,
@@ -310,7 +310,7 @@ async fn three_failures_in_a_row_disable_an_instance_until_it_is_enabled() {
                 stream_id: None,
             },
             "oxplow.contribution.enable",
-            json!({ "extension": "tracker", "kind": "provider", "contribution": "fake" }),
+            json!({ "namespace": "tracker", "kind": "provider", "contribution": "fake" }),
             false,
         )
         .await
@@ -2599,8 +2599,7 @@ async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
 
     // The Integrations component re-reads when this page's rows change: one
     // row per instance, naming its state and what it holds.
-    let page =
-        crate::test_fixtures::run_as_page(&fx.svc, "oxplow-foundation/integrations", &[]).await;
+    let page = crate::test_fixtures::run_as_page(&fx.svc, "oxplow/integrations", &[]).await;
     assert_eq!(page.rows.len(), 2);
     assert_eq!(page.columns[0], "instance");
     assert!(page.columns.contains(&"credentials".to_string()));
@@ -5162,7 +5161,7 @@ async fn effect_failures(fx: &EffortFixture) -> i64 {
         fx.svc.vocabulary.clone(),
     );
     let key = oxplow_db::ContributionKey {
-        extension: EXT.into(),
+        namespace: EXT.into(),
         contribution: "file".into(),
         kind: "effect",
     };
@@ -5930,7 +5929,7 @@ async fn the_retry_loop_sends_a_due_retry() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_retry_that_cant_run_is_dropped() {
     let key = oxplow_db::ContributionKey {
-        extension: EXT.into(),
+        namespace: EXT.into(),
         contribution: "file".into(),
         kind: "effect",
     };

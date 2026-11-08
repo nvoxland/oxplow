@@ -5,7 +5,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Someday } }
-when: { part: oxplow-bundled-todo/work, params: { thread_id: 1 } }
+when: { part: oxplow/work, params: { thread_id: 1 } }
 expect:
   loaders:
     work: { rows: [{ grp: In progress, title: Work in progress }, { grp: Ready, title: Next up }] }

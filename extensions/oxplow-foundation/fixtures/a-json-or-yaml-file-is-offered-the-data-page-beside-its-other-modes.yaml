@@ -10,8 +10,8 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/data-file, default: false }
-      - { page: oxplow-foundation/editor, default: true }
+      - { page: oxplow/data-file, default: false }
+      - { page: oxplow/editor, default: true }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -20,8 +20,8 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/data-file }
-          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow/data-file }
+          - { page: oxplow/file-viewer }
   - when:
       command: oxplow.page.renderers
       input: { uri: "oxplow:oxplow/file?path=shape.json&filesystem=oxplow:temp" }
@@ -29,5 +29,5 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/data-file }
-          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow/data-file }
+          - { page: oxplow/file-viewer }

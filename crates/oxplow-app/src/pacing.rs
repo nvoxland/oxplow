@@ -180,7 +180,8 @@ fn find(svc: &crate::Services, owner: &str, id: &str) -> Option<Paced> {
             "a collector is found on its declaration; its run pins",
         )
         .iter()
-        .filter(|e| e.name == owner)
+        // Its owner is the namespace it is named in.
+        .filter(|e| e.namespace == owner)
         .flat_map(|e| e.collectors.iter())
         .find(|c| c.id == id && c.facts.is_empty())
         .map(|c| Paced::Entity(owner.to_string(), c.clone()))

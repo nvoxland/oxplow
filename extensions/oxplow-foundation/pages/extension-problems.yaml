@@ -13,8 +13,8 @@ answers:
 loaders:
   problems:
     sql: |
-      SELECT h.kind || ' ' || h.contribution AS title, h.extension || '/' || h.kind || '/' || h.contribution AS id,
-             e.uri AS extension_uri, h.extension, h.kind, h.contribution,
+      SELECT h.kind || ' ' || h.contribution AS title, h.namespace || '/' || h.kind || '/' || h.contribution AS id,
+             e.uri AS extension_uri, e.name AS extension, h.kind, h.contribution,
              CASE h.state
                WHEN 'disabled' THEN 'Stopped after ' || coalesce(h.reason, 'repeated failures') || '.'
                ELSE 'Failing, ' || h.consecutive_failures || ' in a row.' END AS what,
@@ -22,12 +22,15 @@ loaders:
              (h.state = 'disabled') AS can_enable,
              (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
              'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask,
-             NULL AS approves
-      FROM v_contribution_health h JOIN v_extension e ON e.name = h.extension
-      WHERE h.state <> 'ok' AND (NULLIF(:extension, '') IS NULL OR h.extension = :extension)
+             NULL AS approves, h.namespace
+      -- Health is the namespace's; it is listed under the extension that
+      -- declares the contribution now.
+      FROM v_contribution_health h
+      JOIN v_extension e ON e.name = COALESCE((SELECT c.extension FROM v_contribution c WHERE c.uri = h.uri), (SELECT x.name FROM v_extension x WHERE x.namespace = h.namespace ORDER BY x.name LIMIT 1))
+      WHERE h.state <> 'ok' AND (NULLIF(:extension, '') IS NULL OR e.name = :extension)
       UNION ALL
       SELECT 'Did not load cleanly', e.name || '/load/' || j.key, e.uri, e.name, 'extension', e.name,
-             NULL, json_extract(j.value, '$.shown'), NULL, NULL, 0, 0, '', NULL
+             NULL, json_extract(j.value, '$.shown'), NULL, NULL, 0, 0, '', NULL, e.namespace
       FROM v_extension e, json_each(e.errors) j
       WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
       UNION ALL
@@ -39,7 +42,8 @@ loaders:
                        'text', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, 1, instr(j.value, ' — ') - 1) ELSE j.value END,
                        'hint', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, instr(j.value, ' — ') + 3) END)
                      ORDER BY j.value)
-              FROM json_each(e.pending) j)
+              FROM json_each(e.pending) j),
+             e.namespace
       FROM v_extension e
       WHERE json_array_length(e.pending) > 0 AND (NULLIF(:extension, '') IS NULL OR e.name = :extension)
       ORDER BY 4, 5, 6
@@ -60,7 +64,7 @@ view:
     row: true
     when: can_enable
     input:
-      extension: '{{row.extension}}'
+      namespace: '{{row.namespace}}'
       kind: '{{row.kind}}'
       contribution: '{{row.contribution}}'
   - id: repair

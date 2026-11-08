@@ -7,7 +7,6 @@
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 
-use oxplow_domain::contribution::valid_extension_name;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
@@ -59,7 +58,7 @@ pub fn resolve_extension_config(
     personal: Option<&serde_json::Value>,
     validate: impl Fn(ConfigLayer, &serde_json::Value) -> Vec<ConfigViolation>,
 ) -> Result<ResolvedConfig, Vec<ConfigIssue>> {
-    if !valid_extension_name(extension) {
+    if !oxplow_domain::contribution::valid_namespace(extension) {
         return Err(vec![ConfigIssue {
             extension: String::new(),
             layer: ConfigLayer::Defaults,

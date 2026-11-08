@@ -20,7 +20,7 @@ async fn a_secret_set_by_anyone_is_never_read_back() {
         stream_id: None,
     };
     let page = Actor::Page {
-        page_id: "oxplow-foundation/ai-providers".into(),
+        page_id: "oxplow/ai-providers".into(),
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();
@@ -119,7 +119,7 @@ async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
         stream_id: None,
     };
     let page = Actor::Page {
-        page_id: "oxplow-foundation/extensions-credentials".into(),
+        page_id: "oxplow/extensions-credentials".into(),
         on_behalf_of: Box::new(agent.clone()),
     };
     let mut results = Vec::new();

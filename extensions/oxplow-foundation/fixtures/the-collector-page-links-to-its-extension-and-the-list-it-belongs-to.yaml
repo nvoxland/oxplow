@@ -1,8 +1,8 @@
 # "See also": the page links to the extension that declares it and to the page that lists collectors.
 when:
-  page: oxplow-foundation/collector
+  page: oxplow/collector
   params:
-    uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"
+    uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"
 expect:
   see_also:
     contains:

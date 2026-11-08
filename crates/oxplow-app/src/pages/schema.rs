@@ -99,8 +99,10 @@ impl PageKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Page {
-    /// `<extension>/<slug>`.
+    /// `<namespace>/<slug>`: named by its extension's namespace, so it
+    /// keeps its id when it moves to a sibling in that namespace.
     pub id: String,
+    /// The extension that declares it.
     pub extension: String,
     pub slug: String,
     /// Which folder it came from, and so what it is.
@@ -151,7 +153,13 @@ pub struct Page {
 }
 
 impl Page {
-    /// Every node of its view and rail, depth first.
+    /// The namespace it is named in: its id's first segment.
+    pub fn namespace(&self) -> &str {
+        self.id
+            .split_once('/')
+            .map_or(self.id.as_str(), |(ns, _)| ns)
+    }
+
     /// Say what each action does, from `summary` of its command: what a
     /// button's hover reads.
     pub fn describe_actions(&mut self, summary: impl Fn(&str) -> Option<String>) {
@@ -774,7 +782,7 @@ pub fn parse_page(
         }
         e.to_string()
     })?;
-    let id = format!("{extension}/{slug}");
+    let id = format!("{namespace}/{slug}");
     let renders = file
         .renders
         .clone()
@@ -1127,7 +1135,14 @@ pub fn temp_file_name(id: &str) -> String {
 pub fn parse_temp_page(id: &str, text: &str) -> Result<Page, String> {
     let file = temp_file_name(id);
     let rel = format!("{}/{file}", crate::filesystems::temp::TEMP_DIR);
-    let mut page = parse_page(TEMP_EXTENSION, INLINE_ID, id, &rel, text, PageKind::Page)?;
+    let mut page = parse_page(
+        TEMP_EXTENSION,
+        TEMP_EXTENSION,
+        id,
+        &rel,
+        text,
+        PageKind::Page,
+    )?;
     if let Some(why) = inline_problem(&page) {
         return Err(why);
     }
@@ -1932,41 +1947,4 @@ fn check_page(page: &Page) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// oxplow's own extensions (`namespace: oxplow`) share the core page names
-/// — `oxplow:oxplow/page?page=<slug>` names a page without its extension —
-/// so a slug two of them declare is ambiguous. The first in load order
-/// keeps it; each later one loses that page and says why.
-pub fn refuse_shared_core_pages(extensions: &mut [crate::extension::extensions::Extension]) {
-    let mut owner: std::collections::BTreeMap<String, String> = Default::default();
-    for ext in extensions.iter_mut() {
-        if !ext.enabled || ext.namespace != oxplow_domain::OXPLOW_NAMESPACE {
-            continue;
-        }
-        let mut errors = Vec::new();
-        ext.page_files.retain(|page| match owner.get(&page.slug) {
-            Some(first) => {
-                errors.push(
-                    oxplow_domain::diagnostic::Diagnostic::error(
-                        "page.shared_core_slug",
-                        format!(
-                            "page `{}` is also `{first}`'s, and oxplow's own extensions share \
-                             page names",
-                            page.slug
-                        ),
-                    )
-                    .at(page.file(), None)
-                    .contribution(&page.slug)
-                    .fix("rename one"),
-                );
-                false
-            }
-            None => true,
-        });
-        for page in &ext.page_files {
-            owner.insert(page.slug.clone(), ext.name.clone());
-        }
-        ext.errors.extend(errors);
-    }
 }

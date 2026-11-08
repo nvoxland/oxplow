@@ -16,8 +16,8 @@ const recording = () => {
 
 test("Enable Again runs oxplow.contribution.enable as the person", async () => {
   const { runs, commands } = recording();
-  await enableAgain({ extension: "tracker", contribution: "issues", kind: "collector" }, commands);
-  expect(runs).toEqual([["Enable tracker/issues", "oxplow.contribution.enable", { extension: "tracker", kind: "collector", contribution: "issues" }]]);
+  await enableAgain({ namespace: "tracker", contribution: "issues", kind: "collector" }, commands);
+  expect(runs).toEqual([["Enable tracker/issues", "oxplow.contribution.enable", { namespace: "tracker", kind: "collector", contribution: "issues" }]]);
 });
 
 test("Enable All Disabled runs oxplow.contribution.enable_all as the person", async () => {

@@ -2,7 +2,7 @@
 # Extensions page (where it comes from, its version, its permissions, its
 # problems), its pages with a link to each Definition, a table per kind of its other contributions, and its deployments. The page's actions are the ones its row allows.
 when:
-  page: oxplow-foundation/extension
+  page: oxplow/extension
   params:
     uri: "oxplow:oxplow/extension?name=oxplow-foundation"
     name: oxplow-foundation

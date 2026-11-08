@@ -22,12 +22,12 @@ loaders:
              CASE WHEN f.rel IS NOT NULL THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
                     || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
-                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+                    || 'oxplow.renderer=oxplow/file-viewer' END AS declared_target
       FROM f JOIN v_slot k ON k.uri = f.uri LEFT JOIN v_page mp ON mp.id = k.page LEFT JOIN v_page hp ON hp.id = k.host
   mount:
     sql: |
-      SELECT COALESCE(mp.title, k.page) AS mounted, mp.running_uri || '#oxplow.renderer=oxplow-foundation/definition' AS mounted_target,
-             COALESCE(hp.title, k.host) AS host, hp.running_uri || '#oxplow.renderer=oxplow-foundation/definition' AS host_target,
+      SELECT COALESCE(mp.title, k.page) AS mounted, mp.running_uri || '#oxplow.renderer=oxplow/definition' AS mounted_target,
+             COALESCE(hp.title, k.host) AS host, hp.running_uri || '#oxplow.renderer=oxplow/definition' AS host_target,
              k.slot AS place
       FROM v_slot k LEFT JOIN v_page mp ON mp.id = k.page LEFT JOIN v_page hp ON hp.id = k.host
       WHERE k.uri = :uri

@@ -130,7 +130,7 @@
       ]
     },
     "datasets": {
-      "description": "Datasets: each with its SQL in `datasets/<name>.sql`, published as\n`v_<extension>_<name>`.",
+      "description": "Datasets: each with its SQL in `datasets/<name>.sql`, published as\n`v_<namespace>_<name>`, named by `namespace:`.",
       "type": [
         "array",
         "null"
@@ -245,7 +245,7 @@
       "default": []
     },
     "event_types": {
-      "description": "The event types it may log, under its own namespace.",
+      "description": "The event types it may log, under its `namespace:`.",
       "anyOf": [
         {
           "$ref": "#/definitions/EventTypesFile"
@@ -2258,7 +2258,7 @@
           "type": "string"
         },
         "at": {
-          "description": "Where: a page's slot (`oxplow-foundation/commit.sections`) or a\nreplaceable core component (`work_item.board`).",
+          "description": "Where: a page's slot (`oxplow/commit.sections`) or a\nreplaceable core component (`work_item.board`).",
           "type": "string"
         },
         "position": {

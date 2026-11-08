@@ -7,5 +7,5 @@ when:
     type: effort.finished
     payload: { effort: "eff1", work_item: $item.uri, end_snapshot: 3 }
 expect:
-  effects: { contains: [{ id: effort-review/review-on-finish, state: ok }] }
+  effects: { contains: [{ id: effort_review/review-on-finish, state: ok }] }
   commands: { contains: [effort_review.effort.review] }

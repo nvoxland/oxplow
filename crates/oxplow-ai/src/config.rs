@@ -81,13 +81,13 @@ impl BuiltinRole {
 }
 
 /// What a model call is for: a built-in role, or an AI profile an
-/// extension declares (`<extension>/<name>`). Extensions and features
+/// extension declares, named in its namespace (`<namespace>/<name>`). Extensions and features
 /// name roles, never models; a person binds each to a provider + model.
 /// Serialized as its name (`summarize`, `acme/review`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Role {
     Builtin(BuiltinRole),
-    Profile { extension: String, name: String },
+    Profile { namespace: String, name: String },
 }
 
 /// Roles oxplow dropped because nothing asked them: a config naming one
@@ -101,7 +101,7 @@ impl Role {
     pub const ASSISTANT: Role = Role::Builtin(BuiltinRole::Assistant);
 
     /// A role as a person writes it in `ai.yaml` or `project.yaml`: a
-    /// built-in name or `<extension>/<profile>`.
+    /// built-in name or `<namespace>/<profile>`.
     pub fn parse(text: &str) -> Result<Role, String> {
         if let Some(role) = BuiltinRole::from_name(text) {
             return Ok(Role::Builtin(role));
@@ -109,33 +109,34 @@ impl Role {
         if DROPPED_ROLES.contains(&text) {
             return Err(format!(
                 "oxplow has no `{text}` role: nothing asked it; remove it (roles: main, \
-                 summarize, decide, or an extension's AI profile as `<extension>/<name>`)"
+                 summarize, decide, or an extension's AI profile as `<namespace>/<name>`)"
             ));
         }
         match text.split_once('/') {
-            Some((extension, name)) if is_extension_name(extension) && is_profile_name(name) => {
+            Some((namespace, name)) if is_profile_name(namespace) && is_profile_name(name) => {
                 Ok(Role::Profile {
-                    extension: extension.to_string(),
+                    namespace: namespace.to_string(),
                     name: name.to_string(),
                 })
             }
             _ => Err(format!(
                 "unknown role `{text}` (roles: main, summarize, decide, or an extension's AI \
-                 profile as `<extension>/<name>`)"
+                 profile as `<namespace>/<name>`)"
             )),
         }
     }
 
     /// A role as an extension's own manifest or script names it: a
-    /// built-in name, or the bare name of one of `extension`'s profiles.
-    /// Profiles aren't shared, so a qualified name is refused.
-    pub fn parse_in(extension: &str, text: &str) -> Result<Role, String> {
+    /// built-in name, or the bare name of one of its profiles, named in
+    /// its `namespace`. Profiles aren't shared, so a qualified name is
+    /// refused.
+    pub fn parse_in(namespace: &str, text: &str) -> Result<Role, String> {
         if let Some(role) = BuiltinRole::from_name(text) {
             return Ok(Role::Builtin(role));
         }
         if is_profile_name(text) {
             return Ok(Role::Profile {
-                extension: extension.to_string(),
+                namespace: namespace.to_string(),
                 name: text.to_string(),
             });
         }
@@ -160,20 +161,11 @@ pub fn is_profile_name(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// The shape of an extension name in a qualified role: no spaces or
-/// slashes. Whether one is installed is known only at run time.
-fn is_extension_name(text: &str) -> bool {
-    !text.is_empty()
-        && text
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-}
-
 impl std::fmt::Display for Role {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Role::Builtin(role) => f.write_str(role.name()),
-            Role::Profile { extension, name } => write!(f, "{extension}/{name}"),
+            Role::Profile { namespace, name } => write!(f, "{namespace}/{name}"),
         }
     }
 }
@@ -206,7 +198,8 @@ impl specta::Type for Role {
 /// resolves a profile role against.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AiProfile {
-    pub extension: String,
+    /// The namespace it is named in (its extension's).
+    pub namespace: String,
     pub name: String,
     pub description: String,
     /// The built-in role whose binding it uses until a person binds it.
@@ -218,7 +211,7 @@ pub struct AiProfile {
 impl AiProfile {
     pub fn role(&self) -> Role {
         Role::Profile {
-            extension: self.extension.clone(),
+            namespace: self.namespace.clone(),
             name: self.name.clone(),
         }
     }
@@ -536,7 +529,7 @@ roles:
 
     fn review() -> AiProfile {
         AiProfile {
-            extension: "acme".into(),
+            namespace: "acme".into(),
             name: "review".into(),
             description: "Reviews things.".into(),
             fallback: BuiltinRole::Summarize,
@@ -572,11 +565,14 @@ roles:
         assert_eq!(
             serde_yaml::from_str::<Role>("acme/review").unwrap(),
             Role::Profile {
-                extension: "acme".into(),
+                namespace: "acme".into(),
                 name: "review".into()
             }
         );
         assert!(Role::parse("acme/Review").is_err());
+        // A profile is named in its namespace, never by a dashed name.
+        assert!(Role::parse("acme_tools/review").is_ok());
+        assert!(Role::parse("acme-tools/review").is_err());
         assert!(Role::parse("nope")
             .unwrap_err()
             .contains("unknown role `nope`"));

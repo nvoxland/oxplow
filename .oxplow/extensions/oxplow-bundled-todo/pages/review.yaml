@@ -28,4 +28,4 @@ view:
     empty: No snapshots yet.
   - id: findings
     embed:
-      page: oxplow-bundled-todo/findings
+      page: oxplow/findings

@@ -1755,12 +1755,17 @@ export type Confirm = "never" | "always" |
  *  kind it is, and its id there (for a [`ContributionKind::global_name`]
  *  kind, its global name). Its only public name is its ref
  *  ([`ContributionId::reference`], also its `Display`):
- *  `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
+ *  `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
  *  events, manifests and the desktop all carry that ref
  *  (`.context/resources.md` "Using refs").
  */
 export type ContributionId = {
-	extension: string,
+	/**
+	 *  The namespace it is named in (its extension's `namespace:`), not
+	 *  the extension that declares it ([`Descriptor::owner`] says that):
+	 *  moving it to a sibling in the namespace keeps its id.
+	 */
+	namespace: string,
 	kind: ContributionKind,
 	local: string,
 };
@@ -2113,7 +2118,10 @@ export type Drop = {
  */
 export type EffectDecl = {
 	id: string,
+	/**  The extension that declares it: whose script and grants it runs. */
 	extension: string,
+	/**  The namespace it is named in: its name's first part. */
+	namespace: string,
 	summary: string,
 	/**  The event types it reacts to. */
 	on: string[],
@@ -2190,7 +2198,7 @@ export type EntityDecl = {
 	key: string,
 	columns: EntityColumn[],
 	relations: EntityRelation[],
-	/**  SQL name pages and agents query: `v_<owner>_<entity>`. */
+	/**  SQL name pages and agents query: `v_<namespace>_<entity>`. */
 	view: string,
 };
 
@@ -2526,7 +2534,7 @@ export type Extension_Deserialize = {
 	dimensions: DimensionEntry[],
 	/**
 	 *  Its datasets (`datasets:` plus `datasets/<name>.sql`), published as
-	 *  `v_<extension>_<name>` (`extension_datasets`). Empty when any
+	 *  `v_<namespace>_<name>` (`extension_datasets`). Empty when any
 	 *  declaration is broken (see `errors`).
 	 */
 	datasets: DatasetSource[],
@@ -2687,7 +2695,7 @@ export type Extension_Serialize = {
 	dimensions: DimensionEntry[],
 	/**
 	 *  Its datasets (`datasets:` plus `datasets/<name>.sql`), published as
-	 *  `v_<extension>_<name>` (`extension_datasets`). Empty when any
+	 *  `v_<namespace>_<name>` (`extension_datasets`). Empty when any
 	 *  declaration is broken (see `errors`).
 	 */
 	datasets: DatasetSource[],
@@ -2822,7 +2830,7 @@ export type FileSnapshotId = number;
 /**
  *  An effect's or collector's `on:` naming an event type of another
  *  extension's namespace (P9.D1). The type's name is the dependency —
- *  there is no `depends:` key, as a dataset's `ref('<ext>/<name>')` has
+ *  there is no `depends:` key, as a dataset's `ref('<namespace>/<name>')` has
  *  none: it resolves when an enabled extension registers the type.
  */
 export type ForeignSubscription = {
@@ -5025,8 +5033,12 @@ export type PageVisit = {
 
 /**  A loaded page. */
 export type Page_Deserialize = {
-	/**  `<extension>/<slug>`. */
+	/**
+	 *  `<namespace>/<slug>`: named by its extension's namespace, so it
+	 *  keeps its id when it moves to a sibling in that namespace.
+	 */
 	id: string,
+	/**  The extension that declares it. */
 	extension: string,
 	slug: string,
 	/**  Which folder it came from, and so what it is. */
@@ -5087,8 +5099,12 @@ export type Page_Deserialize = {
 
 /**  A loaded page. */
 export type Page_Serialize = {
-	/**  `<extension>/<slug>`. */
+	/**
+	 *  `<namespace>/<slug>`: named by its extension's namespace, so it
+	 *  keeps its id when it moves to a sibling in that namespace.
+	 */
 	id: string,
+	/**  The extension that declares it. */
 	extension: string,
 	slug: string,
 	/**  Which folder it came from, and so what it is. */
@@ -5526,8 +5542,8 @@ export type RoleStatus = {
 	 *  extension's for a profile.
 	 */
 	description: string,
-	/**  The extension declaring a profile; `None` for a built-in. */
-	extension: string | null,
+	/**  The namespace a profile is named in; `None` for a built-in. */
+	namespace: string | null,
 	/**  The built-in role an unbound profile uses. */
 	fallback: BuiltinRole | null,
 	/**  Its own binding; `None` when it has none. */
@@ -6231,7 +6247,7 @@ export type UiDecorator = {
 	/**  `<extension>/<n>`. */
 	id: string,
 	extension: string,
-	/**  The dataset's view (`v_<extension>_<dataset>`), which has a `ref` column. */
+	/**  The dataset's view (`v_<namespace>_<dataset>`), which has a `ref` column. */
 	view: string,
 	/**  The resource it decorates (`oxplow/work_item`). */
 	resource: string,
@@ -6483,7 +6499,7 @@ export type VizConfig = VizConfig_Serialize | VizConfig_Deserialize;
  *  block, columns, row styling and actions. It runs no query of its own.
  */
 export type VizConfig_Deserialize = {
-	/**  `<extension>/<slug>`: the stable id of the page this viz is on. */
+	/**  `<namespace>/<slug>`: the stable id of the page this viz is on. */
 	id: string,
 	extension: string,
 	slug: string,
@@ -6549,7 +6565,7 @@ export type VizConfig_Deserialize = {
  *  block, columns, row styling and actions. It runs no query of its own.
  */
 export type VizConfig_Serialize = {
-	/**  `<extension>/<slug>`: the stable id of the page this viz is on. */
+	/**  `<namespace>/<slug>`: the stable id of the page this viz is on. */
 	id: string,
 	extension: string,
 	slug: string,

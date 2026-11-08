@@ -15,7 +15,7 @@ given:
   - observe: { visit: { page: "oxplow:oxplow/file?path=f3.rs", kind: file, label: f3.rs, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=f4.rs", kind: file, label: f4.rs, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=f5.rs", kind: file, label: f5.rs, thread: thr1 } }
-when: { part: oxplow-bundled-todo/go-to-panel, params: { thread_id: 1, mode: recent } }
+when: { part: oxplow/go-to-panel, params: { thread_id: 1, mode: recent } }
 expect:
   loaders:
     go_to:
@@ -40,7 +40,7 @@ steps:
             - { grp: Most visited }
             - { grp: Most visited }
             - { grp: Most visited }
-  - when: { part: oxplow-bundled-todo/go-to-bookmarks, params: { thread_id: 1 } }
+  - when: { part: oxplow/go-to-bookmarks, params: { thread_id: 1 } }
     expect:
       loaders:
         go_to_bookmarks:

@@ -28,7 +28,7 @@ view:
     label: How Sure
   - key: why
     label: Why
-  empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow-bundled-todo/reasoning` (Settings → AI); or the extension is turned off.
+  empty: Nothing inferred. The agent recorded its decisions or made none worth noting; or no model serves `oxplow/reasoning` (Settings → AI); or the extension is turned off.
   actions:
   - id: confirm
     label: Confirm

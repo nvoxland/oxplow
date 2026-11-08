@@ -1,7 +1,7 @@
 # oxplow.review.accept { effort, force? }: comment the review on the effort's
 # work item, then mark it done. Refuses while a claim is unverified or an
 # inferred decision unreviewed, unless forced. The verdict is logged as
-# `oxplow_bundled.accepted` with the run: its subject — kept when the
+# `oxplow.review.accepted` with the run: its subject — kept when the
 # payload expires — names the effort, the item, and every claim and
 # decision accepted unchecked.
 
@@ -10,12 +10,12 @@
 _REVIEW = """
 SELECT e.work_item,
        (SELECT json_group_array(json_object('claim', c.uri, 'statement', c.statement))
-          FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
+          FROM v_claim c JOIN v_oxplow_claim_status s ON s.uri = c.uri
          WHERE c.effort_id = e.id AND s.verified = 0) AS unverified,
        (SELECT json_group_array(json_object('decision', d.uri, 'question', d.question, 'choice', d.choice))
           FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
        (SELECT json_group_array(v.path)
-          FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
+          FROM v_oxplow_deviation v WHERE v.effort_id = e.id) AS deviated
 FROM v_effort e
 WHERE e.uri = uri('oxplow/effort', 'id', :effort)
 """
@@ -62,7 +62,7 @@ def transform(x):
             {"name": "oxplow.work_item.transition", "input": {"uri": item, "to": "done"}},
         ],
         "events": [{
-            "type": "oxplow_bundled.accepted",
+            "type": "oxplow.review.accepted",
             "subject": [ref, item] + [c["claim"] for c in claims] + [d["decision"] for d in decisions],
             "payload": {
                 "effort": effort,

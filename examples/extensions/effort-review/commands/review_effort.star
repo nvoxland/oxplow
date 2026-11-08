@@ -1,4 +1,4 @@
-# effort-review/effort.review: ask for one effort's review — the one place
+# effort_review/effort.review: ask for one effort's review — the one place
 # the review's prompt lives (the `review-on-finish` effect and the Efforts
 # page both come here). The intent key names the effort, so asking again
 # for the same effort returns the same job.

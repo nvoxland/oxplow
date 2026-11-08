@@ -881,7 +881,7 @@ pub(super) fn event_type_example(
     let mut registry = EventSchemaRegistry::new();
     for d in &ext.event_types.types {
         // What doesn't register is `check`'s finding already.
-        let _ = registry.register_declared(&ext.name, d.declared());
+        let _ = registry.register_declared(&ext.name, &ext.namespace, d.declared());
     }
     let Some(v) = ex
         .when

@@ -10,5 +10,5 @@ when:
     type: contribution.disabled
     payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom again" }
 expect:
-  effects: [{ id: oxplow-bundled-todo/repair-disabled, state: ok }]
+  effects: [{ id: oxplow/repair-disabled, state: ok }]
   commands: [oxplow.work_item.comment]

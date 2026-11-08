@@ -1,9 +1,9 @@
 //! oxplow's URIs (`.context/resources.md`): one scheme, the resource as
-//! `<extension>/<name>`, its identity as named params, and the
+//! `<namespace>/<name>` (the declaring extension's namespace), its identity as named params, and the
 //! renderer's view as named params after `#`:
 //!
 //! ```text
-//! uri  := "oxplow:" extension "/" name [ "?" params ] [ "#" view ]
+//! uri  := "oxplow:" namespace "/" name [ "?" params ] [ "#" view ]
 //! params, view := key "=" value ( "&" key "=" value )*
 //! ```
 //!
@@ -24,26 +24,29 @@ use std::str::FromStr;
 /// The scheme every oxplow URI has.
 pub const SCHEME: &str = "oxplow";
 
-/// What a URI names: `<extension>/<name>` (`oxplow/file`, `acme/pr`).
+/// What a URI names: `<namespace>/<name>` (`oxplow/file`, `acme/pr`), the
+/// namespace being its declaring extension's (`namespace:`, never its name),
+/// so a resource keeps its URIs whichever extension in the namespace
+/// declares it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ResourceName {
-    extension: String,
+    namespace: String,
     name: String,
 }
 
 impl ResourceName {
-    pub fn new(extension: &str, name: &str) -> Result<Self, UriParseError> {
-        if !is_extension(extension) || !is_name(name) {
-            return Err(UriParseError::BadResource(format!("{extension}/{name}")));
+    pub fn new(namespace: &str, name: &str) -> Result<Self, UriParseError> {
+        if !is_namespace(namespace) || !is_name(name) {
+            return Err(UriParseError::BadResource(format!("{namespace}/{name}")));
         }
         Ok(Self {
-            extension: extension.to_string(),
+            namespace: namespace.to_string(),
             name: name.to_string(),
         })
     }
 
-    pub fn extension(&self) -> &str {
-        &self.extension
+    pub fn namespace(&self) -> &str {
+        &self.namespace
     }
 
     pub fn name(&self) -> &str {
@@ -53,7 +56,7 @@ impl ResourceName {
 
 impl fmt::Display for ResourceName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}/{}", self.extension, self.name)
+        write!(f, "{}/{}", self.namespace, self.name)
     }
 }
 
@@ -75,19 +78,19 @@ impl FromStr for ResourceName {
     type Err = UriParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (extension, name) = s
+        let (namespace, name) = s
             .split_once('/')
             .ok_or_else(|| UriParseError::BadResource(s.to_string()))?;
-        Self::new(extension, name)
+        Self::new(namespace, name)
     }
 }
 
-/// An extension's name: lowercase letters, digits and `-`, starting with a
-/// letter (`oxplow`, `acme-tools`).
-fn is_extension(s: &str) -> bool {
+/// A namespace: lowercase letters, digits and `_`, starting with a letter
+/// (`oxplow`, `acme_tools`).
+fn is_namespace(s: &str) -> bool {
     let mut chars = s.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// A resource's name within its extension: lowercase letters, digits and

@@ -49,6 +49,56 @@ pub(crate) struct Host {
     stale: std::sync::atomic::AtomicBool,
 }
 
+/// The namespace a manifest's text names its contributions in: its
+/// `namespace:`, else its name's.
+fn manifest_namespace(name: &str, manifest: &[u8]) -> String {
+    #[derive(serde::Deserialize)]
+    struct Manifest {
+        #[serde(default)]
+        namespace: Option<String>,
+    }
+    serde_yaml::from_slice::<Manifest>(manifest)
+        .ok()
+        .and_then(|m| m.namespace)
+        .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(name))
+}
+
+/// The extension in `checkout` (a source, or one that ships) whose
+/// contributions are named in `namespace`: the producer an import names.
+fn producer_named(
+    checkout: &Path,
+    settings: &oxplow_config::ExtensionSettings,
+    namespace: &str,
+) -> Option<String> {
+    let listed = std::fs::read_dir(checkout.join(oxplow_config::EXTENSION_SOURCES_DIR))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok());
+    let sources: std::collections::BTreeSet<String> = settings
+        .team_sources
+        .keys()
+        .chain(settings.personal_sources.keys())
+        .cloned()
+        .chain(listed)
+        .collect();
+    sources
+        .into_iter()
+        .find(|name| {
+            std::fs::read(settings.source(checkout, name).join("extension.yaml"))
+                .is_ok_and(|m| manifest_namespace(name, &m) == namespace)
+        })
+        .or_else(|| {
+            oxplow_app::bundled_extensions::BUNDLED
+                .iter()
+                .find(|b| {
+                    b.bytes("extension.yaml")
+                        .is_some_and(|m| manifest_namespace(b.name, m) == namespace)
+                })
+                .map(|b| b.name.to_string())
+        })
+}
+
 /// What a shipped extension's manifest `requires:`.
 fn shipped_requires(shipped: &oxplow_app::bundled_extensions::BundledExtension) -> Vec<String> {
     #[derive(serde::Deserialize)]
@@ -65,6 +115,16 @@ fn shipped_requires(shipped: &oxplow_app::bundled_extensions::BundledExtension) 
 }
 
 impl Host {
+    /// The namespace extension `name` names its contributions in here (its
+    /// own name's, `-` read as `_`, when it isn't loaded).
+    pub(crate) fn namespace_of(&self, name: &str) -> String {
+        oxplow_app::extension::extensions::owner(&self.svc.extension_catalog.get(&self.root), name)
+            .map_or_else(
+                || oxplow_domain::contribution::extension_namespace(name),
+                |e| e.namespace.clone(),
+            )
+    }
+
     /// A throwaway over the extensions in `checkout` (the project's main
     /// checkout, or a worktree holding drafts) with `testing` on too,
     /// activated. Which are on: the required foundation, `testing` and what
@@ -122,12 +182,15 @@ impl Host {
                 return;
             }
             let ext = oxplow_app::extension::extensions::load_extension_at(&source, name);
-            let needs = ext.requires.iter().cloned().chain(
-                ext.public_contracts
-                    .imports
-                    .iter()
-                    .map(|i| i.contribution.extension.clone()),
-            );
+            // An import names its producer by namespace: the extension of
+            // this checkout that has it.
+            let producers: Vec<String> = ext
+                .public_contracts
+                .imports
+                .iter()
+                .filter_map(|i| producer_named(checkout, settings, &i.contribution.namespace))
+                .collect();
+            let needs = ext.requires.iter().cloned().chain(producers);
             for need in needs.collect::<Vec<_>>() {
                 visit(&need, checkout, settings, on, seen);
             }

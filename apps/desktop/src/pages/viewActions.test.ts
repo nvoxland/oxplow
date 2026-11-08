@@ -20,6 +20,6 @@ test("Definition in About is the running copy's file drawn as Definition with th
   const running = "oxplow:oxplow/file?path=acme%2Fpages%2Flist.yaml&rev=abc123&filesystem=oxplow:extensions";
   const uri = definitionUri(running, { q: "two words" });
   expect(identityOf(uri)).toBe(identityOf(running));
-  expect(viewOf(uri, "oxplow.renderer")).toBe("oxplow-foundation/definition");
+  expect(viewOf(uri, "oxplow.renderer")).toBe("oxplow/definition");
   expect(viewOf(uri, "params")).toBe('{"q":"two words"}');
 });

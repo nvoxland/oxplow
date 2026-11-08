@@ -4,7 +4,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Alpha } }
   - { command: oxplow.work_item.create, input: { title: Beta } }
 when:
-  page: oxplow-foundation/dataset-data
+  page: oxplow/dataset-data
   params: { uri: "oxplow:oxplow/dataset?dataset=work_item" }
 expect:
   label: v_work_item data

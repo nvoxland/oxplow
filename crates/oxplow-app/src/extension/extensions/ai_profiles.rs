@@ -25,10 +25,10 @@ pub struct AiProfileDecl {
 }
 
 impl AiProfileDecl {
-    /// The profile as the AI service resolves it, owned by `extension`.
-    pub fn profile(&self, extension: &str) -> oxplow_ai::config::AiProfile {
+    /// The profile as the AI service resolves it, named in `namespace`.
+    pub fn profile(&self, namespace: &str) -> oxplow_ai::config::AiProfile {
         oxplow_ai::config::AiProfile {
-            extension: extension.to_string(),
+            namespace: namespace.to_string(),
             name: self.id.clone(),
             description: self.description.clone(),
             fallback: self.fallback,
@@ -41,7 +41,7 @@ impl AiProfileDecl {
 pub fn profiles_of(extensions: &[super::Extension]) -> Vec<oxplow_ai::config::AiProfile> {
     extensions
         .iter()
-        .flat_map(|ext| ext.ai_profiles.iter().map(|p| p.profile(&ext.name)))
+        .flat_map(|ext| ext.ai_profiles.iter().map(|p| p.profile(&ext.namespace)))
         .collect()
 }
 

@@ -195,31 +195,34 @@ pub fn credential_account(project: &str, extension: &str, name: &str) -> String 
 /// agents can't reach this.
 pub fn set_credential(
     ctx: &Collectors<'_>,
-    extension: &str,
+    namespace: &str,
     name: &str,
     value: Option<&str>,
 ) -> Result<(), DomainError> {
-    let ext = ctx
-        .catalog
-        .unpinned(
-            ctx.root,
-            "a collector is found on its declaration; its run pins",
-        )
+    // Credentials are the namespace's: any of its extensions' collectors
+    // may declare one.
+    let extensions = ctx.catalog.unpinned(
+        ctx.root,
+        "a collector is found on its declaration; its run pins",
+    );
+    let in_namespace: Vec<_> = extensions
         .iter()
-        .find(|e| e.name == extension)
-        .cloned()
-        .ok_or(DomainError::NotFound)?;
-    let declared = ext
-        .collectors
+        .filter(|e| e.namespace == namespace)
+        .collect();
+    if in_namespace.is_empty() {
+        return Err(DomainError::NotFound);
+    }
+    let declared = in_namespace
         .iter()
+        .flat_map(|e| e.collectors.iter())
         .flat_map(|s| s.credentials.iter())
         .any(|c| c == name);
     if !declared {
         return Err(DomainError::Invalid(format!(
-            "no collector in `{extension}` declares a credential named `{name}`"
+            "no collector in `{namespace}` declares a credential named `{name}`"
         )));
     }
-    let account = credential_account(&ctx.project, extension, name);
+    let account = credential_account(&ctx.project, namespace, name);
     let result = match value.map(str::trim).filter(|v| !v.is_empty()) {
         Some(v) => ctx.secrets.set(&account, v),
         None => ctx.secrets.delete(&account),
@@ -259,17 +262,17 @@ pub async fn list_with(ctx: &Listing<'_>) -> Result<Vec<CollectorListing>, Domai
                     name: name.clone(),
                     set: ctx
                         .secrets
-                        .get(&credential_account(ctx.project, &ext.name, name))
+                        .get(&credential_account(ctx.project, &ext.namespace, name))
                         .ok()
                         .flatten()
                         .is_some(),
                 })
                 .collect();
             let disabled = health
-                .disabled_reason(&contribution_key(&ext.name, &spec.id))
+                .disabled_reason(&contribution_key(&ext.namespace, &spec.id))
                 .await?;
             out.push(CollectorListing {
-                owner: ext.name.clone(),
+                owner: ext.namespace.clone(),
                 disabled,
                 spec,
                 run,
@@ -976,10 +979,11 @@ fn exec_input(event: Option<&EventView>) -> serde_json::Value {
     }
 }
 
-/// A collector's `contribution_health` key: owner / id, kind `collector`.
+/// A collector's `contribution_health` key: its owner (the namespace it is
+/// named in) / id, kind `collector`.
 pub fn contribution_key(owner: &str, id: &str) -> oxplow_db::ContributionKey {
     oxplow_db::ContributionKey {
-        extension: owner.to_string(),
+        namespace: owner.to_string(),
         contribution: id.to_string(),
         kind: "collector",
     }
@@ -1077,6 +1081,8 @@ async fn run_collector_once(
     trigger: RunTrigger,
 ) -> Result<CollectorRunReport, RunCollectorError> {
     let source = run.actor().source();
+    // Who declares it: whose events it may emit and whose entities it writes.
+    let declarer = run.extension().unwrap_or(owner);
     let started = std::time::Instant::now();
     // The event as the collector sees it: carried to its type's newest
     // version. One that can't be carried is a failed run, recorded.
@@ -1095,11 +1101,12 @@ async fn run_collector_once(
     let writes = output.and_then(|mut o| {
         let events = plan_events(
             &ctx.vocabulary.current(),
+            declarer,
             owner,
             &spec,
             std::mem::take(&mut o.events),
         )?;
-        Ok((plan_writes(owner, &spec, o)?, events))
+        Ok((plan_writes(declarer, owner, &spec, o)?, events))
     });
     let last_event_id = trigger.event().map(|e| e.seq);
     let run_row = |status: &str, error: Option<String>| CollectorRun {
@@ -1228,6 +1235,7 @@ pub const MAX_RUN_EVENTS: usize = 100;
 /// is an effect's, which may react to these.
 fn plan_events(
     vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    declarer: &str,
     owner: &str,
     spec: &CollectorSpec,
     events: Vec<crate::extension::extension_commands::ComposedEvent>,
@@ -1254,7 +1262,7 @@ fn plan_events(
     }
     let source = oxplow_domain::uri::build::collector_uri(owner, id);
     let envelopes =
-        crate::extension::extension_commands::own_events(vocabulary, owner, &source, events)
+        crate::extension::extension_commands::own_events(vocabulary, declarer, &source, events)
             .map_err(|e| format!("collector `{owner}/{id}`: {e}"))?;
     // What the append would refuse (a payload its schema doesn't take) is
     // this run's error, before anything is written.
@@ -1607,8 +1615,10 @@ pub async fn preview_collector(
     let run = collector_context(ctx, &parent, owner, id)?;
     let (spec, output) = produce(ctx, &run, owner, id, view.as_ref(), rows).await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
+    let declarer = run.extension().unwrap_or(owner);
     let events = plan_events(
         &ctx.vocabulary.current(),
+        declarer,
         owner,
         &spec,
         std::mem::take(&mut output.events),
@@ -1622,7 +1632,7 @@ pub async fn preview_collector(
         subject: e.subject,
     })
     .collect();
-    let writes = plan_writes(owner, &spec, output).map_err(RunCollectorError::Failed)?;
+    let writes = plan_writes(declarer, owner, &spec, output).map_err(RunCollectorError::Failed)?;
     let entities = writes
         .into_iter()
         .map(|(table, write)| {
@@ -1649,6 +1659,8 @@ pub async fn preview_collector(
 }
 
 /// The extension and spec of collector `owner/id` in `ctx.root`.
+/// The namespace of extension `owner`, which names its entities' tables
+/// and views; its name's default when it isn't in the catalog.
 pub fn find_collector(
     ctx: &Collectors<'_>,
     owner: &str,
@@ -1661,7 +1673,9 @@ pub fn find_collector(
             "a collector is found on its declaration; its run pins",
         )
         .iter()
-        .find(|e| e.name == owner)
+        // A collector is named in its namespace: the extension there that
+        // declares it.
+        .find(|e| e.namespace == owner && e.collectors.iter().any(|s| s.id == id))
         .cloned()
         .ok_or(RunCollectorError::NotFound)?;
     let spec = ext
@@ -1716,7 +1730,7 @@ async fn produce(
         let run = run.clone();
         let mut sources = crate::services::Sources::default().with_ai(
             ctx.ai.clone(),
-            oxplow_domain::uri::build::collector_uri(&ext.name, &spec.id),
+            oxplow_domain::uri::build::collector_uri(&ext.namespace, &spec.id),
         );
         if let Some(trees) = &ctx.trees {
             sources = sources.with_tree(crate::services::Trees::From(trees.clone()));
@@ -1878,7 +1892,7 @@ pub struct SyncInput {
     pub thread: Option<String>,
 }
 
-/// A collector id's extension and `id` (`work/hot` → `work`, `hot`).
+/// A collector id's owner (its namespace) and `id` (`work/hot` → `work`, `hot`).
 fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::CommandError> {
     collector
         .split_once('/')
@@ -1886,7 +1900,7 @@ fn collector_parts(collector: &str) -> Result<(String, String), oxplow_domain::C
         .map(|(owner, id)| (owner.to_string(), id.to_string()))
         .ok_or_else(|| oxplow_domain::CommandError::Invalid {
             field: Some("/collector".into()),
-            message: format!("`{collector}` isn't a collector id (`<extension>/<id>`)"),
+            message: format!("`{collector}` isn't a collector id (`<namespace>/<id>`)"),
         })
 }
 
@@ -2059,7 +2073,7 @@ pub async fn publish_declared_rows(
         };
         let coerced = coerce_rows(entity, entity_rows.clone()).map_err(DomainError::Invalid)?;
         writes.push((
-            entity_table(&ext.name, entity),
+            entity_table(&ext.name, &ext.namespace, entity),
             EntityWrite::Replace(coerced),
         ));
     }
@@ -2077,15 +2091,16 @@ pub(crate) fn declared_entity_tables(
             ext.collectors.iter().flat_map(move |spec| {
                 spec.entities
                     .iter()
-                    .map(move |entity| entity_table(&ext.name, entity))
+                    .map(move |entity| entity_table(&ext.name, &ext.namespace, entity))
             })
         })
         .collect()
 }
 
-fn entity_table(owner: &str, entity: &EntityDecl) -> EntityTable {
+fn entity_table(owner: &str, namespace: &str, entity: &EntityDecl) -> EntityTable {
     EntityTable {
         extension: owner.to_string(),
+        namespace: namespace.to_string(),
         entity: entity.name.clone(),
         view: entity.view.clone(),
         key: entity.key.clone(),
@@ -2104,6 +2119,7 @@ fn entity_table(owner: &str, entity: &EntityDecl) -> EntityTable {
 
 fn plan_writes(
     owner: &str,
+    namespace: &str,
     spec: &CollectorSpec,
     mut output: ScriptOutput,
 ) -> Result<Vec<(EntityTable, EntityWrite)>, String> {
@@ -2127,7 +2143,7 @@ fn plan_writes(
                 }
             }
         };
-        writes.push((entity_table(owner, entity), write));
+        writes.push((entity_table(owner, namespace, entity), write));
     }
     Ok(writes)
 }
@@ -2452,7 +2468,7 @@ pub(crate) mod tests {
             trees: None,
         };
 
-        let report = reviewed_run(&ctx, "my-gh", "gh").await.unwrap();
+        let report = reviewed_run(&ctx, "my_gh", "gh").await.unwrap();
         assert_eq!(report.row_counts["pr"], 2);
         let out = crate::sql_gateway::SqlGateway::new(db)
             .query_sql("SELECT title FROM v_my_gh_pr ORDER BY number", vec![], None)
@@ -2467,7 +2483,7 @@ pub(crate) mod tests {
         run_collector(
             &ctx,
             &RunContext::core(oxplow_domain::Actor::Human, Mode::External),
-            "my-gh",
+            "my_gh",
             "gh",
             RunTrigger::Manual,
         )
@@ -2475,7 +2491,7 @@ pub(crate) mod tests {
         .unwrap();
         // …and a failing run is recorded, keeping the last good rows.
         script(&ext, "sync.sh", "echo nope >&2; exit 1");
-        let err = reviewed_run(&ctx, "my-gh", "gh").await.unwrap_err();
+        let err = reviewed_run(&ctx, "my_gh", "gh").await.unwrap_err();
         assert!(matches!(err, RunCollectorError::Failed(_)), "{err:?}");
         let st = &store.list_runs().await.unwrap()[0];
         assert_eq!(st.status, "error");
@@ -2852,7 +2868,7 @@ pub(crate) mod tests {
         assert!(bad.disabled.is_some());
         assert!(due_collectors(&listings, i64::MAX).is_empty());
 
-        let enable = json!({ "extension": "work", "kind": "collector", "contribution": "bad" });
+        let enable = json!({ "namespace": "work", "kind": "collector", "contribution": "bad" });
         let agent = oxplow_domain::Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -2948,7 +2964,7 @@ pub(crate) mod tests {
             .read(move |c| {
                 c.query_row(
                     "SELECT next_due_at, fresh FROM v_contribution_health
-                     WHERE extension = ?1 AND contribution = ?2",
+                     WHERE namespace = ?1 AND contribution = ?2",
                     [extension, contribution],
                     |r| Ok((r.get(0)?, r.get::<_, i64>(1)? == 1)),
                 )
@@ -3176,7 +3192,7 @@ pub(crate) mod tests {
         .unwrap();
         ai.set_profiles(std::sync::Arc::new(|| {
             vec![oxplow_ai::config::AiProfile {
-                extension: "work".into(),
+                namespace: "work".into(),
                 name: "sort".into(),
                 description: "Sorts.".into(),
                 fallback: oxplow_ai::config::BuiltinRole::Decide,
@@ -3368,11 +3384,11 @@ pub(crate) mod tests {
 
         let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
         assert_eq!(
-            plan_events(&vocabulary, "my-gh", &s, Vec::new()).unwrap(),
+            plan_events(&vocabulary, "my-gh", "my_gh", &s, Vec::new()).unwrap(),
             Vec::new()
         );
         // Its extension declares no such type.
-        let refused = plan_events(&vocabulary, "my-gh", &s, out.events).unwrap_err();
+        let refused = plan_events(&vocabulary, "my-gh", "my_gh", &s, out.events).unwrap_err();
         assert!(
             refused.contains("may emit only the event types `my-gh` declares"),
             "{refused}"

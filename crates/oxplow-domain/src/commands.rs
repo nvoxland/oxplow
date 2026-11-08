@@ -708,9 +708,9 @@ impl Actor {
             }
             // It is its contribution, by its ref.
             Actor::Component { component, .. } => {
-                let (extension, id) = component.split_once('/').unwrap_or(("", component));
+                let (namespace, id) = component.split_once('/').unwrap_or(("", component));
                 crate::contribution::ContributionId::new(
-                    extension,
+                    namespace,
                     crate::contribution::ContributionKind::CustomComponent,
                     id,
                 )

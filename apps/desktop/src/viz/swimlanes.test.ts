@@ -19,7 +19,7 @@ const ITEMS: Item[] = [
   { uri: "oxplow:oxplow/work_item?id=4&provider=a", title: "Fourth", state: "done" },
 ];
 const run = (items: Item[]) => ({
-  config: { id: "task-views/swimlanes" },
+  config: { id: "task_views/swimlanes" },
   params: { scope: "thread", thread_id: "t1" },
   result: { columns: ["uri", "title", "state", "rank"], rows: items.map((i, n) => [i.uri, i.title, i.state, n]), truncated: false },
 });

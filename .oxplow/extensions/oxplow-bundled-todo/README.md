@@ -3,7 +3,7 @@
 What comes with oxplow, built as an ordinary extension:
 
 - the effort review packet: what a person checks before accepting an
-  agent's work, shown on each effort's diff (the `oxplow-foundation/changes.sections`
+  agent's work, shown on each effort's diff (the `oxplow/changes.sections`
   slot), and the verdicts they give;
 - the analytics pages: tests and coverage, metric deltas, churn,
   duplication, co-change, token use and page visits;
@@ -32,14 +32,14 @@ without a restart: the advisory reads it on its next run.
 - `v_claim` — what the agent's answers said about its work, as a dataset
   read them when the effort finished (nothing the agent records), what
   each cites, and a reviewer's `review` (`verified`, `dismissed`, or NULL).
-  `v_oxplow_bundled_claim_status` (this extension's dataset) says whether
+  `v_oxplow_claim_status` (this extension's dataset) says whether
   something backs it: `verified = 0` means no `evidence`, no person's
   verification, and for a `tests_pass` claim no passing latest test run in
   the effort. A dismissed claim has no row there: it counts for nothing.
 - `v_decision` — the forks the agent resolved. `provenance = 'inferred'`
   rows are a model's guesses from the conversation, until a person
   confirms or dismisses them (below, "Decisions Oxplow Noticed").
-- `v_oxplow_bundled_deviation` (this extension's dataset) — files an effort
+- `v_oxplow_deviation` (this extension's dataset) — files an effort
   changed outside the area its work item names. A file is in the area
   when the item's title or body names it, or one of its directories at
   least two levels deep (`src/ui`). An item that names no area has none.
@@ -60,15 +60,15 @@ On an effort's page, **Commands**:
   todo.
 
 Each logs its verdict as an event (`event_types:` in the manifest):
-`oxplow_bundled.accepted { effort, work_item, unverified, inferred, deviated }` or
-`oxplow_bundled.changes_requested { effort, work_item, unverified, inferred, deviated, note? }`,
+`oxplow.review.accepted { effort, work_item, unverified, inferred, deviated }` or
+`oxplow.review.changes_requested { effort, work_item, unverified, inferred, deviated, note? }`,
 caused by the command's run. The counts are what stood at the verdict —
 claims unverified, inferred decisions unreviewed, files outside the area.
 The verdict itself is in the envelope, which is kept when the payload
 expires (30 days): the type says which, and the subject names the effort,
 its work item and — for an acceptance — every claim and decision accepted
 unchecked (any at all makes it forced). Read them in `v_event`, or react
-to one from another extension's effect (`on: [oxplow_bundled.accepted]`).
+to one from another extension's effect (`on: [oxplow.review.accepted]`).
 
 Both work on any list's item. On oxplow's own tasks the comment and the
 move are one change you can undo; on another provider's item
@@ -100,7 +100,7 @@ inferred decisions and claims through oxplow's
 `oxplow.effort.replace_inferred_claims` (the latter replaces only claims
 no reviewer has acted on).
 
-- **The model** is the person's binding of `oxplow-bundled-todo/reasoning` in
+- **The model** is the person's binding of `oxplow/reasoning` in
   Settings → AI, else their Main model. With neither, nothing is asked:
   the effect skips and says where to bind one.
 - **Nothing else to approve:** the job `reasoning` and the effects

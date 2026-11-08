@@ -296,7 +296,7 @@ impl JobOperationRegistry {
 
 fn validate_owner(owner: &JobOwner) -> Result<(), JobOperationError> {
     let id = &owner.contribution;
-    if id.extension.len() > 128
+    if id.namespace.len() > 128
         || id.local.len() > MAX_OWNER_FIELD_BYTES
         || id.problem().is_some()
         || owner

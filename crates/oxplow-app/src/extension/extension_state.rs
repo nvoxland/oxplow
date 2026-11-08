@@ -174,8 +174,9 @@ impl StateHost {
         scope: Scope,
         area: Area,
     ) -> Result<Namespace, StateHostError> {
+        // The namespace's: extensions sharing one share their private state.
         self.with_owner(run, service, |ext| Namespace {
-            extension: ext.name.clone(),
+            namespace: ext.namespace.clone(),
             scope,
             area,
         })
@@ -214,7 +215,7 @@ impl StateHost {
                 "the owning catalog generation is not current",
             ));
         }
-        let ext = crate::extension::extensions::owner(snapshot.extensions(), &owner.id.extension)
+        let ext = crate::extension::extensions::owner(snapshot.extensions(), &owner.extension)
             .filter(|ext| {
                 ext.enabled
                     && ext.version == owner.version

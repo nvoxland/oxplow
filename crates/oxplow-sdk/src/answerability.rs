@@ -511,7 +511,7 @@ pub async fn check_pages(
                 let at = Place {
                     file: page.file(),
                     label: format!("answer {} ({:?})", i + 1, answer.question),
-                    contribution: Some(format!("{}/{}", ext.name, page.slug)),
+                    contribution: Some(page.id.clone()),
                 };
                 // A question is put into the agent's input, never sent, and
                 // the terminal treats a pasted line break as Enter: one line.

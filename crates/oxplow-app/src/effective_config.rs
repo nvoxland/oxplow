@@ -137,7 +137,7 @@ pub fn effective_config(
                     (Some(_), false) => ConfigOrigin::Global,
                     (None, false) => ConfigOrigin::Default,
                 },
-                extension: r.extension.clone(),
+                extension: r.namespace.clone(),
                 schema: Value::Null,
             });
         }
@@ -278,7 +278,7 @@ mod tests {
                 RoleStatus {
                     role: Role::MAIN,
                     description: String::new(),
-                    extension: None,
+                    namespace: None,
                     fallback: None,
                     effective: Some(RoleBinding::new("p", "m")),
                     binding: Some(RoleBinding::new("p", "m")),
@@ -288,7 +288,7 @@ mod tests {
                 RoleStatus {
                     role: Role::SUMMARIZE,
                     description: String::new(),
-                    extension: None,
+                    namespace: None,
                     fallback: None,
                     effective: Some(RoleBinding::new("p", "f")),
                     binding: Some(RoleBinding::new("p", "f")),
@@ -298,7 +298,7 @@ mod tests {
                 RoleStatus {
                     role: Role::DECIDE,
                     description: String::new(),
-                    extension: None,
+                    namespace: None,
                     fallback: None,
                     effective: None,
                     binding: None,

@@ -1,6 +1,6 @@
 # Waiting on Me raises its alert while anything is waiting on the person: a
 # blocked work item is.
-when: { page: oxplow-bundled-todo/waiting-on-me }
+when: { page: oxplow/waiting-on-me }
 expect: { alert: { firing: false } }
 steps:
   - given:

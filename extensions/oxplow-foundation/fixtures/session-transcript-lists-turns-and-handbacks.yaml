@@ -11,7 +11,7 @@ given:
         tools: [{ name: Read, kind: read, paths: [a.rs], ok: true }, { name: Read, kind: read, paths: [b.rs], ok: true }]
   - observe: { turn: { session: $ses.id, prompt: null, subagent: { id: a1, kind: Explore }, answer: report } }
   - observe: { turn: { session: $ses.id, prompt: third ask, answer: three } }
-when: { page: oxplow-foundation/session-transcript, params: { session: $ses.id, turn: "", page: 1 } }
+when: { page: oxplow/session-transcript, params: { session: $ses.id, turn: "", page: 1 } }
 expect:
   loaders:
     session_transcript:

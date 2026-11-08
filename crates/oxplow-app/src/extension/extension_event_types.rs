@@ -105,6 +105,7 @@ struct TypeFile {
 /// than the default; what's wrong is `file:line`.
 pub fn parse_event_types(
     extension: &str,
+    namespace: &str,
     value: &serde_yaml::Value,
     file: &str,
     manifest: &str,
@@ -170,7 +171,7 @@ pub fn parse_event_types(
                 continue;
             }
         };
-        match decl_of(extension, t, file, line, read, &mut scratch) {
+        match decl_of(extension, namespace, t, file, line, read, &mut scratch) {
             Ok(d) => out.push(d),
             Err(e) => errors.push(at("event_type.invalid", rel, line, e)),
         }
@@ -186,6 +187,7 @@ pub fn parse_event_types(
 
 fn decl_of(
     extension: &str,
+    namespace: &str,
     t: TypeFile,
     file: &str,
     line: Option<usize>,
@@ -220,7 +222,7 @@ fn decl_of(
         },
     };
     scratch
-        .register_declared(extension, decl.declared())
+        .register_declared(extension, namespace, decl.declared())
         .map_err(|e| e.to_string())?;
     Ok(decl)
 }
@@ -261,10 +263,14 @@ mod tests {
             .iter()
             .map(|(p, b)| (p.to_string(), b.to_string()))
             .collect();
-        let (types, errors) =
-            parse_event_types("acme-pr", &doc["event_types"], FILE, manifest, &|rel| {
-                files.iter().find(|(p, _)| p == rel).map(|(_, b)| b.clone())
-            });
+        let (types, errors) = parse_event_types(
+            "acme-pr",
+            "acme_pr",
+            &doc["event_types"],
+            FILE,
+            manifest,
+            &|rel| files.iter().find(|(p, _)| p == rel).map(|(_, b)| b.clone()),
+        );
         let root = FILE.trim_end_matches("/extension.yaml");
         (types, errors.iter().map(|e| e.render(root)).collect())
     }
@@ -349,6 +355,7 @@ mod tests {
         let mut r = EventSchemaRegistry::new();
         r.register_declared(
             "acme-pr",
+            "acme_pr",
             declared(
                 1,
                 json!({"type": "object", "required": ["number"], "additionalProperties": false,
@@ -360,6 +367,7 @@ mod tests {
         let script = "def transform(x):\n    return {\"pr\": x[\"payload\"][\"number\"], \"from\": x[\"from_v\"]}\n";
         r.register_declared(
             "acme-pr",
+            "acme_pr",
             declared(
                 2,
                 json!({"type": "object", "required": ["pr"], "additionalProperties": false,
@@ -377,10 +385,15 @@ mod tests {
     #[test]
     fn an_upcast_that_fails_or_returns_the_wrong_shape_is_refused() {
         let mut r = EventSchemaRegistry::new();
-        r.register_declared("acme-pr", declared(1, json!({"type": "object"}), None))
-            .unwrap();
         r.register_declared(
             "acme-pr",
+            "acme_pr",
+            declared(1, json!({"type": "object"}), None),
+        )
+        .unwrap();
+        r.register_declared(
+            "acme-pr",
+            "acme_pr",
             declared(
                 2,
                 json!({"type": "object", "required": ["pr"]}),
@@ -398,6 +411,7 @@ mod tests {
         let mut r = EventSchemaRegistry::new();
         r.register_declared(
             "acme-pr",
+            "acme_pr",
             declared(
                 2,
                 json!({"type": "object"}),

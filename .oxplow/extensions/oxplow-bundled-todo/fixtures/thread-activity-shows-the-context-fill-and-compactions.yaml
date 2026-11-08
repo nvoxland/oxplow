@@ -3,7 +3,7 @@
 given:
   - observe: { turn: { prompt: with a window, compactions: 1, context: { tokens: 52000, window: 200000 } } }
   - observe: { turn: { prompt: without one, context: { tokens: 52000 } } }
-when: { page: oxplow-bundled-todo/thread-activity, params: { thread_id: 1 } }
+when: { page: oxplow/thread-activity, params: { thread_id: 1 } }
 expect:
   loaders:
     thread_activity:

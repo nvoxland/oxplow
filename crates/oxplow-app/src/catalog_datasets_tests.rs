@@ -279,7 +279,7 @@ async fn waiting_permissions_are_a_problem_only_for_an_extension_that_is_on() {
         );
         let page = crate::test_fixtures::run_as_page(
             &fx.svc,
-            "oxplow-foundation/extension-problems",
+            "oxplow/extension-problems",
             &[(
                 "extension".to_string(),
                 oxplow_db::SqlCell::Text("acme".into()),

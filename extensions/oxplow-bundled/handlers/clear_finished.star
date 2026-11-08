@@ -7,6 +7,6 @@ def transform(x):
     thread = uri.build("oxplow/thread", id = "thr%s" % x["input"]["thread_id"])
     return {
         "commands": [],
-        "events": [{"type": "oxplow_bundled.finished_cleared", "subject": [thread], "payload": {}}],
+        "events": [{"type": "oxplow.work.finished_cleared", "subject": [thread], "payload": {}}],
         "result": {"thread": thread},
     }

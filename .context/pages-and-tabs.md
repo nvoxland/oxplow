@@ -79,7 +79,7 @@ pages are THE shell.
 | ~~`apps/desktop/src/tabs/appPageBacklinks.ts`~~ | **Deleted.** Per-kind in-memory backlinks providers used to live here. Cross-page backlinks now come from the persisted `page_ref` graph (`crates/oxplow-db/src/page_ref_store.rs`) via the `list_backlinks` IPC; every page kind goes through the same code path. App pages that need their own provider would register a new `source_resource` writer in the backend instead. |
 | `apps/desktop/src/components/RailHud/sections.ts` | The launcher's categories (`PAGE_CATEGORY_ORDER`, `PageDirectoryEntry`) ; every launcher page is a declared page (`components/extensionLauncher.ts`). |
 | `apps/desktop/src/components/History/CommitGraphTable.tsx` | Pure presentation of the git-log graph (branch/merge dots + lines + sha + ref badges + subject + author + relative date). `indexRefsBySha(log)` exported alongside groups branch heads + tags by sha so callers feed identical maps. |
-| (change analysis) | No page of its own: `crates/oxplow-app/src/change_analysis.rs` stores each change behind `v_change*`, and the oxplow-bundled `change-review` page shows it, mounted at the `oxplow-foundation/diff-view.sections`, `commit.sections` and `uncommitted-changes.sections` slots. The old per-page scope drilldown is gone; scoped tab ids reopen the unscoped page. |
+| (change analysis) | No page of its own: `crates/oxplow-app/src/change_analysis.rs` stores each change behind `v_change*`, and the oxplow-bundled `change-review` page shows it, mounted at the `oxplow/diff-view.sections`, `commit.sections` and `uncommitted-changes.sections` slots. The old per-page scope drilldown is gone; scoped tab ids reopen the unscoped page. |
 | ~~`apps/desktop/src/tabs/backlinksIndex.ts`~~ | **Deleted.** The in-memory cross-kind indexer is replaced by the persisted `page_ref` table; see `data-model.md`. The `BacklinkEntry` type that renderers consume now lives in `apps/desktop/src/tabs/backlinkTypes.ts`. |
 | `apps/desktop/src/tabs/useBacklinks.ts` | React hook that calls the unified `list_backlinks` IPC for a `TabRef` and maps the returned `BacklinkEdge` rows into `BacklinkEntry`s. Used by every page kind including the editor page. The sibling `usePageOutbound` hook does the same for the inverse direction. |
 | `apps/desktop/src/tabs/backlinkTypes.ts` | Renderer-side `BacklinkEntry` interface (`{ ref: TabRef \| null, target, label, subtitle?, dead?, linkType? }`): `ref` is the page the row opens, null for a dead link (nothing resolves the ref; `BacklinkEdge.resolved`) or a resolved ref with no page. Decoupled from the SQLite `BacklinkEdge` shape. |
@@ -110,7 +110,7 @@ viewer) -> Vec<Renderer { page, title, default }>`. The desktop (RPC
 all ask it. A page is offered for a URI when, in this order,
 
 1. its `for` names the URI's resource (an oxplow resource
-   `<extension>/<name>`, or the scheme `https` / `http` for a web page);
+   `<namespace>/<name>`, or the scheme `https` / `http` for a web page);
 2. its `accepts` hold for the URI's params: each named param `present`,
    `absent` or matching its anchored pattern (`param_pattern`); and
 3. when it says `accepts: { content: <loader> }` (`Page.accepts_content`;
@@ -135,7 +135,7 @@ of them asks for text (`content: { text: true }`), at the largest
 *Which one.* `pickRenderer(list, view)` (`pages/renderers.ts`), from the
 daemon's list:
 
-1. The view key `#oxplow.renderer=<extension>/<page>` names one of them
+1. The view key `#oxplow.renderer=<namespace>/<page>` names one of them
    (a name not in the list is ignored).
 2. Else the first page with `default: true`; else the first. Several
    defaults of one resource are allowed when each decides by
@@ -225,7 +225,7 @@ position) stay on identity alone. Two shapes:
   core-named as its commands are: `oxplow:oxplow/page?page=tasks`,
   `oxplow:oxplow/page?page=settings#area=agents`, the area in the `#`
   view) and
-  `oxplow:oxplow/page?page=<extension>/<id>` plus its params for any other
+  `oxplow:oxplow/page?page=<namespace>/<id>` plus its params for any other
   extension's. `pagePayload(ref)` reads it back as `{ extension, page,
   params }` (`extension` null for oxplow's). Nothing
   rides beside the id: what a page shows is its params (a diff's spec,
@@ -268,7 +268,7 @@ moved into the project DB and started fresh again) — see the decision in [reso
 | work_item | `oxplow:oxplow/work_item?id=<id>&provider=<provider>` — every list's item (`workItemTabRef(uri)`) opens `WorkItemPage` | `oxplow:oxplow/work_item?id=tsk142&provider=oxplow`, `oxplow:oxplow/work_item?id=W-1&provider=fake` |
 | commit | `oxplow:oxplow/commit?sha=<sha>` | `oxplow:oxplow/commit?sha=abc1234` |
 | metric | `oxplow:oxplow/metric?metric=<key>[#view]` (`metricRef(key, view?)`) | `oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct` |
-| route | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<extension>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a route; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
+| route | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<namespace>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a route; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
 | web page | the URL itself, `https://example.com/docs` (`externalUrlRef(url)` is `{ id: url }`) — rendered by foundation's `external-url` page (a `viz: embed` over the URL), `for: [https, http]`, its tab labelled `{{param.uri|url}}`; see [external-url-tabs.md](./external-url-tabs.md) | `https://example.com/docs` |
 | symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
 | agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
@@ -356,7 +356,7 @@ defines what the person sees:
   YAML file: `for: oxplow/file`, `accepts: { path: '^[\w./-]+\.yaml$',
   content: definition }` (offered only when `oxplow.page.describe` finds a
   page in the file), `content: { text: true }`. The view is
-  `#oxplow.renderer=oxplow-foundation/definition&params=<the run's params
+  `#oxplow.renderer=oxplow/definition&params=<the run's params
   as JSON>` (`viewActions.ts::definitionUri`); the tab reads
   `Definition: <slug>.yaml`. View as on any page file lists it beside the
   Text view, which stays the default and shows the raw YAML (Definition
@@ -470,7 +470,7 @@ child in view (the param's value, else the first) and an embed to its
 page's run, its params by name: the embed's `params`, else the host's
 param of that name, else that column of the host loaders' first rows in
 order. A `slot` node shows the parts enabled extensions mount there
-(`ui.mounts: [{ page: <slug>, at: <ext>/<page>.<name>, position?, title?,
+(`ui.mounts: [{ page: <slug>, at: <namespace>/<page>.<name>, position?, title?,
 size? }]`, loaded as `ExtensionUi.page_slots`): each runs as an embed, its
 params by name from the host, its node id the mounted page's id with `.`
 for `/` (`beta.extra`); by extension name; `position: start` puts it first
@@ -579,7 +579,7 @@ acting for the presser (`Actor::Page`). An agent presses with
 holds a run of its own for the press. Forms: `page_form { runId, node }` is a
 form node's start (its defaults with params bound, its loader's first
 row, its `choices` and object fields' `from` read from the pages they
-name: `<ext>/<page>` takes its first loader, `<ext>/<page>#<loader>`
+name: `<namespace>/<page>` takes its first loader, `<namespace>/<page>#<loader>`
 that one), `submit_page_form` submits it as the page for the person, and
 `page_action_form { runId, node?, action, row? }` is a form action's
 start. A whole-page action may read `{{row.x}}` / `when:`: the first
@@ -611,15 +611,15 @@ With.
 draws a tab from its page file first (`pages/pageFiles.ts`):
 `chooseRoute` finds a route's page by id (`pageFileOf`: oxplow's — the
 `oxplow` namespace, `CORE_NAMESPACE` — by its slug, any other's by
-`<extension>/<slug>`), `chooseRenderer` a resource URI's: the page file
+`<namespace>/<slug>`), `chooseRenderer` a resource URI's: the page file
 named by `pickRenderer` over the daemon's `renderers_for` list
 ("Renderers"; `pages/useRenderers.ts`). Nothing else
-draws a tab (a page's slot shows only the pages mounted there). oxplow-foundation and
-oxplow-bundled both have `namespace: oxplow` and share the core page
-names, so a slug one of them declares the other may not
-(`pages::schema::refuse_shared_core_pages`: the later in load order loses
-that page with a load error; bundled's panel bodies are
-`comments-panel` and `go-to-panel` for that reason). View as lists the same daemon list. The tab body is `PageFileView`: its run's
+draws a tab (a page's slot shows only the pages mounted there). Everything oxplow
+ships has `namespace: oxplow`, so its pages share the core page names
+(`oxplow/<slug>`, `page=<slug>` in a URI; `page=oxplow/<slug>` names the
+same page): an id one of them declares the others may not (the
+descriptor registry's id check, `descriptor.collision`: the later in load
+order loses it with a load error). View as lists the same daemon list. The tab body is `PageFileView`: its run's
 params are the entry's URI (`pageRunParams`: the `?` params — a
 renderer's `uri` and its resource's own — and the `#` params the page
 declares as a filter, a selection or a view param; a param with no role is a
@@ -723,7 +723,7 @@ action's `ActionForm` with no node. A form's draft is keyed by its node's
 id, so a re-read of the run keeps it. What a viz reads of *other*
 pages comes from `VizPagesContext` (`viz/vizPages.ts`, set per viz node
 by `PageTree`): an `expand` column's row opens the page it names
-(`<ext>/<page>`, its first loader, or `<ext>/<page>#<loader>`) as a run of
+(`<namespace>/<page>`, its first loader, or `<namespace>/<page>#<loader>`) as a run of
 its own — the row's values it declares (`get_page`; the server refuses an
 undeclared param), the named loader's viz node drawn compact — and a lazy
 tree's open branch is a run of the node's own page with the lazy param
@@ -744,7 +744,7 @@ over the window's runs) and reads that node's rows (`liveOriginNodeRun`). Other 
 Every page the desktop draws, lists or names is a page file
 (`Extension.pageFiles`). A page file with no `for`
 is a **route** (`oxplow:oxplow/page?page=<slug>` for oxplow's,
-`page=<extension>/<slug>` for any other's); one with `for` is a
+`page=<namespace>/<slug>` for any other's); one with `for` is a
 **renderer** of a resource ("Renderers"). Its `label` is what its tab says
 (`{{param.<name>}}` over what it shows, `{{row.<column>}}` over its first
 loader's first row once it has run, filters `|short` and `|basename`;
@@ -856,7 +856,7 @@ margin; an embed or a slot takes its title from the page it shows):
   ranges marked.
 - **Lists and boards.** oxplow-bundled's `tasks` (params `show`, `priority`, `thread_id`,
   `stream_id`): `list` (the `work_item.list` replaceable), `summary`,
-  `backlog`, then a `sections` slot (`oxplow-bundled-todo/tasks.sections`) where bundled mounts the thread's
+  `backlog`, then a `sections` slot (`oxplow/tasks.sections`) where bundled mounts the thread's
   tokens, plan, shared work and the handoff pages. `backlog` (badge
   `backlog-count`; params `q`, `thread_id`): a quick-add `form` over
   `oxplow.work_item.create` and a state-grouped `list` of the items on no
@@ -912,7 +912,7 @@ The rail's sections are **panels** (`components/Panels/panelLayout.ts`):
 every enabled extension's `panels:` — core has none of its own since Go
 To moved into `oxplow-bundled`; with it disabled the rail is
 the search box and + Add Panel
-(`ext:<extension>/<id>`, rendered by `ExtensionPanelSection`). Every
+(`ext:<namespace>/<id>`, rendered by `ExtensionPanelSection`). Every
 panel's parts (`body`, `collapsed`, `badge`, `count`) are pages:
 `useExtensionPanelRuns` holds one open page run per part (params its
 scope's, the body's with the viewer's picks), the body and collapsed
@@ -1028,7 +1028,7 @@ Lengths come from the spacing and radius tokens (theming.md).
 
 **Extensions add to a page through its `slot` nodes** (a `slot` node named
 `sections` in the foundation's `changes` page is
-`oxplow-foundation/changes.sections`; the id is `<extension>/<page>.<name>`).
+`oxplow/changes.sections`; the id is `<namespace>/<page>.<name>`).
 An extension lists `ui.mounts: [{ page, at, position }]` in its manifest. It
 mounts one of its own pages there, placed (`position`) at the start, the end, or beside
 a node by its stable id. A mount whose host slot is missing is a load
@@ -1188,7 +1188,7 @@ zone grouping); each appears only when it has content:
    body part `comments-panel` over `v_comment` shows two open-comment count rows split
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each
    row and the header (`open` is the `comments` page) opening the Comments inbox.
-5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow-bundled-todo/go-to`):
+5. **Go To** — an `oxplow-bundled` panel (`ext:oxplow/go-to`):
    the thread-scoped body page `go-to-panel` lists the bookmarks the thread sees
    (`v_bookmark`), then its History — or, through the header's
    Recent / Most visited toggle (the page's `mode` choice param), its most
@@ -1630,7 +1630,7 @@ in the `#` like a filter but never drawn in the rail — or a column's
 `select`) says where its value rides (docs/guide/pages.md "Where a param lives in the address").
 Page memory is scoped by `keyIdentityOf` (the
 identity without its `?` params: `oxplow:oxplow/page?page=tasks`) for
-a page, or `resource:<ext>/<name>` for a resource page.
+a page, or `resource:<namespace>/<name>` for a resource page.
 
 ## Page state: four homes, one name each
 
@@ -1642,7 +1642,7 @@ the docs and the skill:
 |---|---|---|---|
 | **view params** | this tab's view: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the `#` of the entry's ref | `nav.viewParams`, `nav.setViewParams(view, { push })`, `nav.patchViewParams(patch, { push })` |
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
-| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=x/y`) or `resource:<ext>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
+| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
 | **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
 | (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |
@@ -1778,7 +1778,7 @@ page file, with no desktop code:
 1. Declare the resource in the extension (`resources:`,
    [resources.md](./resources.md)), so its URI has a type, params and a
    label.
-2. Add a page file with `for: <extension>/<name>`, optional
+2. Add a page file with `for: <namespace>/<name>`, optional
    `accepts`, `default: true` (the extension's own resource; one page
    per resource, or several that each decide by `accepts.content`) and
    `pinned`. Such a page declares a `uri` param

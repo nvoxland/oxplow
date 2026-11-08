@@ -1,6 +1,6 @@
 # What a backfill would do for one of bundled's effects, enabled: nothing
 # to catch up on in a fresh project.
-when: { part: oxplow-foundation/data-effect-backfill, params: { effect: oxplow-bundled-todo/store-reasoning } }
+when: { part: oxplow/data-effect-backfill, params: { effect: oxplow/store-reasoning } }
 expect:
   loaders:
-    data_effect_backfill: { rows: [{ effect: oxplow-bundled-todo/store-reasoning, what: Nothing to catch up on. }] }
+    data_effect_backfill: { rows: [{ effect: oxplow/store-reasoning, what: Nothing to catch up on. }] }

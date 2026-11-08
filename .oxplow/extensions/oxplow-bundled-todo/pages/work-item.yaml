@@ -102,7 +102,7 @@ view:
       fields:
       - to
       choices:
-        to: oxplow-bundled-todo/work-item#work_item_states
+        to: oxplow/work-item#work_item_states
   - id: fields
     title: Details
     from: fields
@@ -113,7 +113,7 @@ view:
       fields:
       - title
       - name: native
-        from: oxplow-bundled-todo/work-item-fields
+        from: oxplow/work-item-fields
   - id: body
     replaceable: work_item.detail
     title: Description

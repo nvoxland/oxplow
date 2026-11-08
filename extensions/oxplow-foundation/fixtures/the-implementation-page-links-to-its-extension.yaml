@@ -1,8 +1,8 @@
 # "See also": the page links to the extension that declares it.
 when:
-  page: oxplow-foundation/implementation
+  page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"
 expect:
   see_also:
     contains:

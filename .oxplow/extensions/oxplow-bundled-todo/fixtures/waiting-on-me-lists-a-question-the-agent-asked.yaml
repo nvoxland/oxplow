@@ -3,7 +3,7 @@
 given:
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude } }
   - observe: { turn: { prompt: go, answer: "Pick A or B?" } }
-when: { page: oxplow-bundled-todo/waiting-on-me }
+when: { page: oxplow/waiting-on-me }
 expect:
   loaders:
     waiting_on_me:

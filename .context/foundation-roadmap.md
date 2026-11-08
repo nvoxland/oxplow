@@ -638,7 +638,7 @@ Prerequisites: Provide durable cancellable extension jobs outside database trans
 #### Extract work-item repair response from core contribution health
 
 Status: done. Core keeps detection and the health report; the bundled
-effect `oxplow-bundled-todo/repair-disabled` files (or comments on) the repair
+effect `oxplow/repair-disabled` files (or comments on) the repair
 item through `oxplow.work_item.create` / `comment` on the active work list,
 deduplicating by the open item's `Repair <extension> <contribution>:` title
 prefix (no stable work-item key exists yet). An

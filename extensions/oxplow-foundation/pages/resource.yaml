@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Resource
 answers:
-- {"question":"What does this resource kind name, and which pages draw it?","about":"oxplow/resource","params":{"uri":"oxplow:oxplow/resource?resource=oxplow-foundation/commit"},"skill":"oxplow-extension"}
+- {"question":"What does this resource kind name, and which pages draw it?","about":"oxplow/resource","params":{"uri":"oxplow:oxplow/resource?resource=oxplow/commit"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |
@@ -22,7 +22,7 @@ loaders:
              CASE WHEN f.rel IS NOT NULL THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
                     || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
-                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+                    || 'oxplow.renderer=oxplow/file-viewer' END AS declared_target
       FROM f JOIN v_resource r ON r.resource = f.global_name
   facts:
     sql: |
@@ -40,7 +40,7 @@ loaders:
   pages:
     sql: |
       SELECT p.title, p.description,
-             p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' AS definition
+             p.running_uri || '#oxplow.renderer=oxplow/definition' AS definition
       FROM v_contribution c JOIN v_resource r ON r.resource = c.global_name,
            v_page p, json_each(p.renders) j
       WHERE c.kind = 'resource' AND c.uri = :uri AND j.value = r.resource AND p.running_uri IS NOT NULL

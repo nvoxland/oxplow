@@ -22,7 +22,7 @@ loaders:
              CASE WHEN f.rel IS NOT NULL THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
                     || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
-                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+                    || 'oxplow.renderer=oxplow/file-viewer' END AS declared_target
       FROM f JOIN v_dimension d ON d.key = f.local
   facts:
     sql: |

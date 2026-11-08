@@ -10,7 +10,7 @@ It reads effort-review's exported `reviews` dataset and writes nothing.
 
 ```yaml
 imports:
-  - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
+  - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort_review/reviews, version: 2, optional: true }
 ```
 
 The page reads `import_ref('reviews')`, which is how an extension reads
@@ -19,7 +19,7 @@ version it declared.
 
 ## It needs effort-review
 
-Install both: copy `effort-review/` and `review-badges/` into
+Install both: copy `effort_review/` and `review_badges/` into
 `.oxplow/extensions/`, then follow effort-review's README (a dataset on the
 **Summarize** role, deployed). Reviews appear as efforts finish.
 review-badges itself runs no program and declares no permissions.
@@ -36,7 +36,7 @@ When effort-review is missing, disabled, or exports another version:
 - everything else, including review-badges itself, loads as usual.
 
 `oxplow extension check review-badges` prints how the import resolved:
-``import `reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available`` or
+``import `reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available`` or
 `unavailable (effort-review is disabled)`, `(effort-review exports v2)`,
 `(effort-review or its contribution isn't here)`. `oxplow extension test`
 prints the same, and skips the fixtures for the two pages with a warning

@@ -7,7 +7,7 @@ given:
         tools:
           - { name: Edit, kind: edit, paths: [b.rs], ok: true }
           - { name: Edit, kind: edit, paths: [a.rs], ok: true }
-when: { page: oxplow-foundation/effort-files, params: { effort: eff1 } }
+when: { page: oxplow/effort-files, params: { effort: eff1 } }
 expect:
   loaders:
     effort_files:

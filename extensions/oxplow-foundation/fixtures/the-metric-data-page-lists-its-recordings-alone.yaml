@@ -5,7 +5,7 @@
 given:
   - observe: { facts: { measure: oxplow.tokens, items: [{ value: 1, path: a.rs }] } }
 when:
-  page: oxplow-foundation/metric-data
+  page: oxplow/metric-data
   params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total }
 expect:
   label: Total tokens data

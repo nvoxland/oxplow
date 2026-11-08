@@ -6,5 +6,5 @@ when:
     type: effort.finished
     payload: { effort: "eff1" }
 expect:
-  effects: { contains: [{ id: effort-review/review-on-finish, state: skipped }] }
+  effects: { contains: [{ id: effort_review/review-on-finish, state: skipped }] }
   commands: []

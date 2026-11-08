@@ -85,7 +85,7 @@ pub struct EntityDecl {
     pub key: String,
     pub columns: Vec<EntityColumn>,
     pub relations: Vec<EntityRelation>,
-    /// SQL name pages and agents query: `v_<owner>_<entity>`.
+    /// SQL name pages and agents query: `v_<namespace>_<entity>`.
     pub view: String,
 }
 
@@ -465,13 +465,12 @@ pub fn valid_host_pattern(p: &str) -> bool {
         })
 }
 
-/// SQL name of an entity's view: `v_<owner>_<entity>` (dashes in the
-/// owner become underscores; extension names have none, so the mapping
-/// is unambiguous).
-pub fn entity_view_name(owner: &str, entity: &str) -> String {
+/// SQL name of an entity's view: `v_<namespace>_<entity>`, named by its
+/// extension's namespace (not its name), dashes as underscores.
+pub fn entity_view_name(namespace: &str, entity: &str) -> String {
     format!(
         "v_{}_{}",
-        oxplow_domain::contribution::extension_namespace(owner),
+        oxplow_domain::contribution::extension_namespace(namespace),
         entity
     )
 }
@@ -1037,7 +1036,6 @@ fn validate(
     mut raw: RawCollector,
     knows_event: &dyn Fn(&str) -> bool,
 ) -> Result<CollectorSpec, String> {
-    let owner = declarer.extension.as_str();
     let id = std::mem::take(&mut raw.id);
     if !is_collector_id(&id) {
         return Err(format!(
@@ -1308,7 +1306,7 @@ fn validate(
             )));
         }
         entities.push(EntityDecl {
-            view: entity_view_name(owner, &name),
+            view: entity_view_name(&declarer.namespace, &name),
             name,
             doc: e.doc,
             key: e.key,

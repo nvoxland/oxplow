@@ -196,6 +196,7 @@ mod tests {
         events
             .register_declared(
                 "acme",
+                "acme",
                 DeclaredEventType {
                     event_type: "acme.thing".into(),
                     v: 1,
@@ -207,6 +208,7 @@ mod tests {
             .unwrap();
         events
             .register_declared(
+                "acme",
                 "acme",
                 DeclaredEventType {
                     event_type: "acme.thing".into(),

@@ -7,7 +7,7 @@ Slots, replacements, commands in core menus and decorators: how an extension ext
 - **Slots (see "Slots" below).**
   - `extension.yaml` declares `ui: { slots: [{slot, page, at?, title?}] }`
     (v1: top-level `slots`). A slot is a `slot` node in a page, named
-    `<extension>/<page>.<name>` (`oxplow-foundation/diff-view.sections`).
+    `<namespace>/<page>.<name>` (`oxplow/diff-view.sections`).
     A mount whose page is not in `pages/`, or whose name is not that shape,
     is a load error. A mount whose host page is not loaded, or has no slot
     of that name, is a warning ("`x` shows nowhere"). Loaded as
@@ -27,13 +27,13 @@ Slots, replacements, commands in core menus and decorators: how an extension ext
 
 A **slot** is the only way an extension reaches another extension's page.
 A `slot` node in a page's `stack` or `grid` (`- { slot: sections }`) is a
-slot named `<extension>/<page>.<name>`; with nothing mounted it draws
+slot named `<namespace>/<page>.<name>`; with nothing mounted it draws
 nothing. A mount is an entry in the mounting extension's manifest:
 
 ```yaml
 ui:
   mounts:
-    - { page: item-tokens, at: oxplow-bundled-todo/work-item.sections, position: { before: links }, title: Tokens }
+    - { page: item-tokens, at: oxplow/work-item.sections, position: { before: links }, title: Tokens }
 ```
 
 `slot` is the host's slot name; `page` is a slug of the mounting
@@ -52,7 +52,7 @@ extension mounts nothing.
   not hold shows nowhere: the runner drops that mount. `size` (`small`, `wide`, `tall`, `full`) is for a
   grid host.
 - Load errors at the mount's line (`extensions.rs`, `slot_files`): the
-  page is not in `pages/`; the slot is not `<extension>/<page>.<slot>`.
+  page is not in `pages/`; the slot is not `<namespace>/<page>.<slot>`.
   Load warnings: the host page is not loaded, or has no slot by that name
   (the mount "shows nowhere").
 - A mount's contribution id is `<host>.<slot>-<n>` with the host's `/`
@@ -65,13 +65,13 @@ loaders' first rows and params are what a mount can take):
 
 | Slot | Host page | Params a mount may take |
 |---|---|---|
-| `oxplow-foundation/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
-| `oxplow-bundled-todo/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
-| `oxplow-bundled-todo/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
-| `oxplow-foundation/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
-| `oxplow-foundation/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
-| `oxplow-foundation/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
-| `oxplow-foundation/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
+| `oxplow/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
+| `oxplow/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
+| `oxplow/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
+| `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
+| `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
+| `oxplow/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
+| `oxplow/diff.file-header` | the Diff page (one file between two revisions; the slot sits above the diff). oxplow-bundled mounts its `file-co-change` page here | `path`, `left`, `right`, `label`, `base`, `lines` |
 
 `change_id` points at the page's change in `v_change`, with its analysis
 in `v_change_file`, `v_change_function`, `v_change_import`,
@@ -86,7 +86,7 @@ The launcher is not a slot: a page lists itself with `category`.
 A `ui.mounts` entry whose `at` names a core component (no `/`; one of
 `v_replaceable`) puts a **page in place of that named core
 sub-component** — never a whole page. The same list mounts a page at
-another page's slot (`at: <extension>/<page>.<slot>`, with `position`,
+another page's slot (`at: <namespace>/<page>.<slot>`, with `position`,
 `title`, `size`); `version` goes only with a core component, the slot
 keys only with a slot. The old `ui.slots` / `ui.replacements` keys are
 refused, the refusal naming the `ui.mounts` spelling. Panels stay their
@@ -172,7 +172,7 @@ contract's; for a bound target, the extension brings a provider of the
 target's capability (`providers:`); a target is replaced once per
 extension. The viewer's stream is not a prop: a page that declares
 `stream_id` gets it, as everywhere. Valid ones are
-`ExtensionUi.replacements` (`UiReplacement { id: <ext>/<target>,
+`ExtensionUi.replacements` (`UiReplacement { id: <namespace>/<target>,
 extension, target, capability, bound_to_provider, page, version, view,
 label }`).
 
@@ -204,7 +204,7 @@ board couldn't load: …. Showing oxplow's.", `replacement-fallback`),
 outside the replacement's frame: no badge. Nothing is decided in the
 desktop, so the wrong component never flashes.
 
-Showing one records `usage { kind: "replacement", key: <ext>/<target> }`
+Showing one records `usage { kind: "replacement", key: <namespace>/<target> }`
 (the evidence a kind needs to be promoted), once per replacement drawn
 without an error. Agents read work items from `v_work_item` either way.
 The rules are tested in Rust (`replacements::chosen`'s tests, the runner's
@@ -307,7 +307,7 @@ ui:
     - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
 ```
 
-The dataset (`v_<extension>_<dataset>`) must declare a `uri` column and the
+The dataset (`v_<namespace>_<dataset>`) must declare a `uri` column and the
 `label` (and optional `color`) columns named. This is checked at load
 against the dataset's declared columns, which are its contract. Column
 names must be plain identifiers, since the desktop names them in its
@@ -334,7 +334,7 @@ effort's latest verdict on the effort — a `ref-chip` on its page and a
 incremental: seq }`, appended as each lands; a rewrite of the log —
 retention's payload expiry, a restart's refill — refills it whole). It
 reads only the events' **envelopes**: the type says the verdict
-(`oxplow_bundled.accepted` / `.changes_requested`) and the subject what
+(`oxplow.review.accepted` / `.changes_requested`) and the subject what
 it was about — the effort first, then its work item, then each claim and
 decision an acceptance took unchecked (any makes it forced). Retention
 keeps envelopes and an extension's payloads go after 30 days at most, so

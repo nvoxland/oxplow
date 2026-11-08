@@ -40,7 +40,8 @@ impl ConfigurationFile {
         personal: Option<&Value>,
     ) -> Result<super::config::ResolvedConfig, Vec<super::config::ConfigIssue>> {
         use super::config::{ConfigIssue, ConfigLayer, ConfigViolation};
-        if !oxplow_domain::contribution::valid_extension_name(extension) {
+        // Settings are stored under the namespace, which is what names them.
+        if !oxplow_domain::contribution::valid_namespace(extension) {
             return Err(vec![ConfigIssue {
                 extension: String::new(),
                 layer: ConfigLayer::Defaults,
@@ -208,6 +209,146 @@ fn violation(code: &str) -> SchemaViolation {
 
 fn bounded_json(value: &Value) -> Result<(), SchemaViolation> {
     super::config::check_json_limits(value).map_err(violation)
+}
+
+/// A namespace's settings: its extensions' declarations as one, and what
+/// was refused, by the index of the declaration it refused.
+#[derive(Debug, Default)]
+pub struct Merged {
+    pub declaration: Option<ConfigurationFile>,
+    pub problems: Vec<(usize, String)>,
+}
+
+/// The declarations of one namespace's extensions, in load order, as the
+/// one document they share: the first's version, every top-level property
+/// and default, `required` joined. One at another version, or declaring a
+/// key an earlier one does, is refused whole.
+pub fn merge(declarations: &[(&str, &ConfigurationFile)]) -> Merged {
+    let mut out = Merged::default();
+    let mut owners: Vec<(String, String)> = Vec::new();
+    for (i, (extension, decl)) in declarations.iter().enumerate() {
+        let properties = decl
+            .schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let Some(merged) = out.declaration.as_mut() else {
+            owners.extend(
+                properties
+                    .keys()
+                    .map(|k| (k.clone(), extension.to_string())),
+            );
+            out.declaration = Some((*decl).clone());
+            continue;
+        };
+        if decl.version != merged.version {
+            let first = &declarations[0].0;
+            out.problems.push((
+                i,
+                format!(
+                    "`configuration` is `version: {}`, and `{first}` in its namespace declares \
+                     `version: {}`: extensions in one namespace share their settings, at one \
+                     version",
+                    decl.version, merged.version
+                ),
+            ));
+            continue;
+        }
+        if let Some((key, owner)) = owners.iter().find(|(k, _)| properties.contains_key(k)) {
+            out.problems.push((
+                i,
+                format!(
+                    "`configuration` key `{key}` is also `{owner}`'s, and extensions in one \
+                     namespace share their settings"
+                ),
+            ));
+            continue;
+        }
+        owners.extend(
+            properties
+                .keys()
+                .map(|k| (k.clone(), extension.to_string())),
+        );
+        let schema = merged.schema.as_object_mut();
+        if let Some(schema) = schema {
+            let into = schema
+                .entry("properties")
+                .or_insert_with(|| Value::Object(Default::default()));
+            if let Some(into) = into.as_object_mut() {
+                into.extend(properties);
+            }
+            if let Some(required) = decl.schema.get("required").and_then(Value::as_array) {
+                let into = schema
+                    .entry("required")
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                if let Some(into) = into.as_array_mut() {
+                    into.extend(required.iter().cloned());
+                }
+            }
+        }
+        if let (Some(into), Some(from)) =
+            (merged.defaults.as_object_mut(), decl.defaults.as_object())
+        {
+            into.extend(from.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod namespace_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn decl(version: u32, key: &str, default: i64) -> ConfigurationFile {
+        ConfigurationFile {
+            version,
+            schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { key: { "type": "integer" } },
+            }),
+            defaults: json!({ key: default }),
+        }
+    }
+
+    /// Settings are the namespace's: one document, whichever of its
+    /// extensions declares a key. Their declarations merge into one schema
+    /// at one version; a second version, or a key two declare, is refused
+    /// on the later one, which then has none.
+    #[test]
+    fn a_namespaces_declarations_merge_into_one() {
+        let merged = merge(&[("first", &decl(1, "a", 1)), ("second", &decl(1, "b", 2))]);
+        assert_eq!(merged.problems, Vec::<(usize, String)>::new());
+        let one = merged.declaration.unwrap();
+        assert_eq!(one.version, 1);
+        assert_eq!(one.defaults, json!({ "a": 1, "b": 2 }));
+        assert_eq!(
+            one.schema["properties"],
+            json!({ "a": { "type": "integer" }, "b": { "type": "integer" } })
+        );
+        assert_eq!(one.schema["additionalProperties"], json!(false));
+
+        let clash = merge(&[
+            ("first", &decl(1, "a", 1)),
+            ("second", &decl(1, "a", 2)),
+            ("third", &decl(2, "c", 3)),
+        ]);
+        assert_eq!(clash.declaration.unwrap().defaults, json!({ "a": 1 }));
+        let said: Vec<(usize, &str)> = clash
+            .problems
+            .iter()
+            .map(|(i, m)| (*i, m.as_str()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                (1, "`configuration` key `a` is also `first`'s, and extensions in one namespace share their settings"),
+                (2, "`configuration` is `version: 2`, and `first` in its namespace declares `version: 1`: extensions in one namespace share their settings, at one version"),
+            ]
+        );
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 # "See also": the Editor links to the file's history and to its folder
 # (none for a file at the project root).
 when:
-  page: oxplow-foundation/editor
+  page: oxplow/editor
   params: { path: "src/sub/c.rs" }
 expect:
   see_also:

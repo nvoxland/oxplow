@@ -887,7 +887,7 @@ mod tests {
         };
         w(
             ".oxplow/extensions/demo/extension.yaml",
-            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: review, at: oxplow-foundation/diff.file-header }\n",
+            "manifest: 2\nname: demo\nintent:\n  purpose: test\nui:\n  mounts:\n    - { page: review, at: oxplow/diff.file-header }\n",
         );
         w(
             ".oxplow/extensions/demo/pages/review.yaml",

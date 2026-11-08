@@ -1,4 +1,4 @@
-SELECT CAST(h.uri AS TEXT) AS uri, h.extension, h.contribution, h.kind, h.state, h.reason, h.consecutive_failures,
+SELECT CAST(h.uri AS TEXT) AS uri, h.namespace, h.contribution, h.kind, h.state, h.reason, h.consecutive_failures,
        h.last_ok_at, h.last_error, h.mean_ms, h.next_due_at, h.updated_at,
        (SELECT count(*) FROM source('event_dead_letter') d
           JOIN source('event_log') e ON e.seq = d.event_seq
@@ -11,5 +11,5 @@ SELECT CAST(h.uri AS TEXT) AS uri, h.extension, h.contribution, h.kind, h.state,
          WHERE l.to_uri = h.uri AND l.link_type = 'about'
            AND w.state NOT IN ('done', 'canceled')
          ORDER BY w.uri DESC LIMIT 1) AS repair_item
-FROM (SELECT *, CAST(uri('oxplow/' || kind, kind, extension || '/' || contribution) AS TEXT) AS uri
+FROM (SELECT *, CAST(uri('oxplow/' || kind, kind, namespace || '/' || contribution) AS TEXT) AS uri
         FROM source('contribution_health')) h

@@ -35,6 +35,16 @@ pub fn valid_extension_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// A namespace: a lowercase letter, then lowercase letters, digits and
+/// `_` — what [`extension_namespace`] makes of a valid name, and what a
+/// manifest's `namespace:` must be.
+pub fn valid_namespace(namespace: &str) -> bool {
+    namespace.starts_with(|c: char| c.is_ascii_lowercase())
+        && namespace
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 /// Names only oxplow uses: its own namespace, `none`, and core's event
 /// namespaces.
 pub fn reserved_name(name: &str) -> bool {
@@ -139,7 +149,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Dataset,
         "datasets",
         "Dataset",
-        "SQL views over oxplow's datasets, published as `v_<ext>_<name>`",
+        "SQL views over oxplow's datasets, published as `v_<namespace>_<name>`",
         false,
         false,
     ),
@@ -275,7 +285,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Slot,
         "ui.mounts",
         "Slot mount",
-        "a page placed at another page's slot (`at: <extension>/<page>.<slot>`)",
+        "a page placed at another page's slot (`at: <namespace>/<page>.<slot>`)",
         true,
         true,
     ),
@@ -368,14 +378,17 @@ impl ContributionKind {
 /// kind it is, and its id there (for a [`ContributionKind::global_name`]
 /// kind, its global name). Its only public name is its ref
 /// ([`ContributionId::reference`], also its `Display`):
-/// `oxplow:oxplow/job?job=effort-review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
+/// `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
 /// events, manifests and the desktop all carry that ref
 /// (`.context/resources.md` "Using refs").
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
 )]
 pub struct ContributionId {
-    pub extension: String,
+    /// The namespace it is named in (its extension's `namespace:`), not
+    /// the extension that declares it ([`Descriptor::owner`] says that):
+    /// moving it to a sibling in the namespace keeps its id.
+    pub namespace: String,
     pub kind: ContributionKind,
     pub local: String,
 }
@@ -398,7 +411,7 @@ pub struct ContributionRef(#[specta(type = String)] RefParts);
 struct RefParts {
     kind: ContributionKind,
     /// `None` for a global name.
-    extension: Option<String>,
+    namespace: Option<String>,
     name: String,
 }
 
@@ -407,29 +420,29 @@ impl ContributionRef {
         self.0.kind
     }
 
-    /// The owning extension, when the ref says it (a local kind's).
-    pub fn extension(&self) -> Option<&str> {
-        self.0.extension.as_deref()
+    /// The namespace it is named in, when the ref says it (a local kind's).
+    pub fn namespace(&self) -> Option<&str> {
+        self.0.namespace.as_deref()
     }
 
-    /// The id within its extension, or the global name.
+    /// The id within its namespace, or the global name.
     pub fn name(&self) -> &str {
         &self.0.name
     }
 
-    /// The contribution it names, when the ref says its owner.
+    /// The contribution it names, when the ref says its namespace.
     pub fn id(&self) -> Option<ContributionId> {
         self.0
-            .extension
+            .namespace
             .as_ref()
-            .map(|ext| ContributionId::new(ext, self.0.kind, &self.0.name))
+            .map(|ns| ContributionId::new(ns, self.0.kind, &self.0.name))
     }
 }
 
 impl std::fmt::Display for ContributionRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let id = match &self.0.extension {
-            Some(ext) => format!("{ext}/{}", self.0.name),
+        let id = match &self.0.namespace {
+            Some(ns) => format!("{ns}/{}", self.0.name),
             None => self.0.name.clone(),
         };
         let segment = self.0.kind.segment();
@@ -450,7 +463,7 @@ impl std::str::FromStr for ContributionRef {
         let kind = KINDS
             .iter()
             .map(|k| k.kind)
-            .find(|k| resource.extension() == "oxplow" && k.segment() == resource.name())
+            .find(|k| resource.namespace() == "oxplow" && k.segment() == resource.name())
             .ok_or_else(|| format!("`{resource}` isn't a kind of contribution"))?;
         let segment = kind.segment();
         let id = parsed
@@ -463,24 +476,24 @@ impl std::str::FromStr for ContributionRef {
         let parts = if kind.global_name() {
             RefParts {
                 kind,
-                extension: None,
+                namespace: None,
                 name: id,
             }
         } else {
-            let (ext, name) = id
+            let (ns, name) = id
                 .split_once('/')
-                .ok_or_else(|| format!("`{s}`'s `{segment}` isn't `<extension>/<id>`"))?;
-            let id = ContributionId::new(ext, kind, name);
+                .ok_or_else(|| format!("`{s}`'s `{segment}` isn't `<namespace>/<id>`"))?;
+            let id = ContributionId::new(ns, kind, name);
             if let Some(problem) = id.problem() {
                 return Err(problem);
             }
             RefParts {
                 kind,
-                extension: Some(ext.to_string()),
+                namespace: Some(ns.to_string()),
                 name: name.to_string(),
             }
         };
-        if parts.extension.is_none() && !valid_local(kind, &parts.name) {
+        if parts.namespace.is_none() && !valid_local(kind, &parts.name) {
             return Err(format!(
                 "`{}` isn't a {} name",
                 parts.name,
@@ -505,43 +518,49 @@ impl<'de> Deserialize<'de> for ContributionRef {
 }
 
 impl ContributionId {
-    /// Its ref: `<kind>:<extension>/<id>`, or `<kind>:<name>` for a kind
+    /// Its ref: `<kind>:<namespace>/<id>`, or `<kind>:<name>` for a kind
     /// whose names are global.
     pub fn reference(&self) -> ContributionRef {
         ContributionRef(RefParts {
             kind: self.kind,
-            extension: (!self.kind.global_name()).then(|| self.extension.clone()),
+            namespace: (!self.kind.global_name()).then(|| self.namespace.clone()),
             name: self.local.clone(),
         })
     }
 
-    pub fn new(extension: &str, kind: ContributionKind, local: &str) -> Self {
+    pub fn new(namespace: &str, kind: ContributionKind, local: &str) -> Self {
         ContributionId {
-            extension: extension.into(),
+            namespace: namespace.into(),
             kind,
             local: local.into(),
         }
     }
 
-    /// Who a report names as its producer: the extension, or for an
+    /// `<namespace>/<local>`, the form a local kind's id takes in storage
+    /// and in the `?` of its ref.
+    pub fn qualified(&self) -> String {
+        format!("{}/{}", self.namespace, self.local)
+    }
+
+    /// Who a report names as its producer: the namespace, or for an
     /// import of a global name nothing declares, the name itself.
     pub fn producer_label(&self) -> &str {
-        if self.extension.is_empty() {
+        if self.namespace.is_empty() {
             &self.local
         } else {
-            &self.extension
+            &self.namespace
         }
     }
 
     /// What's wrong with it, if anything.
     pub fn problem(&self) -> Option<String> {
         // An import of a global name nothing declares has no owner to name.
-        let ownerless = self.extension.is_empty() && self.kind.global_name();
-        if !ownerless && !valid_extension_name(&self.extension) {
+        let ownerless = self.namespace.is_empty() && self.kind.global_name();
+        if !ownerless && !valid_namespace(&self.namespace) {
             return Some(format!(
-                "`{}` isn't an extension name (lowercase letters, digits and single dashes, \
-                 starting with a letter)",
-                self.extension
+                "`{}` isn't a namespace (lowercase letters, digits and `_`, starting with a \
+                 letter)",
+                self.namespace
             ));
         }
         if !valid_local(self.kind, &self.local) {
@@ -657,7 +676,11 @@ pub struct Collision {
     pub kind: ContributionKind,
     pub global: String,
     pub kept: ContributionId,
+    /// The extension that declares the one kept.
+    pub kept_by: String,
     pub refused: ContributionId,
+    /// The extension whose declaration is refused.
+    pub refused_by: String,
 }
 
 impl std::fmt::Display for Collision {
@@ -667,8 +690,7 @@ impl std::fmt::Display for Collision {
             "{} `{}` is already declared by extension `{}`; extension `{}`'s is not used (rename one)",
             self.kind.spec().title.to_lowercase(),
             self.global,
-            self.kept.extension,
-            self.refused.extension
+            self.kept_by, self.refused_by
         )
     }
 }
@@ -677,25 +699,51 @@ impl std::fmt::Display for Collision {
 #[derive(Debug, Clone, Default)]
 pub struct Registry {
     descriptors: Vec<Descriptor>,
-    by_global: BTreeMap<(ContributionKind, String), ContributionId>,
+    by_global: BTreeMap<(ContributionKind, String), (ContributionId, String)>,
+    /// Who declares each local id: extensions share a namespace (`oxplow`),
+    /// and with it the ids named in it.
+    by_id: BTreeMap<ContributionId, String>,
 }
 
 impl Registry {
     /// Add `d`; a global name its kind doesn't share that another already
-    /// holds is refused, the holder kept.
+    /// holds is refused, the holder kept — and so is an id another
+    /// extension in its namespace already declares.
     pub fn add(&mut self, d: Descriptor) -> Result<(), Box<Collision>> {
+        let spec = d.id.kind.spec();
+        if !spec.shares_names && !d.id.kind.global_name() {
+            match self.by_id.get(&d.id) {
+                Some(kept_by) if *kept_by != d.owner.extension => {
+                    return Err(Box::new(Collision {
+                        kind: d.id.kind,
+                        global: d.id.qualified(),
+                        kept: d.id.clone(),
+                        kept_by: kept_by.clone(),
+                        refused: d.id,
+                        refused_by: d.owner.extension,
+                    }));
+                }
+                Some(_) => {}
+                None => {
+                    self.by_id.insert(d.id.clone(), d.owner.extension.clone());
+                }
+            }
+        }
         if let Some(global) = &d.global {
             if !d.id.kind.spec().shares_names {
                 let key = (d.id.kind, global.clone());
-                if let Some(kept) = self.by_global.get(&key) {
+                if let Some((kept, kept_by)) = self.by_global.get(&key) {
                     return Err(Box::new(Collision {
                         kind: d.id.kind,
                         global: global.clone(),
                         kept: kept.clone(),
+                        kept_by: kept_by.clone(),
                         refused: d.id,
+                        refused_by: d.owner.extension,
                     }));
                 }
-                self.by_global.insert(key, d.id.clone());
+                self.by_global
+                    .insert(key, (d.id.clone(), d.owner.extension.clone()));
             }
         }
         self.descriptors.push(d);
@@ -720,18 +768,16 @@ impl Registry {
 pub enum RefPart {
     /// `v_<namespace>_<dataset>`: the prefix is `v_<namespace>_`.
     Dataset,
-    /// `<extension>/<id>`: the prefix is `<extension>/`.
+    /// `<namespace>/<id>`, a contribution's id (a page, an effect, a
+    /// resource): the prefix is `<namespace>/`.
     Page,
-    /// `<namespace>.<area>.<verb>`: the prefix is `<namespace>.`.
+    /// `<namespace>.<…>`, a command, an event type or a view node: the
+    /// prefix is `<namespace>.`.
     Command,
-    /// `<extension>.<id>`, a view node an extension adds (only a name that
-    /// differs from its namespace has this form apart from `Command`): the
-    /// prefix is `<extension>.`.
-    Node,
 }
 
 /// One place a text names an extension: `prefix` is the part that holds the
-/// extension's name or namespace (what a rename rewrites), `token` the whole
+/// extension's namespace (what a rename rewrites), `token` the whole
 /// dotted/slashed word it starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnReference {
@@ -740,25 +786,21 @@ pub struct OwnReference {
     pub token: std::ops::Range<usize>,
 }
 
-/// Every place `text` names the extension `name` (namespace `namespace`):
-/// its dataset views, its pages and its commands, by the one rule
+/// Every place `text` names the namespace `namespace`: its dataset views,
+/// its contributions' ids and its commands, by the one rule
 /// (`check_dependencies` and `extension new --from` share it). A token
 /// starts at a word boundary (not after a letter, digit, `_`, `-`, `.` or
 /// `/`: `api.triage.com` and `https://triage.com` name a host) and
 /// something follows the prefix, so prose ending in the name and a slug
 /// such as `triage-summary` are no reference. In order of position.
-pub fn own_references(text: &str, name: &str, namespace: &str) -> Vec<OwnReference> {
+pub fn own_references(text: &str, namespace: &str) -> Vec<OwnReference> {
     let forms = [
         (RefPart::Dataset, format!("v_{namespace}_")),
-        (RefPart::Page, format!("{name}/")),
+        (RefPart::Page, format!("{namespace}/")),
         (RefPart::Command, format!("{namespace}.")),
-        (RefPart::Node, format!("{name}.")),
     ];
     let mut found = Vec::new();
     for (part, prefix) in &forms {
-        if *part == RefPart::Node && name == namespace {
-            continue;
-        }
         for (start, _) in text.match_indices(prefix.as_str()) {
             let before = text[..start].chars().next_back();
             if before.is_some_and(|c| c.is_alphanumeric() || "_-./".contains(c)) {
@@ -809,16 +851,16 @@ mod tests {
         d
     }
 
-    /// A contribution's only name is its ref: `<kind>:<extension>/<id>`,
+    /// A contribution's only name is its ref: `<kind>:<namespace>/<id>`,
     /// or `<kind>:<global name>` for a kind whose names are global (a
     /// command's bus id, a metric key, an event type). Parsing one from
     /// text gives a `ContributionRef`; only a local ref says its owner.
     #[test]
     fn a_contribution_is_named_by_its_ref() {
-        let job = ContributionId::new("effort-review", ContributionKind::Job, "review");
+        let job = ContributionId::new("effort_review", ContributionKind::Job, "review");
         assert_eq!(
             job.to_string(),
-            "oxplow:oxplow/job?job=effort-review/review"
+            "oxplow:oxplow/job?job=effort_review/review"
         );
         let command = ContributionId::new(
             "acme-tools",
@@ -830,13 +872,13 @@ mod tests {
             "oxplow:oxplow/command?command=acme_tools.pr.merge"
         );
 
-        let parsed: ContributionRef = "oxplow:oxplow/job?job=effort-review/review"
+        let parsed: ContributionRef = "oxplow:oxplow/job?job=effort_review/review"
             .parse()
             .unwrap();
         assert_eq!(parsed, job.reference());
         assert_eq!(
             parsed.to_string(),
-            "oxplow:oxplow/job?job=effort-review/review"
+            "oxplow:oxplow/job?job=effort_review/review"
         );
         assert_eq!(parsed.id(), Some(job.clone()));
         let global: ContributionRef = "oxplow:oxplow/command?command=acme_tools.pr.merge"
@@ -845,7 +887,9 @@ mod tests {
         assert_eq!(global, command.reference());
         assert_eq!(global.id(), None, "a global name doesn't say its owner");
         for bad in [
-            "effort-review/job/review",
+            "effort_review/job/review",
+            // An extension's name isn't its namespace.
+            "oxplow:oxplow/job?job=effort-review/review",
             "nope:acme/x",
             "oxplow:oxplow/job?job=review",
             "oxplow:oxplow/job?job=Acme/x",
@@ -890,6 +934,10 @@ mod tests {
         }
         assert!(reserved_name("oxplow") && reserved_name("none"));
         assert!(!reserved_name("acme"));
+        assert!(valid_namespace("acme_pr2") && valid_namespace(&extension_namespace("acme-pr")));
+        for bad in ["acme-pr", "Acme", "2acme", "_acme"] {
+            assert!(!valid_namespace(bad), "{bad}");
+        }
     }
 
     /// Two extensions declaring one metric key: the first keeps it, the
@@ -899,8 +947,8 @@ mod tests {
         let mut r = Registry::default();
         r.add(metric("alpha", "loc", "acme.loc")).unwrap();
         let err = r.add(metric("beta", "loc", "acme.loc")).unwrap_err();
-        assert_eq!(err.kept.extension, "alpha");
-        assert_eq!(err.refused.extension, "beta");
+        assert_eq!(err.kept_by, "alpha");
+        assert_eq!(err.refused_by, "beta");
         let msg = err.to_string();
         assert!(
             msg.contains("`acme.loc`") && msg.contains("`alpha`") && msg.contains("`beta`"),
@@ -914,6 +962,33 @@ mod tests {
         again.id.kind = ContributionKind::Slot;
         r.add(slot).unwrap();
         r.add(again).unwrap();
+    }
+
+    /// Ids are named in a namespace, which extensions may share (`oxplow`):
+    /// two of them declaring one id collide, the first keeping it, as a
+    /// global name does. One extension restating its own id doesn't.
+    #[test]
+    fn an_id_two_extensions_declare_in_one_namespace_is_held_by_the_first() {
+        let effect = |ext: &str| {
+            Descriptor::new(
+                ContributionId::new("oxplow", ContributionKind::Effect, "notify"),
+                owner(ext),
+                RunsOn::Events { types: Vec::new() },
+                DeclaredAt {
+                    file: "extension.yaml".into(),
+                    line: None,
+                },
+            )
+        };
+        let mut r = Registry::default();
+        r.add(effect("oxplow-foundation")).unwrap();
+        r.add(effect("oxplow-foundation")).unwrap();
+        let err = r.add(effect("oxplow-bundled")).unwrap_err();
+        assert_eq!(
+            (err.kept_by.as_str(), err.refused_by.as_str()),
+            ("oxplow-foundation", "oxplow-bundled")
+        );
+        assert!(err.to_string().contains("`oxplow/notify`"), "{err}");
     }
 
     #[test]
@@ -939,7 +1014,7 @@ mod tests {
     #[test]
     fn own_references_find_datasets_pages_and_commands_at_word_boundaries() {
         let text = "FROM v_triage_x t; use triage/summarize and triage.todos.decide, not triage-summary or other-triage/x or v_other_triage_x or api.triage.com or https://triage.com/x. The end of triage.";
-        let found: Vec<(RefPart, &str, &str)> = own_references(text, "triage", "triage")
+        let found: Vec<(RefPart, &str, &str)> = own_references(text, "triage")
             .into_iter()
             .map(|r| (r.part, &text[r.prefix], &text[r.token]))
             .collect();
@@ -954,20 +1029,13 @@ mod tests {
     }
 
     #[test]
-    fn own_references_read_a_dashed_name_and_its_underscored_namespace() {
-        let text = "v_task_views_a task-views/board task_views.x.y task-views.node";
-        let found: Vec<RefPart> = own_references(text, "task-views", "task_views")
+    fn own_references_read_only_the_namespace() {
+        // Ids are the namespace's, so the dashed name names nothing.
+        let text = "v_task_views_a task_views/board task_views.x.y task-views/old task-views.node";
+        let found: Vec<RefPart> = own_references(text, "task_views")
             .into_iter()
             .map(|r| r.part)
             .collect();
-        assert_eq!(
-            found,
-            [
-                RefPart::Dataset,
-                RefPart::Page,
-                RefPart::Command,
-                RefPart::Node
-            ]
-        );
+        assert_eq!(found, [RefPart::Dataset, RefPart::Page, RefPart::Command]);
     }
 }

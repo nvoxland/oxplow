@@ -18,7 +18,7 @@ pub(super) async fn component_example(
     use oxplow_app::viz_actions::{invoke_component_command, load_component, ComponentInvoke};
     let shown = ex.shown;
     // The component itself: it acts as itself, whichever page shows it.
-    let key = format!("{}/{id}", ext.name);
+    let key = format!("{}/{id}", ext.namespace);
     let version = match load_component(&host.svc, &host.root, &key) {
         Ok(v) => v,
         Err(e) => {
@@ -100,12 +100,12 @@ pub(super) async fn component_example(
 }
 
 /// The kind of the page file `page` names (a slug of `ext`, or
-/// `<ext>/<slug>` of any enabled extension), when it is loaded.
+/// `<namespace>/<slug>` of any enabled extension), when it is loaded.
 fn kind_of_page(host: &Host, ext: &Extension, page: &str) -> Option<PageKind> {
     let id = if page.contains('/') {
         page.to_string()
     } else {
-        format!("{}/{page}", ext.name)
+        format!("{}/{page}", ext.namespace)
     };
     ext.page_files
         .iter()
@@ -178,7 +178,7 @@ pub(super) async fn query_example(
     let id = if page.contains('/') {
         page.to_string()
     } else {
-        format!("{}/{page}", ext.name)
+        format!("{}/{page}", ext.namespace)
     };
     let found = ext
         .page_files
@@ -636,7 +636,7 @@ pub(super) async fn page_example(
     let id = if page.contains('/') {
         page.to_string()
     } else {
-        format!("{}/{page}", ext.name)
+        format!("{}/{page}", ext.namespace)
     };
     let params = ex.when.get("params").cloned().unwrap_or(Value::Null);
     let at = PageAt {
@@ -1197,7 +1197,7 @@ pub(super) async fn page_answers(host: &Host, ext: &Extension, report: &mut Test
                         "example.answer_failed",
                         format!("the answer to \"{}\" doesn't run: {e}", answer.question),
                     )
-                    .contribution(format!("{}/{}", ext.name, page.slug))
+                    .contribution(page.id.clone())
                     .fix("the answer's `params`, or the page"),
                 );
             }

@@ -610,7 +610,7 @@ and runs without asking when an agent pressed it.
 (P8.D8). `Actor::may_confirm()` is true for `Human` and a page acting for
 one — never an agent, an effect or `System` (step 4 drops a `confirmed`
 from anyone else). An agent's run asks nothing. An
-`Actor::Effect { effect: "<extension>/<id>", thread_id, stream_id }`'s
+`Actor::Effect { effect: "<namespace>/<id>", thread_id, stream_id }`'s
 run that asks becomes a proposal; `System` is asked (`NeedsConfirmation`).
 An effect is held to an agent's gates, and it carries the
 triggering event's thread and stream (`CommandBus::run_effect` takes the
@@ -624,7 +624,7 @@ the gate doesn't apply to it: `Actor::is_anchorless_effect`, step 3's
 command's confirmation still hold), and VCS
 commands on that stream only (`Actor::confined_to_own_stream`; an event
 with no stream reaches no worktree). Its source is
-`effect:<extension>/<id>`, and only a
+`effect:<namespace>/<id>`, and only a
 `Human` approves or declines a proposal. The audit and events say so:
 `actor_kind = 'effect'`, carried by `command.executed@4` (whose
 `ActorKind` also has `job`) and `command.proposed@3` (whose `ActorKindV2`

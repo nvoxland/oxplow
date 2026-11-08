@@ -374,10 +374,12 @@ fn secure_url(value: &str) -> Option<url::Url> {
     (url.scheme() == "https" || (url.scheme() == "http" && loopback)).then_some(url)
 }
 
-/// An instance's name: `<extension>/<instance id>` — its config key, its
-/// health's key, what Settings → Integrations lists.
-pub fn instance_name(extension: &str, id: &str) -> String {
-    format!("{extension}/{id}")
+/// An instance's name: `<namespace>/<instance id>` — its config key, its
+/// health's key, what Settings → Integrations lists. Named in its
+/// extension's namespace, so it keeps its config and health when the
+/// provider moves to a sibling there.
+pub fn instance_name(namespace: &str, id: &str) -> String {
+    format!("{namespace}/{id}")
 }
 
 impl ProviderSpec {
@@ -427,12 +429,12 @@ impl ProviderSpec {
             .any(|o| o.client_secret.as_deref() == Some(name))
     }
 
-    /// Its program's approval key: `provider:<extension>/<id>` — one
+    /// Its program's approval key: `provider:<namespace>/<id>` — one
     /// approval however many instances run it (consent is about the code;
     /// instances differ in config and credential values, which it never
     /// covered).
-    pub fn approval_name(&self, extension: &str) -> String {
-        format!("{extension}/{}", self.id)
+    pub fn approval_name(&self, namespace: &str) -> String {
+        format!("{namespace}/{}", self.id)
     }
 
     /// The program of its own it runs, relative to the folder, and its

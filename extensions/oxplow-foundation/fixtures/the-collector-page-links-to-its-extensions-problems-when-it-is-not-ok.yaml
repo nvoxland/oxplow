@@ -1,15 +1,15 @@
 # "See also": a collector that is not healthy links to the problems of its
 # extension; a healthy one does not.
 when:
-  page: oxplow-foundation/collector
-  params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome" }
+  page: oxplow/collector
+  params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome" }
 expect:
   see_also:
     contains:
       - { title: Collectors, uri: "oxplow:oxplow/page?page=collectors" }
 steps:
   - given:
-      - observe: { health: { extension: oxplow-foundation, contribution: oxplow.effort_test_outcome, kind: collector, disable: failed three times } }
+      - observe: { health: { namespace: oxplow, contribution: oxplow.effort_test_outcome, kind: collector, disable: failed three times } }
     expect:
       see_also:
         contains:

@@ -1,4 +1,4 @@
-// task-views/swimlanes: the work list as one column per state. Drag a card to
+// task_views/swimlanes: the work list as one column per state. Drag a card to
 // another column to move it; drag within a column to reorder it (only when the
 // active list keeps an order); click a title to rename; click a card to open it.
 //

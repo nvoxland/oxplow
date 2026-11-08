@@ -11,12 +11,12 @@ use crate::database::map_sql_err;
 use crate::Database;
 use oxplow_domain::DomainError;
 
-/// Which contribution: its `extension`, its `kind` (`provider`,
-/// `collector`) and `contribution` (that provider's or collector's id) —
-/// all three: a provider and a collector may share an id.
+/// Which contribution: the `namespace` it is named in, its `kind`
+/// (`provider`, `collector`) and `contribution` (that provider's or
+/// collector's id) — all three: a provider and a collector may share an id.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ContributionKey {
-    pub extension: String,
+    pub namespace: String,
     pub contribution: String,
     pub kind: &'static str,
 }
@@ -29,7 +29,7 @@ impl ContributionKey {
             .map(|k| k.kind)
             .find(|k| k.segment() == self.kind)
             .expect("a health row's kind is a kind of contribution");
-        oxplow_domain::contribution::ContributionId::new(&self.extension, kind, &self.contribution)
+        oxplow_domain::contribution::ContributionId::new(&self.namespace, kind, &self.contribution)
     }
 }
 
@@ -37,7 +37,7 @@ impl ContributionKey {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ContributionHealthRow {
-    pub extension: String,
+    pub namespace: String,
     pub contribution: String,
     pub kind: String,
     /// `ok`, `failing` or `disabled`.
@@ -51,17 +51,17 @@ pub struct ContributionHealthRow {
     pub updated_at: String,
 }
 
-const SELECT: &str = "SELECT extension, contribution, kind, state, reason, consecutive_failures,
+const SELECT: &str = "SELECT namespace, contribution, kind, state, reason, consecutive_failures,
         last_ok_at, last_error, mean_ms, next_due_at, updated_at
         FROM contribution_health";
 
-/// The row a [`ContributionKey`] names, its parameters `:extension`, `:kind`,
+/// The row a [`ContributionKey`] names, its parameters `:namespace`, `:kind`,
 /// `:contribution`.
-const KEY: &str = "extension = :extension AND kind = :kind AND contribution = :contribution";
+const KEY: &str = "namespace = :namespace AND kind = :kind AND contribution = :contribution";
 
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ContributionHealthRow> {
     Ok(ContributionHealthRow {
-        extension: r.get(0)?,
+        namespace: r.get(0)?,
         contribution: r.get(1)?,
         kind: r.get(2)?,
         state: r.get(3)?,
@@ -82,7 +82,7 @@ pub fn get_tx(
 ) -> Result<Option<ContributionHealthRow>, DomainError> {
     c.query_row(
         &format!("{SELECT} WHERE {KEY}"),
-        named_params! { ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution },
+        named_params! { ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution },
         row,
     )
     .optional()
@@ -92,11 +92,11 @@ pub fn get_tx(
 /// Make sure `key` has a row (state `ok`).
 fn ensure(c: &Connection, key: &ContributionKey, now: &str) -> Result<(), DomainError> {
     c.execute(
-        "INSERT INTO contribution_health (extension, contribution, kind, state, updated_at)
-         VALUES (:extension, :contribution, :kind, 'ok', :now)
-         ON CONFLICT (extension, kind, contribution) DO NOTHING",
+        "INSERT INTO contribution_health (namespace, contribution, kind, state, updated_at)
+         VALUES (:namespace, :contribution, :kind, 'ok', :now)
+         ON CONFLICT (namespace, kind, contribution) DO NOTHING",
         named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
+            ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution,
             ":now": now,
         },
     )
@@ -124,7 +124,7 @@ pub fn failed_tx(
              RETURNING consecutive_failures"
         ),
         named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
+            ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution,
             ":error": error, ":now": now,
         },
         |r| r.get(0),
@@ -155,7 +155,7 @@ pub fn succeeded_tx(
              WHERE {KEY}"
         ),
         named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
+            ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution,
             ":took": took_ms, ":now": now,
         },
     )
@@ -177,7 +177,7 @@ pub fn disable_tx(
              WHERE {KEY}"
         ),
         named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
+            ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution,
             ":reason": reason, ":now": now,
         },
     )
@@ -195,7 +195,7 @@ pub fn enable_tx(c: &Connection, key: &ContributionKey, now: &str) -> Result<(),
              WHERE {KEY}"
         ),
         named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
+            ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution,
             ":now": now,
         },
     )
@@ -217,7 +217,7 @@ pub fn set_next_due_tx(
     c.execute(
         &format!("UPDATE contribution_health SET next_due_at = :due WHERE {KEY}"),
         named_params! {
-            ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution,
+            ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution,
             ":due": next_due_at,
         },
     )
@@ -250,7 +250,7 @@ impl SqliteContributionHealthStore {
             .transaction(move |c| {
                 c.execute(
                     &format!("DELETE FROM contribution_health WHERE {KEY}"),
-                    named_params! { ":extension": key.extension, ":kind": key.kind, ":contribution": key.contribution },
+                    named_params! { ":namespace": key.namespace, ":kind": key.kind, ":contribution": key.contribution },
                 )
                 .map_err(map_sql_err)?;
                 Ok(())
@@ -262,7 +262,7 @@ impl SqliteContributionHealthStore {
         self.db
             .read(|c| {
                 let mut st = c
-                    .prepare(&format!("{SELECT} ORDER BY extension, contribution"))
+                    .prepare(&format!("{SELECT} ORDER BY namespace, contribution"))
                     .map_err(map_sql_err)?;
                 let rows = st.query_map([], row).map_err(map_sql_err)?;
                 rows.collect::<rusqlite::Result<_>>().map_err(map_sql_err)
@@ -277,7 +277,7 @@ mod tests {
 
     fn key() -> ContributionKey {
         ContributionKey {
-            extension: "tracker".into(),
+            namespace: "tracker".into(),
             contribution: "fake".into(),
             kind: "provider",
         }

@@ -7,5 +7,5 @@ when:
     type: effort.finished
     payload: { effort: "eff1", end_snapshot: 3 }
 expect:
-  effects: [{ id: oxplow-bundled-todo/infer-reasoning, state: skipped }]
+  effects: [{ id: oxplow/infer-reasoning, state: skipped }]
   commands: []

@@ -7,7 +7,7 @@ given:
   - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: followup, body: b } }
   - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b }, bind: last }
   - { command: oxplow.knowledge.update_comment, input: { comment: $last.comment.id, status: resolved } }
-when: { part: oxplow-bundled-todo/comments-panel, params: { stream_id: 1 } }
+when: { part: oxplow/comments-panel, params: { stream_id: 1 } }
 expect:
   loaders:
     comments:

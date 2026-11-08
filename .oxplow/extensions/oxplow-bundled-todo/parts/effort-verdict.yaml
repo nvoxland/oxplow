@@ -23,7 +23,7 @@ loaders:
              WHERE effort_id = :effort_id AND kind = 'diff-coverage'
              ORDER BY seq DESC LIMIT 1) AS coverage,
           (SELECT warn_at FROM v_metric_spec WHERE key = 'oxplow.coverage.abs_pct') AS coverage_ok,
-          (SELECT count(*) FROM v_oxplow_bundled_claim_status
+          (SELECT count(*) FROM v_oxplow_claim_status
              WHERE effort_id = :effort_id AND verified = 0) AS unverified,
           (SELECT count(*) FROM v_decision
              WHERE effort_id = :effort_id AND provenance = 'inferred') AS to_confirm,

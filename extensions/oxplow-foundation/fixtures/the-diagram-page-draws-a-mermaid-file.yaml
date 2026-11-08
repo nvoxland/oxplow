@@ -3,7 +3,7 @@
 temp:
   flow.mmd: "graph TD\n  A --> B\n"
 when:
-  page: oxplow-foundation/diagram
+  page: oxplow/diagram
   params:
     uri: "oxplow:oxplow/file?path=flow.mmd&filesystem=oxplow:temp"
     path: flow.mmd

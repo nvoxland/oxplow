@@ -2,7 +2,7 @@
 # it is built on; one built on no measure links to no
 # measure.
 when:
-  page: oxplow-foundation/metric
+  page: oxplow/metric
   params: { metric: agent.tokens.total }
 expect:
   see_also:

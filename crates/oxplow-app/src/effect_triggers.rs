@@ -215,10 +215,10 @@ impl EffectTriggers {
     }
 }
 
-/// Its health's key: the extension, `effect`, its id.
+/// Its health's key: its namespace, `effect`, its id.
 pub fn contribution_key(decl: &EffectDecl) -> oxplow_db::ContributionKey {
     oxplow_db::ContributionKey {
-        extension: decl.extension.clone(),
+        namespace: decl.namespace.clone(),
         contribution: decl.id.clone(),
         kind: "effect",
     }
@@ -1617,7 +1617,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
         let page = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Page {
-            page_id: "oxplow-foundation/alerts-reactions".into(),
+            page_id: "oxplow/alerts-reactions".into(),
             on_behalf_of: Box::new(presser),
         };
         let agent = oxplow_domain::Actor::Agent {
@@ -1804,7 +1804,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT kind, state FROM v_contribution_health WHERE extension = 'acme'"
+                "SELECT kind, state FROM v_contribution_health WHERE namespace = 'acme'"
             )
             .await,
             json!([["effect", "disabled"]])
@@ -1873,7 +1873,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT consecutive_failures FROM v_contribution_health WHERE extension = 'acme'"
+                "SELECT consecutive_failures FROM v_contribution_health WHERE namespace = 'acme'"
             )
             .await,
             json!([]),

@@ -2,7 +2,7 @@
 # worktree: the root of `oxplow:extensions` is the extensions that run, each
 # row naming the folder's URI on that filesystem (a branch of the tree).
 when:
-  page: oxplow-foundation/directory
+  page: oxplow/directory
   params: { stream_id: 1, path: "", filesystem: "oxplow:extensions" }
 expect:
   loaders:

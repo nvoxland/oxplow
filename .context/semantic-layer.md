@@ -139,7 +139,7 @@ What core publishes, by where it comes from. Each row names its datasets
 Live-only for now — read over LSP or git when asked, not stored, so no
 dataset: blame lines, and LSP references. A collector that
 stores them would add their datasets. Decisions, claims, context reads and
-struggle signals (the bundled review policy's `v_oxplow_bundled_struggle`, over `v_tool_call`) are what a person reviewing agent work needs most —
+struggle signals (the bundled review policy's `v_oxplow_struggle`, over `v_tool_call`) are what a person reviewing agent work needs most —
 **exceptions and decisions**, not trends and totals.
 
 ## Datasets (P4.2)
@@ -152,7 +152,7 @@ where they name machinery, not the declaration: the compiler module
 (`datasets.rs`), the registry tables (`dataset`, `dataset_input`,
 `dataset_contract`, `dataset_test`), `v_dataset_lineage` / `v_dataset_test`,
 the SQL folder (`datasets/<name>.sql`, core's `datasets.yaml`), and the
-contribution kind's URI (`oxplow:oxplow/dataset?dataset=<ext>/<name>`). An
+contribution kind's URI (`oxplow:oxplow/dataset?dataset=<namespace>/<name>`). An
 old spelling (`models:`, a dataset's `columns:`, a `models/` folder) is an
 unknown field or an unread folder, like any other; oxplow keeps no table of
 retired keys.
@@ -163,7 +163,7 @@ another dataset's field. `from` must be one of its fields and `to` must
 have both parts — errors at the declaration's `file:line`
 (`check_relationships`). The target is resolved once every dataset of
 the pass has published, the way a `ref()` names one (own, then core;
-`<ext>/<name>` for another extension's): a target naming no dataset, or
+`<namespace>/<name>` for another extension's): a target naming no dataset, or
 no field of it, is the extension's error (the dataset still publishes,
 without that relationship; for core it fails the compile). The resolved
 ones are stored as `dataset.relationships_json` (V120) and published as
@@ -178,7 +178,7 @@ Every connection registers three scalar functions for URIs
 (`oxplow-db/src/sql_functions.rs`): `uri(resource, key1, value1, …)` builds
 a canonical URI — the params sorted and escaped, a NULL value left out —
 so a dataset or page links to another page
-(`uri('oxplow/page', 'page', 'oxplow-bundled-todo/job-run-output', 'job_run', uri)`)
+(`uri('oxplow/page', 'page', 'oxplow/job-run-output', 'job_run', uri)`)
 or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
@@ -213,7 +213,7 @@ in the extension's explicit public `imports`. The host resolves the canonical
 target and exact native version before exposing the contribution; an unavailable
 optional binding withholds the referring dataset/page. `datasets::import_references`
 uses the shared SQL tokenizer, preserving comments, literals and quoted names.
-Dataset calls become ordinary `ref('<extension>/<dataset>')` before compilation, so
+Dataset calls become ordinary `ref('<namespace>/<dataset>')` before compilation, so
 lineage and dataset contract enforcement stay in the existing compiler. Pages
 receive the quoted public view name. Authoring and impact overlays resolve a
 fresh candidate catalog before compiling all enabled dataset definitions and
@@ -268,7 +268,7 @@ is `sql` (compiled from a dataset file at every open — `drop_all` drops
 only these) or `entity` (an extension's synced entity, created by
 `collector_store::write_entity` when its collector runs and kept across
 opens). An entity view is registered with its extension as owner and its
-`ext__<ext>__<entity>` table as a `source` input, so lineage and
+`ext__<namespace>__<entity>` table as a `source` input, so lineage and
 subscriptions see it. `write_entity` replaces a view only when the
 registry says it is that extension's entity — core's or another
 extension's is refused naming the owner — and recreates a missing view
@@ -280,11 +280,14 @@ An extension declares `datasets:` in `extension.yaml` — each entry the same
 `DatasetDecl` as `datasets.yaml` (name, version, description, fields,
 relationships, key, tests) — with its SQL in `datasets/<name>.sql` (`datasets::join_sources`;
 a declaration without its file, or a file without its declaration, is an
-extension error). Each publishes `v_<extension>_<name>` (dashes as
-underscores — the entity views' formula). Inside one:
-- `ref('x')` is the extension's own dataset or entity `x`, else the core
-  dataset `x`; `ref('<ext>/<name>')` is another extension's, explicitly;
-- `source()` reads only the extension's own `ext__<ext>__*` tables —
+extension error). Each publishes `v_<namespace>_<name>`, named by its
+manifest's `namespace:`, not its name (dashes as underscores — the entity
+views' formula; extensions-manifest.md "Global names come from the
+namespace"). Inside one:
+- `ref('x')` is its namespace's dataset or entity `x` (its own, or a
+  sibling's in `oxplow`), else the core dataset `x`;
+  `ref('<namespace>/<name>')` is another namespace's, explicitly;
+- `source()` reads only its namespace's `ext__<namespace>__*` tables —
   oxplow's data comes through `ref()`.
 
 A check (`datasets::check_extensions`, P7.C6) runs the same pass with temp
@@ -808,7 +811,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [DATA_DATASET_X.md](./DATA_DATASET_X.md) "event_log"); `payload_expired_at` since V102) |
 | `v_extension_run` | one row per finished run of extension code (V48; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
-| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions-jobs.md](./extensions-jobs.md) "Jobs"): `id`, `job` (`job:<ext>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
+| `v_job_run` | each job run — one execution of a job an extension declares (V56; [extensions-jobs.md](./extensions-jobs.md) "Jobs"): `id`, `job` (`job:<namespace>/<id>`), `uri` (`job_run:<id>`), `extension`, `version`, `contract_version`, `operation`, `state`, `attempt`, `cancellation_requested`, `invoker`, `run_id`, `created_at`, `updated_at`, and its current attempt's `ai_calls`, `tool_calls`, `input_tokens`, `output_tokens`. Never its request or result |
 | `v_job_run_output` | what a job produced as it ran, in order (`job_id`, `attempt`, `seq`): `kind` (`text`, `tool_call`, `tool_result`, `usage`), `at`, `text` (a text row's), `data` (the row as JSON). Written as it streams, so a page over it follows a job live |
 | `v_job_run_observation` | what a job's worker said after its attempt was fenced (a lease recovered, a permission removed, a declaration changed): one row per late result (`id`, `job_id`, `attempt`, `fence`, `at`, `outcome`, `evidence`). Evidence only; it never changes the job |
 | `v_op_error` | operations that failed in front of the person in the app, one row per `ui.op_failed@1` event (`oxplow.ui.report_error`, tsk1072): `event_id`, `at`, `stream_id`, `thread`, `label`, `command`, `message`, `exit_code`, `signal`, `duration_ms`, `output_size`, and the person's marks `seen` / `dismissed` (v2: `ui.op_error.seen` / `ui.op_error.dismissed` events, from `oxplow.op_error.*`; the Alerts page lists those not dismissed). The stderr / stdout are the event's `output` body (`oxplow_read` `event:<id>#output`). Kept 30 days, the output 14; an expired event keeps its row with its details NULL and `payload_expired_at` set |
@@ -817,10 +820,10 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `oxplow.delivery.retry` / `oxplow.delivery.discard` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
 | `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via the `oxplow.effort.record_decision` command (V76; P8.A7), or `inferred` when the effort closed (V79) — a recorded `extract` computation on the `main` role (`AiCompute`, so an unchanged effort doesn't call again) — and a reviewer's verdict on an inferred one: `confirmed` or `dismissed` (V132, `oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`; a re-inference replaces only the still-`inferred` ones) |
-| `v_claim` | claims the agent made in its answers ("tests pass"), as a model read them when the effort finished (`oxplow.effort.replace_inferred_claims`), what each cites (`evidence`; `reviewer` when a person verified it by looking) and a reviewer's verdict (`review`: `verified` or `dismissed`, V75). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_bundled_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
+| `v_claim` | claims the agent made in its answers ("tests pass"), as a model read them when the effort finished (`oxplow.effort.replace_inferred_claims`), what each cites (`evidence`; `reviewer` when a person verified it by looking) and a reviewer's verdict (`review`: `verified` or `dismissed`, V75). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
-| `v_oxplow_bundled_struggle` | oxplow-bundled's dataset (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
+| `v_oxplow_struggle` | oxplow-bundled's dataset (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
 | `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `uri` (`ai_call:<id>`, whose bodies `oxplow_read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
 | `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |
@@ -851,7 +854,7 @@ type or order. So changing a view means:
    columns).
 
 An extension entity `<entity>` owned by extension `<ext>` is exposed as
-`v_<ext>_<entity>` (see "User and extension sources").
+`v_<namespace>_<entity>` (see "User and extension sources").
 
 ### Querying (current)
 
@@ -961,7 +964,7 @@ The result keeps the two apart.
 - **Coverage: what fed each dataset read, observed.** `coverage` has one
   entry per collector that declares an entity whose view the query read
   (`collection_coverage::Feeds`, restated on every catalog change):
-  `{ dataset, source: "collector:<owner>/<id>", status, at, error }`, the
+  `{ dataset, source: "collector:<namespace>/<id>", status, at, error }`, the
   status read at query time from `collector_run` and
   `contribution_health` — `never` (no run), `failed` (the last run's
   error), `disabled` (health says so, with its
@@ -1005,7 +1008,7 @@ collectors:
     env: [GITHUB_REPOSITORY]   # host env vars passed through; nothing else is
     credentials: [GITHUB_TOKEN] # keychain secrets, set in Settings → Data
     entities:
-      - name: pr               # view: v_<extension>_<entity> = v_github_pr
+      - name: pr               # view: v_<namespace>_<entity> = v_github_pr
         doc: One pull request.
         key: number
         columns:               # ordered; `type` or `{type, doc}`
@@ -1023,7 +1026,7 @@ extension's own declared event types, logged with the run (P9.D2;
 **Entity vs fact collectors.**
 
 - An **entity collector** (`entities:`) writes rows published as
-  `v_<owner>_<entity>`; `collector_runner` runs it. It may be `exec`
+  `v_<namespace>_<entity>`; `collector_runner` runs it. It may be `exec`
   (needs `process.run`), `starlark` / `jaq` (derived, below; a Starlark one may call
   `ai_*` with `ai.compute`, and read the tree when it declares `tree.read`)
   or `read`.
@@ -1099,7 +1102,7 @@ oxplow's own.
 `collector_run` row and its `collector.synced@2` event in **one
 transaction**; a failed run commits the failure the same way (no rows,
 the last good counts and checkpoint kept). The event's subject is
-`oxplow:oxplow/collector?collector=<owner>/<id>` (resource `oxplow/collector`), its `trigger` is
+`oxplow:oxplow/collector?collector=<namespace>/<id>` (resource `oxplow/collector`), its `trigger` is
 `manual` (`oxplow.collector.sync` by an actor), `every` (the scheduler, as the
 system) or `on`. `collector_run` (V133, `v_collector_run`; it replaced
 V75 `ext_source_state`) keeps `owner, id, status (ok | error |
@@ -1169,7 +1172,7 @@ entities from data already in the semantic layer:
   StateSource outside SQL), and the `ai_*` builtins (`ai_classify` /
   `ai_score` / `ai_summarize` / `ai_extract`, implied when its script
   names one), recorded computations on the project's AI roles as caller
-  `collector:<owner>/<id>`, whose wait is left out of the budget
+  `collector:<namespace>/<id>`, whose wait is left out of the budget
   ([ai-providers.md](./ai-providers.md) "`ai_*` functions for sources").
   A model call spends the person's key — on an `every:` trigger, every few
   minutes, run as nobody — so a Starlark script that names an `ai_*`
@@ -1231,8 +1234,8 @@ component (their `description:`, NULL when absent: none is made up), the same te
 
 - **Storage is a re-syncable cache in the main DB,** not the attached
   per-extension DB the first design sketched. Each entity is a table
-  `ext__<extension>__<entity>` (dashes → underscores) plus its
-  `v_<extension>_<entity>` view.
+  `ext__<namespace>__<entity>` (dashes → underscores) plus its
+  `v_<namespace>_<entity>` view.
   - Oxplow does all the writing from the declared schema, and no
     extension SQL runs on writes, so isolation buys little.
   - One pool and plain views keep `oxplow_query_sql` simple.
@@ -1374,7 +1377,7 @@ oxplow-bundled change cards) only read them.
     a test function). The "look
     here first" score left core (P7.B5, V137 dropped its columns,
     `v_change_file` v2): oxplow-bundled's dataset `change_interest`
-    (`v_oxplow_bundled_change_interest { change_id, path, interest,
+    (`v_oxplow_change_interest { change_id, path, interest,
     reasons }`) computes it in SQL over `change_file` and
     `change_function` — `(1 + log2(1+lines)) × (1 + 0.6·Σcomplexity↑) ×
     (1 + 0.4·Σparams↑) × (1 + (longest new fn − 60)/40)` — using SQLite's
@@ -1471,7 +1474,7 @@ oxplow-bundled change cards) only read them.
 Deleted / skipped tests and removed assertions are `v_change_function`
 (deleted `is_test` rows) plus `v_change_test_file`, read by the
 oxplow-bundled Tests Weakened page. Missing co-change is oxplow-bundled's
-`v_oxplow_bundled_change_co_change`.
+`v_oxplow_change_co_change`.
 
 **Still target:** network enforcement off macOS; AI-role columns.
 (Extension-declared metrics and dimensions, fact and entity, are current:

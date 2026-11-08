@@ -12,4 +12,4 @@ SELECT j.uri AS job_run,
                                ORDER BY seq) o), '') AS TEXT) AS review
 FROM ref('job_run') j
 LEFT JOIN ref('effort') e ON e.uri = uri('oxplow/effort', 'id', substr(j.intent_key, length('review:') + 1))
-WHERE j.job = uri('oxplow/job', 'job', 'effort-review/review')
+WHERE j.job = uri('oxplow/job', 'job', 'effort_review/review')

@@ -7,7 +7,9 @@ Health, disable and repair, and how a catalog snapshot is prepared and published
 Every contribution that runs — an external provider instance, a collector, an effect
 (P8.D11, kind `effect`, V150) — shares one failure policy
 (`contribution_health.rs`, the `contribution_health` table read as
-`v_contribution_health`):
+`v_contribution_health`), keyed by the namespace the contribution is named
+in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
+`{ namespace, kind, contribution }`):
 
 - **Counting.** A failed run or call counts; a good one starts the count
   over. A refused input, a denied permission, or a cancel isn't a failure.
@@ -23,10 +25,10 @@ Every contribution that runs — an external provider instance, a collector, an 
 - **Repairing.** Core detects and reports (the health row,
   `contribution.disabled@1`, the Extensions page) with or without a work
   list. Filing the repair item is the bundled effect
-  `oxplow-bundled-todo/repair-disabled` (`effects/repair_disabled.star`, on
+  `oxplow/repair-disabled` (`effects/repair_disabled.star`, on
   `contribution.disabled`, `needs: [sql.read]`): it composes
   `oxplow.work_item.create` on the active work list — whichever provider
-  that is, never a task table — titled `Repair <extension> <contribution>:
+  that is, never a task table — titled `Repair <namespace> <contribution>:
   <reason>`. Its body is what failed (the reason), where it is declared
   (`v_contribution` file:line), its recent failures (a collector's failed
   syncs, an effect's failed reactions, else the last error) and what to do.
@@ -62,7 +64,7 @@ Every contribution that runs — an external provider instance, a collector, an 
   described in [oxplow uri <repair item>] — read it first.`, never sent
   (the repair brief is the item's body; `no-agent-input-automation.test.ts`
   pins the button as its only caller). Settings → Data → **Undelivered events**
-  (the `alerts-deliveries` page, mounted in `oxplow-foundation/settings-data.sections`) lists the pending dead letters with Retry and Discard; the
+  (the `alerts-deliveries` page, mounted in `oxplow/settings-data.sections`) lists the pending dead letters with Retry and Discard; the
   rail's Alerts shows "N events couldn't be delivered" while any wait.
   **Enable All Disabled** (a page action, atop the Extensions list and Data → Collectors)
   runs `oxplow.contribution.enable_all { extension? }` as the person: every

@@ -1,7 +1,7 @@
 # The Resource data page lists the instances of a kind: the rows of the dataset it resolves to.
 when:
-  page: oxplow-foundation/resource-data
-  params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" }
+  page: oxplow/resource-data
+  params: { uri: "oxplow:oxplow/resource?resource=oxplow/stream" }
 expect:
   label: Stream data
   loaders:

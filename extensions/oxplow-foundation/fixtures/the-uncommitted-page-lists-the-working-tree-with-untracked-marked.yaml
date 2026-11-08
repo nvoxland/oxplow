@@ -8,7 +8,7 @@ given:
   - observe: { turn: { prompt: change, write: { path: tracked.txt, body: "changed\n" } } }
   - observe: { turn: { prompt: loose, write: { path: loose.txt, body: "n\n" } } }
   - observe: { analyze: { kind: working } }
-when: { page: oxplow-foundation/uncommitted-changes, params: { stream_id: 1 } }
+when: { page: oxplow/uncommitted-changes, params: { stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ change_id: $any }] }

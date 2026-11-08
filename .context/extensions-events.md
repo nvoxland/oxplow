@@ -14,7 +14,7 @@ An extension sees an event as one shape, `EventView`
 | `v` | the newest registered version of `type`, which `payload` is at |
 | `seq` | its place in the log, the delivery order |
 | `at` | when it happened (RFC 3339) |
-| `source` | what emitted it: `human`, `agent:thr3`, `system:<c>`, `collector:<ext>/<id>`, `effect:<ext>/<id>`, `provider:<id>` |
+| `source` | what emitted it: `human`, `agent:thr3`, `system:<c>`, `collector:<namespace>/<id>`, `effect:<namespace>/<id>`, `provider:<id>` |
 | `subject` | the URIs it's about |
 | `anchors` | `stream_id`, `thread_id`, `effort_id`, `turn_id`, `agent_session_id`, `snapshot_id` |
 | `payload` | its payload, carried to `v` |
@@ -87,9 +87,9 @@ event_types:
 
 **Promoted to stable (P9.D6)** on the evidence rule every kind is held to
 — a first-party, shared extension depending on it: oxplow-bundled's
-`oxplow_bundled.accepted@2 { effort, work_item, unverified, inferred,
-deviated }` and `oxplow_bundled.changes_requested@2 { effort, work_item,
-unverified, inferred, deviated, note? }` (`effort` is the bare id, `eff12`; v1 held its URI and an upcast reads it), which `accept.star` and `request_changes.star` return in
+`oxplow.review.accepted@1 { effort, work_item, unverified, inferred,
+deviated }` and `oxplow.review.changes_requested@1 { effort, work_item,
+unverified, inferred, deviated, note? }` (`effort` is the bare id, `eff12`), which `accept.star` and `request_changes.star` return in
 `events:` (subjects: the effort, its work item and, for an acceptance, the
 claims and decisions it took unchecked; caused by the run's
 `command.executed`). They replaced a single `verdict@1` type, whose
@@ -109,7 +109,7 @@ the provider host was), so a kind carries no stability.
 
 **`effects` is stable** (P11), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
-`oxplow_bundled.accepted`: its script takes the effort and its item from the event's payload
+`oxplow.review.accepted`: its script takes the effort and its item from the event's payload
 (`effort`, `work_item`) and the claims and decisions accepted unchecked from
 its envelope (`event["subject"]`), links the item it files `about` the
 effort, and reads (`scope("sql.read")`) only what the event
@@ -131,10 +131,14 @@ itself) files has no `author` — it isn't the person's; its
 `work_item.created` and the run's audit name the effect (its `native`
 `author` is null). The loader limits effects to no kind of extension.
 
-**Retention** (P8.D5) is the namespace's window for payloads and large
-content (DATA_DATASET_X.md "event_log" retention): either omitted part is the
-default, and a longer one is a load error. The reactor records it in
-`extension_event_retention`, which keeps it after the extension is gone.
+**Retention** (P8.D5) is the extension's window for its namespace's payloads
+and large content (DATA_DATASET_X.md "event_log" retention): either omitted part
+is the default, and a longer one is a load error. The reactor records it in
+`extension_event_retention`, keyed `(namespace, extension)`, which keeps it
+after the extension is gone: one that declares types and no window records the
+default, one that declares no types records nothing, and the sweep keeps a
+namespace's events as long as its longest window (extensions in `oxplow`
+share one).
 
 **Loading** checks each type the way the vocabulary registers it (a
 scratch `register_declared`): a core or foreign namespace, a schema file
@@ -171,7 +175,7 @@ health says why (`v_event_type` v2's column doc says so).
 a command script's result (and an effect's, P8.D10) may carry
 `events: [{ type, payload, subject? }]`. `own_events` turns each into an
 envelope at its type's newest version, from
-`extension:<extension>/<command>`, refusing (the run is `Invalid` and
+`extension:<namespace>/<command>`, refusing (the run is `Invalid` and
 writes nothing) any type the running vocabulary doesn't list as this
 extension's own — a core type, another extension's, or one in its
 namespace it doesn't declare. They ride the run's `Composition.events`
@@ -185,7 +189,7 @@ step landed.
 may carry `events: [{ type, payload, subject? }]` beside `entities`.
 `collector_runner::plan_events` holds them to the same rule
 (`own_events`: the extension's own declared types, at their newest
-version), from `collector:<owner>/<id>`, and the payload is validated
+version), from `collector:<namespace>/<id>`, and the payload is validated
 before anything is written. They are appended **in the run's
 transaction**, after its rows, its `collector_run` and its
 `collector.synced`, each **caused by that `collector.synced`** — with
@@ -222,17 +226,18 @@ its last good counts stay, and it isn't a failure toward a disable).
 extension's own declared ones, and **another extension's**
 (`acme_pr.merged` from an extension that isn't `acme-pr`). There is no
 `depends:` key: the qualified type name is the dependency, as a dataset's
-`ref('<ext>/<name>')` is. `extensions::subscribes` sorts each name:
+`ref('<namespace>/<name>')` is. `extensions::subscribes` sorts each name:
 - **known** — a core type or one the extension declares;
 - **foreign** — a well-formed name in a namespace that is neither core's
-  nor its own: accepted, kept on `Extension.subscriptions`
+  nor its own, or in `oxplow` (shared by everything oxplow ships, so a
+  sibling's): accepted, kept on `Extension.subscriptions`
   (`ForeignSubscription { by, event_type, declared_at }`), and a
   **warning** at load ("…another extension's event type; it runs once an
   enabled extension registers that type") — which is all `oxplow extension
   check` says, since a check sees one extension;
 - **unknown** — a core namespace's type that doesn't exist, its own
-  namespace's that it doesn't declare, a name that isn't a type's: an
-  error, as before.
+  (unshared) namespace's that it doesn't declare, a name that isn't a
+  type's: an error, as before.
 
 The vocabulary pass then holds each foreign subscription against the
 vocabulary it just built: one **no enabled extension registers** is an
@@ -256,7 +261,7 @@ failing run that counts toward a disable.
 ## Resources
 
 `resources:` declares what the extension's URIs name
-(`oxplow:<extension>/<resource>?<params>`): its params, the dataset that
+(`oxplow:<namespace>/<resource>?<params>`): its params, the dataset that
 titles one, search, an icon and `[[prefix:…]]` sugar. oxplow-foundation
 declares oxplow's own the same way. The grammar, the registry, the
 vocabulary and the stored forms are in `.context/resources.md`
@@ -420,9 +425,9 @@ When one event reaches several effects or collectors, their `after:`
 says which run first (`oxplow_domain::ordering`, compiled by
 `extensions::descriptors::check_catalog`).
 
-- **Targets are URIs.** `effect:<ext>/<id>`, `collector:<ext>/<id>` (any
+- **Targets are URIs.** `effect:<namespace>/<id>`, `collector:<namespace>/<id>` (any
   enabled extension's) or `consumer:<name>` — short forms of
-  `oxplow:oxplow/effect?effect=<ext>/<id>` and so on — one of core's event consumers
+  `oxplow:oxplow/effect?effect=<namespace>/<id>` and so on — one of core's event consumers
   (`event_pump::CORE_CONSUMERS`, kept equal to what a booted app registers
   by `the_core_consumer_list_is_what_a_booted_app_registers`; the two
   that run extensions' contributions aren't targets). A bare name is this
@@ -455,7 +460,7 @@ says which run first (`oxplow_domain::ordering`, compiled by
 `effects:` (stable since P11 — a shared or bundled extension's
 too; `effects.rs`) are scripts that react
 to a logged event by composing commands, run as
-`Actor::Effect { effect: "<extension>/<id>" }` for the event's thread and
+`Actor::Effect { effect: "<namespace>/<id>" }` for the event's thread and
 stream — an agent's rights and gates there (the open-thread gate, its own
 stream's VCS; an event with no thread, like a contribution's health, is
 an anchorless effect: no thread gate, since it writes into no worktree —
@@ -537,7 +542,7 @@ once**, keyed by `effect_run (effect, event_id)` (V149, `v_effect_run`):
    as the pump counts one it finds;
 2. `effects::gate` isn't `Runs` (a live reaction only): nothing;
 3. the loop guard (`lineage`, walking the event's `cause` chain): an
-   event its own run caused (source `effect:<extension>/<id>`) never
+   event its own run caused (source `effect:<namespace>/<id>`) never
    triggers it; one that `MAX_CHAIN` (4) effect runs already led to is
    `skipped`;
 4. the script runs sandboxed over `{ event }`, the event envelope ("The

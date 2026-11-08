@@ -169,7 +169,7 @@ or an item's description editor (`work_item.detail`) — with a
 page or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
 picks whose shows (`replacements`, Settings → Integrations).
-[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow-bundled-todo/work-item.sections` slot gets
+[extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow/work-item.sections` slot gets
 `{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
 **any URI** (a work item's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
@@ -199,7 +199,7 @@ The agent reads work items through the interface too, with no tool of
 its own: `oxplow_query_sql` over `v_work_item` for a list in order (`WHERE
 thread_id = … ORDER BY rank IS NULL, rank, created_at`), `oxplow_read` on a
 work item's URI for one item with its `links` and `comments`, and the
-foundation page `oxplow-foundation/work-next` (the tool `oxplow_work_next`,
+foundation page `oxplow/work-next` (the tool `oxplow_work_next`,
 param `thread: "thr3"`) for what to pick up next (an epic with its ready
 descendants, or every ready non-epic item; open `blocks` links hold an
 item). None of them belongs to an implementation, so the tool list never
@@ -301,7 +301,7 @@ how the task writes send a status. A link belongs to its task, not to a
 thread.
 `oxplow.work_item.comment` and `oxplow.work_item.link` refuse a deleted task (tsk572).
 A comment's `task_note.author` names who made it (`note_author`, tsk1000):
-`user`, `agent` (a page acting for one included), `effect:<extension>/<id>`
+`user`, `agent` (a page acting for one included), `effect:<namespace>/<id>`
 or `oxplow` — as a task's `author` is left empty for an effect or oxplow
 (`task_author`), neither is shown as the person's.
 

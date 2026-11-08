@@ -1,5 +1,5 @@
 # A measure's "metrics built on it" open each metric's definition, not its data.
-when: { page: oxplow-foundation/measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
+when: { page: oxplow/measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
 expect:
   loaders:
     metrics:

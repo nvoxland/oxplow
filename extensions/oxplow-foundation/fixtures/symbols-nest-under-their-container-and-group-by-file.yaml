@@ -8,7 +8,7 @@ given:
         items:
           - { id: Widget, name: Widget, kind: class, line: 1 }
           - { id: "Widget::spin", name: spin, kind: method, container: Widget, line: 2 }
-when: { page: oxplow-foundation/symbols, params: { stream_id: 1, path: "", filter: "" } }
+when: { page: oxplow/symbols, params: { stream_id: 1, path: "", filter: "" } }
 expect:
   loaders:
     symbols:

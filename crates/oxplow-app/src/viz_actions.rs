@@ -387,12 +387,20 @@ fn component_of(
     ),
     CommandError,
 > {
-    let (ext_name, id) = key
+    let (namespace, id) = key
         .split_once('/')
+        .ok_or_else(|| CommandError::from(oxplow_domain::DomainError::NotFound))?;
+    // Named in its namespace: the extension there that declares it.
+    let declarer = svc
+        .extension_catalog
+        .unpinned(project_root, "a component is found on its declaration")
+        .iter()
+        .find(|e| e.namespace == namespace && e.custom_components.iter().any(|c| c.id == id))
+        .map(|e| e.name.clone())
         .ok_or_else(|| CommandError::from(oxplow_domain::DomainError::NotFound))?;
     let ext = svc
         .extension_catalog
-        .named(project_root, ext_name)
+        .named(project_root, &declarer)
         .map_err(CommandError::from)?;
     let component = ext
         .custom_components
@@ -401,7 +409,7 @@ fn component_of(
         .cloned()
         .ok_or_else(|| CommandError::Invalid {
             field: Some("/id".into()),
-            message: format!("`{ext_name}` has no custom component `{id}`"),
+            message: format!("`{namespace}` has no custom component `{id}`"),
         })?;
     Ok((ext, component))
 }
@@ -1425,7 +1433,7 @@ view:
     #[tokio::test]
     async fn the_new_stream_form_shows_each_sources_fields() {
         let (fx, _root) = fixture().await;
-        let start = form_of(&fx.svc, "oxplow-foundation/new-stream", BTreeMap::new())
+        let start = form_of(&fx.svc, "oxplow/new-stream", BTreeMap::new())
             .await
             .unwrap();
         assert_eq!(start.command.id, "oxplow.stream.create");

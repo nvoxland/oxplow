@@ -14,7 +14,7 @@ given:
           - { path: src/hot.rs, symbol: widen, signature_changed: true, start_line: 30, length: 10, params_before: 1, params_after: 3 }
           - { path: src/hot.rs, symbol: fresh, status: added, start_line: 50, length: 70, params_after: 0 }
 when:
-  sql: SELECT path, round(interest, 3) AS interest, reasons FROM v_oxplow_bundled_change_interest ORDER BY path
+  sql: SELECT path, round(interest, 3) AS interest, reasons FROM v_oxplow_change_interest ORDER BY path
 expect:
   rows:
     - { path: src/big.rs, interest: $any, reasons: 60 lines touched }

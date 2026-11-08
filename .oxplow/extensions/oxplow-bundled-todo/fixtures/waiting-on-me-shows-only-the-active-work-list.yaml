@@ -4,7 +4,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Someday } }
-when: { page: oxplow-bundled-todo/waiting-on-me }
+when: { page: oxplow/waiting-on-me }
 expect: { loaders: { waiting_on_me: { rows: [{ what: Blocked, title: Stuck }] } } }
 steps:
   - given:

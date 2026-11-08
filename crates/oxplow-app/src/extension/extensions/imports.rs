@@ -45,6 +45,8 @@ pub struct Import {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, specta::Type)]
 pub struct Candidate {
     pub name: String,
+    /// The namespace its contributions are named in.
+    pub namespace: String,
     pub enabled: bool,
     /// It ships with oxplow: it imports only stable contracts and exports
     /// nothing as experimental.
@@ -235,7 +237,7 @@ pub fn validate_with_blocked(
                 );
                 invalid = true;
             }
-            if contribution.id.extension != candidate.name {
+            if contribution.id.namespace != candidate.namespace {
                 diagnostic(
                     &mut resolution,
                     candidate,
@@ -244,8 +246,11 @@ pub fn validate_with_blocked(
                     Severity::Error,
                     "contribution_owner_mismatch",
                     format!(
-                        "contribution `{}` is owned by `{}`, not candidate `{}`",
-                        contribution.id, contribution.id.extension, candidate.name
+                        "contribution `{}` is named in `{}`, not candidate `{}`'s namespace `{}`",
+                        contribution.id,
+                        contribution.id.namespace,
+                        candidate.name,
+                        candidate.namespace
                     ),
                 );
                 invalid = true;
@@ -307,15 +312,15 @@ pub fn validate_with_blocked(
                 );
                 invalid = true;
             }
-            if export.id.extension != candidate.name {
+            if export.id.namespace != candidate.namespace {
                 invalid_export(
                     &mut resolution,
                     candidate,
                     export,
                     "export_owner_mismatch",
                     format!(
-                        "export `{}` is owned by `{}`, not candidate `{}`",
-                        export.id, export.id.extension, candidate.name
+                        "export `{}` is named in `{}`, not candidate `{}`'s namespace `{}`",
+                        export.id, export.id.namespace, candidate.name, candidate.namespace
                     ),
                 );
                 invalid = true;
@@ -486,7 +491,7 @@ pub fn validate_with_blocked(
                 );
                 invalid = true;
             }
-            if import.target.extension == candidate.name {
+            if import.target.namespace == candidate.namespace {
                 diagnostic(
                     &mut resolution,
                     candidate,
@@ -495,7 +500,7 @@ pub fn validate_with_blocked(
                     Severity::Error,
                     "self_import",
                     format!(
-                        "import `{}` cannot target its own extension",
+                        "import `{}` cannot target its own namespace",
                         import.binding
                     ),
                 );
@@ -526,7 +531,6 @@ pub fn validate_with_blocked(
                 candidate_index,
                 import,
                 catalog,
-                &by_name,
                 &contributions,
                 &export_positions,
                 &export_valid,
@@ -691,18 +695,25 @@ fn resolve_import(
     consumer_index: usize,
     import: &Import,
     catalog: &[Candidate],
-    by_name: &BTreeMap<String, Vec<usize>>,
     contributions: &[BTreeMap<ContributionId, Vec<Option<u32>>>],
     export_positions: &BTreeMap<ContributionId, Vec<(usize, usize)>>,
     export_valid: &[Vec<bool>],
 ) -> (ImportStatus, Option<usize>) {
-    let Some(producers) = by_name.get(&import.target.extension) else {
-        return (unavailable(UnavailableReason::Missing), None);
+    // The target is named in its namespace: its producer is the extension
+    // there that declares it (`oxplow` holds several).
+    let in_namespace: Vec<usize> = (0..catalog.len())
+        .filter(|&i| catalog[i].namespace == import.target.namespace)
+        .collect();
+    let declaring: Vec<usize> = in_namespace
+        .iter()
+        .copied()
+        .filter(|&i| contributions[i].contains_key(&import.target))
+        .collect();
+    let producer_index = match (declaring.as_slice(), in_namespace.as_slice()) {
+        ([one], _) | ([], [one]) => *one,
+        ([], _) => return (unavailable(UnavailableReason::Missing), None),
+        _ => return (unavailable(UnavailableReason::Ambiguous), None),
     };
-    if producers.len() != 1 {
-        return (unavailable(UnavailableReason::Ambiguous), None);
-    }
-    let producer_index = producers[0];
     let producer = &catalog[producer_index];
     if !producer.enabled {
         return (

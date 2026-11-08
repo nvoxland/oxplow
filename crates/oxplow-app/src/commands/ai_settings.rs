@@ -304,7 +304,7 @@ mod tests {
         // A person's page (Settings → AI as a form) runs it, and its record
         // keeps the key out too; a page an agent presses can't.
         let page = |presser: Actor| Actor::Page {
-            page_id: "oxplow-foundation/ai".into(),
+            page_id: "oxplow/ai".into(),
             on_behalf_of: Box::new(presser),
         };
         run(

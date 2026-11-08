@@ -37,7 +37,7 @@ view:
     columns:
     - key: message
       label: Notice
-      expand: oxplow-foundation/alerts-notice
+      expand: oxplow/alerts-notice
     - key: thread
       label: Thread
       width: 160
@@ -70,7 +70,7 @@ view:
     - key: label
       label: Operation
       tone: tone
-      expand: oxplow-foundation/alerts-operation
+      expand: oxplow/alerts-operation
     - key: at
       label: When
       format: relative
@@ -99,17 +99,17 @@ view:
     title: Undelivered events
     description: "Oxplow's own plumbing: every change is an event, and a consumer that threw on one parks it here. Retry hands it over again; Discard drops it for good and asks first."
     embed:
-      page: oxplow-foundation/alerts-deliveries
+      page: oxplow/alerts-deliveries
   - id: reactions
     title: Failed reactions
     description: "An extension's effect that reacts to an event and failed on its last try, with why. Some try again by themselves; Retry runs one now."
     embed:
-      page: oxplow-foundation/alerts-reactions
+      page: oxplow/alerts-reactions
   - id: extensions
     title: Extensions with problems
     description: "Everything wrong with an extension, under its name: a contribution that failed or stopped after failing (Start Again, or Repair with the Agent), permissions waiting for your approval (Deploy it on its page), and load errors. It leaves this list when the extension is fixed and deployed."
     embed:
-      page: oxplow-foundation/extension-problems
+      page: oxplow/extension-problems
 see_also:
-  - { page: oxplow-foundation/extension-problems }
-  - { page: oxplow-foundation/collectors }
+  - { page: oxplow/extension-problems }
+  - { page: oxplow/collectors }

@@ -22,7 +22,7 @@ params:
   type: choice
   role: filter
   label: Slice by
-  options_from: oxplow-foundation/metrics-dimensions
+  options_from: oxplow/metrics-dimensions
   default: ''
 answers:
 - {"question":"What is this metric built from, what are its targets, and how has it moved?","about":"oxplow/metric","params":{"uri":"oxplow:oxplow/metric?metric=agent.tokens.total","metric":"agent.tokens.total"},"skill":"oxplow-metrics"}
@@ -51,7 +51,7 @@ loaders:
                                                            - (SELECT value FROM pts ORDER BY captured_at LIMIT 1), 2)) END
              END AS in_range,
              m.title AS measure,
-             CASE WHEN m.key IS NOT NULL THEN uri('oxplow/measure', 'measure', m.key) || '#oxplow.renderer=oxplow-foundation/measure' END AS measure_target,
+             CASE WHEN m.key IS NOT NULL THEN uri('oxplow/measure', 'measure', m.key) || '#oxplow.renderer=oxplow/measure' END AS measure_target,
              s.expression, s.scope, s.category, s.language, c.enabled, CASE WHEN c.enabled = 1 THEN 'Yes' ELSE 'No' END AS enabled_text, (c.enabled = 0) AS can_enable,
              s.extension,
              CASE WHEN s.extension IS NOT NULL THEN 'oxplow:oxplow/extension?name=' || s.extension END AS extension_target

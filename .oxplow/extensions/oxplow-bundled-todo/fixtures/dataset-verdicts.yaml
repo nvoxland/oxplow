@@ -2,8 +2,8 @@
 # after an append is what a full refill of the log would build.
 before:
   event_log:
-    - { seq: 1, id: e1, type: oxplow_bundled.changes_requested, v: 1, at: "2026-01-01T00:00:00.000000Z", source: fixture, subject: '["oxplow:oxplow/effort?id=eff1"]', payload: "{}" }
+    - { seq: 1, id: e1, type: oxplow.review.changes_requested, v: 1, at: "2026-01-01T00:00:00.000000Z", source: fixture, subject: '["oxplow:oxplow/effort?id=eff1"]', payload: "{}" }
     - { seq: 2, id: e2, type: work_item.created, v: 1, at: "2026-01-01T00:00:01.000000Z", source: fixture, subject: "[]", payload: "{}" }
 after:
   event_log:
-    - { seq: 3, id: e3, type: oxplow_bundled.accepted, v: 1, at: "2026-01-01T00:00:02.000000Z", source: fixture, subject: '["oxplow:oxplow/effort?id=eff1","oxplow:oxplow/claim?id=c1"]', payload: "{}" }
+    - { seq: 3, id: e3, type: oxplow.review.accepted, v: 1, at: "2026-01-01T00:00:02.000000Z", source: fixture, subject: '["oxplow:oxplow/effort?id=eff1","oxplow:oxplow/claim?id=c1"]', payload: "{}" }

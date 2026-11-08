@@ -3,7 +3,7 @@
 given:
   - { command: oxplow.work_item.create, input: { title: Wait for the API key, state: blocked, thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Ship it, thread: thr1 } }
-when: { page: oxplow-bundled-todo/waiting-on-me }
+when: { page: oxplow/waiting-on-me }
 expect:
   loaders:
     waiting_on_me:

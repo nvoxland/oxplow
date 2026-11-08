@@ -3,7 +3,7 @@
 # what's left to check.
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-when: { part: oxplow-bundled-todo/effort-verdict, params: { effort_id: 1 } }
+when: { part: oxplow/effort-verdict, params: { effort_id: 1 } }
 expect:
   loaders:
     effort_verdict:

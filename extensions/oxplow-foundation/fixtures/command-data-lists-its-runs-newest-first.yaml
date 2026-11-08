@@ -4,7 +4,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: One } }
   - { command: oxplow.work_item.create, input: { title: Two } }
 when:
-  page: oxplow-foundation/command-data
+  page: oxplow/command-data
   params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" }
 expect:
   label: oxplow.work_item.create data

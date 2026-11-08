@@ -408,7 +408,7 @@ impl Instance {
     fn account(&self, name: &str) -> String {
         crate::collector_runner::instance_credential_account(
             credential_scope(&self.deps, self.scope),
-            &self.ext.name,
+            &self.ext.namespace,
             &self.id,
             name,
         )
@@ -467,7 +467,7 @@ impl Instance {
                 let value = secrets
                     .get(&crate::extension::extension_secrets::account(
                         &self.deps.project,
-                        &self.ext.name,
+                        &self.ext.namespace,
                         reference,
                     ))
                     .map_err(|_| failed(name, "host secret storage is unavailable".into()))?;
@@ -600,7 +600,7 @@ impl Instance {
                     .iter()
                     .filter_map(|credential| credential.secret_ref.as_ref())
                     .map(|reference| {
-                        let revision = secrets.watch(&self.ext.name, reference);
+                        let revision = secrets.watch(&self.ext.namespace, reference);
                         let expected = revision.load(std::sync::atomic::Ordering::Acquire);
                         (revision, expected)
                     })
@@ -1458,11 +1458,11 @@ fn credential_scope(deps: &HostDeps, scope: Scope) -> &str {
     }
 }
 
-/// An instance's `contribution_health` key: `<extension>/<instance id>`.
+/// An instance's `contribution_health` key: `<namespace>/<instance id>`.
 pub(super) fn contribution_key(instance: &str) -> ContributionKey {
-    let (extension, contribution) = instance.split_once('/').unwrap_or((instance, ""));
+    let (namespace, contribution) = instance.split_once('/').unwrap_or((instance, ""));
     ContributionKey {
-        extension: extension.to_string(),
+        namespace: namespace.to_string(),
         contribution: contribution.to_string(),
         kind: "provider",
     }
@@ -1470,7 +1470,8 @@ pub(super) fn contribution_key(instance: &str) -> ContributionKey {
 
 /// What a removed instance was: enough to find what it left behind.
 struct Gone {
-    ext: String,
+    /// The namespace it was named in.
+    namespace: String,
     id: String,
     /// Its credentials' names, when its extension still declares it.
     credentials: Option<Vec<String>>,
@@ -1480,14 +1481,14 @@ impl Gone {
     fn of(instance: &str, resolved: Option<Resolved>) -> Gone {
         match resolved {
             Some(r) => Gone {
-                ext: r.ext.name.clone(),
+                namespace: r.ext.namespace.clone(),
                 id: r.id.clone(),
                 credentials: Some(r.spec.credential_names()),
             },
             None => {
-                let (ext, id) = instance.split_once('/').unwrap_or((instance, ""));
+                let (namespace, id) = instance.split_once('/').unwrap_or((instance, ""));
                 Gone {
-                    ext: ext.to_string(),
+                    namespace: namespace.to_string(),
                     id: id.to_string(),
                     credentials: None,
                 }
@@ -1628,14 +1629,24 @@ impl ProviderRegistry {
         provider: Option<&str>,
         scope: Scope,
     ) -> Result<Resolved, String> {
-        let (ext_name, id) = instance
+        let (namespace, id) = instance
             .split_once('/')
             .filter(|(e, i)| !e.is_empty() && !i.is_empty())
-            .ok_or_else(|| "an instance is `<extension>/<instance id>`".to_string())?;
-        let ext = crate::extension::extensions::owner(extensions, ext_name)
-            .filter(|e| e.enabled)
-            .ok_or_else(|| format!("no enabled extension `{ext_name}`"))?;
+            .ok_or_else(|| "an instance is `<namespace>/<instance id>`".to_string())?;
         let wanted = provider.unwrap_or(id);
+        // Named in its namespace: the enabled extension there that declares
+        // the provider (`oxplow` holds several), else its only one.
+        let in_namespace: Vec<&Extension> = extensions
+            .iter()
+            .filter(|e| e.enabled && e.namespace == namespace)
+            .collect();
+        let ext = in_namespace
+            .iter()
+            .find(|e| e.providers.iter().any(|p| p.id == wanted))
+            .or(in_namespace.first())
+            .copied()
+            .ok_or_else(|| format!("no enabled extension in namespace `{namespace}`"))?;
+        let ext_name = ext.name.as_str();
         let declared: Vec<&str> = ext.providers.iter().map(|p| p.id.as_str()).collect();
         let spec = ext
             .providers
@@ -1793,7 +1804,7 @@ impl ProviderRegistry {
         id: &str,
         cfg: Option<&oxplow_config::ExtensionInstanceConfig>,
     ) -> ProviderInstanceView {
-        let instance = spec::instance_name(&ext.name, id);
+        let instance = spec::instance_name(&ext.namespace, id);
         let (scope, overridden) = self.scope_of(&instance);
         let dir = host::ext_dir(&self.deps.project_dir, ext);
         let declared =
@@ -1834,12 +1845,12 @@ impl ProviderRegistry {
                     let account = match &c.secret_ref {
                         Some(reference) => crate::extension::extension_secrets::account(
                             &self.deps.project,
-                            &ext.name,
+                            &ext.namespace,
                             reference,
                         ),
                         None => crate::collector_runner::instance_credential_account(
                             credential_scope(&self.deps, scope),
-                            &ext.name,
+                            &ext.namespace,
                             id,
                             &c.name,
                         ),
@@ -1874,7 +1885,7 @@ impl ProviderRegistry {
         let mut out: BTreeMap<String, ProviderInstanceView> = BTreeMap::new();
         for ext in self.extensions().iter().filter(|e| e.enabled) {
             for spec in &ext.providers {
-                let instance = spec::instance_name(&ext.name, &spec.id);
+                let instance = spec::instance_name(&ext.namespace, &spec.id);
                 // A config entry under a provider's own id that names
                 // another provider is that other provider's instance.
                 if configured
@@ -1904,7 +1915,7 @@ impl ProviderRegistry {
                     let here = self
                         .extensions()
                         .iter()
-                        .any(|e| e.enabled && e.name == extension);
+                        .any(|e| e.enabled && e.namespace == extension);
                     if scope == Scope::Global && !here {
                         continue;
                     }
@@ -2018,7 +2029,7 @@ impl ProviderRegistry {
         scope: Scope,
         config: Value,
     ) -> Result<Arc<Instance>, HostError> {
-        let name = spec::instance_name(&ext.name, id);
+        let name = spec::instance_name(&ext.namespace, id);
         let declared = deployment_of(&self.deps, ext, spec).await?.declared;
         let unchanged = self
             .deps
@@ -2050,10 +2061,11 @@ impl ProviderRegistry {
                     ),
                     oxplow_domain::run::ContributionRef {
                         id: oxplow_domain::contribution::ContributionId::new(
-                            &ext.name,
+                            &ext.namespace,
                             oxplow_domain::contribution::ContributionKind::Provider,
                             &spec.id,
                         ),
+                        extension: ext.name.clone(),
                         version: ext.version.clone(),
                         generation: Some(snapshot.generation().to_string()),
                         deployment: ext.deployment.hash().map(str::to_owned),
@@ -2177,7 +2189,7 @@ impl ProviderRegistry {
                 })?;
                 let op = oxplow_domain::OpRef {
                     scope: oxplow_domain::contribution::ContributionId::new(
-                        &extension,
+                        &instance.ext.namespace,
                         oxplow_domain::contribution::ContributionKind::Provider,
                         &provider,
                     )
@@ -2319,7 +2331,7 @@ impl ProviderRegistry {
             bus.run(
                 actor,
                 crate::contribution_health::ENABLE,
-                json!({ "extension": key.extension, "kind": key.kind, "contribution": key.contribution }),
+                json!({ "namespace": key.namespace, "kind": key.kind, "contribution": key.contribution }),
                 false,
             )
             .await?;
@@ -2499,7 +2511,7 @@ impl ProviderRegistry {
         for name in &names {
             let account = crate::collector_runner::instance_credential_account(
                 credential_scope(&self.deps, home),
-                &gone.ext,
+                &gone.namespace,
                 &gone.id,
                 name,
             );
@@ -2613,7 +2625,7 @@ impl ProviderRegistry {
             let names = spec.credential_names();
             return Err(DomainError::Invalid(format!(
                 "provider `{}` declares no credential `{name}` (it declares: {})",
-                spec.approval_name(&ext.name),
+                spec.approval_name(&ext.namespace),
                 if names.is_empty() {
                     "none".to_string()
                 } else {
@@ -2623,7 +2635,7 @@ impl ProviderRegistry {
         };
         let account = crate::collector_runner::instance_credential_account(
             credential_scope(&self.deps, *scope),
-            &ext.name,
+            &ext.namespace,
             id,
             name,
         );
@@ -2736,7 +2748,7 @@ impl ProviderRegistry {
             Some(secret) => {
                 let of_secret = crate::collector_runner::instance_credential_account(
                     credential_scope(&self.deps, resolved.scope),
-                    &resolved.ext.name,
+                    &resolved.ext.namespace,
                     &resolved.id,
                     secret,
                 );
@@ -3335,7 +3347,7 @@ async fn deployment_of(
 ) -> Result<host::Deployment, HostError> {
     let project = deps.project_dir.clone();
     let (ext, spec) = (ext.clone(), spec.clone());
-    let name = spec.approval_name(&ext.name);
+    let name = spec.approval_name(&ext.namespace);
     tokio::task::spawn_blocking(move || host::deployment(&project, &ext, &spec))
         .await
         .map_err(|e| HostError::Failed {

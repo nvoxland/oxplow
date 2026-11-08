@@ -280,7 +280,7 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
     // The rows are still there for the extension's return.
     let rows = SqliteExtensionStateStore::new(fx.svc.db.clone())
         .snapshot(Namespace {
-            extension: "alpha".into(),
+            namespace: "alpha".into(),
             scope: Scope::Project,
             area: Area::State,
         })

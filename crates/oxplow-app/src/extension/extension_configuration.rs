@@ -258,8 +258,9 @@ impl ConfigurationHost {
     ) -> Result<(String, ConfigurationFile), ConfigurationError> {
         let (extension, declaration) = self
             .owner
+            // The namespace's settings: one document its extensions share.
             .with_owner(run, service, |extension| {
-                (extension.name.clone(), extension.configuration.clone())
+                (extension.namespace.clone(), extension.configuration.clone())
             })
             .map_err(|error| match error {
                 StateHostError::Denied(_) => ConfigurationError::Denied,
@@ -272,16 +273,16 @@ impl ConfigurationHost {
     }
 }
 
-/// An extension's effective configuration as stored now — its declared defaults
-/// under the project and personal layers — which the SQL that reads it with
-/// `config()` is compiled and run against.
+/// A namespace's effective configuration as stored now — its declared
+/// defaults under the project and personal layers — which the SQL that reads
+/// it with `config()` is compiled and run against.
 pub(crate) fn effective_values(
     conn: &Connection,
-    extension: &str,
+    namespace: &str,
     declaration: &ConfigurationFile,
 ) -> Result<Value, ConfigurationError> {
-    let (project, personal) = layers(conn, extension)?;
-    Ok(resolve(extension, declaration, project.as_ref(), personal.as_ref())?.values)
+    let (project, personal) = layers(conn, namespace)?;
+    Ok(resolve(namespace, declaration, project.as_ref(), personal.as_ref())?.values)
 }
 
 fn layers(

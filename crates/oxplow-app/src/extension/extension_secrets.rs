@@ -61,15 +61,15 @@ impl ExtensionSecrets {
         reference: Option<SecretRef>,
         value: &str,
     ) -> Result<SecretRef, DomainError> {
-        self.current_owner(extension)?;
+        let namespace = self.current_owner(extension)?;
         if value.is_empty() || value.len() > MAX_SECRET_BYTES {
             return Err(DomainError::Invalid("invalid extension secret size".into()));
         }
         let reference = reference.unwrap_or_else(SecretRef::generate);
         let result = self
             .secrets
-            .set(&account(&self.project, extension, &reference), value);
-        self.changed(extension, &reference);
+            .set(&account(&self.project, &namespace, &reference), value);
+        self.changed(&namespace, &reference);
         result.map_err(|_| secret_failure())?;
         Ok(reference)
     }
@@ -81,9 +81,9 @@ impl ExtensionSecrets {
     ) -> Result<bool, DomainError> {
         self.sql
             .read_generation(async {
-                self.current_owner(extension)?;
+                let namespace = self.current_owner(extension)?;
                 self.secrets
-                    .get(&account(&self.project, extension, reference))
+                    .get(&account(&self.project, &namespace, reference))
                     .map(|value| value.is_some())
                     .map_err(|_| secret_failure())
             })
@@ -93,43 +93,52 @@ impl ExtensionSecrets {
     /// Explicit human revocation remains available after disable/uninstall.
     pub fn revoke(&self, extension: &str, reference: &SecretRef) -> Result<(), DomainError> {
         valid_owner(extension)?;
+        // One no longer here is revoked under the namespace its name makes.
+        let namespace = crate::extension::extensions::owner(
+            self.catalog.live_snapshot(&self.root).extensions(),
+            extension,
+        )
+        .map_or_else(
+            || oxplow_domain::contribution::extension_namespace(extension),
+            |ext| ext.namespace.clone(),
+        );
         let result = self
             .secrets
-            .delete(&account(&self.project, extension, reference));
-        self.changed(extension, reference);
+            .delete(&account(&self.project, &namespace, reference));
+        self.changed(&namespace, reference);
         result.map_err(|_| secret_failure())
     }
 
     /// Process authority captures this revision at admission. Rotation and
     /// revocation invalidate it synchronously, even if settings RPC is dropped.
-    pub(crate) fn watch(&self, extension: &str, reference: &SecretRef) -> Arc<AtomicU64> {
+    /// Keyed by the namespace the secret is stored under.
+    pub(crate) fn watch(&self, namespace: &str, reference: &SecretRef) -> Arc<AtomicU64> {
         self.revisions
             .lock()
-            .entry((extension.to_owned(), reference.id().to_owned()))
+            .entry((namespace.to_owned(), reference.id().to_owned()))
             .or_default()
             .clone()
     }
 
-    fn changed(&self, extension: &str, reference: &SecretRef) {
+    fn changed(&self, namespace: &str, reference: &SecretRef) {
         if let Some(revision) = self
             .revisions
             .lock()
-            .get(&(extension.to_owned(), reference.id().to_owned()))
+            .get(&(namespace.to_owned(), reference.id().to_owned()))
         {
             revision.fetch_add(1, Ordering::AcqRel);
         }
     }
 
-    fn current_owner(&self, extension: &str) -> Result<(), DomainError> {
+    /// `extension`, enabled here: the namespace its secrets are stored
+    /// under.
+    fn current_owner(&self, extension: &str) -> Result<String, DomainError> {
         valid_owner(extension)?;
         let snapshot = self.catalog.live_snapshot(&self.root);
-        let current = crate::extension::extensions::owner(snapshot.extensions(), extension);
-        if !current.is_some_and(|ext| ext.enabled) {
-            return Err(DomainError::Invalid(
-                "extension secret owner is unavailable".into(),
-            ));
-        }
-        Ok(())
+        crate::extension::extensions::owner(snapshot.extensions(), extension)
+            .filter(|ext| ext.enabled)
+            .map(|ext| ext.namespace.clone())
+            .ok_or_else(|| DomainError::Invalid("extension secret owner is unavailable".into()))
     }
 }
 
@@ -150,8 +159,10 @@ fn secret_failure() -> DomainError {
 
 /// Trusted transport use only, after current owner and exact approval checks.
 /// The caller supplies the primary project's identity, never a wire namespace.
-pub(crate) fn account(project: &str, extension: &str, reference: &SecretRef) -> String {
-    format!("extension-secret:{project}:{extension}:{}", reference.id())
+/// Stored under the extension's namespace, so a secret outlives a move
+/// between siblings there.
+pub(crate) fn account(project: &str, namespace: &str, reference: &SecretRef) -> String {
+    format!("extension-secret:{project}:{namespace}:{}", reference.id())
 }
 
 #[cfg(test)]

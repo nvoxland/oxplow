@@ -25,8 +25,8 @@ fn every_valid_case_parses_to_its_parts_and_its_canonical_form() {
         let text = case["text"].as_str().unwrap();
         let uri = OxplowUri::parse(text).unwrap_or_else(|e| panic!("{text}: {e}"));
         assert_eq!(
-            uri.resource().extension(),
-            case["resource"]["extension"],
+            uri.resource().namespace(),
+            case["resource"]["namespace"],
             "{text}"
         );
         assert_eq!(uri.resource().name(), case["resource"]["name"], "{text}");

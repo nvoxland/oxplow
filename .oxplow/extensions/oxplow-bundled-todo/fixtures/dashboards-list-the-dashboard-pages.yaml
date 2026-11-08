@@ -8,7 +8,7 @@ given:
   - command: oxplow.extension.new_dashboard
     input: { title: Build health }
     confirmed: true
-when: { page: oxplow-bundled-todo/dashboards }
+when: { page: oxplow/dashboards }
 expect:
   loaders:
     dashboards:

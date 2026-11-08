@@ -1,18 +1,18 @@
 title: "Contribution health"
 description: "The extension providers and collectors that are failing or disabled, and the repair work item of one."
 params:
-- name: extension
+- name: namespace
   default: ""
 - name: contribution
   default: ""
 answers:
 - {"question":"Which extension providers or collectors are failing or disabled, and why?","params":{},"skill":"oxplow-extension"}
-- {"question":"Which repair work item describes this disabled collector?","params":{"extension":"tracker","contribution":"issues"},"skill":"oxplow-extension"}
+- {"question":"Which repair work item describes this disabled collector?","params":{"namespace":"tracker","contribution":"issues"},"skill":"oxplow-extension"}
 loaders:
   unhealthy:
-    sql: "SELECT extension, contribution, kind, state, reason, last_error FROM v_contribution_health WHERE state <> 'ok'"
+    sql: "SELECT namespace, contribution, kind, state, reason, last_error FROM v_contribution_health WHERE state <> 'ok'"
   repair:
-    sql: "SELECT repair_item FROM v_contribution_health WHERE extension = :extension AND contribution = :contribution"
+    sql: "SELECT repair_item FROM v_contribution_health WHERE namespace = :namespace AND contribution = :contribution"
 view:
   stack:
   - { id: unhealthy, title: Failing or disabled, viz: table, from: unhealthy }

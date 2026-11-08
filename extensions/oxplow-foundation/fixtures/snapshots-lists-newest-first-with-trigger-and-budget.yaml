@@ -3,7 +3,7 @@
 given:
   - observe: { snapshot: { trigger: startup, elapsed_ms: 5, files: [{ path: a.txt, hash: h1 }, { path: b.txt, hash: h1 }, { path: c.txt, hash: h1 }] } }
   - observe: { snapshot: { trigger: quiet, elapsed_ms: 900, budget_ms: 500, files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h1 }, { path: c.txt, hash: h1 }, { path: d.txt, hash: h2 }] } }
-when: { page: oxplow-foundation/snapshots, params: { limit: 5 } }
+when: { page: oxplow/snapshots, params: { limit: 5 } }
 expect:
   loaders:
     snapshots:

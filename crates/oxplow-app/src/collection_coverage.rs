@@ -21,6 +21,8 @@ use rusqlite::OptionalExtension;
 /// A collector that feeds a dataset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Feeder {
+    /// The namespace the collector is named in: its run row's and health's
+    /// owner.
     owner: String,
     id: String,
 }
@@ -40,12 +42,12 @@ impl Feeds {
                 for entity in &c.entities {
                     by_dataset
                         .entry(oxplow_config::collectors::entity_view_name(
-                            &ext.name,
+                            &ext.namespace,
                             &entity.name,
                         ))
                         .or_default()
                         .push(Feeder {
-                            owner: ext.name.clone(),
+                            owner: ext.namespace.clone(),
                             id: c.id.clone(),
                         });
                 }
@@ -107,7 +109,7 @@ fn status_of(
     let health: Option<(String, Option<String>, Option<String>)> = c
         .query_row(
             "SELECT state, reason, next_due_at FROM contribution_health
-              WHERE extension = ?1 AND contribution = ?2 AND kind = 'collector'",
+              WHERE namespace = ?1 AND contribution = ?2 AND kind = 'collector'",
             [&f.owner, &f.id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -158,7 +160,7 @@ mod tests {
 
     fn run(status: &str, error: Option<&str>) -> CollectorRun {
         CollectorRun {
-            owner: "my-gh".into(),
+            owner: "my_gh".into(),
             id: "gh".into(),
             status: status.into(),
             last_run_at: "2026-10-09T12:00:00.000000Z".into(),
@@ -184,7 +186,7 @@ mod tests {
         );
         assert_eq!(
             (coverage[0].source.as_str(), coverage[0].status.as_str()),
-            ("oxplow:oxplow/collector?collector=my-gh/gh", "never")
+            ("oxplow:oxplow/collector?collector=my_gh/gh", "never")
         );
         let store = oxplow_db::SqliteCollectorStore::new(fx.svc.db.clone());
         store

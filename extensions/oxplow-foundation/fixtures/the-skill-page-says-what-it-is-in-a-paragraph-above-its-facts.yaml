@@ -1,9 +1,9 @@
 # What a thing is, is a paragraph under the About heading, above its facts
 # (the node's `lead:`), not a "What it is" row and not a section of its own.
 when:
-  page: oxplow-foundation/skill
+  page: oxplow/skill
   params:
-    uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items"
+    uri: "oxplow:oxplow/skill?skill=oxplow/work-items"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }

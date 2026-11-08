@@ -9,33 +9,38 @@ import { isDefaultValue } from "../viz/vizModel.js";
 import { pickRenderer } from "./renderers.js";
 import { extPageUri, pageUri, type Params } from "../uri/uri.js";
 
-/** The namespace whose pages are core-named (`page=<slug>`):
- *  oxplow-foundation's, as its commands are. */
+/** The namespace whose pages are core-named (`page=<slug>`): everything
+ *  oxplow ships, as its commands are. */
 export const CORE_NAMESPACE = "oxplow";
 
-/** The page file a route names among the enabled extensions: oxplow's by
- *  its slug, any other's by `<extension>/<slug>`. `undefined` while the
- *  extensions load; null when none declares it. */
+/** The namespace a page file is named in: its id's first segment. */
+export function pageNamespace(page: Page): string {
+  return page.id.split("/")[0] ?? page.id;
+}
+
+/** The page file a route names among the enabled extensions: by its id,
+ *  `<namespace>/<slug>`, a core-named one's namespace `oxplow`. Several
+ *  extensions share `oxplow`; the server refuses an id two of them
+ *  declare, so an id names one page. `undefined` while the extensions
+ *  load; null when none declares it. */
 export function pageFileOf(extensions: Extension[] | null, route: PagePayload): Page | null | undefined {
   if (extensions === null) return undefined;
-  // Two extensions share the core namespace (oxplow-foundation and
-  // oxplow-bundled); the server refuses a core slug both declare
-  // (`refuse_shared_core_pages`), so a core slug names one page.
+  const id = `${route.namespace ?? CORE_NAMESPACE}/${route.page}`;
   for (const e of extensions) {
     if (!e.enabled) continue;
-    const core = e.namespace === CORE_NAMESPACE;
-    if (route.extension === null ? !core : core || e.name !== route.extension) continue;
-    const page = (e.pageFiles ?? []).find((p) => p.slug === route.page);
+    const page = (e.pageFiles ?? []).find((p) => p.id === id);
     if (page) return page;
   }
   return null;
 }
 
 /** The route a page file opens at (`page=<slug>` for oxplow's, else
- *  `page=<extension>/<slug>`), with its `?` params and `#` view. */
-export function pageFileUri(extensions: readonly Extension[], page: Page, params: Params = {}, view: Params = {}): string {
-  const core = extensions.find((e) => e.name === page.extension)?.namespace === CORE_NAMESPACE;
-  return core ? pageUri(page.slug, params, view) : extPageUri(page.extension, page.slug, params, view);
+ *  `page=<namespace>/<slug>`), with its `?` params and `#` view. */
+export function pageFileUri(_extensions: readonly Extension[], page: Page, params: Params = {}, view: Params = {}): string {
+  const namespace = pageNamespace(page);
+  return namespace === CORE_NAMESPACE
+    ? pageUri(page.slug, params, view)
+    : extPageUri(namespace, page.slug, params, view);
 }
 
 /** Every enabled extension's page files. */

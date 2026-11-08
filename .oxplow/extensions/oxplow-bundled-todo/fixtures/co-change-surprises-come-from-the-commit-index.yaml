@@ -20,7 +20,7 @@ given:
           - { path: src/e.rs, additions: 1 }
           - { path: src/f.rs, additions: 1 }
 when:
-  sql: SELECT path, reason, expected, dormant_days >= 90 AS long_dormant FROM v_oxplow_bundled_change_co_change ORDER BY path
+  sql: SELECT path, reason, expected, dormant_days >= 90 AS long_dormant FROM v_oxplow_change_co_change ORDER BY path
 expect:
   rows:
     - { path: src/a.rs, reason: usual-co-changers-absent, expected: src/b.rs }

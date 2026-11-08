@@ -52,6 +52,6 @@ view:
         source:
         - worktree
     choices:
-      existing_branch: oxplow-foundation/new-stream#new_stream_branches
-      start_point: oxplow-foundation/new-stream#new_stream_branches
-      worktree: oxplow-foundation/new-stream#new_stream_worktrees
+      existing_branch: oxplow/new-stream#new_stream_branches
+      start_point: oxplow/new-stream#new_stream_branches
+      worktree: oxplow/new-stream#new_stream_worktrees

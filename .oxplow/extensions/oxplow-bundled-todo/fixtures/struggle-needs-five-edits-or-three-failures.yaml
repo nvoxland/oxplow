@@ -11,6 +11,6 @@ given:
           - { name: Edit, kind: edit, paths: [a.rs], ok: true }
           - { name: Bash, kind: shell, ok: false }
           - { name: Bash, kind: shell, ok: false }
-when: { sql: "SELECT kind, subject, count FROM v_oxplow_bundled_struggle" }
+when: { sql: "SELECT kind, subject, count FROM v_oxplow_struggle" }
 expect:
   rows: 0

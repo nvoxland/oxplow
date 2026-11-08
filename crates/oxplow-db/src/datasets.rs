@@ -1794,6 +1794,9 @@ fn test_sql(
 #[derive(Debug, Clone)]
 pub struct ExtensionDatasets {
     pub extension: String,
+    /// Its manifest's `namespace:`, which names its datasets
+    /// (`v_<namespace>_<name>`): extensions sharing one share its names.
+    pub namespace: String,
     pub sources: Vec<DatasetSource>,
     /// The extension's effective configuration (`defaults < project <
     /// personal`) that its datasets' `config('/pointer')` reads are compiled
@@ -1805,13 +1808,31 @@ pub struct ExtensionDatasets {
 pub type ExtensionDatasetErrors = BTreeMap<String, Vec<String>>;
 
 /// The view an extension's dataset (or entity) publishes:
-/// `v_<extension>_<name>`, dashes as underscores.
-pub fn extension_view(extension: &str, name: &str) -> String {
+/// `v_<namespace>_<name>`, dashes as underscores. The namespace is the
+/// manifest's `namespace:`, not the extension's name, so a dataset keeps
+/// its name whichever extension in the namespace declares it.
+pub fn extension_view(namespace: &str, name: &str) -> String {
     format!(
         "v_{}_{}",
-        oxplow_domain::contribution::extension_namespace(extension),
+        oxplow_domain::contribution::extension_namespace(namespace),
         name
     )
+}
+
+/// The view a `ref()` (or a relationship's target) names, read from a
+/// dataset in `namespace`: `<namespace>/<name>` is that namespace's
+/// dataset, a bare name its own namespace's, else core's.
+fn ref_target(
+    namespace: &str,
+    target: &str,
+    owners: &HashMap<String, String>,
+    core: &HashMap<String, String>,
+) -> Option<String> {
+    let known = |v: String| owners.contains_key(&v).then_some(v);
+    match target.split_once('/') {
+        Some((ns, name)) => known(extension_view(ns, name)),
+        None => known(extension_view(namespace, target)).or_else(|| core.get(target).cloned()),
+    }
 }
 
 /// Compile every enabled extension's datasets in one pass (P4.9), after the
@@ -1896,8 +1917,10 @@ pub fn replace_extensions(
 pub struct EntityStub {
     /// The extension that declares it.
     pub owner: String,
+    /// Its namespace, which names its table and view.
+    pub namespace: String,
     pub name: String,
-    /// `v_<owner>_<entity>`.
+    /// `v_<namespace>_<entity>`.
     pub view: String,
     pub columns: Vec<(String, crate::collector_store::StoredType)>,
 }
@@ -1949,7 +1972,7 @@ fn pass(
     let today = today();
     let mut ready = Vec::with_capacity(extensions.len());
     for e in extensions {
-        let view_of = |name: &str| extension_view(&e.extension, name);
+        let view_of = |name: &str| extension_view(&e.namespace, name);
         let mut sources = Vec::with_capacity(e.sources.len());
         for s in &e.sources {
             match fill_twin(tx, s, &view_of, &today)? {
@@ -1959,6 +1982,7 @@ fn pass(
         }
         ready.push(ExtensionDatasets {
             extension: e.extension.clone(),
+            namespace: e.namespace.clone(),
             sources,
             config: e.config.clone(),
         });
@@ -1978,16 +2002,22 @@ fn pass(
             .map_err(map_sql_err)?;
         rows
     };
-    let mut known: HashMap<(String, String), String> = registered
+    // Every view a ref() can name, with its owner. A view is
+    // `v_<namespace>_<name>`, so a ref computes it (`ref_target`).
+    let mut owners: HashMap<String, String> = registered
         .iter()
-        .map(|(o, n, v)| ((o.clone(), n.clone()), v.clone()))
+        .map(|(o, _, v)| (v.clone(), o.clone()))
+        .collect();
+    let core: HashMap<String, String> = registered
+        .iter()
+        .filter(|(o, _, _)| o == CORE)
+        .map(|(_, n, v)| (n.clone(), v.clone()))
         .collect();
     let existing: BTreeSet<String> = registered.into_iter().map(|(_, _, v)| v).collect();
     // What a check created, for its queries to recreate.
     let mut views: Vec<TempView> = Vec::new();
     for stub in stubs.iter().filter(|_| mode == Pass::Check) {
-        let key = (stub.owner.clone(), stub.name.clone());
-        if known.contains_key(&key) {
+        if owners.contains_key(&stub.view) {
             continue; // it has synced: its view is real
         }
         // Here, a typed empty table under the view, as a synced entity has
@@ -1995,7 +2025,7 @@ fn pass(
         // check's queries, which only read its columns, an empty SELECT.
         let table = format!(
             "ext__{}__{}",
-            oxplow_domain::contribution::extension_namespace(&stub.owner),
+            oxplow_domain::contribution::extension_namespace(&stub.namespace),
             oxplow_domain::contribution::extension_namespace(&stub.name)
         );
         let typed: Vec<String> = stub
@@ -2022,19 +2052,13 @@ fn pass(
             name: stub.view.clone(),
             sql: format!("SELECT {} WHERE 0", empty.join(", ")),
         });
-        known.insert(key, stub.view.clone());
+        owners.insert(stub.view.clone(), stub.owner.clone());
     }
     let mut declared: BTreeMap<String, String> = BTreeMap::new();
     for e in extensions {
         for src in &e.sources {
-            let view = extension_view(&e.extension, &src.decl.name);
-            let owner_of = |v: &str| {
-                known
-                    .iter()
-                    .find(|(_, view)| view.as_str() == v)
-                    .map(|((o, _), _)| o.clone())
-            };
-            if let Some(owner) = owner_of(&view) {
+            let view = extension_view(&e.namespace, &src.decl.name);
+            if let Some(owner) = owners.get(&view) {
                 push(
                     &mut errors,
                     &e.extension,
@@ -2050,9 +2074,9 @@ fn pass(
             declared.insert(view.clone(), e.extension.clone());
         }
         for src in &e.sources {
-            known
-                .entry((e.extension.clone(), src.decl.name.clone()))
-                .or_insert_with(|| extension_view(&e.extension, &src.decl.name));
+            owners
+                .entry(extension_view(&e.namespace, &src.decl.name))
+                .or_insert_with(|| e.extension.clone());
         }
     }
     let tables = stored_tables(tx)?;
@@ -2060,19 +2084,13 @@ fn pass(
     for e in extensions {
         let own_prefix = format!(
             "ext__{}__",
-            oxplow_domain::contribution::extension_namespace(&e.extension)
+            oxplow_domain::contribution::extension_namespace(&e.namespace)
         );
-        let ref_view = |target: &str| match target.split_once('/') {
-            Some((ext, name)) => known.get(&(ext.to_string(), name.to_string())).cloned(),
-            None => known
-                .get(&(e.extension.clone(), target.to_string()))
-                .or_else(|| known.get(&(CORE.to_string(), target.to_string())))
-                .cloned(),
-        };
+        let ref_view = |target: &str| ref_target(&e.namespace, target, &owners, &core);
         let source_ok = |table: &str| {
             if !table.starts_with(&own_prefix) {
                 Err(format!(
-                    "is not this extension's: an extension dataset reads only its own extension's tables \
+                    "is not this extension's: an extension dataset reads only its own namespace's tables \
                      (`{own_prefix}*`); read oxplow's data through ref()"
                 ))
             } else if !tables.contains(table) {
@@ -2082,7 +2100,7 @@ fn pass(
             }
         };
         for src in &e.sources {
-            let view = extension_view(&e.extension, &src.decl.name);
+            let view = extension_view(&e.namespace, &src.decl.name);
             if declared.get(&view) != Some(&e.extension) || existing.contains(&view) {
                 continue; // reported above
             }
@@ -2169,20 +2187,19 @@ fn pass(
     // Relationships, once everything that published has: a target is
     // named the way a ref() names it. A bad one is the extension's error;
     // the dataset stays published.
+    let namespace_of: HashMap<&str, &str> = extensions
+        .iter()
+        .map(|e| (e.extension.as_str(), e.namespace.as_str()))
+        .collect();
     for (ext, src) in &published {
-        let target = |name: &str| match name.split_once('/') {
-            Some((other, n)) => known.get(&(other.to_string(), n.to_string())).cloned(),
-            None => known
-                .get(&(ext.clone(), name.to_string()))
-                .or_else(|| known.get(&(CORE.to_string(), name.to_string())))
-                .cloned(),
-        };
+        let ns = namespace_of.get(ext.as_str()).copied().unwrap_or_default();
+        let target = |name: &str| ref_target(ns, name, &owners, &core);
         let (json, problems) = relationships_json(tx, &src.decl, &target);
         for p in problems {
             push(&mut errors, ext, format!("{}: {p}", src.file));
         }
         if let (Some(json), Pass::Publish) = (json, mode) {
-            record_relationships(tx, &extension_view(ext, &src.decl.name), &json)?;
+            record_relationships(tx, &extension_view(ns, &src.decl.name), &json)?;
         }
     }
     // Declared tests, on what published: a failure is the extension's
@@ -2198,17 +2215,14 @@ fn pass(
             continue;
         }
         let view_of = |name: &str| {
-            known
-                .get(&(e.extension.clone(), name.to_string()))
-                .or_else(|| known.get(&(CORE.to_string(), name.to_string())))
-                .cloned()
-                .unwrap_or_else(|| extension_view(&e.extension, name))
+            ref_target(&e.namespace, name, &owners, &core)
+                .unwrap_or_else(|| extension_view(&e.namespace, name))
         };
         let file_of: HashMap<String, String> = mine
             .iter()
             .map(|src| {
                 (
-                    extension_view(&e.extension, &src.decl.name),
+                    extension_view(&e.namespace, &src.decl.name),
                     src.file.clone(),
                 )
             })
@@ -3009,8 +3023,17 @@ mod tests {
     }
 
     fn ext(extension: &str, datasets: Vec<DatasetSource>) -> ExtensionDatasets {
+        ext_in(
+            extension,
+            &oxplow_domain::contribution::extension_namespace(extension),
+            datasets,
+        )
+    }
+
+    fn ext_in(extension: &str, namespace: &str, datasets: Vec<DatasetSource>) -> ExtensionDatasets {
         ExtensionDatasets {
             extension: extension.into(),
+            namespace: namespace.into(),
             sources: datasets
                 .into_iter()
                 .map(|mut m| {
@@ -3226,9 +3249,73 @@ mod tests {
         assert!(!table_exists(&conn, "m_v_acme_busy"));
     }
 
+    /// A dataset is named by its extension's namespace, not its name:
+    /// extensions sharing one (everything oxplow ships is `oxplow`) publish
+    /// `v_<namespace>_<name>`, read each other's by bare name or as
+    /// `ref('<namespace>/<name>')`, and can't both declare one name.
+    #[test]
+    fn extensions_sharing_a_namespace_share_its_dataset_names() {
+        let mut conn = fresh();
+        let verdict = || {
+            source(
+                "verdict",
+                "SELECT uri, title FROM ref('work_item')",
+                &["uri TEXT", "title TEXT"],
+            )
+        };
+        let errors = publish(
+            &mut conn,
+            &[
+                ext_in("acme-reviews", "acme", vec![verdict()]),
+                ext_in(
+                    "acme-board",
+                    "acme",
+                    vec![
+                        source("board", "SELECT title FROM ref('verdict')", &["title TEXT"]),
+                        source(
+                            "board_count",
+                            "SELECT count(*) AS n FROM ref('acme/verdict')",
+                            &["n"],
+                        ),
+                    ],
+                ),
+                ext_in("acme-dupe", "acme", vec![verdict()]),
+            ],
+        )
+        .unwrap();
+        assert!(errors["acme-reviews"].is_empty(), "{errors:?}");
+        assert!(errors["acme-board"].is_empty(), "{errors:?}");
+        assert!(
+            errors["acme-dupe"].len() == 1
+                && errors["acme-dupe"][0]
+                    .contains("`v_acme_verdict` already belongs to `acme-reviews`"),
+            "{errors:?}"
+        );
+        assert_eq!(
+            published(&conn),
+            vec![
+                (
+                    "v_acme_board".into(),
+                    "acme-board".into(),
+                    "v_acme_verdict".into()
+                ),
+                (
+                    "v_acme_board_count".into(),
+                    "acme-board".into(),
+                    "v_acme_verdict".into()
+                ),
+                (
+                    "v_acme_verdict".into(),
+                    "acme-reviews".into(),
+                    "v_work_item".into()
+                ),
+            ]
+        );
+    }
+
     /// P4.9 (tsk494): an extension's dataset reads core datasets through
     /// `ref()`, its own by bare name and another extension's as
-    /// `ref('<ext>/<name>')`; each publishes `v_<ext>_<name>` in the
+    /// `ref('<namespace>/<name>')`; each publishes `v_<namespace>_<name>` in the
     /// registry. A recompile replaces the set.
     #[test]
     fn extension_datasets_publish_views_over_core_and_each_other() {
@@ -3351,7 +3438,7 @@ mod tests {
             raw.contains(".oxplow/extensions/raw/datasets/items.sql:2:3"),
             "{raw}"
         );
-        assert!(raw.contains("only its own extension's tables"), "{raw}");
+        assert!(raw.contains("only its own namespace's tables"), "{raw}");
         let shaky = errors["shaky"].join("\n");
         assert!(shaky.contains("datasets/bad.sql"), "{shaky}");
         assert!(

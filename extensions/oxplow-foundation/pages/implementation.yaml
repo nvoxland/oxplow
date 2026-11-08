@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Implementation
 answers:
-- {"question":"What does this implementation provide, and is it in use?","about":"oxplow/implementation","params":{"uri":"oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow"},"skill":"oxplow-extension"}
+- {"question":"What does this implementation provide, and is it in use?","about":"oxplow/implementation","params":{"uri":"oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |
@@ -22,7 +22,7 @@ loaders:
              CASE WHEN f.rel IS NOT NULL THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
                     || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
-                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+                    || 'oxplow.renderer=oxplow/file-viewer' END AS declared_target
       FROM f JOIN v_capability_provider i ON i.extension = f.extension AND i.capability || '.' || i.provider = f.local
   facts:
     sql: |

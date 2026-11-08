@@ -2,7 +2,7 @@
 # each an item with its explanation as the hover: [{ text, hint }]. An extension with
 # nothing wrong has no Problems line.
 when:
-  page: oxplow-foundation/extension
+  page: oxplow/extension
   params:
     uri: "oxplow:oxplow/extension?name=oxplow-foundation"
     name: oxplow-foundation

@@ -2199,22 +2199,25 @@ fn is_instance_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Validate `extensionInstances:`: keyed `<extension>/<instance id>` (the
+/// Validate `extensionInstances:`: keyed `<namespace>/<instance id>` (the
 /// id lowercase snake_case — a provider's own for its default instance),
 /// each config an object, `provider` (when given) a provider id.
 fn validate_extension_instances(
     raw: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
 ) -> Result<std::collections::BTreeMap<String, ExtensionInstanceConfig>, ConfigError> {
     for (key, instance) in &raw {
-        let Some((_, id)) = key.split_once('/').filter(|(ext, _)| !ext.is_empty()) else {
+        let Some((_, id)) = key
+            .split_once('/')
+            .filter(|(ns, _)| oxplow_domain::contribution::valid_namespace(ns))
+        else {
             return Err(ConfigError::Invalid(format!(
-                "extensionInstances: `{key}` must be `<extension>/<instance id>` (the id lowercase \
+                "extensionInstances: `{key}` must be `<namespace>/<instance id>` (the id lowercase \
                  snake_case: a provider's own, or another instance's with `provider: <id>`)"
             )));
         };
         if let Some(why) = oxplow_domain::capability::instance_id_problem(id) {
             return Err(ConfigError::Invalid(format!(
-                "extensionInstances: `{key}` must be `<extension>/<instance id>`, and the \
+                "extensionInstances: `{key}` must be `<namespace>/<instance id>`, and the \
                  instance id {why} (it is its refs' segment and its command namespace)"
             )));
         }
@@ -2519,14 +2522,11 @@ fn validate(raw: RawConfig, fallback_name: &str) -> Result<OxplowConfig, ConfigE
 }
 
 /// Validate `ai.roles`: known role names, non-empty provider and model.
-/// `<extension>/<profile>`: the shape only. Whether an active extension
+/// `<namespace>/<profile>`: the shape only. Whether an active extension
 /// declares it is known at run time, where an unknown one goes unused.
 fn is_ai_profile_name(role: &str) -> bool {
-    role.split_once('/').is_some_and(|(extension, profile)| {
-        !extension.is_empty()
-            && extension
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    role.split_once('/').is_some_and(|(namespace, profile)| {
+        oxplow_domain::contribution::valid_namespace(namespace)
             && profile.starts_with(|c: char| c.is_ascii_lowercase())
             && profile
                 .chars()
@@ -4127,18 +4127,18 @@ mod tests {
     /// default instance has the provider's id, and another one says which
     /// provider it is.
     #[test]
-    fn an_instance_key_is_an_extension_and_a_snake_case_instance_id() {
+    fn an_instance_key_is_a_namespace_and_a_snake_case_instance_id() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
         let config = parse(
-            "extensionInstances:\n  my-tracker/issues: { enabled: true }\n  my-tracker/issues_acme: { enabled: true, provider: issues }\n",
+            "extensionInstances:\n  my_tracker/issues: { enabled: true }\n  my_tracker/issues_acme: { enabled: true, provider: issues }\n",
         )
         .unwrap();
         assert_eq!(
-            config.extension_instances["my-tracker/issues"].provider,
+            config.extension_instances["my_tracker/issues"].provider,
             None
         );
         assert_eq!(
-            config.extension_instances["my-tracker/issues_acme"]
+            config.extension_instances["my_tracker/issues_acme"]
                 .provider
                 .as_deref(),
             Some("issues")
@@ -4159,13 +4159,15 @@ mod tests {
             "/issues",
             "tracker/a/b",
             "issues",
+            // An instance is named in its extension's namespace.
+            "acme-tools/issues",
         ] {
             let err = parse(&format!(
                 "extensionInstances:\n  \"{bad}\": {{ enabled: true }}\n"
             ))
             .unwrap_err()
             .to_string();
-            assert!(err.contains("<extension>/<instance id>"), "{bad}: {err}");
+            assert!(err.contains("<namespace>/<instance id>"), "{bad}: {err}");
         }
         let err = parse("extensionInstances:\n  tracker/acme: { provider: Lin-ear }\n")
             .unwrap_err()

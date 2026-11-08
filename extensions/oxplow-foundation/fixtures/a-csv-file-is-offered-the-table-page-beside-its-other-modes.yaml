@@ -8,8 +8,8 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/csv, default: false }
-      - { page: oxplow-foundation/editor, default: true }
+      - { page: oxplow/csv, default: false }
+      - { page: oxplow/editor, default: true }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -18,5 +18,5 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/csv }
-          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow/csv }
+          - { page: oxplow/file-viewer }

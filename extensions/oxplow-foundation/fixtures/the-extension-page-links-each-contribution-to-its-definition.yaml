@@ -1,16 +1,16 @@
 # The Extension page's tables open a contribution's definition, not its data: a command, collector,
 # metric, measure, dimension and resource kind each link with the renderer pinned.
-when: { page: oxplow-foundation/extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
+when: { page: oxplow/extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
 expect:
   loaders:
     commands:
       rows:
         contains:
-          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow-foundation/command" }
+          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow/command" }
     collectors:
       rows:
         contains:
-          - { link: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome#oxplow.renderer=oxplow-foundation/collector" }
+          - { link: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome#oxplow.renderer=oxplow/collector" }
     metrics:
       rows:
         contains:
@@ -18,12 +18,12 @@ expect:
     measures:
       rows:
         contains:
-          - { link: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow-foundation/measure" }
+          - { link: "oxplow:oxplow/measure?measure=oxplow.tokens#oxplow.renderer=oxplow/measure" }
     dimensions:
       rows:
         contains:
-          - { link: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow-foundation/dimension" }
+          - { link: "oxplow:oxplow/dimension?dimension=oxplow.language#oxplow.renderer=oxplow/dimension" }
     resources:
       rows:
         contains:
-          - { link: "oxplow:oxplow/resource?resource=oxplow-foundation/commit#oxplow.renderer=oxplow-foundation/resource" }
+          - { link: "oxplow:oxplow/resource?resource=oxplow/commit#oxplow.renderer=oxplow/resource" }

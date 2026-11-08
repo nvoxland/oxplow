@@ -10,8 +10,8 @@ test("a starred page is in the rail's Go To", async ({ page }) => {
   // Every open page has a nav bar; the visible one is Metrics'.
   await page.locator('[data-testid="page-nav-bookmark"]:visible').click();
   await page.locator('[data-testid="page-nav-bookmark-scope-thread"]:visible').click();
-  await expandRailSection(page, "ext:oxplow-bundled-todo/go-to");
-  const goTo = page.getByTestId("rail-section-ext:oxplow-bundled-todo/go-to");
+  await expandRailSection(page, "ext:oxplow/go-to");
+  const goTo = page.getByTestId("rail-section-ext:oxplow/go-to");
   await expect(goTo).toContainText("Bookmarks");
   await expect(goTo).toContainText("Metrics");
   await expect(goTo).toContainText("History");

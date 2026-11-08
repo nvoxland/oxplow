@@ -1,7 +1,7 @@
 # "See also": the Extension page links to Extensions and to Extension problems
 # narrowed to this extension (a view param, so in the `#`).
 when:
-  page: oxplow-foundation/extension
+  page: oxplow/extension
   params:
     uri: "oxplow:oxplow/extension?name=oxplow-foundation"
     name: oxplow-foundation

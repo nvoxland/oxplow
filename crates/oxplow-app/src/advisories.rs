@@ -147,7 +147,7 @@ impl AdvisoryRunner {
         let mut marks: Vec<(OnceScope, String)> = Vec::new();
         for ext in extensions.iter().filter(|e| e.enabled) {
             for a in ext.advisories.iter().filter(|a| a.on == on) {
-                let id = format!("{}/{}", ext.name, a.id);
+                let id = format!("{}/{}", ext.namespace, a.id);
                 let Ok(once) = scope.once_mark(&id, a.once_per) else {
                     continue;
                 };
@@ -462,6 +462,7 @@ mod tests {
                 .next()
                 .unwrap();
         e.name = "x".into();
+        e.namespace = "x".into();
         e.advisories = advisories;
         e
     }

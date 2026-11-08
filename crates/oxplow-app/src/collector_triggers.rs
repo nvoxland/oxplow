@@ -120,7 +120,8 @@ impl CollectorTriggers {
                 ext.collectors
                     .iter()
                     .filter(|c| c.facts.is_empty() && matches!(c.trigger, Trigger::On { .. }))
-                    .map(|c| (ext.name.clone(), c.clone()))
+                    // Its owner is the namespace it is named in.
+                    .map(|c| (ext.namespace.clone(), c.clone()))
             })
             .collect()
     }
@@ -134,7 +135,7 @@ impl CollectorTriggers {
         );
         let place = |owner: &str, id: &str| {
             load.iter()
-                .find(|e| e.name == owner)
+                .find(|e| e.namespace == owner && e.collectors.iter().any(|c| c.id == id))
                 .map(|e| placement(e, ContributionKind::Collector, id))
                 .unwrap_or_default()
         };
@@ -751,7 +752,7 @@ mod tests {
                 oxplow_domain::Actor::Human,
                 oxplow_domain::run::Mode::External,
             ),
-            "acme-pr",
+            "acme_pr",
             id,
             collector_runner::RunTrigger::Manual,
         )
@@ -774,7 +775,7 @@ mod tests {
             &prs(""),
             &[(
                 "prs.star",
-                &prs_script("[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 12}, \"subject\": [\"oxplow:oxplow/collector?collector=acme-pr/prs\"]}]"),
+                &prs_script("[{\"type\": \"acme_pr.merged\", \"payload\": {\"number\": 12}, \"subject\": [\"oxplow:oxplow/collector?collector=acme_pr/prs\"]}]"),
             )],
         ).await;
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -791,14 +792,14 @@ mod tests {
                 "SELECT source, cause, json_extract(payload, '$.number'), v FROM v_event WHERE type = 'acme_pr.merged'"
             )
             .await,
-            json!([["oxplow:oxplow/collector?collector=acme-pr/prs", synced[0][0], 12, 1]])
+            json!([["oxplow:oxplow/collector?collector=acme_pr/prs", synced[0][0], 12, 1]])
         );
         // What a preview (and `oxplow extension test`) shows: the events it
         // would emit, stored nowhere.
         let root = svc.layout.project_dir.clone();
         let preview = collector_runner::preview_collector(
             &Collectors::of(svc, &root),
-            "acme-pr",
+            "acme_pr",
             "prs",
             None,
             None,
@@ -807,7 +808,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             serde_json::to_value(&preview.events).unwrap(),
-            json!([{ "type": "acme_pr.merged", "v": 1, "payload": { "number": 12 }, "subject": ["oxplow:oxplow/collector?collector=acme-pr/prs"] }])
+            json!([{ "type": "acme_pr.merged", "v": 1, "payload": { "number": 12 }, "subject": ["oxplow:oxplow/collector?collector=acme_pr/prs"] }])
         );
         assert_eq!(
             rows(

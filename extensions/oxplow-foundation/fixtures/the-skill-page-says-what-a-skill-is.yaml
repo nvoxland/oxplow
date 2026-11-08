@@ -1,5 +1,5 @@
 # A skill page names the skill, what it teaches and whether it is a skill or a slash command.
-when: { page: oxplow-foundation/skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items" } }
+when: { page: oxplow/skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/work-items" } }
 expect:
   label: work-items
   loaders:

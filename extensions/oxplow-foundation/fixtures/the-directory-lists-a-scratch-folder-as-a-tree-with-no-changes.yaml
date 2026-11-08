@@ -7,7 +7,7 @@ given:
   - observe: { turn: { prompt: top, write: { path: top.txt, body: "x\n" } } }
   - observe: { analyze: { kind: working } }
 when:
-  page: oxplow-foundation/directory
+  page: oxplow/directory
   params: { stream_id: 1, path: "", filesystem: "oxplow:temp", scope: uncommitted, compare: main }
 expect:
   loaders:

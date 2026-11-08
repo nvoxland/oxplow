@@ -70,7 +70,7 @@ pub struct IntentFile {
 pub struct Mount {
     /// The page it places: a slug of this extension.
     pub page: String,
-    /// Where: a page's slot (`oxplow-foundation/commit.sections`) or a
+    /// Where: a page's slot (`oxplow/commit.sections`) or a
     /// replaceable core component (`work_item.board`).
     pub at: String,
     /// At a parts slot: where among the page's parts — `start`, `end`,
@@ -189,7 +189,7 @@ pub struct ManifestV2 {
 
     // ---- kinds ----
     /// Datasets: each with its SQL in `datasets/<name>.sql`, published as
-    /// `v_<extension>_<name>`.
+    /// `v_<namespace>_<name>`, named by `namespace:`.
     #[serde(default)]
     #[schemars(with = "Option<Vec<oxplow_db::datasets::DatasetDecl>>")]
     pub datasets: Option<Value>,
@@ -236,7 +236,7 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Vec<super::AdvisoryFile>")]
     pub advisories: Vec<Value>,
-    /// The event types it may log, under its own namespace.
+    /// The event types it may log, under its `namespace:`.
     #[serde(default)]
     #[schemars(with = "Option<crate::extension::extension_event_types::EventTypesFile>")]
     pub event_types: Option<Value>,

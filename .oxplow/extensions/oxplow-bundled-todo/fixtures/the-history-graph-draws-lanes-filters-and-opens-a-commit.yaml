@@ -6,7 +6,7 @@ given:
   - observe: { commit: { sha: s1, at: "2026-01-02T00:00:00Z", subject: Side work, parents: [m1], files: [{ path: side.txt }] } }
   - observe: { commit: { sha: m2, at: "2026-01-03T00:00:00Z", subject: Main again, parents: [m1], files: [{ path: main.txt }] } }
   - observe: { commit: { sha: mg, at: "2026-01-04T00:00:00Z", subject: Merge side, parents: [m2, s1], files: [] } }
-when: { page: oxplow-foundation/git-history, params: { stream_id: 1, head_sha: mg } }
+when: { page: oxplow/git-history, params: { stream_id: 1, head_sha: mg } }
 steps:
   - ui:
       - expect: { count: { ".row": 4 }, text: { ".row": { contains: "Merge side" } } }

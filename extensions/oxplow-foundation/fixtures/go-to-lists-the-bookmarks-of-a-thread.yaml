@@ -7,7 +7,7 @@ given:
   - observe: { visit: { page: "oxplow:oxplow/file?path=DEV.md", kind: file, label: DEV.md, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/page?page=settings", kind: settings, label: Settings, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/agent_session?id=ses1", kind: agent_session, label: Claude, thread: thr1 } }
-when: { page: oxplow-foundation/go-to, params: { thread_id: 1 } }
+when: { page: oxplow/go-to, params: { thread_id: 1 } }
 expect:
   loaders:
     bookmarks:

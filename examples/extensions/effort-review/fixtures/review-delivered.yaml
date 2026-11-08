@@ -12,7 +12,7 @@ when:
 expect:
   state: succeeded
   effects:
-    - { id: effort-review/publish-review, state: skipped }
+    - { id: effort_review/publish-review, state: skipped }
   commands: []
 model:
   replies: ["Tests pass; nothing measured."]

@@ -602,10 +602,10 @@ impl CollectorOracle {
     }
 
     /// `role` as the collector's own extension means it: a built-in, or
-    /// the bare name of one of its AI profiles.
+    /// the bare name of one of its AI profiles, named in its namespace.
     fn role(&self, role: &str) -> Result<Role, String> {
-        match self.run.extension() {
-            Some(extension) => Role::parse_in(extension, role),
+        match self.run.namespace() {
+            Some(namespace) => Role::parse_in(namespace, role),
             None => Role::parse(role),
         }
     }

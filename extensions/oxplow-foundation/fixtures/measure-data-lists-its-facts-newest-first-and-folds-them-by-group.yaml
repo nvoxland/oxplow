@@ -3,7 +3,7 @@
 given:
   - observe: { facts: { measure: oxplow.tokens, items: [{ value: 10, path: a.rs, dims: { oxplow.language: rust } }, { value: 5, path: b.rs, dims: { oxplow.language: rust } }, { value: 7, path: a.rs, dims: { oxplow.language: ts } }] } }
 when:
-  page: oxplow-foundation/measure-data
+  page: oxplow/measure-data
   params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" }
 expect:
   label: Agent tokens data

@@ -9,16 +9,16 @@ const page = (id: string, more: Partial<Page> = {}): Page =>
 const r = (name: string, over: Partial<Renderer> = {}): Renderer => ({ page: name, title: name, default: false, ...over });
 
 describe("pickRenderer", () => {
-  const offered = [r("oxplow-foundation/editor", { default: true }), r("oxplow-foundation/file-viewer"), r("acme/blame")];
+  const offered = [r("oxplow/editor", { default: true }), r("oxplow/file-viewer"), r("acme/blame")];
 
   test("the view's renderer, else the default, else the first, else none", () => {
-    expect(pickRenderer(offered, {})?.page).toBe("oxplow-foundation/editor");
+    expect(pickRenderer(offered, {})?.page).toBe("oxplow/editor");
     expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: "acme/blame" })?.page).toBe("acme/blame");
     // A renderer the view names that the daemon doesn't offer for this URI is ignored.
-    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: "acme/pr" })?.page).toBe("oxplow-foundation/editor");
-    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: 7 })?.page).toBe("oxplow-foundation/editor");
+    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: "acme/pr" })?.page).toBe("oxplow/editor");
+    expect(pickRenderer(offered, { [RENDERER_VIEW_KEY]: 7 })?.page).toBe("oxplow/editor");
     // No default among them: the first, as the daemon lists them.
-    expect(pickRenderer(offered.slice(1), {})?.page).toBe("oxplow-foundation/file-viewer");
+    expect(pickRenderer(offered.slice(1), {})?.page).toBe("oxplow/file-viewer");
     expect(pickRenderer([], {})).toBeNull();
     expect(pickRenderer([], { [RENDERER_VIEW_KEY]: "acme/blame" })).toBeNull();
   });

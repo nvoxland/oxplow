@@ -3,11 +3,11 @@
 given:
   - observe: { turn: { prompt: Review the page migration } }
 when:
-  page: oxplow-foundation/new-session
+  page: oxplow/new-session
   params: { stream_id: 1, thread_id: 1 }
 expect:
   nodes:
     - { id: start }
-    - { id: session-history.thread-history }
+    - { id: session_history.thread-history }
   loaders:
-    session-history.thread-history/thread_history: { rows: [{ prompt: Review the page migration }] }
+    session_history.thread-history/thread_history: { rows: [{ prompt: Review the page migration }] }

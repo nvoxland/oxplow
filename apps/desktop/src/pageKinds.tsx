@@ -107,9 +107,9 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
 /** The page file a page kind names (`tasks`, `gh/open-prs`). */
 function declaredPageOf(extensions: Extension[] | null, kind: string): { icon: string | null; title: string } | null {
   if (!extensions) return null;
-  // A page kind is the page's id, `<extension>/` first for any but oxplow's.
+  // A page kind is the page's id, `<namespace>/` first for any but oxplow's.
   const slash = kind.indexOf("/");
-  const route = slash === -1 ? { extension: null, page: kind, params: {} } : { extension: kind.slice(0, slash), page: kind.slice(slash + 1), params: {} };
+  const route = slash === -1 ? { namespace: null, page: kind, params: {} } : { namespace: kind.slice(0, slash), page: kind.slice(slash + 1), params: {} };
   return pageFileOf(extensions, route) ?? null;
 }
 

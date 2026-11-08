@@ -1,7 +1,7 @@
 # An action that opens a URI runs no command: Definition's Actions table
 # says which column it opens in the Command column.
 when:
-  page: oxplow-foundation/definition
+  page: oxplow/definition
   params:
     uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/file-viewer.yaml&filesystem=oxplow:extensions"
     path: oxplow-foundation/pages/file-viewer.yaml

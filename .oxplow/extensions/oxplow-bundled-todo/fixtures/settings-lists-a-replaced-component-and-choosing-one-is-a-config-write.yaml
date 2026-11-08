@@ -1,7 +1,7 @@
 # Settings → Integrations: a replaced component has the default, oxplow's own,
 # and each extension replacing it; choosing writes `replacements`. The history
 # graph is the replacement this extension ships.
-when: { page: oxplow-foundation/settings, params: { area: integrations } }
+when: { page: oxplow/settings, params: { area: integrations } }
 expect:
   loaders:
     replacements:

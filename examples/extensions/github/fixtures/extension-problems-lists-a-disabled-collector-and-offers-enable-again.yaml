@@ -1,8 +1,8 @@
 # Extension problems: a collector turned off after failures says why, under
 # its extension, and offers Enable Again.
 given:
-  - observe: { health: { extension: github, contribution: prs, kind: collector, disable: "3 failures in a row; the last: boom" } }
-when: { page: oxplow-foundation/extension-problems, params: { extension: github } }
+  - observe: { health: { namespace: github, contribution: prs, kind: collector, disable: "3 failures in a row; the last: boom" } }
+when: { page: oxplow/extension-problems, params: { extension: github } }
 expect:
   loaders:
     problems:

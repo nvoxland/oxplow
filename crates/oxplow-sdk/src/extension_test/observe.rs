@@ -22,7 +22,7 @@ use super::*;
 ///   the definitions the index read from a file at a snapshot of it.
 /// - `run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls?, error? }`:
 ///   a finished run of an extension's code, as the host records it.
-/// - `health: { extension, contribution, kind?, disable }`: a contribution
+/// - `health: { namespace, contribution, kind?, disable }`: a contribution
 ///   disabled after failures, with the reason.
 /// - `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
 ///   output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?, turn? }`:
@@ -456,7 +456,8 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
     };
     let mut run = RunContext::contribution(
         ContributionRef {
-            id: ContributionId::new(extension, kind, local),
+            id: ContributionId::new(&host.namespace_of(extension), kind, local),
+            extension: extension.to_string(),
             version: None,
             generation: None,
             deployment: None,
@@ -484,13 +485,13 @@ pub(super) async fn observe_run(host: &Host, body: &Value) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
-/// `health: { extension, contribution, kind?, disable }`: the contribution
+/// `health: { namespace, contribution, kind?, disable }`: the contribution
 /// disabled after failures, with `disable` as the reason
 /// (`contribution_health_store::disable_tx`).
 pub(super) async fn observe_health(host: &Host, body: &Value) -> Result<(), String> {
     let text = |k: &str| body.get(k).and_then(Value::as_str);
     let key = oxplow_db::ContributionKey {
-        extension: text("extension").ok_or("`health.extension`")?.to_string(),
+        namespace: text("namespace").ok_or("`health.namespace`")?.to_string(),
         contribution: text("contribution")
             .ok_or("`health.contribution`")?
             .to_string(),

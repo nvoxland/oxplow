@@ -133,7 +133,7 @@ describe("history", () => {
 // view names (`#oxplow.renderer`), absent being its own mode (the default).
 describe("display modes: one tab per identity and mode", () => {
   const file = fileUri("a.ts");
-  const asDefinition = withUriView(file, { "oxplow.renderer": "oxplow-foundation/definition" });
+  const asDefinition = withUriView(file, { "oxplow.renderer": "oxplow/definition" });
   const asBlame = withUriView(file, { "oxplow.renderer": "acme/blame" });
   const f = { id: file } as Entry["ref"];
   const def = { id: asDefinition } as Entry["ref"];
@@ -141,7 +141,7 @@ describe("display modes: one tab per identity and mode", () => {
 
   test("modeOf is the renderer the view names, or nothing", () => {
     expect(modeOf(file)).toBe("");
-    expect(modeOf(asDefinition)).toBe("oxplow-foundation/definition");
+    expect(modeOf(asDefinition)).toBe("oxplow/definition");
     expect(modeOf(withUriView(file, { lines: "3-4" }))).toBe("");
     expect(modeOf("not a uri")).toBe("");
   });
@@ -159,7 +159,7 @@ describe("display modes: one tab per identity and mode", () => {
 
   test("a tab showing the file in another view of the same mode is still the one refreshed", () => {
     let s = open(emptySession(), e(def));
-    s = open(s, e({ id: withUriView(file, { "oxplow.renderer": "oxplow-foundation/definition", params: "{}" }) }));
+    s = open(s, e({ id: withUriView(file, { "oxplow.renderer": "oxplow/definition", params: "{}" }) }));
     expect(s.tabs).toHaveLength(1);
   });
 
@@ -208,7 +208,7 @@ describe("display modes: one tab per identity and mode", () => {
     let s = open(emptySession(), e(f));
     const slot = s.active!;
     s = navigate(s, slot, e(def));
-    expect(bodies(s.tabs[0]!).map((b) => b.key)).toEqual([`${slot}/${file}`, `${slot}/${file}\noxplow-foundation/definition`]);
+    expect(bodies(s.tabs[0]!).map((b) => b.key)).toEqual([`${slot}/${file}`, `${slot}/${file}\noxplow/definition`]);
   });
 });
 

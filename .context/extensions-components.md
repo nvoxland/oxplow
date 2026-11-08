@@ -173,12 +173,12 @@ read` (`querySql`). Load checks, each at its line: the id, a duplicate,
 symlink anywhere in it (`stat_bundle`; a bundle has no size limit, see
 Deploy) and each command a command name. A page that names a component
 its extension does not declare is refused (`component_problem`: "`x`
-isn't one of this extension's `custom_components`"; `<extension>/<id>` for
+isn't one of this extension's `custom_components`"; `<namespace>/<id>` for
 another extension's component is that extension's to have). A `viz:
 custom` node needs `custom.component` and a `from` loader (its rows are
 what the component shows and what an agent reads). An agent reads a
 `viz: custom` node as its table, prefixed ``(custom component
-`<ext>/<id>`; its table rendering)``, and a `component` node as
+`<namespace>/<id>`; its table rendering)``, and a `component` node as
 ``(custom component `<id>`: it shows the page's loaders)``.
 `check_extension` checks that the declared commands are registered, and
 warns when a custom viz also fills a kit role block (`chart`, `tree`,
@@ -187,7 +187,7 @@ warns when a custom viz also fills a kit role block (`chart`, `tree`,
 a "this reimplements the kit" lint.
 
 **The bridged calls** (`viz_actions.rs`; the frame reaches them only
-through the host). Each names the component by `id`, `<extension>/<component
+through the host). Each names the component by `id`, `<namespace>/<component
 id>` — the component itself, whatever shows it — and the bundle `version`
 its frame was loaded at (`load_component { id }`). A version that is not
 the current one is `Denied`. `invoke_component_command { id, command,
@@ -380,7 +380,7 @@ the rail HUD — gives none: `init.view` is null, `setViewParams` and
 `setHistoryState` answer `INVALID`, and the component keeps its filters
 itself. Any component, page or not, has **page memory**: `{ id, method:
 pageMemoryGet, key }` and `{ id, method: pageMemorySet, key, value }`
-(null forgets), scope `component:<ext>/<id>` in `ui_preference` — for
+(null forgets), scope `component:<namespace>/<id>` in `ui_preference` — for
 the person, in every tab of it. A value over 64 KB or a component over
 1 MB is refused `INVALID` (`componentMemoryProblem`, before the write).
 A component keeps no view state of its own: `check` warns
@@ -397,7 +397,7 @@ first `load` is its own, and a failure is remembered per URL. An invoke
 that asks shows the host's `CommandConfirm`; confirming re-runs it
 confirmed, declining answers `CANCELLED`. No `ready` within 3 s, or a
 second `load` (the frame navigated itself), tears it down and shows the
-table. `ready` records `usage { kind: "custom_component", key: <ext>/<id>
+table. `ready` records `usage { kind: "custom_component", key: <namespace>/<id>
 }` — the evidence a kind needs to be promoted. `tokens` are the root's CSS
 custom properties (`tokensFromStyle`). There is no gesture check on
 invoke: the frame's clicks do not reliably activate the host across

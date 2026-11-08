@@ -149,7 +149,9 @@ loaders:
       ORDER BY package
   extensions_credentials:
     sql: |
-      SELECT substr(uri_param(c.collector, 'collector'), 1, instr(uri_param(c.collector, 'collector'), '/') - 1) AS extension,
+      -- A credential is its namespace's: any of its extensions' collectors
+      -- may declare it.
+      SELECT substr(uri_param(c.collector, 'collector'), 1, instr(uri_param(c.collector, 'collector'), '/') - 1) AS namespace,
              c.name, min(c.collector) AS collector, max(c.is_set) AS is_set,
              CASE WHEN max(c.is_set) THEN 'Saved in keychain' ELSE 'Not set' END AS status
       FROM v_collector_credential c
@@ -167,7 +169,7 @@ loaders:
       SELECT name, owner, kind, CASE WHEN instr(description, '. ') > 0 THEN substr(description, 1, instr(description, '. ')) ELSE description END AS description FROM v_data_entity ORDER BY owner <> 'core', owner, name
   data_sources:
     sql: |
-      SELECT c.uri, c.extension || '/' || c.id AS collector, c.extension, c.id,
+      SELECT c.uri, c.namespace || '/' || c.id AS collector, c.extension, c.namespace, c.id,
              CASE c.trigger WHEN 'call' THEN 'manual' WHEN 'schedule' THEN 'scheduled' WHEN 'events' THEN 'on events' ELSE 'after a run' END AS trigger,
              CASE c.state WHEN 'disabled' THEN 'Off on this machine' WHEN 'failing' THEN 'Failed' WHEN 'never_run' THEN 'Never run' ELSE 'Ok' END AS state,
              CASE c.state WHEN 'disabled' THEN 'warning' WHEN 'failing' THEN 'danger' WHEN 'ok' THEN 'success' END AS tone,
@@ -180,7 +182,7 @@ loaders:
       FROM v_collector c ORDER BY c.extension, c.id
   data_effects:
     sql: |
-      SELECT extension || '/' || local AS effect, extension FROM v_contribution WHERE kind = 'effect' ORDER BY 1
+      SELECT namespace || '/' || local AS effect, extension FROM v_contribution WHERE kind = 'effect' ORDER BY 1
   capabilities:
     sql: |
       WITH proj AS (SELECT coalesce((SELECT value FROM v_config_value WHERE key = 'activeProviders' AND origin = 'project'), '{}') AS j),
@@ -502,7 +504,7 @@ view:
         columns:
         - key: name
           label: Entity
-          expand: oxplow-foundation/data-entity-rows
+          expand: oxplow/data-entity-rows
         - key: owner
           label: From
           width: 140
@@ -553,7 +555,7 @@ view:
           row: true
           when: can_enable_again
           input:
-            extension: '{{row.extension}}'
+            namespace: '{{row.namespace}}'
             kind: collector
             contribution: '{{row.id}}'
         - id: enable-all
@@ -568,7 +570,7 @@ view:
         columns:
         - key: effect
           label: Effect
-          expand: oxplow-foundation/data-effect-backfill
+          expand: oxplow/data-effect-backfill
         - key: extension
           label: From
           width: 160
@@ -576,17 +578,17 @@ view:
       - id: alerts-reactions
         title: Failed reactions
         embed:
-          page: oxplow-foundation/alerts-reactions
+          page: oxplow/alerts-reactions
       - id: alerts-deliveries
         title: Undelivered events
         embed:
-          page: oxplow-foundation/alerts-deliveries
+          page: oxplow/alerts-deliveries
       - id: extensions-credentials
         title: Credentials
         from: extensions_credentials
         viz: table
         group:
-          by: extension
+          by: namespace
         columns:
         - key: name
           label: Credential
@@ -795,7 +797,7 @@ view:
           - name: key
             secret: true
           choices:
-            kind: oxplow-foundation/settings#ai_provider_kinds
+            kind: oxplow/settings#ai_provider_kinds
       - id: ai-roles
         title: Roles
         from: ai_roles
@@ -827,7 +829,7 @@ view:
             model: '{{row.model}}'
             restrict: '{{row.restrict|json}}'
           choices:
-            provider: oxplow-foundation/settings#ai_provider_choices
+            provider: oxplow/settings#ai_provider_choices
         - id: unassign
           label: Unassign
           command: oxplow.ai.set_role

@@ -6,7 +6,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: still open, thread: thr1 } }
   - { command: oxplow.work_item.transition, input: { uri: $older.uri, to: done } }
   - { command: oxplow.work_item.transition, input: { uri: $newer.uri, to: done } }
-when: { page: oxplow-foundation/thread-work, params: { thread: thr1 } }
+when: { page: oxplow/thread-work, params: { thread: thr1 } }
 expect:
   loaders:
     thread_work:

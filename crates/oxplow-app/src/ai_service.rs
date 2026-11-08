@@ -63,8 +63,8 @@ pub struct RoleStatus {
     /// What it's for: oxplow's text for a built-in, the declaring
     /// extension's for a profile.
     pub description: String,
-    /// The extension declaring a profile; `None` for a built-in.
-    pub extension: Option<String>,
+    /// The namespace a profile is named in; `None` for a built-in.
+    pub namespace: Option<String>,
     /// The built-in role an unbound profile uses.
     pub fallback: Option<BuiltinRole>,
     /// Its own binding; `None` when it has none.
@@ -364,7 +364,7 @@ impl AiService {
             let effective = config.resolve(&role, &profiles).map(|(_, b)| b.clone());
             RoleStatus {
                 description,
-                extension: profile.map(|p| p.extension.clone()),
+                namespace: profile.map(|p| p.namespace.clone()),
                 fallback: profile
                     .map(|p| p.fallback)
                     .or_else(|| role.builtin().and_then(BuiltinRole::fallback)),
@@ -422,8 +422,8 @@ impl AiService {
         for role in config.roles.keys() {
             if role.builtin().is_none() && !profiles.iter().any(|p| &p.role() == role) {
                 let mut row = status(role.clone(), String::new(), None);
-                row.extension = match role {
-                    Role::Profile { extension, .. } => Some(extension.clone()),
+                row.namespace = match role {
+                    Role::Profile { namespace, .. } => Some(namespace.clone()),
                     Role::Builtin(_) => None,
                 };
                 row.problem = Some(AiServiceError::UndeclaredProfile(role.to_string()).to_string());
@@ -1636,7 +1636,7 @@ mod tests {
 
     fn review(features: Vec<oxplow_ai::capabilities::ModelFeature>) -> AiProfile {
         AiProfile {
-            extension: "acme".into(),
+            namespace: "acme".into(),
             name: "review".into(),
             description: "Reviews things.".into(),
             fallback: BuiltinRole::Summarize,
@@ -1732,7 +1732,7 @@ mod tests {
         assert_eq!(assistant.fallback, Some(BuiltinRole::Main));
         let profile = &st.roles[4];
         assert_eq!(profile.description, "Reviews things.");
-        assert_eq!(profile.extension.as_deref(), Some("acme"));
+        assert_eq!(profile.namespace.as_deref(), Some("acme"));
         assert_eq!(profile.fallback, Some(BuiltinRole::Summarize));
         assert_eq!(profile.binding, None);
         assert_eq!(
@@ -2655,7 +2655,7 @@ mod typed_tests {
         let fx = fixture("fake", Some(models), typed_reply("observed")).await;
         fx.svc.set_profiles(Arc::new(|| {
             vec![AiProfile {
-                extension: "acme".into(),
+                namespace: "acme".into(),
                 name: "review".into(),
                 description: String::new(),
                 fallback: BuiltinRole::Summarize,
@@ -2808,7 +2808,7 @@ mod typed_tests {
         let fx = fixture("fake", None, typed_reply("observed")).await;
         fx.svc.set_profiles(Arc::new(|| {
             vec![AiProfile {
-                extension: "acme".into(),
+                namespace: "acme".into(),
                 name: "review".into(),
                 description: String::new(),
                 fallback: BuiltinRole::Summarize,

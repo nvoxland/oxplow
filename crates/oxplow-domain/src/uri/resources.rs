@@ -132,8 +132,8 @@ pub struct ResourceEntry {
 impl ResourceEntry {
     /// This entry as the resource `extension` declares (`resolve` and
     /// `searchable` left as written), or why its name isn't one.
-    pub fn into_decl(self, extension: &str) -> Result<ResourceDecl, String> {
-        let name = ResourceName::new(extension, &self.name).map_err(|_| {
+    pub fn into_decl(self, namespace: &str) -> Result<ResourceDecl, String> {
+        let name = ResourceName::new(namespace, &self.name).map_err(|_| {
             format!(
                 "resource `{}`: a name is lowercase letters, digits and `_`, starting with a letter",
                 self.name

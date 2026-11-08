@@ -4,7 +4,7 @@ temp:
   shape.yaml: "name: ant\nlegs: 6\n"
   shape.json: "{\"list\": [true]}"
 when:
-  page: oxplow-foundation/data-file
+  page: oxplow/data-file
   params:
     uri: "oxplow:oxplow/file?path=shape.yaml&filesystem=oxplow:temp"
     path: shape.yaml
