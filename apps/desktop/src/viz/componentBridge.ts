@@ -46,7 +46,7 @@
 /// (`/component-lib/oxplow-component.js`, `oxplow.connect()`); it checks
 /// `protocol` against the one it speaks.
 import { isIconName } from "../iconNames.js";
-import { IpcCallError, needsConfirmation } from "../ipc-error.js";
+import { ipcErrorDetails, needsConfirmation } from "../ipc-error.js";
 import { parseUri } from "../uri/uri.js";
 import type { CommandOutcome, VizRun, PageRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 
@@ -330,8 +330,9 @@ export interface BridgeDeps {
   /** Open `ref`'s page, in a new tab when asked; false when it isn't one
    *  a component may open (`componentMayOpen`). */
   navigate(ref: string, opts: { newTab: boolean; replace: boolean }): boolean;
-  /** Ask the person, in the host, to confirm `command`. */
-  confirm(command: string): Promise<boolean>;
+  /** Ask the person, in the host, to confirm `command`; `details` is what
+   *  it asks about beyond itself, one line each. */
+  confirm(command: string, details: string[]): Promise<boolean>;
   onReady(): void;
   /** Run its own read-only SQL (`run_component_sql`). */
   querySql?(sql: string, params: SqlCell[]): Promise<SqlQueryResult>;
@@ -370,13 +371,6 @@ export interface BridgeDeps {
   showView?(spec: string | null): Promise<ShownRows | null>;
   /** The frame's content height, as it changes. */
   size?(height: number): void;
-}
-
-/** Why an invoke was refused (`DENIED`: the component isn't approved, or a
- *  policy said no), for the host to show beside the frame — the frame's
- *  own code may not (tsk960). Any other failure is the frame's to show. */
-export function componentRefusal(e: unknown): string | null {
-  return e instanceof IpcCallError && e.code === "DENIED" ? e.message : null;
 }
 
 /** Whether a component's `navigate` may open `ref`: one of oxplow's URIs,
@@ -436,7 +430,7 @@ export function createBridgeHost(
           reply(r.id, (await deps.invoke(r.command, r.input, false)).result);
         } catch (e) {
           if (!needsConfirmation(e)) return failWith(r.id, e);
-          if (!(await deps.confirm(r.command))) {
+          if (!(await deps.confirm(r.command, ipcErrorDetails(e)))) {
             return fail(r.id, "CANCELLED", `The person didn't confirm \`${r.command}\`.`);
           }
           try {

@@ -20,7 +20,9 @@ import {
   stopSignInRedirect,
   subscribeOxplowEvents,
 } from "../api.js";
+import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
+import { InlineError } from "../kit/InlineError.js";
 import { openRefInWindow } from "../tabs/openRef.js";
 import { useOptionalPageNavigation } from "../tabs/PageNavigationContext.js";
 import type { SignInCompletion } from "../tauri-bridge/generated/bindings.js";
@@ -28,7 +30,6 @@ import { createSignInHost } from "./hostSignIn.js";
 import { pageDefinitionChanged } from "./rerun.js";
 import {
   componentMayOpen,
-  componentRefusal,
   createBridgeHost,
   initMessage,
   tokensFromStyle,
@@ -166,9 +167,15 @@ export function ComponentFrame({
   fit?: boolean;
 }) {
   const nav = useOptionalPageNavigation();
-  const [asking, setAsking] = useState<{ command: string; answer(ok: boolean): void } | null>(null);
-  // Why its last invoke was refused: shown here, not left to the frame.
-  const [refused, setRefused] = useState<string | null>(null);
+  const [asking, setAsking] = useState<{ command: string; details: string[]; answer(ok: boolean): void } | null>(null);
+  // Its invokes run through the person's runner: a failure (other than a
+  // field it names, the frame's to show) is recorded and shown under the
+  // frame, whatever the frame's own code does.
+  const anchor = `component/${component}`;
+  const failure = useActionAnchor(anchor);
+  const runner = useRunner();
+  const runnerRef = useRef(runner);
+  runnerRef.current = runner;
   // Its content's height, when the host fits the frame to it.
   const [fitHeight, setFitHeight] = useState<number | null>(null);
   const frameRef = useRef<HTMLIFrameElement | null>(null);
@@ -265,15 +272,19 @@ export function ComponentFrame({
       channel.port1,
       {
         invoke: async (command, input, confirmed) => {
-          try {
-            const out = await invokeComponentCommand(component, command, input, confirmed, version);
-            setRefused(null);
-            return out;
-          } catch (e) {
-            const why = componentRefusal(e);
-            if (why !== null) setRefused(why);
-            throw e;
-          }
+          // The frame still hears the refusal as it was (`{ code, message, field? }`).
+          let thrown: unknown = null;
+          const ran = await runnerRef.current.run(
+            title,
+            () =>
+              invokeComponentCommand(component, command, input, confirmed, version).catch((e: unknown) => {
+                thrown = e;
+                throw e;
+              }),
+            { anchor, command, showsFields: true },
+          );
+          if ("failure" in ran) throw thrown;
+          return ran.value;
         },
         navigate: (ref, opts) => {
           if (!componentMayOpen(ref)) return false;
@@ -316,7 +327,7 @@ export function ComponentFrame({
               setHistoryState: (patch: Record<string, unknown>) => viewRef.current?.setHistoryState(patch),
             }
           : {}),
-        confirm: (command) => new Promise<boolean>((answer) => setAsking({ command, answer })),
+        confirm: (command, details) => new Promise<boolean>((answer) => setAsking({ command, details, answer })),
         onReady: () => {
           ready = true;
           clearTimeout(timer);
@@ -347,15 +358,16 @@ export function ComponentFrame({
         onLoad={onLoad}
         style={page ? (height !== null ? { ...sizedFrameStyle, height } : pageFrameStyle) : fit ? { ...fitFrameStyle, height: fitHeight ?? 80 } : frameStyle}
       />
-      {refused ? (
-        <div data-testid="custom-component-refused" style={noteStyle}>
-          {refused}
+      {failure ? (
+        <div style={noteStyle}>
+          <InlineError failure={failure} testId="custom-component-refused" />
         </div>
       ) : null}
       {asking ? (
         <CommandConfirm
           label={title}
           command={asking.command}
+          details={asking.details}
           testIdPrefix="custom-component-confirm"
           onConfirm={() => {
             asking.answer(true);

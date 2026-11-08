@@ -15,6 +15,14 @@
   function needsConfirmation(e) {
     return e instanceof IpcCallError && e.code === "NEEDS_CONFIRMATION";
   }
+  function ipcErrorDetails(err) {
+    if (err && typeof err === "object") {
+      const details = err.details;
+      if (Array.isArray(details))
+        return details.filter((d) => typeof d === "string");
+    }
+    return [];
+  }
 
   // src/iconNames.ts
   var ICON_NAMES = [
@@ -271,7 +279,7 @@
           } catch (e) {
             if (!needsConfirmation(e))
               return failWith(r.id, e);
-            if (!await deps.confirm(r.command)) {
+            if (!await deps.confirm(r.command, ipcErrorDetails(e))) {
               return fail(r.id, "CANCELLED", `The person didn't confirm \`${r.command}\`.`);
             }
             try {

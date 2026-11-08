@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 
 import { IpcCallError } from "../ipc-error.js";
 import type { VizRun } from "../tauri-bridge/generated/bindings.js";
-import { componentBundleUrl, componentMayOpen, componentRefusal, createBridgeHost, initMessage, vizData, parseFrameMessage, tokensFromStyle, type HostedData } from "./componentBridge.js";
+import { componentBundleUrl, componentMayOpen, createBridgeHost, initMessage, vizData, parseFrameMessage, tokensFromStyle, type HostedData } from "./componentBridge.js";
 
 // P6b.D4: a custom component talks to the host over a MessageChannel —
 // requests (invoke, navigate, …) and a `ready`; everything else
@@ -172,7 +172,7 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
   const host = createBridgeHost(channel.port1, {
     invoke: async (command, input, confirmed) => {
       calls.push(["invoke", command, input, confirmed]);
-      if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION");
+      if (!confirmed) throw new IpcCallError("needs confirmation", "NEEDS_CONFIRMATION", null, ["process — runs programs"]);
       return { result: null, audit_id: 1, event_id: null, inverse: null };
     },
     navigate: (ref, opts) => {
@@ -188,8 +188,9 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
   return { received, calls, send, settle, channel, host };
 }
 
-test("an invoke that asks is confirmed in the host, then runs confirmed; declined, it's CANCELLED", async () => {
-  const yes = harness();
+test("an invoke that asks is confirmed in the host, with what it asks about, then runs confirmed; declined, it's CANCELLED", async () => {
+  const asked: [string, string[]][] = [];
+  const yes = harness({ confirm: async (command, details) => (asked.push([command, details]), true) });
   yes.send({ id: "i1", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } });
   await yes.settle();
   expect(yes.calls).toEqual([
@@ -197,6 +198,7 @@ test("an invoke that asks is confirmed in the host, then runs confirmed; decline
     ["invoke", "oxplow.work_item.transition", { to: "done" }, true],
   ]);
   expect(yes.received).toEqual([{ id: "i1", ok: true, result: null }]);
+  expect(asked).toEqual([["oxplow.work_item.transition", ["process — runs programs"]]]);
   yes.channel.port1.close();
 
   const no = harness({ confirm: async () => false });
@@ -420,13 +422,6 @@ test("querySql and openForm answer with the host's result; a closed form is CANC
     { id: "g", ok: false, error: { code: "CANCELLED", message: "The person closed the form for `acme.closed`." } },
   ]);
   h.channel.port1.close();
-});
-
-test("componentRefusal is a refused invoke's reason, and nothing else's", () => {
-  const reason = "component `x/burn` runs `…` and is not allowed to call this command.";
-  expect(componentRefusal(new IpcCallError(reason, "DENIED"))).toBe(reason);
-  expect(componentRefusal(new IpcCallError("bad input", "INVALID"))).toBeNull();
-  expect(componentRefusal(new Error("boom"))).toBeNull();
 });
 
 // A page shows an inline page the host draws (`showView`, protocol 12),
