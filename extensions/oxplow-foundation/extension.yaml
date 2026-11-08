@@ -442,9 +442,9 @@ intent:
       expect: each contribution table opens the definition, not the data
 panels:
   # The left nav's Go To, beside the Go To page its header opens: the
-  # thread's bookmarks, then its recent or most visited pages; collapsed,
-  # the bookmarks alone.
-  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-bookmarks, open: 'oxplow:oxplow/page?page=go-to' }
+  # thread's bookmarks, recent or most visited pages, one kind at a time
+  # (its header's icons); collapsed, the same pages as icons.
+  - { id: go-to, title: Go To, icon: compass, scope: thread, body: go-to-panel, collapsed: go-to-icons, open: 'oxplow:oxplow/page?page=go-to' }
 # What the coding agent reads about the work list: its commands (with no
 # list they're a sink), and oxplow's tasks' ready queue while they are it.
 skills:

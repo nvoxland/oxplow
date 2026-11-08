@@ -918,12 +918,14 @@ the search box and + Add Panel
 (`ext:<namespace>/<id>`, rendered by `ExtensionPanelSection`). Every
 panel's parts (`body`, `collapsed`, `badge`, `count`) are pages:
 `useExtensionPanelRuns` holds one open page run per part (params its
-scope's, the body's with the viewer's picks), the body and collapsed
+scope's, the body's and the collapsed page's with the viewer's picks,
+the header's toggles), the body and collapsed
 pages drawn compact by `PageTree`, the header count the count page's
 `badge` (else its first loader's rows) or the badge page's alert count
 while it fires (else its `badge`), and the badge page's alert an Alerts
-row whose Review opens that page (`PanelAlert.open`, a URI); the header's
-↗ opens the panel's `open` page, else its body page (`panelOpenRef`).
+row whose Review opens that page (`PanelAlert.open`, a URI); the header
+ends with the open-page arrow every heading uses (`OpenPageLink`), to the
+panel's `open` page, else its body page (`panelOpenRef`).
 A compact viz keeps its `group` headings and group actions; its rows
 offer Add to Context on right-click, as every page row does. Every
 disclosure (a row's `expand`, a group's fold, a tree's branch, a hunk, a

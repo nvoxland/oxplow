@@ -83,7 +83,11 @@ nobody reads by default.
 under the node's heading, above its viz: what a thing is, above its facts
 (null or blank draws nothing, no gap).
 
-- `table`: rows. `list`: one line per row, headlined by the first column.
+- `table`: rows. `list`: one line per row, headlined by the first column
+  (in a rail panel, one dense line, the other columns small beside it).
+  `icons`: each row as its first column's `icon` alone, side by side, the
+  column's value the hover and its `link` what a click opens — a list made
+  small, such as a panel's collapsed view (`columns: [{ key, icon, link }]`).
   `number`: the first cell, big. `markdown`: the first row's text
   (`markdown: { text: <column>, base?: <column> }`; `base` holds the URI of
   the file the text came from, so its relative links and images are that

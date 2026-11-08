@@ -3312,8 +3312,20 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
         Viz::Board if cfg.group.is_none() => {
             Some("`board` needs `group: { by: <column> }` (its columns)".to_string())
         }
+        Viz::Icons
+            if cfg
+                .columns
+                .first()
+                .is_none_or(|c| c.icon.is_none()) =>
+        {
+            Some(
+                "`icons` draws each row as its first column's `icon`: give `columns: [{ key, icon, link? }]`"
+                    .to_string(),
+            )
+        }
         Viz::Table
         | Viz::List
+        | Viz::Icons
         | Viz::Number
         | Viz::Markdown
         | Viz::Detail
@@ -5148,6 +5160,44 @@ mod tests {
         let errs = shown_errors(&ext);
         assert!(
             errs.contains("`board` needs `group: { by: <column> }`"),
+            "{errs}"
+        );
+    }
+
+    /// An `icons` viz draws each row as its icon alone, so its first column
+    /// must name the icon column; a toggle's option may name an icon.
+    #[test]
+    fn an_icons_viz_needs_its_first_columns_icon() {
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "strip",
+                    &viz_page(
+                        "",
+                        "SELECT 'Git' AS title, 'git-branch' AS kind, 'oxplow:x' AS uri",
+                        "viz: icons
+columns: [{ key: title, icon: kind, link: { kind: page, from: uri } }]
+",
+                    ),
+                ),
+                (
+                    "bare",
+                    &viz_page(
+                        "",
+                        "SELECT 'Git' AS title",
+                        "viz: icons
+columns: [{ key: title }]
+",
+                    ),
+                ),
+            ],
+            "",
+        );
+        assert!(node(&ext, "strip").is_some());
+        assert!(node(&ext, "bare").is_none());
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.contains("`icons` draws each row as its first column's `icon`"),
             "{errs}"
         );
     }

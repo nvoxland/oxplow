@@ -47,8 +47,7 @@ sinks.
 
 **Panel headers.** `--panel-header-bg` (`rgba(108,156,246,0.12)`, a muted
 accent wash — *not* grey) tints the header band of every panel so titles
-read as intentional headers in dark mode: rail section headers
-(`RailSection`), Navigator stream-header rows, the page tab bar
+read as intentional headers in dark mode: Navigator stream-header rows, the page tab bar
 (`CenterTabs`), and the common page chrome (`PageNavBar`). It's
 translucent, so when a surface needs the same look over a non-card base
 (tab bar, page nav) layer it over `--surface-card`:
@@ -56,7 +55,13 @@ translucent, so when a surface needs the same look over a non-card base
 That layered value is `--surface-chrome`, and it is what everything that
 comes out of the chrome wears: a tab's dialog (`TabModal`) and every menu
 (`MenuList`: the ☰, right-click menus, the menubar), with a
-`--border-strong` edge.
+`--border-strong` edge. A rail panel (`RailSection`) sits *on* that
+chrome, so its header can't wear the same wash (it would be the rail's own
+color): it wears `--rail-panel-header-bg` (the same blue at 22%) over the
+card, bluer than the rail and lighter than the card body below. The whole
+panel is a `--surface-card` card with a `--border-strong` edge and a
+`--text-primary` title. A header toggle's picked option is boxed in
+`--accent` over `--rail-panel-choice-bg` (the blue at 18%), not filled solid.
 
 ### Borders
 

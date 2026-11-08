@@ -282,9 +282,13 @@ the user guide is `docs/guide/pages.md`.
     and the rail does not draw it). `body`, `badge`, `collapsed` and
     `count` name **pages of the same extension, by slug**. `open`, a
     `page` URI, is the page its header opens — a core page it summarizes,
-    as Comments opens the inbox; absent, the body page. `collapsed` is a
-    page shown compact while the panel is collapsed, as its summary
-    (absent, a collapsed panel is just its header). `count` is a page whose
+    as Comments opens the inbox; absent, the body page. `collapsed` is the
+    extension's own page shown while the panel is collapsed: the same view,
+    smaller (Go To's is its pages as `viz: icons`); it takes the body's
+    toggles that it declares too, so it follows the header's pick (absent,
+    a collapsed panel is just its header). A body's choice param is the
+    header's toggle; an option with an `icon` is that icon alone there, its
+    label the hover (Go To: bookmarks, recent, most visited). `count` is a page whose
     first cell (else row count) is the header's count, raising no alert; with
     a `badge` too, the count page's number shows and the badge still feeds
     Alerts (`panelCount`). (`Extension.panels`, `ExtensionPanel`; checked at
@@ -295,7 +299,8 @@ the user guide is `docs/guide/pages.md`.
     (`crates/oxplow-app/src/pages/panels.rs`): which page each part runs
     (`page_of`), with what (`part_request`: the scope's id from the view —
     the stream and thread it's shown for, as every page takes them — and,
-    for the body only, the toggles in force), the toggles a body's choice
+    for the body and the collapsed view (the toggles its page declares),
+    the toggles in force), the toggles a body's choice
     params give (`choices`: the viewer's pick while the body offers it, else
     its default, else its first option), the header's count (the part it
     counts by, `counting_part`: the count page, else the badge; a count

@@ -103,7 +103,7 @@ test("a group's action is a button in its heading, even compact, and runs withou
 
 // A group's heading says how many rows it holds and folds them away.
 test("a group's heading shows its count and folds its rows", () => {
-  const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const view = render(<VizView run={runOf(grouped)} onOpenPage={() => {}} />);
   const headings = view.getAllByTestId("viz-group-heading");
   expect(headings.map((h) => h.querySelector("[data-testid=viz-group-count]")?.textContent)).toEqual(["2", "1"]);
   const toggle = headings[0]!.querySelector("[aria-expanded]") as HTMLElement;
@@ -116,6 +116,26 @@ test("a group's heading shows its count and folds its rows", () => {
   expect((view.getAllByTestId("viz-group-heading")[0]!.querySelector("[aria-expanded]") as HTMLElement).getAttribute("aria-expanded")).toBe("false");
   fireEvent.click(view.getAllByTestId("viz-group-heading")[0]!.querySelector("[aria-expanded]") as HTMLElement);
   expect(view.getByTestId("viz-row-0")).toBeTruthy();
+});
+
+// A compact view (a rail panel, a strip, a tile) is folded as a whole by
+// what holds it: its group headings say the group and count, and fold nothing.
+test("a compact view's group headings fold nothing", () => {
+  const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const headings = view.getAllByTestId("viz-group-heading");
+  expect(headings.map((h) => h.querySelector("[data-testid=viz-group-count]")?.textContent)).toEqual(["2", "1"]);
+  expect(headings.every((h) => h.querySelector("[aria-expanded]") === null)).toBe(true);
+  expect(view.getByTestId("viz-row-0")).toBeTruthy();
+});
+
+// A compact list (a rail panel) is dense: each row one line, its other
+// columns beside its headline, not under it.
+test("a compact list draws each row as one dense line", () => {
+  const view = render(<VizView run={runOf(grouped)} compact onOpenPage={() => {}} />);
+  const row = view.getByTestId("viz-row-0");
+  expect(row.getAttribute("data-dense")).toBe("true");
+  const full = render(<VizView run={runOf(grouped)} onOpenPage={() => {}} />);
+  expect(full.getAllByTestId("viz-row-0").at(-1)!.getAttribute("data-dense")).toBeNull();
 });
 
 // A cell's format can draw a mark: a series as a small line with its

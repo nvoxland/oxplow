@@ -1,3 +1,4 @@
+import { ICONS } from "../../icons.js";
 import type { ReactNode } from "react";
 import { useAppPreference } from "../../prefs/remembered.js";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
@@ -25,6 +26,7 @@ import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
 import { recordOpError } from "../../opErrors.js";
 import { EmptyState } from "../Prompts/EmptyState.js";
+import { OpenPageLink } from "../../kit/OpenPageLink.js";
 
 export interface RailHudProps {
   /** Current stream — what a panel's page actions run in. */
@@ -183,8 +185,7 @@ function RailSection({
   tone,
   headerAction,
   collapsedContent,
-  onOpen,
-  openTitle,
+  opens,
   children,
 }: {
   id: RailSectionId;
@@ -194,16 +195,16 @@ function RailSection({
   tone?: "danger";
   headerAction?: ReactNode;
   collapsedContent?: ReactNode;
-  /** When set, a right-side icon opens this content's full page/dashboard. */
-  onOpen?(): void;
-  openTitle?: string;
+  /** When set, the header ends with the open-page arrow (`OpenPageLink`,
+   *  as a section heading's) to this content's full page. */
+  opens?: { to: TabRef; name: string; onNavigate(ref: TabRef): void };
   children: ReactNode;
 }) {
   const ctx = useContext(RailSectionsContext);
   const expanded = ctx ? ctx.isExpanded(id) : true;
   const headerMenu = useContextMenu();
   const side = ctx ? ctx.dropSide(id) : null;
-  const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-secondary)";
+  const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-primary)";
   return (
     // Wrapper holds the inter-pane margin + drop-zone and (unlike the card)
     // is not overflow-clipped, so the insertion line can sit in the gap.
@@ -239,9 +240,10 @@ function RailSection({
         style={{
           // Inset, rounded card (matching the Search box) that recesses
           // below the lighter rail; the gap between cards reveals the rail
-          // (IntelliJ-style grouping).
+          // (IntelliJ-style grouping). Its edge is the strong one: the
+          // card, header and all, stands off the rail.
           background: "var(--surface-card)",
-          border: "1px solid var(--border-subtle)",
+          border: "1px solid var(--border-strong)",
           borderRadius: 6,
           overflow: "hidden",
         }}
@@ -252,10 +254,11 @@ function RailSection({
           alignItems: "center",
           gap: 2,
           padding: "8px 8px 7px 6px",
-          // Muted-accent header tint (not grey) so the title reads as an
-          // intentional header band; the divider closes it off from the
-          // content below.
-          background: "var(--panel-header-bg)",
+          // A stronger wash than the chrome's: the rail around it wears the
+          // 12% one over the card, so that would be the rail's own color and
+          // disappear into it. This one is bluer than the rail and lighter
+          // than the card below; the divider closes it off from the content.
+          background: "linear-gradient(var(--rail-panel-header-bg), var(--rail-panel-header-bg)), var(--surface-card)",
           borderBottom: expanded ? "1px solid var(--border-subtle)" : undefined,
         }}
         onContextMenu={(e) =>
@@ -313,26 +316,14 @@ function RailSection({
           ) : null}
         </button>
         {headerAction}
-        {onOpen ? (
-          <button
-            type="button"
+        {opens ? (
+          <span
             data-testid={`rail-section-open-${id}`}
-            onClick={(e) => { e.stopPropagation(); onOpen(); }}
-            title={openTitle ?? "Open"}
-            aria-label={openTitle ?? "Open"}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: "var(--text-muted)",
-              cursor: "pointer",
-              fontSize: 13,
-              lineHeight: 1,
-              padding: "0 2px",
-              flexShrink: 0,
-            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "inline-flex", flexShrink: 0 }}
           >
-            ↗
-          </button>
+            <OpenPageLink to={opens.to} name={opens.name} onNavigate={opens.onNavigate} />
+          </span>
         ) : null}
       </div>
       {expanded ? children : (collapsedContent ?? null)}
@@ -530,8 +521,7 @@ function ExtensionPanelSection({
       title={panel.title}
       count={runs.count ?? undefined}
       collapsedContent={collapsed}
-      onOpen={() => onOpenPage(panelOpenRef(panel, extensions))}
-      openTitle={`Open ${panel.title}`}
+      opens={{ to: panelOpenRef(panel, extensions), name: panel.title, onNavigate: onOpenPage }}
       headerAction={
         toggles.length > 0 ? (
           <>
@@ -560,27 +550,36 @@ function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(val
     <span role="group" aria-label={choice.label ?? choice.name} style={{ display: "inline-flex", gap: 2 }}>
       {choice.options.map((o) => {
         const active = o.value === choice.value;
+        // An option that names an icon is the icon alone, its label the
+        // hover and the button's name.
+        const Icon = o.icon ? ICONS[o.icon as keyof typeof ICONS] : undefined;
         return (
           <button
             key={o.value}
             type="button"
             data-testid={`rail-panel-choice-${choice.name}-${o.value}`}
             aria-pressed={active}
+            title={Icon ? o.label : undefined}
+            aria-label={Icon ? o.label : undefined}
             onClick={(e) => {
               e.stopPropagation();
               if (!active) onPick(o.value);
             }}
             style={{
-              background: active ? "var(--accent-soft-bg, var(--surface-app))" : "transparent",
-              border: "none",
+              // The one in force is boxed in the accent over a faint
+              // accent wash, so it reads as picked against the header.
+              background: active ? "var(--rail-panel-choice-bg)" : "transparent",
+              border: `1px solid ${active ? "var(--accent)" : "transparent"}`,
               borderRadius: 4,
               color: active ? "var(--text-primary)" : "var(--text-secondary)",
               cursor: active ? "default" : "pointer",
               fontSize: 10,
-              padding: "0 4px",
+              padding: Icon ? "2px 3px" : "0 4px",
+              display: "inline-flex",
+              alignItems: "center",
             }}
           >
-            {o.label}
+            {Icon ? <Icon size={13} aria-hidden /> : o.label}
           </button>
         );
       })}

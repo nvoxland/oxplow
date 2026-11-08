@@ -15,7 +15,7 @@ const MODE = {
   name: "mode",
   label: "Show",
   default: "recent",
-  options: [{ value: "recent", label: "Recent" }, { value: "top", label: "Top" }],
+  options: [{ value: "recent", label: "Recent" }, { value: "top", label: "Top", icon: "star" }],
 };
 const rowsOf: Record<string, SqlCell[][]> = {
   "x/body": [["body row"]],
@@ -98,6 +98,23 @@ test("a body page's choice param is a header toggle; picking re-runs the body wi
   await waitFor(() => expect(view.getByTestId("rail-panel-choice-mode-top").getAttribute("aria-pressed")).toBe("true"));
   // The pick is the panel's memory, not the browser's.
   expect(store.get(panelScope("x/w"), "choices")).toEqual({ mode: "top" });
+});
+
+// An option that names an icon is that icon alone in the header, its
+// label the hover and the button's name; one that doesn't is its label.
+test("a choice option with an icon is an icon button, its label the hover", async () => {
+  const { runs } = fakePageRunsBy((key) => pageRun(key.page!, { ...key.params, ...(key.panel?.choices ?? {}) }), viewOf);
+  const view = render(
+    <PanelRunsProvider streamId="str1" threadId={null} pageRuns={runs}>
+      <RailHud streamId="str1" onOpenPage={() => {}} />
+    </PanelRunsProvider>,
+  );
+  const top = await waitFor(() => view.getByTestId("rail-panel-choice-mode-top"));
+  expect(top.textContent).toBe("");
+  expect(top.querySelector("svg")).not.toBeNull();
+  expect(top.getAttribute("title")).toBe("Top");
+  expect(top.getAttribute("aria-label")).toBe("Top");
+  expect(view.getByTestId("rail-panel-choice-mode-recent").textContent).toBe("Recent");
 });
 
 test("a count of zero draws no badge in the header", async () => {

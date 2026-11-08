@@ -1282,9 +1282,28 @@ export type Choice = {
 };
 
 /**  One value a choice param takes, and what the viewer sees for it. */
-export type ChoiceOption = {
+export type ChoiceOption = ChoiceOption_Serialize | ChoiceOption_Deserialize;
+
+/**  One value a choice param takes, and what the viewer sees for it. */
+export type ChoiceOption_Deserialize = {
 	value: string,
 	label: string,
+	/**
+	 *  An icon oxplow draws (`ICONS`): where the choice is a panel header's
+	 *  toggle, the option is that icon alone, its label the hover.
+	 */
+	icon?: string | null,
+};
+
+/**  One value a choice param takes, and what the viewer sees for it. */
+export type ChoiceOption_Serialize = {
+	value: string,
+	label: string,
+	/**
+	 *  An icon oxplow draws (`ICONS`): where the choice is a panel header's
+	 *  toggle, the option is that icon alone, its label the hover.
+	 */
+	icon?: string | null,
 };
 
 /**  How a client authenticates to a token endpoint. */
@@ -4062,7 +4081,7 @@ export type OpenedRun_Deserialize = {
 	 *  A panel's part: what this run gives the panel (its snapshots say it
 	 *  again as it re-runs); none for a page.
 	 */
-	panel: PartView | null,
+	panel: PartView_Deserialize | null,
 };
 
 /**
@@ -4076,7 +4095,7 @@ export type OpenedRun_Serialize = {
 	 *  A panel's part: what this run gives the panel (its snapshots say it
 	 *  again as it re-runs); none for a page.
 	 */
-	panel: PartView | null,
+	panel: PartView_Serialize | null,
 };
 
 /**  Who contributed it. */
@@ -4909,7 +4928,13 @@ export type PageKind =
  *  A value the viewer (or an agent) can set when running the viz,
  *  bound into the query as `:name`.
  */
-export type PageParam = {
+export type PageParam = PageParam_Serialize | PageParam_Deserialize;
+
+/**
+ *  A value the viewer (or an agent) can set when running the viz,
+ *  bound into the query as `:name`.
+ */
+export type PageParam_Deserialize = {
 	name: string,
 	label?: string | null,
 	/**  Used when the caller doesn't supply the param. */
@@ -4919,7 +4944,7 @@ export type PageParam = {
 	 *  them as a toggle in its header, a viz page as a select. Its
 	 *  `default` must be one; a run supplying another is refused.
 	 */
-	options?: ChoiceOption[],
+	options?: ChoiceOption_Deserialize[],
 	/**
 	 *  A viz whose rows are the values it takes, when it's a choice
 	 *  whose options aren't fixed (`value`, `label`, optional `group` —
@@ -4951,6 +4976,54 @@ export type PageParam = {
 	 *  default is `1d 7d 30d all`.
 	 */
 	presets?: string[],
+};
+
+/**
+ *  A value the viewer (or an agent) can set when running the viz,
+ *  bound into the query as `:name`.
+ */
+export type PageParam_Serialize = {
+	name: string,
+	label: string | null,
+	/**  Used when the caller doesn't supply the param. */
+	default: SqlCell | null,
+	/**
+	 *  The values it takes, when it's a choice: a panel shows
+	 *  them as a toggle in its header, a viz page as a select. Its
+	 *  `default` must be one; a run supplying another is refused.
+	 */
+	options: ChoiceOption_Serialize[],
+	/**
+	 *  A viz whose rows are the values it takes, when it's a choice
+	 *  whose options aren't fixed (`value`, `label`, optional `group` —
+	 *  the form `choices` contract): a slug of this extension, or
+	 *  `<extension>/<slug>`; a loaded viz has the whole id. The page runs
+	 *  it with the params it declares of the page's, so an `end` picker's
+	 *  viz can leave out what `start` is. Its options aren't known at
+	 *  load, so no `default` is needed and any text is taken. Exclusive
+	 *  with `options`.
+	 */
+	options_from: string | null,
+	/**
+	 *  What it holds, and so how a page draws it. Left out, it is a
+	 *  `choice` when it has `options` or `options_from`, else `text`; a
+	 *  loaded viz always says.
+	 */
+	type: ParamType | null,
+	/**
+	 *  What it is to the page, and so where it rides in the page's URI:
+	 *  a `resource` (the default) names what the page shows, in the URI's
+	 *  `?`; `filter` narrows how it shows it, in the URI's `#` view. A
+	 *  `selection` follows from the columns and is never written: a param
+	 *  a column of the viz (or of a part of the page) selects, in the
+	 *  view too. A loaded viz always says.
+	 */
+	role: ParamRole | null,
+	/**
+	 *  A `date_range`'s quick picks, of `1d 2d 3d 7d 30d 90d all`; the
+	 *  default is `1d 7d 30d all`.
+	 */
+	presets: string[],
 };
 
 /**
@@ -5098,7 +5171,7 @@ export type Page_Deserialize = {
 	 *  Its params, typed, each with its role (`resource` names what it
 	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
 	 */
-	params: PageParam[],
+	params: PageParam_Deserialize[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
 	/**
@@ -5164,7 +5237,7 @@ export type Page_Serialize = {
 	 *  Its params, typed, each with its role (`resource` names what it
 	 *  shows, in its URI's `?`; `filter` and `selection` ride in the `#`).
 	 */
-	params: PageParam[],
+	params: PageParam_Serialize[],
 	/**  The resources it renders (`oxplow/commit`); empty: a route. */
 	for: string[],
 	/**
@@ -5206,10 +5279,27 @@ export type Page_Serialize = {
  *  A choice param of the body, as the panel's header toggle offers it: its
  *  options and the value in force.
  */
-export type PanelChoice = {
+export type PanelChoice = PanelChoice_Serialize | PanelChoice_Deserialize;
+
+/**
+ *  A choice param of the body, as the panel's header toggle offers it: its
+ *  options and the value in force.
+ */
+export type PanelChoice_Deserialize = {
 	name: string,
 	label: string,
-	options: ChoiceOption[],
+	options: ChoiceOption_Deserialize[],
+	value: string,
+};
+
+/**
+ *  A choice param of the body, as the panel's header toggle offers it: its
+ *  options and the value in force.
+ */
+export type PanelChoice_Serialize = {
+	name: string,
+	label: string,
+	options: ChoiceOption_Serialize[],
 	value: string,
 };
 
@@ -5294,13 +5384,26 @@ export type ParseFormat =
 "yaml";
 
 /**  What one part's run gives its panel, as the window shows it. */
-export type PartView = {
+export type PartView = PartView_Serialize | PartView_Deserialize;
+
+/**  What one part's run gives its panel, as the window shows it. */
+export type PartView_Deserialize = {
 	/**  The header counts by this part ([`counting_part`]). */
 	counts: boolean,
 	/**  The header's count while it `counts`; none shows no count. */
 	count: number | null,
 	/**  The body's toggles, each with the value it ran with ([`choices`]). */
-	choices: PanelChoice[],
+	choices: PanelChoice_Deserialize[],
+};
+
+/**  What one part's run gives its panel, as the window shows it. */
+export type PartView_Serialize = {
+	/**  The header counts by this part ([`counting_part`]). */
+	counts: boolean,
+	/**  The header's count while it `counts`; none shows no count. */
+	count: number | null,
+	/**  The body's toggles, each with the value it ran with ([`choices`]). */
+	choices: PanelChoice_Serialize[],
 };
 
 /**  How a permission request was answered. */
@@ -5692,7 +5795,7 @@ export type RunSnapshot_Deserialize = {
 	 *  A left-nav panel's part: what this run gives the panel
 	 *  (`panels::part_view`); none for a page run.
 	 */
-	panel: PartView | null,
+	panel: PartView_Deserialize | null,
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */
@@ -5703,7 +5806,7 @@ export type RunSnapshot_Serialize = {
 	 *  A left-nav panel's part: what this run gives the panel
 	 *  (`panels::part_view`); none for a page run.
 	 */
-	panel: PartView | null,
+	panel: PartView_Serialize | null,
 };
 
 /**  How a contribution comes to run. */
@@ -6412,6 +6515,13 @@ export type Viz =
  *  is the headline, the rest are secondary.
  */
 "list" |
+/**
+ *  Each row as its icon alone, side by side: the first `columns`
+ *  entry's `icon`, its value the hover and accessible name, its `link`
+ *  what a click opens. A small view of a list (a rail panel's collapsed
+ *  view); an agent reads it as the list.
+ */
+"icons" |
 /**  A single value: the first column of the first row. */
 "number" |
 /**  The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited. */
@@ -6578,7 +6688,7 @@ export type VizConfig_Deserialize = {
 	slug: string,
 	title: string,
 	viz: Viz,
-	params: PageParam[],
+	params: PageParam_Deserialize[],
 	columns: PageColumn[],
 	empty: string | null,
 	/**  A table leaves out its header row: its columns explain themselves. */
@@ -6644,7 +6754,7 @@ export type VizConfig_Serialize = {
 	slug: string,
 	title: string,
 	viz: Viz,
-	params: PageParam[],
+	params: PageParam_Serialize[],
 	columns: PageColumn[],
 	empty: string | null,
 	/**  A table leaves out its header row: its columns explain themselves. */

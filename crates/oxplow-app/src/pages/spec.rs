@@ -22,6 +22,11 @@ pub enum Viz {
     /// One line per row: the first column (or the first `columns` entry)
     /// is the headline, the rest are secondary.
     List,
+    /// Each row as its icon alone, side by side: the first `columns`
+    /// entry's `icon`, its value the hover and accessible name, its `link`
+    /// what a click opens. A small view of a list (a rail panel's collapsed
+    /// view); an agent reads it as the list.
+    Icons,
     /// A single value: the first column of the first row.
     Number,
     /// The first row's text (`markdown: { text }`, else its first column), rendered as markdown; with an `edit` action, edited.
@@ -1021,6 +1026,10 @@ pub(crate) const RANGE_PRESETS: &[(&str, Option<i64>)] = &[
 pub struct ChoiceOption {
     pub value: String,
     pub label: String,
+    /// An icon oxplow draws (`ICONS`): where the choice is a panel header's
+    /// toggle, the option is that icon alone, its label the hover.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 impl PageParam {

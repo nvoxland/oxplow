@@ -559,6 +559,25 @@ function RowsBody({
     const action = rowActions0.find((a) => actionOffered(a, record));
     if (action) actions?.run(action, record);
   };
+  // `viz: icons`: a row as its first column's icon alone, its value the
+  // hover and the name, its link what a click opens.
+  const iconCell: CellRenderer = (row, c) => {
+    const raw = row[c.index] ?? null;
+    const label = String(formatCell(raw, undefined, c.format) || "");
+    const spec = c.iconIndex === null ? null : vizIcon(row[c.iconIndex] ?? null, extensions);
+    const Glyph = spec && "Icon" in spec ? spec.Icon : null;
+    const face = Glyph ? <Glyph size={14} aria-hidden /> : <span aria-hidden>{spec && "glyph" in spec ? spec.glyph : "•"}</span>;
+    const ref = c.link && raw !== null ? cellLinkRef(c.link, c.key, row, result.columns) : null;
+    return ref ? (
+      <RouteLink to={ref} onNavigate={tabNavigate(ref, onOpenPage)} origin={origins.get(c.key)?.(row)} testId="viz-icon-item" title={label} ariaLabel={label} className="ox-icon-item">
+        {face}
+      </RouteLink>
+    ) : (
+      <span data-testid="viz-icon-item" title={label} aria-label={label} role="img" className="ox-icon-item">
+        {face}
+      </span>
+    );
+  };
   const cell: CellRenderer = (row, c) => {
     const raw = row[c.index] ?? null;
     const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
@@ -856,8 +875,8 @@ function RowsBody({
     <div {...groupDrop(g)}>
     <GroupHeading
       group={g}
-      open={!folded.has(g.key)}
-      onToggle={() => folded.toggle(g.key)}
+      open={compact || !folded.has(g.key)}
+      onToggle={compact ? null : () => folded.toggle(g.key)}
       actions={viz.actions.filter((a) => a.group === g.key)}
       busy={actions?.busy ?? null}
       onAction={(a) => actions?.run(a, null)}
@@ -932,7 +951,7 @@ function RowsBody({
           const own = viz.actions.filter((a) => a.fact === key && offeredWholePage(a, result));
           return own.length > 0 ? own.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />) : null;
         }}
-        {...{ run, result, viz, cols, cell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+        {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
       {ctxMenu.menu}
     </>
   );
@@ -993,7 +1012,8 @@ interface RowsView {
 
 /** A group's heading, styled as the rail's sub-headings: its value
  *  (an arrow after it opens its page when the group's `link` resolves,
- *  never the text itself) and its group actions. */
+ *  never the text itself) and its group actions. `onToggle` folds it; none
+ *  (a compact view, which what holds it folds whole): no fold. */
 function GroupHeading({
   group,
   open,
@@ -1005,7 +1025,7 @@ function GroupHeading({
 }: {
   group: RowGroup;
   open: boolean;
-  onToggle(): void;
+  onToggle: (() => void) | null;
   actions: DeclaredPageAction[];
   busy: string | null;
   onAction(a: DeclaredPageAction): void;
@@ -1014,15 +1034,17 @@ function GroupHeading({
   const ref = group.ref;
   return (
     <div data-testid="viz-group-heading" data-group={group.key} style={groupHeadingStyle}>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
-        onClick={onToggle}
-        style={disclosureStyle}
-      >
-        <DisclosureGlyph open={open} />
-      </button>
+      {onToggle ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${group.label}`}
+          onClick={onToggle}
+          style={disclosureStyle}
+        >
+          <DisclosureGlyph open={open} />
+        </button>
+      ) : null}
       <span>{group.label}</span>
       {ref ? <OpenPageLink to={ref} name={group.label} onNavigate={tabNavigate(ref, onOpenPage)} /> : null}
       <span data-testid="viz-group-count" style={{ fontWeight: "normal", color: "var(--text-muted)" }}>
@@ -1065,6 +1087,7 @@ function Viz({
   viz,
   cols,
   cell,
+  iconCell,
   first,
   compact,
   streamId,
@@ -1089,6 +1112,8 @@ function Viz({
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   cols: DisplayColumn[];
   cell: CellRenderer;
+  /** A row as its icon alone (`viz: icons`). */
+  iconCell: CellRenderer;
   first: SqlCell | null;
   compact: boolean;
   streamId: string | null;
@@ -1176,7 +1201,13 @@ function Viz({
     case "embed":
       return <EmbedViz url={embedRow(viz, result)?.url ?? null} />;
     case "list":
-      return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
+      return <ListViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} dense={compact} />;
+    case "icons":
+      return (
+        <div data-testid="viz-icons" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {cols[0] ? result.rows.map((row, i) => <Fragment key={i}>{iconCell(row, cols[0]!)}</Fragment>) : null}
+        </div>
+      );
     case "board":
       return <BoardViz rows={result.rows} cols={cols} cell={cell} rowMenu={rowMenu} view={rowsView} />;
     case "custom":
@@ -1924,7 +1955,9 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
 
 const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, fold: null, picks: false, selected: false };
 
-function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
+/** `dense` (a compact view, a rail panel): each row one tight line, its
+ *  other columns small beside the headline, no divider. */
+function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProps & { dense?: boolean }) {
   const [head, ...rest] = cols;
   return (
     <>
@@ -1938,18 +1971,19 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                 <li
                   key={i}
                   data-testid={`viz-row-${i}`}
+                  data-dense={dense ? "true" : undefined}
                   data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
                   className={look.picks ? "ox-clickable" : undefined}
                   onMouseEnter={() => view?.cursor.point(row)}
                   style={{
-                    ...listRowStyle,
+                    ...(dense ? denseRowStyle : listRowStyle),
                     ...(look.emphasized || look.selected ? emphasisStyle : {}),
                     ...(look.indent ? { paddingLeft: look.indent } : {}),
                   }}
                   {...rowMenu(row)}
                   {...look.props}
                 >
-                  <div>
+                  <div style={dense ? denseHeadStyle : undefined}>
                     {look.fold ? (
                       <button
                         type="button"
@@ -1966,7 +2000,7 @@ function ListViz({ rows, cols, cell, rowMenu, view }: RowsVizProps) {
                   </div>
                   {/* A cell with no value is left out, not drawn as "—". */}
                   {rest.some((c) => row[c.index] !== null && row[c.index] !== undefined) ? (
-                    <div style={{ color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+                    <div style={dense ? denseRestStyle : { color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
                       {rest.filter((c) => row[c.index] !== null && row[c.index] !== undefined).map((c, j) => (
                         <span key={c.key}>
                           {j > 0 ? " · " : null}
@@ -2100,6 +2134,10 @@ const disclosureStyle: CSSProperties = {
 /** A list's rows stand apart: room above and below each, and a rule between
  *  them, so two long rows never read as one block. */
 const listRowStyle: CSSProperties = { padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" };
+/** A compact list's row: one line, headline left, the rest right. */
+const denseRowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "3px 0", minHeight: 22 };
+const denseHeadStyle: CSSProperties = { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const denseRestStyle: CSSProperties = { color: "var(--text-muted)", fontSize: "var(--text-xs)", whiteSpace: "nowrap", flexShrink: 0 };
 /** An `emphasis` row: the soft accent wash an active row gets. */
 const emphasisStyle: CSSProperties = { background: "var(--accent-soft-bg)", fontWeight: 500 };
 /** A group's heading: the rail's sub-heading look. */

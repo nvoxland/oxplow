@@ -338,7 +338,7 @@ pub fn render(run: &VizRun, resolved: &Resolved) -> String {
                 )
             }
         }
-        Viz::Table | Viz::List | Viz::Form => table(run),
+        Viz::Table | Viz::List | Viz::Icons | Viz::Form => table(run),
         // A component's rendering is its own; an agent reads its rows.
         Viz::Custom => format!(
             "(custom component `{}/{}`; its table rendering)\n{}",

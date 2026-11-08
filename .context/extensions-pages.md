@@ -364,7 +364,13 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
   in a dry run like a role block's; the desktop draws it in `VizNode`
   (`leadOf`) and `text.rs` writes it under the heading.
 
-**Vizes** (`Viz`): `table`, `list`, `number`, `markdown` (the first row's
+**Vizes** (`Viz`): `table`, `list` (in a compact view, a rail panel, each
+row one dense line: the headline, then the other columns small beside it,
+no divider; its group headings fold nothing — what holds it folds it),
+`icons` (each row as its first `columns` entry's `icon` alone, side by
+side, the value the hover and name, the `link` what a click opens: a list
+made small, a panel's collapsed view; checked: that column must name an
+`icon`; an agent reads it as the list), `number`, `markdown` (the first row's
 `markdown: { text: <column> }`, else its first column, drawn by the one
 Markdown component, `.context/markdown.md`; `base: <column>` names the URI
 the text came from, a file whose folder its relative links and images

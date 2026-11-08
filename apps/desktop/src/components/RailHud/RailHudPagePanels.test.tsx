@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 
 import type { ExtensionPanel, PageRun } from "../../tauri-bridge/generated/bindings.js";
 import { createPageRuns, type PageKey } from "../../pageRuns.js";
@@ -84,7 +84,10 @@ test("the body page drawn small, the badge page's alert as the count and an Aler
   ]);
   await waitFor(() => expect(view.getByTestId("rail-section-toggle-ext:z/w").textContent).toContain("2"));
   expect(view.getByTestId("alerts").textContent).toBe("2 waiting@oxplow:oxplow/page?page=z/badge");
-  fireEvent.click(view.getByTestId("rail-section-open-ext:z/w"));
+  // The header's open arrow is the one every heading uses (`OpenPageLink`).
+  const open = within(view.getByTestId("rail-section-open-ext:z/w")).getByTestId("open-page-link");
+  expect(open.getAttribute("title")).toBe("Open Waiting");
+  fireEvent.click(open);
   expect(openedPages).toEqual(["oxplow:oxplow/page?page=z/body"]);
 });
 

@@ -200,11 +200,13 @@ pub async fn find_panel(svc: &crate::Services, id: &str) -> Result<ExtensionPane
     )))
 }
 
-/// The params `part` runs with: the body takes the toggles' values in force;
-/// every part's scope id comes from the view.
+/// The params `part` runs with: the toggles' values in force, for the body
+/// and for its collapsed view (the same view, smaller — given the toggles
+/// its page declares, [`part_request`]); every part's scope id comes from
+/// the view.
 pub fn part_params(part: PanelPart, choices: &[PanelChoice]) -> BTreeMap<String, SqlCell> {
     match part {
-        PanelPart::Body => choices
+        PanelPart::Body | PanelPart::Collapsed => choices
             .iter()
             .map(|c| (c.name.clone(), SqlCell::Text(c.value.clone())))
             .collect(),
@@ -240,6 +242,17 @@ pub async fn part_request(
     };
     let choices = match part {
         PanelPart::Body => body_choices(svc, panel, picks).await?,
+        // The body's toggles, those its collapsed page declares too.
+        PanelPart::Collapsed => {
+            let declared = svc
+                .extension_catalog
+                .find_page(svc.worktrees.project_dir(), page)?;
+            body_choices(svc, panel, picks)
+                .await?
+                .into_iter()
+                .filter(|c| declared.params.iter().any(|p| p.name == c.name))
+                .collect()
+        }
         _ => Vec::new(),
     };
     Ok(Some(RunRequest {
