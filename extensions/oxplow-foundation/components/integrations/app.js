@@ -29,6 +29,10 @@
     }
   };
   const message = (e) => (e && e.message ? e.message : String(e));
+  // A command that fails is oxplow's to show (under the frame, recorded),
+  // except one that names a field: that the row says. A closed form or a
+  // declined confirmation (`CANCELLED`) is nothing to say.
+  const fieldError = (e) => (e && e.field && e.code !== "CANCELLED" ? message(e) : null);
   const when = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "");
 
   function records(result) {
@@ -193,7 +197,7 @@
         await fn();
         note(instance, null);
       } catch (e) {
-        note(instance, message(e), true);
+        note(instance, fieldError(e), true);
       } finally {
         busy = null;
         await load();
@@ -258,8 +262,7 @@
               schema: { type: "object", properties: { value: { type: "string", title: cred.name, writeOnly: true } }, required: ["value"] },
             });
           } catch (e) {
-            if (e && e.code === "CANCELLED") return;
-            return note(v.instance, message(e), true);
+            return note(v.instance, fieldError(e), true);
           }
           await run(v.instance, "credential", () => c.invoke("oxplow.provider.set_credential", { instance: v.instance, name: cred.name, value: values.value }));
         }),
@@ -294,8 +297,7 @@
                 try {
                   values = await c.openForm({ title: "Configure " + v.instance, schema: v.configSchema, values: config });
                 } catch (e) {
-                  if (e && e.code === "CANCELLED") return;
-                  return note(v.instance, message(e), true);
+                  return note(v.instance, fieldError(e), true);
                 }
                 edits.set(v.instance, values);
                 checked.delete(v.instance);
@@ -402,8 +404,7 @@
               values: { scope: "project" },
             });
           } catch (e) {
-            if (e && e.code === "CANCELLED") return;
-            return note(p.key, message(e), true);
+            return note(p.key, fieldError(e), true);
           }
           if (views.some((v) => v.instanceId === values.name)) return note(p.key, "`" + values.name + "` is already an instance", true);
           await run(p.key, "add", () => c.invoke("oxplow.provider.add_instance", { instance: p.extension + "/" + values.name, provider: p.provider, scope: values.scope || "project" }));

@@ -1,6 +1,6 @@
 import { ipc, run, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { inFrame, open } from "../../support/ui.js";
+import { inFrame, open, shown } from "../../support/ui.js";
 
 // Only what the shell shows: the Integrations frame's config form (oxplow's
 // `openForm`), check, toggle and sync, and the right-click choice of the work
@@ -49,4 +49,19 @@ test("a person configures, checks and enables the fake tracker from Integrations
   integrations = await inFrame(page, "Integrations");
   await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
   await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
+});
+
+// A command the frame runs that fails says so once. One that names a field
+// (`INVALID` at `/config/team`) is the component's to show, in its row; any
+// other is oxplow's, under the frame and recorded (pages/action-failure.spec.ts).
+test("a refused enable in Integrations names its field once, in the row", async ({ page, daemon }) => {
+  await open(page, daemon, "oxplow:oxplow/page?page=settings#area=integrations");
+  const integrations = await inFrame(page, "Integrations");
+  await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Off");
+  // Its config needs a team: enabling it unconfigured is refused.
+  await integrations.getByTestId("integration-toggle-e2e/fake").click();
+  await expect(integrations.getByTestId("integration-note-e2e/fake")).toContainText("a team is required");
+  await expect(shown(page).getByTestId("custom-component-refused")).not.toBeVisible();
+  const recorded = async () => (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_op_error" })).rows[0]?.[0];
+  expect(await recorded()).toBe(0);
 });
