@@ -66,12 +66,13 @@ export function contentsHas(run: PageRun, fills: boolean): boolean {
 
 /** Whether the rail has anything: a switch's sections, a `filter` param
  *  (a `view` param rides the `#` and is never drawn), a `selection`
- *  param, a `rail:` node, a see-also link or another view of the tab's item (`views`; not on a page that fills: its ☰ lists them), the save-a-view form (`saveOpen`), or Contents. */
+ *  param (not on a page that fills: its viz draws the picks, as a
+ *  terminal's tabs do), a `rail:` node, a see-also link or another view of the tab's item (`views`; not on a page that fills: its ☰ lists them), the save-a-view form (`saveOpen`), or Contents. */
 export function railHas(run: PageRun, opts: { fills: boolean; saveOpen: boolean; views?: boolean }): boolean {
   const { params, view } = run.page;
   return (
     view.kind === "switch" ||
-    params.some((p) => p.role === "filter" || p.role === "selection") ||
+    params.some((p) => p.role === "filter" || (p.role === "selection" && !opts.fills)) ||
     run.rail !== null ||
     ((run.seeAlso.length > 0 || !!opts.views) && !opts.fills) ||
     opts.saveOpen ||
