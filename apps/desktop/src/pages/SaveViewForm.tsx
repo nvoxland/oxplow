@@ -5,6 +5,8 @@ import { Loading } from "../kit/Loading.js";
 import { useAppPreference } from "../prefs/remembered.js";
 import { pageUri, wikiUri } from "../uri/uri.js";
 import { pageSlug, titledPage, viewWikiBody } from "./viewActions.js";
+import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
+import { InlineError } from "../kit/InlineError.js";
 
 type SaveCommand = (name: string, input: unknown) => Promise<unknown>;
 export const SaveViewCommandContext = createContext<SaveCommand | null>(null);
@@ -54,7 +56,8 @@ export function SaveViewForm({ kind, specYaml, initialTitle, onClose, onSaved }:
   const [title, setTitle] = useState(initialTitle);
   const [preferred, rememberExtension] = useAppPreference("pages.extension", "my-pages");
   const [extension, setExtension] = useState(preferred);
-  const [error, setError] = useState<string | null>(null);
+  const runner = useRunner();
+  const failure = useActionAnchor("save-view");
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
   const slug = pageSlug(title);
@@ -62,21 +65,24 @@ export function SaveViewForm({ kind, specYaml, initialTitle, onClose, onSaved }:
     if (saving.current || !slug || (kind === "page" && !extension.trim())) return;
     saving.current = true;
     setBusy(true);
-    setError(null);
     try {
       const yaml = titledPage(specYaml, title.trim());
-      if (kind === "wiki") {
-        await command("oxplow.knowledge.write_page", { slug, title: title.trim(), body: viewWikiBody(title.trim(), yaml) });
-        onSaved(wikiUri(slug));
-      } else {
-        const name = extension.trim();
-        await command("oxplow.extension.write_page", { extension: name, page: slug, spec: yaml, deploy: true });
-        rememberExtension(name);
-        onSaved(pageUri(`${name}/${slug}`));
-      }
-      onClose();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const ran = await runner.run(
+        kind === "wiki" ? "Save to wiki" : "Save as page",
+        async () => {
+          if (kind === "wiki") {
+            await command("oxplow.knowledge.write_page", { slug, title: title.trim(), body: viewWikiBody(title.trim(), yaml) });
+            onSaved(wikiUri(slug));
+          } else {
+            const name = extension.trim();
+            await command("oxplow.extension.write_page", { extension: name, page: slug, spec: yaml, deploy: true });
+            rememberExtension(name);
+            onSaved(pageUri(`${name}/${slug}`));
+          }
+        },
+        { anchor: "save-view", command: kind === "wiki" ? "oxplow.knowledge.write_page" : "oxplow.extension.write_page" },
+      );
+      if (ran.ok) onClose();
     } finally {
       saving.current = false;
       setBusy(false);
@@ -87,7 +93,7 @@ export function SaveViewForm({ kind, specYaml, initialTitle, onClose, onSaved }:
   }}>
     <label>Title<input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} data-testid="save-view-title" /></label>
     {kind === "page" ? <label>Extension<input value={extension} onChange={(e) => setExtension(e.target.value)} data-testid="save-view-extension" /></label> : null}
-    {error ? <div className="ox-error" role="alert">{error}</div> : null}
+    {failure ? <InlineError failure={failure} testId="save-view-error" /> : null}
     <button type="submit" disabled={busy || !slug || (kind === "page" && !extension.trim())} data-testid="save-view-submit">{busy ? "Saving…" : "Save"}</button>
     <button type="button" onClick={onClose}>Cancel</button>
   </form>;

@@ -81,7 +81,7 @@ test("a writable dashboard's title is the renaming button in the page chrome, wi
   const { runs } = fakePageRuns(dash);
   const spec = { page: "acme/page", extension: "acme", slug: "page", yaml: "title: x\n", writable: true };
   const view = render(
-    <DashboardEditContext.Provider value={{ read: async () => spec, write: async () => {}, report: () => {} }}>
+    <DashboardEditContext.Provider value={{ read: async () => spec, write: async () => {} }}>
       <PageHost pageKey={key} runs={runs} />
     </DashboardEditContext.Provider>,
   );

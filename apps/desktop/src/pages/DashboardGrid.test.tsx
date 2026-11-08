@@ -1,3 +1,5 @@
+import { RunnerContext } from "../commands/RunnerContext.js";
+import { recordingRunner } from "../commands/testing.js";
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, createEvent, fireEvent, render, waitFor } from "@testing-library/react";
 import { parse } from "yaml";
@@ -28,11 +30,12 @@ function fixture({ writable = true, write = async (_input: { spec: string }): Pr
   const errors: { label: string; message: string }[] = [];
   const spec = { page: "my-pages/build-health", extension: "my-pages", slug: "build-health", yaml, writable };
   let reads = 0;
-  const view = render(<DashboardEditContext.Provider value={{
-    read: async () => { reads += 1; return spec; },
-    write: async (input) => { writes.push(input); return write(input); },
-    report: (error) => errors.push(error),
-  }}><DashboardGrid page={spec.page} tiles={tiles} /></DashboardEditContext.Provider>);
+  const view = render(<RunnerContext.Provider value={recordingRunner((e) => errors.push({ label: e.label, message: e.message ?? "" }))}>
+    <DashboardEditContext.Provider value={{
+      read: async () => { reads += 1; return spec; },
+      write: async (input) => { writes.push(input); return write(input); },
+    }}><DashboardGrid page={spec.page} tiles={tiles} /></DashboardEditContext.Provider>
+  </RunnerContext.Provider>);
   const order = () => Array.from(view.getByTestId("dashboard-grid").children)
     .map((element) => element.getAttribute("data-testid"));
   const ready = async () => {
@@ -127,7 +130,6 @@ test("a dashboard with no tiles says how to add one", () => {
   const view = render(<DashboardEditContext.Provider value={{
     read: async () => ({ page: "my-pages/empty", extension: "my-pages", slug: "empty", yaml: "title: Empty\nview:\n  grid: []\n", writable: true }),
     write: async () => {},
-    report: () => {},
   }}><DashboardGrid page="my-pages/empty" tiles={[]} /></DashboardEditContext.Provider>);
   expect(view.getByTestId("dashboard-empty").textContent).toContain("Pin to Dashboard");
 });

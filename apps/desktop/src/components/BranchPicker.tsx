@@ -1,3 +1,5 @@
+import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
+import { InlineError } from "../kit/InlineError.js";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { gitRebase, vcsDeleteBranch, vcsMerge, vcsRenameBranch } from "../api.js";
@@ -74,7 +76,11 @@ export function BranchPicker({
   const [grouped, setGrouped] = useState<GroupedGitRefs | null>(null);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState("");
+  // What couldn't be read, or a missing stream; a failed command is the
+  // runner's (`failure`), recorded and shown at the picker's foot.
   const [error, setError] = useState<string | null>(null);
+  const runner = useRunner();
+  const failure = useActionAnchor(BRANCH_PICKER);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     recent: true,
@@ -169,79 +175,78 @@ export function BranchPicker({
     }
   }
 
-  async function handleRename() {
-    if (!renaming) return;
-    const to = renaming.value.trim();
-    if (!to || to === renaming.from) {
-      setRenaming(null);
-      return;
-    }
+  /** Run a person's git command from the picker: a failure is recorded and
+   *  shows at the foot of the picker (`BRANCH_PICKER`). */
+  async function act<T>(label: string, call: () => Promise<T>): Promise<T | null> {
     setBusy(true);
     setError(null);
     try {
-      if (!streamId) { setError("No stream selected"); return; }
-      await vcsRenameBranch(streamId, renaming.from, to);
-      await refresh();
-    } catch (e) {
-      setError(String(e));
+      const ran = await runner.run(label, call, { anchor: BRANCH_PICKER });
+      return ran.ok ? ran.value : null;
     } finally {
       setBusy(false);
-      setRenaming(null);
     }
+  }
+
+  async function handleRename() {
+    if (!renaming) return;
+    const to = renaming.value.trim();
+    const from = renaming.from;
+    setRenaming(null);
+    if (!to || to === from) return;
+    if (!streamId) { setError("No stream selected"); return; }
+    await act(`Rename ${from} to ${to}`, async () => {
+      await vcsRenameBranch(streamId, from, to);
+      await refresh();
+    });
+  }
+
+  /** A git op's result that didn't succeed is its failure. */
+  async function gitOp(start: Promise<Parameters<typeof awaitGitOp>[0]>, what: string) {
+    const result = await awaitGitOp(await start);
+    if (!result.success) throw new Error(gitOpErrorMessage(result, `${what} failed`));
   }
 
   async function handleMerge(other: string) {
     if (!streamId) { setError("No stream selected"); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await awaitGitOp(await vcsMerge(streamId, other, true));
-      if (!result.success) setError(gitOpErrorMessage(result, "merge failed"));
-      else { await refresh(); setOpen(false); }
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
+    const done = await act(`Merge ${other}`, async () => {
+      await gitOp(vcsMerge(streamId, other, true), "merge");
+      return true;
+    });
+    if (done) { await refresh(); setOpen(false); }
   }
 
   async function handleRebase(onto: string) {
     if (!streamId) { setError("No stream selected"); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await awaitGitOp(await gitRebase(streamId, onto, true));
-      if (!result.success) setError(gitOpErrorMessage(result, "rebase failed"));
-      else { await refresh(); setOpen(false); }
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
+    const done = await act(`Rebase onto ${onto}`, async () => {
+      await gitOp(gitRebase(streamId, onto, true), "rebase");
+      return true;
+    });
+    if (done) { await refresh(); setOpen(false); }
   }
 
   async function handleDelete(branch: string, force: boolean) {
     if (!streamId) { setError("No stream selected"); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      await vcsDeleteBranch(streamId, branch, force, true);
-      await refresh();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Git refuses `-d` on an unmerged branch; offer the force path.
-      if (!force && /not fully merged/i.test(msg)) {
-        setConfirming({
-          kind: "delete",
-          branch,
-          force: true,
-          message: `Branch "${branch}" is not fully merged. Delete anyway (will discard unmerged commits)?`,
-        });
-        return;
+    // Git refuses `-d` on an unmerged branch: that is a question for the
+    // person (delete anyway?), not a failure.
+    const unmerged = await act(`Delete ${branch}`, async () => {
+      try {
+        await vcsDeleteBranch(streamId, branch, force, true);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!force && /not fully merged/i.test(msg)) return true;
+        throw e;
       }
-      setError(msg);
-    } finally {
-      setBusy(false);
+      await refresh();
+      return false;
+    });
+    if (unmerged) {
+      setConfirming({
+        kind: "delete",
+        branch,
+        force: true,
+        message: `Branch "${branch}" is not fully merged. Delete anyway (will discard unmerged commits)?`,
+      });
     }
   }
 
@@ -292,29 +297,19 @@ export function BranchPicker({
   }, [expanded, q]);
 
   async function pickBranch(branch: BranchRef) {
-    try {
-      setBusy(true);
-      setError(null);
+    const done = await act(`Switch to ${branch.name}`, async () => {
       await onPick(pickedBranch(branch));
-      setOpen(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
+      return true;
+    });
+    if (done) setOpen(false);
   }
 
   async function pickTag(tag: string) {
-    try {
-      setBusy(true);
-      setError(null);
+    const done = await act(`Check out ${tag}`, async () => {
       await onPick({ kind: "tag", name: tag });
-      setOpen(false);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
+      return true;
+    });
+    if (done) setOpen(false);
   }
 
   function pickRecent(name: string) {
@@ -483,7 +478,7 @@ export function BranchPicker({
               </>
             )}
           </div>
-          {error ? <div style={errorStyle}>{error}</div> : null}
+          {error ? <div style={errorStyle}>{error}</div> : failure ? <div style={errorStyle}><InlineError failure={failure} testId="branch-picker-error" /></div> : null}
         </div>
       ) : null}
       {contextMenu ? (() => {
@@ -747,6 +742,9 @@ const dialogButtonStyle: CSSProperties = {
   fontFamily: "inherit",
   fontSize: "var(--text-xs)",
 };
+
+/** The key the picker's failed commands show by. */
+const BRANCH_PICKER = "branch-picker";
 
 const errorStyle: CSSProperties = {
   padding: "6px 10px",

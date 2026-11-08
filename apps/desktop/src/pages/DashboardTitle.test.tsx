@@ -2,6 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { parse } from "yaml";
 
+import { RunnerContext } from "../commands/RunnerContext.js";
+import { recordingRunner } from "../commands/testing.js";
 import { DashboardEditContext } from "./dashboardAuthoring.js";
 import { DashboardTitle } from "./DashboardTitle.js";
 
@@ -14,13 +16,14 @@ function fixture(write: (input: { spec: string }) => Promise<unknown> = async ()
   const errors: { label: string; message: string }[] = [];
   const saved: string[] = [];
   const spec = { page: "my-pages/build-health", extension: "my-pages", slug: "build-health", yaml, writable: true };
-  const view = render(<DashboardEditContext.Provider value={{
-    read: async () => spec,
-    write: async (input) => { writes.push(input); return write(input); },
-    report: (error) => errors.push(error),
-  }}>
-    <DashboardTitle page={spec.page} title="Build health" onSaved={(title) => saved.push(title)} />
-  </DashboardEditContext.Provider>);
+  const view = render(<RunnerContext.Provider value={recordingRunner((e) => errors.push({ label: e.label, message: e.message ?? "" }))}>
+    <DashboardEditContext.Provider value={{
+      read: async () => spec,
+      write: async (input) => { writes.push(input); return write(input); },
+    }}>
+      <DashboardTitle page={spec.page} title="Build health" onSaved={(title) => saved.push(title)} />
+    </DashboardEditContext.Provider>
+  </RunnerContext.Provider>);
   const edit = (title: string) => {
     fireEvent.click(view.getByTestId("dashboard-title-edit"));
     const input = view.getByTestId("dashboard-title-input");

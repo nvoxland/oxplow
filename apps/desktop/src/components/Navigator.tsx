@@ -32,7 +32,8 @@ interface NavigatorProps {
   openHandoffs?: Record<string, OpenHandoffs>;
   onSwitchStream(id: string): void | Promise<void>;
   onSelectThread(streamId: string, threadId: string): void | Promise<void>;
-  onCreateThread(streamId: string, title: string): Promise<void>;
+  /** Whether it was made (a failure is the runner's: recorded, toasted). */
+  onCreateThread(streamId: string, title: string): Promise<boolean>;
   onOpenNewStreamPage?(): void;
   onRenameStream?(streamId: string, title: string): void | Promise<void>;
   onRenameThread?(threadId: string, title: string): void | Promise<void>;
@@ -514,8 +515,8 @@ export function Navigator({
                   {pendingNewThreadFor === g.stream.id ? (
                     <InlineNewThread
                       onSubmit={async (title) => {
-                        await onCreateThread(g.stream.id, title);
-                        setPendingNewThreadFor(null);
+                        // A failure keeps the title, to try again.
+                        if (await onCreateThread(g.stream.id, title)) setPendingNewThreadFor(null);
                       }}
                       onCancel={() => setPendingNewThreadFor(null)}
                     />

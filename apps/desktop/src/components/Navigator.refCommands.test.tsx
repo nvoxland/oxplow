@@ -60,7 +60,7 @@ test("a thread's menu offers the commands about that thread", async () => {
       enabledAgents={["claude"]}
       onSwitchStream={noop}
       onSelectThread={noop}
-      onCreateThread={noop}
+      onCreateThread={async () => true}
       vcsEnabled
     />,
   );

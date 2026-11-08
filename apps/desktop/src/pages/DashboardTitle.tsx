@@ -3,6 +3,8 @@ import { useRef, useState } from "react";
 import { InlineEdit } from "../components/InlineEdit.js";
 import { rename } from "./dashboardEdits.js";
 import { useDashboardAuthoring } from "./dashboardAuthoring.js";
+import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
+import { InlineError } from "../kit/InlineError.js";
 
 /** The writable dashboard's title, in the nav bar. Enter/blur saves; Escape cancels.
  * Read the current source before editing it, preserving edits that have
@@ -15,7 +17,9 @@ export function DashboardTitle({ page, title, onSaved }: {
   const authoring = useDashboardAuthoring();
   const saving = useRef(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const runner = useRunner();
+  const anchor = `dashboard-title/${page}`;
+  const failure = useActionAnchor(anchor);
 
   const save = async (next: string) => {
     // Enter may unmount the input and trigger blur before React commits
@@ -23,22 +27,17 @@ export function DashboardTitle({ page, title, onSaved }: {
     if (saving.current || !next.trim() || next.trim() === title) return;
     saving.current = true;
     setBusy(true);
-    setError(null);
     try {
-      const spec = await authoring.read(page);
-      if (!spec.writable) throw new Error("This dashboard's source cannot be edited here.");
-      const yaml = rename(spec.yaml, next);
-      await authoring.write({
-        extension: spec.extension,
-        page: spec.slug,
-        spec: yaml,
-        deploy: true,
-      });
-      onSaved?.(next.trim());
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setError(message);
-      authoring.report({ label: "Rename dashboard", command: "oxplow.extension.write_page", message });
+      const ran = await runner.run(
+        "Rename dashboard",
+        async () => {
+          const spec = await authoring.read(page);
+          if (!spec.writable) throw new Error("This dashboard's source cannot be edited here.");
+          await authoring.write({ extension: spec.extension, page: spec.slug, spec: rename(spec.yaml, next), deploy: true });
+        },
+        { anchor, command: "oxplow.extension.write_page" },
+      );
+      if (ran.ok) onSaved?.(next.trim());
     } finally {
       saving.current = false;
       setBusy(false);
@@ -58,7 +57,7 @@ export function DashboardTitle({ page, title, onSaved }: {
         renderDisplay={(value, beginEdit) => <button
           type="button"
           disabled={busy}
-          onClick={() => { setError(null); beginEdit(); }}
+          onClick={() => beginEdit()}
           data-testid="dashboard-title-edit"
           aria-label="Rename dashboard"
           style={{ border: 0, padding: 0, background: "transparent", color: "inherit", font: "inherit", textAlign: "left", cursor: busy ? "wait" : "text" }}
@@ -66,6 +65,6 @@ export function DashboardTitle({ page, title, onSaved }: {
       />
     </span>
     {busy ? <span role="status" className="ox-muted">Saving…</span> : null}
-    {error ? <span role="alert" className="ox-error">{error}</span> : null}
+    {failure ? <InlineError failure={failure} testId="dashboard-title-error" /> : null}
   </span>;
 }

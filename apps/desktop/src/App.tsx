@@ -50,7 +50,7 @@ import { TempPage } from "./pages/TempPage.js";
 import { TEMP_EXTENSION } from "./pages/viewActions.js";
 import { PersonCommandConfirm } from "./components/PersonCommandConfirm.js";
 import { RemoteConnectionBanner } from "./components/RemoteConnectionBanner.js";
-import { subscribeUiError } from "./ui-error.js";
+import { runForPerson } from "./commands/runForPerson.js";
 import { useBackendSubscriptions } from "./useBackendSubscriptions.js";
 import { Menubar } from "./components/Menubar.js";
 import { CenterTabs, type CenterTab } from "./components/CenterTabs/CenterTabs.js";
@@ -332,11 +332,6 @@ export function App() {
   const isMac = typeof navigator !== "undefined"
     && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || "");
 
-  useEffect(() => {
-    return subscribeUiError(({ label, message }) => {
-      setError(`${label}: ${message}`);
-    });
-  }, []);
 
   // Top-level state hydration: streams, the current stream + its
   // threads, workspace context, and the selected thread's work state.
@@ -462,14 +457,12 @@ export function App() {
 
   async function handleRenameThreadById(threadId: string, newTitle: string) {
     if (!stream) return;
-    try {
+    // The person's command: a failure is recorded, and the toast's.
+    await runForPerson("Rename thread", async () => {
       await renameThread(stream.id, threadId, newTitle);
       const refreshed = await getThreadState(stream.id);
       setThreadStates((prev) => ({ ...prev, [stream.id]: refreshed }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
+    });
   }
 
   async function handleStreamCreated(next: Stream) {
@@ -609,40 +602,31 @@ export function App() {
     }
   }
 
-  async function handleCreateThread(title: string) {
-    if (!stream) return;
-    try {
-      // It opens on the session picker: a thread names no agent.
+  async function handleCreateThread(title: string): Promise<boolean> {
+    if (!stream) return false;
+    // It opens on the session picker: a thread names no agent.
+    const ran = await runForPerson("New thread", async () => {
       const { state: next } = await createThread(stream.id, title);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-      throw e;
-    }
+    });
+    return ran.ok;
   }
 
   async function handleMarkThread(threadId: string, mark: ThreadMark | null) {
     const owner = streams.find((s) => threadStates[s.id]?.threads.some((t) => t.id === threadId));
     if (!owner) return;
-    try {
+    await runForPerson(mark ? "Mark thread" : "Clear thread mark", async () => {
       const next = await markThread(owner.id, threadId, mark);
       setThreadStates((prev) => ({ ...prev, [owner.id]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
+    });
   }
 
   async function handleCloseThread(threadId: string) {
     if (!stream) return;
-    try {
+    await runForPerson("Close thread", async () => {
       const next = await closeThread(stream.id, threadId);
       setThreadStates((prev) => ({ ...prev, [stream.id]: next }));
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
+    });
   }
 
 
@@ -2024,7 +2008,7 @@ export function App() {
           onSelectThread={handleSelectThread}
           onCreateThread={async (streamId, title) => {
             if (streamId !== stream?.id) await handleSwitch(streamId);
-            await handleCreateThread(title);
+            return handleCreateThread(title);
           }}
           onOpenNewStreamPage={() => handleOpenPage(newStreamRef())}
           onRenameStream={handleRenameStreamById}

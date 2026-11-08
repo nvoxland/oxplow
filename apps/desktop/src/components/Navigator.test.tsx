@@ -55,7 +55,7 @@ function renderNavigator(opts?: {
       enabledAgents={["claude"]}
       onSwitchStream={opts?.onSwitchStream ?? NOOP_ASYNC}
       onSelectThread={opts?.onSelectThread ?? NOOP_ASYNC}
-      onCreateThread={NOOP_ASYNC}
+      onCreateThread={async () => true}
       onMarkThread={opts?.onMarkThread}
       onRenameThread={opts?.onRenameThread}
       vcsEnabled
@@ -515,7 +515,7 @@ test("a thread's row counts its open handoffs, naming the newest sender", () => 
       enabledAgents={["claude"]}
       onSwitchStream={NOOP_ASYNC}
       onSelectThread={NOOP_ASYNC}
-      onCreateThread={NOOP_ASYNC}
+      onCreateThread={async () => true}
       vcsEnabled
     />,
   );

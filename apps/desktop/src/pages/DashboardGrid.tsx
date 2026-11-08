@@ -1,5 +1,6 @@
 /** A writable dashboard's grid. Every edit starts from the primary YAML
  * source and goes through write_page; tile order previews immediately. */
+import { useRunner } from "../commands/RunnerContext.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useContextMenu } from "../components/useRowContextMenu.js";
 import { TileGrid, TileSlot, type TileSize } from "../kit/Tiles.js";
@@ -11,6 +12,7 @@ const TILE_MIME = "application/x-oxplow-dashboard-tile";
 
 export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardChild[] }) {
   const authoring = useDashboardAuthoring();
+  const runner = useRunner();
   const writable = useDashboardWritable(page);
   const [order, setOrder] = useState<string[] | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -26,14 +28,18 @@ export function DashboardGrid({ page, tiles }: { page: string; tiles: DashboardC
     setBusy(true);
     if (optimistic) setOrder(optimistic);
     try {
-      const spec = await authoring.read(page);
-      if (!spec.writable) throw new Error("This dashboard is read-only");
-      await authoring.write({
-        extension: spec.extension, page: spec.slug, spec: change(spec.yaml), deploy: true,
-      });
-    } catch (e) {
-      setOrder(null);
-      authoring.report({ label: "Edit dashboard", message: String(e) });
+      // Dragged or removed in the grid: a failure has no button to show
+      // beside, so it is the toast's.
+      const ran = await runner.run(
+        "Edit dashboard",
+        async () => {
+          const spec = await authoring.read(page);
+          if (!spec.writable) throw new Error("This dashboard is read-only");
+          await authoring.write({ extension: spec.extension, page: spec.slug, spec: change(spec.yaml), deploy: true });
+        },
+        { command: "oxplow.extension.write_page" },
+      );
+      if (!ran.ok) setOrder(null);
     } finally {
       saving.current = false;
       setBusy(false);
