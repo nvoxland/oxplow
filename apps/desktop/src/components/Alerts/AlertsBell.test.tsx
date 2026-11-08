@@ -196,6 +196,20 @@ test("a failed operation shown beside its control gets no toast; one with no con
   expect(getToastStore().getSnapshot().slice(before).map((t) => t.message)).toEqual(["Push to origin"]);
 });
 
+// A failure this window caused is new even as the window opens; one that
+// was already recorded then is taken as seen.
+test("in the first moments, only a failure this window's runner recorded is toasted", async () => {
+  const none = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
+  const claims = createInlineClaims((f) => void Promise.resolve().then(f), 0);
+  claims.claim(Promise.resolve("e-mine"), null);
+  const before = getToastStore().getSnapshot().length;
+  renderHook(() =>
+    useAlertToasts({ ...none, opErrors: [{ id: "e-old", label: "Old push" }, { id: "e-mine", label: "Boom" }] }, () => {}, () => 0, claims),
+  );
+  await waitFor(() => expect(getToastStore().getSnapshot().length).toBe(before + 1));
+  expect(getToastStore().getSnapshot().slice(before).map((t) => t.message)).toEqual(["Boom"]);
+});
+
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../../api.js", () => realApi);

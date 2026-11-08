@@ -31,6 +31,18 @@ effects:
     on: [work_item.created]
     entry: effects/note.star
     needs: [sql.read]
+# A command that always refuses, a page that runs it and a component that
+# does: how a person's failed command shows.
+commands:
+  - name: fail.now
+    summary: Always refuses (the suite's failing command).
+    input_schema: { type: object, properties: {}, additionalProperties: false }
+    entry: handlers/fail.star
+    ui: { label: Fail Now, group: Work }
+custom_components:
+  - id: boom
+    title: Boom
+    commands: [e2e.fail.now]
 datasets:
   - name: item
     version: 2

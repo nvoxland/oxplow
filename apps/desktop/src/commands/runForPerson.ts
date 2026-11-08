@@ -94,8 +94,10 @@ export function createRunner(deps: RunnerDeps) {
           const now = deps.failures.get(anchor);
           if (errorId && now?.at === at) deps.failures.set(anchor, { ...now, errorId });
         });
-        if (deps.failures.isMounted(anchor)) deps.claims.claim(report, () => deps.failures.isMounted(anchor));
       }
+      // Shown beside its control while that is on screen, else the toast's.
+      const shownAt = anchor && deps.failures.isMounted(anchor) ? anchor : null;
+      deps.claims.claim(report, shownAt ? () => deps.failures.isMounted(shownAt) : null);
       return { ok: false, failure };
     }
   };

@@ -31,3 +31,23 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
   await expect(shown(page).getByTestId(`proposal-${id}`)).toHaveCount(0);
   await expect.poll(live).toBe(0);
 });
+
+test("approving a proposal whose run fails keeps the failure on its card, recorded once", async ({ page, daemon }) => {
+  await load(page);
+  const made = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title: "Quince [delete]", thread: daemon.thread });
+  await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
+  // The task goes another way first, so the delete the effect asked for fails.
+  await run(daemon, "oxplow.work_item.delete", { uri: made.result.uri });
+  await page.getByTestId("dock-alerts").click();
+  await page.getByTestId("dock-panel-open-page").getByTestId("open-page-link").click();
+  const card = shown(page).locator('[data-testid^="proposal-"]').filter({ hasText: "destructive" }).first();
+  const id = (await card.getAttribute("data-testid"))!.replace("proposal-", "");
+  await page.getByTestId(`proposal-approve-${id}-trigger`).click();
+  await page.getByTestId(`proposal-approve-${id}-confirm`).click();
+  // The proposal stays pending, and the list re-reads: the card drawn again
+  // still says why.
+  await expect(shown(page).getByTestId(`proposal-error-${id}`)).toBeVisible();
+  const failed = async () =>
+    (await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT count(*) FROM v_op_error" })).rows[0]?.[0];
+  await expect.poll(failed).toBe(1);
+});

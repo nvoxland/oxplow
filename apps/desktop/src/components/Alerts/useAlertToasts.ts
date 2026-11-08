@@ -29,16 +29,22 @@ export function useAlertToasts(
   const review = useRef(onReview);
   review.current = onReview;
   useEffect(() => {
-    if (now() - mounted.current < SETTLE_MS) {
-      for (const k of alertKeys(items)) seen.current.add(k);
-      return;
-    }
+    // What's there as the window opens is taken as seen; a failure this
+    // window's runner recorded is new whenever it arrives, and is toasted
+    // only when it wasn't shown beside its control.
+    const settling = now() - mounted.current < SETTLE_MS;
     for (const a of newAlerts(seen.current, items)) {
       seen.current.add(a.key);
       const toast = () => showToast({ message: a.message, actionLabel: "Review", onUndo: () => review.current(a.open) });
       const op = a.key.startsWith("op:") ? a.key.slice(3) : null;
-      if (op === null) toast();
-      else void claims.settled().then(() => (claims.shown(op) ? undefined : toast()));
+      if (op === null) {
+        if (!settling) toast();
+        continue;
+      }
+      void claims.settled().then(() => {
+        if (claims.shown(op) || (settling && !claims.mine(op))) return;
+        toast();
+      });
     }
     // A key that's gone (a proposal decided, delivery recovered) may be
     // announced again if it comes back.

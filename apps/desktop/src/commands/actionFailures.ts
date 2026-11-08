@@ -62,11 +62,15 @@ export function createFailureStore(): FailureStore {
 
 /** The recorded failures the window showed beside their control. */
 export interface InlineClaims {
-  /** A failure `report` will record, shown beside a control: once the id is
-   *  known and the grace has passed, it is the control's if `onScreen()`
-   *  still holds, else the toast's. */
-  claim(report: Promise<string | null>, onScreen: () => boolean): void;
+  /** A failure this window's runner records. With `onScreen` (it was shown
+   *  beside a control): once the id is known and the grace has passed, it
+   *  is the control's if `onScreen()` still holds, else the toast's. With
+   *  none, it is the toast's as soon as the id is known. */
+  claim(report: Promise<string | null>, onScreen: (() => boolean) | null): void;
   shown(id: string): boolean;
+  /** This window's runner recorded it: new, whenever it arrives (the
+   *  toast's start-up settle doesn't take it as already there). */
+  mine(id: string): boolean;
   /** Every claim decided: the toast waits on this before announcing a
    *  recorded failure. */
   settled(): Promise<void>;
@@ -81,6 +85,7 @@ export function createInlineClaims(
   grace = INLINE_GRACE_MS,
 ): InlineClaims {
   const shown = new Set<string>();
+  const mine = new Set<string>();
   let pending = 0;
   let waiters: (() => void)[] = [];
   const done = () => {
@@ -93,13 +98,15 @@ export function createInlineClaims(
   return {
     claim: (report, onScreen) => {
       pending += 1;
-      const waited = new Promise<void>((r) => later(r, grace));
+      const waited = onScreen ? new Promise<void>((r) => later(r, grace)) : Promise.resolve();
       void Promise.all([report, waited]).then(([id]) => {
-        if (id && onScreen()) shown.add(id);
+        if (id) mine.add(id);
+        if (id && onScreen?.()) shown.add(id);
         done();
       });
     },
     shown: (id) => shown.has(id),
+    mine: (id) => mine.has(id),
     settled: () => (pending === 0 ? Promise.resolve() : new Promise((r) => waiters.push(r))),
   };
 }

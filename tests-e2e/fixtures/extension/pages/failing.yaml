@@ -1,0 +1,9 @@
+title: Suite Failing
+description: A page whose action always fails, for the specs of how a failure shows.
+category: Work
+loaders:
+  line:
+    sql: SELECT 'Nothing here works' AS line
+view: { from: line, viz: table }
+actions:
+  - { id: boom, label: Boom, command: e2e.fail.now, input: {}, prominent: true }

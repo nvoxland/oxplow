@@ -1,0 +1,11 @@
+title: Suite Boom
+description: A component whose button runs a command that always fails.
+category: Work
+loaders:
+  line:
+    sql: SELECT 1 AS n
+view:
+  from: line
+  viz: custom
+  custom:
+    component: boom
