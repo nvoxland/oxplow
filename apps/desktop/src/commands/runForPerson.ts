@@ -109,7 +109,7 @@ export function createRunner(deps: RunnerDeps) {
     if (!(await ask(failure.details))) return { ok: false, failure: { kind: "cancelled" } };
     return run(label, () => call(true), opts);
   };
-  return { run, runAsking };
+  return { run, runAsking, failures: deps.failures };
 }
 
 export type Runner = ReturnType<typeof createRunner>;

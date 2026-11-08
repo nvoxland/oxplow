@@ -93,6 +93,7 @@ const { alertsRef } = await import("../../tabs/pageRefs.js");
 const { getToastStore } = await import("../toastStore.js");
 const { useAlertToasts, SETTLE_MS } = await import("./useAlertToasts.js");
 const { renderHook } = await import("@testing-library/react");
+const { createInlineClaims } = await import("../../commands/actionFailures.js");
 
 const withRuns = (node: React.ReactNode) => (
   <PanelRunsProvider streamId={null} threadId={null}>
@@ -178,6 +179,21 @@ test("a toast once per new item, after the start-up settle, offering only Review
   expect(toasts.map((t) => [t.message, t.actionLabel])).toEqual([["New one", "Review"]]);
   getToastStore().undo(toasts[0]!.id);
   expect(reviewed).toEqual([1]);
+});
+
+// A failure shown beside the control that ran it isn't toasted too; one
+// whose control is gone is.
+test("a failed operation shown beside its control gets no toast; one with no control does", async () => {
+  let clock = 0;
+  const none = { proposals: [], opErrors: [], undelivered: 0, failedReactions: 0, extensionProblems: [], badges: [], hints: [] };
+  const claims = createInlineClaims((f) => void Promise.resolve().then(f), 0);
+  claims.claim(Promise.resolve("e-inline"), () => true);
+  const { rerender } = renderHook(({ items }) => useAlertToasts(items, () => {}, () => clock, claims), { initialProps: { items: none } });
+  const before = getToastStore().getSnapshot().length;
+  clock = SETTLE_MS + 1;
+  rerender({ items: { ...none, opErrors: [{ id: "e-inline", label: "Approve" }, { id: "e-away", label: "Push to origin" }] } });
+  await waitFor(() => expect(getToastStore().getSnapshot().length).toBe(before + 1));
+  expect(getToastStore().getSnapshot().slice(before).map((t) => t.message)).toEqual(["Push to origin"]);
 });
 
 // `mock.module` outlives this file: put the real modules back for the files that run after it.

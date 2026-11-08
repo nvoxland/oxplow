@@ -30,4 +30,8 @@ export interface PageAction {
   busy?: boolean;
   /** Hover text. */
   title?: string;
+  /** The key its failures show by (`useActionAnchor`): set it when `run`
+   *  goes through the person's runner with its own anchor, so the failure
+   *  shows beside this button. */
+  anchor?: string;
 }

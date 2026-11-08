@@ -8,6 +8,7 @@
 export type { PageAction } from "./actions.js";
 export { Approvals, ProposalCard, ProposalList } from "./Approvals.js";
 export { ActionButtons } from "./ActionButtons.js";
+export { InlineError } from "./InlineError.js";
 export { DataTable, type DataColumn, type DataGroup, type DataTableProps, type RowProps } from "./DataTable.js";
 export { Facts, type Fact } from "./Facts.js";
 export { humanize } from "./humanize.js";
