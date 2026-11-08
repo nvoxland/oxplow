@@ -5,7 +5,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Shared item, thread: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
-when: { page: oxplow-bundled-todo/shared-work }
+when: { page: oxplow/shared-work }
 expect: { loaders: { shared_work: { rows: 0 } } }
 steps:
   - given:
@@ -18,7 +18,7 @@ steps:
       - { command: oxplow.work_item.create, input: { title: Epic }, bind: epic }
       - { command: oxplow.work_item.create, input: { title: Child A, parent_uri: $epic.uri, thread: thr1 } }
       - { command: oxplow.work_item.create, input: { title: Child B, parent_uri: $epic.uri, thread: $beta.id } }
-  - when: { page: oxplow-bundled-todo/shared-work }
+  - when: { page: oxplow/shared-work }
     expect:
       loaders:
         shared_work:
@@ -29,14 +29,14 @@ steps:
               - { section: Epics spread over threads, what: Epic }
   # The thread variant keeps what involves the thread; a third thread sees
   # none of it.
-  - when: { part: oxplow-bundled-todo/thread-shared-work, params: { thread_id: 2 } }
+  - when: { part: oxplow/thread-shared-work, params: { thread_id: 2 } }
     expect: { loaders: { thread_shared_work: { rows: 3 } } }
   - given:
       - { command: oxplow.thread.create, input: { stream: str1, title: Gamma } }
-  - when: { part: oxplow-bundled-todo/thread-shared-work, params: { thread_id: 3 } }
+  - when: { part: oxplow/thread-shared-work, params: { thread_id: 3 } }
     expect: { loaders: { thread_shared_work: { rows: 0 } } }
   # The item variant: the item's own row and the files its efforts changed.
-  - when: { part: oxplow-bundled-todo/item-shared-work, params: { uri: $item.uri } }
+  - when: { part: oxplow/item-shared-work, params: { uri: $item.uri } }
     expect:
       loaders:
         item_shared_work:

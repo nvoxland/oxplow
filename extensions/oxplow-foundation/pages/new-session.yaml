@@ -130,7 +130,7 @@ view:
       - harness
       - remember
       choices:
-        harness: oxplow-foundation/new-session#new_session_harnesses
+        harness: oxplow/new-session#new_session_harnesses
   - id: earlier
     title: Earlier sessions
     from: earlier

@@ -228,8 +228,8 @@ const document = (base: string): VizRun =>
   }) as unknown as VizRun;
 
 const renderers = [
-  { page: "oxplow-foundation/editor", title: "Editor", default: true },
-  { page: "oxplow-foundation/markdown", title: "Markdown", default: false },
+  { page: "oxplow/editor", title: "Editor", default: true },
+  { page: "oxplow/markdown", title: "Markdown", default: false },
 ];
 
 function openedFrom(ref: string, viewParams: Record<string, SqlCell>, run: VizRun): string[] {
@@ -247,8 +247,8 @@ function openedFrom(ref: string, viewParams: Record<string, SqlCell>, run: VizRu
 
 test("a document's link to a sibling of its kind opens with the page that draws it", () => {
   const readme = "oxplow:oxplow/file?path=README.md";
-  expect(openedFrom(`${readme}#oxplow.renderer=oxplow-foundation/markdown`, { "oxplow.renderer": "oxplow-foundation/markdown" }, document(readme))).toEqual([
-    "oxplow:oxplow/file?path=DEV.md#oxplow.renderer=oxplow-foundation/markdown",
+  expect(openedFrom(`${readme}#oxplow.renderer=oxplow/markdown`, { "oxplow.renderer": "oxplow/markdown" }, document(readme))).toEqual([
+    "oxplow:oxplow/file?path=DEV.md#oxplow.renderer=oxplow/markdown",
     "oxplow:oxplow/file?path=src/main.rs",
   ]);
   // Drawn by the default page: the link carries no key, as the tab's own address has none.

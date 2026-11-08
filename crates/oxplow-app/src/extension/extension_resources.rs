@@ -17,7 +17,7 @@
 //! extension's name, or `oxplow` for the extension whose namespace is
 //! oxplow's (only a bundled one may be). That one resolves to core's
 //! datasets (`resolve: effort` is `v_effort`); any other to its own
-//! (`v_<extension>_<dataset>`). Collisions across extensions are the
+//! (`v_<namespace>_<dataset>`). Collisions across extensions are the
 //! vocabulary's to find.
 
 use std::collections::BTreeMap;
@@ -98,7 +98,7 @@ const MAX_SVG_BYTES: usize = 32 * 1024;
 const RESERVED_PREFIXES: &[&str] = &["dir", "finding"];
 
 /// Why `name` can't name a resource from a manifest (a decorator's
-/// `resource:`, a prompt's `about:`): not `<extension>/<name>`, or one of
+/// `resource:`, a prompt's `about:`): not `<namespace>/<name>`, or one of
 /// oxplow's that oxplow-foundation doesn't declare. Another extension's
 /// is the vocabulary's to know.
 pub fn resource_problem(name: &str) -> Option<String> {
@@ -106,11 +106,11 @@ pub fn resource_problem(name: &str) -> Option<String> {
         Ok(n) => n,
         Err(_) => {
             return Some(
-                "a resource is `<extension>/<name>` (`oxplow/work_item`, `oxplow/commit`)".into(),
+                "a resource is `<namespace>/<name>` (`oxplow/work_item`, `oxplow/commit`)".into(),
             )
         }
     };
-    (parsed.extension() == CORE_NAMESPACE
+    (parsed.namespace() == CORE_NAMESPACE
         && oxplow_domain::uri::resources::foundation()
             .get(&parsed)
             .is_none())
@@ -228,20 +228,10 @@ pub struct ExtensionResource {
 /// A `resources:` entry as the manifest holds it.
 pub(crate) type ResourceFile = oxplow_domain::uri::resources::ResourceEntry;
 
-/// The extension segment of the resources `extension` declares.
-pub fn resource_extension(extension: &str, namespace: &str) -> String {
-    if namespace == CORE_NAMESPACE {
-        CORE_NAMESPACE.to_string()
-    } else {
-        extension.to_string()
-    }
-}
-
 /// Parse a `resources:` block against the extension's datasets (core's,
 /// for oxplow's namespace): the valid resources, and an error
 /// (`file:line: …`) for each broken one.
 pub fn parse_resources(
-    extension: &str,
     namespace: &str,
     datasets: &[oxplow_db::datasets::DatasetSource],
     value: &serde_yaml::Value,
@@ -261,7 +251,8 @@ pub fn parse_resources(
             )],
         );
     };
-    let segment = resource_extension(extension, namespace);
+    // A resource is named by its namespace, never its extension's name.
+    let segment = namespace;
     let core = namespace == CORE_NAMESPACE;
     let core_datasets = if core {
         oxplow_db::datasets::core_sources().unwrap_or_default()
@@ -298,7 +289,7 @@ pub fn parse_resources(
             None => file.to_string(),
         };
         let name = f.name.clone();
-        match decl_of(&segment, extension, core, datasets, f) {
+        match decl_of(segment, namespace, core, datasets, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
             Err(e) => errors.push(at("resource.invalid", rel, line, e).contribution(name)),
         }
@@ -308,7 +299,7 @@ pub fn parse_resources(
 
 fn decl_of(
     segment: &str,
-    extension: &str,
+    namespace: &str,
     core: bool,
     datasets: &[oxplow_db::datasets::DatasetSource],
     f: ResourceFile,
@@ -366,7 +357,7 @@ fn decl_of(
         Ok(if core {
             oxplow_db::datasets::core_view(dataset)
         } else {
-            oxplow_db::datasets::extension_view(extension, dataset)
+            oxplow_db::datasets::extension_view(namespace, dataset)
         })
     };
     let title = f.title.as_deref().unwrap_or("title");

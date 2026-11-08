@@ -68,9 +68,9 @@ pub fn snapshot_tx(
         .query_row(
             "SELECT schema_version, revision, values_json
              FROM extension_state
-             WHERE extension = ?1 AND scope = ?2 AND area = ?3",
+             WHERE namespace = ?1 AND scope = ?2 AND area = ?3",
             params![
-                namespace.extension,
+                namespace.namespace,
                 scope_name(namespace.scope),
                 area_name(namespace.area)
             ],
@@ -151,17 +151,17 @@ pub fn compare_exchange_tx(
     let changed = match expected {
         Some(stamp) => conn.execute(
             "UPDATE extension_state SET schema_version = ?4, revision = ?5, values_json = ?6
-             WHERE extension = ?1 AND scope = ?2 AND area = ?3
+             WHERE namespace = ?1 AND scope = ?2 AND area = ?3
                  AND schema_version = ?7 AND revision = ?8",
-            params![namespace.extension, scope_name(namespace.scope), area_name(namespace.area),
+            params![namespace.namespace, scope_name(namespace.scope), area_name(namespace.area),
                 i64::from(schema_version), revision as i64, json,
                 i64::from(stamp.schema_version), stamp.revision as i64],
         ),
         None => conn.execute(
-            "INSERT INTO extension_state (extension, scope, area, schema_version, revision, values_json)
+            "INSERT INTO extension_state (namespace, scope, area, schema_version, revision, values_json)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT (extension, scope, area) DO NOTHING",
-            params![namespace.extension, scope_name(namespace.scope), area_name(namespace.area),
+             ON CONFLICT (namespace, scope, area) DO NOTHING",
+            params![namespace.namespace, scope_name(namespace.scope), area_name(namespace.area),
                 i64::from(schema_version), revision as i64, json],
         ),
     }.map_err(map_sql_err)?;
@@ -213,7 +213,7 @@ pub fn forget_extension_tx(
     extension: &str,
 ) -> Result<(), oxplow_domain::DomainError> {
     conn.execute(
-        "DELETE FROM extension_state WHERE extension = ?1",
+        "DELETE FROM extension_state WHERE namespace = ?1",
         rusqlite::params![extension],
     )
     .map_err(crate::database::map_sql_err)?;
@@ -232,9 +232,9 @@ mod tests {
         SqliteExtensionStateStore::new(Database::in_memory())
     }
 
-    fn ns(extension: &str, scope: Scope, area: Area) -> Namespace {
+    fn ns(namespace: &str, scope: Scope, area: Area) -> Namespace {
         Namespace {
-            extension: extension.into(),
+            namespace: namespace.into(),
             scope,
             area,
         }

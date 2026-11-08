@@ -1,7 +1,7 @@
 # A diff's tab names the file, not the whole path (the path is in the diff
 # itself): "file.rs (Working tree)".
 when:
-  page: oxplow-foundation/diff
+  page: oxplow/diff
   params: { path: crates/oxplow-app/src/lib.rs, left: HEAD, right: working, label: Working tree }
 expect:
   label: lib.rs (Working tree)

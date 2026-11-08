@@ -8,8 +8,8 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/editor, default: true }
-      - { page: oxplow-foundation/tsv, default: false }
+      - { page: oxplow/editor, default: true }
+      - { page: oxplow/tsv, default: false }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -18,5 +18,5 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/file-viewer }
-          - { page: oxplow-foundation/tsv }
+          - { page: oxplow/file-viewer }
+          - { page: oxplow/tsv }

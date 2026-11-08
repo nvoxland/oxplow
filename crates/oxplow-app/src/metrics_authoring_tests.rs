@@ -18,6 +18,8 @@ use crate::metric_scaffold::{extension_files, source, MetricStarter, ScaffoldFil
 use crate::metrics_service::{BaselineReport, SweepReport};
 
 const NAME: &str = "complex-fns";
+/// What its contributions are named in: its collector's owner.
+const NAMESPACE: &str = "complex_fns";
 const MEASURE: &str = "complex_fns.complex_functions";
 const AREA: &str = "complex_fns.area";
 const COLLECTOR: &str = "complex_fns.scan";
@@ -164,7 +166,7 @@ impl Project {
     async fn run_status(&self) -> (String, Option<String>) {
         let rows = self
             .rows(&format!(
-                "SELECT status, error FROM v_collector_run WHERE owner = '{NAME}' AND id = '{COLLECTOR}'"
+                "SELECT status, error FROM v_collector_run WHERE owner = '{NAMESPACE}' AND id = '{COLLECTOR}'"
             ))
             .await;
         let row = rows.first().expect("the collector ran");
@@ -372,7 +374,7 @@ fn page_request(page: &str, params: Vec<(&str, SqlCell)>) -> crate::pages::runne
     let id = if page.contains('/') {
         page.to_string()
     } else {
-        format!("oxplow-foundation/{page}")
+        format!("oxplow/{page}")
     };
     crate::pages::runner::RunRequest {
         target: crate::pages::runner::RunTarget::Page(id),

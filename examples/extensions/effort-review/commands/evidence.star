@@ -1,4 +1,4 @@
-# effort-review/effort.evidence: what oxplow collected about one effort, in
+# effort_review/effort.evidence: what oxplow collected about one effort, in
 # one answer a model can read. Every list is capped (the job's tool answers
 # are limited to 64 KiB); `truncated` names the ones that were cut.
 

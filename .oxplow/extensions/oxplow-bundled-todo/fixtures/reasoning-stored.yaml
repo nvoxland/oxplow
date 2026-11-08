@@ -14,7 +14,7 @@ when:
       - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
 expect:
   state: succeeded
-  effects: [{ id: oxplow-bundled-todo/store-reasoning, state: ok }]
+  effects: [{ id: oxplow/store-reasoning, state: ok }]
   commands: [oxplow.effort.replace_inferred_decisions, oxplow.effort.replace_inferred_claims]
 model:
   replies: ["```json\n{\"decisions\": [{\"question\": \"Which CSV library?\", \"choice\": \"csv crate\", \"alternatives\": [\"hand-rolled\"], \"confidence\": \"High\"}, {\"question\": \"\", \"choice\": \"x\"}], \"claims\": [{\"statement\": \"The export tests pass.\", \"kind\": \"tests_pass\", \"evidence\": \"run:12\"}, {\"statement\": \"Empty input is handled.\", \"kind\": \"mystery\"}, {\"kind\": \"tests_pass\"}]}\n```"]

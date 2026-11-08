@@ -1,5 +1,5 @@
 // oxplow's URIs (.context/resources.md): one scheme, the resource as
-// `<extension>/<name>`, its identity as named params, and the renderer's
+// `<namespace>/<name>` (the declaring extension's namespace), its identity as named params, and the renderer's
 // view as named params after `#`:
 //
 //   oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20
@@ -14,7 +14,7 @@
 import { LOCAL_FS } from "../filesystem.js";
 
 export interface ResourceName {
-  extension: string;
+  namespace: string;
   name: string;
 }
 
@@ -26,7 +26,7 @@ export interface ParsedUri {
   view: Record<string, string>;
 }
 
-const EXTENSION = /^[a-z][a-z0-9-]*$/;
+const NAMESPACE = /^[a-z][a-z0-9_]*$/;
 const NAME = /^[a-z][a-z0-9_]*$/;
 const KEY = /^[A-Za-z][A-Za-z0-9_.-]*$/;
 /** A byte a canonical key or value carries as itself. */
@@ -57,14 +57,14 @@ function parse(text: string): Parse {
   const path = q < 0 ? beforeView : beforeView.slice(0, q);
   const query = q < 0 ? "" : beforeView.slice(q + 1);
   const slash = path.indexOf("/");
-  const extension = slash < 0 ? "" : path.slice(0, slash);
+  const namespace = slash < 0 ? "" : path.slice(0, slash);
   const name = slash < 0 ? "" : path.slice(slash + 1);
-  if (!EXTENSION.test(extension) || !NAME.test(name)) return { ok: false, reason: "bad_resource" };
+  if (!NAMESPACE.test(namespace) || !NAME.test(name)) return { ok: false, reason: "bad_resource" };
   const params = pairs(query);
   if ("reason" in params) return { ok: false, reason: params.reason };
   const view = pairs(viewText);
   if ("reason" in view) return { ok: false, reason: view.reason };
-  return { ok: true, uri: { resource: { extension, name }, params: params.pairs, view: view.pairs } };
+  return { ok: true, uri: { resource: { namespace, name }, params: params.pairs, view: view.pairs } };
 }
 
 function pairs(text: string): { ok: true; pairs: Record<string, string> } | { ok: false; reason: Reason } {
@@ -138,7 +138,7 @@ export function formatUri(u: ParsedUri): string {
   for (const k of [...Object.keys(u.params), ...Object.keys(u.view)]) {
     if (!KEY.test(k)) throw new Error(`\`${k}\` isn't a URI param key`);
   }
-  return `oxplow:${u.resource.extension}/${u.resource.name}${writePairs("?", u.params)}${writePairs("#", u.view)}`;
+  return `oxplow:${u.resource.namespace}/${u.resource.name}${writePairs("?", u.params)}${writePairs("#", u.view)}`;
 }
 
 /** Whether `text` is one of oxplow's URIs (the scheme, not the grammar):
@@ -151,10 +151,10 @@ export function isOxplowScheme(text: string): boolean {
  *  undefined value is left out. */
 export function resourceUri(resource: string, params: Params = {}, view: Params = {}): string {
   const slash = resource.indexOf("/");
-  const extension = resource.slice(0, slash);
+  const namespace = resource.slice(0, slash);
   const name = resource.slice(slash + 1);
-  if (slash < 0 || !EXTENSION.test(extension) || !NAME.test(name)) throw new Error(`\`${resource}\` isn't <extension>/<resource>`);
-  return formatUri({ resource: { extension, name }, params: present(params), view: present(view) });
+  if (slash < 0 || !NAMESPACE.test(namespace) || !NAME.test(name)) throw new Error(`\`${resource}\` isn't <namespace>/<resource>`);
+  return formatUri({ resource: { namespace, name }, params: present(params), view: present(view) });
 }
 
 export type ParamValue = string | number | null | undefined;
@@ -177,7 +177,7 @@ export function identityOf(text: string): string | null {
  *  one of oxplow's URIs. */
 export function typeOf(text: string): string | null {
   const u = parseUri(text);
-  return u ? `${u.resource.extension}/${u.resource.name}` : null;
+  return u ? `${u.resource.namespace}/${u.resource.name}` : null;
 }
 
 /** Whether `text` is a URI of `resource`. */
@@ -241,7 +241,7 @@ export function keyParamOf(resource: string): string {
 export function keyIdentityOf(text: string): string | null {
   const u = parseUri(text);
   if (!u) return null;
-  const key = keyParamOf(`${u.resource.extension}/${u.resource.name}`);
+  const key = keyParamOf(`${u.resource.namespace}/${u.resource.name}`);
   const value = u.params[key];
   return formatUri({ resource: u.resource, params: value === undefined ? {} : { [key]: value }, view: {} });
 }
@@ -249,7 +249,7 @@ export function keyIdentityOf(text: string): string | null {
 /** The key param of `text` when it is a URI of `resource`, else null. */
 export function idOf(text: string, resource: string): string | null {
   const u = parseUri(text);
-  if (!u || `${u.resource.extension}/${u.resource.name}` !== resource) return null;
+  if (!u || `${u.resource.namespace}/${u.resource.name}` !== resource) return null;
   return u.params[keyParamOf(resource)] ?? null;
 }
 
@@ -371,9 +371,9 @@ export function pageUri(page: string, params: Params = {}, view: Params = {}): s
   return resourceUri("oxplow/page", { ...params, page }, view);
 }
 
-/** An extension's page: the contribution `page=<extension>/<page>`. */
-export function extPageUri(extension: string, page: string, params: Params = {}, view: Params = {}): string {
-  return pageUri(`${extension}/${page}`, params, view);
+/** A page named in another namespace: the contribution `page=<namespace>/<page>`. */
+export function extPageUri(namespace: string, page: string, params: Params = {}, view: Params = {}): string {
+  return pageUri(`${namespace}/${page}`, params, view);
 }
 
 /** A metric's page (`oxplow.todos`) and its view (range, branch, …). */
@@ -408,7 +408,7 @@ const GLOBAL_CONTRIBUTIONS = new Set(["command", "measure", "metric", "dimension
 
 export function contributionOf(text: string): { kind: string; extension: string | null; id: string } | null {
   const u = parseUri(text);
-  if (!u || u.resource.extension !== "oxplow" || !CONTRIBUTIONS.has(u.resource.name)) return null;
+  if (!u || u.resource.namespace !== "oxplow" || !CONTRIBUTIONS.has(u.resource.name)) return null;
   const id = u.params[u.resource.name];
   if (id === undefined) return null;
   if (GLOBAL_CONTRIBUTIONS.has(u.resource.name)) return { kind: u.resource.name, extension: null, id };

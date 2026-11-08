@@ -23,9 +23,9 @@ export function extensionPanelId(panel: ExtensionPanel): string {
 export function panelOpenRef(panel: ExtensionPanel, extensions: Extension[] | null = null): TabRef {
   const named = panel.open ? refFromTabId(panel.open) : null;
   if (named) return named;
+  // The body is a page id, `<namespace>/<slug>`.
   const slash = panel.body.indexOf("/");
-  const ext = (extensions ?? []).find((e) => e.name === panel.body.slice(0, slash));
-  const route = ext?.namespace === "oxplow" ? { extension: null, page: panel.body.slice(slash + 1), params: {} } : { extension: panel.body.slice(0, slash), page: panel.body.slice(slash + 1), params: {} };
+  const route = { namespace: panel.body.slice(0, slash), page: panel.body.slice(slash + 1), params: {} };
   const body = pageFileOf(extensions, route);
   return refFromTabId(body ? pageFileUri(extensions ?? [], body) : "") ?? { id: extPageUri(panel.body.slice(0, slash), panel.body.slice(slash + 1)) };
 }

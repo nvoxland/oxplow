@@ -235,7 +235,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      (the definitions the index read from it), `{ observe: { collect: {
      effort, collectors?: [key] } } }` (the fact collectors an effort's end
      runs), `{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
-     (a finished run of an extension's code), `{ observe: { health: { extension, contribution,
+     (a finished run of an extension's code), `{ observe: { health: { namespace, contribution,
      kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
      thread?, effort?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
      hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,
@@ -286,7 +286,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `expect: { ok: true, result?, commands?: [names] }` or `{ ok: false,
      refused: <part of the reason> }` — `commands` are the ones it ran (a
      script's) and what reacted. Make what it needs with `given:` first.
-   - a query: `when: { sql: "SELECT … FROM v_<ext>_<dataset>", params? }`,
+   - a query: `when: { sql: "SELECT … FROM v_<namespace>_<dataset>", params? }`,
      `expect: { rows: [ { col: val } ] }` — reads the published datasets as a
      page loader would, for a dataset, a decorator's labels or a metric
      (`metric_grid`) on its own.

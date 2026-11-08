@@ -700,7 +700,7 @@ mod tests {
         commit_all(&root, "base");
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         let page = Actor::Page {
-            page_id: "oxplow-foundation/uncommitted".into(),
+            page_id: "oxplow/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
@@ -736,7 +736,7 @@ mod tests {
             .expect("confirmed, a page discards for the person");
         std::fs::write(root.join("a.txt"), "four\n").unwrap();
         let for_agent = Actor::Page {
-            page_id: "oxplow-foundation/uncommitted".into(),
+            page_id: "oxplow/uncommitted".into(),
             on_behalf_of: Box::new(Actor::Agent {
                 session_id: None,
                 thread_id: Some(f.thread),
@@ -953,7 +953,7 @@ mod tests {
         let stream = svc.stream_store.list().await.unwrap()[0].id.to_string();
         std::fs::write(root.join("a.txt"), "two\n").unwrap();
         let page = Actor::Page {
-            page_id: "oxplow-foundation/uncommitted-changes#commit".into(),
+            page_id: "oxplow/uncommitted-changes#commit".into(),
             on_behalf_of: Box::new(Actor::Human),
         };
         let out = svc

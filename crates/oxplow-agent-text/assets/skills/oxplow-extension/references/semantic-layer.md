@@ -71,8 +71,8 @@ Carry URIs; never assemble or dissect them:
   same in an action's input. A URI goes only where a field can name anything
   (`uri`, `target`, `subject`) and for work items.
 - **To link to a page from SQL**, `uri('oxplow/page', 'page',
-  'oxplow-bundled/thread-activity', 'thread_id', thread_id)` gives
-  `oxplow:oxplow/page?page=oxplow-bundled/thread-activity&thread_id=7`
+  'oxplow/thread-activity', 'thread_id', thread_id)` gives
+  `oxplow:oxplow/page?page=oxplow/thread-activity&thread_id=7`
   (params escaped and sorted, a NULL value left out).
 - **In a script**, build with `uri.build("oxplow/file", path = f["path"])`
   and read with `uri.parse(r)` (`{ resource, params, view }`) /
@@ -122,12 +122,13 @@ datasets:
 SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
 ```
 
-- It publishes as `v_<extension>_<name>` (dashes as underscores):
+- It publishes as `v_<namespace>_<name>` (dashes as underscores), named by
+  the manifest's `namespace:` (default: the extension's name):
   `v_late_work_blocked` for extension `late-work`.
 - Read through `ref()` only: `ref('work_item')` is a core dataset (`v_work_item`),
   `ref('blocked')` your own dataset or synced entity. Another extension's
   dataset is read through an import ("Importing another extension's dataset" below). `source('<table>')` is only
-  for your own source tables (`ext__<ext>__<entity>`).
+  for your own source tables (`ext__<namespace>__<entity>`).
 - `type` is what SQLite reports for the field's column (`PRAGMA table_info`);
   leave it out for a computed one (`count(*)`, an expression).
 - `relationships: [{ from: <field>, to: <dataset>.<field> }]` says a field
@@ -138,7 +139,7 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
 - **Changing the fields is a breaking change:** bump `version`. To keep
   the old shape for readers, keep its SQL in another file and list it:
   `deprecated: [{ version: 1, file: blocked.v1.sql, until: 2027-01-01 }]`
-  publishes `v_<ext>_blocked_v1` until then.
+  publishes `v_<namespace>_blocked_v1` until then.
 - **`ai_context`** is optional guidance for an agent that reads the
   catalog, on a dataset, on one of its fields, on a metric and on a
   dimension: `ai_context: { instructions: "When to use it and how to read it.",
@@ -152,7 +153,7 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
   the files change. A failing declared test shows in the extension's
   errors and `v_dataset_test`, and the view stays up.
 - **Let other extensions build on it** by exporting it:
-  `exports: [{ contribution: "oxplow:oxplow/dataset?dataset=<ext>/<name>", version: 1,
+  `exports: [{ contribution: "oxplow:oxplow/dataset?dataset=<namespace>/<name>", version: 1,
   visibility: stable }]` (the version is the dataset's). Unexported, it's yours alone.
 
 ### Importing another extension's dataset
@@ -162,7 +163,7 @@ the binding:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=effort-review/reviews", version: 1, optional: true }
+  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=effort_review/reviews", version: 1, optional: true }
 ```
 
 ```sql
@@ -174,7 +175,7 @@ SELECT work_item, review FROM import_ref('reviews')
   mounts the page) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
 - `$OXPLOW_BIN extension check` prints how each import resolved
-  (``import `reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available``, or
+  (``import `reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available``, or
   why not).
 - The producer bumping its dataset's version is a break: your import of
   the old version goes unavailable until you change it. Leave `version`

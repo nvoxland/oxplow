@@ -52,7 +52,7 @@ test("a page kind draws its page's icon", () => {
     expect(spec && "Icon" in spec ? spec.Icon : null, kind).toBe(pageKindIconComponent(kind));
   }
   const extensions = [
-    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pageFiles: [{ id: "oxplow-foundation/git-dashboard", extension: "oxplow-foundation", slug: "git-dashboard", title: "Git", icon: "git-branch" }] },
+    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pageFiles: [{ id: "oxplow/git-dashboard", extension: "oxplow-foundation", slug: "git-dashboard", title: "Git", icon: "git-branch" }] },
   ] as unknown as Extension[];
   const spec = vizIcon("git-dashboard", extensions);
   expect(spec && "Icon" in spec ? spec.Icon : null).toBe(ICONS["git-branch"]!);

@@ -1288,6 +1288,7 @@ mod tests {
             registry
                 .register_declared(
                     "acme",
+                    "acme",
                     DeclaredEventType {
                         event_type: "acme.thing".into(),
                         v,

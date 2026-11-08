@@ -316,8 +316,8 @@ show their own content and nothing another extension adds
 foundation fixture's, which runs with only foundation on —
 [work-items.md](./work-items.md), "Conformance"). The commit and
 Uncommitted pages are foundation documents (their mounts are
-`oxplow-foundation/commit.sections` and
-`oxplow-foundation/uncommitted-changes.sections`; Git Status embeds the
+`oxplow/commit.sections` and
+`oxplow/uncommitted-changes.sections`; Git Status embeds the
 Uncommitted page); Git History is a
 declared page with a replaceable part.
 

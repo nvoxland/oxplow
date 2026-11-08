@@ -387,7 +387,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         }
       ],
       "key": []
@@ -452,7 +452,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -527,7 +527,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -612,7 +612,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow-foundation/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -702,7 +702,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -792,7 +792,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -882,7 +882,7 @@
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens shown from this turn (`oxplow:oxplow/lens?lens=oxplow-foundation/session-transcript&session=ses2#turn=trn7`: the session in its `?`, the turn its view): where a turn opens. NULL for a turn no session claims. (v4; v10: bare ids, the turn in the view)"
+          "doc": "The session's transcript lens shown from this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=ses2#turn=trn7`: the session in its `?`, the turn its view): where a turn opens. NULL for a turn no session claims. (v4; v10: bare ids, the turn in the view)"
         },
         {
           "name": "model",
@@ -3279,7 +3279,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)"
         },
         {
           "name": "created_at",
@@ -3339,7 +3339,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)"
         },
         {
           "name": "review",
@@ -3404,7 +3404,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+          "doc": "What it cites (`run:<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)"
         },
         {
           "name": "review",
@@ -3474,7 +3474,7 @@
         {
           "name": "evidence_ref",
           "type": "TEXT",
-          "doc": "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+          "doc": "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)"
         },
         {
           "name": "review",
@@ -3544,7 +3544,7 @@
         {
           "name": "evidence",
           "type": "TEXT",
-          "doc": "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_bundled_claim_status`). (v6)"
+          "doc": "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)"
         },
         {
           "name": "review",
@@ -16998,6 +16998,86 @@
         }
       ],
       "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The contribution's URI (`effect:tracker/fake`): the same as its `v_contribution.uri`."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace it is named in (its extension's): a contribution keeps its health when it moves to another extension in the namespace."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The provider's, collector's or effect's id within it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`provider`, `collector` or `effect`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`ok`, `failing` or `disabled`."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "Why it's disabled."
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "INTEGER",
+          "doc": "Failures since its last success."
+        },
+        {
+          "name": "last_ok_at",
+          "type": "TEXT",
+          "doc": "When it last succeeded (RFC 3339)."
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "doc": "Its last failure."
+        },
+        {
+          "name": "mean_ms",
+          "type": "REAL",
+          "doc": "A moving average of its successful runs or calls, in milliseconds."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TEXT",
+          "doc": "When it should next run (a schedule's next slot), if it runs on one."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When this row last changed."
+        },
+        {
+          "name": "dead_letters",
+          "type": "",
+          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `uri`) or of events whose subject names it (its `uri`)."
+        },
+        {
+          "name": "fresh",
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)"
+        },
+        {
+          "name": "repair_item",
+          "type": "TEXT",
+          "doc": "The open repair work item for it — the one whose title starts `Repair <namespace> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+        }
+      ],
+      "key": []
     }
   },
   "contribution": {
@@ -17720,6 +17800,93 @@
           "name": "extension",
           "type": "TEXT",
           "doc": "The extension that declares it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a dataset's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The file it's declared in, inside its extension: `extension.yaml`, a page's `pages/<slug>.yaml`, a dataset's SQL. Join it to the extension (`v_extension`) for where that runs; never a machine path."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its entry's line there; NULL for a contribution that is a whole file (a page, a dataset's SQL)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what it is, a collector's `doc:`, or the `description:` of a resource, a dimension or an implementation (the same text as on `v_collector`, `v_resource`, `v_dimension` and `v_capability_provider`); NULL for a kind whose declaration has none."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
+    },
+    "11": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its ref: `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace it is named in (its extension's `namespace:`): the first part of a local kind's id, kept when it moves to another extension in the namespace."
         },
         {
           "name": "kind",
@@ -18549,6 +18716,153 @@
           "name": "contribution",
           "type": "TEXT",
           "doc": "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it ran; NULL when it declares none."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `page`, `system` or `effect`."
+        },
+        {
+          "name": "actor",
+          "type": "TEXT",
+          "doc": "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for; NULL when none."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for; NULL when none."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort it ran for; NULL when none."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for; NULL when none."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for; NULL when none."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over; NULL when none."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (`v_event.id`); NULL for a run a person or schedule started."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339)."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)"
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, was denied or stopped."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "How long it ran."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Its scripts' CPU time, summed (0 for a run that ran no script)."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "The most any one of its scripts held live at once."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "The model calls it made."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 on its contribution's most recent run."
+        }
+      ],
+      "key": [
+        "run_id"
+      ]
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`."
         },
         {
           "name": "kind",
@@ -20855,6 +21169,73 @@
           "name": "extension",
           "type": "TEXT",
           "doc": "The extension declaring a profile; NULL for a built-in."
+        },
+        {
+          "name": "fallback",
+          "type": "TEXT",
+          "doc": "The built-in role an unbound profile uses; NULL for a built-in."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider (`v_ai_provider.id`) of the role's own binding; NULL when it has none."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model of the role's own binding; NULL when it has none."
+        },
+        {
+          "name": "restrict",
+          "type": "TEXT",
+          "doc": "What a person forbids this binding, a JSON array of `tools`, `sql`, `streaming`, `images`; NULL when it has no binding."
+        },
+        {
+          "name": "effective_provider",
+          "type": "TEXT",
+          "doc": "The provider a call would use now: its binding's, else its fallback's; NULL when a call would be refused."
+        },
+        {
+          "name": "effective_model",
+          "type": "TEXT",
+          "doc": "The model a call would use now."
+        },
+        {
+          "name": "key_set",
+          "type": "INT",
+          "doc": "1 when the effective provider has a key in the keychain (never the key)."
+        },
+        {
+          "name": "overridden",
+          "type": "INT",
+          "doc": "1 when the binding comes from the project's `project.yaml`, not the global `ai.yaml`."
+        },
+        {
+          "name": "problem",
+          "type": "TEXT",
+          "doc": "Why a call on it would be refused, when it would be: a model lacking a feature the profile needs."
+        }
+      ],
+      "key": [
+        "role"
+      ]
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "`main`, `summarize`, `decide`, or `<namespace>/<profile>`."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "What the role is for: oxplow's text for a built-in, the declaring extension's for a profile."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace a profile is named in (its extension's); NULL for a built-in."
         },
         {
           "name": "fallback",
@@ -24470,6 +24851,88 @@
       "key": [
         "uri"
       ]
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/collector?collector=<namespace>/<id>`: its URI, the same as `v_contribution.uri` and `v_collector_run.uri`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it (`project` for the project's own)."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace it is named in (`project` for the project's own); `<namespace>/<id>` is what `oxplow.collector.sync` takes as `collector`."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "Its id within the namespace."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what it collects: its `doc:` in the manifest. Joins `v_contribution` on `uri`."
+        },
+        {
+          "name": "trigger",
+          "type": "TEXT",
+          "doc": "How it comes to run: `call` (manual), `schedule` (`every:`), `events` (`on:`) or `run` (after a test or analysis run)."
+        },
+        {
+          "name": "enabled",
+          "type": "INT",
+          "doc": "1 unless failures disabled it on this machine (`disabled_reason` says why)."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`disabled`, `failing` (its health is failing or its last run failed), `never_run` or `ok`."
+        },
+        {
+          "name": "last_run_at",
+          "type": "TEXT",
+          "doc": "When it last ran (RFC 3339); NULL when it never ran."
+        },
+        {
+          "name": "last_status",
+          "type": "TEXT",
+          "doc": "The last run's outcome: `ok`, `error` or `skipped`; NULL when it never ran."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The last run's error, when it failed."
+        },
+        {
+          "name": "row_counts_json",
+          "type": "TEXT",
+          "doc": "Rows per entity after the last successful run, as JSON."
+        },
+        {
+          "name": "disabled_reason",
+          "type": "TEXT",
+          "doc": "Why it is disabled; NULL when it is not."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TEXT",
+          "doc": "When a scheduled collector should next run (RFC 3339); NULL when it has no schedule or no health row yet."
+        },
+        {
+          "name": "fresh",
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue or its last run failed, so its data is the last good run's; NULL before it has a health row."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "extension_change": {
@@ -26021,7 +26484,7 @@
         {
           "name": "host",
           "type": "TEXT",
-          "doc": "The page whose slot it is (`oxplow-foundation/commit`)."
+          "doc": "The page whose slot it is (`oxplow/commit`)."
         },
         {
           "name": "slot",

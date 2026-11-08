@@ -6,7 +6,7 @@ loaders:
   file_co_change:
     sql: |
       SELECT p.other AS path, p.together
-      FROM v_oxplow_bundled_co_change_pair p
+      FROM v_oxplow_co_change_pair p
       WHERE p.path = :path
       ORDER BY p.together DESC, p.other
       LIMIT 5

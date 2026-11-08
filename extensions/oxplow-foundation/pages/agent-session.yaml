@@ -97,7 +97,7 @@ actions:
     label: Conversation
     help: The saved conversation the new session starts from. The one this session is on is marked.
   choices:
-    conversation: oxplow-foundation/agent-session#agent_session_conversations
+    conversation: oxplow/agent-session#agent_session_conversations
   when: can_fork
 see_also:
   - { from: related }

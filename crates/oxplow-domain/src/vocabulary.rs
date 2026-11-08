@@ -43,18 +43,19 @@ impl Vocabulary {
         )
     }
 
-    /// This vocabulary plus what `extension` declares that it doesn't
-    /// already have — how a review reads events as one version of an
+    /// This vocabulary plus what `extension` (in `namespace`) declares that
+    /// it doesn't already have — how a review reads events as one version of an
     /// extension would. A declaration it refuses (one already registered,
     /// one that doesn't hold) is left out: the version's check reports it.
     pub fn with_declared(
         &self,
         extension: &str,
+        namespace: &str,
         declared: impl IntoIterator<Item = crate::events::schema::DeclaredEventType>,
     ) -> Self {
         let mut out = self.clone();
         for d in declared {
-            let _ = out.events.register_declared(extension, d);
+            let _ = out.events.register_declared(extension, namespace, d);
         }
         out
     }

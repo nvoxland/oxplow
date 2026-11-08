@@ -386,6 +386,7 @@ fn owner(fx: &EffortFixture, generation: Option<String>) -> ContributionRef {
         .clone();
     let mut owner = ContributionRef {
         id,
+        extension: ext.name.clone(),
         version: ext.version.clone(),
         generation: Some(snapshot.generation().to_string()),
         deployment: ext.deployment.hash().map(str::to_owned),

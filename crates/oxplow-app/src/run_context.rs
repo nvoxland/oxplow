@@ -23,7 +23,8 @@ pub fn contribution(
     local: &str,
 ) -> ContributionRef {
     ContributionRef {
-        id: ContributionId::new(&ext.name, kind, local),
+        id: ContributionId::new(&ext.namespace, kind, local),
+        extension: ext.name.clone(),
         version: ext.version.clone(),
         generation: Some(catalog.live_snapshot(root).generation().to_string()),
         deployment: ext.deployment.hash().map(str::to_owned),
@@ -39,7 +40,8 @@ pub fn unpinned_contribution(
     local: &str,
 ) -> ContributionRef {
     ContributionRef {
-        id: ContributionId::new(&ext.name, kind, local),
+        id: ContributionId::new(&ext.namespace, kind, local),
+        extension: ext.name.clone(),
         version: ext.version.clone(),
         generation: None,
         deployment: ext.deployment.hash().map(str::to_owned),
@@ -62,8 +64,7 @@ pub fn live_owner(
     let root = root.to_path_buf();
     std::sync::Arc::new(move || {
         let snapshot = catalog.live_snapshot(&root);
-        let current =
-            crate::extension::extensions::owner(snapshot.extensions(), &owner.id.extension);
+        let current = crate::extension::extensions::owner(snapshot.extensions(), &owner.extension);
         match current {
             Some(ext)
                 if ext.enabled

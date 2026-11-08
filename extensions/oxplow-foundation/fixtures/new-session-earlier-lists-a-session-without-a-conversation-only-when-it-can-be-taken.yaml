@@ -23,7 +23,7 @@ given:
   - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: there } }
   - { command: oxplow.agent_session.open, input: { thread: thr2, harness: claude, resume: busy } }
   - observe: { conversation: { harness: claude, id: busy, updated_at: "2026-10-10T10:05:00Z" } }
-when: { page: oxplow-foundation/new-session, params: { stream_id: 1, thread_id: 1 } }
+when: { page: oxplow/new-session, params: { stream_id: 1, thread_id: 1 } }
 expect:
   loaders:
     earlier:

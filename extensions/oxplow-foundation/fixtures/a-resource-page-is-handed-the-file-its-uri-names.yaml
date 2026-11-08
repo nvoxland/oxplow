@@ -5,7 +5,7 @@
 temp:
   note.md: "# Hello\n"
 when:
-  page: oxplow-foundation/file-viewer
+  page: oxplow/file-viewer
   params:
     uri: "oxplow:oxplow/file?path=note.md&filesystem=oxplow:temp"
     path: note.md

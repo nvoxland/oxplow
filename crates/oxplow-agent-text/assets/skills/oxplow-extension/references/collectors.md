@@ -16,7 +16,7 @@ CI runs), add a **collector** to the extension:
   `on: manual` (the default).
 - `$OXPLOW_BIN extension new --from github` copies a complete, working
   collector; change it to fit.
-- The entity becomes `v_<extension>_<entity>`. Join it to core views in
+- The entity becomes `v_<namespace>_<entity>` (the manifest's `namespace:`, default the extension's name). Join it to core views in
   pages.
 
 Rules:
@@ -35,7 +35,7 @@ Rules:
 - **A collector that runs a program needs `process.run`** (and the
   `network` hosts and `secrets` it uses), which a person approves when the
   extension is deployed; you can't approve. Once it is deployed,
-  `run_command` `oxplow.collector.sync { collector: "<extension>/<id>" }`
+  `run_command` `oxplow.collector.sync { collector: "<namespace>/<id>" }`
   re-runs it.
 - `v_collector` lists every enabled collector with its trigger, `enabled`,
   `state` (`disabled`, `failing`, `never_run`, `ok`) and last run.

@@ -44,7 +44,7 @@ intent:
       input: { page: reviews }
       expect: one row per review asked for, with its effort and work item
 
-# The model the review asks for: a person binds `effort-review/review` in
+# The model the review asks for: a person binds `effort_review/review` in
 # Settings → AI; until then it uses their Summarize model. The review calls
 # a tool, so the bound model must support tool calling.
 permissions: [sql.read, ai.compute, commands:oxplow.effort.*, commands:oxplow.work_item.comment, commands:oxplow.work_item.create, commands:oxplow.test.record_run]
@@ -119,7 +119,7 @@ effects:
   - id: publish-review
     summary: When a review job ends, comment its review on the effort's work item.
     on: [contribution.job.completed]
-    where: { job: "effort-review/review" }
+    where: { job: "effort_review/review" }
     entry: effects/publish_review.star
     needs: [jobs.read, sql.read]
 
@@ -137,7 +137,7 @@ datasets:
       - { name: review, type: TEXT, doc: "What the model wrote in the job's current attempt ('' before it starts)." }
 
 # Another extension may read the reviews: `imports: [{ id: reviews,
-# contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2 }]` and
+# contribution: oxplow:oxplow/dataset?dataset=effort_review/reviews, version: 2 }]` and
 # `import_ref('reviews')` in its SQL.
 exports:
-  - { contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, visibility: stable }
+  - { contribution: oxplow:oxplow/dataset?dataset=effort_review/reviews, version: 2, visibility: stable }

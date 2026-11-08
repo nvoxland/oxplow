@@ -5,7 +5,7 @@ given:
   - observe: { snapshot: { trigger: startup, branch: main, files: [{ path: a.txt, hash: h1 }] } }
   - observe: { snapshot: { trigger: quiet, branch: main, revision: "git:abc1234def", files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h1 }] } }
   - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h3 }, { path: ".oxplow/wiki/idea.md", hash: w1 }] } }
-when: { page: oxplow-foundation/local-history, params: { stream_id: 1, mode: recent } }
+when: { page: oxplow/local-history, params: { stream_id: 1, mode: recent } }
 expect:
   loaders:
     # The wiki one says which page, the clean one its commit, the first that

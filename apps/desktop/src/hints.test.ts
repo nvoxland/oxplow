@@ -8,14 +8,14 @@ test("hints read from their nudge rows", () => {
     hintsFromResult({
       columns: ["id", "kind", "message", "thread_title"],
       rows: [
-        [4, "oxplow-bundled/landed-in-progress", "“t” is still in progress", "Main"],
+        [4, "oxplow/landed-in-progress", "“t” is still in progress", "Main"],
         [2, "hint-muted", "muted", null],
       ],
       reads: { datasets: [], sources: [] },
       truncated: false,
     } as never),
   ).toEqual([
-    { id: 4, kind: "oxplow-bundled/landed-in-progress", message: "“t” is still in progress", threadTitle: "Main" },
+    { id: 4, kind: "oxplow/landed-in-progress", message: "“t” is still in progress", threadTitle: "Main" },
     { id: 2, kind: "hint-muted", message: "muted", threadTitle: null },
   ]);
 });

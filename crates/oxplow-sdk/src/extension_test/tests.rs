@@ -854,7 +854,7 @@ async fn a_foundation_fixture_runs_without_bundled() {
         .unwrap();
     let run = run_page(
         &host,
-        oxplow_app::pages::runner::RunTarget::Page("oxplow-foundation/git-history".into()),
+        oxplow_app::pages::runner::RunTarget::Page("oxplow/git-history".into()),
         &json!({ "stream_id": 1, "head_sha": "c1" }),
         &oxplow_app::pages::spec::ViewContext::default(),
     )
@@ -964,7 +964,7 @@ async fn a_given_observes_runs_health_usage_and_hints() {
             "given:
   - observe: { run: { extension: acme, contribution: pull, kind: collector, outcome: failed, days_ago: 2, cpu_ms: 30, ai_calls: 2 } }
   - observe: { run: { extension: acme, contribution: pull, kind: collector, outcome: ok } }
-  - observe: { health: { extension: acme, contribution: pull, kind: collector, disable: boom } }
+  - observe: { health: { namespace: acme, contribution: pull, kind: collector, disable: boom } }
   - observe: { token_usage: { prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
   - observe: { hint: { hint: x/never, evaluated: 3 } }
   - observe: { nudge: { kind: x/spoke, message: m } }

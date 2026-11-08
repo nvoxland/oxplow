@@ -14,7 +14,7 @@ params:
   default: 7d
   presets: [1d, 7d, 30d, 90d, all]
 answers:
-- {"question":"What did this collector record?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
+- {"question":"What did this collector record?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

@@ -6,8 +6,8 @@ import { useEffect } from "react";
 import { goRowsOf, type GoRow } from "../../menuBar.js";
 import { usePanelRuns } from "./PanelRunsContext.js";
 
-/** The Go To panel's id. */
-export const GO_TO_PANEL = "go-to";
+/** The Go To panel's id (`<namespace>/<id>`). */
+export const GO_TO_PANEL = "oxplow/go-to";
 
 export function GoMenuFeed({ onRows }: { onRows(rows: GoRow[]): void }) {
   const body = usePanelRuns().runs[GO_TO_PANEL]?.body?.run ?? null;

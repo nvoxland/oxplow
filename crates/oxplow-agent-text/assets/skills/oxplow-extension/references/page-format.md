@@ -44,7 +44,7 @@ intent:                 # required: what it is for, and how to know it works
       expect: one row for the blocked task
 ui:                     # optional: what it adds to other pages
   mounts:
-    - { page: task-history, at: oxplow-bundled/work-item.sections }   # also add requires: [oxplow-bundled]
+    - { page: task-history, at: oxplow/work-item.sections }   # also add requires: [oxplow-bundled]
 panels:                 # optional: a left-nav panel
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
@@ -141,7 +141,7 @@ looking at.** Don't hardcode ids.
 
 ## Renderers
 
-`for: oxplow/commit` (or a list; your own `<extension>/<name>`, another
+`for: oxplow/commit` (or a list; your own `<namespace>/<name>`, another
 extension's, or `https`/`http`) makes the page a **resource page**: a
 display mode of that kind of URI (a commit, a file), opened from the
 resource and never listed on its own. So it takes no `category`,
@@ -173,7 +173,7 @@ definition page the other mode. Don't link them to each other: the rail's
 "See also" lists every other renderer of the tab's URI by itself, as
 `View as <title>`. A page that is about the definition (a list of an
 extension's contributions, a catalog) links to it as the same URI with
-`#oxplow.renderer=<extension>/<page>`, pinning the definition renderer,
+`#oxplow.renderer=<namespace>/<page>`, pinning the definition renderer,
 because the bare URI opens the data page.
 
 `accepts: { content: <loader> }` also looks at what the URI names: the

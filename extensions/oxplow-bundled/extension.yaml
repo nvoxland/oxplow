@@ -9,8 +9,8 @@ intent:
   purpose: >-
     Hold the optional features oxplow ships once each has been cleaned up. So
     far that is the review and analysis datasets, their settings and the
-    verdict decorators, event types and commands, here so their names stay when
-    oxplow-bundled-todo goes away.
+    verdict decorators, event types and commands. Their names come from the
+    `oxplow` namespace, so they stay when a piece moves between extensions.
   origin: null
 datasets:
   - name: change_interest
@@ -69,7 +69,7 @@ datasets:
     version: 3
     key: [seq]
     materialize: { incremental: seq }
-    description: "Every verdict a reviewer gave (`oxplow_bundled.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
+    description: "Every verdict a reviewer gave (`oxplow.review.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
     fields:
       - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
       - { name: uri, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
@@ -105,27 +105,17 @@ datasets:
       - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }
 event_types:
   types:
-    - type: oxplow_bundled.accepted
+    - type: oxplow.review.accepted
       v: 1
-      schema: event_types/accepted.v1.json
+      schema: event_types/accepted.json
       summary: A person accepted an effort's work. Subject — the effort, its work item and any claim or decision accepted unchecked.
-    - type: oxplow_bundled.accepted
-      v: 2
-      schema: event_types/accepted.v2.json
-      summary: A person accepted an effort's work. Subject — the effort, its work item and any claim or decision accepted unchecked. The payload names the effort by its bare id.
-      upcast: event_types/accepted.star
-    - type: oxplow_bundled.changes_requested
+    - type: oxplow.review.changes_requested
       v: 1
-      schema: event_types/changes_requested.v1.json
+      schema: event_types/changes_requested.json
       summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
-    - type: oxplow_bundled.changes_requested
-      v: 2
-      schema: event_types/changes_requested.v2.json
-      summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item. The payload names the effort by its bare id.
-      upcast: event_types/changes_requested.star
-    - type: oxplow_bundled.finished_cleared
+    - type: oxplow.work.finished_cleared
       v: 1
-      schema: event_types/finished_cleared.v1.json
+      schema: event_types/finished_cleared.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
 ui:
   # The verdict where the effort is shown: it shows; it never acts.

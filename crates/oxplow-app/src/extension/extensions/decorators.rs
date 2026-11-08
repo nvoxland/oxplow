@@ -10,7 +10,7 @@
 //!     - { dataset: flags, resource: oxplow/work_item, placement: ref-chip, label: label, color: color }
 //! ```
 //!
-//! The dataset is `v_<extension>_<dataset>`; it must declare a `ref` column
+//! The dataset is `v_<namespace>_<dataset>`; it must declare a `ref` column
 //! and the `label` (and `color`) columns named.
 
 use oxplow_domain::diagnostic::Diagnostic;
@@ -37,7 +37,7 @@ pub struct UiDecorator {
     /// `<extension>/<n>`.
     pub id: String,
     pub extension: String,
-    /// The dataset's view (`v_<extension>_<dataset>`), which has a `ref` column.
+    /// The dataset's view (`v_<namespace>_<dataset>`), which has a `ref` column.
     pub view: String,
     /// The resource it decorates (`oxplow/work_item`).
     pub resource: String,
@@ -71,6 +71,7 @@ fn identifier(s: &str) -> bool {
 /// and an error (`file:line: …`) for each broken one.
 pub fn parse_decorators(
     extension: &str,
+    namespace: &str,
     datasets: &[oxplow_db::datasets::DatasetSource],
     value: &serde_yaml::Value,
     file: &str,
@@ -167,9 +168,11 @@ pub fn parse_decorators(
             continue;
         }
         out.push(UiDecorator {
+            // Positional and never stored: its extension's, so two in a
+            // namespace don't meet.
             id: format!("{extension}/{i}"),
             extension: extension.to_string(),
-            view: oxplow_db::datasets::extension_view(extension, &d.dataset),
+            view: oxplow_db::datasets::extension_view(namespace, &d.dataset),
             resource: d.resource,
             placement: d.placement,
             label: d.label,

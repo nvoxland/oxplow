@@ -54,8 +54,8 @@ export function CustomComponentViz({
   const component = run.config.custom?.component ?? null;
   const fed = useMemo(() => data ?? vizData(run), [data, run]);
   // The component itself names every call: it acts as itself wherever
-  // it is shown.
-  const componentKey = component ? `${run.config.extension}/${component}` : null;
+  // it is shown. It is named in its page's namespace.
+  const componentKey = component ? `${run.config.id.split("/")[0]}/${component}` : null;
   const { loadKey, version, src, error } = useComponentBundle(componentKey, base);
   // A viz's component may open forms and sign in, as a page's may.
   const frameForms = useFrameForms(componentKey, run.config.title);

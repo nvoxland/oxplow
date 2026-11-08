@@ -10,14 +10,14 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 | Example | What it shows |
 |---|---|
 | [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a resource kind (`[[pr:12]]`), a page and a custom component. |
-| [prompt-efforts](prompt-efforts/) | Replacing a core policy: an effort policy script that opens one effort per prompt. |
-| [task-views](task-views/) | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
+| [prompt-efforts](prompt_efforts/) | Replacing a core policy: an effort policy script that opens one effort per prompt. |
+| [task-views](task_views/) | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
-| [effort-review](effort-review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
-| [schema-review](schema-review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
-| [session-history](session-history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
-| [commit-history](commit-history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
-| [review-badges](review-badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list, withheld with a warning when effort-review isn't there. |
+| [effort-review](effort_review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
+| [schema-review](schema_review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
+| [session-history](session_history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
+| [commit-history](commit_history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
+| [review-badges](review_badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list, withheld with a warning when effort-review isn't there. |
 
 ## What the trials prove
 
@@ -112,7 +112,7 @@ Still open:
 - **Names:** an extension's command namespace is its name with `-` as `_`
   (`effort_review.review.ask`), while its contribution ids and dataset
   views keep or translate the dash differently
-  (`oxplow:oxplow/job?job=effort-review/review`, `v_effort_review_reviews`).
+  (`oxplow:oxplow/job?job=effort_review/review`, `v_effort_review_reviews`).
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.

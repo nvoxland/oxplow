@@ -8,5 +8,5 @@ when:
     type: contribution.disabled
     payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: boom }
 expect:
-  effects: [{ id: oxplow-bundled-todo/repair-disabled, state: skipped }]
+  effects: [{ id: oxplow/repair-disabled, state: skipped }]
   commands: []

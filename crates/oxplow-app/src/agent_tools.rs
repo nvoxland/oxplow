@@ -24,7 +24,7 @@ use crate::Services;
 pub enum ToolTarget {
     /// A command, by id (`oxplow.sql.query`).
     Command(String),
-    /// A page, by id (`oxplow-foundation/thread-work`), through
+    /// A page, by id (`oxplow/thread-work`), through
     /// [`PAGE_RUN`].
     Page(String),
 }
@@ -263,10 +263,7 @@ mod tests {
             .iter()
             .find(|t| t.name == "oxplow_thread_work")
             .unwrap();
-        assert_eq!(
-            work.target,
-            ToolTarget::Page("oxplow-foundation/thread-work".into())
-        );
+        assert_eq!(work.target, ToolTarget::Page("oxplow/thread-work".into()));
         assert!(work.read_only);
         assert!(work.input_schema["properties"]["thread"].is_object());
     }

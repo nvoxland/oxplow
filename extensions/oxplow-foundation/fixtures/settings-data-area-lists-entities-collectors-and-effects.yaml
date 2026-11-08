@@ -8,6 +8,6 @@ expect:
       columns: [name, owner, kind, description]
       rows: $any
     data_sources:
-      columns: [uri, collector, extension, id, trigger, state, tone, last_run_at, rows, problem, missing, can_enable_again]
+      columns: [uri, collector, extension, namespace, id, trigger, state, tone, last_run_at, rows, problem, missing, can_enable_again]
       rows: $any
     data_effects: { rows: 0 }

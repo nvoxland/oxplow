@@ -42,7 +42,7 @@ export function Replaced({
   const view = useHostedView({ keys: replacement?.view ?? NO_KEYS, scope: target });
   // Usage is the evidence a kind needs to be promoted: once per
   // replacement actually shown.
-  const shown = error === null ? `${extension}/${target}` : null;
+  const shown = error === null ? (replacement?.id ?? `${extension}/${target}`) : null;
   useEffect(() => {
     if (shown !== null) void recordUsage({ kind: "replacement", key: shown, streamId }).catch(() => {});
   }, [shown, streamId]);

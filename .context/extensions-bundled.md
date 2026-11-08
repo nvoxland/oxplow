@@ -35,11 +35,11 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       extension.
 
 - **The review packet** (in `oxplow-bundled`). Its pages, mounted in
-  the `sections` slots of `oxplow-foundation/diff-view` (the Changes
+  the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`:
   - Decisions Made (`v_decision`, `provenance = 'recorded'`)
   - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
-  - Unverified Claims (`v_claim` whose `v_oxplow_bundled_claim_status`
+  - Unverified Claims (`v_claim` whose `v_oxplow_claim_status`
     says `verified = 0`: it cites nothing and no person verified it, and
     for a `tests_pass` claim its effort's latest test run didn't pass
     with at least one test — the bundled policy's rule; core keeps only
@@ -52,7 +52,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     (`oxplow.effort.reopen_claim`)
   - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
     (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
-  - What Deviated (its own dataset `v_oxplow_bundled_deviation`: each
+  - What Deviated (its own dataset `v_oxplow_deviation`: each
     effort's files against its work item's title and body — a file is in
     the area when the text names it or one of its directories at least
     two levels deep; none when the item names no area. Live, not
@@ -60,8 +60,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     database)
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
-    also mounted in the `oxplow-foundation/commit.sections` and `oxplow-foundation/uncommitted.sections` slots)
-  - Struggled Here (`v_oxplow_bundled_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per effort)
+    also mounted in the `oxplow/commit.sections` and `oxplow/uncommitted.sections` slots)
+  - Struggled Here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per effort)
   - Review Prompt (a copyable markdown prompt for reviewing the effort
     with a second harness: the task, the agent's summary, the files it
     changed, its claims and recorded decisions, and what to report; an
@@ -88,8 +88,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   add headings, links or items to the reviewer's comment); the note is
   the reviewer's own markdown. Both read one `input` query
   (`v_effort` + `json_group_array`s over `v_claim` and its
-  `v_oxplow_bundled_claim_status`, `v_decision`,
-  `v_oxplow_bundled_deviation`), compose `oxplow.work_item.comment` and
+  `v_oxplow_claim_status`, `v_decision`,
+  `v_oxplow_deviation`), compose `oxplow.work_item.comment` and
   `oxplow.work_item.transition` — as steps, every list's verbs running
   outside the transaction (not undoable; [commands.md](./commands.md) →
   "Composition") — refuse an
@@ -178,13 +178,14 @@ accepted, and the holder goes away when it is empty. Add nothing new there.
 - **Nothing may depend on it.** No test, example or doc names its contents. Core
   machinery a test needs a collector or a component for has its own test data
   (`crates/oxplow-app/testdata/`) or uses foundation's.
-- **What came first.** Names derived from an extension (`v_<ext>_*` datasets,
-  `<ext>.*` event types, `<ext>/<id>` contribution ids) are why the datasets, the
-  event types and the commands that emit those types moved first: a script may emit
-  only its own extension's event types, and a decorator reads only its own
-  extension's datasets. They publish as `v_oxplow_bundled_*` and `oxplow_bundled.*`.
+- **Names don't move.** Every global name comes from the `oxplow` namespace
+  ([extensions-manifest.md](./extensions-manifest.md) "Global names come from the
+  namespace"), so a dataset is `v_oxplow_<name>` and an event type `oxplow.<…>`
+  wherever it sits. The datasets, event types and the commands that emit them moved
+  first anyway: a script emits only the event types its own extension declares, and a
+  decorator reads only its own extension's datasets.
 - **Other docs.** Where `.context/` describes a screen, an advisory or a metric as
-  `oxplow-bundled`'s (or `oxplow-bundled-todo/...`) and `extensions/oxplow-bundled/`
+  `oxplow-bundled`'s (or `oxplow/...`) and `extensions/oxplow-bundled/`
   doesn't have it, it is in the holder and doesn't run today.
 
 What moved out of core, and what it is now. All of it is pages (files in
@@ -212,21 +213,21 @@ screens and the holder's add the review and analysis:
   offered only for a kind that resolves to a dataset (`accepts: { content:
   resolved }`), so the others have Definition alone. Each data page's See
   also has Definition and each definition page's has Data, linked as the
-  same URI with `#oxplow.renderer=oxplow-foundation/<page>`. A page about
+  same URI with `#oxplow.renderer=oxplow/<page>`. A page about
   definitions (the Extension page's tables, the definition pages' links to
   each other, the data catalog) links the same way, pinning the definition
   renderer, because the bare URI opens the data view.
 - **Dashboards and review.** `planning`, `review`, `quality` and `usage`;
   the code-quality `findings`; the `change-review` page (treemap,
   look-here-first, functions, co-change, zones) mounted in the
-  `oxplow-foundation/diff-view.sections`, `commit.sections` and
+  `oxplow/diff-view.sections`, `commit.sections` and
   `uncommitted-changes.sections` slots. The duplicate scan runs in core's
   change analysis; the compare page is foundation's `duplicate-block`.
 - **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
   failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
-  and `effort-plan`, mounted at `oxplow-foundation/diff-view.sections`.
-  `task-tokens` mounts at `oxplow-bundled/work-item.sections`;
-  `thread-tokens` at `oxplow-bundled/tasks.sections`.
+  and `effort-plan`, mounted at `oxplow/diff-view.sections`.
+  `task-tokens` mounts at `oxplow/work-item.sections`;
+  `thread-tokens` at `oxplow/tasks.sections`.
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component, replacing
@@ -256,7 +257,7 @@ screens and the holder's add the review and analysis:
   `metrics-slices`. Foundation keeps one metric's pages (`metric`,
   `metric-data`, `measure`), which do not link to the list, and the
   `metrics-dimensions` query (the `metric` page's Slice by reads it;
-  the list names it as `oxplow-foundation/metrics-dimensions`). People find
+  the list names it as `oxplow/metrics-dimensions`). People find
   a metric from the launcher instead: `metric` and `measure` are
   `searchable:` ([metrics.md](./metrics.md) "UI").
 - **Zones.** The `zones` page (no category) holds the questions about the zone
@@ -287,18 +288,18 @@ screens and the holder's add the review and analysis:
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
-its dataset `change_interest` (`v_oxplow_bundled_change_interest`, over
+its dataset `change_interest` (`v_oxplow_change_interest`, over
 `ref('change_file')` and `ref('change_function')`), which the
 `change-review` page reads; co-change surprises are its datasets
 `co_change_pair` (`materialize: { every: 1h }` over the commit index —
 "the last 180 days" moves with the clock) and
 `change_co_change`, which `change-review` reads — and the
 `file-co-change` page ("Usually Changes With", mounted at the diff
-page's `file-header` slot, `oxplow-foundation/diff.file-header`) reads `co_change_pair` for the file a diff
+page's `file-header` slot, `oxplow/diff.file-header`) reads `co_change_pair` for the file a diff
 shows; an
-effort's churn is its fact collector `oxplow_bundled.effort_churn`
+effort's churn is its fact collector `oxplow.effort_churn`
 (`on: [effort.finished]`, `after: [change.analyze]`, reading the
-effort's change files) recording `oxplow_bundled.effort_churn_lines`.
+effort's change files) recording `oxplow.effort_churn_lines`.
 Full-tree duplicated lines read the tree, not tables, so they
 are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
@@ -352,7 +353,7 @@ available to every extension:
 - Page `actions:` as commands.
 - Disabling extensions per project.
 - Advisories: the generic nudge primitive (see extensions-commands.md "Advisories").
-- Page tabs carry params: `oxplow:oxplow/page?page=<ext>/<slug>&k=v#view`,
+- Page tabs carry params: `oxplow:oxplow/page?page=<namespace>/<slug>&k=v#view`,
   so a slot page's heading opens its page with the slot's values, and
   history and bookmarks keep them.
 - Panel `collapsed:` — a page shown as a collapsed panel's summary

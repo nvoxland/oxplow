@@ -3,7 +3,7 @@
 temp:
   sheet.csv: "name,n\nant,1\nbee,2\n"
 when:
-  page: oxplow-foundation/csv
+  page: oxplow/csv
   params:
     uri: "oxplow:oxplow/file?path=sheet.csv&filesystem=oxplow:temp"
     path: sheet.csv

@@ -4,7 +4,7 @@ given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - command: oxplow.effort.replace_inferred_claims
     input: { effort: eff1, claims: [{ statement: The tests pass., kind: tests_pass }] }
-when: { part: oxplow-bundled-todo/unverified-claims, params: { effort_id: 1 } }
+when: { part: oxplow/unverified-claims, params: { effort_id: 1 } }
 expect:
   nodes:
     - id: unverified_claims

@@ -46,7 +46,7 @@ describe("pageRefs", () => {
     expect(agentSessionRef("ses3")).toEqual({ id: "oxplow:oxplow/agent_session?id=ses3", pinned: true });
     expect(recordedPageKind(agentSessionRef("ses3"))).toBe("oxplow/agent_session");
     expect(newSessionRef()).toEqual({ id: "oxplow:oxplow/page?page=new-session" });
-    expect(pagePayload(newSessionRef())).toEqual({ extension: null, page: "new-session", params: {} });
+    expect(pagePayload(newSessionRef())).toEqual({ namespace: null, page: "new-session", params: {} });
   });
 
   test("fileRef encodes the path with a default disk version", () => {
@@ -60,7 +60,7 @@ describe("pageRefs", () => {
     // A base named as its version reads says nothing more: left out. The
     // label the tab says defaults to "diff".
     expect(a.id).toBe("oxplow:oxplow/page?label=diff&left=git:abc&page=diff&path=src/a.ts&right=working");
-    expect(pagePayload(a)).toEqual({ extension: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working", label: "diff" } });
+    expect(pagePayload(a)).toEqual({ namespace: null, page: "diff", params: { path: "src/a.ts", left: "git:abc", right: "working", label: "diff" } });
     expect(diffSpecOf(refFromTabId(a.id)!)).toEqual({ ...spec, labelOverride: undefined, revealLine: undefined });
     const full = { ...spec, baseLabel: "HEAD", labelOverride: "wi 3", revealLine: 7 };
     const b = diffRef(full);
@@ -91,10 +91,10 @@ describe("pageRefs", () => {
     expect(ref.id).toBe("oxplow:oxplow/page?page=tasks");
     expect(typeOf(ref.id)).toBe("oxplow/page");
     expect(hookEventsRef()).toEqual({ id: "oxplow:oxplow/page?page=hook-events" });
-    expect(pagePayload(hookEventsRef())).toEqual({ extension: null, page: "hook-events", params: {} });
+    expect(pagePayload(hookEventsRef())).toEqual({ namespace: null, page: "hook-events", params: {} });
     const gh = extPageRef("gh", "open-prs", { uri: "acme_pr:1" });
     expect(gh).toEqual({ id: "oxplow:oxplow/page?page=gh/open-prs&uri=acme_pr:1" });
-    expect(pagePayload(gh)).toEqual({ extension: "gh", page: "open-prs", params: { uri: "acme_pr:1" } });
+    expect(pagePayload(gh)).toEqual({ namespace: "gh", page: "open-prs", params: { uri: "acme_pr:1" } });
     expect(uncommittedChangesRef().id).toBe("oxplow:oxplow/page?page=uncommitted-changes");
   });
 

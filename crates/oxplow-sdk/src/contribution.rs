@@ -44,22 +44,22 @@ fn services_list() -> String {
         .join(", ")
 }
 
-/// The contribution of `kind` named `id` to extension `extension`. A kind
+/// The contribution of `kind` named `id` to an extension in `namespace`. A kind
 /// that has none of its own (an extension, a provider, a metric, a policy, a
 /// panel, a job) is refused.
-pub fn contribution(kind: Kind, extension: &str, id: &str) -> Result<Contribution, SdkError> {
-    build(kind, extension, id, None)
+pub fn contribution(kind: Kind, namespace: &str, id: &str) -> Result<Contribution, SdkError> {
+    build(kind, namespace, id, None)
 }
 
 /// [`contribution`], with the script path and menu label a command gets when
 /// `new command` makes it (the one starter `new` has always written).
 pub(crate) fn build(
     kind: Kind,
-    extension: &str,
+    namespace: &str,
     id: &str,
     command: Option<(&str, &str)>,
 ) -> Result<Contribution, SdkError> {
-    let ns = extension_namespace(extension);
+    let ns = extension_namespace(namespace);
     let work_item = work_item_uri("oxplow", "tsk1");
     let mut files: Vec<(String, String)> = Vec::new();
     let mut write = |rel: &str, body: String| -> Result<(), SdkError> {
@@ -402,7 +402,13 @@ pub fn add_contribution(
     let original = std::fs::read_to_string(&manifest_path)?;
     let parsed: serde_yaml::Value = serde_yaml::from_str(&original)
         .map_err(|e| SdkError::Invalid(format!("{rel_dir}/extension.yaml doesn't parse: {e}")))?;
-    let made = contribution(kind, &name, id)?;
+    // What it names (`v_<ns>_…`, `<ns>.<command>`) is the manifest's
+    // `namespace:`, the name's when it has none.
+    let namespace = parsed
+        .get("namespace")
+        .and_then(serde_yaml::Value::as_str)
+        .map_or_else(|| extension_namespace(&name), str::to_string);
+    let made = contribution(kind, &namespace, id)?;
 
     let mut text = original;
     for (block, entry) in &made.entries {

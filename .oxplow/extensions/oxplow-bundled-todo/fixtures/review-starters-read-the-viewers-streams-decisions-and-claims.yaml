@@ -8,16 +8,16 @@ given:
     input: { effort: eff1, decisions: [{ question: Where does export live?, choice: src/export, alternatives: [], why: "" }] }
   - command: oxplow.effort.replace_inferred_claims
     input: { effort: eff1, claims: [{ statement: tests pass, kind: tests_pass }, { statement: handles empty, kind: tests_pass, evidence: "test:empty" }] }
-when: { page: oxplow-bundled-todo/recent-decisions, params: { stream_id: 1 } }
+when: { page: oxplow/recent-decisions, params: { stream_id: 1 } }
 expect:
   loaders:
     recent_decisions: { rows: [{ question: Where does export live? }] }
 steps:
-  - when: { page: oxplow-bundled-todo/unbacked-claims, params: { stream_id: 1 } }
+  - when: { page: oxplow/unbacked-claims, params: { stream_id: 1 } }
     expect:
       loaders:
         unbacked_claims: { rows: [{ statement: tests pass }] }
-  - when: { page: oxplow-bundled-todo/unbacked-claims, params: { stream_id: 999 } }
+  - when: { page: oxplow/unbacked-claims, params: { stream_id: 999 } }
     expect:
       loaders:
         unbacked_claims: { rows: 0 }

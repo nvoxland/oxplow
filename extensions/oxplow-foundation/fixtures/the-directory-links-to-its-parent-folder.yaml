@@ -2,7 +2,7 @@
 # folder: it sits at its filesystem's root).
 given:
   - observe: { turn: { prompt: c, write: { path: src/sub/c.rs, body: "c\n" } } }
-when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src/sub } }
+when: { page: oxplow/directory, params: { stream_id: 1, path: src/sub } }
 expect:
   see_also:
     - { title: src, uri: "oxplow:oxplow/dir?path=src" }

@@ -2,7 +2,7 @@
 # what to fix on the effort's work item — each unverified claim, each
 # inferred decision, each file outside the item's area — and move it back
 # to todo (oxplow: ready). The verdict is logged as
-# `oxplow_bundled.changes_requested` with the run, about the effort and
+# `oxplow.review.changes_requested` with the run, about the effort and
 # the item.
 
 # The effort's work item, and what its review weighs: unverified claims,
@@ -10,12 +10,12 @@
 _REVIEW = """
 SELECT e.work_item,
        (SELECT json_group_array(json_object('claim', c.uri, 'statement', c.statement))
-          FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
+          FROM v_claim c JOIN v_oxplow_claim_status s ON s.uri = c.uri
          WHERE c.effort_id = e.id AND s.verified = 0) AS unverified,
        (SELECT json_group_array(json_object('decision', d.uri, 'question', d.question, 'choice', d.choice))
           FROM v_decision d WHERE d.effort_id = e.id AND d.provenance = 'inferred') AS inferred,
        (SELECT json_group_array(v.path)
-          FROM v_oxplow_bundled_deviation v WHERE v.effort_id = e.id) AS deviated
+          FROM v_oxplow_deviation v WHERE v.effort_id = e.id) AS deviated
 FROM v_effort e
 WHERE e.uri = uri('oxplow/effort', 'id', :effort)
 """
@@ -65,6 +65,6 @@ def transform(x):
             {"name": "oxplow.work_item.comment", "input": {"uri": item, "body": "\n".join(lines)}},
             {"name": "oxplow.work_item.transition", "input": {"uri": item, "to": "todo"}},
         ],
-        "events": [{"type": "oxplow_bundled.changes_requested", "subject": [ref, item], "payload": payload}],
+        "events": [{"type": "oxplow.review.changes_requested", "subject": [ref, item], "payload": payload}],
         "result": {"work_item": item},
     }

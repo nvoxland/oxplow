@@ -144,7 +144,7 @@ pages, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
 `` optional import `items` for `oxplow:oxplow/dataset?dataset=maker/items` v1 is unavailable: maker
-is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow-bundled.work-item.sections-0` ``.
+is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow.work-item.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -218,7 +218,7 @@ lists each declared reference with Set… and Revoke.
 <!-- kinds:begin (generated from oxplow_domain::contribution::KINDS; bless with OXPLOW_BLESS=1) -->
 | Key | What it adds | More |
 |---|---|---|
-| `datasets` | SQL views over oxplow's datasets, published as `v_<ext>_<name>` |  |
+| `datasets` | SQL views over oxplow's datasets, published as `v_<namespace>_<name>` |  |
 | `measures` | what a metric's facts measure | [Metrics](../guide/metrics.md) |
 | `metrics` | a number tracked over a measure | [Metrics](../guide/metrics.md) |
 | `dimensions` | a way to slice metrics | [Metrics](../guide/metrics.md) |
@@ -235,7 +235,7 @@ lists each declared reference with Set… and Revoke.
 | `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
-| `ui.mounts` | a page placed at another page's slot (`at: <extension>/<page>.<slot>`) |  |
+| `ui.mounts` | a page placed at another page's slot (`at: <namespace>/<page>.<slot>`) |  |
 | `ui.decorators` | labels on core refs |  |
 | `ui.mounts` | a page placed in place of a core component (`at: <target>`, `v_replaceable`) |  |
 | `custom_components` | sandboxed HTML components a page draws, fed its loaders |  |
@@ -480,7 +480,7 @@ deployed.
 A script declaring `needs: [jobs.read]` can call
 `scope("jobs.read", {"job_run": payload["job_run"]})` for its extension's result. The
 `contribution.job.completed` event carries the run (`job_run`), the job
-(`job`, which `where: { job: "job:<extension>/<id>" }` matches) and
+(`job`, which `where: { job: "job:<namespace>/<id>" }` matches) and
 `outcome` (`succeeded`, `failed`, `cancelled` or `interrupted`), with no
 request or result body; read the result through `jobs.read`. An agent or effect that
 composes `enqueue` does not acquire the job's AI permission.
@@ -501,7 +501,7 @@ ai_profiles:
 Name it by its id where your extension picks a role: a job request's
 `role: review`, a collector's `ai_classify(text, labels, role = "review")`
 (every `ai_*` builtin takes `role=`). Another extension's profiles aren't
-yours to name. The person binds `<extension>/<id>` to a model in
+yours to name. The person binds `<namespace>/<id>` to a model in
 Settings → AI (or a project in `.oxplow/project.yaml`'s `ai.roles`);
 until they do, the `fallback` role's model serves it. `features` are what
 the bound model must support: a job's typed call on a model that
@@ -514,7 +514,7 @@ what serves it.
 
 A resource is a kind of thing your extension adds: pull requests, tickets,
 deployments. `resources:` declares it, and every thing of it gets a URI,
-`oxplow:<extension>/<resource>?<params>` (`oxplow:github/pr?id=12`).
+`oxplow:<namespace>/<resource>?<params>` (`oxplow:github/pr?id=12`).
 
 ```yaml
 resources:
@@ -645,7 +645,7 @@ effects:
 
 An entry is one of:
 - a bare id: this extension's own effect or collector;
-- a short URI: `effect:<extension>/<id>` or `collector:<extension>/<id>`,
+- a short URI: `effect:<namespace>/<id>` or `collector:<namespace>/<id>`,
   any extension's (the short forms of `oxplow:oxplow/effect?effect=…` and
   `oxplow:oxplow/collector?collector=…`);
 - one of oxplow's own steps, by name (`change.analyze`, `collection`,

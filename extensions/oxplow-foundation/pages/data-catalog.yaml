@@ -10,7 +10,7 @@ loaders:
     sql: |
       SELECT m.view, m.owner,
              uri('oxplow/dataset', 'dataset', CASE WHEN m.owner = 'core' THEN m.name ELSE m.owner || '/' || m.name END)
-               || '#oxplow.renderer=oxplow-foundation/dataset-definition' AS definition,
+               || '#oxplow.renderer=oxplow/dataset-definition' AS definition,
              m.description || CASE WHEN m.ai_context IS NOT NULL THEN ' [ai_context: ' || m.ai_context || ']' ELSE '' END
                || CASE WHEN :dataset <> '' AND m.relationships IS NOT NULL THEN ' [relationships: ' || m.relationships || ']' ELSE '' END AS description,
              (SELECT group_concat(

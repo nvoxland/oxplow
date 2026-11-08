@@ -13,7 +13,7 @@ import {
 } from "./pageFiles.js";
 
 const file = (extension: string, slug: string, over: Partial<Page> = {}): Page =>
-  fakePage(node.viz("items", "items"), { id: `${extension}/${slug}`, extension, slug, title: slug, ...over });
+  fakePage(node.viz("items", "items"), { id: `${extension.startsWith("oxplow-") ? "oxplow" : extension.replace(/-/g, "_")}/${slug}`, extension, slug, title: slug, ...over });
 
 const ext = (name: string, namespace: string, pageFiles: Page[], enabled = true) =>
   ({ name, namespace, enabled, pageFiles }) as unknown as Extension;
@@ -23,17 +23,17 @@ const prs = file("gh", "open-prs");
 const exts = [ext("oxplow-foundation", "oxplow", [tasks]), ext("gh", "gh", [prs])];
 
 describe("a route's page file", () => {
-  test("oxplow's by its slug, any other extension's by `<extension>/<slug>`", () => {
-    expect(pageFileOf(exts, { extension: null, page: "tasks", params: {} })?.id).toBe("oxplow-foundation/tasks");
-    expect(pageFileOf(exts, { extension: "gh", page: "open-prs", params: {} })?.id).toBe("gh/open-prs");
-    // oxplow's pages are core-named: never `oxplow-foundation/tasks`.
-    expect(pageFileOf(exts, { extension: "oxplow-foundation", page: "tasks", params: {} })).toBeNull();
-    expect(pageFileOf(exts, { extension: null, page: "nope", params: {} })).toBeNull();
+  test("oxplow's by its slug, any other's by `<namespace>/<slug>`", () => {
+    expect(pageFileOf(exts, { namespace: null, page: "tasks", params: {} })?.id).toBe("oxplow/tasks");
+    expect(pageFileOf(exts, { namespace: "gh", page: "open-prs", params: {} })?.id).toBe("gh/open-prs");
+    // oxplow's pages are core-named; spelled `oxplow/tasks`, it is the same page.
+    expect(pageFileOf(exts, { namespace: "oxplow", page: "tasks", params: {} })?.id).toBe("oxplow/tasks");
+    expect(pageFileOf(exts, { namespace: null, page: "nope", params: {} })).toBeNull();
   });
 
   test("a disabled extension's page doesn't resolve; while the extensions load it is undefined", () => {
-    expect(pageFileOf([ext("gh", "gh", [prs], false)], { extension: "gh", page: "open-prs", params: {} })).toBeNull();
-    expect(pageFileOf(null, { extension: null, page: "tasks", params: {} })).toBeUndefined();
+    expect(pageFileOf([ext("gh", "gh", [prs], false)], { namespace: "gh", page: "open-prs", params: {} })).toBeNull();
+    expect(pageFileOf(null, { namespace: null, page: "tasks", params: {} })).toBeUndefined();
   });
 
   test("its URI is the route the same rule names", () => {
@@ -48,7 +48,7 @@ describe("a renderer's page file", () => {
   const all = [ext("oxplow-foundation", "oxplow", [tasks, editor]), ext("acme", "acme", [blame], false)];
 
   test("is found by its id among the enabled extensions' pages", () => {
-    expect(pageFileById(all, "oxplow-foundation/editor")).toBe(editor);
+    expect(pageFileById(all, "oxplow/editor")).toBe(editor);
     // Disabled, or not there: nothing.
     expect(pageFileById(all, "acme/blame")).toBeNull();
     expect(pageFileById(all, "acme/gone")).toBeNull();
@@ -125,9 +125,9 @@ describe("what draws a tab", () => {
   const exts2 = [ext("oxplow-foundation", "oxplow", [tasks, formPage, commit, editorFile])];
 
   test("a route: its page file — a form's too — else nothing", () => {
-    expect(chooseRoute(exts2, { extension: null, page: "tasks", params: {} })).toBe(tasks);
-    expect(chooseRoute(exts2, { extension: null, page: "new-task", params: {} })).toBe(formPage);
-    expect(chooseRoute(exts2, { extension: null, page: "gone", params: {} })).toBeNull();
+    expect(chooseRoute(exts2, { namespace: null, page: "tasks", params: {} })).toBe(tasks);
+    expect(chooseRoute(exts2, { namespace: null, page: "new-task", params: {} })).toBe(formPage);
+    expect(chooseRoute(exts2, { namespace: null, page: "gone", params: {} })).toBeNull();
   });
 
   const offer = (...pages: Page[]): Renderer[] => pages.map((p) => ({ page: p.id, title: p.title, default: p.default }));
@@ -137,14 +137,14 @@ describe("what draws a tab", () => {
     expect(chooseRenderer(exts2, offer(editorFile), {})).toBe(editorFile);
     expect(chooseRenderer(exts2, [], {})).toBeNull();
     // The view's pick, among what was offered.
-    expect(chooseRenderer(exts2, offer(editorFile, commit), { "oxplow.renderer": "oxplow-foundation/commit" })).toBe(commit);
+    expect(chooseRenderer(exts2, offer(editorFile, commit), { "oxplow.renderer": "oxplow/commit" })).toBe(commit);
     // Offered, but no longer a page file (the extensions just reloaded): the fallback.
     expect(chooseRenderer(exts2, [{ page: "acme/gone", title: "Gone", default: true }], {})).toBeNull();
   });
 
   // Mounts in a page's slots never move it off its file.
   test("a page others mount into is still drawn from its file", () => {
-    const mounting = { name: "b", namespace: "b", enabled: true, pageFiles: [], ui: { slots: [{ slot: "oxplow-foundation/tasks.sections" }] } } as unknown as Extension;
-    expect(chooseRoute([...exts2, mounting], { extension: null, page: "tasks", params: {} })).toBe(tasks);
+    const mounting = { name: "b", namespace: "b", enabled: true, pageFiles: [], ui: { slots: [{ slot: "oxplow/tasks.sections" }] } } as unknown as Extension;
+    expect(chooseRoute([...exts2, mounting], { namespace: null, page: "tasks", params: {} })).toBe(tasks);
   });
 });

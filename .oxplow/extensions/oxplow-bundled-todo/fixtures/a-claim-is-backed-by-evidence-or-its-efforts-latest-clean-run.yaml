@@ -30,7 +30,7 @@ given:
 when:
   sql: |
     SELECT c.kind, c.effort_id, s.verified, s.backed_by
-    FROM v_claim c JOIN v_oxplow_bundled_claim_status s ON s.uri = c.uri
+    FROM v_claim c JOIN v_oxplow_claim_status s ON s.uri = c.uri
     ORDER BY c.id
 expect:
   rows:

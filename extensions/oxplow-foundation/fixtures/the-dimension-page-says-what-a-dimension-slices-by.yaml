@@ -1,5 +1,5 @@
 # A dimension page says what it slices by and the kind of value it takes.
-when: { page: oxplow-foundation/dimension, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
+when: { page: oxplow/dimension, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
 expect:
   label: Language
   loaders:

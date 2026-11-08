@@ -1,6 +1,6 @@
 //! Storage for extension-declared sources: each entity's rows in a
-//! prefixed table (`ext__<extension>__<entity>`) exposed through its
-//! semantic-layer view (`v_<extension>_<entity>`), plus per-source run
+//! prefixed table (`ext__<namespace>__<entity>`) exposed through its
+//! semantic-layer view (`v_<namespace>_<entity>`), plus per-source run
 //! state. The data is a re-syncable cache: every successful run replaces
 //! it, and a changed column set just rebuilds the table.
 //!
@@ -37,9 +37,13 @@ impl StoredType {
 /// The table/view shape for one entity, and what documents it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntityTable {
+    /// The extension that declares it, which owns its table and view.
     pub extension: String,
+    /// Its manifest's `namespace:`, which names them: extensions sharing
+    /// one share its names.
+    pub namespace: String,
     pub entity: String,
-    /// `v_<extension>_<entity>`.
+    /// `v_<namespace>_<entity>`.
     pub view: String,
     pub key: String,
     /// What the entity is, for the catalog (`v_dataset.description`).
@@ -240,7 +244,6 @@ impl SqliteCollectorStore {
                 "bad extension name `{extension}`"
             )));
         }
-        let prefix = table_prefix(extension);
         let ext = extension.to_string();
         self.db
             .transaction(move |tx| {
@@ -251,6 +254,18 @@ impl SqliteCollectorStore {
                         .map_err(map_sql_err)?;
                     rows.collect::<rusqlite::Result<_>>().map_err(map_sql_err)
                 };
+                // Its entities' tables: each view's `source` input in the
+                // registry. Never by name prefix: extensions share a
+                // namespace, and with it the `ext__<namespace>__` prefix.
+                for table in names(
+                    "SELECT i.input FROM dataset d JOIN dataset_input i ON i.view = d.view
+                      WHERE d.owner = ?1 AND d.kind = 'entity' AND i.kind = 'source'
+                        AND substr(i.input, 1, 5) = 'ext__'",
+                    &ext,
+                )? {
+                    tx.execute_batch(&format!("DROP TABLE IF EXISTS {}", quote(&table)))
+                        .map_err(map_sql_err)?;
+                }
                 // Its views, from the registry: entities and SQL datasets alike.
                 for view in names("SELECT view FROM dataset WHERE owner = ?1", &ext)? {
                     tx.execute_batch(&format!("DROP VIEW IF EXISTS {}", quote(&view)))
@@ -258,15 +273,6 @@ impl SqliteCollectorStore {
                 }
                 tx.execute("DELETE FROM dataset WHERE owner = ?1", [&ext])
                     .map_err(map_sql_err)?;
-                // Its tables. An exact prefix, not LIKE: `_` is a LIKE
-                // wildcard, so `ext__gh__` would match `ext__gh_extra__` (tsk368).
-                for table in names(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, length(?1)) = ?1",
-                    &prefix,
-                )? {
-                    tx.execute_batch(&format!("DROP TABLE IF EXISTS {}", quote(&table)))
-                        .map_err(map_sql_err)?;
-                }
                 tx.execute("DELETE FROM collector_run WHERE owner = ?1", [&ext])
                     .map_err(map_sql_err)?;
                 Ok(())
@@ -389,16 +395,13 @@ pub struct PendingRun {
     pub touched: String,
 }
 
-/// `ext__<extension>__` with dashes as underscores.
-fn table_prefix(extension: &str) -> String {
-    format!(
-        "ext__{}__",
-        oxplow_domain::contribution::extension_namespace(extension)
-    )
-}
-
+/// `ext__<namespace>__<entity>`, dashes as underscores.
 fn table_name(t: &EntityTable) -> String {
-    format!("{}{}", table_prefix(&t.extension), t.entity)
+    format!(
+        "ext__{}__{}",
+        oxplow_domain::contribution::extension_namespace(&t.namespace),
+        t.entity
+    )
 }
 
 fn quote(ident: &str) -> String {
@@ -421,16 +424,21 @@ fn is_ext_name(s: &str) -> bool {
 /// here even though the declaration parser already validated it.
 fn validate_table(t: &EntityTable) -> Result<(), DomainError> {
     let bad = |m: String| Err(DomainError::Invalid(m));
-    if !is_ext_name(&t.extension) || !is_ident(&t.entity) {
+    if !is_ext_name(&t.extension)
+        || !is_ident(&oxplow_domain::contribution::extension_namespace(
+            &t.namespace,
+        ))
+        || !is_ident(&t.entity)
+    {
         return bad(format!(
-            "bad extension/entity name `{}`/`{}`",
-            t.extension, t.entity
+            "bad extension/namespace/entity name `{}`/`{}`/`{}`",
+            t.extension, t.namespace, t.entity
         ));
     }
     if t.view
         != format!(
             "v_{}_{}",
-            oxplow_domain::contribution::extension_namespace(&t.extension),
+            oxplow_domain::contribution::extension_namespace(&t.namespace),
             t.entity
         )
     {
@@ -664,6 +672,7 @@ mod tests {
     fn pr_table(cols: &[(&str, StoredType)]) -> EntityTable {
         EntityTable {
             extension: "my-gh".into(),
+            namespace: "my_gh".into(),
             entity: "pr".into(),
             view: "v_my_gh_pr".into(),
             key: "number".into(),
@@ -728,6 +737,7 @@ mod tests {
         // A second extension whose view name would collide.
         let other = EntityTable {
             extension: "my".into(),
+            namespace: "my".into(),
             entity: "gh_pr".into(),
             view: "v_my_gh_pr".into(),
             key: "number".into(),
@@ -746,6 +756,7 @@ mod tests {
         // A core dataset's view.
         let core = EntityTable {
             extension: "effort".into(),
+            namespace: "effort".into(),
             entity: "file".into(),
             view: "v_effort_file".into(),
             key: "path".into(),
@@ -1066,6 +1077,7 @@ mod tests {
         let sl = SemanticLayer::new(db);
         let table = |extension: &str, view: &str| EntityTable {
             extension: extension.into(),
+            namespace: extension.replace('-', "_"),
             view: view.into(),
             ..pr_table(&[("number", StoredType::Integer)])
         };
@@ -1088,6 +1100,57 @@ mod tests {
         assert_eq!(serde_json::to_value(out.rows).unwrap(), json!([[2]]));
     }
 
+    /// Extensions share a namespace (everything oxplow ships is `oxplow`):
+    /// an entity's table and view are named by it, and dropping one
+    /// extension drops only its own entities.
+    #[tokio::test]
+    async fn dropping_an_extension_leaves_its_namespace_siblings_alone() {
+        let db = Database::in_memory();
+        let store = SqliteCollectorStore::new(db.clone());
+        let sl = SemanticLayer::new(db.clone());
+        let table = |extension: &str, entity: &str| EntityTable {
+            extension: extension.into(),
+            namespace: "gh".into(),
+            entity: entity.into(),
+            view: format!("v_gh_{entity}"),
+            ..pr_table(&[("number", StoredType::Integer)])
+        };
+        store
+            .replace_rows(vec![
+                (table("gh-prs", "pr"), rows(json!([[1]]))),
+                (table("gh-issues", "issue"), rows(json!([[2]]))),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(
+            registered(&db).await,
+            vec![
+                (
+                    "v_gh_issue".to_string(),
+                    "gh-issues".to_string(),
+                    "entity".to_string(),
+                    "ext__gh__issue".to_string()
+                ),
+                (
+                    "v_gh_pr".to_string(),
+                    "gh-prs".to_string(),
+                    "entity".to_string(),
+                    "ext__gh__pr".to_string()
+                ),
+            ]
+        );
+        store.drop_extension("gh-prs").await.unwrap();
+        assert!(sl
+            .query_sql("SELECT * FROM v_gh_pr", vec![], None)
+            .await
+            .is_err());
+        let out = sl
+            .query_sql("SELECT number FROM v_gh_issue", vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(serde_json::to_value(out.rows).unwrap(), json!([[2]]));
+    }
+
     #[tokio::test]
     async fn never_replaces_a_core_view() {
         let db = Database::in_memory();
@@ -1096,6 +1159,7 @@ mod tests {
         // `v_work_item_comment`, a core view.
         let t = EntityTable {
             extension: "work-item".into(),
+            namespace: "work_item".into(),
             entity: "comment".into(),
             view: "v_work_item_comment".into(),
             key: "id".into(),

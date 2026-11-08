@@ -12,8 +12,8 @@ test("a task made in the UI is on the thread's list", async ({ page }) => {
   await form.getByTestId("viz-form-fields-submit").click();
   // The form gives way to the item it made, whose own page has forms too.
   await expect(page.getByTestId("viz-form-fields-again")).toHaveCount(0);
-  await expandRailSection(page, "ext:oxplow-bundled-todo/work");
-  await expect(page.getByTestId("rail-section-ext:oxplow-bundled-todo/work")).toContainText("Made in the UI");
+  await expandRailSection(page, "ext:oxplow/work");
+  await expect(page.getByTestId("rail-section-ext:oxplow/work")).toContainText("Made in the UI");
 });
 
 // The New Item form asks for the active list's own fields, and its second
@@ -29,20 +29,20 @@ test("Save and Another keeps the state and the list's fields", async ({ page }) 
   await expect(form.getByTestId("viz-form-fields-native.priority")).toHaveValue("high");
   await form.getByTestId("viz-form-fields-title").fill("Second of two");
   await form.getByTestId("viz-form-fields-submit").click();
-  await expandRailSection(page, "ext:oxplow-bundled-todo/work");
-  const work = page.getByTestId("rail-section-ext:oxplow-bundled-todo/work");
+  await expandRailSection(page, "ext:oxplow/work");
+  const work = page.getByTestId("rail-section-ext:oxplow/work");
   await expect(work).toContainText("First of two");
   await expect(work).toContainText("Second of two");
 });
 
 test("a task made elsewhere appears without a reload", async ({ page, daemon }) => {
   await page.goto("/");
-  await expandRailSection(page, "ext:oxplow-bundled-todo/work");
-  await expect(page.getByTestId("rail-section-ext:oxplow-bundled-todo/work")).toBeVisible();
+  await expandRailSection(page, "ext:oxplow/work");
+  await expect(page.getByTestId("rail-section-ext:oxplow/work")).toBeVisible();
   await waitForModels(daemon, ["v_work_item"], () =>
     run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
   );
-  await expect(page.getByTestId("rail-section-ext:oxplow-bundled-todo/work")).toContainText("Made elsewhere");
+  await expect(page.getByTestId("rail-section-ext:oxplow/work")).toContainText("Made elsewhere");
 });
 
 // The Tasks page's scope is its view params: in its tab's id, so a reload

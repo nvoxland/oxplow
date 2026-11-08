@@ -1,4 +1,4 @@
-# oxplow-bundled-todo/repair-disabled: when an extension's contribution is
+# oxplow/repair-disabled: when an extension's contribution is
 # disabled after repeated failures, file one work item asking for it to be
 # repaired — on the active work list, whichever provider that is — and
 # comment on that item when the contribution is disabled again while it is
@@ -27,22 +27,22 @@ SELECT (SELECT provider FROM v_capability_provider
 # collector's failed syncs, an effect's failed reactions (each reaction at
 # its latest attempt: a failure a retry got past isn't one any more).
 _FAILURES = """
-SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution
-         WHERE extension = :extension AND kind = :kind AND local = :contribution) AS declared,
+SELECT (SELECT file || ':' || coalesce(line, 1) FROM v_contribution WHERE uri = :uri) AS declared,
+       (SELECT extension FROM v_contribution WHERE uri = :uri) AS extension,
        (SELECT json_group_array(error) FROM (
           SELECT json_extract(payload, '$.error') AS error FROM v_event
            WHERE :kind = 'collector' AND type = 'collector.synced'
-             AND json_extract(payload, '$.collector') = :extension || '/' || :contribution
+             AND json_extract(payload, '$.collector') = :namespace || '/' || :contribution
              AND json_extract(payload, '$.status') = 'error'
              AND json_extract(payload, '$.error') IS NOT NULL
            ORDER BY seq DESC LIMIT 5)) AS collector_errors,
        (SELECT json_group_array(reason) FROM (
           SELECT reason FROM v_effect_run
-           WHERE :kind = 'effect' AND effect = :extension || '/' || :contribution
+           WHERE :kind = 'effect' AND effect = :namespace || '/' || :contribution
              AND state = 'failed' AND reason IS NOT NULL AND latest = 1
            ORDER BY id DESC LIMIT 5)) AS effect_errors,
        (SELECT last_error FROM v_contribution_health
-         WHERE extension = :extension AND contribution = :contribution AND kind = :kind) AS last_error
+         WHERE namespace = :namespace AND contribution = :contribution AND kind = :kind) AS last_error
 """
 
 def _list(text):
@@ -61,9 +61,11 @@ def transform(x):
     event = x["event"]
     p = event["payload"]
     named = uri.contribution(p["contribution"])
-    extension, contribution, kind = named["extension"], named["id"], named["kind"]
+    # A contribution is named in its namespace; the extension that
+    # declares it now is what a person checks and tests.
+    namespace, contribution, kind = named["namespace"], named["id"], named["kind"]
     reason = p["reason"]
-    prefix = "Repair %s %s:" % (extension, contribution)
+    prefix = "Repair %s %s:" % (namespace, contribution)
 
     state = scope("sql.read", {"sql": _STATE, "params": {"contribution": p["contribution"]}})[0]
     if not state["provider"]:
@@ -71,8 +73,9 @@ def transform(x):
 
     found = scope("sql.read", {
         "sql": _FAILURES,
-        "params": {"extension": extension, "contribution": contribution, "kind": kind},
+        "params": {"uri": p["contribution"], "namespace": namespace, "contribution": contribution, "kind": kind},
     })[0]
+    extension = found["extension"] or namespace
     errors = _list(found["collector_errors"]) + _list(found["effect_errors"])
     if not errors and found["last_error"]:
         errors = [found["last_error"]]

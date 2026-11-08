@@ -108,6 +108,7 @@ impl ReplacementFile {
 /// ones, and an error (`file:line: …`) for each broken one.
 pub fn parse_replacements(
     extension: &str,
+    namespace: &str,
     capabilities: &[String],
     pages: &[crate::pages::schema::Page],
     items: Vec<(Option<usize>, ReplacementFile)>,
@@ -198,12 +199,12 @@ pub fn parse_replacements(
             continue;
         };
         out.push(UiReplacement {
-            id: format!("{extension}/{}", t.target),
+            id: format!("{namespace}/{}", t.target),
             extension: extension.to_string(),
             target: t.target.to_string(),
             capability: t.capability.to_string(),
             bound_to_provider: t.bound_to_provider,
-            page: format!("{extension}/{}", r.page),
+            page: format!("{namespace}/{}", r.page),
             version: t.version,
             view: t.view.iter().map(|k| k.to_string()).collect(),
             label: t.label.to_string(),

@@ -10,7 +10,7 @@ import { PageNavigationContext, type PageNavigation } from "./PageNavigationCont
 // with `oxplow.renderer`, so the same URI stays in the tab.
 
 const renderer = (page: string, title: string, over: Partial<Renderer> = {}): Renderer => ({ page, title, default: false, ...over });
-const two = [renderer("oxplow-foundation/editor", "Editor", { default: true }), renderer("acme/blame", "Blame")];
+const two = [renderer("oxplow/editor", "Editor", { default: true }), renderer("acme/blame", "Blame")];
 
 afterEach(cleanup);
 
@@ -44,7 +44,7 @@ test("a URI with two renderers offers Open with; picking one patches the view wi
   const patches: unknown[] = [];
   const view = shown(FILE, two, patches);
   await openWith(view);
-  expect(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor").textContent).toContain("✓");
+  expect(view.getByTestId("menu-item-page-open-with-oxplow/editor").textContent).toContain("✓");
   expect(view.getByTestId("menu-item-page-open-with-acme/blame").textContent).not.toContain("✓");
   expect(view.getByTestId("menu-item-page-open-with-acme/blame").textContent).toContain("Blame");
   fireEvent.click(view.getByTestId("menu-item-page-open-with-acme/blame"));
@@ -55,7 +55,7 @@ test("the renderer the view names is the one checked", async () => {
   const view = shown(FILE, two, [], { "oxplow.renderer": "acme/blame" });
   await openWith(view);
   expect(view.getByTestId("menu-item-page-open-with-acme/blame").textContent).toContain("✓");
-  expect(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor").textContent).not.toContain("✓");
+  expect(view.getByTestId("menu-item-page-open-with-oxplow/editor").textContent).not.toContain("✓");
 });
 
 test("a URI with one renderer, none, or a list not yet asked offers nothing", async () => {
@@ -75,6 +75,6 @@ test("picking the default renderer drops oxplow.renderer from the view", async (
   const patches: unknown[] = [];
   const view = shown(FILE, two, patches, { "oxplow.renderer": "acme/blame" });
   await openWith(view);
-  fireEvent.click(view.getByTestId("menu-item-page-open-with-oxplow-foundation/editor"));
+  fireEvent.click(view.getByTestId("menu-item-page-open-with-oxplow/editor"));
   await waitFor(() => expect(patches).toEqual([{ "oxplow.renderer": undefined }]));
 });

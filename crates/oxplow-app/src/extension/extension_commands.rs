@@ -317,7 +317,7 @@ pub fn check_about_when(extensions: &mut [Extension]) {
     for e in extensions.iter().filter(|e| e.enabled) {
         for d in &e.datasets {
             publish(
-                oxplow_db::datasets::extension_view(&e.name, &d.decl.name),
+                oxplow_db::datasets::extension_view(&e.namespace, &d.decl.name),
                 d,
             );
         }
@@ -869,9 +869,8 @@ pub fn own_events(
                 .filter(|&v| vocabulary.owner(&e.event_type, v) == Some(Some(extension)))
                 .ok_or_else(|| {
                     invalid(format!(
-                        "the script may emit only the event types `{extension}` declares \
-                         (`{}.*`); `{}` isn't one",
-                        oxplow_domain::events::schema::extension_namespace(extension),
+                        "the script may emit only the event types `{extension}` declares; \
+                         `{}` isn't one",
                         e.event_type
                     ))
                 })?;
@@ -1065,7 +1064,10 @@ pub fn extension_command(
             provider,
             op,
             undoable,
-        } => return provider_command(bus, extension, spec, provider, op, *undoable),
+        } => {
+            let namespace = oxplow_domain::namespace_of(&decl.name).to_string();
+            return provider_command(bus, extension, &namespace, spec, provider, op, *undoable);
+        }
         CommandHandler::Script { script, .. } => script.clone(),
     };
     let (needs, reads) = (decl.needs.clone(), decl.access.reads_only());
@@ -1158,11 +1160,12 @@ pub fn register_declared(bus: &std::sync::Arc<crate::commands::CommandBus>) {
 /// The command `spec` over operation `op` of `extension`'s provider
 /// `provider`: it runs, outside the transaction, on the instance its input
 /// names, through the bus's provider router (the provider registry). Its
-/// spec names the operation (`provider:<extension>/<provider>`), which is
+/// spec names the operation (`provider:<namespace>/<provider>`), which is
 /// how an inverse naming an operation finds its command.
 fn provider_command(
     bus: &std::sync::Arc<crate::commands::CommandBus>,
     extension: &str,
+    namespace: &str,
     mut spec: CommandSpec,
     provider: &str,
     op: &str,
@@ -1173,7 +1176,7 @@ fn provider_command(
     spec.undoable = undoable;
     spec.op = Some(oxplow_domain::OpRef {
         scope: oxplow_domain::contribution::ContributionId::new(
-            extension,
+            namespace,
             oxplow_domain::contribution::ContributionKind::Provider,
             provider,
         )
@@ -1453,10 +1456,11 @@ impl ExtensionCommands {
                 // catalog reloads before this command is replaced.
                 let contribution = oxplow_domain::run::ContributionRef {
                     id: oxplow_domain::contribution::ContributionId::new(
-                        extension,
+                        &registration.namespace,
                         oxplow_domain::contribution::ContributionKind::Command,
                         &name,
                     ),
+                    extension: extension.to_string(),
                     version: registration.version.clone(),
                     generation: Some(registration.generation.clone()),
                     deployment: registration.deployment.clone(),

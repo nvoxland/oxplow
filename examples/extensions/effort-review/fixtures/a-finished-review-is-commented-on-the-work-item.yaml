@@ -15,7 +15,7 @@ when:
       - { role: user, parts: [{ type: text, text: "Review eff1." }] }
 expect:
   state: succeeded
-  effects: { contains: [{ id: effort-review/publish-review, state: ok }] }
+  effects: { contains: [{ id: effort_review/publish-review, state: ok }] }
   commands: { contains: [oxplow.work_item.comment] }
 steps:
   - when: { sql: "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff1**%'" }

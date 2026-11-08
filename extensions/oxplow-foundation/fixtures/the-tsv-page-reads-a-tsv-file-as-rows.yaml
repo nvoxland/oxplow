@@ -2,7 +2,7 @@
 temp:
   sheet.tsv: "name\tn\nant\t1\nbee\t2\n"
 when:
-  page: oxplow-foundation/tsv
+  page: oxplow/tsv
   params:
     uri: "oxplow:oxplow/file?path=sheet.tsv&filesystem=oxplow:temp"
     path: sheet.tsv

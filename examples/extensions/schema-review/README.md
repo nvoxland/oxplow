@@ -39,7 +39,7 @@ Only from oxplow's public contracts, so nothing in oxplow changed for it:
 
 ## Using it
 
-Copy `schema-review/` into your project's `.oxplow/extensions/`. Two
+Copy `schema_review/` into your project's `.oxplow/extensions/`. Two
 review policies now offer an effort's verdict, oxplow-bundled's and this
 one: choose in **Settings → Integrations** ("effort verdict"). Change the
 rules by editing `datasets/verdict.sql`.

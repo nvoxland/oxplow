@@ -35,7 +35,8 @@ pub(super) async fn panel_example(
     let id = if panel.contains('/') {
         panel.to_string()
     } else {
-        format!("{}/{panel}", ext.name)
+        // A panel's id is its extension's namespace's, as a page's is.
+        format!("{}/{panel}", ext.namespace)
     };
     if let Some(key) = ex
         .when

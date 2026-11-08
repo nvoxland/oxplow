@@ -38,7 +38,7 @@ pub fn record_tx(
         params![
             run.run().as_str(),
             run.parent().map(|p| p.as_str().to_string()),
-            contribution.id.extension,
+            contribution.extension,
             contribution.id.to_string(),
             contribution.id.kind.segment(),
             contribution.version,
@@ -97,6 +97,7 @@ mod tests {
         RunContext::contribution(
             ContributionRef {
                 id: ContributionId::new("acme", ContributionKind::Effect, "note"),
+                extension: "acme".into(),
                 version: Some("1.0.0".into()),
                 generation: Some("g1".into()),
                 deployment: None,

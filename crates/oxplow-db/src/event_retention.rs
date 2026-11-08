@@ -56,8 +56,10 @@ pub fn check_declared(payload_days: i64, content_days: i64) -> Result<(), String
     Ok(())
 }
 
-/// An extension present in the catalog, with its declared window (`None`:
-/// the default).
+/// An extension present in the catalog, with its window: the one it
+/// declares, [`EXTENSION_DEFAULT`] when it declares types and no window
+/// (a sibling's shorter one mustn't cut its events), `None` when it
+/// declares no types.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeclaredRetention {
     pub namespace: String,
@@ -68,7 +70,8 @@ pub struct DeclaredRetention {
 
 /// Restate the declared windows from the extensions present: each one's
 /// window recorded, or dropped when it declares none. An extension not
-/// present keeps the window it last declared.
+/// present keeps the window it last declared. Each is the extension's own
+/// (extensions share a namespace); the sweep takes a namespace's longest.
 pub fn restate_declared_tx(
     conn: &rusqlite::Connection,
     present: &[DeclaredRetention],
@@ -80,16 +83,15 @@ pub fn restate_declared_tx(
                 "INSERT INTO extension_event_retention
                      (namespace, extension, payload_days, content_days, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT (namespace) DO UPDATE SET
-                     extension = excluded.extension,
+                 ON CONFLICT (namespace, extension) DO UPDATE SET
                      payload_days = excluded.payload_days,
                      content_days = excluded.content_days,
                      updated_at = excluded.updated_at",
                 params![d.namespace, d.extension, payload_days, content_days, now],
             ),
             None => conn.execute(
-                "DELETE FROM extension_event_retention WHERE namespace = ?1",
-                [&d.namespace],
+                "DELETE FROM extension_event_retention WHERE namespace = ?1 AND extension = ?2",
+                [&d.namespace, &d.extension],
             ),
         }
         .map_err(map_sql_err)?;
@@ -100,8 +102,8 @@ pub fn restate_declared_tx(
 /// The namespaces the sweep expires and their windows: core's
 /// [`CORE_WINDOWS`], each replaced by the project's when it sets one; then
 /// every namespace in the log or the content store that core doesn't own,
-/// at its declared window or [`EXTENSION_DEFAULT`] — the project's when
-/// shorter, never longer.
+/// at the longest window its extensions declared or [`EXTENSION_DEFAULT`]
+/// — the project's when shorter, never longer.
 async fn windows(
     db: &Database,
     project: &BTreeMap<String, RetentionWindow>,
@@ -114,7 +116,8 @@ async fn windows(
         .read(|tx| {
             let mut st = tx
                 .prepare(
-                    "SELECT namespace, payload_days, content_days FROM extension_event_retention",
+                    "SELECT namespace, max(payload_days), max(content_days)
+                       FROM extension_event_retention GROUP BY namespace",
                 )
                 .map_err(map_sql_err)?;
             let rows = st
@@ -566,6 +569,42 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    /// Extensions share a namespace (everything oxplow ships is `oxplow`):
+    /// each keeps its own window, one restated without a window drops only
+    /// its own, and the namespace keeps its events as long as the longest.
+    #[tokio::test]
+    async fn extensions_in_one_namespace_each_keep_their_window_and_the_longest_holds() {
+        let db = Database::in_memory();
+        let now = Timestamp::from_unix_ms(100 * DAY_MS);
+        let declared = |extension: &str, window| DeclaredRetention {
+            namespace: "acme".into(),
+            extension: extension.into(),
+            window,
+        };
+        let (short, long) = (
+            declared("acme-a", Some((7, 3))),
+            declared("acme-b", Some((20, 10))),
+        );
+        db.transaction(move |tx| restate_declared_tx(tx, &[short.clone(), long.clone()], "t"))
+            .await
+            .unwrap();
+        seed_payloads(
+            &db,
+            now,
+            &[("p10", "acme.thing", 10), ("p25", "acme.thing", 25)],
+        )
+        .await;
+        let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert_eq!(report.payloads_expired, 1, "only the 25-day-old payload");
+
+        let gone = declared("acme-b", None);
+        db.transaction(move |tx| restate_declared_tx(tx, std::slice::from_ref(&gone), "t"))
+            .await
+            .unwrap();
+        let report = sweep(&db, now, &BTreeMap::new()).await.unwrap();
+        assert_eq!(report.payloads_expired, 1, "acme-a's 7 days now hold");
     }
 
     /// Seed `agent.tool.finished` and `acme_pr.merged` payloads `days`

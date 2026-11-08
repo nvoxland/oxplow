@@ -691,7 +691,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                 e.providers
                     .iter()
                     .find(|s| s.id == provider)
-                    .map(|s| s.approval_name(&e.name))
+                    .map(|s| s.approval_name(&e.namespace))
             });
         let Some(instance) = instance else {
             return Ok(false);

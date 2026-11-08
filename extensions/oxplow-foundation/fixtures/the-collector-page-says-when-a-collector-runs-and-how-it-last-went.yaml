@@ -1,5 +1,5 @@
 # A collector page says what it gathers, when it runs, whether it is enabled and how it last went.
-when: { page: oxplow-foundation/collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome" } }
+when: { page: oxplow/collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome" } }
 expect:
   label: oxplow.effort_test_outcome
   loaders:

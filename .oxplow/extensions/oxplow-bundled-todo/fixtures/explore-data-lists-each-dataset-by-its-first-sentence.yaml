@@ -1,6 +1,6 @@
 # The Explore Data rail names every dataset with one line, not its whole
 # paragraph; the paragraph is on the dataset's own page.
-when: { page: oxplow-bundled-todo/explore-data, params: { dataset: v_dataset } }
+when: { page: oxplow/explore-data, params: { dataset: v_dataset } }
 expect:
   loaders:
     explore_catalog:

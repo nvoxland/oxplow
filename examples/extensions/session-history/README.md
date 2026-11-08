@@ -1,7 +1,7 @@
 # session-history
 
 Adds a section to a foundation page. The New Session page has a slot,
-`oxplow-foundation/new-session.sections`, among its sections with stable ids
+`oxplow/new-session.sections`, among its sections with stable ids
 `start` and `earlier`. This extension mounts its `thread-history` page there
 `at: { after: start }`, so the thread's earlier prompts show between starting
 a session and picking an earlier one. The page binds the host's `thread_id`

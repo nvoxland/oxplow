@@ -47,8 +47,8 @@ view:
 
 A `form` viz has no `from`. `command` is the (write) command the form
 submits, as the person. `defaults` bind params with `{{param.x}}`;
-`choices: { field: <ext>/<query>[#<loader>] }` reads a query's rows (`value`,
-`label`, optional `group`); `<ext>/<query>` alone means its last loader. A list
+`choices: { field: <namespace>/<query>[#<loader>] }` reads a query's rows (`value`,
+`label`, optional `group`); `<namespace>/<query>` alone means its last loader. A list
 two pages share is a query. Field and `fixed`
 rules are in `commands-and-forms.md`. A form is not allowed in an inline
 page.
@@ -99,12 +99,12 @@ view: { viz: list, from: stale, empty: No stale reviews. }
 # extension.yaml
 ui:
   mounts:
-    - { page: stale-reviews, at: oxplow-bundled/work-item.sections, position: { after: links }, title: Stale reviews }
+    - { page: stale-reviews, at: oxplow/work-item.sections, position: { after: links }, title: Stale reviews }
 ```
 
-`slot: <extension>/<page>.<name>` (the work item page is oxplow-bundled's, so an extension that mounts there declares `requires: [oxplow-bundled]`); `at` is `start`, `end` (default) or `{
+`slot: <namespace>/<page>.<name>` (the work item page is oxplow-bundled's, so an extension that mounts there declares `requires: [oxplow-bundled]`); `at` is `start`, `end` (default) or `{
 before | after: <sibling id> }`. The mounted page gets the host's params by
 name, so declare the ones you need. Check the mount with
 `oxplow_validate_extension`, and see it on the host page with `oxplow_run_page
-{ page: oxplow-bundled/work-item, draft: true }` (its text includes your
+{ page: oxplow/work-item, draft: true }` (its text includes your
 section, marked with your extension).

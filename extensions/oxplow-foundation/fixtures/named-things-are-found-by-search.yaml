@@ -17,13 +17,13 @@ steps:
       sql: "SELECT uri, title FROM v_search_skill WHERE title = 'work-items'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items"
+        - uri: "oxplow:oxplow/skill?skill=oxplow/work-items"
           title: work-items
   - when:
       sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.effort_test_outcome'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"
+        - uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"
           title: oxplow.effort_test_outcome
   - when:
       sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=work_item' AND title = 'v_work_item' AND body NOT LIKE '%SELECT%'"
@@ -42,11 +42,11 @@ steps:
         - uri: "oxplow:oxplow/dimension?dimension=oxplow.agent"
           title: $any
   - when:
-      sql: "SELECT count(*) AS n FROM v_search_resource WHERE uri = 'oxplow:oxplow/resource?resource=oxplow-foundation/advisory'"
+      sql: "SELECT count(*) AS n FROM v_search_resource WHERE uri = 'oxplow:oxplow/resource?resource=oxplow/advisory'"
     expect:
       rows: [{ n: 1 }]
   - when:
-      sql: "SELECT count(*) AS n FROM v_search_implementation WHERE uri LIKE 'oxplow:oxplow/implementation?implementation=oxplow-foundation/%'"
+      sql: "SELECT count(*) AS n FROM v_search_implementation WHERE uri LIKE 'oxplow:oxplow/implementation?implementation=oxplow/%'"
     expect:
       rows: [{ n: $any }]
   - when:

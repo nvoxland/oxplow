@@ -30,9 +30,9 @@ import { firstLoader } from "./firstLoader.js";
 const READY_MS = 3000;
 
 /** The bundle key of component node `def` of `run`'s page: its
- *  extension's component, by id. */
+ *  namespace's component, by id (`<namespace>/<id>`). */
 function componentKey(run: PageRun, def: Node): string | null {
-  return def.kind === "component" ? `${run.page.extension}/${def.component}` : null;
+  return def.kind === "component" ? `${run.page.id.split("/")[0]}/${def.component}` : null;
 }
 
 /** Why a component can't show (no daemon, a bundle that failed, a frame

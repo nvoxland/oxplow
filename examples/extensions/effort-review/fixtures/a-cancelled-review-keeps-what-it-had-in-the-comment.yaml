@@ -15,7 +15,7 @@ when:
       - { role: user, parts: [{ type: text, text: "Review eff1 at length." }] }
 expect:
   state: cancelled
-  effects: { contains: [{ id: effort-review/publish-review, state: ok }] }
+  effects: { contains: [{ id: effort_review/publish-review, state: ok }] }
 steps:
   - when: { sql: "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff1**%The review was cancelled after%'" }
     expect: { rows: 1 }

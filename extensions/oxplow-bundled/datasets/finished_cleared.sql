@@ -5,5 +5,5 @@ SELECT CAST((SELECT t.id FROM ref('thread') t
               WHERE t.uri = json_extract(e.subject, '$[0]')) AS INTEGER) AS thread_id,
        CAST(max(e.at) AS TEXT) AS cleared_at
 FROM ref('event') e
-WHERE e.type = 'oxplow_bundled.finished_cleared'
+WHERE e.type = 'oxplow.work.finished_cleared'
 GROUP BY 1

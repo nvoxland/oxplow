@@ -4,7 +4,7 @@
 temp:
   logo.png: "\0PNG"
 when:
-  page: oxplow-foundation/media
+  page: oxplow/media
   params:
     uri: "oxplow:oxplow/file?path=logo.png&filesystem=oxplow:temp"
     path: logo.png

@@ -26,7 +26,7 @@ given:
   - observe: { hint: { hint: x/never, evaluated: 120 } }
   - observe: { hint: { hint: x/spoke, evaluated: 40 } }
   - observe: { nudge: { kind: x/spoke, message: m, delivered: true } }
-when: { page: oxplow-bundled-todo/agent-interface }
+when: { page: oxplow/agent-interface }
 expect:
   loaders:
     interface_tool_calls:
@@ -47,12 +47,12 @@ steps:
     expect: { ok: false, refused: ready }
   - when: { command: oxplow.work_item.create, input: { title: "" }, as: person }
     expect: { ok: false, refused: title }
-  - when: { page: oxplow-bundled-todo/agent-interface }
+  - when: { page: oxplow/agent-interface }
     expect:
       loaders:
         interface_commands:
           rows:
             - { command: oxplow.work_item.transition, runs: 3, invalid: 2 }
             - { command: oxplow.work_item.create, runs: 1, invalid: 0 }
-  - when: { page: oxplow-bundled-todo/interface-command-errors, params: { command: oxplow.work_item.transition } }
+  - when: { page: oxplow/interface-command-errors, params: { command: oxplow.work_item.transition } }
     expect: { loaders: { interface_command_errors: { rows: [{ outcome: invalid }] } } }

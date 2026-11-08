@@ -75,7 +75,7 @@ pub fn columns(name: &str) -> &'static [&'static str] {
         "ai_role" => &[
             "role",
             "description",
-            "extension",
+            "namespace",
             "fallback",
             "provider",
             "model",
@@ -637,7 +637,7 @@ impl LiveSources {
                 vec![
                     text(r.role.to_string()),
                     text(r.description.clone()),
-                    opt(r.extension.clone()),
+                    opt(r.namespace.clone()),
                     opt(r.fallback.map(|f| f.name())),
                     opt(own.map(|b| b.provider.clone())),
                     opt(own.map(|b| b.model.clone())),
@@ -761,7 +761,7 @@ impl LiveSources {
                     };
                     let account = crate::extension::extension_secrets::account(
                         &self.project,
-                        &extension.name,
+                        &extension.namespace,
                         reference,
                     );
                     let is_set = self
@@ -1427,7 +1427,7 @@ impl LiveSources {
                 "skill" => {
                     for k in &ext.skills {
                         rows.push(vec![
-                            uri(&ext.name, ContributionKind::Skill, &k.name),
+                            uri(&ext.namespace, ContributionKind::Skill, &k.name),
                             text(ext.name.clone()),
                             text(k.name.clone()),
                             text(wire_name(&k.kind)),
@@ -1440,7 +1440,7 @@ impl LiveSources {
                     for (n, s) in ext.ui.page_slots.iter().enumerate() {
                         let id = s.local_id(n);
                         rows.push(vec![
-                            uri(&ext.name, ContributionKind::Slot, &id),
+                            uri(&ext.namespace, ContributionKind::Slot, &id),
                             text(ext.name.clone()),
                             text(id),
                             text(s.host.clone()),
@@ -1457,7 +1457,7 @@ impl LiveSources {
                     for c in &ext.custom_components {
                         let title = c.title.clone().unwrap_or_else(|| c.id.clone());
                         rows.push(vec![
-                            uri(&ext.name, ContributionKind::CustomComponent, &c.id),
+                            uri(&ext.namespace, ContributionKind::CustomComponent, &c.id),
                             text(ext.name.clone()),
                             text(c.id.clone()),
                             text(title),

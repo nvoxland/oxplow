@@ -16,25 +16,25 @@ when:
   confirmed: true
 expect: { ok: true }
 steps:
-  - when: { sql: "SELECT uri, label, color FROM v_oxplow_bundled_verdict" }
+  - when: { sql: "SELECT uri, label, color FROM v_oxplow_verdict" }
     expect:
       rows:
         - { uri: "oxplow:oxplow/effort?id=eff1", label: Changes requested, color: red }
   - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
     expect: { ok: true }
-  - when: { sql: "SELECT uri, label, color FROM v_oxplow_bundled_verdict" }
+  - when: { sql: "SELECT uri, label, color FROM v_oxplow_verdict" }
     expect:
       rows:
         - { uri: "oxplow:oxplow/effort?id=eff1", label: Accepted (forced), color: orange }
   # The verdict is state: its payload expires with the extension default's 30
   # days, but what the chip shows is in the envelope (type and subject), which
   # stays.
-  - when: { sql: "SELECT count(*) AS n FROM v_event WHERE type LIKE 'oxplow_bundled.%' AND payload_expired_at IS NULL" }
+  - when: { sql: "SELECT count(*) AS n FROM v_event WHERE type LIKE 'oxplow.review.%' AND payload_expired_at IS NULL" }
     expect: { rows: [{ n: 2 }] }
   - given: [{ observe: { retention: { days: 31 } } }]
-  - when: { sql: "SELECT count(*) AS n FROM v_event WHERE type LIKE 'oxplow_bundled.%' AND payload_expired_at IS NOT NULL" }
+  - when: { sql: "SELECT count(*) AS n FROM v_event WHERE type LIKE 'oxplow.review.%' AND payload_expired_at IS NOT NULL" }
     expect: { rows: [{ n: 2 }] }
-  - when: { sql: "SELECT uri, label, color FROM v_oxplow_bundled_verdict" }
+  - when: { sql: "SELECT uri, label, color FROM v_oxplow_verdict" }
     expect:
       rows:
         - { uri: "oxplow:oxplow/effort?id=eff1", label: Accepted (forced), color: orange }

@@ -3,7 +3,7 @@
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - observe: { turn: { prompt: Make the files, tools: [{ name: Edit, kind: edit, paths: [b.rs], ok: true }, { name: Edit, kind: edit, paths: [a.rs], ok: true }] } }
-when: { page: oxplow-foundation/effort-summary, params: { effort: eff1 } }
+when: { page: oxplow/effort-summary, params: { effort: eff1 } }
 expect:
   loaders:
     effort_summary:

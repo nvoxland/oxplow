@@ -3,7 +3,7 @@
 given:
   - observe: { diagnostics: { path: a.rs, items: [{ severity: warning, message: unused, line: 3 }] } }
   - observe: { diagnostics: { path: b.rs, items: [{ severity: warning, message: late, line: 9 }, { severity: error, message: broken, line: 20 }] } }
-when: { page: oxplow-foundation/problems, params: { stream_id: 1 } }
+when: { page: oxplow/problems, params: { stream_id: 1 } }
 expect:
   loaders:
     problems:

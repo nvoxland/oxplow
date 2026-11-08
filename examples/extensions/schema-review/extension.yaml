@@ -66,6 +66,6 @@ ui:
   # The effort's verdict on its page, in place of oxplow-bundled's.
   mounts:
     - { page: effort-verdict, at: effort.verdict, version: 1 }
-    - { page: schema-changes, at: oxplow-foundation/diff-view.sections }
+    - { page: schema-changes, at: oxplow/diff-view.sections }
   decorators:
     - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }

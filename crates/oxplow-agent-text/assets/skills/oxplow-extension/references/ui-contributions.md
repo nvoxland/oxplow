@@ -2,23 +2,23 @@
 
 - **Slots** mount a part (a page may be mounted too) into another page's `slot` node (`ui: { slots: [{
   slot, page, at?, title?, size? }] }` in `extension.yaml`). `slot:
-  <extension>/<page>.<name>`; the mounted part runs as an embed, getting the
+  <namespace>/<page>.<name>`; the mounted part runs as an embed, getting the
   host's params by name (declare the ones you need). `at` is `start`, `end`
   (default) or `{ before | after: <sibling id> }`; an `at` naming a node the
   host doesn't have is a load warning and the mount goes last. `size` is for
   a grid host. The mounted section shows marked with your extension. Foundation
   pages with a `sections` slot:
-  - `oxplow-foundation/commit.sections` and
-    `oxplow-foundation/uncommitted-changes.sections` → `change_id` (the
+  - `oxplow/commit.sections` and
+    `oxplow/uncommitted-changes.sections` → `change_id` (the
     `v_change*` analysis; the page's `row` loader) — `at: { before: commit }`
     puts a strip above the uncommitted page;
-  - `oxplow-foundation/diff-view.sections` (an effort's or a range's diff) →
+  - `oxplow/diff-view.sections` (an effort's or a range's diff) →
     `effort_id`, `change_id`, …;
-  - `oxplow-bundled/work-item.sections` (a work item's page, whichever
+  - `oxplow/work-item.sections` (a work item's page, whichever
     list; oxplow-bundled's, so declare `requires: [oxplow-bundled]`) → `uri`;
-  - `oxplow-bundled/tasks.sections` (the Tasks page; also needs `requires: [oxplow-bundled]`) → `thread_id`,
+  - `oxplow/tasks.sections` (the Tasks page; also needs `requires: [oxplow-bundled]`) → `thread_id`,
     `stream_id`;
-  - `oxplow-foundation/new-session.sections` (sections `start`, `earlier`) →
+  - `oxplow/new-session.sections` (sections `start`, `earlier`) →
     `thread_id`.
   `oxplow_find_page`/`oxplow.page.describe` on a page's file shows its slot
   nodes; read a page's loaders to learn the params it binds.

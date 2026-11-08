@@ -1,7 +1,7 @@
 # The Extension page splits its pages: the ones you go to directly, and the
 # ones that draw a kind of resource, each saying which.
 when:
-  page: oxplow-foundation/extension
+  page: oxplow/extension
   params:
     uri: "oxplow:oxplow/extension?name=oxplow-foundation"
     name: oxplow-foundation
@@ -13,8 +13,8 @@ expect:
     pages:
       rows:
         contains:
-          - { title: Alerts, id: oxplow-foundation/alerts }
+          - { title: Alerts, id: oxplow/alerts }
     resource_pages:
       rows:
         contains:
-          - { title: Text, id: oxplow-foundation/file-viewer, draws: File }
+          - { title: Text, id: oxplow/file-viewer, draws: File }

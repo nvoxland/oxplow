@@ -258,7 +258,7 @@ pub async fn source_diff(
 /// What writing a page did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PageWritten {
-    /// `<extension>/<slug>`.
+    /// `<namespace>/<slug>`.
     pub page: String,
     /// The file, relative to the project when inside it.
     pub path: String,
@@ -327,9 +327,10 @@ pub async fn write_page(
     }
     let file = dir.join("pages").join(format!("{page}.yaml"));
     let shown = crate::extension::extensions::shown(&project, &file);
+    let namespace = crate::extension::extensions::namespace_in(&dir, extension);
     crate::pages::schema::parse_page(
         extension,
-        &extension.replace('-', "_"),
+        &namespace,
         page,
         &shown,
         spec,
@@ -401,7 +402,7 @@ pub async fn write_page(
         None
     };
     Ok(PageWritten {
-        page: format!("{extension}/{page}"),
+        page: format!("{namespace}/{page}"),
         path: shown,
         deployed,
     })
@@ -1207,6 +1208,17 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
     }
     not_required(svc, name)?;
     let project = svc.layout.project_dir.clone();
+    // Its settings and private state are its namespace's: they go only
+    // with the namespace's last extension.
+    let catalog = svc
+        .extension_catalog
+        .unpinned(&project, "a removal reads one snapshot");
+    let namespace = crate::extension::extensions::owner(&catalog, name)
+        .map(|e| e.namespace.clone())
+        .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(name));
+    let last_in_namespace = !catalog
+        .iter()
+        .any(|e| e.name != name && e.namespace == namespace);
     let mut settings = oxplow_config::extension_settings(&project);
     settings.personal.enable.retain(|n| n != name);
     settings.personal.disable.retain(|n| n != name);
@@ -1226,8 +1238,11 @@ pub async fn remove(svc: &Arc<Services>, name: &str) -> Result<(), DomainError> 
     svc.db
         .transaction(move |tx| {
             store_rows::forget_tx(tx, &name, None)?;
-            oxplow_db::extension_state_store::forget_extension_tx(tx, &name)?;
-            oxplow_db::extension_config_store::forget_extension_tx(tx, &name)
+            if !last_in_namespace {
+                return Ok(());
+            }
+            oxplow_db::extension_state_store::forget_extension_tx(tx, &namespace)?;
+            oxplow_db::extension_config_store::forget_extension_tx(tx, &namespace)
         })
         .await
 }
@@ -1890,7 +1905,7 @@ mod tests {
         let written = write_page(svc, "my-pages", "overview", PAGE_SPEC, true, true)
             .await
             .unwrap();
-        assert_eq!(written.page, "my-pages/overview");
+        assert_eq!(written.page, "my_pages/overview");
         assert!(written.deployed.is_some());
         let dir = svc.layout.project_dir.join(".oxplow/extensions/my-pages");
         assert!(dir.join("extension.yaml").is_file());
@@ -1958,7 +1973,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             out.result["page"],
-            json!("my-pages/release-health"),
+            json!("my_pages/release-health"),
             "{:?}",
             out.result
         );
@@ -2624,7 +2639,7 @@ mod tests {
     fn acme_page() -> crate::pages::runner::RunRequest {
         use crate::pages::runner::{RunRequest, RunTarget};
         RunRequest {
-            target: RunTarget::Page("oxplow-foundation/extension".into()),
+            target: RunTarget::Page("oxplow/extension".into()),
             params: [
                 (
                     "uri".to_string(),

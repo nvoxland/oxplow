@@ -322,16 +322,20 @@ pub fn event_uri(id: &str) -> String {
     keyed(r::EVENT, id)
 }
 
-/// A page (`tasks`, `<extension>/<id>`) with its params.
+/// A page (`tasks`, `<namespace>/<id>`) with its params.
 pub fn page_uri(page: &str, params: &[(&str, &str)]) -> String {
     let mut all = vec![("page", page)];
     all.extend_from_slice(params);
     of(r::PAGE, &all)
 }
 
-/// An extension's page (`<extension>/<id>`).
-pub fn extension_page_uri(extension: &str, page: &str) -> String {
-    page_uri(&format!("{extension}/{page}"), &[])
+/// A page named in `namespace` (`<namespace>/<id>`); oxplow's own are
+/// core-named, by their bare id.
+pub fn extension_page_uri(namespace: &str, page: &str) -> String {
+    if namespace == crate::OXPLOW_NAMESPACE {
+        return page_uri(page, &[]);
+    }
+    page_uri(&format!("{namespace}/{page}"), &[])
 }
 
 /// A metric by its key.
@@ -539,6 +543,10 @@ mod tests {
         assert_eq!(
             extension_page_uri("github", "pr"),
             "oxplow:oxplow/page?page=github/pr"
+        );
+        assert_eq!(
+            extension_page_uri("oxplow", "commit"),
+            "oxplow:oxplow/page?page=commit"
         );
     }
 

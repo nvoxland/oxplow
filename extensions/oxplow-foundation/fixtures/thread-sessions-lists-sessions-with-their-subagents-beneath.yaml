@@ -5,7 +5,7 @@ given:
   - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
   - observe: { event: { type: agent.subagent.started, v: 2, payload: { thread: "thread:thr1", subagent: { id: a1, kind: Explore } }, anchors: { thread_id: thr1, agent_session_id: $ses.id } } }
   - observe: { turn: { session: $ses.id, prompt: look, tools: [{ name: Read, kind: read, paths: [a.rs], ok: true, subagent: { id: child-9 } }] } }
-when: { page: oxplow-foundation/thread-sessions, params: { thread: thr1 } }
+when: { page: oxplow/thread-sessions, params: { thread: thr1 } }
 expect:
   loaders:
     thread_sessions:

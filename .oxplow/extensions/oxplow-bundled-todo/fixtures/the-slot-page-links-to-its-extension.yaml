@@ -1,8 +1,8 @@
 # "See also": the page links to the extension that declares it.
 when:
-  page: oxplow-foundation/slot
+  page: oxplow/slot
   params:
-    uri: "oxplow:oxplow/slot?slot=oxplow-bundled-todo/oxplow-bundled-todo.tasks.sections-0"
+    uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.tasks.sections-0"
 expect:
   see_also:
     contains:

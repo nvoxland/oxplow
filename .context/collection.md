@@ -365,7 +365,7 @@ errorCount, warningCount, infoCount, noteCount }`; its `metric_value` is the
 error+warning count (**lower is better**, unlike coverage where higher is
 better). The effort review shows the latest run's findings in the
 oxplow-bundled *Static Analysis* section (a node of its `effort-tests` page,
-mounted in the `oxplow-foundation/changes.sections` slot), each row opening the file at the line.
+mounted in the `oxplow/changes.sections` slot), each row opening the file at the line.
 The analysis ride-along has **no nudge** — the report-less nudge is
 test-specific.
 
@@ -377,10 +377,10 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   fetches.
 - A **completed** effort (`ActivityEffortSection`) shows the summary, the
   **Modified Files** tree (token usage is the task-level `task-tokens`
-  page in the `oxplow-foundation/work-item.sections` slot) — but
+  page in the `oxplow/work-item.sections` slot) — but
   **not** coverage, test runs or static analysis. Those live only on the
   effort **diff view** (`DiffViewPage`, the effort-review surface), as the
-  oxplow-bundled `effort-tests` page in its `oxplow-foundation/diff-view.sections` slot:
+  oxplow-bundled `effort-tests` page in its `oxplow/diff-view.sections` slot:
   diff coverage, most-untested files, test runs, tests that failed (with
   their latest status, so a red→green loop reads plainly) and analyzer
   findings, all SQL over `v_effort_observation`'s payloads.
@@ -461,7 +461,7 @@ agent this effort" after the fact, and the persisted row is what delivers it
 return a nudge, it also calls `persist_nudge` (best-effort — a write error is
 logged via `tracing::warn!` and swallowed, never failing the hook), which
 records a row in the `agent_nudge` table tagged with `kind`
-(`report-less-run` / `<extension>/<advisory id>`), the message, and the trigger (the
+(`report-less-run` / `<namespace>/<advisory id>`), the message, and the trigger (the
 bash command); a view of `v_agent_nudge` re-runs on `DatasetsChanged`. Persistence sits **after** the
 durable dedup gate (`mark_nudged`), so a deduped/non-fired nudge is never
 stored. The store

@@ -224,7 +224,7 @@ mod tests {
             stream_id: None,
         };
         let page = |presser: Actor| Actor::Page {
-            page_id: "oxplow-foundation/agents".into(),
+            page_id: "oxplow/agents".into(),
             on_behalf_of: Box::new(presser),
         };
         for actor in [agent.clone(), page(agent)] {
@@ -277,7 +277,7 @@ mod tests {
             stream_id: None,
         };
         let page = Actor::Page {
-            page_id: "oxplow-foundation/agents-prompt".into(),
+            page_id: "oxplow/agents-prompt".into(),
             on_behalf_of: Box::new(agent.clone()),
         };
         for actor in [agent, page] {

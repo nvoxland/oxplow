@@ -7,7 +7,7 @@ loaders:
   what_deviated:
     sql: |
       SELECT path, change_kind
-      FROM v_oxplow_bundled_deviation
+      FROM v_oxplow_deviation
       WHERE effort_id = :effort_id
       ORDER BY path
 view:

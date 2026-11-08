@@ -1915,7 +1915,7 @@ The mechanics behind those controls (unchanged by tsk117):
   collector's `entry` from its owner's extension folder (`collector_script_text`; oxplow-foundation's scripts are embedded like any bundled extension file).
 
 Metrics are also surfaced **organically off the Metrics pages** (tsk250): the
-effort review (`DiffViewPage`'s `oxplow-foundation/changes.sections` slot) shows the oxplow-bundled
+effort review (`DiffViewPage`'s `oxplow/changes.sections` slot) shows the oxplow-bundled
 `effort-metric-deltas` page — the metrics the effort moved, before→after with
 Δ, better/worse and any threshold crossing, over `v_effort_metric_delta`
 (tests, coverage, analysis, tokens and nudges have their own pages and are
@@ -2057,7 +2057,7 @@ metrics:                              # the read SPEC (the chartable metric)
     rust, ts, clojure, csharp, or `code` for the language-agnostic ones,
     embedded through `bundled_extensions.rs` like any bundled extension file).
     Nothing is built in: oxplow's own are this extension's. Their scope is `extension:oxplow-bundled`, their collector refs
-    `collector:oxplow-bundled-todo/<id>`. Each is authored through the **public**
+    `collector:oxplow/<id>`. Each is authored through the **public**
     surface (`files()`/`ast_query()`) — no privileged Rust path — and verified by
     fixtures in the extension (`.oxplow/extensions/oxplow-bundled-todo/fixtures/`);
     the effort test-outcome collector's script (foundation's) is held by

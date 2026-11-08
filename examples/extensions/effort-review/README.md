@@ -26,7 +26,7 @@ cancelled review is still commented, marked as cancelled.
 | `review.ask` / `review.status` / `review.cancel` | The job's lifecycle, through oxplow's jobs service. |
 | `review-on-finish` | On `effort.finished` (not `effort.closed`: the evidence is refreshed between the two), asks for the review of an effort with a work item. |
 | `publish-review` | On `contribution.job.completed`, reads the review back and comments it on the effort's work item. |
-| `reviews` dataset | `v_effort_review_reviews`: each review, its effort and work item, its state and what the dataset wrote. **Exported** as `oxplow:oxplow/dataset?dataset=effort-review/reviews` v2, so another extension can build on it. |
+| `reviews` dataset | `v_effort_review_reviews`: each review, its effort and work item, its state and what the dataset wrote. **Exported** as `oxplow:oxplow/dataset?dataset=effort_review/reviews` v2, so another extension can build on it. |
 | Pages | **Effort Reviews** and **Finished Efforts** (with **Review**), both under Work. |
 
 ## What it needs
@@ -39,14 +39,14 @@ cancelled review is still commented, marked as cancelled.
 
 It runs no program, reads no files, opens no network connection and holds
 no credentials: the model is whichever one you bind to the AI profile
-**effort-review/review** in Settings → AI, or your **Summarize** model when
+**effort_review/review** in Settings → AI, or your **Summarize** model when
 you bind none, through your own AI provider. Sharing the folder shares nothing of
 yours.
 
 ## Use it
 
 1. Copy this folder to `.oxplow/extensions/effort-review/`.
-2. Settings → AI: bind **effort-review/review** to a model (it needs tool
+2. Settings → AI: bind **effort_review/review** to a model (it needs tool
    calling), or give the **Summarize** role one and it is used instead.
 3. Deploy it (`oxplow.extension.deploy { name: "effort-review" }`, or
    Deploy on Settings → Extensions) and approve what it asks for: models
@@ -63,7 +63,7 @@ Another extension reads the reviews through the exported dataset:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2, optional: true }
+  - { id: reviews, contribution: oxplow:oxplow/dataset?dataset=effort_review/reviews, version: 2, optional: true }
 ```
 
 and `SELECT … FROM import_ref('reviews')` in its pages or datasets. With

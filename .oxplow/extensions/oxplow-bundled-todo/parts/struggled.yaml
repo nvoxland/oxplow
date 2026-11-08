@@ -7,7 +7,7 @@ loaders:
   struggled:
     sql: |
       SELECT subject, kind, count
-      FROM v_oxplow_bundled_struggle
+      FROM v_oxplow_struggle
       WHERE effort_id = :effort_id
       ORDER BY count DESC
 view:

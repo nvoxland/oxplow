@@ -43,7 +43,7 @@ view:
     columns:
     - key: title
       label: Stream
-      expand: oxplow-foundation/git-dashboard-between
+      expand: oxplow/git-dashboard-between
     - key: other
       label: Branch
     - key: working

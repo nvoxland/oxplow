@@ -3,24 +3,24 @@
 # working tree's: nothing for the working tree, the revision for the local
 # filesystem, the filesystem (and a deployment's hash cut to 7) for another.
 when:
-  page: oxplow-foundation/file-viewer
+  page: oxplow/file-viewer
   params: { path: "notes.md" }
 expect:
   loaders:
     file_viewer:
       rows: [{ path: "notes.md", suffix: "", current_uri: null }]
 steps:
-  - when: { page: oxplow-foundation/file-viewer, params: { path: "notes.md", rev: "git:HEAD" } }
+  - when: { page: oxplow/file-viewer, params: { path: "notes.md", rev: "git:HEAD" } }
     expect:
       loaders:
         file_viewer:
           rows: [{ suffix: " (git:HEAD)" }]
-  - when: { page: oxplow-foundation/file-viewer, params: { path: "oxplow-foundation/extension.yaml", filesystem: "oxplow:extensions", rev: "4f9c2e1a7b3d5f60" } }
+  - when: { page: oxplow/file-viewer, params: { path: "oxplow-foundation/extension.yaml", filesystem: "oxplow:extensions", rev: "4f9c2e1a7b3d5f60" } }
     expect:
       loaders:
         file_viewer:
           rows: [{ suffix: " (oxplow:extensions 4f9c2e1)" }]
-  - when: { page: oxplow-foundation/file-viewer, params: { path: "abc.yaml", filesystem: "oxplow:temp" } }
+  - when: { page: oxplow/file-viewer, params: { path: "abc.yaml", filesystem: "oxplow:temp" } }
     expect:
       loaders:
         file_viewer:

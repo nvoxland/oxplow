@@ -87,7 +87,7 @@ describe("core kinds a search hit can be", () => {
 });
 
 describe("a declared page", () => {
-  const pf = (extension: string, slug: string, title: string, icon: string | null) => ({ id: `${extension}/${slug}`, extension, slug, title, icon });
+  const pf = (extension: string, slug: string, title: string, icon: string | null) => ({ id: `${extension.startsWith("oxplow-") ? "oxplow" : extension.replace(/-/g, "_")}/${slug}`, extension, slug, title, icon });
   const extensions = [
     {
       name: "oxplow-foundation",
@@ -126,7 +126,7 @@ describe("a declared page", () => {
 
 describe("a page file's icon and label", () => {
   const extensions = [
-    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pages: [], pageFiles: [{ id: "oxplow-foundation/timeline", extension: "oxplow-foundation", slug: "timeline", title: "Time Line", icon: "history" }] },
+    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pages: [], pageFiles: [{ id: "oxplow/timeline", extension: "oxplow-foundation", slug: "timeline", title: "Time Line", icon: "history" }] },
     { name: "gh", namespace: "gh", enabled: true, pages: [], pageFiles: [{ id: "gh/open-prs", extension: "gh", slug: "open-prs", title: "Open PRs", icon: "git-merge" }] },
   ] as unknown as Extension[];
 

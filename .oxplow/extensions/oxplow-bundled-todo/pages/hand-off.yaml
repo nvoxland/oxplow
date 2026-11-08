@@ -33,5 +33,5 @@ view:
     - work_item
     - body
     choices:
-      to_thread: oxplow-bundled-todo/hand-off#handoff_recipients
-      work_item: oxplow-bundled-todo/hand-off#handoff_items
+      to_thread: oxplow/hand-off#handoff_recipients
+      work_item: oxplow/hand-off#handoff_items

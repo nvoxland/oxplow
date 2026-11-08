@@ -18,7 +18,7 @@ loaders:
       SELECT c.name AS extension, c.description,
              CASE WHEN c.deployment IN ('deployed', 'shipped', 'source') THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', c.name || '/extension.yaml')
-                    || '#oxplow.renderer=oxplow-foundation/file-viewer' END AS manifest_target,
+                    || '#oxplow.renderer=oxplow/file-viewer' END AS manifest_target,
              (s.hash IS NOT NULL AND (c.deployment = 'undeployed'
                 OR (c.hash IS NOT NULL AND s.hash != c.hash))) AS can_deploy,
              (c.deployment = 'deployed') AS can_rollback,
@@ -29,11 +29,11 @@ loaders:
              (c.origin = 'project' AND c.shared) AS can_unshare
       FROM content c LEFT JOIN v_extension_source s ON s.name = c.name
   summary:
-    page: oxplow-foundation/extension-facts
+    page: oxplow/extension-facts
     loader: summary
     params: { extension: { from: about.extension } }
   reach:
-    page: oxplow-foundation/extension-facts
+    page: oxplow/extension-facts
     loader: reach
     params: { extension: { from: about.extension } }
   about_facts:
@@ -49,7 +49,7 @@ loaders:
   pages:
     sql: |
       SELECT p.title, p.id, p.description,
-             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
+             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow/definition' END AS link
       FROM about a JOIN v_page p ON p.extension = a.extension AND p.kind = 'page'
       WHERE json_array_length(p.renders) = 0
       ORDER BY p.title
@@ -60,20 +60,20 @@ loaders:
       SELECT p.title, p.id, p.description,
              (SELECT group_concat(coalesce(r.label, j.value), ', ')
                 FROM json_each(p.renders) j LEFT JOIN v_resource r ON r.resource = j.value) AS draws,
-             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
+             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow/definition' END AS link
       FROM about a JOIN v_page p ON p.extension = a.extension AND p.kind = 'page'
       WHERE json_array_length(p.renders) > 0
       ORDER BY draws, p.title
   parts:
     sql: |
       SELECT p.title, p.id, p.description,
-             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
+             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow/definition' END AS link
       FROM about a JOIN v_page p ON p.extension = a.extension AND p.kind = 'part'
       ORDER BY p.title
   queries:
     sql: |
       SELECT p.title, p.id, p.description,
-             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow-foundation/definition' END AS link
+             CASE WHEN p.running_uri IS NOT NULL THEN p.running_uri || '#oxplow.renderer=oxplow/definition' END AS link
       FROM about a JOIN v_page p ON p.extension = a.extension AND p.kind = 'query'
       ORDER BY p.title
   # Each other kind: its name and what it is, from its kind's own dataset
@@ -81,7 +81,7 @@ loaders:
   commands:
     sql: |
       SELECT m.id AS title, m.summary AS description,
-             CASE WHEN d.resource IS NOT NULL THEN m.uri || '#oxplow.renderer=oxplow-foundation/command' END AS link
+             CASE WHEN d.resource IS NOT NULL THEN m.uri || '#oxplow.renderer=oxplow/command' END AS link
       FROM about a JOIN v_command m ON m.extension = a.extension
            LEFT JOIN drawn d ON d.resource = 'oxplow/command'
       ORDER BY m.id
@@ -113,7 +113,7 @@ loaders:
   collectors:
     sql: |
       SELECT k.id AS title, k.description,
-             CASE WHEN d.resource IS NOT NULL THEN k.uri || '#oxplow.renderer=oxplow-foundation/collector' END AS link
+             CASE WHEN d.resource IS NOT NULL THEN k.uri || '#oxplow.renderer=oxplow/collector' END AS link
       FROM about a JOIN v_collector k ON k.extension = a.extension
            LEFT JOIN drawn d ON d.resource = 'oxplow/collector'
       ORDER BY k.id
@@ -128,7 +128,7 @@ loaders:
   measures:
     sql: |
       SELECT m.title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/measure' END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow/measure' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'measure'
            JOIN v_measure m ON m.key = c.local
            LEFT JOIN drawn d ON d.resource = 'oxplow/measure'
@@ -136,7 +136,7 @@ loaders:
   dimensions:
     sql: |
       SELECT m.label AS title, m.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/dimension' END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow/dimension' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'dimension'
            JOIN v_dimension m ON m.key = c.local
            LEFT JOIN drawn d ON d.resource = 'oxplow/dimension'
@@ -144,7 +144,7 @@ loaders:
   resources:
     sql: |
       SELECT r.label AS title, r.description,
-             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow-foundation/resource' END AS link
+             CASE WHEN d.resource IS NOT NULL THEN c.uri || '#oxplow.renderer=oxplow/resource' END AS link
       FROM about a JOIN v_contribution c ON c.extension = a.extension AND c.kind = 'resource'
            JOIN v_resource r ON r.resource = c.global_name
            LEFT JOIN drawn d ON d.resource = 'oxplow/resource'
@@ -372,5 +372,5 @@ actions:
     name: '{{row.extension}}'
   when: can_remove
 see_also:
-  - { page: oxplow-foundation/extensions }
-  - { page: oxplow-foundation/extension-problems, params: { extension: { from: about.extension } } }
+  - { page: oxplow/extensions }
+  - { page: oxplow/extension-problems, params: { extension: { from: about.extension } } }

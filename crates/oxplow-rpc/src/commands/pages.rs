@@ -444,19 +444,17 @@ mod tests {
         crate::test_support::publish(&ctx).await;
         let edited = INLINE.replace("SELECT 7", "SELECT 8");
         std::fs::write(extension.join("pages/example.yaml"), &edited).unwrap();
-        let source = page_spec(&ctx, "my-pages/example".into()).await.unwrap();
+        let source = page_spec(&ctx, "my_pages/example".into()).await.unwrap();
         assert!(source.writable);
         assert_eq!(source.yaml, edited);
-        let deployed = run_page(&ctx, Some("my-pages/example".into()), None, None, None)
+        let deployed = run_page(&ctx, Some("my_pages/example".into()), None, None, None)
             .await
             .unwrap();
         assert_eq!(
             deployed.loaders["value"].result.rows,
             vec![vec![SqlCell::Int(7)]]
         );
-        let bundled = page_spec(&ctx, "oxplow-foundation/commit".into())
-            .await
-            .unwrap();
+        let bundled = page_spec(&ctx, "oxplow/commit".into()).await.unwrap();
         assert!(!bundled.writable);
         assert!(bundled.yaml.contains("title: Commit"));
     }

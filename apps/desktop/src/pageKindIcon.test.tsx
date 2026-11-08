@@ -6,7 +6,7 @@ const pristineApi = { ...realApi };
 mock.module("./api.js", () => ({
   ...realApi,
   listExtensions: async () => [
-    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pageFiles: [{ id: "oxplow-foundation/problems", extension: "oxplow-foundation", slug: "problems", title: "Problems", icon: "triangle-alert" }] },
+    { name: "oxplow-foundation", namespace: "oxplow", enabled: true, pageFiles: [{ id: "oxplow/problems", extension: "oxplow-foundation", slug: "problems", title: "Problems", icon: "triangle-alert" }] },
   ],
 }));
 

@@ -433,7 +433,8 @@ impl SqlGateway {
         }
         let values = match ext.configuration.clone() {
             Some(declaration) => {
-                let name = ext.name.clone();
+                // Settings are stored under the namespace.
+                let name = ext.namespace.clone();
                 Some(
                     self.layer
                         .database()

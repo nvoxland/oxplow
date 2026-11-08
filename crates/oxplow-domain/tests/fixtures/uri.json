@@ -1,9 +1,9 @@
 {
-  "$comment": "Golden cases for oxplow's URI grammar `oxplow:<extension>/<resource>[?<params>][#<view>]` (.context/resources.md). Asserted by crates/oxplow-domain/tests/oxplow_uri.rs and by apps/desktop/src/uri/oxplowUri.test.ts, so the Rust and TS parsers can't drift. `params` and `view` are DECODED; `canonical` is the one string every parse formats back to: keys sorted, and only ASCII letters, digits and -._~/:?,@!$'()*; left raw in a key or value (everything else %XX, uppercase hex). `identity` is the canonical URI without its view. `invalid` cases name the reason both parsers give.",
+  "$comment": "Golden cases for oxplow's URI grammar `oxplow:<namespace>/<resource>[?<params>][#<view>]` (.context/resources.md). Asserted by crates/oxplow-domain/tests/oxplow_uri.rs and by apps/desktop/src/uri/oxplowUri.test.ts, so the Rust and TS parsers can't drift. `params` and `view` are DECODED; `canonical` is the one string every parse formats back to: keys sorted, and only ASCII letters, digits and -._~/:?,@!$'()*; left raw in a key or value (everything else %XX, uppercase hex). `identity` is the canonical URI without its view. `invalid` cases name the reason both parsers give.",
   "valid": [
     {
       "text": "oxplow:oxplow/effort?id=eff12",
-      "resource": { "extension": "oxplow", "name": "effort" },
+      "resource": { "namespace": "oxplow", "name": "effort" },
       "params": { "id": "eff12" },
       "view": {},
       "canonical": "oxplow:oxplow/effort?id=eff12",
@@ -11,7 +11,7 @@
     },
     {
       "text": "oxplow:oxplow/file?rev=git:HEAD&path=src/a.rs#lines=10-20",
-      "resource": { "extension": "oxplow", "name": "file" },
+      "resource": { "namespace": "oxplow", "name": "file" },
       "params": { "path": "src/a.rs", "rev": "git:HEAD" },
       "view": { "lines": "10-20" },
       "canonical": "oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-20",
@@ -19,23 +19,23 @@
     },
     {
       "text": "oxplow:oxplow/work_item?provider=oxplow&id=tsk42",
-      "resource": { "extension": "oxplow", "name": "work_item" },
+      "resource": { "namespace": "oxplow", "name": "work_item" },
       "params": { "id": "tsk42", "provider": "oxplow" },
       "view": {},
       "canonical": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow",
       "identity": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"
     },
     {
-      "text": "oxplow:acme-tools/pr?id=12",
-      "resource": { "extension": "acme-tools", "name": "pr" },
+      "text": "oxplow:acme_tools/pr?id=12",
+      "resource": { "namespace": "acme_tools", "name": "pr" },
       "params": { "id": "12" },
       "view": {},
-      "canonical": "oxplow:acme-tools/pr?id=12",
-      "identity": "oxplow:acme-tools/pr?id=12"
+      "canonical": "oxplow:acme_tools/pr?id=12",
+      "identity": "oxplow:acme_tools/pr?id=12"
     },
     {
       "text": "oxplow:oxplow/page?page=tasks",
-      "resource": { "extension": "oxplow", "name": "page" },
+      "resource": { "namespace": "oxplow", "name": "page" },
       "params": { "page": "tasks" },
       "view": {},
       "canonical": "oxplow:oxplow/page?page=tasks",
@@ -43,7 +43,7 @@
     },
     {
       "text": "oxplow:oxplow/page",
-      "resource": { "extension": "oxplow", "name": "page" },
+      "resource": { "namespace": "oxplow", "name": "page" },
       "params": {},
       "view": {},
       "canonical": "oxplow:oxplow/page",
@@ -51,7 +51,7 @@
     },
     {
       "text": "oxplow:oxplow/page?stream_id=2&page=acme/blocked#q=fix&oxplow.renderer=acme/cards",
-      "resource": { "extension": "oxplow", "name": "page" },
+      "resource": { "namespace": "oxplow", "name": "page" },
       "params": { "page": "acme/blocked", "stream_id": "2" },
       "view": { "oxplow.renderer": "acme/cards", "q": "fix" },
       "canonical": "oxplow:oxplow/page?page=acme/blocked&stream_id=2#oxplow.renderer=acme/cards&q=fix",
@@ -60,7 +60,7 @@
     {
       "$comment": "Order doesn't matter: the same resource as the one above.",
       "text": "oxplow:oxplow/page?page=acme/blocked&stream_id=2",
-      "resource": { "extension": "oxplow", "name": "page" },
+      "resource": { "namespace": "oxplow", "name": "page" },
       "params": { "page": "acme/blocked", "stream_id": "2" },
       "view": {},
       "canonical": "oxplow:oxplow/page?page=acme/blocked&stream_id=2",
@@ -69,7 +69,7 @@
     {
       "$comment": "A value holding the grammar's own characters, a space, a plus and non-ASCII: each encoded once, uppercase hex.",
       "text": "oxplow:oxplow/file?path=docs/a%26b%3Dc%23d%25e%20f%2Bg%C3%A9.md",
-      "resource": { "extension": "oxplow", "name": "file" },
+      "resource": { "namespace": "oxplow", "name": "file" },
       "params": { "path": "docs/a&b=c#d%e f+gé.md" },
       "view": {},
       "canonical": "oxplow:oxplow/file?path=docs/a%26b%3Dc%23d%25e%20f%2Bg%C3%A9.md",
@@ -78,7 +78,7 @@
     {
       "$comment": "Lowercase hex and needless escapes parse; the canonical form drops them.",
       "text": "oxplow:oxplow/file?path=src%2fa%2Ers%3a1",
-      "resource": { "extension": "oxplow", "name": "file" },
+      "resource": { "namespace": "oxplow", "name": "file" },
       "params": { "path": "src/a.rs:1" },
       "view": {},
       "canonical": "oxplow:oxplow/file?path=src/a.rs:1",
@@ -87,7 +87,7 @@
     {
       "$comment": "A raw plus is a plus (never a space); it is encoded in the canonical form.",
       "text": "oxplow:oxplow/search?q=a+b",
-      "resource": { "extension": "oxplow", "name": "search" },
+      "resource": { "namespace": "oxplow", "name": "search" },
       "params": { "q": "a+b" },
       "view": {},
       "canonical": "oxplow:oxplow/search?q=a%2Bb",
@@ -96,7 +96,7 @@
     {
       "$comment": "An empty value is a value; an empty ? or # is nothing.",
       "text": "oxplow:oxplow/page?q=&page=git-history?#",
-      "resource": { "extension": "oxplow", "name": "page" },
+      "resource": { "namespace": "oxplow", "name": "page" },
       "params": { "page": "git-history?", "q": "" },
       "view": {},
       "canonical": "oxplow:oxplow/page?page=git-history?&q=",
@@ -105,7 +105,7 @@
     {
       "$comment": "Keys may hold dots and dashes (a chip filter, a namespaced view key) and capitals (a config key).",
       "text": "oxplow:oxplow/config?key=newThreadSession#f.state=todo",
-      "resource": { "extension": "oxplow", "name": "config" },
+      "resource": { "namespace": "oxplow", "name": "config" },
       "params": { "key": "newThreadSession" },
       "view": { "f.state": "todo" },
       "canonical": "oxplow:oxplow/config?key=newThreadSession#f.state=todo",
@@ -114,7 +114,7 @@
     {
       "$comment": "A value holding a whole URI is encoded where the grammar needs it.",
       "text": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
-      "resource": { "extension": "oxplow", "name": "page" },
+      "resource": { "namespace": "oxplow", "name": "page" },
       "params": { "page": "new-task", "parent": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" },
       "view": {},
       "canonical": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
@@ -123,7 +123,7 @@
     {
       "$comment": "A file on a filesystem other than the local one names it (`filesystem`); keys sort whatever order they were written in, so the filesystem comes first.",
       "text": "oxplow:oxplow/file?path=abc123.yaml&filesystem=oxplow:temp",
-      "resource": { "extension": "oxplow", "name": "file" },
+      "resource": { "namespace": "oxplow", "name": "file" },
       "params": { "filesystem": "oxplow:temp", "path": "abc123.yaml" },
       "view": {},
       "canonical": "oxplow:oxplow/file?filesystem=oxplow:temp&path=abc123.yaml",
@@ -132,7 +132,7 @@
     {
       "$comment": "A revision is the filesystem's own word: a deployment hash on the extensions filesystem.",
       "text": "oxplow:oxplow/file?rev=4f9c2e1a&path=oxplow-foundation/pages/commit.yaml&filesystem=oxplow:extensions#lines=1-5",
-      "resource": { "extension": "oxplow", "name": "file" },
+      "resource": { "namespace": "oxplow", "name": "file" },
       "params": { "filesystem": "oxplow:extensions", "path": "oxplow-foundation/pages/commit.yaml", "rev": "4f9c2e1a" },
       "view": { "lines": "1-5" },
       "canonical": "oxplow:oxplow/file?filesystem=oxplow:extensions&path=oxplow-foundation/pages/commit.yaml&rev=4f9c2e1a#lines=1-5",
@@ -141,7 +141,7 @@
     {
       "$comment": "An extension's filesystem is `<extension>:<name>`.",
       "text": "oxplow:oxplow/file?filesystem=acme:s3&path=bucket/key%20one.txt",
-      "resource": { "extension": "oxplow", "name": "file" },
+      "resource": { "namespace": "oxplow", "name": "file" },
       "params": { "filesystem": "acme:s3", "path": "bucket/key one.txt" },
       "view": {},
       "canonical": "oxplow:oxplow/file?filesystem=acme:s3&path=bucket/key%20one.txt",
@@ -150,7 +150,7 @@
     {
       "$comment": "A directory names its filesystem the same way.",
       "text": "oxplow:oxplow/dir?path=oxplow-foundation/pages&filesystem=oxplow:extensions",
-      "resource": { "extension": "oxplow", "name": "dir" },
+      "resource": { "namespace": "oxplow", "name": "dir" },
       "params": { "filesystem": "oxplow:extensions", "path": "oxplow-foundation/pages" },
       "view": {},
       "canonical": "oxplow:oxplow/dir?filesystem=oxplow:extensions&path=oxplow-foundation/pages",
@@ -168,6 +168,7 @@
     { "text": "oxplow:Acme/pr?id=1", "reason": "bad_resource" },
     { "text": "oxplow:acme/Pr?id=1", "reason": "bad_resource" },
     { "text": "oxplow:acme/pr-x?id=1", "reason": "bad_resource" },
+    { "text": "oxplow:acme-tools/pr?id=1", "reason": "bad_resource" },
     { "text": "oxplow:/pr?id=1", "reason": "bad_resource" },
     { "text": "oxplow:oxplow/effort?id", "reason": "bad_param" },
     { "text": "oxplow:oxplow/effort?=eff1", "reason": "bad_param" },

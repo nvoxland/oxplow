@@ -1,4 +1,4 @@
-SELECT id AS uri, extension, kind, local, origin, version, contract_version,
+SELECT id AS uri, extension, namespace, kind, local, origin, version, contract_version,
        runs_on_json AS runs_on, needs_json AS needs, after_json AS after, order_level,
        global_name, file, line, description
 FROM source('contribution')

@@ -16,7 +16,7 @@ params:
   options: [{ value: '50', label: '50' }, { value: '200', label: '200' }, { value: '1000', label: '1000' }]
   default: '200'
 answers:
-- {"question":"Which instances of this kind of resource are there?","about":"oxplow/resource","params":{"uri":"oxplow:oxplow/resource?resource=oxplow-foundation/stream"},"skill":"oxplow-extension"}
+- {"question":"Which instances of this kind of resource are there?","about":"oxplow/resource","params":{"uri":"oxplow:oxplow/resource?resource=oxplow/stream"},"skill":"oxplow-extension"}
 loaders:
   # One row when the kind resolves to a published dataset.
   resolved:

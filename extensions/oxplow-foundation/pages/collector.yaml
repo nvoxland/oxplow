@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Collector
 answers:
-- {"question":"When did this collector last run, and did it fail?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
+- {"question":"When did this collector last run, and did it fail?","about":"oxplow/collector","params":{"uri":"oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |
@@ -22,7 +22,7 @@ loaders:
              CASE WHEN f.rel IS NOT NULL THEN
                     uri('oxplow/file', 'filesystem', 'oxplow:extensions', 'path', f.rel)
                     || CASE WHEN f.line IS NOT NULL THEN '#lines=' || f.line || '&' ELSE '#' END
-                    || 'oxplow.renderer=oxplow-foundation/file-viewer' END AS declared_target
+                    || 'oxplow.renderer=oxplow/file-viewer' END AS declared_target
       FROM f JOIN v_collector k ON k.uri = f.uri
   facts:
     sql: |
@@ -41,9 +41,9 @@ loaders:
   problems:
     sql: |
       SELECT 'Extension problems' AS title,
-             uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || h.extension AS uri,
-             'What is wrong in ' || h.extension AS description
-      FROM v_contribution_health h WHERE h.uri = :uri AND h.state <> 'ok'
+             uri('oxplow/page', 'page', 'extension-problems') || '#extension=' || a.extension AS uri,
+             'What is wrong in ' || a.extension AS description
+      FROM v_contribution_health h JOIN about a WHERE h.uri = :uri AND h.state <> 'ok'
 view:
   stack:
   - id: about
@@ -70,4 +70,4 @@ view:
 see_also:
   - { from: related }
   - { from: problems }
-  - { page: oxplow-foundation/collectors }
+  - { page: oxplow/collectors }

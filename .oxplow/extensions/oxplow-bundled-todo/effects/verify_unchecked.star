@@ -1,4 +1,4 @@
-# oxplow-bundled-todo/verify-unchecked: after an acceptance that left claims
+# oxplow/verify-unchecked: after an acceptance that left claims
 # unverified or decisions inferred (a forced one), file one item to verify
 # them — a checklist naming each, on the active tracker like every new
 # item.
@@ -14,7 +14,7 @@
 _ACCEPTED = """
 SELECT (SELECT json_group_array(json_object('claim', s.value, 'statement', c.statement))
           FROM json_each(:subject) s JOIN v_claim c ON s.value = c.uri
-          JOIN v_oxplow_bundled_claim_status cs ON cs.uri = c.uri
+          JOIN v_oxplow_claim_status cs ON cs.uri = c.uri
          WHERE cs.verified = 0) AS claims,
        (SELECT json_group_array(json_object('decision', s.value, 'question', d.question, 'choice', d.choice))
           FROM json_each(:subject) s JOIN v_decision d ON s.value = d.uri
@@ -22,9 +22,9 @@ SELECT (SELECT json_group_array(json_object('claim', s.value, 'statement', c.sta
 WHERE NOT EXISTS (
     SELECT 1 FROM v_event p
       JOIN v_effect_run r ON r.event_id = p.id
-     WHERE p.type = 'oxplow_bundled.accepted' AND p.seq < :event_seq
+     WHERE p.type = 'oxplow.review.accepted' AND p.seq < :event_seq
        AND :effort IN (SELECT value FROM json_each(p.subject))
-       AND r.effect = 'oxplow-bundled-todo/verify-unchecked' AND r.latest = 1
+       AND r.effect = 'oxplow/verify-unchecked' AND r.latest = 1
        AND r.state IN ('ok', 'proposed'))
 """
 

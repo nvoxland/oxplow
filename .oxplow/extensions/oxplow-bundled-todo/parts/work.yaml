@@ -8,7 +8,7 @@ loaders:
     sql: |
       SELECT grp, title, icon, uri, depth, active,
              CASE grp WHEN 'Finished' THEN uri('oxplow/page', 'page', 'thread-activity', 'thread_id', thread_id) END AS grp_ref
-      FROM v_oxplow_bundled_thread_work
+      FROM v_oxplow_thread_work
       WHERE thread_id = :thread_id
       ORDER BY g, ord
 view:

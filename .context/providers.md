@@ -640,7 +640,7 @@ doesn't write its `.profraw` into the deployment (`host::PASSED_ENV`).
 **The spawn** (`host.rs`, `connect`) mirrors an `exec` source: a
 scrubbed environment (PATH, HOME, the declared `env` names, the
 credentials from the instance's keychain accounts
-(`instance:<project>:<ext>/<instance id>:<name>`),
+(`instance:<project>:<namespace>/<instance id>:<name>`),
 `OXPLOW_EXTENSION_DIR`, `OXPLOW_PROVIDER_ID` = the **instance id**), the egress proxy and
 `sandbox-exec` where the OS enforces `network`, stderr to the log, and
 `kill_on_drop` as the last resort. **A process is ended the orderly
@@ -672,7 +672,7 @@ The conformance kit has no project: it answers `host/call` like any
 other request.
 
 **Instances** (§10.3; project scope). An instance is
-`<extension>/<instance id>`, configured in `.oxplow/project.yaml`:
+`<namespace>/<instance id>`, configured in `.oxplow/project.yaml`:
 
 ```yaml
 extensionInstances:
@@ -702,7 +702,7 @@ One spelling everywhere, because the id is used as it stands:
 | the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
-| the credential accounts (`instance:<project>:<ext>/<id>:<name>`) | |
+| the credential accounts (`instance:<project>:<namespace>/<id>:<name>`) | |
 
 Permissions stay per extension: they cover the folder, the entry, args
 and the *names* of its credentials; two instances differ only in config and
@@ -735,7 +735,7 @@ input names (`instance`, else its `uri`'s, else the default).
 **Scope** (P9.B2). An instance is the **project's** (above: shared with
 the team in `project.yaml`) or the **person's** — global, in this
 machine's `instances.yaml` in the global config dir
-(`oxplow_config::GlobalInstances`: `instances: { "<ext>/<id>": { enabled,
+(`oxplow_config::GlobalInstances`: `instances: { "<namespace>/<id>": { enabled,
 config, provider? } }`, the same entries and the same validation):
 
 - a global instance applies in **every project whose catalog has its
@@ -759,7 +759,7 @@ config, provider? } }`, the same entries and the same validation):
   moves a project entry onto other credentials, and removing a project's
   replacement removes its own credentials, never the global one's;
 - its credentials are the person's, set once:
-  `instance:global:<ext>/<id>:<name>` (a project instance's are
+  `instance:global:<namespace>/<id>:<name>` (a project instance's are
   `instance:<project>:…`). Changing one — a pasted value, a sign-in, a
   sign-out — restarts it in **every** project, not only where it was
   changed (tsk842): the keychain can't be watched, so
@@ -1044,7 +1044,7 @@ for every instance (`tracker.item.estimate`), registered by the
 extension's generation whether or not an instance runs. Its spec takes the
 operation's input schema (plus an optional `instance`), effect and
 undo; its `confirm` is the manifest's when that asks more, else the
-declaration's; its `op` is `{ scope: provider:<ext>/<provider>, op }`.
+declaration's; its `op` is `{ scope: provider:<namespace>/<provider>, op }`.
 A run goes through the bus's **provider router**
 (`CommandBus::set_provider_router`, `ProviderRouter for
 ProviderRegistry::run_op`) to the instance its input names — an
@@ -1209,7 +1209,7 @@ restated by the next read.
 **Settings → Integrations** is oxplow-foundation's own component
 (`extensions/oxplow-foundation/components/integrations/`: `index.html`,
 `app.js`, `app.css`, hand-written, no build), mounted by the page
-`integrations` in `oxplow-foundation/settings-integrations.sections` after Capabilities and
+`integrations` in `oxplow/settings-integrations.sections` after Capabilities and
 Replaced components. Its operations are commands
 (`commands/provider_instances.rs`, scopes `providers.write` and
 `credentials.write`, all `External`) and the instances are read as the live
@@ -1243,7 +1243,7 @@ while the instance runs. A pasted credential is **Set… / Replace…**
 (a masked `writeOnly` field of an `openForm`; `oxplow.provider.set_credential`)
 and **Forget**; a signed-in one is **Sign in** (`signIn`, above) and **Sign
 out**. **Instances** (P9.B6): under the rows, "Add another instance of
-`<ext>/<provider>`" opens a form for a name (the instance id: lowercase
+`<namespace>/<provider>`" opens a form for a name (the instance id: lowercase
 snake_case, not already an instance) and a scope ("project" / "global")
 and runs `oxplow.provider.add_instance`. A named instance, a project's
 replacement of the person's own, and one whose provider is gone have

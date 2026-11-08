@@ -20,7 +20,7 @@ given:
           - { name: Bash, kind: shell, ok: false }
           - { name: Bash, kind: shell, ok: false }
           - { name: Bash, kind: shell }
-when: { sql: "SELECT kind, subject, count FROM v_oxplow_bundled_struggle ORDER BY kind" }
+when: { sql: "SELECT kind, subject, count FROM v_oxplow_struggle ORDER BY kind" }
 expect:
   rows:
     - { kind: failed_commands, subject: shell, count: 3 }

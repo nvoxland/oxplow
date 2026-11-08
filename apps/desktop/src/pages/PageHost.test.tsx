@@ -30,7 +30,7 @@ test("About this page: Definition opens the running copy drawn as Definition, wi
   expect(about.textContent).not.toContain("Title");
   fireEvent.click(view.getByTestId("page-about-definition"));
   expect(paramOf(opened[0], "path")).toBe("acme/pages/page.yaml");
-  expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow-foundation/definition");
+  expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow/definition");
   expect(viewOf(opened[0], "params")).toBe('{"q":"recent"}');
 });
 
@@ -57,7 +57,7 @@ test("a shown view (a temp page) offers Save and, in About, Definition as Defini
   fireEvent.click(await view.findByTestId("page-about-definition"));
   expect(paramOf(opened[0], "path")).toBe("v1.yaml");
   expect(paramOf(opened[0], "filesystem")).toBe("oxplow:temp");
-  expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow-foundation/definition");
+  expect(viewOf(opened[0], "oxplow.renderer")).toBe("oxplow/definition");
   cleanup();
   const deployed = fakePageRuns(tablePage());
   const other = render(<PageHost pageKey={key} runs={deployed.runs} />);
@@ -128,7 +128,7 @@ test("the description isn't in the body: About this page in the ☰ shows it wit
   expect(about.textContent).toContain("deployment abc123def456");
   expect(view.getByTestId("page-about-definition").textContent).toBe("acme/pages/items.yaml");
   fireEvent.click(view.getByTestId("page-about-definition"));
-  expect(opened[0]).toBe(`${runningUri}#oxplow.renderer=oxplow-foundation/definition&params=%7B%7D`);
+  expect(opened[0]).toBe(`${runningUri}#oxplow.renderer=oxplow/definition&params=%7B%7D`);
 });
 
 test("a whole-page action with `when` is offered only while the page's row has that column truthy", async () => {

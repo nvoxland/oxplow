@@ -19,7 +19,7 @@ given:
         branches:
           - { name: main, head: $more.rev, stream: 1, default: true }
           - { name: feat, head: $feature.rev, stream: 2 }
-when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
+when: { page: oxplow/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
 expect:
   loaders:
     upstream:
@@ -35,7 +35,7 @@ expect:
   nodes:
     - { id: upstream, actions: [merge-out, merge-base, rebase-base, publish, push, pull, fetch] }
 steps:
-  - when: { page: oxplow-foundation/streams, params: { stream_id: 2 }, view: { stream: $feat.id } }
+  - when: { page: oxplow/streams, params: { stream_id: 2 }, view: { stream: $feat.id } }
     expect:
       loaders:
         streams:
@@ -46,7 +46,7 @@ steps:
               can_join: 1
               can_merge_out: 1
   - when:
-      part: oxplow-foundation/git-dashboard-between
+      part: oxplow/git-dashboard-between
       params: { base: feat, head: main, stream_id: 2, target_stream: 1 }
       view: { stream: $feat.id }
     expect:
@@ -57,7 +57,7 @@ steps:
         - { id: apart, actions: [merge-out, merge-in, rebase] }
   - press: { action: merge-out, node: upstream }
     expect: { ok: true }
-  - when: { page: oxplow-foundation/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
+  - when: { page: oxplow/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
     expect:
       loaders:
         upstream: { rows: [{ is_ahead: 0, is_behind: 1, can_merge_out: 0, ahead_says: null, behind_says: 2 commits from main }] }

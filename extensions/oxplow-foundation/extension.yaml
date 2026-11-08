@@ -111,13 +111,13 @@ intent:
       input: { page: command, params: { uri: "oxplow:oxplow/command?command=oxplow.agent.draft" } }
       expect: a command's permission, whether it asks first and can be undone, and where it is declared
     - name: the-skill-page-says-what-a-skill-is
-      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow-foundation/work-items" } }
+      input: { page: skill, params: { uri: "oxplow:oxplow/skill?skill=oxplow/work-items" } }
       expect: a skill's description and whether it is a skill or a slash command
     - name: the-component-page-links-the-commands-it-may-run
-      input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations" } }
+      input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow/integrations" } }
       expect: a custom component's code, whether it reads data, and a link to each command it may run
     - name: the-collector-page-says-when-a-collector-runs-and-how-it-last-went
-      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome" } }
+      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome" } }
       expect: when a collector runs, whether it is enabled and its last run
     - name: the-measure-page-says-what-a-measure-counts-and-lists-its-metrics
       input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
@@ -126,10 +126,10 @@ intent:
       input: { page: dimension, params: { uri: "oxplow:oxplow/dimension?dimension=oxplow.language" } }
       expect: a dimension's value type, what it describes and whether it is stored per value
     - name: the-resource-page-lists-the-pages-that-draw-a-resource-kind
-      input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/commit" } }
+      input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow/commit" } }
       expect: a resource kind's URI form and the pages that draw it
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
-      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow" } }
+      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow" } }
       expect: an implementation's capability, whether it is in use and what it can do
     - name: a-command-row-of-an-extension-links-to-the-commands-page
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
@@ -246,25 +246,25 @@ intent:
       input: { page: command, params: { uri: 'oxplow:oxplow/command?command=oxplow.agent.draft' } }
       expect: its see-also links name the extension that declares it
     - name: the-skill-page-links-to-its-extension
-      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow-foundation/work-items' } }
+      input: { page: skill, params: { uri: 'oxplow:oxplow/skill?skill=oxplow/work-items' } }
       expect: its see-also links name the extension that declares it
     - name: the-custom-component-page-links-to-its-extension
-      input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations' } }
+      input: { page: custom-component, params: { uri: 'oxplow:oxplow/custom_component?custom_component=oxplow/integrations' } }
       expect: its see-also links name the extension that declares it
     - name: the-dimension-page-links-to-its-extension
       input: { page: dimension, params: { uri: 'oxplow:oxplow/dimension?dimension=oxplow.language' } }
       expect: its see-also links name the extension that declares it
     - name: the-resource-page-links-to-its-extension
-      input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow-foundation/commit' } }
+      input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow/commit' } }
       expect: its see-also links name the extension that declares it
     - name: the-implementation-page-links-to-its-extension
-      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow' } }
+      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow' } }
       expect: its see-also links name the extension that declares it
     - name: the-measure-page-links-to-its-extension
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
       expect: its see-also links name the extension that declares it
     - name: the-collector-page-links-to-its-extension-and-the-list-it-belongs-to
-      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome' } }
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome' } }
       expect: its see-also links name the extension that declares it and the list it belongs to
     - name: the-editor-links-to-the-files-history-and-its-folder
       input: { page: editor, params: { path: src/sub/c.rs } }
@@ -291,7 +291,7 @@ intent:
       input: { page: alerts }
       expect: its see-also links open the extension problems and the collectors
     - name: the-collector-page-links-to-its-extensions-problems-when-it-is-not-ok
-      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome' } }
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome' } }
       expect: an unhealthy collector's see-also links open its extension's problems
     - name: the-extension-page-links-to-all-extensions-and-its-problems
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
@@ -300,22 +300,22 @@ intent:
       input: { page: commit, params: { uri: 'oxplow:oxplow/commit?sha=abc1234', sha: abc1234, stream_id: 1 } }
       expect: its see-also link is Git History
     - name: the-collector-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: collector, params: {uri:"oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome"} }
+      input: { page: collector, params: {uri:"oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"} }
       expect: its description is a paragraph above the facts
     - name: the-command-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: command, params: {uri:"oxplow:oxplow/command?command=oxplow.agent.draft"} }
       expect: its description is a paragraph above the facts
     - name: the-custom-component-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations"} }
+      input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow/integrations"} }
       expect: its description is a paragraph above the facts
     - name: the-implementation-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow-foundation/work_items.oxplow"} }
+      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"} }
       expect: its description is a paragraph above the facts
     - name: the-measure-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: measure, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
       expect: its description is a paragraph above the facts
     - name: the-resource-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: resource, params: {uri:"oxplow:oxplow/resource?resource=oxplow-foundation/commit"} }
+      input: { page: resource, params: {uri:"oxplow:oxplow/resource?resource=oxplow/commit"} }
       expect: its description is a paragraph above the facts
     - name: the-measure-data-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: measure-data, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
@@ -336,10 +336,10 @@ intent:
       input: { page: dimension, params: {uri:"oxplow:oxplow/dimension?dimension=oxplow.language"} }
       expect: its description is a paragraph above the facts
     - name: the-resource-data-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: resource-data, params: {uri:"oxplow:oxplow/resource?resource=oxplow-foundation/stream"} }
+      input: { page: resource-data, params: {uri:"oxplow:oxplow/resource?resource=oxplow/stream"} }
       expect: its description is a paragraph above the facts
     - name: the-skill-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow-foundation/work-items"} }
+      input: { page: skill, params: {uri:"oxplow:oxplow/skill?skill=oxplow/work-items"} }
       expect: its description is a paragraph above the facts
     - name: the-dataset-definition-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: dataset-definition, params: {uri:"oxplow:oxplow/dataset?dataset=work_item"} }
@@ -423,13 +423,13 @@ intent:
       input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.work_item.create" } }
       expect: a command's audited runs, newest first, narrowed by outcome, who and date
     - name: collector-data-lists-its-last-run-counts-and-the-facts-it-recorded
-      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow-foundation/oxplow.effort_test_outcome", range: all } }
+      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome", range: all } }
       expect: the rows a collector's last run counted and the facts it recorded
     - name: resource-data-lists-the-instances-of-a-kind-that-a-dataset-holds
-      input: { page: resource-data, params: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
+      input: { page: resource-data, params: { uri: "oxplow:oxplow/resource?resource=oxplow/stream" } }
       expect: the instances of a kind, the rows of the dataset it resolves to
     - name: resource-data-is-offered-only-for-a-kind-a-dataset-holds
-      input: { command: oxplow.page.renderers, input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" } }
+      input: { command: oxplow.page.renderers, input: { uri: "oxplow:oxplow/resource?resource=oxplow/stream" } }
       expect: a kind a dataset holds opens on its data with Definition as the other mode; a kind no dataset holds has Definition alone
     - name: the-metric-page-says-what-a-metric-is-built-from
       input: { page: metric, params: { uri: "oxplow:oxplow/metric?metric=agent.tokens.total", metric: agent.tokens.total } }
@@ -793,7 +793,7 @@ resources:
   - name: collector
     description: "A program that gathers data into oxplow's datasets."
     label: Collector
-    params: { collector: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { collector: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     resolve: collector_run
     title: id
     searchable: search_collector
@@ -807,7 +807,7 @@ resources:
   - name: resource
     description: "A kind of thing that a URI can name."
     label: Resource
-    params: { resource: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_]*$' } }
+    params: { resource: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_]*$' } }
     searchable: search_resource
     icon: link
   - name: command
@@ -819,43 +819,43 @@ resources:
   - name: job
     description: "A durable task that can call a language model."
     label: Job
-    params: { job: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { job: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_job
     icon: server
   - name: ai_profile
     description: "A saved way of calling a language model."
     label: AI profile
-    params: { ai_profile: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { ai_profile: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_ai_profile
     icon: server
   - name: effect
     description: "A reaction that runs when an event happens."
     label: Effect
-    params: { effect: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { effect: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_effect
     icon: zap
   - name: advisory
     description: "A short note that an extension adds to an agent's context."
     label: Advisory
-    params: { advisory: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { advisory: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_advisory
     icon: bell
   - name: skill
     description: "Instructions that oxplow gives a coding agent."
     label: Skill
-    params: { skill: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { skill: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_skill
     icon: book-open
   - name: implementation
     description: "One way to provide a capability, such as a work list or an agent."
     label: Implementation
-    params: { implementation: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { implementation: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_implementation
     icon: box
   - name: provider
     description: "A program that connects oxplow to an outside service."
     label: Provider
-    params: { provider: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { provider: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_provider
     icon: server
   - name: page
@@ -874,28 +874,28 @@ resources:
   - name: panel
     description: "A panel that an extension adds to the side of the window."
     label: Panel
-    params: { panel: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { panel: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_panel
     icon: layout-dashboard
   - name: slot
     description: "A place on a page where another extension's page can be shown."
     label: Slot
-    params: { slot: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { slot: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
   - name: decorator
     description: "A label that an extension adds to a record."
     label: Decorator
-    params: { decorator: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { decorator: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: tag
   - name: replacement
     description: "A built-in part of the window that an extension replaces."
     label: Replacement
-    params: { replacement: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { replacement: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: copy
   - name: custom_component
     description: "A part of a page that an extension draws with its own code."
     label: Custom component
-    params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9-]*/[a-z][a-z0-9_.-]*$' } }
+    params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
 commands:
   # agent_input.write — the window's agent input.
@@ -1035,7 +1035,7 @@ commands:
     example: {"thread": "thr1"}
   # changes.read
   - name: change.ensure
-    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_bundled_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_bundled_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."
+    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."
     scope: changes.read
     op: ensure
     tool: ensure_change
@@ -1096,7 +1096,7 @@ commands:
     summary: "Choose which implementation a capability uses (`work_items`, `effort_policy`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
     scope: config.write
     op: choose_provider
-    example: {"capability": "snapshots", "provider": "oxplow-bundled/diffs"}
+    example: {"capability": "snapshots", "provider": "oxplow/diffs"}
   - name: replacement.choose
     summary: "Choose whose component shows where an extension replaces a core one (`replacements` in .oxplow/project.yaml): an extension's name, or `oxplow` for oxplow's own. Leave `whose` out for the default. Logged as config.changed, undoable."
     scope: config.write
@@ -1344,13 +1344,13 @@ commands:
     scope: extensions.enable
     op: enable
     lifecycle: experimental
-    example: {"extension": "review", "kind": "effect", "contribution": "infer-reasoning"}
+    example: {"namespace": "review", "kind": "effect", "contribution": "infer-reasoning"}
   - name: contribution.enable_all
-    summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one extension's (`extension`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
+    summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one namespace's (`namespace`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
     scope: extensions.enable
     op: enable_all
     lifecycle: experimental
-    example: {"extension": "review"}
+    example: {"namespace": "review"}
   # files.write
   - name: snapshot.restore_file
     summary: "Restore a captured file (a `file_snapshot` id) into its stream's worktree, overwriting what's at its path now. A person confirms it."
@@ -1566,7 +1566,7 @@ commands:
     scope: pages.read
     op: run
     tool: run_page
-    example: {"page": "oxplow-foundation/problems", "format": "text"}
+    example: {"page": "oxplow/problems", "format": "text"}
   - name: page.find
     summary: "Find the pages that answer a question. A `question` (in words) matches the questions pages say they answer, then their titles and descriptions; `about` (a uri) keeps the pages that show that kind of thing and binds its uri (`bind`). Each comes with its params, so you can `oxplow_run_page` it, or show it to the person with `oxplow_navigate`. Look here before writing SQL for something a person will look at."
     scope: pages.read

@@ -183,7 +183,7 @@ gates"). It is made visible, all of it bundled over existing datasets
 
 - The **Shared work** page (`shared-work` in the launcher under Work;
   `thread-shared-work` on the thread page, slot `thread.plan.header`;
-  `item-shared-work` on a work item, slot `oxplow-foundation/work-item.sections`): items
+  `item-shared-work` on a work item, slot `oxplow/work-item.sections`): items
   with open efforts on two threads, files changed by two threads' efforts
   (open, or closed in the last day, from `v_effort_file`), and epics whose
   open children sit on different threads.

@@ -101,9 +101,9 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     assert_eq!(tested.error_lines(), Vec::<String>::new());
     assert_eq!(
         tested.imports,
-        ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available"]
+        ["`reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available"]
     );
-    let id = "oxplow:oxplow/page?page=review-badges/review-verdicts";
+    let id = "oxplow:oxplow/page?page=review_badges/review-verdicts";
     assert!(
         tested.contributes.iter().any(|c| c == id),
         "{id}: {:?}",
@@ -123,7 +123,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     // the import; the fixtures that test them are skipped, saying why.
     assert_eq!(
         tested.imports,
-        ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: unavailable (effort-review or its contribution isn't here)"]
+        ["`reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: unavailable (effort_review or its contribution isn't here)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
     let warning_lines = tested.warning_lines();
@@ -135,12 +135,12 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let warning = import_warnings[0];
     assert!(
         warning.contains(
-            "optional import `reviews` for `oxplow:oxplow/dataset?dataset=effort-review/reviews` v2 is unavailable: \
-             effort-review or its contribution isn't here; withheld: "
+            "optional import `reviews` for `oxplow:oxplow/dataset?dataset=effort_review/reviews` v2 is unavailable: \
+             effort_review or its contribution isn't here; withheld: "
         ),
         "{warning}"
     );
-    let id = "`oxplow:oxplow/page?page=review-badges/review-verdicts`";
+    let id = "`oxplow:oxplow/page?page=review_badges/review-verdicts`";
     assert!(warning.contains(id), "{id}: {warning}");
     assert!(
         !tested
@@ -154,8 +154,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     assert!(
         tested.skipped_lines().iter().any(|w| w.contains(
             "fixtures/review-verdicts.yaml: example `review-verdicts` isn't run: \
-             `oxplow:oxplow/page?page=review-badges/review-verdicts` is withheld because import `reviews` is \
-             unavailable (effort-review or its contribution isn't here)"
+             `oxplow:oxplow/page?page=review_badges/review-verdicts` is withheld because import `reviews` is \
+             unavailable (effort_review or its contribution isn't here)"
         )),
         "{:?}",
         tested.skipped
@@ -174,7 +174,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     let tested = test_extension(root, "review-badges", false).await.unwrap();
     assert_eq!(
         tested.imports,
-        ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: available"]
+        ["`reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available"]
     );
 
     // The producer exports another version.
@@ -188,15 +188,15 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
             "    version: 3\n    key: [job_run]",
         )
         .replace(
-            "contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 2,",
-            "contribution: oxplow:oxplow/dataset?dataset=effort-review/reviews, version: 3,",
+            "contribution: oxplow:oxplow/dataset?dataset=effort_review/reviews, version: 2,",
+            "contribution: oxplow:oxplow/dataset?dataset=effort_review/reviews, version: 3,",
         );
     assert_ne!(bumped, text);
     std::fs::write(&manifest, bumped).unwrap();
     let tested = test_extension(root, "review-badges", false).await.unwrap();
     assert_eq!(
         tested.imports,
-        ["`reviews` → oxplow:oxplow/dataset?dataset=effort-review/reviews v2: unavailable (effort-review exports v3)"]
+        ["`reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: unavailable (effort_review exports v3)"]
     );
     assert!(tested.contributes.is_empty(), "{:?}", tested.contributes);
 }

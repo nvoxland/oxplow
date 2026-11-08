@@ -1,6 +1,6 @@
 # "See also": the page links to the extension that declares it.
 when:
-  page: oxplow-foundation/measure
+  page: oxplow/measure
   params:
     uri: "oxplow:oxplow/measure?measure=oxplow.tokens"
 expect:

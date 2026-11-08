@@ -540,6 +540,8 @@ pub(crate) fn foundation_declarations() -> (
 /// (`testdata/code-metrics/`): real scripts for the tests of the collector
 /// machinery. It ships nowhere.
 pub(crate) const CODE_METRICS_EXT: &str = "code-metrics";
+/// The namespace [`CODE_METRICS_EXT`]'s collectors are named in: their owner.
+pub(crate) const CODE_METRICS_NS: &str = "code_metrics";
 
 /// Where [`CODE_METRICS_EXT`]'s source is.
 pub(crate) fn code_metrics_dir() -> std::path::PathBuf {
@@ -695,242 +697,110 @@ pub async fn run_as_page_in(
     ctx: crate::pages::spec::ViewContext,
 ) -> oxplow_db::SqlQueryResult {
     use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
-    let (extension, slug) = id.split_once('/').expect("<extension>/<slug>");
+    let (namespace, slug) = id.split_once('/').expect("<namespace>/<slug>");
     // Pages the conversion inlined into a page as a part named otherwise,
     // or renamed (`pages convert` prints both).
     const NAMED: &[(&str, &str, &str)] = &[
-        ("oxplow-foundation/context-waiting", "context", "waiting"),
+        ("oxplow/context-waiting", "context", "waiting"),
+        ("oxplow/context-delivered", "context", "delivered"),
+        ("oxplow/git-dashboard-upstream", "git-dashboard", "upstream"),
         (
-            "oxplow-foundation/context-delivered",
-            "context",
-            "delivered",
-        ),
-        (
-            "oxplow-foundation/git-dashboard-upstream",
-            "git-dashboard",
-            "upstream",
-        ),
-        (
-            "oxplow-foundation/git-dashboard-uncommitted",
+            "oxplow/git-dashboard-uncommitted",
             "git-dashboard",
             "uncommitted",
         ),
+        ("oxplow/git-dashboard-recent", "git-dashboard", "recent"),
+        ("oxplow/git-dashboard-streams", "git-dashboard", "streams"),
         (
-            "oxplow-foundation/git-dashboard-recent",
-            "git-dashboard",
-            "recent",
-        ),
-        (
-            "oxplow-foundation/git-dashboard-streams",
-            "git-dashboard",
-            "streams",
-        ),
-        (
-            "oxplow-foundation/git-dashboard-readiness",
+            "oxplow/git-dashboard-readiness",
             "git-dashboard",
             "readiness",
         ),
+        ("oxplow/git-dashboard-remotes", "git-dashboard", "remotes"),
+        ("oxplow/git-history-commits", "git-history", "history"),
+        ("oxplow/uncommitted-commit", "uncommitted-changes", "commit"),
+        ("oxplow/uncommitted-files", "uncommitted-changes", "files"),
+        ("oxplow/local-history-recent", "local-history", "recent"),
+        ("oxplow/local-history-commits", "local-history", "by-commit"),
+        ("oxplow/comments-threads", "comments", "threads"),
+        ("oxplow/comments-conversation", "comments", "conversation"),
+        ("oxplow/settings-overview", "settings", "overview"),
         (
-            "oxplow-foundation/git-dashboard-remotes",
-            "git-dashboard",
-            "remotes",
-        ),
-        (
-            "oxplow-foundation/git-history-commits",
-            "git-history",
-            "history",
-        ),
-        (
-            "oxplow-foundation/uncommitted-commit",
-            "uncommitted-changes",
-            "commit",
-        ),
-        (
-            "oxplow-foundation/uncommitted-files",
-            "uncommitted-changes",
-            "files",
-        ),
-        (
-            "oxplow-foundation/local-history-recent",
-            "local-history",
-            "recent",
-        ),
-        (
-            "oxplow-foundation/local-history-commits",
-            "local-history",
-            "by-commit",
-        ),
-        ("oxplow-foundation/comments-threads", "comments", "threads"),
-        (
-            "oxplow-foundation/comments-conversation",
-            "comments",
-            "conversation",
-        ),
-        (
-            "oxplow-foundation/settings-overview",
-            "settings",
-            "overview",
-        ),
-        (
-            "oxplow-foundation/settings-proposals",
+            "oxplow/settings-proposals",
             "settings",
             "settings-proposals",
         ),
+        ("oxplow/settings-values", "settings", "settings-values"),
+        ("oxplow/settings-agents", "settings", "agents"),
+        ("oxplow/agents-list", "settings", "agents-list"),
+        ("oxplow/agents-settings", "settings", "agents-settings"),
+        ("oxplow/agents-new-thread", "settings", "agents-new-thread"),
+        ("oxplow/agents-prompt", "settings", "agents-prompt"),
+        ("oxplow/settings-lsp", "settings", "lsp"),
+        ("oxplow/lsp-servers", "settings", "lsp-servers"),
+        ("oxplow/lsp-install", "settings", "lsp-install"),
+        ("oxplow/lsp-suggestions", "settings", "lsp-suggestions"),
         (
-            "oxplow-foundation/settings-values",
-            "settings",
-            "settings-values",
-        ),
-        ("oxplow-foundation/settings-agents", "settings", "agents"),
-        ("oxplow-foundation/agents-list", "settings", "agents-list"),
-        (
-            "oxplow-foundation/agents-settings",
-            "settings",
-            "agents-settings",
-        ),
-        (
-            "oxplow-foundation/agents-new-thread",
-            "settings",
-            "agents-new-thread",
-        ),
-        (
-            "oxplow-foundation/agents-prompt",
-            "settings",
-            "agents-prompt",
-        ),
-        ("oxplow-foundation/settings-lsp", "settings", "lsp"),
-        ("oxplow-foundation/lsp-servers", "settings", "lsp-servers"),
-        ("oxplow-foundation/lsp-install", "settings", "lsp-install"),
-        (
-            "oxplow-foundation/lsp-suggestions",
-            "settings",
-            "lsp-suggestions",
-        ),
-        (
-            "oxplow-foundation/extensions-credentials",
+            "oxplow/extensions-credentials",
             "settings",
             "extensions-credentials",
         ),
         (
-            "oxplow-foundation/extensions-secrets",
+            "oxplow/extensions-secrets",
             "settings",
             "extensions-secrets",
         ),
-        ("oxplow-foundation/settings-data", "settings", "data"),
+        ("oxplow/settings-data", "settings", "data"),
+        ("oxplow/data-entities", "settings", "data-entities"),
+        ("oxplow/data-sources", "settings", "data-sources"),
+        ("oxplow/data-effects", "settings", "data-effects"),
+        ("oxplow/settings-integrations", "settings", "integrations"),
+        ("oxplow/capabilities", "settings", "capabilities"),
+        ("oxplow/replacements", "settings", "replacements"),
         (
-            "oxplow-foundation/data-entities",
-            "settings",
-            "data-entities",
-        ),
-        ("oxplow-foundation/data-sources", "settings", "data-sources"),
-        ("oxplow-foundation/data-effects", "settings", "data-effects"),
-        (
-            "oxplow-foundation/settings-integrations",
-            "settings",
-            "integrations",
-        ),
-        ("oxplow-foundation/capabilities", "settings", "capabilities"),
-        ("oxplow-foundation/replacements", "settings", "replacements"),
-        (
-            "oxplow-foundation/integrations",
+            "oxplow/integrations",
             "settings",
             "integrations-integrations",
         ),
-        ("oxplow-foundation/settings-ai", "settings", "ai"),
-        ("oxplow-foundation/ai-providers", "settings", "ai-providers"),
+        ("oxplow/settings-ai", "settings", "ai"),
+        ("oxplow/ai-providers", "settings", "ai-providers"),
+        ("oxplow/ai-provider-form", "settings", "ai-provider-form"),
+        ("oxplow/ai-roles", "settings", "ai-roles"),
+        ("oxplow/ai-calls", "settings", "ai-calls"),
+        ("oxplow/catalog-prompts", "catalog", "ask"),
+        ("oxplow/catalog-config-keys", "catalog", "configure"),
+        ("oxplow/alerts-decisions", "alerts", "decisions"),
+        ("oxplow/alerts-hints", "alerts", "hints"),
+        ("oxplow/alerts-operations", "alerts", "operations"),
+        ("oxplow/alerts-extensions", "alerts", "extensions"),
+        ("oxplow/new-session-start", "new-session", "start"),
+        ("oxplow/new-session-earlier", "new-session", "earlier"),
+        ("oxplow/stream-settings-prompt", "stream-settings", "prompt"),
         (
-            "oxplow-foundation/ai-provider-form",
-            "settings",
-            "ai-provider-form",
-        ),
-        ("oxplow-foundation/ai-roles", "settings", "ai-roles"),
-        ("oxplow-foundation/ai-calls", "settings", "ai-calls"),
-        ("oxplow-foundation/catalog-prompts", "catalog", "ask"),
-        (
-            "oxplow-foundation/catalog-config-keys",
-            "catalog",
-            "configure",
-        ),
-        ("oxplow-foundation/alerts-decisions", "alerts", "decisions"),
-        ("oxplow-foundation/alerts-hints", "alerts", "hints"),
-        (
-            "oxplow-foundation/alerts-operations",
-            "alerts",
-            "operations",
-        ),
-        (
-            "oxplow-foundation/alerts-extensions",
-            "alerts",
-            "extensions",
-        ),
-        (
-            "oxplow-foundation/new-session-start",
-            "new-session",
-            "start",
-        ),
-        (
-            "oxplow-foundation/new-session-earlier",
-            "new-session",
-            "earlier",
-        ),
-        (
-            "oxplow-foundation/stream-settings-prompt",
-            "stream-settings",
-            "prompt",
-        ),
-        (
-            "oxplow-foundation/thread-settings-sessions",
+            "oxplow/thread-settings-sessions",
             "thread-settings",
             "sessions",
         ),
+        ("oxplow/thread-settings-prompt", "thread-settings", "prompt"),
+        ("oxplow/changes-header", "diff-view", "header"),
+        ("oxplow/changes-description", "diff-view", "description"),
+        ("oxplow/changes-verdict", "diff-view", "verdict"),
+        ("oxplow/changes-concurrent", "diff-view", "concurrent"),
+        ("oxplow/changes-files", "diff-view", "files"),
+        ("oxplow/changes-extensions", "diff-view", "extensions"),
+        ("oxplow/commit-detail", "commit", "detail"),
+        ("oxplow/commit-files", "commit", "files"),
+        ("oxplow/metric-header", "metric", "about"),
+        ("oxplow/metric-chart", "metric", "chart"),
+        ("oxplow/metric-unchecked", "metric-data", "unchecked"),
+        ("oxplow/metric-recordings", "metric-data", "recordings"),
         (
-            "oxplow-foundation/thread-settings-prompt",
-            "thread-settings",
-            "prompt",
-        ),
-        ("oxplow-foundation/changes-header", "diff-view", "header"),
-        (
-            "oxplow-foundation/changes-description",
-            "diff-view",
-            "description",
-        ),
-        ("oxplow-foundation/changes-verdict", "diff-view", "verdict"),
-        (
-            "oxplow-foundation/changes-concurrent",
-            "diff-view",
-            "concurrent",
-        ),
-        ("oxplow-foundation/changes-files", "diff-view", "files"),
-        (
-            "oxplow-foundation/changes-extensions",
-            "diff-view",
-            "extensions",
-        ),
-        ("oxplow-foundation/commit-detail", "commit", "detail"),
-        ("oxplow-foundation/commit-files", "commit", "files"),
-        ("oxplow-foundation/metric-header", "metric", "about"),
-        ("oxplow-foundation/metric-chart", "metric", "chart"),
-        (
-            "oxplow-foundation/metric-unchecked",
-            "metric-data",
-            "unchecked",
-        ),
-        (
-            "oxplow-foundation/metric-recordings",
-            "metric-data",
-            "recordings",
-        ),
-        (
-            "oxplow-foundation/agent-session-terminal",
+            "oxplow/agent-session-terminal",
             "agent-session",
             "agent-session-terminal",
         ),
-        ("oxplow-foundation/catalog", "data-catalog", ""),
-        (
-            "oxplow-foundation/uncommitted",
-            "uncommitted-changes",
-            "row",
-        ),
+        ("oxplow/catalog", "data-catalog", ""),
+        ("oxplow/uncommitted", "uncommitted-changes", "row"),
     ];
     let named = NAMED.iter().find(|(l, _, _)| *l == id);
     let (slug, loader_name) = match named {
@@ -938,10 +808,16 @@ pub async fn run_as_page_in(
         None => (slug, slug.replace('-', "_")),
     };
     let snapshot = svc.extension_catalog.snapshot(&svc.layout.project_dir);
-    let ext = snapshot
-        .extensions()
-        .iter()
-        .find(|e| e.name == extension)
+    // Named in its namespace: the extension there with the page.
+    let in_namespace = || {
+        snapshot
+            .extensions()
+            .iter()
+            .filter(|e| e.namespace == namespace)
+    };
+    let ext = in_namespace()
+        .find(|e| e.page_files.iter().any(|p| p.slug == slug))
+        .or_else(|| in_namespace().next())
         .expect("the extension");
     let own = ext.page_files.iter().find(|p| p.slug == slug);
     let inlined = || {

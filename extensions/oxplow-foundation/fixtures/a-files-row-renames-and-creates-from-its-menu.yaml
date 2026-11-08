@@ -4,7 +4,7 @@
 # spec.)
 given:
   - observe: { turn: { prompt: emu, write: { path: src/emu.txt, body: "emu\n" } } }
-when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src } }
+when: { page: oxplow/directory, params: { stream_id: 1, path: src } }
 expect:
   loaders:
     tree:

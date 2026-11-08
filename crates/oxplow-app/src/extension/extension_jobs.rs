@@ -116,7 +116,7 @@ impl ExtensionJobs {
             for job in &extension.jobs {
                 let owner = JobOwner {
                     contribution: ContributionId::new(
-                        &extension.name,
+                        &extension.namespace,
                         ContributionKind::Job,
                         &job.id,
                     ),
@@ -179,7 +179,7 @@ impl ExtensionJobs {
                         (
                             JobOwner {
                                 contribution: ContributionId::new(
-                                    &extension.name,
+                                    &extension.namespace,
                                     ContributionKind::Job,
                                     &job.id,
                                 ),
@@ -199,7 +199,7 @@ impl ExtensionJobs {
             })
             .map_err(|_| denied("job scheduling authority is unavailable"))?
             .ok_or_else(|| invalid("declared job is unavailable"))?;
-        let request = qualify_role(&input.request, &owner.contribution.extension, &profiles)?;
+        let request = qualify_role(&input.request, &owner.contribution.namespace, &profiles)?;
         let request = TypedAiJobRequest::from_value(&request)
             .map_err(|_| invalid("invalid typed AI job input"))?;
         self.operations
@@ -236,7 +236,7 @@ impl ExtensionJobs {
                     "SELECT count(*), COALESCE(sum(r.extension = ?1), 0)
                 FROM extension_job j LEFT JOIN extension_run r ON r.run_id = j.run_id
                 WHERE j.state IN ('queued', 'running')",
-                    [&new.job.owner.contribution.extension],
+                    [ctx.run.extension().unwrap_or_default()],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .map_err(oxplow_db::map_sql_err)?;
@@ -264,11 +264,11 @@ impl ExtensionJobs {
         let id = job_id(&input.job_run)?;
         let extension = self
             .ownership
-            .with_owner(run, "jobs.read", |extension| extension.name.clone())
+            .with_owner(run, "jobs.read", |extension| extension.namespace.clone())
             .map_err(|_| denied("job result authority is unavailable"))?;
         let metadata = extension_job_store::metadata_tx(conn, &id)
             .map_err(store_error)?
-            .filter(|row| row.job.owner.contribution.extension == extension)
+            .filter(|row| row.job.owner.contribution.namespace == extension)
             .ok_or_else(|| invalid("job was not found"))?;
         check_stream(
             run,
@@ -353,11 +353,13 @@ impl ExtensionJobs {
         let id = job_id(&input.job_run)?;
         let extension = self
             .ownership
-            .with_owner(ctx.run, "jobs.write", |extension| extension.name.clone())
+            .with_owner(ctx.run, "jobs.write", |extension| {
+                extension.namespace.clone()
+            })
             .map_err(|_| denied("job cancellation authority is unavailable"))?;
         let metadata = extension_job_store::metadata_tx(ctx.conn, &id)
             .map_err(store_error)?
-            .filter(|row| row.job.owner.contribution.extension == extension)
+            .filter(|row| row.job.owner.contribution.namespace == extension)
             .ok_or_else(|| invalid("job was not found"))?;
         check_stream(
             ctx.run,
@@ -505,10 +507,7 @@ pub(crate) fn announce_tx(
         .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))?;
     let payload = ContributionJobCompletedV2 {
         job_run: job.id.as_str().to_string(),
-        job: format!(
-            "{}/{}",
-            job.owner.contribution.extension, job.owner.contribution.local
-        ),
+        job: job.owner.contribution.qualified(),
         version: job.owner.contract_version,
         attempt: job.attempt,
         fence: job.fence,
@@ -568,10 +567,10 @@ fn denied(message: &str) -> CommandError {
 }
 /// `request` with its `role` as the job's extension means it: a built-in
 /// role, or the bare id of one of its own `ai_profiles`, stored qualified
-/// (`<extension>/<id>`) so the run resolves it without the manifest.
+/// (`<namespace>/<id>`) so the run resolves it without the manifest.
 fn qualify_role(
     request: &Value,
-    extension: &str,
+    namespace: &str,
     profiles: &[String],
 ) -> Result<Value, CommandError> {
     let refused = || {
@@ -594,7 +593,7 @@ fn qualify_role(
         return Ok(request);
     };
     let name = role.as_str().ok_or_else(refused)?;
-    let qualified = oxplow_ai::config::Role::parse_in(extension, name).map_err(|_| refused())?;
+    let qualified = oxplow_ai::config::Role::parse_in(namespace, name).map_err(|_| refused())?;
     if let oxplow_ai::config::Role::Profile { name, .. } = &qualified {
         if !profiles.contains(name) {
             return Err(refused());

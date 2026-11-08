@@ -92,7 +92,7 @@ ai:
   provider someone hasn't set up shows "AI provider X isn't set up" for them.
 - `OxplowConfig.ai_roles` holds them (a built-in name from
   `oxplow_config::AI_ROLE_NAMES`, which a test keeps equal to
-  `BuiltinRole::ALL`, or a profile's `<extension>/<name>`, checked for
+  `BuiltinRole::ALL`, or a profile's `<namespace>/<name>`, checked for
   shape only).
 - `AiService` gets an `OverridesSource` closure that reads the live config
   on every resolve, so edits and `reload_config_from_disk` apply with
@@ -128,7 +128,7 @@ an id, a description, a required `fallback` built-in role and optional
 `features` (`text | tool_calling | streaming | image`). So
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
 `Profile { extension, name }`, written as one string (`summarize`,
-`effort-review/review`) wherever a person sees it — `ai.yaml`,
+`effort_review/review`) wherever a person sees it — `ai.yaml`,
 `project.yaml`'s `ai.roles`, Settings, `ai_call.role`, `ai_result.role`.
 
 - **Naming.** Inside its own extension an author writes the bare id (a
@@ -549,7 +549,7 @@ extension's AI profiles by id, qualified with the run's extension) — Starlark 
 [extensions-permissions.md](./extensions-permissions.md) "Services"). The host holds
 a synchronous `dyn AiOracle`; the app's is `ai_compute::CollectorOracle`,
 which blocks the script's worker thread on the runtime and asks
-`AiCompute` as caller `collector:<owner>/<id>` — so every answer is a
+`AiCompute` as caller `collector:<namespace>/<id>` — so every answer is a
 recorded computation (the same question on the same text is one call,
 ever). Only a script whose extension declares `ai.compute` gets it: one that
 names an `ai_*` builtin is refused otherwise, like an exec program needing
@@ -643,7 +643,7 @@ its source; with no model bound, the recorded ones are all there is.
   so asking again about unchanged activity on the same binding reads the
   recorded answer; rebinding the profile asks the new model.
 - **`store-reasoning`** (on `contribution.job.completed`, `where: {
-  contribution: oxplow:oxplow/job?job=oxplow-bundled-todo/reasoning }`) reads the job, drops a
+  contribution: oxplow:oxplow/job?job=oxplow/reasoning }`) reads the job, drops a
   code fence, and skips — saying so — a reply that isn't a JSON object
   with a `decisions` or a `claims` list (Starlark's `json.decode` has no
   fallback, so the check is the object's braces; malformed JSON inside
@@ -671,7 +671,7 @@ its source; with no model bound, the recorded ones are all there is.
   as backed and leaves a dismissed one out entirely (neither backed nor
   unbacked), so the verdict, `review.accept`, `review.request_changes`
   and the verify-unchecked effect ignore it.
-- Calls record role `oxplow-bundled-todo/reasoning` in
+- Calls record role `oxplow/reasoning` in
   `v_ai_call`. The review packet shows the decision rows as "Decisions
   Oxplow Noticed", separate from "Decisions Made", and the claim rows in
   "Unverified Claims" with their source (stated or read) and review state.
@@ -681,7 +681,7 @@ its source; with no model bound, the recorded ones are all there is.
 
 ## Settings → AI (current)
 
-The foundation's pages in `oxplow-foundation/settings-ai.sections` (`ai-providers`,
+The foundation's pages in `oxplow/settings-ai.sections` (`ai-providers`,
 `ai-provider-form`, `ai-roles`, `ai-calls`; the settings page's `ai_provider_kinds` and
 `ai_provider_choices` loaders are the choices the forms offer). They read the live
 models `v_ai_provider` and `v_ai_role` and write with commands

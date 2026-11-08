@@ -40,7 +40,7 @@ view:
   grid:
     - { id: open, title: Open, viz: number, from: open, size: small }
     - { id: trend, title: Created per day, viz: line, from: by_day, size: wide, chart: { x: day, y: n } }
-    - { id: tests, embed: { page: oxplow-foundation/problems }, size: wide }
+    - { id: tests, embed: { page: oxplow/problems }, size: wide }
 ```
 
 - **Start one:** `oxplow.extension.new_dashboard { title, extension? }` writes
@@ -50,7 +50,7 @@ view:
   editing the page file: an `embed` node, or a `viz` over a new loader.
 - **Change one:** reorder by reordering the list, rename by changing
   `title`, remove by deleting the node, resize with `size`. Read the file
-  (`oxplow_read { uri: "oxplow:oxplow/page?page=<ext>/<slug>" }`), change the
+  (`oxplow_read { uri: "oxplow:oxplow/page?page=<namespace>/<slug>" }`), change the
   YAML, write it back with `oxplow.extension.write_page { extension, page,
   spec, deploy: true }`. The app's own edits do the same.
 - Embed an existing page for a tile that is already a page; its params flow

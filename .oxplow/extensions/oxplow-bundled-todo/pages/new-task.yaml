@@ -47,11 +47,11 @@ view:
     - thread
     - parent_uri
     - name: native
-      from: oxplow-bundled-todo/work-item-fields
+      from: oxplow/work-item-fields
     choices:
-      state: oxplow-bundled-todo/new-task#new_task_states
-      thread: oxplow-bundled-todo/new-task#new_task_threads
-      parent_uri: oxplow-bundled-todo/new-task#new_task_parents
+      state: oxplow/new-task#new_task_states
+      thread: oxplow/new-task#new_task_threads
+      parent_uri: oxplow/new-task#new_task_parents
     again:
       label: Save and Another
       keep:

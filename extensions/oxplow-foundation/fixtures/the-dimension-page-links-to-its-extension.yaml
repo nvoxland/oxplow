@@ -1,6 +1,6 @@
 # "See also": the page links to the extension that declares it.
 when:
-  page: oxplow-foundation/dimension
+  page: oxplow/dimension
   params:
     uri: "oxplow:oxplow/dimension?dimension=oxplow.language"
 expect:

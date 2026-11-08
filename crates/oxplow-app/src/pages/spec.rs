@@ -1942,7 +1942,7 @@ pub struct PageProvenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct VizConfig {
-    /// `<extension>/<slug>`: the stable id of the page this viz is on.
+    /// `<namespace>/<slug>`: the stable id of the page this viz is on.
     pub id: String,
     pub extension: String,
     pub slug: String,

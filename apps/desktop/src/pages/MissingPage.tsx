@@ -5,7 +5,7 @@ import { Page } from "../tabs/Page.js";
 import type { PagePayload } from "../tabs/pageRefs.js";
 
 export function MissingPage({ page }: { page: PagePayload }) {
-  const name = page.extension ? `${page.extension}/${page.page}` : page.page;
+  const name = page.namespace ? `${page.namespace}/${page.page}` : page.page;
   return (
     <Page testId="page-missing" title={name}>
       <div style={{ padding: 16 }}>

@@ -2,20 +2,20 @@
 # a kind no dataset holds (a file) is drawn by Definition alone.
 when:
   command: oxplow.page.renderers
-  input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/stream" }
+  input: { uri: "oxplow:oxplow/resource?resource=oxplow/stream" }
 expect:
   ok: true
   result:
     renderers:
       contains:
-        - { page: oxplow-foundation/resource-data, default: true }
-        - { page: oxplow-foundation/resource, default: false }
+        - { page: oxplow/resource-data, default: true }
+        - { page: oxplow/resource, default: false }
 steps:
   - when:
       command: oxplow.page.renderers
-      input: { uri: "oxplow:oxplow/resource?resource=oxplow-foundation/file" }
+      input: { uri: "oxplow:oxplow/resource?resource=oxplow/file" }
     expect:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/resource, default: false }
+          - { page: oxplow/resource, default: false }

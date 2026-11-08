@@ -6,7 +6,7 @@ given:
   - observe: { token_usage: { effort: eff1, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
   - observe: { token_usage: { effort: eff1, prompt: again, input_tokens: 99, output_tokens: 1 } }
   - observe: { token_usage: { prompt: chat, input_tokens: 9, output_tokens: 1 } }
-when: { part: oxplow-bundled-todo/task-tokens, params: { uri: $item.uri } }
+when: { part: oxplow/task-tokens, params: { uri: $item.uri } }
 expect:
   loaders:
     task_turns: { rows: 2 }
@@ -14,7 +14,7 @@ expect:
       rows:
         - { summary: "**2,100** tokens · 2 turns · in 2,098 · out 2 · cache-write 0 · cache-read 0" }
 steps:
-  - when: { part: oxplow-bundled-todo/thread-tokens, params: { thread_id: 1 } }
+  - when: { part: oxplow/thread-tokens, params: { thread_id: 1 } }
     expect: { loaders: { thread_tokens: { rows: [{ tokens: 2110 }] } } }
-  - when: { part: oxplow-bundled-todo/thread-tokens, params: { thread_id: 999 } }
+  - when: { part: oxplow/thread-tokens, params: { thread_id: 999 } }
     expect: { loaders: { thread_tokens: { rows: 0 } } }

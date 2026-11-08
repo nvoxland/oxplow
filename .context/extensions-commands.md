@@ -351,7 +351,7 @@ advisories:
   or all (`oxplow.hint.dismiss_all`, Clear notices on the page and the
   dock panel's Clear).
 - **Delivery.** Every hit is recorded as a nudge (`v_agent_nudge`, kind
-  `<extension>/<id>`, with its `audience`), undelivered. The thread's
+  `<namespace>/<id>`, with its `audience`), undelivered. The thread's
   next prompt (`AgentContext::prompt_context`) or tool call
   (`post_tool_context`) takes the agent's undelivered nudges — oxplow's
   own first, oldest first, up to `NUDGE_BUDGET` (2,000) characters, at
@@ -480,7 +480,7 @@ tool: open_work              # offered as <namespace>_open_work
 
 - `oxplow_query_sql`: read-only SQL over the published datasets. `v_dataset` /
   `v_field` / `v_dataset_lineage` describe every view (core `v_*` and
-  extension `v_<ext>_<entity>`) with its column docs and inputs;
+  extension `v_<namespace>_<entity>`) with its column docs and inputs;
   `v_dimension`, `v_metric_spec` and `v_measure` list the dimensions,
   metrics and measures, extension-declared ones included, each with its
   scope.
@@ -596,7 +596,7 @@ tool: open_work              # offered as <namespace>_open_work
 - `v_extension`, `v_collector_state`, `v_collector_credential`
   (set or not, never the value), the `oxplow.collector.sync` command (never grants).
 - **Worktree streams: preview, don't run.** Collected data is
-  project-wide (one `ext__<ext>__<entity>` table), so a run (the
+  project-wide (one `ext__<namespace>__<entity>` table), so a run (the
   `oxplow.collector.sync` command over `CollectorRunner::sync`, from any caller)
   always runs the **live** copy. An agent
   writing a collector tests it with `$OXPLOW_BIN extension test <name>` (a

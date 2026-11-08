@@ -483,7 +483,7 @@ mod tests {
             .unwrap();
 
         let effect = Actor::Effect {
-            effect: "oxplow-bundled/store-reasoning".into(),
+            effect: "oxplow/store-reasoning".into(),
             thread_id: Some(fx.thread),
             stream_id: None,
         };
@@ -624,7 +624,7 @@ mod tests {
         seed("stale", None).await;
 
         let effect = Actor::Effect {
-            effect: "oxplow-bundled/store-reasoning".into(),
+            effect: "oxplow/store-reasoning".into(),
             thread_id: Some(fx.thread),
             stream_id: None,
         };

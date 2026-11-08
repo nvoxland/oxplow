@@ -5,7 +5,7 @@ given:
   - observe: { turn: { prompt: Build the parser } }
   - { command: oxplow.effort.close, input: { effort: eff1 } }
   - observe: { turn: { prompt: What does the lexer do? } }
-when: { page: oxplow-bundled-todo/thread-activity, params: { thread_id: 1 } }
+when: { page: oxplow/thread-activity, params: { thread_id: 1 } }
 expect:
   loaders:
     thread_activity:

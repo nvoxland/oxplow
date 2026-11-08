@@ -13,9 +13,11 @@
 //! **Namespaces.** Core types live in the namespaces of
 //! [`CORE_NAMESPACES`] (`.context/data-model.md` "event_log"). An
 //! extension declares types (a JSON Schema each, not a Rust type —
-//! [`DeclaredEventType`]) only under its own namespace
-//! ([`extension_namespace`]); declaring into a core namespace, or under
-//! another extension's, is refused.
+//! [`DeclaredEventType`]) only under its manifest's `namespace:`
+//! (default [`extension_namespace`] of its name); declaring into a core
+//! namespace, or under another, is refused. Extensions sharing a namespace
+//! (everything oxplow ships is `oxplow`) share its names: each type is
+//! still one registrant's.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -261,13 +263,16 @@ impl EventSchemaRegistry {
         self.insert(T::TYPE, T::V, schema_for::<T>(), None, None, Some(upcast))
     }
 
-    /// Register an extension's declared type. Its namespace must be the
-    /// extension's own — never a core namespace, never another
-    /// extension's; its schema must compile; past v1 it must carry an
-    /// upcast.
+    /// Register an extension's declared type. It must be under the
+    /// extension's `namespace` (its manifest's `namespace:`, not its name:
+    /// extensions sharing a namespace share its names) — never a core
+    /// namespace, never another's; its schema must compile; past v1 it must
+    /// carry an upcast. The registrant is `extension`, which alone may emit
+    /// it.
     pub fn register_declared(
         &mut self,
         extension: &str,
+        namespace: &str,
         declared: DeclaredEventType,
     ) -> Result<(), DomainError> {
         let DeclaredEventType {
@@ -284,10 +289,9 @@ impl EventSchemaRegistry {
                 "extension `{extension}` may not declare `{event_type}`: `{ns}` is a core namespace"
             )));
         }
-        let own = extension_namespace(extension);
-        if ns != own {
+        if ns != namespace {
             return Err(DomainError::Invalid(format!(
-                "extension `{extension}` may only declare types under `{own}.*`, not `{event_type}`"
+                "extension `{extension}` may only declare types under `{namespace}.*`, not `{event_type}`"
             )));
         }
         if v == 0 {
@@ -2489,7 +2493,19 @@ mod tests {
 
     struct AcmeDecided;
     impl EventType for AcmeDecided {
+        const TYPE: &'static str = "acme.decided";
+        const V: u32 = 1;
+        type Payload = ConfigChangedV2;
+    }
+    struct NamedForTheExtension;
+    impl EventType for NamedForTheExtension {
         const TYPE: &'static str = "acme_review.decided";
+        const V: u32 = 1;
+        type Payload = ConfigChangedV2;
+    }
+    struct AcmeFiled;
+    impl EventType for AcmeFiled {
+        const TYPE: &'static str = "acme.filed";
         const V: u32 = 1;
         type Payload = ConfigChangedV2;
     }
@@ -2503,27 +2519,40 @@ mod tests {
     #[test]
     fn an_extension_declares_types_only_under_its_own_namespace() {
         let mut r = EventSchemaRegistry::core();
-        // The namespace is the extension's name with `-` read as `_`.
-        r.register_declared("acme-review", declared::<AcmeDecided>())
+        // The namespace is the manifest's `namespace:`, not the name.
+        r.register_declared("acme-review", "acme", declared::<AcmeDecided>())
             .unwrap();
-        assert_eq!(r.owner("acme_review.decided", 1), Some(Some("acme-review")));
+        assert_eq!(r.owner("acme.decided", 1), Some(Some("acme-review")));
         assert_eq!(
-            r.summary("acme_review.decided", 1),
-            Some("acme_review.decided, for the test")
+            r.summary("acme.decided", 1),
+            Some("acme.decided, for the test")
         );
+        let by_name = r
+            .register_declared("acme-review", "acme", declared::<NamedForTheExtension>())
+            .unwrap_err();
+        assert!(by_name.to_string().contains("`acme.*`"), "{by_name}");
         let core = r
-            .register_declared("acme-review", declared::<Squatter>())
+            .register_declared("acme-review", "acme", declared::<Squatter>())
             .unwrap_err();
         assert!(core.to_string().contains("core namespace"), "{core}");
         let foreign = r
-            .register_declared("other-extension", declared::<AcmeDecided>())
+            .register_declared(
+                "other-extension",
+                "other_extension",
+                declared::<AcmeFiled>(),
+            )
             .unwrap_err();
         assert!(
             foreign.to_string().contains("other_extension.*"),
             "{foreign}"
         );
+        // A second extension in the same namespace declares its own types
+        // there; it can't declare one the first already did.
+        r.register_declared("acme-tracker", "acme", declared::<AcmeFiled>())
+            .unwrap();
+        assert_eq!(r.owner("acme.filed", 1), Some(Some("acme-tracker")));
         let dup = r
-            .register_declared("acme-review", declared::<AcmeDecided>())
+            .register_declared("acme-tracker", "acme", declared::<AcmeDecided>())
             .unwrap_err();
         assert!(dup.to_string().contains("already registered"), "{dup}");
         // Core can't register into an extension's namespace either, and a
@@ -2538,6 +2567,7 @@ mod tests {
         let bad = r
             .register_declared(
                 "acme",
+                "acme",
                 DeclaredEventType {
                     schema: json!({"type": "nonsense"}),
                     ..declared::<Thing1>()
@@ -2546,11 +2576,12 @@ mod tests {
             .unwrap_err();
         assert!(bad.to_string().contains("acme.thing@1"), "{bad}");
         let no_upcast = r
-            .register_declared("acme", declared::<Thing2>())
+            .register_declared("acme", "acme", declared::<Thing2>())
             .unwrap_err();
         assert!(no_upcast.to_string().contains("upcast"), "{no_upcast}");
         let zero = r
             .register_declared(
+                "acme",
                 "acme",
                 DeclaredEventType {
                     v: 0,
@@ -2597,8 +2628,10 @@ mod tests {
     #[test]
     fn upcast_carries_an_old_payload_to_the_newest_version_and_validates_it() {
         let mut r = EventSchemaRegistry::new();
-        r.register_declared("acme", declared::<Thing1>()).unwrap();
+        r.register_declared("acme", "acme", declared::<Thing1>())
+            .unwrap();
         r.register_declared(
+            "acme",
             "acme",
             DeclaredEventType {
                 upcast: Some(Arc::new(Thing2::upcast)),

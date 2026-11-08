@@ -4,7 +4,7 @@
 # The working tree itself and a file on another filesystem (an
 # extension's deployment, a temp file) have none.
 when:
-  page: oxplow-foundation/file-viewer
+  page: oxplow/file-viewer
   params: { path: "src/main.rs", rev: "git:HEAD" }
 expect:
   loaders:

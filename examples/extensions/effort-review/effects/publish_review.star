@@ -1,4 +1,4 @@
-# effort-review/publish-review: a review's answer, commented on the effort's
+# effort_review/publish-review: a review's answer, commented on the effort's
 # work item. The event carries only which run of the review job ended
 # (`where:` in the manifest keeps it to this job); the run's intent key,
 # `review:<effort id>`, says which effort it was about.

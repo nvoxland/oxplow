@@ -134,7 +134,8 @@ pub(super) async fn collector_example(
         .map(|r| r.to_vec());
     let preview = oxplow_app::collector_runner::preview_collector(
         &oxplow_app::collector_runner::Collectors::of(&host.svc, &host.root),
-        &ext.name,
+        // A collector's owner is the namespace it is named in.
+        &ext.namespace,
         id,
         ex.when.get("event"),
         rows,
@@ -250,7 +251,7 @@ pub(super) async fn incremental_datasets(host: &Host, ext: &Extension, report: &
             }
         };
         report.ran.push(format!("incremental {}", decl.name));
-        let view = oxplow_db::datasets::extension_view(&ext.name, &decl.name);
+        let view = oxplow_db::datasets::extension_view(&ext.namespace, &decl.name);
         let decl_c = decl.clone();
         let checked = host
             .svc

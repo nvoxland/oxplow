@@ -37,9 +37,13 @@ export function problemsFromResult(result: SqlQueryResult): ExtensionProblem[] {
   return [...out.values()];
 }
 
-/** The problems, one row each, as the Extension problems page reads them. */
+/** The problems, one row each, as the Extension problems page reads them.
+ *  Health is the namespace's: a row is listed under the extension that
+ *  declares the contribution now. */
 export const PROBLEMS_SQL = `SELECT name, problem FROM (
-  SELECT h.extension AS name, 1 AS rank, h.kind || ' ' || h.contribution || ' ' ||
+  SELECT COALESCE((SELECT c.extension FROM v_contribution c WHERE c.uri = h.uri),
+                  (SELECT x.name FROM v_extension x WHERE x.namespace = h.namespace ORDER BY x.name LIMIT 1)) AS name,
+         1 AS rank, h.kind || ' ' || h.contribution || ' ' ||
          CASE h.state WHEN 'disabled' THEN 'stopped after ' || coalesce(h.reason, 'repeated failures')
                       ELSE 'is failing, ' || h.consecutive_failures || ' in a row' END AS problem
   FROM v_contribution_health h WHERE h.state <> 'ok'

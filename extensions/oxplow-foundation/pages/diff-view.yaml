@@ -212,7 +212,7 @@ view:
   stack:
   - id: effort
     embed:
-      page: oxplow-foundation/changes-effort
+      page: oxplow/changes-effort
   - id: header
     title: Range
     from: header

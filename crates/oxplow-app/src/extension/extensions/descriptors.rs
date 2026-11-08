@@ -43,7 +43,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
     };
     let new = |kind: ContributionKind, local: &str, trigger: RunsOn| {
         Descriptor::new(
-            ContributionId::new(&ext.name, kind, local),
+            ContributionId::new(&ext.namespace, kind, local),
             owner.clone(),
             trigger,
             source.clone(),
@@ -59,7 +59,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         }
     };
     for m in ext.datasets.iter().filter(|m| m.twin.is_none()) {
-        let view = oxplow_db::datasets::extension_view(&ext.name, &m.decl.name);
+        let view = oxplow_db::datasets::extension_view(&ext.namespace, &m.decl.name);
         let mut d = new(ContributionKind::Dataset, &m.decl.name, RunsOn::Query);
         d.contract_version = Some(m.decl.version);
         d.global = Some(view.clone());
@@ -107,7 +107,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
     }
     for p in &ext.panels {
         let local =
-            p.id.strip_prefix(&format!("{}/", ext.name))
+            p.id.strip_prefix(&format!("{}/", ext.namespace))
                 .unwrap_or(&p.id);
         let mut d = new(ContributionKind::Panel, local, RunsOn::Mount);
         d.source = entry("panels", "id", local);
@@ -401,11 +401,20 @@ pub fn consumer_of(kind: ContributionKind) -> Option<&'static str> {
 fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
     use oxplow_domain::ordering::{resolve, After, Node, Order, OrderError};
     let live = |e: &Extension| e.enabled && !e.public_contracts.blocked;
-    // Extensions the catalog has but doesn't run: a target in one can't run.
-    let idle: std::collections::BTreeSet<String> = exts
+    // What the extensions the catalog has but doesn't run declare: it can't
+    // run.
+    let idle: std::collections::BTreeSet<oxplow_domain::contribution::ContributionRef> = exts
         .iter()
         .filter(|e| !live(e))
-        .map(|e| e.name.clone())
+        .flat_map(|e| {
+            let ns = e.namespace.as_str();
+            e.effects
+                .iter()
+                .map(move |x| ContributionId::new(ns, ContributionKind::Effect, &x.id).reference())
+                .chain(e.collectors.iter().map(move |c| {
+                    ContributionId::new(ns, ContributionKind::Collector, &c.id).reference()
+                }))
+        })
         .collect();
     // Resolve each entry as its extension wrote it.
     for ext in exts.iter_mut().filter(|e| live(e)) {
@@ -421,22 +430,18 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
         for d in ext.contributions.iter_mut().filter(|d| ordered(d)) {
             let mut resolved = Vec::new();
             for entry in &d.after {
-                match resolve(&ext.name, entry, &own, consumers) {
-                    Ok(After::Contribution(target))
-                        if target.extension().is_some_and(|x| idle.contains(x)) =>
-                    {
-                        warnings.push(
-                            Diagnostic::warning(
-                                "descriptor.after_disabled",
-                                format!(
-                                    "runs after {target}, whose extension is disabled: it runs \
+                match resolve(&ext.namespace, entry, &own, consumers) {
+                    Ok(After::Contribution(target)) if idle.contains(&target) => warnings.push(
+                        Diagnostic::warning(
+                            "descriptor.after_disabled",
+                            format!(
+                                "runs after {target}, whose extension is disabled: it runs \
                                      without waiting"
-                                ),
-                            )
-                            .at("extension.yaml", None)
-                            .contribution(d.id.to_string()),
+                            ),
                         )
-                    }
+                        .at("extension.yaml", None)
+                        .contribution(d.id.to_string()),
+                    ),
                     Ok(after) => resolved.push(after.to_ref()),
                     Err(e) => refused.push((
                         d.id.clone(),
@@ -501,10 +506,12 @@ fn order_catalog(exts: &mut [Extension], consumers: &[&str]) {
         };
         problems.dedup();
         for (id, code, message) in problems {
-            let Some(ext) = exts
-                .iter_mut()
-                .find(|e| Some(e.name.as_str()) == id.extension())
-            else {
+            let declared = id.id();
+            let Some(ext) = exts.iter_mut().find(|e| {
+                declared
+                    .as_ref()
+                    .is_some_and(|d| e.contributions.iter().any(|c| c.id == *d))
+            }) else {
                 continue;
             };
             let error = Diagnostic::error(code, message).at("extension.yaml", None);
@@ -598,6 +605,14 @@ fn remove(ext: &mut Extension, c: &Collision) {
         }
         ContributionKind::Provider => ext.providers.retain(|x| x.id != local),
         ContributionKind::Effect => ext.effects.retain(|x| x.id != local),
+        ContributionKind::Page => ext.page_files.retain(|x| x.slug != local),
+        ContributionKind::Panel => {
+            let id = c.refused.qualified();
+            ext.panels.retain(|x| x.id != id)
+        }
+        ContributionKind::Advisory => ext.advisories.retain(|x| x.id != local),
+        ContributionKind::CustomComponent => ext.custom_components.retain(|x| x.id != local),
+        ContributionKind::Replacement => ext.ui.replacements.retain(|x| x.target != local),
         _ => {}
     }
     ext.contributions.retain(|d| d.id != c.refused);
@@ -632,7 +647,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  mounts:\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n    - {{ page: open, at: oxplow-foundation/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -758,7 +773,7 @@ mod tests {
         let d = one(&ext, K::Dataset);
         assert_eq!(
             d.id.to_string(),
-            "oxplow:oxplow/dataset?dataset=acme-pr/prs"
+            "oxplow:oxplow/dataset?dataset=acme_pr/prs"
         );
         assert_eq!(d.trigger, RunsOn::Query);
         assert_eq!(d.contract_version, Some(3));
@@ -780,28 +795,29 @@ mod tests {
     }
 
     #[test]
-    fn a_resource_is_declared_and_named_by_its_extension_and_name() {
+    fn a_resource_is_declared_and_named_by_its_namespace_and_name() {
         let ext = acme();
         let d = one(&ext, K::Resource);
         assert_eq!(d.id.local, "pr");
         assert_eq!(d.trigger, RunsOn::Declared);
-        assert_eq!(d.global.as_deref(), Some("acme-pr/pr"));
+        // `acme-pr`'s namespace, not its name.
+        assert_eq!(d.global.as_deref(), Some("acme_pr/pr"));
     }
 
     #[test]
     fn the_ui_kinds_are_mounted_and_claim_no_global_name() {
         let ext = acme();
         let page = one(&ext, K::Page);
-        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme-pr/open");
+        assert_eq!(page.id.to_string(), "oxplow:oxplow/page?page=acme_pr/open");
         let panel = one(&ext, K::Panel);
         assert_eq!(
             panel.id.to_string(),
-            "oxplow:oxplow/panel?panel=acme-pr/inbox"
+            "oxplow:oxplow/panel?panel=acme_pr/inbox"
         );
         let component = one(&ext, K::CustomComponent);
         assert_eq!(
             component.id.to_string(),
-            "oxplow:oxplow/custom_component?custom_component=acme-pr/chart"
+            "oxplow:oxplow/custom_component?custom_component=acme_pr/chart"
         );
         for d in [page, panel, component] {
             assert_eq!(d.trigger, RunsOn::Mount, "{}", d.id);
@@ -817,8 +833,8 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "oxplow:oxplow/slot?slot=acme-pr/oxplow-foundation.diff.file-header-0",
-                "oxplow:oxplow/slot?slot=acme-pr/oxplow-foundation.diff.file-header-1"
+                "oxplow:oxplow/slot?slot=acme_pr/oxplow.diff.file-header-0",
+                "oxplow:oxplow/slot?slot=acme_pr/oxplow.diff.file-header-1"
             ]
         );
         for d in slots {
@@ -832,7 +848,7 @@ mod tests {
         let d = one(&ext, K::Decorator);
         assert_eq!(
             d.id.to_string(),
-            "oxplow:oxplow/decorator?decorator=acme-pr/decorator-0"
+            "oxplow:oxplow/decorator?decorator=acme_pr/decorator-0"
         );
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
     }
@@ -874,6 +890,43 @@ mod tests {
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
     }
 
+    /// Ids are named in the namespace, so two extensions sharing one (as
+    /// everything oxplow ships shares `oxplow`) can't both declare a page,
+    /// a panel or a component of one id: the first keeps it, and the second
+    /// loses its own and is told, naming both.
+    #[test]
+    fn two_extensions_in_one_namespace_cannot_declare_one_id() {
+        let first = acme();
+        let mut second = acme();
+        second.name = "acme-qr".into();
+        second.path = ".oxplow/extensions/acme-qr".into();
+        second.contributions = describe(&second, "");
+        let mut exts = vec![first, second];
+        check_catalog(&mut exts);
+        let (first, second) = (&exts[0], &exts[1]);
+        assert_eq!(first.page_files.len(), 1, "{:?}", first.errors);
+        assert_eq!(first.panels.len(), 1);
+        assert!(second.page_files.is_empty(), "the second loses its page");
+        assert!(second.panels.is_empty() && second.custom_components.is_empty());
+        for (what, id) in [
+            ("page", "acme_pr/open"),
+            ("panel", "acme_pr/inbox"),
+            ("custom component", "acme_pr/chart"),
+        ] {
+            assert!(
+                second
+                    .errors
+                    .iter()
+                    .any(|e| e.code == "descriptor.collision"
+                        && e.message.contains(&format!("{what} `{id}`"))
+                        && e.message.contains("`acme-pr`")
+                        && e.message.contains("`acme-qr`")),
+                "{what}: {:?}",
+                second.errors
+            );
+        }
+    }
+
     /// Two extensions claiming one event type and one ref kind: the first
     /// keeps each, one load error per kind names both, and the second's is
     /// gone. (Valid extension names make distinct namespaces, so a second
@@ -884,8 +937,9 @@ mod tests {
         let first = acme();
         let mut second = acme();
         second.name = "acme-qr".into();
+        second.namespace = "acme_qr".into();
         second.path = ".oxplow/extensions/acme-qr".into();
-        // The dataset's view is named for its extension, so a second one's
+        // The dataset's view is named for its namespace, so a second one's
         // never matches; claim it outright.
         second.contributions = describe(&second, "");
         for d in &mut second.contributions {
@@ -900,7 +954,7 @@ mod tests {
         for (what, name) in [
             ("dataset", "v_acme_pr_prs"),
             ("event type", "acme_pr.merged"),
-            ("resource", "acme-pr/pr"),
+            ("resource", "acme_pr/pr"),
         ] {
             let reports: Vec<&Diagnostic> = second
                 .errors

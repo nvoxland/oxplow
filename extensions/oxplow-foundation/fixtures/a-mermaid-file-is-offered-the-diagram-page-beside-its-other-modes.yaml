@@ -8,8 +8,8 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/diagram, default: false }
-      - { page: oxplow-foundation/editor, default: true }
+      - { page: oxplow/diagram, default: false }
+      - { page: oxplow/editor, default: true }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -18,5 +18,5 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/diagram }
-          - { page: oxplow-foundation/file-viewer }
+          - { page: oxplow/diagram }
+          - { page: oxplow/file-viewer }

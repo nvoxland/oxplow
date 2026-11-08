@@ -10,8 +10,8 @@ import { personCommands, type PersonCommands } from "./personCommands.js";
 
 /** The contribution `enableAgain` names. */
 export interface ContributionHealth {
-  /** The extension. */
-  extension: string;
+  /** The namespace it is named in (its extension's). */
+  namespace: string;
   /** Its provider's or collector's id. */
   contribution: string;
   /** `provider`, `collector` or `effect`. */
@@ -20,8 +20,8 @@ export interface ContributionHealth {
 
 /** Enable Again: `oxplow.contribution.enable` as the person. */
 export async function enableAgain(h: ContributionHealth, commands: PersonCommands = personCommands): Promise<boolean> {
-  return !!(await commands.run(`Enable ${h.extension}/${h.contribution}`, "oxplow.contribution.enable", {
-    extension: h.extension,
+  return !!(await commands.run(`Enable ${h.namespace}/${h.contribution}`, "oxplow.contribution.enable", {
+    namespace: h.namespace,
     kind: h.kind,
     contribution: h.contribution,
   }));

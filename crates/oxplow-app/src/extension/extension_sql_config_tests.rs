@@ -33,11 +33,7 @@ async fn struggles(fx: &EffortFixture) -> Value {
     serde_json::to_value(
         fx.svc
             .sql
-            .query_sql(
-                "SELECT subject, count FROM v_oxplow_bundled_struggle",
-                vec![],
-                None,
-            )
+            .query_sql("SELECT subject, count FROM v_oxplow_struggle", vec![], None)
             .await
             .unwrap()
             .rows,

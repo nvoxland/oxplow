@@ -44,7 +44,9 @@ jobs change through their commands and the dispatcher.
 ## Extension state persistence
 
 `extension_state` reserves storage for host-managed workflow state and
-rebuildable caches, keyed by `(extension, scope, area)` within the project DB.
+rebuildable caches, keyed by `(namespace, scope, area)` within the project DB
+(V6: the extensions sharing a namespace share it, and it outlives a move
+between them; it is forgotten only with the namespace's last extension).
 Scope is `project` or the current host's `personal` workspace scope; area is
 `state` or `cache`. These rows are private extension data, not published SQL
 models, shared domain entities or configuration preferences. The schema stores
@@ -299,7 +301,7 @@ as the type-erased form for polymorphic boundaries (the MCP
 (insert allocates a real id and returns it; AUTOINCREMENT never issues 0).
 A polymorphic reference is stored as a URI ([resources.md](./resources.md)):
 `page_ref.source_uri`/`target_uri` and `search_entry.uri` (and every
-model's `uri` column) hold `oxplow:<extension>/<resource>?<params>`
+model's `uri` column) hold `oxplow:<namespace>/<resource>?<params>`
 (`event_log.id` is a UUIDv7, also TEXT). Refs in prose/wiki use the bare
 self-typed sugar, e.g. `[[tsk42]]`.
 
@@ -844,7 +846,7 @@ named the file) and `shared` (`NOT NULL DEFAULT 0`: an observed file more
 than one session's turns could have changed) — set by `observe_files_tx` from `agent_stores::sessions_active_tx` (one session active in the window: the row carries it; more: `shared = 1`, no session; a path two sessions observe becomes shared; a claimed row is never touched); `claim.agent_session_id`
 (the acting session — a reasoning claim lands on *that session's* open
 turn, not the thread's newest). `v_tool_call`, `v_effort_file`, `v_claim`
-expose them (oxplow-bundled's `v_oxplow_bundled_struggle` groups tool calls by session too).
+expose them (oxplow-bundled's `v_oxplow_struggle` groups tool calls by session too).
 See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
 (`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
 `EffortStore` and `SnapshotStore`: when ≥2 efforts share an end
@@ -1565,6 +1567,8 @@ doesn't own — an extension's, found by skipping through that index one
 namespace per probe, and in `event_content` — `EXTENSION_DEFAULT` 30 / 14
 (P7.B7), or the shorter window its extension declares
 (`event_types.retention`, P8.D5: kept in `extension_event_retention`, V145,
+keyed `(namespace, extension)` since V5 — extensions share a namespace, and
+the sweep takes its longest window —
 restated by the vocabulary reactor, longer than the default refused by
 `check_declared` at load, and **kept when the extension is unloaded** —
 its rows stay under the window it promised; an extension present without
@@ -2010,9 +2014,9 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   thread; today every kind fires against the open effort, but the column is
   nullable so a future thread-scoped nudge (no open effort) has a home. The
   effort FK cascades with its `effort` when present.
-- **`kind`** is open-ended (`report-less-run` | `<extension>/<advisory>` |
+- **`kind`** is open-ended (`report-less-run` | `<namespace>/<advisory>` |
   `configure`, …) — adding a kind needs no migration. Retired kinds keep
-  their rows: `commit-hygiene` and `oxplow-bundled-todo/coverage-target` no
+  their rows: `commit-hygiene` and `oxplow/coverage-target` no
   longer fire but old rows still
   read back.
 - **`trigger`** is the bash command (or commit sha) that caused the nudge.
@@ -2039,8 +2043,8 @@ Columns: `id, thread_id (NOT NULL, FK threads ON DELETE CASCADE), effort_id
   NULL, mark, fired_at)`, unique on `(thread_id, coalesce(effort_id, 0),
   mark)` — a mark is kept in an effort, or in the thread when
   `effort_id` is NULL (`OnceScope`). It holds
-  `report-less-run`, `<extension>/<advisory>` and
-  `<extension>/<advisory>#<row key>`. `claim_once_tx` is the insert (`true`
+  `report-less-run`, `<namespace>/<advisory>` and
+  `<namespace>/<advisory>#<row key>`. `claim_once_tx` is the insert (`true`
   the first time); `has_fired` reads it. It replaces the in-memory sets
   (`CollectionService::nudged_efforts`, `AdvisoryRunner.fired`), so a
   restart no longer repeats guidance. A mark is separate from the nudge row
@@ -2104,7 +2108,7 @@ reads `v_token_usage` through oxplow-bundled pages (`task-tokens`,
 
 V126 (P6.G1). The person's left-nav layout in this project: one row per
 panel they've placed (`panel` — a core id like `core:bookmarks` or
-`ext:<extension>/<id>` — `position`, `hidden`, `collapsed`). Local state,
+`ext:<namespace>/<id>` — `position`, `hidden`, `collapsed`). Local state,
 never the repo. `get` returns the placements in order; `set` replaces
 them all in one transaction. A panel the table doesn't name shows
 expanded after the ones it does, and a named panel that no longer exists
@@ -2117,8 +2121,8 @@ V96. What the person's oxplow remembers for them outside any one tab
 (`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
 (JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
 without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`) or
-`resource:<ext>/<name>` (page memory, shared by every tab of the page); a panel's
-URI; `component:<ext>/<id>` (a custom component's own memory). Anything
+`resource:<namespace>/<name>` (page memory, shared by every tab of the page); a panel's
+URI; `component:<namespace>/<id>` (a custom component's own memory). Anything
 else is refused, as is text that isn't JSON or a value over 64 KB, and a
 component's keys together stay under 1 MB. Local state, never the repo,
 like `panel_layout`. UI-only RPCs `get_ui_preferences` (all, read once at
@@ -2196,7 +2200,7 @@ logs its `collector.synced@2`. Read as `v_collector_run`; see
 ### `effect_run` — `crates/oxplow-db/src/effect_run_store.rs`
 
 V149 (P8.D10), rebuilt by V156 (P9.D4). Each **attempt** at an
-extension effect's reaction to an event: `effect` (`<extension>/<id>`),
+extension effect's reaction to an event: `effect` (`<namespace>/<id>`),
 `event_id` / `event_seq`, `attempt` (from 1), `origin` (`live` — the
 event's delivery; `retry` — a person's `oxplow.effect.retry`; `backfill`),
 `state` (`started` / `ok` / `skipped` / `proposed` / `failed`), `reason`,
@@ -2212,7 +2216,7 @@ See [extensions-events.md](./extensions-events.md) "Effects".
 V48. One row per finished run of extension code (`oxplow_domain::run`,
 [extensions-permissions.md](./extensions-permissions.md) "The run context"): `run_id` (a
 UUIDv7), `parent_run_id`, `extension`, `contribution`
-(its URI, `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort-review/review`), `kind`, `version`, `generation`, `actor_kind` /
+(its URI, `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`), `kind`, `version`, `generation`, `actor_kind` /
 `actor`, the anchors (`stream_id`, `thread_id`, `effort_id`, `turn_id`,
 `agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
 `mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /
@@ -2249,7 +2253,8 @@ scripts held), `ai_calls`, `scopes_json`, `decisions_json`. STRICT.
 ### `contribution_health` — `SqliteContributionHealthStore` (`crates/oxplow-db/src/contribution_health_store.rs`)
 
 V135 (P7.C1). Each extension contribution's health on this machine, keyed
-`extension` + `kind` (`provider` | `collector` | `effect`) +
+`namespace` (V6: the namespace it is named in, so it keeps its health when it
+moves to a sibling) + `kind` (`provider` | `collector` | `effect`) +
 `contribution` (its provider's, collector's or effect's id) — V140 put `kind` in
 the key, since a provider and a collector may share an id (tsk721):
 `state` (`ok` / `failing` /
@@ -2266,7 +2271,7 @@ keeps its last plan (tsk722). The policy is `oxplow-app/src/contribution_health.
 three failures in a row disable it, the row and `contribution.disabled@1` in
 one transaction; `oxplow.contribution.enable` clears it (`contribution.enabled@1`).
 `v_contribution_health` adds `dead_letters` (pending dead letters of its
-consumer `extension:<extension>/<contribution>`, or of events whose subject
+consumer `extension:<namespace>/<contribution>`, or of events whose subject
 is `extension:<extension>`) and `fresh` (0 once `next_due_at` has passed, and 0 for a collector whose
 last run failed: its rows are the last good run's, not current).
 `v_contribution_health` shows `repair_item`: the open work item whose title starts
@@ -2341,7 +2346,7 @@ The Work panel's "Finished" group is the bundled extension's
 whichever list is active), the knowledge pages it wrote
 (`v_knowledge_touch`, over `wiki_page_thread_update`) and its closed
 unlinked efforts, newest first. "Clear" runs
-`oxplow_bundled.clear_finished`, which logs an event the
+`oxplow.work.clear_finished`, which logs an event the
 `finished_cleared` model reads, so entries closed before it are hidden
 until something newer lands.
 
@@ -2574,7 +2579,9 @@ the docs in one diff:
 ## Private extension configuration overrides
 
 `extension_config_store` and draft `V53__extension_config.sql` persist one JSON
-object per host-derived extension and Project/Personal layer, both in the local
+object per host-derived namespace (V6: `extension_config.namespace`; the
+extensions sharing one share one document, their declarations merged,
+`extensions-manifest.md`) and Project/Personal layer, both in the local
 project database. There is no global-user namespace or cross-project lookup.
 The store exposes no SQL model, wire type, payload Debug or authority. The host
 must validate the manifest schema, derive the owner, check live grants and

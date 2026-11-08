@@ -144,8 +144,12 @@ impl Corpus {
 pub struct FactCollector {
     /// Its id — the producer name its captures carry.
     pub key: String,
-    /// `project` or the extension's name.
+    /// The namespace it is named in (its extension's), or `project`: with
+    /// `key`, its identity — URI, health and run row.
     pub owner: String,
+    /// `project` or the extension that declares it: whose files, grants
+    /// and capture scope it has.
+    pub extension: String,
     /// The folder its entry is read from: its owner's deployment, or for a
     /// preview, the owner's source (relative to the checkout, or absolute).
     pub path: String,
@@ -172,10 +176,16 @@ pub struct FactCollector {
 impl FactCollector {
     /// The fact collector `spec` declares, or `None` when it writes
     /// entities instead.
-    pub fn from_spec(owner: &str, path: &str, spec: &CollectorSpec) -> Option<Self> {
+    pub fn from_spec(
+        extension: &str,
+        namespace: &str,
+        path: &str,
+        spec: &CollectorSpec,
+    ) -> Option<Self> {
         (!spec.facts.is_empty()).then(|| FactCollector {
             key: spec.id.clone(),
-            owner: owner.to_string(),
+            owner: namespace.to_string(),
+            extension: extension.to_string(),
             path: path.to_string(),
             trigger: spec.trigger.clone(),
             facts: spec.facts.clone(),
@@ -202,7 +212,7 @@ impl FactCollector {
 
     /// The scope its captures record (the metric catalog's vocabulary).
     fn scope(&self) -> String {
-        oxplow_config::extension_scope(&self.owner)
+        oxplow_config::extension_scope(&self.extension)
     }
 }
 
@@ -579,7 +589,7 @@ impl MetricsService {
             out.collectors.extend(
                 e.collectors
                     .iter()
-                    .filter_map(|c| FactCollector::from_spec(&e.name, &e.path, c)),
+                    .filter_map(|c| FactCollector::from_spec(&e.name, &e.namespace, &e.path, c)),
             );
             if !e.dimensions.is_empty() {
                 out.dimensions.push((e.name.clone(), e.dimensions));
@@ -652,9 +662,10 @@ impl MetricsService {
                 *named.entry((ext, c.clone())).or_default() |= s.enabled;
             }
         }
+        // A metric's scope names the extension that declares it.
         let extension = self.extension_catalog().collectors.into_iter().filter(|c| {
             named
-                .get(&(c.owner.clone(), c.key.clone()))
+                .get(&(c.extension.clone(), c.key.clone()))
                 .copied()
                 .unwrap_or(true)
         });
@@ -722,7 +733,12 @@ impl MetricsService {
             .extension_catalog()
             .collectors
             .iter()
-            .map(|c| ((c.owner.clone(), c.key.clone()), trigger_label(&c.trigger)))
+            .map(|c| {
+                (
+                    (c.extension.clone(), c.key.clone()),
+                    trigger_label(&c.trigger),
+                )
+            })
             .collect();
         let mut seen = std::collections::HashSet::new();
         let mut out = Vec::new();
@@ -1845,7 +1861,7 @@ impl MetricsService {
                 let extensions = self.extensions_cache.get(root);
                 let ext = extensions
                     .iter()
-                    .find(|e| e.name == c.owner)
+                    .find(|e| e.name == c.extension)
                     .ok_or_else(|| format!("collector `{}/{}` isn't declared", c.owner, c.key))?;
                 let entry = c.entry.clone().unwrap_or_default();
                 if !oxplow_domain::service::valid_path(&entry) {
@@ -1886,6 +1902,19 @@ impl MetricsService {
         })
     }
 
+    /// The namespace extension `name` names its contributions in here (its
+    /// own name's, `-` read as `_`, when it isn't loaded).
+    fn namespace_of(&self, name: &str) -> String {
+        self.extensions_cache
+            .unpinned(&self.project_dir, "a namespace is read from declarations")
+            .iter()
+            .find(|e| e.name == name)
+            .map_or_else(
+                || oxplow_domain::contribution::extension_namespace(name),
+                |e| e.namespace.clone(),
+            )
+    }
+
     /// Run `owner`'s fact collector `spec` over `files` (path → content)
     /// with `input` — an example's fixture — recording nothing: what `oxplow
     /// extension test` runs for a fact collector's example (tsk1047). The facts
@@ -1905,7 +1934,7 @@ impl MetricsService {
             &self.project_dir,
             owner,
         );
-        let collector = FactCollector::from_spec(owner, &path, spec)
+        let collector = FactCollector::from_spec(owner, &self.namespace_of(owner), &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         let runner = self.preview_runner(&collector, &self.project_dir)?;
         self.preview_with(&collector, runner, files, input, mode)
@@ -1928,7 +1957,7 @@ impl MetricsService {
     ) -> Result<Vec<serde_json::Value>, String> {
         use crate::services::TreeSource as _;
         let path = crate::extension::extensions::source_or_shipped(&self.project_dir, root, owner);
-        let collector = FactCollector::from_spec(owner, &path, spec)
+        let collector = FactCollector::from_spec(owner, &self.namespace_of(owner), &path, spec)
             .ok_or_else(|| format!("collector `{}` declares no `facts:`", spec.id))?;
         if collector.input.is_some() {
             return Err(format!(
@@ -2032,7 +2061,7 @@ impl MetricsService {
         let extensions = self
             .extensions_cache
             .unpinned(root, "a run is parented to its collector's declaration");
-        let Some(ext) = extensions.iter().find(|e| e.name == collector.owner) else {
+        let Some(ext) = extensions.iter().find(|e| e.name == collector.extension) else {
             return parent.child(None, mode);
         };
         // It holds no catalog generation while it runs: it belongs to its
@@ -3774,6 +3803,7 @@ mod tests {
         FactCollector {
             key: key.into(),
             owner: oxplow_config::collectors::PROJECT_EXTENSION.into(),
+            extension: oxplow_config::collectors::PROJECT_EXTENSION.into(),
             path: format!(
                 "{}/{}",
                 crate::extension::extensions::EXTENSIONS_DIR,
@@ -4064,7 +4094,7 @@ def transform(input):
             svc.commands.run(
                 &oxplow_domain::Actor::Human,
                 crate::collector_runner::SYNC,
-                serde_json::json!({ "collector": "code-metrics/code_metrics.rust.unsafe_blocks" }),
+                serde_json::json!({ "collector": "code_metrics/code_metrics.rust.unsafe_blocks" }),
                 false,
             )
         };
@@ -4241,7 +4271,7 @@ def transform(input):
         let err = svc
             .metrics
             .run_collector_by_key(
-                crate::test_fixtures::CODE_METRICS_EXT,
+                crate::test_fixtures::CODE_METRICS_NS,
                 "code_metrics.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
@@ -4762,7 +4792,14 @@ def transform(input):
         let path = dir.to_string_lossy().into_owned();
         specs
             .iter()
-            .filter_map(|s| FactCollector::from_spec(ext, &path, s))
+            .filter_map(|s| {
+                FactCollector::from_spec(
+                    ext,
+                    &oxplow_domain::contribution::extension_namespace(ext),
+                    &path,
+                    s,
+                )
+            })
             .collect()
     }
 
@@ -5673,7 +5710,7 @@ def transform(input):
         let count = svc
             .metrics
             .run_collector_by_key(
-                crate::test_fixtures::CODE_METRICS_EXT,
+                crate::test_fixtures::CODE_METRICS_NS,
                 "code_metrics.rust.unsafe_blocks",
                 None,
                 &RunContext::core(Actor::Human, Mode::External),
@@ -5914,7 +5951,7 @@ def transform(input):
             .iter()
             .find(|c| c.key == "code_metrics.fn_count")
             .expect("on by default");
-        assert_eq!(fn_count.owner, crate::test_fixtures::CODE_METRICS_EXT);
+        assert_eq!(fn_count.owner, crate::test_fixtures::CODE_METRICS_NS);
         assert!(!running
             .iter()
             .any(|c| c.key == "code_metrics.rust.unsafe_blocks"));
@@ -6411,7 +6448,7 @@ def transform(input):
             .metrics
             .fact_collectors()
             .iter()
-            .any(|c| c.key == "complex_fns.scan" && c.owner == "complex-fns"));
+            .any(|c| c.key == "complex_fns.scan" && c.owner == "complex_fns"));
 
         // An existing extension, a bad name, a reserved one and a language
         // with no sample are refused.

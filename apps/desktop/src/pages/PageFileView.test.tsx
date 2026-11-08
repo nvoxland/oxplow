@@ -99,7 +99,7 @@ test("another resource navigates to a new entry, keeping the view", async () => 
 test("a renderer's other resource is that resource's URI", async () => {
   const m = moves();
   const commitPage: Page = fakePage(node.viz("parents", "parents", { columns: [{ key: "sha", label: "Parent", select: "sha" } as never] }), {
-    id: "oxplow-foundation/commit",
+    id: "oxplow/commit",
     extension: "oxplow-foundation",
     slug: "commit",
     for: ["oxplow/commit"],

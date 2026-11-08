@@ -11,7 +11,7 @@ given:
       refs:
         branches: [{ name: main, head: c2, stream: 1 }, { name: side, head: c3 }]
         heads: [{ stream: 1, sha: c2 }]
-when: { page: oxplow-foundation/file-history, params: { stream_id: 1, path: a.rs, limit: 20 } }
+when: { page: oxplow/file-history, params: { stream_id: 1, path: a.rs, limit: 20 } }
 expect:
   loaders:
     row: { rows: [{ branch: main }] }

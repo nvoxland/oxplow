@@ -15,7 +15,7 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/media, default: true }
+      - { page: oxplow/media, default: true }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -24,7 +24,7 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/file-viewer, default: true }
+          - { page: oxplow/file-viewer, default: true }
   - when:
       command: oxplow.page.renderers
       input: { uri: "oxplow:oxplow/file?path=logo.png&filesystem=oxplow:temp" }
@@ -32,7 +32,7 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/media, default: true }
+          - { page: oxplow/media, default: true }
   - when:
       command: oxplow.page.renderers
       input: { uri: "oxplow:oxplow/file?path=report.pdf&rev=git:HEAD" }
@@ -40,4 +40,4 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/media, default: true }
+          - { page: oxplow/media, default: true }

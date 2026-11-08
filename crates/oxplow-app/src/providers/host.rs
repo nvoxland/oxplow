@@ -628,7 +628,7 @@ pub fn deployment(
     let declared =
         super::spec::read_declarations(spec, &|f| std::fs::read_to_string(ext_dir.join(f)).ok())
             .map_err(|message| HostError::Failed {
-                name: spec.approval_name(&ext.name),
+                name: spec.approval_name(&ext.namespace),
                 message,
             })?;
     Ok(Deployment { ext_dir, declared })

@@ -1,8 +1,8 @@
 # A row of the Extension page's commands links to the command's own page.
-when: { page: oxplow-foundation/extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
+when: { page: oxplow/extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
 expect:
   loaders:
     commands:
       rows:
         contains:
-          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow-foundation/command" }
+          - { link: "oxplow:oxplow/command?command=oxplow.agent.draft#oxplow.renderer=oxplow/command" }

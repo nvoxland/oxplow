@@ -130,7 +130,7 @@ last-touch lookup using `idx_git_commit_file_path`.
 
 ## oxplow-bundled's deviation model (P7.C5, 2026-10-02)
 
-`v_oxplow_bundled_deviation` (an extension dataset with a recursive CTE over
+`v_oxplow_deviation` (an extension dataset with a recursive CTE over
 every effort file's directory prefixes) computes all efforts at once:
 **0.21 s** over this repo's 658 efforts / 5,484 effort files (sqlite3 on
 the live database, the same SQL over the physical tables). It stays a
@@ -498,7 +498,7 @@ not per event.
 
 ### The Measure data page reads recent captures first (measured 2026-11-01)
 
-`slow page re-run page=oxplow-foundation/measure-data loaders=facts took_ms=646..849`.
+`slow page re-run page=oxplow/measure-data loaders=facts took_ms=646..849`.
 Measured on this repo's live database with the bundled SQLite (3.51;
 the system `sqlite3` CLI plans differently, so do not time with it), for
 `oxplow.tokens` (138,000 facts, 153,000 `v_fact` rows, 130,000 captures):
@@ -684,7 +684,7 @@ database.
 
 Expanding a folder runs the Directory page once for that folder (a lazy
 branch), and every open run re-runs on a change. The daemon log showed
-`slow page re-run … page=oxplow-foundation/files` at 560-900 ms, even
+`slow page re-run … page=oxplow/files` at 560-900 ms, even
 with `loaders=` empty. That list is the loaders whose *rows changed*, not
 the ones that ran: a re-run runs every loader its changed dataset
 reached and then finds equal rows. Measured on this repo (16 refs, idle

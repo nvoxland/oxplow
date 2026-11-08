@@ -416,7 +416,7 @@ pub struct Extension {
     /// extension toggling would rebuild the metric cube each time.
     pub dimensions: Vec<oxplow_config::DimensionEntry>,
     /// Its datasets (`datasets:` plus `datasets/<name>.sql`), published as
-    /// `v_<extension>_<name>` (`extension_datasets`). Empty when any
+    /// `v_<namespace>_<name>` (`extension_datasets`). Empty when any
     /// declaration is broken (see `errors`).
     pub datasets: Vec<oxplow_db::datasets::DatasetSource>,
     /// Left-nav panels it contributes (valid ones; invalid ones are in
@@ -505,7 +505,7 @@ impl Extension {
     pub fn default_configuration(&self) -> Option<serde_json::Value> {
         self.configuration
             .as_ref()
-            .and_then(|declared| declared.resolve(&self.name, None, None).ok())
+            .and_then(|declared| declared.resolve(&self.namespace, None, None).ok())
             .map(|resolved| resolved.values)
     }
 
@@ -669,6 +669,112 @@ fn ignored_folder(folder: &str, name: &str) -> Diagnostic {
 /// tie-breaks on where an extension came from.
 pub fn owner<'a>(extensions: &'a [Extension], name: &str) -> Option<&'a Extension> {
     extensions.iter().find(|ext| ext.name == name)
+}
+
+/// The namespace the extension in folder `dir` names its contributions in:
+/// its manifest's `namespace:`, else `name`'s (`-` read as `_`), also when
+/// it has no manifest yet.
+pub fn namespace_in(dir: &Path, name: &str) -> String {
+    std::fs::read_to_string(dir.join("extension.yaml"))
+        .ok()
+        .and_then(|text| serde_yaml::from_str::<serde_yaml::Value>(&text).ok())
+        .and_then(|m| m.get("namespace")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| oxplow_domain::contribution::extension_namespace(name))
+}
+
+/// The extension in `checkout` (its sources, where the project's settings
+/// put them) that declares page file `<namespace>/<slug>`: whose draft a
+/// draft run of that page reads.
+pub fn source_declaring_page(project: &Path, checkout: &Path, id: &str) -> Option<String> {
+    let (namespace, slug) = id.split_once('/')?;
+    let settings = oxplow_config::extension_settings(project);
+    let listed = std::fs::read_dir(checkout.join(EXTENSIONS_DIR))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok());
+    let names: BTreeSet<String> = settings
+        .team_sources
+        .keys()
+        .chain(settings.personal_sources.keys())
+        .cloned()
+        .chain(listed)
+        .collect();
+    names.into_iter().find(|name| {
+        let dir = settings.source(checkout, name);
+        namespace_in(&dir, name) == namespace
+            && crate::pages::schema::PageKind::ALL
+                .iter()
+                .any(|k| dir.join(k.folder()).join(format!("{slug}.yaml")).is_file())
+    })
+}
+
+/// Settings are the namespace's: the enabled extensions sharing one that
+/// declare `configuration:` each get the one declaration of them all
+/// (`config_schema::merge`). One at another version, or declaring a key an
+/// earlier one does, is a load error and has none.
+fn share_configuration(extensions: &mut [Extension]) {
+    let mut namespaces: Vec<String> = extensions
+        .iter()
+        .filter(|e| e.enabled && e.configuration.is_some())
+        .map(|e| e.namespace.clone())
+        .collect();
+    namespaces.sort();
+    namespaces.dedup();
+    for namespace in namespaces {
+        let at: Vec<usize> = (0..extensions.len())
+            .filter(|&i| {
+                let e = &extensions[i];
+                e.enabled && e.namespace == namespace && e.configuration.is_some()
+            })
+            .collect();
+        if at.len() < 2 {
+            continue;
+        }
+        let declarations: Vec<(String, config_schema::ConfigurationFile)> = at
+            .iter()
+            .filter_map(|&i| {
+                let e = &extensions[i];
+                Some((e.name.clone(), e.configuration.clone()?))
+            })
+            .collect();
+        let borrowed: Vec<(&str, &config_schema::ConfigurationFile)> =
+            declarations.iter().map(|(n, d)| (n.as_str(), d)).collect();
+        let merged = config_schema::merge(&borrowed);
+        let refused: BTreeSet<usize> = merged.problems.iter().map(|(i, _)| *i).collect();
+        for (n, &i) in at.iter().enumerate() {
+            let ext = &mut extensions[i];
+            if refused.contains(&n) {
+                ext.configuration = None;
+            } else {
+                ext.configuration.clone_from(&merged.declaration);
+            }
+        }
+        for (n, problem) in merged.problems {
+            extensions[at[n]].errors.push(
+                Diagnostic::error("configuration.shared", problem)
+                    .at("extension.yaml", None)
+                    .fix("declare one version, and give each setting one extension"),
+            );
+        }
+    }
+}
+
+/// The extension among `extensions` that declares `id`: the one in its
+/// namespace whose contributions hold it, else the namespace's only
+/// extension (a namespace other than `oxplow` is one extension's).
+pub fn declarer<'a>(
+    extensions: &'a [Extension],
+    id: &oxplow_domain::contribution::ContributionId,
+) -> Option<&'a Extension> {
+    let in_namespace = || extensions.iter().filter(|e| e.namespace == id.namespace);
+    in_namespace()
+        .find(|e| e.contributions.iter().any(|d| d.id == *id))
+        .or_else(|| {
+            let mut all = in_namespace();
+            let only = all.next();
+            all.next().is_none().then_some(only).flatten()
+        })
 }
 
 /// A listed extension that has nothing to run here.
@@ -890,7 +996,7 @@ pub(super) fn resolve_catalog(
         .collect();
     public_contracts::stage(&mut out);
     crate::extension::extension_commands::refuse_shared_namespaces(&mut out);
-    crate::pages::schema::refuse_shared_core_pages(&mut out);
+    share_configuration(&mut out);
     crate::extension::extension_commands::refuse_duplicate_tools(&mut out);
     crate::extension::extension_commands::check_about_when(&mut out);
     for ext in &mut out {
@@ -1028,12 +1134,14 @@ fn check_cross_refs(out: &mut [Extension]) {
         let root = ext.path.clone();
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
+        // Its own pages were checked as it loaded (`page_ref_problem`).
+        let own: BTreeSet<String> = ext.page_files.iter().map(|p| p.id.clone()).collect();
         ext.page_files.retain(|page| {
             let at = oxplow_domain::diagnostic::relative_to(&root, &page.origin.running);
             let mut keep = true;
             for (site, target) in crate::pages::refs::refs(page) {
                 let (id, _) = crate::pages::refs::split(&target);
-                if id.split_once('/').map(|(e, _)| e) == Some(page.extension.as_str()) {
+                if own.contains(id) {
                     continue;
                 }
                 match known.get(id) {
@@ -1516,7 +1624,7 @@ pub async fn impact_between(
 
 /// An effect's or collector's `on:` naming an event type of another
 /// extension's namespace (P9.D1). The type's name is the dependency —
-/// there is no `depends:` key, as a dataset's `ref('<ext>/<name>')` has
+/// there is no `depends:` key, as a dataset's `ref('<namespace>/<name>')` has
 /// none: it resolves when an enabled extension registers the type.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -1552,26 +1660,27 @@ impl ForeignSubscription {
 enum Subscribes {
     /// A core type, or one it declares.
     Known,
-    /// One in another extension's namespace: known when that one is here.
+    /// Another extension's — in another namespace, or in `oxplow`, the one
+    /// namespace extensions share (everything oxplow ships): known when the
+    /// one declaring it is here.
     Foreign,
     /// No type at all: a core namespace's that doesn't exist, its own
-    /// that it doesn't declare, a name that isn't a type's.
+    /// (unshared) namespace's that it doesn't declare, a name that isn't a
+    /// type's.
     Unknown,
 }
 
 fn subscribes(
-    extension: &str,
+    namespace: &str,
     declared: &[crate::extension::extension_event_types::EventTypeDecl],
     event_type: &str,
 ) -> Subscribes {
-    use oxplow_domain::events::schema::{
-        extension_namespace, extension_type_namespace, is_core_type,
-    };
+    use oxplow_domain::events::schema::{extension_type_namespace, is_core_type};
     if is_core_type(event_type) || declared.iter().any(|d| d.event_type == event_type) {
         return Subscribes::Known;
     }
     match extension_type_namespace(event_type) {
-        Some(ns) if ns != extension_namespace(extension) => Subscribes::Foreign,
+        Some(ns) if ns != namespace || ns == oxplow_domain::OXPLOW_NAMESPACE => Subscribes::Foreign,
         _ => Subscribes::Unknown,
     }
 }
@@ -1743,6 +1852,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = m.event_types.as_ref() {
             let (declared, errors) = crate::extension::extension_event_types::parse_event_types(
                 name,
+                &ext.namespace,
                 v,
                 &file,
                 &manifest,
@@ -1755,10 +1865,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         // to another extension's (P9.D1), which resolves when that one is
         // here (`subscriptions`).
         let declared = ext.event_types.types.clone();
-        let subscribable = |t: &str| subscribes(name, &declared, t) != Subscribes::Unknown;
+        let subscribable =
+            |t: &str| subscribes(&ext.namespace, &declared, t) != Subscribes::Unknown;
         if let Some(v) = m.effects.as_ref() {
             let (effects, errors) = crate::effects::parse_effects(
                 name,
+                &ext.namespace,
                 v,
                 &file,
                 &manifest,
@@ -1767,7 +1879,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             );
             for e in &effects {
                 for t in &e.on {
-                    if subscribes(name, &declared, t) == Subscribes::Foreign {
+                    if subscribes(&ext.namespace, &declared, t) == Subscribes::Foreign {
                         ext.subscriptions.push(ForeignSubscription {
                             by: format!("effect `{}`", e.id),
                             event_type: t.clone(),
@@ -1802,7 +1914,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                             entry_line(&manifest, "implementations", "id", &d.id),
                             format!("implementation `{}` lists skill `{skill}`, which `skills:` doesn't declare", d.id),
                         )
-                        .contribution(format!("{name}/{}", d.id)),
+                        .contribution(format!("{}/{}", ext.namespace, d.id)),
                     );
                 }
             }
@@ -1855,7 +1967,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                                 c.id
                             ),
                         )
-                        .contribution(format!("{name}/{}", c.id)),
+                        .contribution(format!("{}/{}", ext.namespace, c.id)),
                     ),
                     Some((entry, Some(script)))
                         if c.runtime == oxplow_config::collectors::CollectorRuntime::Starlark =>
@@ -1874,7 +1986,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                                     c_line,
                                     format!("collector `{}`: `{entry}` {e}", c.id),
                                 )
-                                .contribution(format!("{name}/{}", c.id)),
+                                .contribution(format!("{}/{}", ext.namespace, c.id)),
                             ),
                         }
                     }
@@ -1886,7 +1998,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                     continue;
                 };
                 for t in events {
-                    if subscribes(name, &declared, t) == Subscribes::Foreign {
+                    if subscribes(&ext.namespace, &declared, t) == Subscribes::Foreign {
                         let c_line = entry_line(&manifest, "collectors", "id", &c.id).or(line);
                         ext.subscriptions.push(ForeignSubscription {
                             by: format!("collector `{}`", c.id),
@@ -2002,7 +2114,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
                                     line_under(&manifest, "advisories", &a.id),
                                     format!("advisory {}: {e}", a.id),
                                 )
-                                .contribution(format!("{name}/{}", a.id)),
+                                .contribution(format!("{}/{}", ext.namespace, a.id)),
                             );
                         }
                     }
@@ -2316,7 +2428,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.ui.page_slots.push(PageSlot {
             host: host.to_string(),
             slot: slot_name.to_string(),
-            page: format!("{name}/{page}"),
+            page: format!("{}/{page}", ext.namespace),
             at: s.at,
             title: s.title,
             size: s.size,
@@ -2324,7 +2436,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     if let Some(v) = decorator_files {
         let (decorators, errors) =
-            decorators::parse_decorators(name, &ext.datasets, &v, man, &manifest);
+            decorators::parse_decorators(name, &ext.namespace, &ext.datasets, &v, man, &manifest);
         ext.ui.decorators = decorators;
         ext.errors.extend(errors);
     }
@@ -2333,6 +2445,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.providers.iter().map(|p| p.capability.clone()).collect();
         let (replaced, errors) = replacements::parse_replacements(
             name,
+            &ext.namespace,
             &capabilities,
             &ext.page_files,
             replacement_files,
@@ -2344,7 +2457,6 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     // After datasets: a resource is titled by one.
     if let Some(v) = resource_files {
         let (resources, errors) = crate::extension::extension_resources::parse_resources(
-            name,
             &ext.namespace,
             &ext.datasets,
             &v,
@@ -2359,7 +2471,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     // After resources: a page that renders one is checked against it.
     let mut checked: Vec<crate::pages::schema::Page> = Vec::new();
     for page in std::mem::take(&mut ext.page_files) {
-        let checks = renderer_problem(name, &ext.namespace, &ext.resources, &page, &checked)
+        let checks = renderer_problem(&ext.namespace, &ext.resources, &page, &checked)
             .and_then(|()| component_problem(&page, &ext.custom_components));
         match checks {
             Ok(()) => checked.push(page),
@@ -2371,7 +2483,7 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
     }
     ext.page_files = checked;
     if let Some(v) = panel_files {
-        let (panels, errors) = parse_panels(name, &ext.page_files, v);
+        let (panels, errors) = parse_panels(name, &ext.namespace, &ext.page_files, v);
         ext.panels = panels;
         let lines = item_lines(&manifest, "panels");
         ext.errors.extend(errors.into_iter().map(|(i, e)| {
@@ -2648,16 +2760,16 @@ fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&
 /// Name each page file `page` refers to — a param's `options_from`, a
 /// column's `expand`, a form's `from` and `choices`, an `embed`, a `{ page,
 /// loader }` loader, a `see_also` link (`pages::refs`, the one list) —
-/// whole, as one of its own extension's: `<extension>/<slug>`, what every
+/// whole, as one of its own namespace's: `<namespace>/<slug>`, what every
 /// reader looks it up by. A bare `#<loader>` is the page's own.
 pub(crate) fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
     let own = page.id.clone();
-    let extension = page.extension.clone();
+    let namespace = page.namespace().to_string();
     crate::pages::refs::for_each_ref(page, |_, id| {
         if id.starts_with('#') {
             *id = format!("{own}{id}");
         } else if !id.contains('/') {
-            *id = format!("{extension}/{id}");
+            *id = format!("{namespace}/{id}");
         }
     });
 }
@@ -2681,10 +2793,10 @@ fn page_ref_problem(
     crate::pages::refs::refs(page)
         .into_iter()
         .find_map(|(site, target)| {
-            // Qualified at load (`qualify_page_refs`): `<extension>/<slug>`.
+            // Qualified at load (`qualify_page_refs`): `<namespace>/<slug>`.
             let (id, loader) = crate::pages::refs::split(&target);
-            let (extension, slug) = id.split_once('/')?;
-            if extension != page.extension {
+            let (namespace, slug) = id.split_once('/')?;
+            if namespace != page.namespace() {
                 return None;
             }
             if slug == page.slug {
@@ -2708,6 +2820,9 @@ fn page_ref_problem(
                 });
             }
             match pages.iter().find(|p| p.slug == slug) {
+                // `oxplow` is shared: a page it names may be a sibling's,
+                // checked once every extension is loaded (`check_cross_refs`).
+                None if namespace == CORE_NAMESPACE => None,
                 None => Some(format!(
                     "{} names `{id}`, which isn't one of this extension's pages, parts or queries",
                     site.what()
@@ -2756,14 +2871,13 @@ fn component_problem(
 /// What's wrong with a page's `for`, `accepts`, `default` and `pinned`:
 /// each resource it renders is a scheme oxplow renders (`https`), one this
 /// extension declares, one of foundation's (`oxplow/*`) or another
-/// extension's (`<extension>/<name>`); `accepts` names a param of each
+/// extension's (`<namespace>/<name>`); `accepts` names a param of each
 /// (when they're known) with `present`, `absent` or an id pattern; it
 /// takes no resource param the resource hasn't (it is run with the URI's
 /// params);
 /// `default` is for a resource of this extension's, one page per resource;
 /// `pinned` and `accepts` are a renderer's.
 fn renderer_problem(
-    extension: &str,
     namespace: &str,
     resources: &[crate::extension::extension_resources::ExtensionResource],
     p: &crate::pages::schema::Page,
@@ -2801,7 +2915,7 @@ fn renderer_problem(
         }
         return Ok(());
     }
-    let segment = crate::extension::extension_resources::resource_extension(extension, namespace);
+    let segment = namespace;
     let foundation = oxplow_domain::uri::resources::foundation();
     for r in &renders {
         let scheme = RENDERED_SCHEMES.contains(&r.as_str());
@@ -2811,13 +2925,13 @@ fn renderer_problem(
         } else {
             let Ok(name) = r.parse::<oxplow_domain::uri::oxplow_uri::ResourceName>() else {
                 return Err(format!(
-                    "`for: {r}` isn't a resource (`<extension>/<name>`) or a scheme oxplow renders ({})",
+                    "`for: {r}` isn't a resource (`<namespace>/<name>`) or a scheme oxplow renders ({})",
                     RENDERED_SCHEMES.join(", ")
                 ));
             };
             match own(r) {
                 Some(x) => Some(&x.decl),
-                None if name.extension() == CORE_NAMESPACE => match foundation.get(&name) {
+                None if name.namespace() == CORE_NAMESPACE => match foundation.get(&name) {
                     Some(d) => Some(d),
                     None => {
                         return Err(format!(
@@ -2825,7 +2939,7 @@ fn renderer_problem(
                         ))
                     }
                 },
-                None if name.extension() == segment => {
+                None if name.namespace() == segment => {
                     return Err(format!(
                         "`for: {r}` isn't one of this extension's `resources:`"
                     ))
@@ -2865,7 +2979,7 @@ fn renderer_problem(
             let ours = if scheme {
                 namespace == CORE_NAMESPACE
             } else {
-                r.split('/').next() == Some(segment.as_str())
+                r.split('/').next() == Some(segment)
             };
             if !ours {
                 return Err(format!(
@@ -2897,6 +3011,7 @@ fn renderer_problem(
 /// `thread_id` (what the nav binds). Each error names the entry's index.
 fn parse_panels(
     extension: &str,
+    namespace: &str,
     pages: &[crate::pages::schema::Page],
     raw: serde_yaml::Value,
 ) -> (Vec<ExtensionPanel>, Vec<(Option<usize>, String)>) {
@@ -2923,7 +3038,7 @@ fn parse_panels(
         }
         if panels
             .iter()
-            .any(|q| q.id == format!("{extension}/{}", p.id))
+            .any(|q| q.id == format!("{namespace}/{}", p.id))
         {
             errors.push(err("declared twice".into()));
             continue;
@@ -2984,16 +3099,16 @@ fn parse_panels(
         }
         if ok {
             panels.push(ExtensionPanel {
-                id: format!("{extension}/{}", p.id),
+                id: format!("{namespace}/{}", p.id),
                 extension: extension.to_string(),
                 title: p.title,
                 icon: p.icon,
                 scope: p.scope,
-                body: format!("{extension}/{}", p.body),
-                badge: p.badge.map(|b| format!("{extension}/{b}")),
+                body: format!("{namespace}/{}", p.body),
+                badge: p.badge.map(|b| format!("{namespace}/{b}")),
                 open: p.open,
-                collapsed: p.collapsed.map(|c| format!("{extension}/{c}")),
-                count: p.count.map(|c| format!("{extension}/{c}")),
+                collapsed: p.collapsed.map(|c| format!("{namespace}/{c}")),
+                count: p.count.map(|c| format!("{namespace}/{c}")),
                 dock: p.dock,
             });
         }
@@ -3421,23 +3536,21 @@ fn check_measures(ext: &mut Extension, others: &[Extension], files: &dyn Extensi
 
 /// Another extension `ext` uses but doesn't declare — reads its dataset
 /// (`v_<namespace>_…` in a page or a dataset), mounts at or names its page
-/// (`<name>/…`), runs its command (`<namespace>.…`) — is an error at the
+/// (`<namespace>/…`), runs its command (`<namespace>.…`) — is an error at the
 /// first place it does: a test runs `ext` with only what it declares
 /// (`requires:`, or the extension an import names), and a person may turn
 /// the other off. The required foundation, and a command in a namespace it
 /// shares, need no declaration.
 fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn ExtensionFiles) {
     use oxplow_domain::contribution::RefPart;
-    let declared: std::collections::BTreeSet<&str> = ext
-        .requires
+    let declared: std::collections::BTreeSet<&str> =
+        ext.requires.iter().map(String::as_str).collect();
+    // An import names its producer by namespace.
+    let imported: std::collections::BTreeSet<&str> = ext
+        .public_contracts
+        .imports
         .iter()
-        .map(String::as_str)
-        .chain(
-            ext.public_contracts
-                .imports
-                .iter()
-                .map(|i| i.contribution.extension.as_str()),
-        )
+        .map(|i| i.contribution.namespace.as_str())
         .collect();
     // A command namespace the required foundation, or `ext` itself, holds
     // too is no one other extension's to declare.
@@ -3453,6 +3566,7 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
             o.name != ext.name
                 && !crate::bundled_extensions::is_required(&o.name)
                 && !declared.contains(o.name.as_str())
+                && !imported.contains(o.namespace.as_str())
         })
         .collect();
     let mut found: Vec<(String, String, String, usize)> = Vec::new();
@@ -3463,10 +3577,10 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
     };
     // A slot it mounts at.
     for mount in &ext.ui.page_slots {
-        if let Some(owner) = others
-            .iter()
-            .find(|o| mount.host.split('/').next() == Some(o.name.as_str()))
-        {
+        // The host is the page of whichever extension declares it.
+        if let Some(owner) = others.iter().find(|o| {
+            o.namespace != ext.namespace && o.page_files.iter().any(|p| p.id == mount.host)
+        }) {
             note(
                 &owner.name,
                 format!("its slot `{}.{}`", mount.host, mount.slot),
@@ -3492,22 +3606,32 @@ fn check_dependencies(ext: &mut Extension, others: &[Extension], files: &dyn Ext
         for (n, line) in text.lines().enumerate() {
             let line_no = n + 1;
             for owner in &others {
-                let refs = oxplow_domain::contribution::own_references(
-                    line,
-                    &owner.name,
-                    &owner.namespace,
-                );
+                // Ids and names are the namespace's, so extensions sharing
+                // one (oxplow's own shipped ones) can't be told apart.
+                if owner.namespace == ext.namespace {
+                    continue;
+                }
+                let refs = oxplow_domain::contribution::own_references(line, &owner.namespace);
+                // The namespace may be shared with core's names (`oxplow`:
+                // `oxplow/file` is a resource): only what `owner` itself
+                // declares is its.
+                let declares = |part: RefPart, token: &str| match part {
+                    RefPart::Dataset => owner.datasets.iter().any(|d| {
+                        oxplow_db::datasets::extension_view(&owner.namespace, &d.decl.name) == token
+                    }),
+                    RefPart::Page => {
+                        let id = token.split('#').next().unwrap_or(token);
+                        owner.page_files.iter().any(|p| p.id == id)
+                    }
+                    RefPart::Command => true,
+                };
                 let word = |part: RefPart| {
                     refs.iter()
-                        .find(|r| r.part == part)
+                        .filter(|r| r.part == part)
                         .map(|r| line[r.token.clone()].to_string())
+                        .find(|token| declares(part, token))
                 };
-                // Datasets are named by namespace, so extensions sharing one
-                // (oxplow's own shipped ones) can't be told apart by a name.
-                let by_dataset = (owner.namespace != ext.namespace)
-                    .then(|| word(RefPart::Dataset))
-                    .flatten();
-                if let Some(name) = by_dataset {
+                if let Some(name) = word(RefPart::Dataset) {
                     note(
                         &owner.name,
                         format!("its dataset `{name}`"),
@@ -3726,7 +3850,7 @@ fn check_components(
                     ),
                 )
                 .at("extension.yaml", None)
-                .contribution(format!("{}/{component}", ext.name)),
+                .contribution(format!("{}/{component}", ext.namespace)),
             );
         }
     }
@@ -3778,6 +3902,7 @@ fn entity_stubs(ext: &Extension) -> Vec<oxplow_db::datasets::EntityStub> {
         .flat_map(|c| &c.entities)
         .map(|e| oxplow_db::datasets::EntityStub {
             owner: ext.name.clone(),
+            namespace: ext.namespace.clone(),
             name: e.name.clone(),
             view: e.view.clone(),
             columns: e
@@ -3816,6 +3941,7 @@ async fn dataset_overlay(
         .filter(|ext| ext.enabled && !ext.datasets.is_empty())
         .map(|ext| oxplow_db::datasets::ExtensionDatasets {
             extension: ext.name.clone(),
+            namespace: ext.namespace.clone(),
             sources: ext.datasets.clone(),
             config: ext.default_configuration(),
         })
@@ -3923,7 +4049,7 @@ async fn prepare(
                         ),
                     )
                     .at("extension.yaml", None)
-                    .contribution(format!("{}/{}", ext.name, a.id)),
+                    .contribution(format!("{}/{}", ext.namespace, a.id)),
                 );
                 continue;
             }
@@ -3951,7 +4077,7 @@ async fn prepare(
                     ),
                 )
                 .at("extension.yaml", None)
-                .contribution(format!("{}/{}", ext.name, a.id)),
+                .contribution(format!("{}/{}", ext.namespace, a.id)),
             ),
             Ok(r) => {
                 let mut need = vec!["message"];
@@ -3970,7 +4096,7 @@ async fn prepare(
                                 ),
                             )
                             .at("extension.yaml", None)
-                            .contribution(format!("{}/{}", ext.name, a.id)),
+                            .contribution(format!("{}/{}", ext.namespace, a.id)),
                         );
                     }
                 }
@@ -4069,13 +4195,10 @@ async fn prepare(
                 continue;
             }
             let (id, loader) = crate::pages::refs::split(&target);
-            let Some((target_ext, slug)) = id.split_once('/') else {
+            let Some((_, slug)) = id.split_once('/') else {
                 continue;
             };
-            let columns = if target_ext == ext.name {
-                let Some(target_page) = ext.page_files.iter().find(|p| p.slug == slug) else {
-                    continue;
-                };
+            let columns = if let Some(target_page) = ext.page_files.iter().find(|p| p.id == id) {
                 let name = loader
                     .map(str::to_string)
                     .or_else(|| target_page.default_loader().map(|l| l.name.clone()));
@@ -4158,7 +4281,7 @@ async fn check_collector_inputs(
                     line,
                     format!("collector `{}` input: {problem}", c.id),
                 )
-                .contribution(format!("{}/{}", ext.name, c.id)),
+                .contribution(format!("{}/{}", ext.namespace, c.id)),
             );
         }
     }
@@ -4341,6 +4464,24 @@ pub fn scaffold_manifest(m: &ManifestScaffold<'_>) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// An undeclared type in an extension's own namespace is no type,
+    /// except in `oxplow`, which everything oxplow ships shares: there it
+    /// is a sibling's, known when that one is here.
+    #[test]
+    fn a_type_in_the_shared_oxplow_namespace_is_a_siblings() {
+        use super::{subscribes, Subscribes};
+        assert_eq!(subscribes("acme", &[], "acme.closed"), Subscribes::Unknown);
+        assert_eq!(subscribes("acme", &[], "other.closed"), Subscribes::Foreign);
+        assert_eq!(
+            subscribes("oxplow", &[], "oxplow.review.accepted"),
+            Subscribes::Foreign
+        );
+        assert_eq!(
+            subscribes("oxplow", &[], "work_item.nope"),
+            Subscribes::Unknown
+        );
+    }
+
     /// An extension's errors as the lines a person reads, one per line.
     fn shown_errors(ext: &Extension) -> String {
         ext.errors
@@ -5788,6 +5929,29 @@ view:
             .unwrap()
     }
 
+    /// A contribution is named by its extension's namespace, not its
+    /// name: moving one between extensions that share a namespace keeps
+    /// its id, and so what is stored under it. A bare ref is the
+    /// namespace's.
+    #[test]
+    fn a_page_is_named_by_its_extensions_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        write(
+            dir.path(),
+            ".oxplow/extensions/acme-tools/extension.yaml",
+            "manifest: 2\nname: acme-tools\nintent:\n  purpose: test\n",
+        );
+        write(
+            dir.path(),
+            ".oxplow/extensions/acme-tools/pages/tasks.yaml",
+            PAGE,
+        );
+        let e = only(dir.path(), "acme-tools");
+        assert!(e.errors.is_empty(), "{}", shown_errors(&e));
+        assert_eq!(e.page_files[0].id, "acme_tools/tasks");
+        assert_eq!(e.page_files[0].extension, "acme-tools");
+    }
+
     #[test]
     fn a_v2_manifest_needs_an_intent_and_says_where() {
         let dir = tempfile::tempdir().unwrap();
@@ -5877,7 +6041,7 @@ view:
     #[test]
     fn a_slot_mount_to_a_missing_page_names_its_line() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = format!("{EXT_V2}ui:\n  mounts:\n    - {{ page: tasks, at: oxplow-foundation/diff.file-header }}\n    - {{ page: nope, at: oxplow-foundation/diff.file-header }}\n");
+        let manifest = format!("{EXT_V2}ui:\n  mounts:\n    - {{ page: tasks, at: oxplow/diff.file-header }}\n    - {{ page: nope, at: oxplow/diff.file-header }}\n");
         write(
             dir.path(),
             ".oxplow/extensions/review/extension.yaml",
@@ -6713,7 +6877,7 @@ commands:
             ("queries/q.yaml", query),
             (
                 "extension.yaml",
-                "manifest: 2\nname: x\nintent:\n  purpose: test\npanels:\n  - { id: one, title: One, scope: stream, body: body, count: body-page }\n  - { id: two, title: Two, scope: stream, body: body-page, count: count }\nui:\n  mounts:\n    - { page: mounted, at: oxplow-foundation/commit.sections }\n    - { page: q, at: oxplow-foundation/commit.sections }\n",
+                "manifest: 2\nname: x\nintent:\n  purpose: test\npanels:\n  - { id: one, title: One, scope: stream, body: body, count: body-page }\n  - { id: two, title: Two, scope: stream, body: body-page, count: count }\nui:\n  mounts:\n    - { page: mounted, at: oxplow/commit.sections }\n    - { page: q, at: oxplow/commit.sections }\n",
             ),
         ]);
         let errs = shown_errors(&ext);
@@ -6753,7 +6917,7 @@ commands:
             ".oxplow/extensions/x/extension.yaml",
             "manifest: 2\nname: x\nintent:\n  purpose: test\n",
         );
-        write(root, ".oxplow/extensions/x/pages/ok.yaml", &viz_page("params: [{ name: s, type: choice, options_from: y/opts }]\nsee_also: [{ page: oxplow-foundation/tasks }]\n", "SELECT 1 AS a", ""));
+        write(root, ".oxplow/extensions/x/pages/ok.yaml", &viz_page("params: [{ name: s, type: choice, options_from: y/opts }]\nsee_also: [{ page: oxplow/tasks }]\n", "SELECT 1 AS a", ""));
         write(
             root,
             ".oxplow/extensions/x/pages/wrong.yaml",

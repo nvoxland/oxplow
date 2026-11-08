@@ -44,7 +44,7 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
 A **page** is a user- or agent-built way of looking at your work: named
 SQL queries over the semantic layer, plus a tree of nodes that shows them.
 (Not "view", which is taken by the SQL `v_*` views.) A page is one file in
-an extension; its id is `<extension>/<slug>`. The extension manifest lists
+an extension; its id is `<namespace>/<slug>`. The extension manifest lists
 no pages: the folders are the list. A source with the old `lenses/` folder
 does not load.
 
@@ -224,7 +224,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   param found in a `?` is refused.
 - **`options_from`** makes a choice whose options rows list: `value`,
   `label`, optional `group`. It names a **query** (`<slug>` of the
-  extension or `<extension>/<slug>`, its last loader; `…#<loader>` for
+  extension or `<namespace>/<slug>`, its last loader; `…#<loader>` for
   another), or **a loader of the page itself**, `'#<loader>'` (a list only
   this page uses; qualified at load to `<page id>#<loader>`). Typed and
   checked at load (`pages/refs.rs`: a part or a page is refused; a loader

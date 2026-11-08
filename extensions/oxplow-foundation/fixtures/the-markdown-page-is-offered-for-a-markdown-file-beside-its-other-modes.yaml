@@ -10,8 +10,8 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/editor, default: true }
-      - { page: oxplow-foundation/markdown, default: false }
+      - { page: oxplow/editor, default: true }
+      - { page: oxplow/markdown, default: false }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -20,8 +20,8 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/file-viewer }
-          - { page: oxplow-foundation/markdown }
+          - { page: oxplow/file-viewer }
+          - { page: oxplow/markdown }
   - when:
       command: oxplow.page.renderers
       input: { uri: "oxplow:oxplow/file?path=koala.txt" }
@@ -29,4 +29,4 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/editor, default: true }
+          - { page: oxplow/editor, default: true }

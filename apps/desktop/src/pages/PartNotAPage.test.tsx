@@ -17,14 +17,14 @@ const extensions = [
     enabled: true,
     pageFiles: [host, section, kinds],
     panels: [{ id: "acme/side", title: "Side", body: "acme/section", collapsed: null, count: null, badge: null }],
-    ui: { pageSlots: [{ host: "oxplow-bundled/work-item", slot: "sections", page: "acme/section" }], decorators: [], replacements: [] },
+    ui: { pageSlots: [{ host: "oxplow/work-item", slot: "sections", page: "acme/section" }], decorators: [], replacements: [] },
   },
 ] as unknown as Extension[];
 
 // A part opened by its URI says what it is and where it is drawn; a query
 // says it is rows other pages read.
 test("a part's tab names the pages, panels and slots that draw it; a query's says what it is", () => {
-  expect(hostsOf(extensions, "acme/section")).toEqual(["page `acme/host`", "panel `acme/side`", "page `oxplow-bundled/work-item` (slot `sections`)"]);
+  expect(hostsOf(extensions, "acme/section")).toEqual(["page `acme/host`", "panel `acme/side`", "page `oxplow/work-item` (slot `sections`)"]);
   const part = render(<PartNotAPage page={section} extensions={extensions} />);
   expect(part.getByTestId("page-not-a-page").textContent).toContain("is a part, drawn inside page `acme/host`, panel `acme/side`");
   cleanup();

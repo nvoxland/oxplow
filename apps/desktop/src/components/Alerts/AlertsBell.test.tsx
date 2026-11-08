@@ -12,7 +12,7 @@ const noRows = { columns: [], rows: [], truncated: false, reads: { datasets: [],
 let extensionRows: unknown[][] = [];
 /** The failed operations `v_op_error` answers with. */
 let opErrorRows: unknown[][] = [];
-const landedHint = [4, "oxplow-bundled/landed-in-progress", "“t” is still in progress, but a commit landed its work.", "Main"];
+const landedHint = [4, "oxplow/landed-in-progress", "“t” is still in progress, but a commit landed its work.", "Main"];
 /** The hints `v_agent_nudge` answers with. */
 let hintRows: unknown[][] = [landedHint];
 const pushFailed = ["e-push", "2026-10-22T10:00:00Z", "Push to origin", "git push", null, 1, null, 40, 12, 0];

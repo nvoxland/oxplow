@@ -1,5 +1,5 @@
 # A custom component page lists the commands the component may run, each a link to its command.
-when: { page: oxplow-foundation/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow-foundation/integrations" } }
+when: { page: oxplow/custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow/integrations" } }
 expect:
   label: Integrations
   loaders:

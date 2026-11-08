@@ -115,7 +115,7 @@ impl PageAt<'_> {
             .id
             .split('/')
             .next()
-            .unwrap_or(&ext.name)
+            .unwrap_or(&ext.namespace)
             .to_string();
         let key = if component.contains('/') {
             component

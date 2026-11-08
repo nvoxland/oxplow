@@ -1,4 +1,4 @@
-// oxplow-bundled-todo/history-graph: the stream's commits as `git log --graph`
+// oxplow/history-graph: the stream's commits as `git log --graph`
 // draws them — a lane per line of descent, a dot per commit, edges to its
 // parents — in place of core's plain commit list (the `vcs.history.graph`
 // replacement). Its page walks `v_commit` from the stream's head; the

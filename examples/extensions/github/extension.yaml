@@ -23,10 +23,10 @@ intent:
       input: { page: pr-lifetimes }
       expect: a bar per readable pull request; the filters re-run the page, Sync runs the collector and a bar opens its pull request
     - name: extension-problems-lists-a-disabled-collector-and-offers-enable-again
-      input: { page: oxplow-foundation/extension-problems, params: { extension: github } }
+      input: { page: oxplow/extension-problems, params: { extension: github } }
       expect: a collector disabled after failures says why, under its extension
     - name: settings-data-area-lists-a-credential-and-whether-it-is-kept
-      input: { page: oxplow-foundation/settings, params: { area: data } }
+      input: { page: oxplow/settings, params: { area: data } }
       expect: a declared credential is listed once, never its value
 permissions: [process.run, network:api.github.com, secrets:GITHUB_TOKEN, commands:oxplow.collector.sync]
 collectors:

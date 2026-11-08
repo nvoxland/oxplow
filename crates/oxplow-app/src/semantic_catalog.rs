@@ -128,6 +128,7 @@ mod tests {
             .replace_rows(vec![(
                 EntityTable {
                     extension: "my-gh".into(),
+                    namespace: "my_gh".into(),
                     entity: "pr".into(),
                     view: "v_my_gh_pr".into(),
                     key: "number".into(),

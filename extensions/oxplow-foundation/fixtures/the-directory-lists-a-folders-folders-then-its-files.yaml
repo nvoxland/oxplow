@@ -5,7 +5,7 @@ given:
   - observe: { turn: { prompt: b, write: { path: src/b.rs, body: "b\n" } } }
   - observe: { turn: { prompt: a, write: { path: src/a.rs, body: "a\n" } } }
   - observe: { turn: { prompt: top, write: { path: top.txt, body: "t\n" } } }
-when: { page: oxplow-foundation/directory, params: { stream_id: 1, path: src } }
+when: { page: oxplow/directory, params: { stream_id: 1, path: src } }
 expect:
   loaders:
     tree:

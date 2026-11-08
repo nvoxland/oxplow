@@ -3,7 +3,7 @@
 given:
   - observe: { event: { type: agent.tool.requested, v: 3, payload: { tool: Edit, kind: edit, paths: [src/a.rs], decision: allowed }, anchors: { stream_id: str1 } } }
   - observe: { event: { type: agent.tool.finished, v: 3, payload: { tool: Edit, kind: edit, paths: [src/a.rs], ok: false }, anchors: { stream_id: str1 } } }
-when: { page: oxplow-foundation/hook-events, params: { stream_id: 1 } }
+when: { page: oxplow/hook-events, params: { stream_id: 1 } }
 expect:
   loaders:
     hook_events:

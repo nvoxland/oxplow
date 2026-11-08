@@ -29,7 +29,7 @@ the user guide is `docs/guide/pages.md`.
     keys (extensions-pages.md "Three kinds, by folder"). Details:
     [pages-and-tabs.md](./pages-and-tabs.md) "Page files".
   - Unknown keys are errors, so typos surface instead of being ignored.
-- **Ids.** A page id is `<extension>/<slug>`.
+- **Ids.** A page id is `<namespace>/<slug>`, named in its extension's namespace (`Page::namespace()`); `Page.extension` is who declares it. The catalog finds one by id among the extensions in that namespace (`ExtensionCatalog::find_page`).
 - **Reading.** What the app shows is the **live set**: each extension's
   active deployment (extensions-deploy.md "Sources and deployments"), whichever stream is open:
   listings, pages, slots and panels, custom components, prompts,
@@ -87,7 +87,7 @@ the user guide is `docs/guide/pages.md`.
     `oxplow_find_page`, `oxplow_show_page`, `oxplow_run_page_action`,
     `oxplow_validate_extension`; an agent reads a
     page's definition with `oxplow_read`
-    (`oxplow:oxplow/page?page=<ext>/<slug>`).
+    (`oxplow:oxplow/page?page=<namespace>/<slug>`).
   - An agent lists pages, extensions and what each contributes with
     datasets, not tools: `v_page`, `v_page_answer`, `v_page_param`,
     `v_extension` and `v_contribution` (restated with each extension
@@ -150,7 +150,7 @@ the user guide is `docs/guide/pages.md`.
     from `extension_resources::ICONS` (the desktop's `src/icons.ts`): alone
     on its button in the bar, beside its label in a menu.
     **A page is a function of its tab entry** (`tabs/session.ts`): its
-    params are its URI's (`oxplow:oxplow/page?page=<ext>/<slug>&k=v#f=v`): the
+    params are its URI's (`oxplow:oxplow/page?page=<namespace>/<slug>&k=v#f=v`): the
     `?` holds its `resource` params, the `#` its filters and picks. A change
     of a filter or pick goes back through `PageNavigation.setViewParams`
     with the values that differ from the defaults (`changedParams`, by
@@ -203,7 +203,7 @@ the user guide is `docs/guide/pages.md`.
     value, else its row count; Backlog's ready count).
   - **Pages** (`Extension.page_files`, `pages::schema::Page`; checked at
     load) — every page is a page file, oxplow's own included. Its tab id is
-    the URI `oxplow:oxplow/page?page=<extension>/<slug>[&params]`, or
+    the URI `oxplow:oxplow/page?page=<namespace>/<slug>[&params]`, or
     `page=<slug>` for the extension whose `namespace:` is `oxplow`
     (oxplow-foundation: its pages are core-named as its commands are,
     `CORE_NAMESPACE`); `pageRef` carries it. `category` lists it in the
@@ -411,7 +411,7 @@ the user guide is `docs/guide/pages.md`.
       the result. The query computes the condition (`can_enable`).
     - **A page grants no power.** `pages::actions::run_page_action` runs the
       command through the bus as `Actor::Page { page_id, on_behalf_of }`
-      (`page_id` is `<extension>/<page>`, with `#<node>` for a node's
+      (`page_id` is `<namespace>/<page>`, with `#<node>` for a node's
       action) — `Human` from the UI (`run_page_action` RPC), the calling
       agent from MCP `oxplow_run_page_action` (which never confirms). The
       bus applies the agent policy through `on_behalf_of`. A command that

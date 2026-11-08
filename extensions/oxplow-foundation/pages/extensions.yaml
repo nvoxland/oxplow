@@ -5,7 +5,7 @@ category: System
 keywords: deploy rollback permissions enable disable share health
 loaders:
   summary:
-    page: oxplow-foundation/extension-facts
+    page: oxplow/extension-facts
     loader: summary
   # One row an extension, from the summary: "no" problems, else their count
   # (in the problem color, linking to the problems page).

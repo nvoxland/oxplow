@@ -520,7 +520,7 @@ byte-identical after. Text output adds `impact against <rev>:` and the
 report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
-**On an effort's review.** The diff page (`oxplow-foundation/diff-view`)
+**On an effort's review.** The diff page (`oxplow/diff-view`)
 has an "Extension Changes" table, empty unless the range touched
 `.oxplow/extensions/**`. Its `extensions` loader reads the live dataset
 `v_extension_change` (pinned to `base` and `head`, each a `v_change`

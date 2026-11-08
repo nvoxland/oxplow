@@ -2,7 +2,7 @@
 # page that opens by itself: not one that draws a resource or is hidden)
 # and to the extension that declares the page.
 when:
-  page: oxplow-foundation/definition
+  page: oxplow/definition
   params:
     uri: "oxplow:oxplow/file?path=oxplow-foundation/pages/problems.yaml&filesystem=oxplow:extensions"
     path: oxplow-foundation/pages/problems.yaml

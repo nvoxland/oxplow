@@ -15,9 +15,15 @@ const BODY: &str = "view: { viz: table, from: q }\nloaders:\n  q: { rows: [{ a: 
 /// A resource page of `extension` named `slug`: `head` is its `for`,
 /// `accepts`, `default` lines.
 fn page(extension: &str, slug: &str, head: &str) -> Page {
+    // oxplow's own extensions share the `oxplow` namespace.
+    let namespace = if extension.starts_with("oxplow-") {
+        "oxplow"
+    } else {
+        extension
+    };
     parse_page(
         extension,
-        extension,
+        namespace,
         slug,
         &format!("{slug}.yaml"),
         &format!("title: {slug}\nparams: [{{ name: uri }}]\n{head}\n{BODY}"),
@@ -48,7 +54,7 @@ fn catalog() -> Vec<Page> {
         // A route: renders nothing.
         parse_page(
             "oxplow-foundation",
-            "oxplow-foundation",
+            "oxplow",
             "tasks",
             "tasks.yaml",
             &format!("title: tasks\n{BODY}"),
@@ -78,18 +84,14 @@ fn the_pages_for_a_uris_resource_whose_accepts_hold_for_its_params() {
     let pages = catalog();
     assert_eq!(
         ids(candidates(&pages, "oxplow:oxplow/file?path=a.ts")),
-        [
-            "oxplow-foundation/editor",
-            "oxplow-foundation/file-viewer",
-            "acme/blame"
-        ]
+        ["oxplow/editor", "oxplow/file-viewer", "acme/blame"]
     );
     assert_eq!(
         ids(candidates(
             &pages,
             "oxplow:oxplow/file?path=a.ts&rev=git:HEAD"
         )),
-        ["oxplow-foundation/file-viewer", "acme/blame"]
+        ["oxplow/file-viewer", "acme/blame"]
     );
     // The editor edits only the local working tree: another filesystem's file is the viewer's.
     assert_eq!(
@@ -97,13 +99,13 @@ fn the_pages_for_a_uris_resource_whose_accepts_hold_for_its_params() {
             &pages,
             "oxplow:oxplow/file?path=a.ts&filesystem=oxplow:temp"
         )),
-        ["oxplow-foundation/file-viewer", "acme/blame"]
+        ["oxplow/file-viewer", "acme/blame"]
     );
     assert_eq!(ids(candidates(&pages, "oxplow:acme/pr?id=12")), ["acme/pr"]);
     assert!(candidates(&pages, "oxplow:acme/pr?id=x").is_empty());
     assert_eq!(
         ids(candidates(&pages, "https://example.com")),
-        ["oxplow-foundation/external-url"]
+        ["oxplow/external-url"]
     );
     assert!(candidates(&pages, "oxplow:oxplow/commit?sha=abc").is_empty());
     assert!(candidates(&pages, "ftp://example.com").is_empty());
@@ -371,8 +373,7 @@ async fn renderers_for_lists_title_and_default_of_each_offered_page() {
         .iter()
         .any(|r| r.page == "acme/yaml" && r.title == "yaml" && !r.default));
     assert!(
-        all.iter()
-            .any(|r| r.page == "oxplow-foundation/editor" && r.default),
+        all.iter().any(|r| r.page == "oxplow/editor" && r.default),
         "{all:?}"
     );
     assert!(renderers_for(

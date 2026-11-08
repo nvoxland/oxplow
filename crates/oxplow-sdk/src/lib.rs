@@ -453,7 +453,7 @@ pub fn scaffold_with(
                 "    - name: published\n      input: { job: run }\n      expect: the finished job's reply is commented on the work item\n",
             );
             manifest.push_str(&format!(
-                "# The model: a person binds `{name}/{ns}` in Settings → AI; until then it\n\
+                "# The model: a person binds `{ns}/{ns}` in Settings → AI; until then it\n\
                  # uses their Summarize model. The job's script runs core commands as\n\
                  # the caller. Deploying approves the permissions below.\n\
                  permissions: [ai.compute, commands:oxplow.work_item.comment]\n\
@@ -500,7 +500,7 @@ pub fn scaffold_with(
                  \x20 - id: publish\n\
                  \x20   summary: When the job ends, comment its reply on the work item.\n\
                  \x20   on: [contribution.job.completed]\n\
-                 \x20   where: {{ job: \"{name}/run\" }}\n\
+                 \x20   where: {{ job: \"{ns}/run\" }}\n\
                  \x20   entry: effects/publish.star\n\
                  \x20   needs: [jobs.read]\n"
             ));
@@ -703,7 +703,7 @@ pub fn scaffold_with(
                      expect:\n\
                      \x20 state: succeeded\n\
                      \x20 effects:\n\
-                     \x20   - {{ id: {name}/publish, state: ok }}\n\
+                     \x20   - {{ id: {ns}/publish, state: ok }}\n\
                      \x20 commands: {{ contains: [oxplow.work_item.comment] }}\n\
                      model:\n\
                      \x20 replies: [\"A fine start.\"]\n"
@@ -1414,7 +1414,7 @@ pub fn profile_lines(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Vec<S
                 format!(" (needs {})", names.join(", "))
             };
             let role = oxplow_ai::config::Role::Profile {
-                extension: ext.name.clone(),
+                namespace: ext.namespace.clone(),
                 name: p.id.clone(),
             };
             let serves = match ai.roles.get(&role) {
@@ -1432,7 +1432,7 @@ pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Ve
     ext.ai_profiles
         .iter()
         .filter_map(|decl| {
-            let profile = decl.profile(&ext.name);
+            let profile = decl.profile(&ext.namespace);
             let binding = ai.roles.get(&profile.role()).or_else(|| {
                 ai.roles
                     .get(&oxplow_ai::config::Role::Builtin(profile.fallback))
@@ -1441,7 +1441,7 @@ pub fn profile_warnings(ext: &Extension, ai: &oxplow_ai::config::AiConfig) -> Ve
             Some(
                 Diagnostic::warning("ai_profile.forbidden_feature", why)
                     .at("extension.yaml", None)
-                    .contribution(format!("{}/{}", ext.name, decl.id))
+                    .contribution(format!("{}/{}", ext.namespace, decl.id))
                     .fix("allow the feature in the role's binding, or drop it from the profile"),
             )
         })

@@ -10,7 +10,7 @@ import { dirUri, fileLinesUri, fileUri, formatUri, identityOf, isExternal, param
 const fixture = JSON.parse(
   readFileSync(join(import.meta.dir, "../../../../crates/oxplow-domain/tests/fixtures/uri.json"), "utf8"),
 ) as {
-  valid: Array<{ text: string; resource: { extension: string; name: string }; params: Record<string, string>; view: Record<string, string>; canonical: string; identity: string }>;
+  valid: Array<{ text: string; resource: { namespace: string; name: string }; params: Record<string, string>; view: Record<string, string>; canonical: string; identity: string }>;
   invalid: Array<{ text: string; reason: string }>;
   build: Array<{ resource: string; params: Record<string, string>; view: Record<string, string>; canonical: string }>;
 };

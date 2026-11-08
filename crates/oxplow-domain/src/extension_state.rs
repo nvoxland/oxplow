@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::{contribution::valid_extension_name, DomainError, Json};
+use crate::{contribution::valid_namespace, DomainError, Json};
 
 pub const MAX_KEYS: usize = 256;
 pub const MAX_KEY_BYTES: usize = 128;
@@ -16,18 +16,20 @@ pub const MAX_SNAPSHOT_BYTES: usize = 1_048_576;
 /// Stay below serde_json's decoding recursion limit, including the map.
 pub const MAX_VALUE_DEPTH: usize = 64;
 
-/// One extension's storage namespace in the current project's database.
+/// One namespace's private storage in the current project's database: the
+/// extensions sharing a namespace share it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type)]
 #[serde(deny_unknown_fields)]
 pub struct Namespace {
-    pub extension: String,
+    /// The extensions' `namespace:`.
+    pub namespace: String,
     pub scope: Scope,
     pub area: Area,
 }
 
 impl Namespace {
     pub fn validate(&self) -> Result<(), StateError> {
-        if self.extension.len() > MAX_KEY_BYTES || !valid_extension_name(&self.extension) {
+        if self.namespace.len() > MAX_KEY_BYTES || !valid_namespace(&self.namespace) {
             return Err(StateError::Invalid("invalid extension namespace".into()));
         }
         Ok(())

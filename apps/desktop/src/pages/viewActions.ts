@@ -24,7 +24,7 @@ export const TEMP_EXTENSION = "temp";
 
 /** The page "Definition" in About this page draws with: Definition, a display mode of a
  *  page's YAML file. */
-export const DEFINITION_PAGE = "oxplow-foundation/definition";
+export const DEFINITION_PAGE = "oxplow/definition";
 
 /** What Definition in About this page opens: the page's running copy
  *  (`PageProvenance.running_uri`, its file on `oxplow:extensions` pinned to

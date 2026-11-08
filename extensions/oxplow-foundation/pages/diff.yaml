@@ -17,7 +17,7 @@ loaders:
 view:
   stack:
   # What other extensions show for the file above its diff (bundled's
-  # co-change files): pages mounted at `oxplow-foundation/diff.file-header`.
+  # co-change files): pages mounted at `oxplow/diff.file-header`.
   - slot: file-header
   - id: diff
     title: Diff

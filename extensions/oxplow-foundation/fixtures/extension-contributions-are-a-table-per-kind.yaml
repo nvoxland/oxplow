@@ -4,7 +4,7 @@
 # the extension doesn't have keeps its table, saying so: the page has one shape.
 # Parts and queries are tables of their own, apart from its pages.
 when:
-  page: oxplow-foundation/extension
+  page: oxplow/extension
   params:
     uri: "oxplow:oxplow/extension?name=oxplow-foundation"
     name: oxplow-foundation
@@ -27,7 +27,7 @@ expect:
         contains:
           - { title: Commit, description: $any, link: $any }
     parts: { rows: { contains: [{ title: Undelivered events }] } }
-    queries: { rows: { contains: [{ id: oxplow-foundation/metrics-dimensions }] } }
+    queries: { rows: { contains: [{ id: oxplow/metrics-dimensions }] } }
     commands:
       rows:
         contains:

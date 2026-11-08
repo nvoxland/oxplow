@@ -77,13 +77,19 @@ pub(crate) fn build(root: &Path, project: &Path, mut candidate: Extension) -> Ca
     }
     let mut dependents = BTreeSet::from([name]);
     loop {
+        // An import names its producer's contribution by namespace.
+        let namespaces: BTreeSet<&str> = extensions
+            .iter()
+            .filter(|ext| dependents.contains(&ext.name))
+            .map(|ext| ext.namespace.as_str())
+            .collect();
         let consumers: Vec<_> = extensions
             .iter()
             .filter(|ext| {
                 ext.public_contracts
                     .imports
                     .iter()
-                    .any(|import| dependents.contains(&import.contribution.extension))
+                    .any(|import| namespaces.contains(import.contribution.namespace.as_str()))
             })
             .map(|ext| ext.name.clone())
             .collect();

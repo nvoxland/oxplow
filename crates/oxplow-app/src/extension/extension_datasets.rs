@@ -1,6 +1,6 @@
 //! Extensions' SQL datasets (P4.9, `.context/semantic-layer.md` "Datasets"):
 //! compiled from the primary worktree's enabled extensions into
-//! `v_<extension>_<name>` views, after the core datasets, in one pass
+//! `v_<namespace>_<name>` views, after the core datasets, in one pass
 //! (`oxplow_db::datasets::compile_extensions`). Views are project-wide, like
 //! source data, so a worktree stream's extension edits reach them only
 //! once merged.
@@ -274,6 +274,6 @@ mod tests {
             ".oxplow/extensions/late/datasets/blocked.sql",
             "SELECT uri, title FROM source('work_item')",
         );
-        assert!(validate().await.contains("only its own extension's tables"));
+        assert!(validate().await.contains("only its own namespace's tables"));
     }
 }

@@ -91,7 +91,7 @@ linking to Extension problems filtered to it) and a link to its
 running `extension.yaml`; then its pages (each linking to the Definition of
 the running file, `v_page.running_uri`), the other contributions by count,
 what it may reach, its deployments (newest first, Roll Back to This) and the
-slot `oxplow-foundation/extension.runs`, which oxplow-bundled fills with
+slot `oxplow/extension.runs`, which oxplow-bundled fills with
 `extension-runs` (foundation never depends on bundled). Deploy, Roll Back,
 Enable, Disable, Share with the Team, Stop Sharing and Remove are the page's
 actions (the ☰ menu), each offered by a `can_*` column of its first loader;
@@ -204,12 +204,12 @@ its scope trace.
   started it. A person's `oxplow.effect.retry` / `backfill` links the
   reaction's run to theirs (`under`) without making it theirs: the
   effect still runs as itself.
-  **Reading it:** the bundled `runs` page (`oxplow-bundled-todo/runs`, titled
+  **Reading it:** the bundled `runs` page (`oxplow/runs`, titled
   "Extension runs", in the launcher under Activity) lists, per extension
   and for the last 7 days, its runs, failures, denials, mean `cpu_ms` and
   model calls, the ones needing attention first. The Extensions page
   shows each extension's worst current run (`v_extension_run`, `latest =
-  1`). Opening an extension's row (the `oxplow-bundled-todo/extension-runs`
+  1`). Opening an extension's row (the `oxplow/extension-runs`
   page, which has no category, param `extension`) lists its runs one by one for the same week:
   contribution, version, generation (blank for a run that holds none),
   actor, causing event, outcome, error, wall and CPU time, model calls — the
@@ -333,7 +333,7 @@ uses):
   snapshot, else its stream's latest, else the primary stream's, and
   keeps the last one — or `Trees::Fixed`, a fact collector's sweep or a
   fixture) and the dataset (a `CollectorOracle` on the run, caller
-  `collector:<owner>/<id>`). A `sql.read` call is decided as it's made
+  `collector:<namespace>/<id>`). A `sql.read` call is decided as it's made
   (`Calls::serve`), not twice. A caller with nothing to give (a command;
   a dry run, which is pure) says the service isn't available there. The
   worker gets the result as its host set (`Given::onto`).

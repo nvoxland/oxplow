@@ -1,4 +1,4 @@
-# effort-review/review-on-finish: a finished effort with a work item gets a
+# effort_review/review-on-finish: a finished effort with a work item gets a
 # review (`effort.review` holds the prompt; a second delivery of the same
 # event asks for the same job, not another).
 

@@ -4,7 +4,7 @@
 given:
   - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=problems", label: "oxplow:oxplow/page?page=problems" } }
   - { command: oxplow.context.add, input: { thread: thr1, uri: "oxplow:oxplow/page?page=git-history", label: "oxplow:oxplow/page?page=git-history" } }
-when: { page: oxplow-foundation/context, params: { thread_id: 1 } }
+when: { page: oxplow/context, params: { thread_id: 1 } }
 expect: { loaders: { waiting: { rows: 2 } } }
 steps:
   - press: { action: clear }

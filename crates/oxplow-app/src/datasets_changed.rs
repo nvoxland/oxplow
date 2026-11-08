@@ -395,7 +395,7 @@ mod tests {
         let through = lineage.affected(&["metric_capture".to_string()]);
         assert!(through.contains(&"v_test_run".to_string()));
         assert!(
-            through.contains(&"v_oxplow_bundled_claim_status".to_string()),
+            through.contains(&"v_oxplow_claim_status".to_string()),
             "oxplow-bundled's claim status reads v_test_run"
         );
 
@@ -631,6 +631,7 @@ mod tests {
             .db
             .compile_extension_datasets(vec![ExtensionDatasets {
                 extension: "acme".into(),
+                namespace: "acme".into(),
                 sources: vec![
                     dataset(
                         "titles",
@@ -780,6 +781,7 @@ mod tests {
                 let errors = db
                     .compile_extension_datasets(vec![ExtensionDatasets {
                         extension: "acme".into(),
+                        namespace: "acme".into(),
                         sources,
                         config: None,
                     }])

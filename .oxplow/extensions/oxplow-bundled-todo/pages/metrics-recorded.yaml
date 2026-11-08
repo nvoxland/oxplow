@@ -36,7 +36,7 @@ params:
   type: choice
   role: filter
   label: Slice by
-  options_from: oxplow-foundation/metrics-dimensions
+  options_from: oxplow/metrics-dimensions
   default: ''
 loaders:
   metrics:
@@ -91,7 +91,7 @@ view:
       kind: page
       from: metric_ref
     highlight: q
-    expand: oxplow-bundled-todo/metrics-slices
+    expand: oxplow/metrics-slices
   - key: trend
     label: Trend
     format: sparkline

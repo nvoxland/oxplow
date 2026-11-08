@@ -8,7 +8,7 @@ params:
 loaders:
   # What the thread sees, the rule the rail's Go To panel reads too.
   bookmarks:
-    page: oxplow-foundation/thread-bookmarks
+    page: oxplow/thread-bookmarks
     loader: bookmarks
     params: { thread_id: { param: thread_id } }
   recent:

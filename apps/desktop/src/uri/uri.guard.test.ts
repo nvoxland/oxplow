@@ -32,7 +32,7 @@ function code(text: string): string {
 }
 
 const FORBIDDEN: Array<[RegExp, string]> = [
-  [/[`"']oxplow:[a-z][a-z0-9-]*\//, "writes a URI (use a builder in uri/uri.ts)"],
+  [/[`"']oxplow:[a-z][a-z0-9_]*\//, "writes a URI (use a builder in uri/uri.ts)"],
   [/\^oxplow:/, "matches the oxplow: scheme (use isOxplowScheme / parseUri)"],
   [/\b\w*[uU]ri\w*\.indexOf\(["']\?["']\)/, "splits a URI at its query (use parseUri)"],
 ];

@@ -119,7 +119,7 @@ async fn a_scaffolded_collector_checks_before_its_first_sync_and_runs() {
         .run(
             &oxplow_domain::Actor::Human,
             "oxplow.collector.sync",
-            serde_json::json!({ "collector": format!("open-items/{}", collector.id).to_string() }),
+            serde_json::json!({ "collector": format!("open_items/{}", collector.id).to_string() }),
             true,
         )
         .await
@@ -1080,7 +1080,7 @@ async fn a_scaffolded_panel_checks_tests_and_shows_its_page() {
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "open-work");
     assert_eq!(ext.panels.len(), 1);
-    assert_eq!(ext.panels[0].body, "open-work/open-work");
+    assert_eq!(ext.panels[0].body, "open_work/open-work");
     assert_eq!(ext.page_files.len(), 1);
 }
 

@@ -1,11 +1,11 @@
 # Settings → Data lists the effects oxplow's own extensions declare:
 # bundled's four.
-when: { page: oxplow-foundation/settings, params: { area: data } }
+when: { page: oxplow/settings, params: { area: data } }
 expect:
   loaders:
     data_effects:
       rows:
-        - { effect: oxplow-bundled-todo/infer-reasoning }
-        - { effect: oxplow-bundled-todo/repair-disabled }
-        - { effect: oxplow-bundled-todo/store-reasoning }
-        - { effect: oxplow-bundled-todo/verify-unchecked }
+        - { effect: oxplow/infer-reasoning }
+        - { effect: oxplow/repair-disabled }
+        - { effect: oxplow/store-reasoning }
+        - { effect: oxplow/verify-unchecked }

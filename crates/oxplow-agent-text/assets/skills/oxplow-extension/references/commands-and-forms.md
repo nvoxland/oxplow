@@ -3,7 +3,7 @@
 - **A command on a URI's menus** (its page's Commands, a row's
   right-click) says so in its own `ui`: `ui: { label, group?, about:
   oxplow/work_item, input?: { uri: "{{uri}}" } }` (`about` is a resource
-  name, `<extension>/<name>`; `"{{uri.id}}"` binds the URI's key param, such as
+  name, `<namespace>/<name>`; `"{{uri.id}}"` binds the URI's key param, such as
   the id, alone). In a page's ☰ it sits at the top level among the page's
   own actions, sorted by label (`group` is the palette's heading and the
   row menu's grouping, not a ☰ submenu). Add `about_when: <column>` to

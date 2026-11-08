@@ -15,7 +15,7 @@ view:
     - id: tests
       title: "Tests" # tile title note
       size: wide
-      embed: { page: oxplow-foundation/problems }
+      embed: { page: oxplow/problems }
     # Coverage follows
     - id: coverage
       embed:

@@ -5,7 +5,7 @@ given:
       refs:
         branches: [{ name: main, head: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", stream: 1, default: true }]
         heads: [{ stream: 1, sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
-when: { page: oxplow-bundled-todo/merge-readiness, params: { stream_id: 1 } }
+when: { page: oxplow/merge-readiness, params: { stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ branch: main }] }

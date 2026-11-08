@@ -1,4 +1,4 @@
-# oxplow-bundled-todo/effort.infer_reasoning: ask a model what the agent decided
+# oxplow/effort.infer_reasoning: ask a model what the agent decided
 # and claimed during one effort. The one place the prompt lives (the
 # `infer-reasoning` effect and a person's Infer Again both come here). It
 # reads what the agent did — the conversation in the effort's window (each

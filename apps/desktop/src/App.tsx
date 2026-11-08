@@ -1685,7 +1685,7 @@ export function App() {
       // Until the extensions load, nothing says what draws it.
       if (extensions === null) return { id: ref.id, label: page.page, closable: true, render: () => null };
       // A shown view is a page file on `oxplow:temp`: the daemon has it, not the extensions.
-      if (page.extension === TEMP_EXTENSION) {
+      if (page.namespace === TEMP_EXTENSION) {
         return {
           id: ref.id,
           label: "View",

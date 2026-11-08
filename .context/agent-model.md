@@ -284,7 +284,7 @@ an event's stored body (`oxplow:oxplow/event?id=<id>#part=input`, `part=output`,
 caller's own stream's events only), a recorded model call's bodies
 (`oxplow:oxplow/ai_call?id=<id>#part=request`, `part=response`; any call but one another agent's
 thread asked for — an extension's, a collector's or a job's are the
-project's), a page's definition (`oxplow:oxplow/page?page=<ext>/<slug>`). A file or page is
+project's), a page's definition (`oxplow:oxplow/page?page=<namespace>/<slug>`). A file or page is
 read in the caller's stream's worktree, or another's named by `stream`
 (`str2`). Content stops at 64 KB with `truncated: true`; ask for
 lines to read further. A captured file's row comes from
@@ -1366,7 +1366,7 @@ Subagent tool calls reach the hooks like any other, so their edits and
 test runs land in the thread's effort with nothing from them: there is
 no dispatch protocol or subagent skill.
 
-**What to pick up next** is the foundation page `oxplow-foundation/work-next`
+**What to pick up next** is the foundation page `oxplow/work-next`
 (the tool `oxplow_work_next` with `thread: "thr3"`) over `v_work_item`, whichever
 list is active: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
@@ -1634,7 +1634,7 @@ a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
 
 `v_agent_plan` (thread, effort, turn, session, `proposed_at`, `text`,
 `path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
-reads them; the bundled `effort-plan` (slot `oxplow-foundation/changes.sections`) and
+reads them; the bundled `effort-plan` (slot `oxplow/changes.sections`) and
 `thread-plan` (slot `thread.plan.header`) pages show a plan, newest
 first.
 
@@ -1856,7 +1856,7 @@ row keyed by the event (`agent_token_usage.cause`).
 transcript the agent wrote — what the person typed into the real CLI.
 There is no second input box and no "send prompt" tool. Everything reads
 the rows through `v_token_usage`: the bundled `task-tokens` page
-(`oxplow-foundation/work-item.sections` slot), `thread-tokens` (`thread.plan.header`)
+(`oxplow/work-item.sections` slot), `thread-tokens` (`thread.plan.header`)
 and the usage pages. Tables: [data-model.md](./data-model.md).
 
 ### Collection command and skill
@@ -1878,7 +1878,7 @@ steering the agent to the report-emitting command
 ### Nudge persistence
 
 The nudges — the report-less-run nudge and any advisory hit (kind
-`<extension>/<advisory id>`), whatever its trigger — are written by pump
+`<namespace>/<advisory id>`), whatever its trigger — are written by pump
 reactors (`collection`, `advisories.post_tool` in
 `post_tool_reactors.rs`; prompt and turn-end advisories too) to the
 `agent_nudge` table (`crates/oxplow-db/src/agent_nudge_store.rs`) with
@@ -1895,7 +1895,7 @@ its nudges stay undelivered rather than being stamped and lost. **One-shot marks
 are durable** (`claim_once`, per effort or per thread): the report-less
 nudge fires once per effort, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
-`effort-nudges` page ("Agent Nudges", `oxplow-foundation/changes.sections` slot).
+`effort-nudges` page ("Agent Nudges", `oxplow/changes.sections` slot).
 
 ### Observe conformance
 

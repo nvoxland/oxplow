@@ -121,7 +121,7 @@ fn uri_members(builder: &mut GlobalsBuilder) {
         build::id_of(text, &resource).map_err(|e| anyhow::anyhow!("{e}"))
     }
 
-    /// A contribution's URI as `{ kind, extension, id }`: `extension` is
+    /// A contribution's URI as `{ kind, namespace, id }`: `namespace` is
     /// `None` for a kind named globally (a command's bus id, a metric key).
     fn contribution<'v>(
         #[starlark(require = pos)] text: &str,
@@ -130,7 +130,7 @@ fn uri_members(builder: &mut GlobalsBuilder) {
         let r: oxplow_domain::contribution::ContributionRef =
             text.parse().map_err(|e: String| anyhow::anyhow!(e))?;
         Ok(heap.alloc(serde_json::json!({
-            "kind": r.kind().segment(), "extension": r.extension(), "id": r.name(),
+            "kind": r.kind().segment(), "namespace": r.namespace(), "id": r.name(),
         })))
     }
 
@@ -212,12 +212,12 @@ mod tests {
         assert!(e.contains("isn't an oxplow URI"), "{e}");
         assert_eq!(
             run(r#"uri.contribution("oxplow:oxplow/collector?collector=work/hot")"#).unwrap(),
-            json!({ "kind": "collector", "extension": "work", "id": "hot" })
+            json!({ "kind": "collector", "namespace": "work", "id": "hot" })
         );
         assert_eq!(
             run(r#"uri.contribution("oxplow:oxplow/command?command=oxplow.review.accept")"#)
                 .unwrap(),
-            json!({ "kind": "command", "extension": null, "id": "oxplow.review.accept" })
+            json!({ "kind": "command", "namespace": null, "id": "oxplow.review.accept" })
         );
         assert!(run(r#"uri.contribution("oxplow:oxplow/effort?id=eff1")"#).is_err());
         // A guard for an optional value: `uri.is_uri` never fails.

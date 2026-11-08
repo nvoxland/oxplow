@@ -90,6 +90,10 @@ pub struct ImportGuard {
 pub struct PublicBinding {
     pub id: String,
     pub contribution: ContributionId,
+    /// The producer's namespace, which names its datasets (`ref('<ns>/…')`,
+    /// `v_<ns>_…`); the host's, not shown.
+    #[serde(skip)]
+    pub namespace: String,
     /// The version it bound: the producer's export when available.
     pub version: Option<u32>,
     pub available: bool,
@@ -174,7 +178,7 @@ pub(super) fn load(
     }
 }
 
-/// A manifest's contribution ref (`oxplow:oxplow/dataset?dataset=effort-review/reviews`,
+/// A manifest's contribution ref (`oxplow:oxplow/dataset?dataset=effort_review/reviews`,
 /// `oxplow:oxplow/command?command=acme.pr.merge`). A global name says no owner: in an export or
 /// guard it is the extension's own; in an import the owner is found when
 /// imports resolve ([`resolve_global_imports`]), until then its extension
@@ -187,7 +191,7 @@ fn parse_id(
 ) -> Option<ContributionId> {
     match text.parse::<oxplow_domain::contribution::ContributionRef>() {
         Ok(r) => Some(r.id().unwrap_or_else(|| {
-            let owner = if own { ext.name.as_str() } else { "" };
+            let owner = if own { ext.namespace.as_str() } else { "" };
             ContributionId::new(owner, r.kind(), r.name())
         })),
         Err(error) => {
@@ -216,7 +220,7 @@ fn resolve_global_imports(extensions: &mut [Extension]) {
         .collect();
     for ext in extensions.iter_mut() {
         for import in &mut ext.public_contracts.imports {
-            if import.contribution.extension.is_empty() {
+            if import.contribution.namespace.is_empty() {
                 if let Some(owner) = owners.get(&import.contribution.reference()) {
                     import.contribution = owner.clone();
                 }
@@ -232,7 +236,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         .map(|dataset| {
             (
                 ContributionId::new(
-                    &ext.name,
+                    &ext.namespace,
                     ContributionKind::Dataset,
                     dataset
                         .twin
@@ -246,7 +250,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         .chain(ext.page_files.iter().flat_map(|page| {
             page.loaders.iter().filter_map(|decl| match &decl.loader {
                 crate::pages::schema::Loader::Sql { sql, .. } => Some((
-                    ContributionId::new(&ext.name, ContributionKind::Page, &page.slug),
+                    ContributionId::new(&ext.namespace, ContributionKind::Page, &page.slug),
                     page.origin.running.clone(),
                     sql.clone(),
                 )),
@@ -294,7 +298,7 @@ pub(super) fn prepare(ext: &mut Extension) {
         }
     }
     for guard in ext.public_contracts.guards.clone() {
-        if guard.contribution.extension != ext.name
+        if guard.contribution.namespace != ext.namespace
             || !ext
                 .contributions
                 .iter()
@@ -366,6 +370,7 @@ fn candidate(
 ) -> imports::Candidate {
     imports::Candidate {
         name: ext.name.clone(),
+        namespace: ext.namespace.clone(),
         enabled: ext.enabled,
         bundled: ext.origin == "bundled",
         contributions: ext
@@ -444,7 +449,9 @@ fn record_diagnostics(
             let withheld: Vec<_> = match (&finding.binding, finding.severity) {
                 (Some(binding), imports::Severity::Warning) => causes
                     .iter()
-                    .filter(|(id, bindings)| id.extension == ext.name && bindings.contains(binding))
+                    .filter(|(id, bindings)| {
+                        id.namespace == ext.namespace && bindings.contains(binding)
+                    })
                     .map(|(id, _)| format!("`{id}`"))
                     .collect(),
                 _ => Vec::new(),
@@ -460,7 +467,7 @@ fn record_diagnostics(
             }
             .at(file, line);
             let diagnostic = match &finding.binding {
-                Some(binding) => diagnostic.contribution(format!("{}/{binding}", ext.name)),
+                Some(binding) => diagnostic.contribution(format!("{}/{binding}", ext.namespace)),
                 None => diagnostic,
             };
             let messages = match finding.severity {
@@ -565,7 +572,7 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
             if !causes.contains_key(id) {
                 let bindings = causes
                     .iter()
-                    .filter(|(other, _)| other.extension == id.extension)
+                    .filter(|(other, _)| other.namespace == id.namespace)
                     .flat_map(|(_, bindings)| bindings.iter().cloned())
                     .collect();
                 causes.insert(id.clone(), bindings);
@@ -579,7 +586,7 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
     for ext in extensions.iter_mut() {
         for (id, _) in causes
             .iter()
-            .filter(|(id, bindings)| id.extension == ext.name && bindings.is_empty())
+            .filter(|(id, bindings)| id.namespace == ext.namespace && bindings.is_empty())
         {
             let message = Diagnostic::warning(
                 "import.withheld",
@@ -609,6 +616,7 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
                 PublicBinding {
                     id: binding.binding.clone(),
                     contribution: binding.target.clone(),
+                    namespace: binding.target.namespace.clone(),
                     version: binding.version,
                     available,
                     unavailable_reason: if available {
@@ -624,7 +632,7 @@ fn resolve(extensions: &mut [Extension], publish: bool) {
             .collect();
         ext.public_contracts.withheld = causes
             .iter()
-            .filter(|(id, _)| id.extension == ext.name)
+            .filter(|(id, _)| id.namespace == ext.namespace)
             .map(|(id, bindings)| Withheld {
                 contribution: id.clone(),
                 imports: bindings.iter().cloned().collect(),
@@ -691,7 +699,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                 {
                     if !providers.contains(provider) {
                         removed.insert(ContributionId::new(
-                            &ext.name,
+                            &ext.namespace,
                             ContributionKind::Command,
                             &command.name,
                         ));
@@ -715,11 +723,11 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     true
                 } else {
                     removed.insert(ContributionId::new(
-                        &ext.name,
+                        &ext.namespace,
                         ContributionKind::Panel,
                         panel
                             .id
-                            .strip_prefix(&format!("{}/", ext.name))
+                            .strip_prefix(&format!("{}/", ext.namespace))
                             .unwrap_or(&panel.id),
                     ));
                     false
@@ -732,7 +740,11 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                 if pages.contains(&slot.page) {
                     true
                 } else {
-                    removed.insert(ContributionId::new(&ext.name, ContributionKind::Slot, &id));
+                    removed.insert(ContributionId::new(
+                        &ext.namespace,
+                        ContributionKind::Slot,
+                        &id,
+                    ));
                     false
                 }
             });
@@ -741,7 +753,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     true
                 } else {
                     removed.insert(ContributionId::new(
-                        &ext.name,
+                        &ext.namespace,
                         ContributionKind::Replacement,
                         &replacement.target,
                     ));
@@ -751,7 +763,9 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
             let datasets: BTreeSet<_> = ext
                 .datasets
                 .iter()
-                .map(|dataset| oxplow_db::datasets::extension_view(&ext.name, &dataset.decl.name))
+                .map(|dataset| {
+                    oxplow_db::datasets::extension_view(&ext.namespace, &dataset.decl.name)
+                })
                 .collect();
             let core = ext.namespace == super::CORE_NAMESPACE;
             ext.resources.retain(|resource| {
@@ -765,7 +779,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     true
                 } else {
                     removed.insert(ContributionId::new(
-                        &ext.name,
+                        &ext.namespace,
                         ContributionKind::Resource,
                         decl.name.name(),
                     ));
@@ -777,7 +791,7 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     true
                 } else {
                     removed.insert(ContributionId::new(
-                        &ext.name,
+                        &ext.namespace,
                         ContributionKind::Decorator,
                         &format!(
                             "decorator-{}",
@@ -820,13 +834,13 @@ fn rewrite_sql(sql: &str, bindings: &[PublicBinding], dataset: bool) -> String {
             let replacement = if dataset {
                 format!(
                     "ref('{}/{}')",
-                    binding.contribution.extension, binding.contribution.local
+                    binding.namespace, binding.contribution.local
                 )
             } else {
                 format!(
                     "\"{}\"",
                     oxplow_db::datasets::extension_view(
-                        &binding.contribution.extension,
+                        &binding.namespace,
                         &binding.contribution.local
                     )
                     .replace('"', "\"\"")

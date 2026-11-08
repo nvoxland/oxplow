@@ -8,8 +8,8 @@ afterEach(cleanup);
 
 const page = fakePage(node.viz("items", "items"));
 const links = [
-  { title: "Collectors", uri: "oxplow:oxplow/page?page=oxplow-foundation/collectors", description: "Every collector." },
-  { title: "Extension problems", uri: "oxplow:oxplow/page?page=oxplow-foundation/extension-problems#extension=acme", description: null },
+  { title: "Collectors", uri: "oxplow:oxplow/page?page=oxplow/collectors", description: "Every collector." },
+  { title: "Extension problems", uri: "oxplow:oxplow/page?page=oxplow/extension-problems#extension=acme", description: null },
 ];
 const run = fakeRun(page, { loaders: { items: loader([], []) }, seeAlso: links });
 
@@ -30,11 +30,11 @@ test("a page with no see-also links draws no group", () => {
 
 const views = {
   options: [
-    { name: "oxplow-foundation/measure", title: "Measure" },
-    { name: "oxplow-foundation/measure-data", title: "Measure data" },
-    { name: "oxplow-foundation/definition", title: "Definition" },
+    { name: "oxplow/measure", title: "Measure" },
+    { name: "oxplow/measure-data", title: "Measure data" },
+    { name: "oxplow/definition", title: "Definition" },
   ],
-  current: "oxplow-foundation/measure",
+  current: "oxplow/measure",
   pick: () => {},
 };
 
@@ -42,20 +42,20 @@ test("the other views of the tab's item follow the declared links, the current o
   const { getByTestId, getByText, queryByTestId } = render(<RailSeeAlso run={run} onOpenPage={() => {}} openWith={views} />);
   const labels = Array.from(getByTestId("page-rail-see-also").querySelectorAll("button")).map((b) => b.textContent);
   expect(labels).toEqual(["Collectors", "Extension problems", "View as Measure data", "View as Definition"]);
-  expect(queryByTestId("see-also-view-oxplow-foundation/measure")).toBeNull();
-  expect(getByText("View as Definition")).toBe(getByTestId("see-also-view-oxplow-foundation/definition"));
+  expect(queryByTestId("see-also-view-oxplow/measure")).toBeNull();
+  expect(getByText("View as Definition")).toBe(getByTestId("see-also-view-oxplow/definition"));
 });
 
 test("a view link picks that view as View as does", () => {
   const picked: string[] = [];
   const { getByTestId } = render(<RailSeeAlso run={run} onOpenPage={() => {}} openWith={{ ...views, pick: (n) => picked.push(n) }} />);
-  fireEvent.click(getByTestId("see-also-view-oxplow-foundation/measure-data"));
-  expect(picked).toEqual(["oxplow-foundation/measure-data"]);
+  fireEvent.click(getByTestId("see-also-view-oxplow/measure-data"));
+  expect(picked).toEqual(["oxplow/measure-data"]);
 });
 
 test("view links alone make the group", () => {
   const { getByTestId } = render(<RailSeeAlso run={fakeRun(page, { loaders: { items: loader([], []) } })} openWith={views} />);
-  expect(getByTestId("see-also-view-oxplow-foundation/definition")).toBeTruthy();
+  expect(getByTestId("see-also-view-oxplow/definition")).toBeTruthy();
 });
 
 test("no view links with one view, none without View as", () => {

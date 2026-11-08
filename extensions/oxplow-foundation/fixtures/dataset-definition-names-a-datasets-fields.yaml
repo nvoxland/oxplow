@@ -1,6 +1,6 @@
 # The definition mode of a dataset: what it holds, its owner and kind, and each field with its type and doc.
 when:
-  page: oxplow-foundation/dataset-definition
+  page: oxplow/dataset-definition
   params: { uri: "oxplow:oxplow/dataset?dataset=work_item" }
 expect:
   label: v_work_item

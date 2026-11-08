@@ -245,7 +245,7 @@ impl<'a> Calls<'a> {
     fn with_ai_source(self, source: Option<std::sync::Arc<crate::ai_service::AiService>>) -> Self {
         match source {
             Some(source) => {
-                let extension = self.run.extension().map(str::to_string);
+                let extension = self.run.namespace().map(str::to_string);
                 self.with_ai_reader(Box::new(move |name| {
                     discover(&source, extension.as_deref(), &name)
                 }))
@@ -794,7 +794,7 @@ mod tests {
         );
         svc.set_profiles(std::sync::Arc::new(|| {
             vec![crate::ai_service::AiProfile {
-                extension: "acme".into(),
+                namespace: "acme".into(),
                 name: "review".into(),
                 description: "Reviews.".into(),
                 fallback: BuiltinRole::Summarize,
@@ -845,6 +845,7 @@ mod tests {
         RunContext::contribution(
             oxplow_domain::run::ContributionRef {
                 id: ContributionId::new("acme", ContributionKind::Effect, "e"),
+                extension: "acme".into(),
                 version: None,
                 generation: None,
                 deployment: None,

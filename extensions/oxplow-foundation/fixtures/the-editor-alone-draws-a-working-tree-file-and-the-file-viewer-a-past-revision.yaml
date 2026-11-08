@@ -8,7 +8,7 @@ expect:
   ok: true
   result:
     renderers:
-      - { page: oxplow-foundation/editor, default: true }
+      - { page: oxplow/editor, default: true }
 steps:
   - when:
       command: oxplow.page.renderers
@@ -17,4 +17,4 @@ steps:
       ok: true
       result:
         renderers:
-          - { page: oxplow-foundation/file-viewer, default: true }
+          - { page: oxplow/file-viewer, default: true }

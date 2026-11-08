@@ -10,8 +10,8 @@
 //! - **causality** (an event's `cause`) says which event's handling
 //!   logged this one.
 //!
-//! An `after:` target is one of three refs: `effect:<ext>/<id>`,
-//! `oxplow:oxplow/collector?collector=<ext>/<id>` — any enabled extension's — or
+//! An `after:` target is one of three refs: `effect:<namespace>/<id>`,
+//! `oxplow:oxplow/collector?collector=<namespace>/<id>` — any enabled extension's — or
 //! `oxplow:oxplow/consumer?name=<name>`, one of core's own event consumers
 //! (`change.analyze`, `collection`, …). A bare name in a manifest is this
 //! extension's own effect or collector of that id, else a core consumer.
@@ -67,11 +67,12 @@ fn article(word: &str) -> &'static str {
     }
 }
 
-/// Resolve one `after:` entry as `extension` wrote it: a ref as is; a
-/// bare name as this extension's own effect or collector of that id
-/// (`own` says which it declares), else a core consumer (`consumers`).
+/// Resolve one `after:` entry as an extension in `namespace` wrote it: a
+/// ref as is; a bare name as this extension's own effect or collector of
+/// that id (`own` says which it declares), else a core consumer
+/// (`consumers`).
 pub fn resolve(
-    extension: &str,
+    namespace: &str,
     entry: &str,
     own: &dyn Fn(ContributionKind, &str) -> bool,
     consumers: &[&str],
@@ -84,7 +85,7 @@ pub fn resolve(
     for kind in [ContributionKind::Effect, ContributionKind::Collector] {
         if own(kind, entry) {
             return Ok(After::Contribution(
-                crate::contribution::ContributionId::new(extension, kind, entry).reference(),
+                crate::contribution::ContributionId::new(namespace, kind, entry).reference(),
             ));
         }
     }
@@ -93,7 +94,7 @@ pub fn resolve(
     }
     Err(format!(
         "`{entry}` is none of this extension's effects or collectors and no core consumer; \
-         name another extension's by its URI or `effect:<extension>/<id>`"
+         name another extension's by its URI or `effect:<namespace>/<id>`"
     ))
 }
 

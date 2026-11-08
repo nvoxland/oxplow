@@ -40,7 +40,7 @@ view:
   - id: data
     title: What data there is
     embed:
-      page: oxplow-foundation/data-catalog
+      page: oxplow/data-catalog
   - id: configure
     title: What you can configure
     from: configure
