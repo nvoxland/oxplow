@@ -83,27 +83,41 @@ export function reportInput(entry: OpErrorInput, at: { thread: string | null; st
 }
 
 /**
- * Report `entry` with `run`, without waiting. A report that fails is
- * logged, never recorded as another op error: that would report itself
- * again, without end.
+ * Report `entry` with `run`. It resolves to the failure's id (the
+ * `ui.op_failed` event, `v_op_error.event_id`), or null when the report
+ * failed. A report that fails is logged, never recorded as another op
+ * error: that would report itself again, without end. It never rejects.
  */
-export function reportOpErrorWith(
+export async function reportOpErrorWith(
   run: (name: string, input: unknown) => Promise<unknown>,
   log: (level: UiLogLevel, message: string, context?: Record<string, unknown>) => void,
   entry: OpErrorInput,
   at: { thread: string | null; stream: string | null },
-): void {
-  run("oxplow.ui.report_error", reportInput(entry, at)).catch((error: unknown) => {
+): Promise<string | null> {
+  try {
+    const out = (await run("oxplow.ui.report_error", reportInput(entry, at))) as { result?: { event?: unknown } } | null;
+    const id = out?.result?.event;
+    return typeof id === "string" ? id : null;
+  } catch (error) {
     log("warn", "couldn't report an op error to the daemon", {
       label: entry.label,
       error: error instanceof Error ? error.message : String(error),
     });
-  });
+    return null;
+  }
 }
 
-/** Record an operation that failed in front of the person. */
+/** Report an operation that failed in front of the person; resolves to its
+ *  id (null when the report failed). A person's command reaches this through
+ *  the runner (`commands/runForPerson.ts`), which also shows it. */
+export function reportOpError(entry: OpErrorInput): Promise<string | null> {
+  return reportOpErrorWith(runCommand, logUi, entry, context);
+}
+
+/** Record an operation that failed in front of the person, without waiting:
+ *  for a failure that isn't a person's command (a read, a load). */
 export function recordOpError(entry: OpErrorInput): void {
-  reportOpErrorWith(runCommand, logUi, entry, context);
+  void reportOpError(entry);
 }
 
 /** `v_op_error` rows as failed operations. */
