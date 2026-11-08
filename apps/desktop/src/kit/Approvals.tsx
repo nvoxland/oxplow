@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineConfirm } from "../components/InlineConfirm.js";
 import { configUri, idOf } from "../uri/uri.js";
-import { decide, summarizeProposal, useProposals, type Proposal } from "../proposals.js";
+import { decide, sourceOf, summarizeProposal, useProposals, type Proposal } from "../proposals.js";
+import { SourceChip } from "./SourceChip.js";
 import { InlineError } from "./InlineError.js";
 
 /** The pending proposals an agent raised, read here and decided through
@@ -94,15 +95,21 @@ export function ProposalCard({
       style={{ ...cardStyle, borderLeftColor: s.destructive ? "var(--diff-del-fg, #f85149)" : "var(--accent)" }}
     >
       {compact ? null : (
-        <div style={{ color: "var(--text-primary)", fontWeight: 600 }}>
-          {s.title}
-          {s.destructive ? <span style={destructiveStyle}> destructive</span> : null}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={{ color: "var(--text-primary)", fontWeight: 600, flex: 1 }}>
+            {s.title}
+            {s.destructive ? <span style={destructiveStyle}> destructive</span> : null}
+          </span>
+          <SourceChip source={sourceOf(proposal)} />
         </div>
       )}
-      {compact ? null : <div style={mutedStyle}>{s.who} proposed this.</div>}
       {s.change ? (
         <div data-testid={`proposal-change-${id}`} style={changeStyle}>
-          {compact ? <span style={mutedStyle}>{s.who} proposes: </span> : null}
+          {compact ? (
+            <span style={{ marginRight: 6 }}>
+              <SourceChip source={sourceOf(proposal)} />
+            </span>
+          ) : null}
           <span>{s.change.before}</span>
           <span style={mutedStyle}> → </span>
           <span style={{ color: "var(--text-primary)" }}>{s.change.after}</span>

@@ -4,6 +4,9 @@ loaders:
   alerts_reactions:
     sql: |
       SELECT r.effect, r.event_id, coalesce(e.type, 'an event') AS event_type,
+             -- The extension whose effect it is: the source chip every alert uses.
+             json_object('kind', 'extension', 'label', r.effect,
+                         'uri', uri('oxplow/extension', 'name', r.extension)) AS source,
              r.attempt || CASE WHEN r.retry_at IS NULL THEN '' ELSE ', tries again by itself' END AS tries,
              coalesce(r.finished_at, r.started_at) AS at,
              r.reason
@@ -13,8 +16,9 @@ view:
   from: alerts_reactions
   viz: table
   columns:
-  - key: effect
+  - key: source
     label: Reaction
+    format: source
   - key: event_type
     label: Event
   - key: tries

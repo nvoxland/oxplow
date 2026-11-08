@@ -391,22 +391,42 @@ fn items(c: &SqlCell) -> String {
         .join(" · ")
 }
 
+/// A `source` cell (`{ kind, label, uri? }`) as who: `agent in <label>`,
+/// `<kind> <label>`, `You`. A value that isn't one reads as it is.
+fn source(c: &SqlCell) -> String {
+    let raw = cell(c);
+    let Ok(serde_json::Value::Object(o)) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return raw;
+    };
+    let (Some(kind), Some(label)) = (
+        o.get("kind").and_then(|k| k.as_str()),
+        o.get("label").and_then(|l| l.as_str()),
+    ) else {
+        return raw;
+    };
+    match kind {
+        "you" => label.to_string(),
+        "agent" => format!("agent in {label}"),
+        other => format!("{other} {label}"),
+    }
+}
+
 /// Row `r`'s value in result column `i`, as the person reads it: an
-/// `items` column as its items.
+/// `items` column as its items, a `source` column as who.
 fn value(run: &VizRun, r: &[SqlCell], i: usize) -> String {
     let Some(c) = r.get(i) else {
         return String::new();
     };
-    let is_items = run.result.columns.get(i).is_some_and(|key| {
-        run.config
-            .columns
-            .iter()
-            .any(|c| &c.key == key && c.format == Some(ColumnFormat::Items))
-    });
-    if is_items {
-        items(c)
-    } else {
-        cell(c)
+    let format = run
+        .result
+        .columns
+        .get(i)
+        .and_then(|key| run.config.columns.iter().find(|c| &c.key == key))
+        .and_then(|c| c.format);
+    match format {
+        Some(ColumnFormat::Items) => items(c),
+        Some(ColumnFormat::Source) => source(c),
+        _ => cell(c),
     }
 }
 
@@ -1697,6 +1717,48 @@ mod tests {
         assert_eq!(
             render(&r, &Resolved::default()),
             "**perms**: plain · sql.read (may run its own SQL) · to\n**other**: [1]"
+        );
+    }
+
+    /// A `source` column (who caused it: an agent's thread, the person, an
+    /// extension) reads as its kind and label; a value that is not one
+    /// reads as it is.
+    #[test]
+    fn a_source_column_reads_as_who() {
+        let agent = r#"{"kind":"agent","label":"Main Controller","uri":"oxplow:oxplow/page?page=thread-work&thread=thr1"}"#;
+        let r = with(
+            run(
+                Viz::Detail,
+                None,
+                &["by", "ext", "you", "other"],
+                vec![vec![
+                    t(agent),
+                    t(r#"{"kind":"extension","label":"oxplow-bundled"}"#),
+                    t(r#"{"kind":"you","label":"You"}"#),
+                    t("plain"),
+                ]],
+            ),
+            |l| {
+                let col = |key: &str| crate::pages::spec::PageColumn {
+                    key: key.into(),
+                    label: None,
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    width: None,
+                    format: Some(crate::pages::spec::ColumnFormat::Source),
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                    when: None,
+                };
+                l.columns = vec![col("by"), col("ext"), col("you"), col("other")];
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "**by**: agent in Main Controller\n**ext**: extension oxplow-bundled\n**you**: You\n**other**: plain"
         );
     }
 

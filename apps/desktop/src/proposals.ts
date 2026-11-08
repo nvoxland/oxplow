@@ -10,6 +10,9 @@ import { decideProposal, querySql } from "./api.js";
 import { recordOpError } from "./opErrors.js";
 import { NO_READS, useRerunOnChange } from "./viz/rerun.js";
 import { threadRowId } from "./modelIds.js";
+import { pageTabRef } from "./tabs/pageRefs.js";
+import { extensionUri } from "./uri/uri.js";
+import type { Source } from "./viz/vizModel.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** What the run raised: the command, its summary and input, and whether
@@ -58,7 +61,6 @@ export interface Proposal {
 /** How a card shows a proposal. */
 export interface ProposalSummary {
   title: string;
-  who: string;
   /** A config key's value before and after. */
   change: { before: string; after: string } | null;
   /** A composite's commands, in order. */
@@ -151,6 +153,23 @@ function valueText(value: unknown): string {
 const field = (value: unknown, name: string): unknown =>
   value && typeof value === "object" ? (value as Record<string, unknown>)[name] : undefined;
 
+/** Who asked (the source chip every alert shows): the agent's thread by
+ *  its title, as the person knows it, never its id; a page acting for an
+ *  agent; an extension's effect, which is the extension's. */
+export function sourceOf(p: Proposal): Source {
+  if (p.actorKind === "effect" && p.actorId) {
+    const extension = p.actorId.split("/")[0]!;
+    return { kind: "extension", label: extension, uri: extensionUri(extension) };
+  }
+  if (p.actorKind === "page") return { kind: "page", label: p.actorId ?? "A page" };
+  const thread = p.threadId === null ? null : `thr${p.threadId}`;
+  return {
+    kind: "agent",
+    label: p.threadTitle ?? p.actorId ?? "An agent",
+    ...(thread ? { uri: pageTabRef("thread-work", { thread }).id } : {}),
+  };
+}
+
 export function summarizeProposal(p: Proposal): ProposalSummary {
   const key = field(p.input, "key");
   const title =
@@ -159,15 +178,11 @@ export function summarizeProposal(p: Proposal): ProposalSummary {
       : p.command === "oxplow.config.unset" && typeof key === "string"
         ? `Unset ${key}`
         : p.preview?.summary || p.command;
-  // The thread by its title, as the person knows it, never its id.
-  const agent = p.threadTitle ? `The agent in “${p.threadTitle}”` : "The agent";
-  const who = p.actorKind === "page" ? `A page${p.actorId ? ` (${p.actorId})` : ""} for the agent` : agent;
   const hasChange = p.dryRun != null && typeof p.dryRun === "object" && "before" in p.dryRun && "after" in p.dryRun;
   const shown = (v: unknown) => (v == null ? "(not set)" : valueText(v));
   const children = field(p.dryRun, "children");
   return {
     title,
-    who,
     change: hasChange ? { before: shown(field(p.dryRun, "before")), after: shown(field(p.dryRun, "after")) } : null,
     children: Array.isArray(children) ? children.map((c) => String(field(c, "name"))) : [],
     destructive: Boolean(p.preview?.destructive),

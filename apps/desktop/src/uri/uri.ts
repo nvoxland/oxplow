@@ -325,6 +325,8 @@ export const eventUri = (id: string): string => resourceUri("oxplow/event", { id
 export const proposalUri = (id: string | number): string => resourceUri("oxplow/proposal", { id });
 /** A `.oxplow/project.yaml` key (`snapshotRetentionDays`). */
 export const configUri = (key: string): string => resourceUri("oxplow/config", { key });
+
+export const extensionUri = (name: string): string => resourceUri("oxplow/extension", { name });
 /** A snapshot, by its id. */
 export const snapshotUri = (id: string | number): string => resourceUri("oxplow/snapshot", { id });
 /** An agent turn, by its id. */

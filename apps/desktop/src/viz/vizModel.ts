@@ -393,6 +393,10 @@ function byFormat(v: string | number, format: ColumnFormat): string | null {
     const list = itemList(v);
     return list === null ? null : list.map((i) => i.text).join(" · ");
   }
+  if (format === "source") {
+    const who = sourceValue(v);
+    return who === null ? null : who.label;
+  }
   if (typeof v === "string") {
     if (Number.isNaN(Date.parse(v))) return null;
     if (format === "date") return formatDateOnly(v);
@@ -941,5 +945,33 @@ export function treemapItems(
   return out;
 }
 
+/** Who caused an alert: an agent (its thread), the person, an extension,
+ *  or a page acting for an agent. The same chip on every Alerts row, so
+ *  "from an agent" looks one way wherever it shows. */
+export interface Source {
+  kind: "agent" | "you" | "extension" | "page";
+  /** The thread's title, the extension's name, the page's id; "You". */
+  label: string;
+  /** What it opens: the agent's thread, the extension's page. */
+  uri?: string;
+}
 
+const SOURCE_KINDS = ["agent", "you", "extension", "page"] as const;
+
+/** `v` as a source (`{ kind, label, uri? }`, a `format: source` cell's
+ *  JSON), or null when it isn't one. */
+export function sourceValue(v: unknown): Source | null {
+  let o: unknown = v;
+  if (typeof v === "string") {
+    try {
+      o = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  if (!o || typeof o !== "object") return null;
+  const { kind, label, uri } = o as Record<string, unknown>;
+  if (typeof label !== "string" || label === "" || typeof kind !== "string" || !(SOURCE_KINDS as readonly string[]).includes(kind)) return null;
+  return { kind: kind as Source["kind"], label, ...(typeof uri === "string" && uri !== "" ? { uri } : {}) };
+}
 

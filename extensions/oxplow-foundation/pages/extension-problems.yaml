@@ -32,9 +32,18 @@ loaders:
       WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
       UNION ALL
       -- What its source asks for that nobody approved: a pending line is
-      -- `<what> — <what it allows>`; the person approves on its page (Deploy).
+      -- `<what> — <what it allows>`; the person approves on its page (Deploy),
+      -- or, when an agent already asked to deploy it, decides that request
+      -- on the Alerts page (one decision, not two).
       SELECT 'Needs your approval to run', e.name || '/approval', e.uri, e.name, 'extension', e.name,
-             NULL, 'Deploy it on its page to approve.', NULL, NULL, 0, 0, '',
+             NULL,
+             CASE WHEN EXISTS (SELECT 1 FROM v_command_proposal p
+                               WHERE p.decision = 'pending'
+                                 AND p.command IN ('oxplow.extension.deploy', 'oxplow.extension.enable', 'oxplow.extension.rollback')
+                                 AND json_extract(p.input, '$.name') = e.name)
+                  THEN 'An agent asked to deploy it: decide that under Needs your decision on the Alerts page.'
+                  ELSE 'Deploy it on its page to approve.' END,
+             NULL, NULL, 0, 0, '',
              (SELECT json_group_array(json_object(
                        'text', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, 1, instr(j.value, ' — ') - 1) ELSE j.value END,
                        'hint', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, instr(j.value, ' — ') + 3) END)

@@ -12,8 +12,10 @@ loaders:
     sql: |
       SELECT n.id,
              CASE WHEN instr(n.message, char(10)) > 0 THEN substr(n.message, 1, instr(n.message, char(10)) - 1) ELSE n.message END AS message,
-             CASE WHEN th.title IS NULL THEN NULL ELSE 'Thread: ' || th.title END AS thread,
-             uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || n.thread_id) AS thread_uri,
+             -- Who it is about: the source chip every alert uses.
+             CASE WHEN th.title IS NULL THEN NULL
+                  ELSE json_object('kind', 'agent', 'label', th.title,
+                                   'uri', uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || n.thread_id)) END AS source,
              n.created_at
       FROM v_agent_nudge n LEFT JOIN v_thread th ON th.id = n.thread_id
       WHERE n.audience = 'person' AND n.delivered_at IS NULL
@@ -38,12 +40,10 @@ view:
     - key: message
       label: Notice
       expand: oxplow-foundation/alerts-notice
-    - key: thread
-      label: Thread
+    - key: source
+      label: From
+      format: source
       width: 160
-      link:
-        kind: page
-        from: thread_uri
     - key: created_at
       label: When
       format: relative

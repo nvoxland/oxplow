@@ -528,8 +528,13 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   `duration` (ms), `integer`, `percent` (a 0–1 fraction), `sparkline` (a
   JSON array of numbers), `badge` (a pill in the column's `tone`), `items` (a JSON array of
   strings or `{text, hint?, uri?}`, drawn inline separated by " · ", the
-  hint on hover, the uri a link; an agent reads `text (hint) · text`). It
-  changes only what a person sees; an agent reads the raw value (but for `items`).
+  hint on hover, the uri a link; an agent reads `text (hint) · text`),
+  `source` (who caused the row, a JSON object `{kind, label, uri?}` with
+  `kind` one of `agent`, `you`, `extension`, `page`: the `SourceChip`
+  every Alerts row uses, its kind's icon and label, a link with a `uri`;
+  an agent reads `agent in <label>`, `extension <label>`, `You`). It
+  changes only what a person sees; an agent reads the raw value (but for
+  `items` and `source`).
 - A timestamp cell shows in local time, its full time on hover.
 - A `table` sizes its columns and stripes its rows with no page settings.
   The renderer picks each column's wrap from its `format` and the texts

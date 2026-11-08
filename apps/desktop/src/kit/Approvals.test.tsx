@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 
-import type { Proposal } from "../proposals.js";
+import { sourceOf, type Proposal } from "../proposals.js";
 import { createFailureStore, createInlineClaims } from "../commands/actionFailures.js";
 import { createRunner } from "../commands/runForPerson.js";
 import { RunnerContext } from "../commands/RunnerContext.js";
@@ -37,7 +37,10 @@ test("a card shows what the agent proposed and decides it", async () => {
   );
   const card = view.getByTestId("proposal-7");
   expect(card.textContent).toContain("Set agentPromptAppend");
-  expect(card.textContent).toContain("The agent in “Fix the cart”");
+  // Who asked is the source chip every alert uses: the agent's thread.
+  const chip = view.getByTestId("source-chip");
+  expect([chip.getAttribute("data-kind"), chip.textContent]).toEqual(["agent", "Fix the cart"]);
+  expect(card.textContent).not.toContain("proposed this");
   expect(view.getByTestId("proposal-change-7").textContent).toContain("be brief");
   fireEvent.click(view.getByTestId("proposal-approve-7"));
   await waitFor(() => expect(decided).toEqual([[7, true]]));
@@ -106,6 +109,17 @@ test("a failed approval stays on the card when the list draws it again, recorded
   const again = draw();
   expect(again.getByTestId("proposal-error-7").textContent).toContain("changed");
   expect(reports).toEqual([{ label: "Approve: Set agentPromptAppend", command: "oxplow.config.set" }]);
+});
+
+// An effect's step that waits for a person is the extension's, not an agent's.
+test("who asked: the agent's thread, a page acting for it, or an extension's effect", () => {
+  expect(sourceOf(proposal)).toEqual({ kind: "agent", label: "Fix the cart", uri: "oxplow:oxplow/page?page=thread-work&thread=thr3" });
+  expect(sourceOf({ ...proposal, actorKind: "effect", actorId: "e2e/delete-flagged", threadId: null, threadTitle: null })).toEqual({
+    kind: "extension",
+    label: "e2e",
+    uri: "oxplow:oxplow/extension?name=e2e",
+  });
+  expect(sourceOf({ ...proposal, actorKind: "page", actorId: "acme/prs" })).toEqual({ kind: "page", label: "acme/prs" });
 });
 
 test("a list narrows to a thread and to a setting, and draws nothing when empty", () => {

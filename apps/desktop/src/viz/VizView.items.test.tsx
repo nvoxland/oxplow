@@ -104,6 +104,27 @@ test("a value that is not a list of items shows as it is; an empty list shows no
   expect(empty.container.querySelector("[data-testid=viz-item]")).toBeNull();
 });
 
+// A `format: source` column says who caused a row: a chip with its kind's
+// icon and its label, a link where it has a `uri`; an agent reads it as text.
+test("a source column is a chip that says who, opening its thread", () => {
+  const agent = JSON.stringify({ kind: "agent", label: "Main Controller", uri: "oxplow:oxplow/page?page=thread-work&thread=thr1" });
+  const view = render(
+    runOf("table", { columns: [{ ...column, key: "perms", format: "source" }] }, [
+      ["a", "Alpha", agent],
+      ["b", "Beta", JSON.stringify({ kind: "you", label: "You" })],
+    ]),
+  );
+  const chips = view.getAllByTestId("source-chip");
+  expect(chips.map((c) => [c.getAttribute("data-kind"), c.textContent])).toEqual([
+    ["agent", "Main Controller"],
+    ["you", "You"],
+  ]);
+  opened.length = 0;
+  fireEvent.click(chips[0]!.querySelector("button")!);
+  expect(opened).toEqual(["oxplow:oxplow/page?page=thread-work&thread=thr1"]);
+  expect(chips[1]!.querySelector("button")).toBeNull();
+});
+
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../api.js", () => realApi);

@@ -873,6 +873,12 @@ pub enum ColumnFormat {
     /// ` · `; `hint` is the item's hover text, `uri` makes it a link. An
     /// agent reads them joined by ` · `, a hint in parentheses.
     Items,
+    /// Who caused it (a JSON object `{ "kind": "agent" | "you" |
+    /// "extension" | "page", "label": …, "uri"?: … }`): a small chip with
+    /// the kind's icon, a link when it has a `uri` (an agent's thread, an
+    /// extension's page). An agent reads `<kind> <label>` (`agent in
+    /// <label>`; "You" alone).
+    Source,
 }
 
 /// `group` on a `list` or `table`: the rows under a heading per distinct

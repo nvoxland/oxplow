@@ -77,8 +77,6 @@ test("a config change summarizes as the key with its before and after", () => {
     }),
   );
   expect(s.title).toBe("Set agentPromptAppend");
-  // The thread by its title, never its id (tsk1044).
-  expect(s.who).toBe("The agent in “Fix the cart”");
   expect(s.change).toEqual({ before: "(not set)", after: "be brief" });
   expect(s.children).toEqual([]);
   expect(s.destructive).toBe(false);
@@ -98,7 +96,6 @@ test("a composite lists its children; anything else uses its summary; destructiv
   expect(s.change).toBeNull();
   expect(s.children).toEqual(["oxplow.work_item.transition", "oxplow.work_item.delete"]);
   expect(s.destructive).toBe(true);
-  expect(summarizeProposal(proposal({ actorKind: "page", actorId: "acme/x" })).who).toBe("A page (acme/x) for the agent");
 });
 
 test("a deploy's proposal lists what it adds", () => {

@@ -184,14 +184,20 @@ exists for actions and links).
   `datetime`, `relative` (how long ago), `bytes`, `duration`
   (milliseconds), `integer`, `percent` (a 0-1 fraction), `sparkline` (a
   JSON array of numbers), `badge` (a pill in the column's `tone`), `items`
-  (below). It changes only what the person sees; agents read the raw values
-  (but for `items`).
+  and `source` (below). It changes only what the person sees; agents read
+  the raw values (but for `items` and `source`).
 - `format: items`: the value is a JSON array of items, each a string or
   `{ "text": ..., "hint"?: ..., "uri"?: ... }`, drawn inline separated by
   " · " in a `detail` or `sections` fact, a `table` or `list` cell. `hint`
   is the item's hover text, `uri` makes it a link. Build the array in SQL
   (`json_group_array(json_object('text', name, 'hint', why))`). An agent
   reads `text (hint) · text`.
+- `format: source`: who caused the row, a JSON object `{ "kind": "agent" |
+  "you" | "extension" | "page", "label": ..., "uri"?: ... }`, drawn as the
+  chip oxplow's Alerts rows use (the kind's icon and the label, a link with
+  a `uri`). Build it in SQL (`json_object('kind', 'agent', 'label',
+  th.title, 'uri', uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr'
+  || th.id))`). An agent reads `agent in <label>`, `extension <label>`.
 - `link: { kind, from? }` makes cells clickable: `page` (any URI: a work
   item's `v_work_item.uri`, `oxplow:oxplow/commit?sha=…`), `file` (a path;
   `line: <column>`), `wiki` (a slug), `effort-diff`, `commit`, `metric`.

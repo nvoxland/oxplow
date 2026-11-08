@@ -68,6 +68,7 @@ import {
   type RowGroup,
   type StepStatus,
   type TreeNode,
+  sourceValue,
 } from "./vizModel.js";
 import { askAssistant } from "../components/Assistant/assistantSession.js";
 import { addToContext } from "../contextBasket.js";
@@ -89,6 +90,7 @@ import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
+import { SourceChip } from "../kit/SourceChip.js";
 import { DisclosureGlyph } from "../kit/Disclosure.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
 import { SectionsViz } from "./SectionsViz.js";
@@ -565,7 +567,10 @@ function RowsBody({
     const needle = c.highlight === null ? "" : String(run.params[c.highlight] ?? "");
     const series = c.format === "sparkline" ? sparklineValues(raw) : null;
     const itemsList = c.format === "items" ? itemList(raw) : null;
-    const text = itemsList ? (
+    const source = c.format === "source" ? sourceValue(raw) : null;
+    const text = source ? (
+      <SourceChip source={source} />
+    ) : itemsList ? (
       <ItemsCell items={itemsList} linkStyle={linkStyle} />
     ) : series ? (
       <span data-testid="viz-sparkline" title={formatted} style={{ display: "inline-flex", alignItems: "center" }}>
