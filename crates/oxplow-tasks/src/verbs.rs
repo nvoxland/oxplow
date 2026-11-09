@@ -11,16 +11,15 @@ use serde_json::{json, Value};
 
 use crate::ids::TaskId;
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, List, WorkItemCommentInput, WorkItemCreateInput,
-    WorkItemDeleteInput, WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput,
-    WorkItemTransitionInput, WorkItemUpdateInput,
+    provider_of, CanonicalState, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
+    WorkItemLinkInput, WorkItemTransitionInput, WorkItemUpdateInput,
 };
-use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, ThreadId, Timestamp};
+use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, Timestamp};
 
 use crate::mapping::{canonical_of, native_status, oxplow_native, oxplow_status, status_str};
 use crate::model::{Task, TaskActorKind, TaskAuthor, TaskLinkType, TaskPriority, TaskStatus};
 use crate::refs::{task_of_work_item_ref, work_item_ref, PROVIDER};
-use crate::store::{self, Placement};
+use crate::store;
 
 /// What a verb did: its result, the verb (with its input) that undoes it
 /// when one does, and the tasks it changed — each answered with its
@@ -82,11 +81,6 @@ fn live_task_tx(
     }
 }
 
-fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
-    raw.parse::<ThreadId>()
-        .map_err(|e| invalid_at(field, format!("{e}")))
-}
-
 /// Who authored a task an actor files: a person (`user`), an agent
 /// (`agent`, a page acting for one included), or neither — an effect or
 /// oxplow itself: the creating actor is on the run's audit and its
@@ -119,8 +113,8 @@ fn note_author(actor: &Actor) -> String {
     }
 }
 
-/// `create`: the row, at the end of the list it's filed on (`thread`,
-/// as core resolved it; none is the backlog). An agent's task is authored
+/// `create`: the row. Who it's assigned to is core's, never the list's.
+/// An agent's task is authored
 /// `agent`. The result names it: `{ ref }`.
 pub fn create_tx(
     conn: &rusqlite::Connection,
@@ -133,23 +127,16 @@ pub fn create_tx(
         .map(|r| task_ref(r, "/parent_uri"))
         .transpose()?;
     let native = oxplow_native(input.native.as_ref())?;
-    let thread = input
-        .thread
-        .as_deref()
-        .map(|raw| parse_thread(raw, "/thread"))
-        .transpose()?;
     let now = Timestamp::now();
     let status =
         oxplow_status(input.state, input.native_state.as_deref())?.unwrap_or(TaskStatus::Ready);
     let item = Task {
         id: TaskId::placeholder(),
-        thread_id: thread,
         parent_id,
         title: input.title,
         description: input.body.unwrap_or_default(),
         status,
         priority: native.priority.unwrap_or(TaskPriority::Medium),
-        sort_index: store::next_sort_index_tx(conn, thread).map_err(CommandError::from)?,
         created_by: TaskActorKind::User,
         created_at: now,
         updated_at: now,
@@ -427,129 +414,5 @@ pub fn delete_tx(
         result: json!({ "uri": input.uri }),
         inverse: None,
         changed: vec![id],
-    })
-}
-
-/// The place `before` / `after` name (at most one).
-fn placement(before: &Option<String>, after: &Option<String>) -> Result<Placement, CommandError> {
-    match (before, after) {
-        (Some(_), Some(_)) => Err(invalid_at(
-            "/after",
-            "give `before` or `after`, not both".into(),
-        )),
-        (Some(b), None) => Ok(Placement::Before(task_ref(b, "/before")?)),
-        (None, Some(a)) => Ok(Placement::After(task_ref(a, "/after")?)),
-        (None, None) => Ok(Placement::End),
-    }
-}
-
-/// `before` / `after` for a place (the inverse's input).
-fn neighbour(place: Placement) -> (Option<String>, Option<String>) {
-    match place {
-        Placement::End => (None, None),
-        Placement::Before(t) => (Some(work_item_ref(t)), None),
-        Placement::After(t) => (None, Some(work_item_ref(t))),
-    }
-}
-
-/// The list `to` names: a thread's, or the backlog (`None`).
-fn move_dest(to: &List) -> Result<Option<ThreadId>, CommandError> {
-    match to {
-        List::Backlog => Ok(None),
-        List::Thread(raw) => parse_thread(raw, "/to/thread").map(Some),
-    }
-}
-
-/// The `to` naming a list: a thread's, or the backlog.
-fn move_to(thread: Option<ThreadId>) -> List {
-    thread.map_or(List::Backlog, |t| List::Thread(t.to_string()))
-}
-
-/// Place the task in `dest`'s list, refusing a thread that doesn't exist.
-fn place(
-    conn: &rusqlite::Connection,
-    id: TaskId,
-    dest: Option<ThreadId>,
-    at: Placement,
-) -> Result<store::Placed, CommandError> {
-    if let Some(thread) = dest {
-        let exists: Option<i64> = conn
-            .query_row(
-                "SELECT 1 FROM threads WHERE id = ?1",
-                [thread.value()],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| CommandError::Failed {
-                message: e.to_string(),
-            })?;
-        if exists.is_none() {
-            return Err(invalid_at("/to", format!("no thread `{thread}`")));
-        }
-    }
-    store::place_task_tx(conn, id, dest, at, Timestamp::now()).map_err(|e| match e {
-        DomainError::NotFound => invalid_at("/uri", format!("no work item {}", work_item_ref(id))),
-        DomainError::Invalid(message) => CommandError::Invalid {
-            field: None,
-            message,
-        },
-        other => CommandError::from(other),
-    })
-}
-
-/// `reorder`: before or after another task on its own list (neither: its
-/// end).
-pub fn reorder_tx(
-    conn: &rusqlite::Connection,
-    input: WorkItemReorderInput,
-) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.uri, "/uri")?;
-    let at = placement(&input.before, &input.after)?;
-    let Some(list) = store::get_task_tx(conn, id)
-        .map_err(CommandError::from)?
-        .map(|t| t.thread_id)
-    else {
-        return Err(invalid_at("/uri", format!("no work item `{}`", input.uri)));
-    };
-    let placed = place(conn, id, list, at)?;
-    let (before, after) = neighbour(placed.from_place);
-    Ok(Answer {
-        result: json!({ "uri": input.uri }),
-        inverse: Some(CommandCall {
-            name: "reorder".into(),
-            input: serde_json::to_value(WorkItemReorderInput {
-                uri: input.uri,
-                before,
-                after,
-            })
-            .expect("input serializes"),
-        }),
-        changed: std::iter::once(id).chain(placed.renumbered).collect(),
-    })
-}
-
-/// `move`: to a thread's list or the backlog — its end, or next to a task
-/// there.
-pub fn move_tx(
-    conn: &rusqlite::Connection,
-    input: WorkItemMoveInput,
-) -> Result<Answer, CommandError> {
-    let id = task_ref(&input.uri, "/uri")?;
-    let at = placement(&input.before, &input.after)?;
-    let placed = place(conn, id, move_dest(&input.to)?, at)?;
-    let (before, after) = neighbour(placed.from_place);
-    Ok(Answer {
-        result: json!({ "uri": input.uri }),
-        inverse: Some(CommandCall {
-            name: "move".into(),
-            input: serde_json::to_value(WorkItemMoveInput {
-                uri: input.uri,
-                to: move_to(placed.from_thread),
-                before,
-                after,
-            })
-            .expect("input serializes"),
-        }),
-        changed: std::iter::once(id).chain(placed.renumbered).collect(),
     })
 }

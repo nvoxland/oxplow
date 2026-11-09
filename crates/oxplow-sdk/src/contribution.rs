@@ -84,7 +84,7 @@ pub(crate) fn build(
                  \x20 items:\n\
                  \x20   sql: |\n\
                  \x20     SELECT w.uri, w.title, w.state, w.updated_at\n\
-                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20     FROM v_work_item w JOIN v_thread t ON t.uri = w.assignee\n\
                  \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                  \x20     ORDER BY w.updated_at DESC\n\
                  view:\n\
@@ -256,7 +256,7 @@ pub(crate) fn build(
                      \x20 items:\n\
                      \x20   sql: |\n\
                      \x20     SELECT w.uri, w.title, w.state\n\
-                     \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                     \x20     FROM v_work_item w JOIN v_thread t ON t.uri = w.assignee\n\
                      \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                      \x20     ORDER BY w.updated_at DESC\n\
                      view:\n\

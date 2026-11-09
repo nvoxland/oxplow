@@ -1,0 +1,19 @@
+# With nothing ready assigned to the thread, what to pick up is the pool:
+# ready items assigned to nobody, the most pressing first. Another
+# thread's items, the backlog and blocked ones aren't offered. Starting one
+# assigns it to the thread that started it.
+when: { page: work-next, params: { thread: thr1 } }
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Other }, bind: other }
+  - { command: oxplow.work_item.create, input: { title: later, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: theirs, assignee: $other.id } }
+  - { command: oxplow.work_item.create, input: { title: whenever, native: { priority: low } } }
+  - { command: oxplow.work_item.create, input: { title: soon, native: { priority: urgent } }, bind: soon }
+  - { command: oxplow.work_item.create, input: { title: stuck, state: blocked } }
+expect:
+  loaders:
+    work_next: { rows: [{ title: soon, role: pool }, { title: whenever, role: pool }] }
+steps:
+  - given:
+      - { command: oxplow.work_item.create, input: { title: mine, assignee: thr1 } }
+  - expect: { loaders: { work_next: { rows: [{ title: mine, role: ready }] } } }

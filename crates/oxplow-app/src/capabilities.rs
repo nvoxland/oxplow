@@ -46,14 +46,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         capability: "work_items",
         provider: Some("oxplow"),
         title: "oxplow's tasks",
-        features: &[
-            "hierarchy",
-            "comments",
-            "links",
-            "delete",
-            "ordering",
-            "lists",
-        ],
+        features: &["hierarchy", "comments", "links", "delete"],
         id_pattern: Some(r"tsk\d+"),
         fields: &[
             BuiltInField {
@@ -1730,7 +1723,7 @@ mod tests {
             "oxplow.work_item.comment",
             "oxplow.work_item.link",
             "oxplow.work_item.reorder",
-            "oxplow.work_item.move",
+            "oxplow.work_item.assign",
         ] {
             assert!(offered.iter().any(|n| n == name), "{name} offered");
         }
@@ -1759,8 +1752,8 @@ mod tests {
             ),
             (crate::commands::work_item::REORDER, json!({ "uri": task })),
             (
-                crate::commands::work_item::MOVE,
-                json!({ "uri": task, "to": "backlog" }),
+                crate::commands::work_item::ASSIGN,
+                json!({ "uri": task, "to": null }),
             ),
         ] {
             assert_eq!(
@@ -1795,7 +1788,7 @@ mod tests {
                 title: "plain".into(),
                 extension: None,
                 source: Source::External,
-                features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
+                features: serde_json::json!({ "comments": false, "links": true, "delete": true }),
                 fields: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
                 icon: None,
@@ -1810,14 +1803,10 @@ mod tests {
         assert!(plain
             .command_refusal("x", &needs("work_items.comments"))
             .is_some());
-        // Ordering and lists are features like the rest.
         assert_eq!(
-            plain.command_refusal("x", &needs("work_items.ordering")),
+            plain.command_refusal("x", &needs("work_items.delete")),
             None
         );
-        assert!(plain
-            .command_refusal("x", &needs("work_items.lists"))
-            .is_some());
     }
 
     /// A provider instance's own commands are offered only while it's the

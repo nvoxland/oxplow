@@ -1170,7 +1170,7 @@ mod core_tests {
         run(
             svc,
             crate::commands::work_item::CREATE,
-            serde_json::json!({ "title": title, "thread": thread.to_string() }),
+            serde_json::json!({ "title": title, "assignee": thread.to_string() }),
         )
         .await["uri"]
             .as_str()
@@ -1286,8 +1286,9 @@ mod core_tests {
         );
     }
 
-    /// tsk921: archived work leaves search as its files do — an archived
-    /// thread's tasks, then an archived stream's — and the backlog stays.
+    /// tsk921: archived work leaves search as its files do — the items
+    /// assigned to an archived thread, then an archived stream's — and an
+    /// unassigned item stays.
     #[tokio::test]
     async fn archived_threads_and_streams_leave_search() {
         let (svc, _dir) = services().await;
@@ -1297,7 +1298,7 @@ mod core_tests {
         change_loop(&svc);
         let stays = task(&svc, kept.id, "Stays put").await;
         task(&svc, shelved.id, "Shelved with its thread").await;
-        // A person's item names no thread: the backlog.
+        // An item assigned to nobody is project-wide.
         let backlog = run(
             &svc,
             crate::commands::work_item::CREATE,
@@ -1332,8 +1333,8 @@ mod core_tests {
         .await;
     }
 
-    /// A task moved to the backlog is indexed there and nowhere else
-    /// (tsk508): its entry's stream follows its thread.
+    /// A task released to nobody is indexed project-wide and nowhere else
+    /// (tsk508): its entry's stream follows the thread it's assigned to.
     #[tokio::test]
     async fn a_moved_task_is_indexed_only_where_it_now_lives() {
         let (svc, _dir) = services().await;
@@ -1349,11 +1350,11 @@ mod core_tests {
         .await;
         run(
             &svc,
-            crate::commands::work_item::MOVE,
-            serde_json::json!({ "uri": t, "to": "backlog" }),
+            crate::commands::work_item::ASSIGN,
+            serde_json::json!({ "uri": t, "to": null }),
         )
         .await;
-        eventually("in the backlog", || async {
+        eventually("project-wide", || async {
             entries(&svc, "oxplow/work_item").await == vec![(id.clone(), None)]
         })
         .await;

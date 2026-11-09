@@ -9,13 +9,16 @@
 //!   `task_writes` use it);
 //! - [`WorkItemsProjection`], the pump consumer (`work_items.project`)
 //!   that upserts every list's items into `work_item` from its
-//!   `work_item.recorded` events.
+//!   `work_item.recorded` events, and keeps who each is assigned to
+//!   (`work_item_assignment`) from core's `work_item.assigned`.
 
 use std::sync::Arc;
 
-use oxplow_domain::events::schema::{EventType, WorkItemRecorded, WorkItemRecordedV3};
+use oxplow_domain::events::schema::{
+    EventType, WorkItemAssigned, WorkItemAssignedV1, WorkItemRecorded, WorkItemRecordedV3,
+};
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, List, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider,
+    provider_of, CanonicalState, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider,
 };
 use oxplow_domain::{Actor, CommandError, CommandOutcome, DomainError, StoredEvent};
 use serde_json::{json, Value};
@@ -51,8 +54,6 @@ pub fn built_in_provider(entry: &str, db: &oxplow_db::Database) -> Option<WorkIt
             links: has("links"),
             delete: has("delete"),
             idempotent_writes: has("idempotent_writes"),
-            ordering: has("ordering"),
-            lists: has("lists"),
         },
         verbs,
         id_pattern: built_in.id_pattern.map(str::to_string),
@@ -121,8 +122,6 @@ pub fn none_provider() -> WorkItemsProvider {
             links: true,
             delete: true,
             idempotent_writes: true,
-            ordering: true,
-            lists: true,
         },
         verbs: Arc::new(Sink),
         id_pattern: Some(".+".into()),
@@ -199,7 +198,7 @@ impl WorkItems {
             state: item.state,
             native_state: item.native_state,
             native: item.native,
-            thread: None,
+            assignee: None,
             links: Vec::new(),
         })
         .expect("input serializes");
@@ -283,7 +282,8 @@ impl WorkItems {
         .await
     }
 
-    /// Put `item_ref` just before `before` on its list (`ordering`).
+    /// Put `item_ref` just before `before` in its assignee's queue (core's,
+    /// for every list).
     pub async fn reorder_before(
         &self,
         actor: &Actor,
@@ -298,16 +298,18 @@ impl WorkItems {
         .await
     }
 
-    /// Move `item_ref` to the backlog (`lists`).
-    pub async fn move_to_backlog(
+    /// Assign `item_ref` to `to` (a thread's or the person's URI; `None`:
+    /// nobody) — core's, for every list.
+    pub async fn assign(
         &self,
         actor: &Actor,
         item_ref: &str,
+        to: Option<&str>,
     ) -> Result<CommandOutcome, CommandError> {
         self.run(
             actor,
-            work_item::MOVE,
-            json!({ "uri": item_ref, "to": "backlog" }),
+            work_item::ASSIGN,
+            json!({ "uri": item_ref, "to": to }),
         )
         .await
     }
@@ -338,7 +340,10 @@ impl WorkItems {
 
 /// Upserts a list's item into `work_item` from its `work_item.recorded`
 /// event, by ref — idempotent, so a replay restates the same row; every
-/// list's, oxplow's own tasks' included.
+/// list's, oxplow's own tasks' included. Keeps who each item is assigned
+/// to and its place in their queue (`work_item_assignment`) from core's
+/// `work_item.assigned`; an item recorded done or canceled has no
+/// assignee, whichever list closed it.
 pub struct WorkItemsProjection;
 
 impl WorkItemsProjection {
@@ -351,10 +356,17 @@ impl EventConsumer for WorkItemsProjection {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == WorkItemRecorded::TYPE
+        event_type == WorkItemRecorded::TYPE || event_type == WorkItemAssigned::TYPE
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
+        if event.envelope.event_type == WorkItemAssigned::TYPE {
+            let assigned: WorkItemAssignedV1 =
+                serde_json::from_value(event.envelope.payload.clone()).map_err(|e| {
+                    DomainError::Invalid(format!("work_item.assigned payload: {e}"))
+                })?;
+            return assign_tx(conn, &assigned, &event.envelope.at.to_string());
+        }
         let WorkItemRecordedV3 { item } = serde_json::from_value(event.envelope.payload.clone())
             .map_err(|e| DomainError::Invalid(format!("work_item.recorded payload: {e}")))?;
         let provider = provider_of(&item.uri)
@@ -363,9 +375,8 @@ impl EventConsumer for WorkItemsProjection {
         let at = event.envelope.at.to_string();
         conn.execute(
             "INSERT INTO work_item (uri, provider, title, body, state, native_state, native,
-                                    parent_uri, created_at, updated_at, deleted_at,
-                                    thread_id, closed_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END, ?11,
+                                    parent_uri, created_at, updated_at, deleted_at, closed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END,
                      CASE WHEN ?5 IN ('done', 'canceled') THEN ?9 END)
              ON CONFLICT(uri) DO UPDATE SET
                 title = excluded.title, body = excluded.body, state = excluded.state,
@@ -386,34 +397,17 @@ impl EventConsumer for WorkItemsProjection {
                 item.parent_uri,
                 at,
                 item.deleted,
-                // The list it's on: the thread that filed it, at its
-                // first record only (tsk1041); a restatement keeps it.
-                event.envelope.anchors.thread_id.map(|t| t.value()),
             ],
         )
         .map_err(|e| DomainError::Storage(e.to_string()))?;
         let storage = |e: rusqlite::Error| DomainError::Storage(e.to_string());
         // What the record states, it restates whole; what it leaves out,
         // the host keeps.
-        if let Some(list) = &item.list {
-            let thread = match list {
-                List::Backlog => None,
-                List::Thread(raw) => Some(
-                    raw.parse::<oxplow_domain::ThreadId>()
-                        .map_err(|e| DomainError::Invalid(format!("list `{raw}`: {e}")))?
-                        .value(),
-                ),
-            };
+        // Closed, by whichever list: nobody's to work on.
+        if item.state.is_closed() {
             conn.execute(
-                "UPDATE work_item SET thread_id = ?2 WHERE uri = ?1",
-                rusqlite::params![item.uri, thread],
-            )
-            .map_err(storage)?;
-        }
-        if let Some(rank) = item.rank {
-            conn.execute(
-                "UPDATE work_item SET rank = ?2 WHERE uri = ?1",
-                rusqlite::params![item.uri, rank],
+                "DELETE FROM work_item_assignment WHERE uri = ?1",
+                [&item.uri],
             )
             .map_err(storage)?;
         }
@@ -468,6 +462,73 @@ impl EventConsumer for WorkItemsProjection {
     }
 }
 
+/// Keep `assigned` in `work_item_assignment`: the item goes to `to`'s
+/// queue (nobody's when `None`) next to the item it names, or at its end,
+/// and that queue is renumbered. A closed item has no assignee: its row
+/// goes. Idempotent: the same event places the item at the same place.
+fn assign_tx(
+    conn: &rusqlite::Connection,
+    assigned: &WorkItemAssignedV1,
+    at: &str,
+) -> Result<(), DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let storage = |e: rusqlite::Error| DomainError::Storage(e.to_string());
+    let item = &assigned.work_item;
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT provider, state FROM work_item WHERE uri = ?1",
+            [item],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(storage)?;
+    let Some((provider, state)) = row else {
+        // Not recorded (yet): nothing to place.
+        return Ok(());
+    };
+    if matches!(state.as_str(), "done" | "canceled") {
+        conn.execute("DELETE FROM work_item_assignment WHERE uri = ?1", [item])
+            .map_err(storage)?;
+        return Ok(());
+    }
+    // The queue it joins: the list's open items assigned to `to`.
+    let mut stmt = conn
+        .prepare(
+            "SELECT w.uri FROM work_item w
+             LEFT JOIN work_item_assignment a ON a.uri = w.uri
+             WHERE w.provider = ?1 AND w.deleted_at IS NULL
+               AND w.state NOT IN ('done', 'canceled')
+               AND a.assignee IS ?2 AND w.uri <> ?3
+             ORDER BY a.rank IS NULL, a.rank, w.created_at, w.uri",
+        )
+        .map_err(storage)?;
+    let mut queue: Vec<String> = stmt
+        .query_map(rusqlite::params![provider, assigned.to, item], |r| r.get(0))
+        .map_err(storage)?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(storage)?;
+    let index = match (&assigned.before, &assigned.after) {
+        (Some(b), _) => queue.iter().position(|u| u == b),
+        (None, Some(a)) => queue.iter().position(|u| u == a).map(|i| i + 1),
+        (None, None) => None,
+    }
+    .unwrap_or(queue.len());
+    queue.insert(index, item.clone());
+    for (rank, uri) in queue.iter().enumerate() {
+        let assigned_at = (uri == item).then_some(at);
+        conn.execute(
+            "INSERT INTO work_item_assignment (uri, assignee, rank, assigned_at)
+             VALUES (?1, ?2, ?3, coalesce(?4, ?5))
+             ON CONFLICT(uri) DO UPDATE SET
+                assignee = excluded.assignee, rank = excluded.rank,
+                assigned_at = coalesce(?4, work_item_assignment.assigned_at)",
+            rusqlite::params![uri, assigned.to, rank as f64, assigned_at, at],
+        )
+        .map_err(storage)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,8 +541,8 @@ mod tests {
         serde_json::to_value(out.rows).unwrap()
     }
 
-    /// The interface carries what any list's screens need — the list an
-    /// item is on, its rank, when it closed, its links and comments — and
+    /// The interface carries what any list's screens need — who an item
+    /// is assigned to, its rank, when it closed, its links and comments — and
     /// shows only the active list's items: with none, nothing.
     #[tokio::test]
     async fn the_interface_reads_the_active_lists_items() {
@@ -502,7 +563,7 @@ mod tests {
         };
         let child = run(
             w::CREATE,
-            json!({ "title": "child", "parent_uri": task, "thread": fx.thread.to_string() }),
+            json!({ "title": "child", "parent_uri": task, "assignee": fx.thread.to_string() }),
         )
         .await
         .result["uri"]
@@ -520,14 +581,15 @@ mod tests {
             rows(
                 svc,
                 &format!(
-                "SELECT uri, thread_id, rank IS NOT NULL, closed_at IS NOT NULL FROM v_work_item
+                    "SELECT uri, assignee, rank IS NOT NULL, closed_at IS NOT NULL FROM v_work_item
                   WHERE uri IN ('{task}', '{child}') ORDER BY uri"
-            )
+                )
             )
             .await,
+            // Done, the child is nobody's: who worked on it is its efforts.
             json!([
-                [task, fx.thread.value(), 1, 0],
-                [child, fx.thread.value(), 1, 1]
+                [task, oxplow_domain::uri::build::thread_uri(fx.thread), 1, 0],
+                [child, null, 0, 1]
             ])
         );
         assert_eq!(
@@ -570,10 +632,8 @@ mod tests {
                     native: json!({ "points": 3 }),
                     parent_uri: None,
                     deleted,
-                    rank: None,
                     links: None,
                     comments: None,
-                    list: None,
                 },
             },
         )
@@ -636,9 +696,6 @@ mod tests {
         assert!(WorkItemsProjection.handles(WorkItemRecorded::TYPE));
     }
 
-    /// tsk1041: an outside tracker's item keeps the thread that filed it
-    /// (the record's thread anchor, at its first record), so "This thread"
-    /// lists it; a later restatement from elsewhere doesn't move it.
     fn recorded_with_links(item_ref: &str, links: &[(&str, &str)]) -> Envelope {
         let mut env = recorded(item_ref, "linked", false);
         let mut payload: WorkItemRecordedV3 = serde_json::from_value(env.payload.clone()).unwrap();
@@ -721,50 +778,94 @@ mod tests {
         assert_eq!(left, vec![after[1].clone()]);
     }
 
+    fn assigned(item: &str, to: Option<&str>, before: Option<&str>) -> Envelope {
+        Envelope::typed::<WorkItemAssigned>(
+            "human",
+            &WorkItemAssignedV1 {
+                work_item: item.into(),
+                from: None,
+                to: to.map(str::to_string),
+                before: before.map(str::to_string),
+                after: None,
+            },
+        )
+        .with_subject([item])
+    }
+
+    /// Who each item is assigned to and its rank, by uri, from the
+    /// projection's own table (the provider isn't running, so the
+    /// interface, which shows the active list, doesn't list them).
+    async fn assignments(svc: &crate::Services) -> Vec<(String, Option<String>, f64)> {
+        svc.db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT uri, assignee, rank FROM work_item_assignment
+                         WHERE uri LIKE '%provider=fake' ORDER BY rank, uri",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Assignment is core's, for any list's item: `work_item.assigned` puts
+    /// an item in its assignee's queue (at the end, or before another
+    /// there) and renumbers that queue; an item recorded done has none.
     #[tokio::test]
-    async fn an_outside_item_keeps_the_thread_that_filed_it() {
+    async fn an_assignment_places_an_item_in_its_queue_and_a_close_releases_it() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let r = "oxplow:oxplow/work_item?id=W-7&provider=fake";
-        let anchored = |title: &str| {
-            recorded(r, title, false).with_anchors(oxplow_domain::Anchors {
-                thread_id: Some(fx.thread),
-                ..Default::default()
-            })
-        };
-        svc.event_log_store.append(anchored("Kiwi")).await.unwrap();
-        svc.event_log_store
-            .append(recorded(r, "Kiwi, renamed by a sync", false))
-            .await
-            .unwrap();
+        let (a, b, c) = (
+            "oxplow:oxplow/work_item?id=W-1&provider=fake",
+            "oxplow:oxplow/work_item?id=W-2&provider=fake",
+            "oxplow:oxplow/work_item?id=W-3&provider=fake",
+        );
+        let person = oxplow_domain::uri::build::person_uri(None);
+        for item in [a, b, c] {
+            svc.event_log_store
+                .append(recorded(item, item, false))
+                .await
+                .unwrap();
+        }
+        for event in [
+            assigned(a, Some(&person), None),
+            assigned(b, Some(&person), None),
+            assigned(c, Some(&person), Some(a)),
+        ] {
+            svc.event_log_store.append(event).await.unwrap();
+        }
         svc.event_pump.run_once().await.unwrap();
-        // The projection's row (the provider isn't running, so the
-        // interface, which shows the active list, doesn't list it).
-        let thread: Option<i64> = svc
-            .db
-            .read(move |c| {
-                c.query_row("SELECT thread_id FROM work_item WHERE uri = ?1", [r], |r| {
-                    r.get(0)
-                })
-                .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap();
-        assert_eq!(thread, Some(fx.thread.value()));
-        // An oxplow task's thread is the task's own.
-        let own = oxplow_tasks::work_item_ref(fx.task);
-        let out = svc
-            .sql
-            .query_sql(
-                "SELECT thread_id FROM v_work_item WHERE uri = ?1",
-                vec![oxplow_db::SqlCell::Text(own)],
-                None,
-            )
-            .await
-            .unwrap();
+        let who = Some(person.clone());
         assert_eq!(
-            serde_json::to_value(out.rows).unwrap(),
-            json!([[fx.thread.value()]])
+            assignments(svc).await,
+            vec![
+                (c.to_string(), who.clone(), 0.0),
+                (a.to_string(), who.clone(), 1.0),
+                (b.to_string(), who.clone(), 2.0),
+            ]
+        );
+
+        // Released: among the unassigned; done: no assignment at all.
+        svc.event_log_store
+            .append(assigned(a, None, None))
+            .await
+            .unwrap();
+        let mut done = recorded(b, b, false);
+        let mut payload: WorkItemRecordedV3 = serde_json::from_value(done.payload.clone()).unwrap();
+        payload.item.state = CanonicalState::Done;
+        payload.item.native_state = "Shipped".into();
+        done.payload = serde_json::to_value(payload).unwrap();
+        svc.event_log_store.append(done).await.unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            assignments(svc).await,
+            vec![(a.to_string(), None, 0.0), (c.to_string(), who, 0.0),]
         );
     }
 }

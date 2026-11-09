@@ -111,12 +111,12 @@ inverse moves the item back) / `link` / `comment` / `delete` over the contract's
 `native_state`, its `native.points`; `additionalProperties: false`), one
 command of its own, `estimate { uri, points }`, the
 `work_item.recorded@3` event type with the core schema (its records
-state its links and comments; it declares no `ordering` or `lists`), a
+state its links and comments), a
 `work_items`
 collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
-live in memory as `oxplow:oxplow/work_item?id=W-<n>&provider=fake` with native states `Backlog`,
-`Doing`, `Stuck`, `Shipped`, `Dropped` (one per canonical state); every
+live in memory as `oxplow:oxplow/work_item?id=W-<n>&provider=fake` with native states `Icebox`,
+`Ready`, `Doing`, `Stuck`, `Shipped`, `Dropped` (one per canonical state); every
 `invoke` returns the `work_item.recorded` events the host logs. Each
 write bumps the item's revision (a deleted item stays, marked
 `deleted`); `read` streams each item changed after the cursor, in

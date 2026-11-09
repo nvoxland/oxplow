@@ -7,14 +7,19 @@
 //! A provider the registry doesn't know is refused at `/ref` naming the
 //! registered ones; a parent or link target of another provider is refused
 //! at its field; a feature the provider doesn't declare (`hierarchy`,
-//! `links`, `comments`, `delete`, `ordering`, `lists`) is refused before
-//! anything runs.
+//! `links`, `comments`, `delete`) is refused before anything runs.
 //!
 //! The inputs are the interface's (`oxplow_domain::work_items`): the
 //! `v_work_item` columns, a canonical `state` and the provider's
-//! `native_state`, and `native` for its own fields. The thread a new item
-//! is filed on is core's to resolve ([`filing_thread`]); a loose id is the
+//! `native_state`, and `native` for its own fields; a loose id is the
 //! active list's ([`with_loose_refs`]).
+//!
+//! **Assignment is core's** ([`assign_op`], [`reorder_op`]): who is going
+//! to work on an item — a thread, the person or nobody — and its place in
+//! that assignee's queue, for every list, logged as `work_item.assigned`
+//! and kept by the `work_items.project` consumer. A create may name its
+//! assignee (the list never sees it); a verb that closes an item releases
+//! its assignment.
 //!
 //! What every verb did is logged in the interface's words, the same way
 //! for every list ([`canonical_events`]): `work_item.created`, `.edited`,
@@ -27,41 +32,23 @@
 use crate::commands::ops::Op;
 use crate::link_check::LinkDeps;
 use oxplow_domain::events::schema::{
-    EventType as _, WorkItemCommented, WorkItemCommentedV2, WorkItemCreated, WorkItemCreatedV2,
-    WorkItemDeleted, WorkItemDeletedV2, WorkItemEdited, WorkItemEditedV2, WorkItemLinked,
-    WorkItemLinkedV2, WorkItemRecorded, WorkItemStateChanged, WorkItemStateChangedV1,
-    WorkItemUnlinked, WorkItemUnlinkedV1,
+    EventType as _, WorkItemAssigned, WorkItemAssignedV1, WorkItemCommented, WorkItemCommentedV2,
+    WorkItemCreated, WorkItemCreatedV2, WorkItemDeleted, WorkItemDeletedV2, WorkItemEdited,
+    WorkItemEditedV2, WorkItemLinked, WorkItemLinkedV2, WorkItemRecorded, WorkItemStateChanged,
+    WorkItemStateChangedV1, WorkItemUnlinked, WorkItemUnlinkedV1,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
-    WorkItemLinkInput, WorkItemMoveInput, WorkItemReorderInput, WorkItemTransitionInput,
-    WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry,
+    provider_of, Assignee, CanonicalState, WorkItemAssignInput, WorkItemCommentInput,
+    WorkItemCreateInput, WorkItemDeleteInput, WorkItemLinkInput, WorkItemReorderInput,
+    WorkItemTransitionInput, WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry,
 };
-use oxplow_domain::{CommandCall, CommandError, ThreadId};
+use oxplow_domain::{CommandCall, CommandError};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 use super::util::{parse, schema};
-use super::{Handler, HandlerOutput, Invocation};
-
-/// The thread a work-item command names, by its id (`thr3`).
-fn parse_thread(raw: &str, field: &str) -> Result<ThreadId, CommandError> {
-    super::util::bare_id(raw, oxplow_domain::uri::resources::THREAD, field)
-}
-
-/// The thread a new item is filed on, whatever tracker holds it
-/// (tsk1058): the one `create` names, else an agent's own; none for a
-/// person who names none (oxplow's backlog).
-pub fn filing_thread(
-    actor: &oxplow_domain::Actor,
-    named: Option<&str>,
-) -> Result<Option<ThreadId>, CommandError> {
-    match named {
-        Some(raw) => parse_thread(raw, "/thread").map(Some),
-        None => Ok(actor.thread_id()),
-    }
-}
+use super::{Handler, HandlerOutput, Invocation, TxCtx};
 
 /// The fields that name a work item, in any command's input.
 const URI_FIELDS: [&str; 6] = [
@@ -344,43 +331,6 @@ fn delete_target(
     Ok(provider)
 }
 
-/// `before` / `after` (a place among the list's items) must be the
-/// provider's own items too.
-fn place_belongs(
-    provider: &WorkItemsProvider,
-    before: &Option<String>,
-    after: &Option<String>,
-) -> Result<(), CommandError> {
-    for (field, item) in [("/before", before), ("/after", after)] {
-        if let Some(item) = item {
-            belongs(provider, item, field)?;
-        }
-    }
-    Ok(())
-}
-
-fn reorder_target(
-    registry: &WorkItemsRegistry,
-    input: &Value,
-) -> Result<WorkItemsProvider, CommandError> {
-    let input: WorkItemReorderInput = parse(input.clone())?;
-    let provider = provider_of_ref(registry, &input.uri, "/uri")?;
-    supports(&provider, provider.features.ordering, "ordering", "/uri")?;
-    place_belongs(&provider, &input.before, &input.after)?;
-    Ok(provider)
-}
-
-fn move_target(
-    registry: &WorkItemsRegistry,
-    input: &Value,
-) -> Result<WorkItemsProvider, CommandError> {
-    let input: WorkItemMoveInput = parse(input.clone())?;
-    let provider = provider_of_ref(registry, &input.uri, "/uri")?;
-    supports(&provider, provider.features.lists, "lists", "/uri")?;
-    place_belongs(&provider, &input.before, &input.after)?;
-    Ok(provider)
-}
-
 /// The provider a `work_item.<verb>` call goes to, as its command routes
 /// it — what an effect's automatic retry asks of each step (P10). `None`
 /// for a name that isn't a work-items verb, or an input no provider takes.
@@ -396,16 +346,16 @@ pub(crate) fn provider_for(
         "link" | "unlink" => link_target,
         "comment" => comment_target,
         "delete" => delete_target,
-        "reorder" => reorder_target,
-        "move" => move_target,
         _ => return None,
     };
     target(registry, input).ok()
 }
 
 /// A `work_item.<verb>` op: run on the provider `target` names, through
-/// its verbs. A `create`'s `thread` is resolved here ([`filing_thread`]);
-/// the provider's inverse (a verb) is renamed back to
+/// its verbs. A `create`'s `assignee` is core's: checked, kept from the
+/// list, and logged as `work_item.assigned` once the item exists. A verb
+/// that closes an assigned item releases it (`work_item.assigned` to
+/// nobody). The provider's inverse (a verb) is renamed back to
 /// `oxplow.work_item.<verb>`, so an undo dispatches again. With `links`,
 /// the result carries the body's `link_warnings` (a create's, and an
 /// update's that sets one).
@@ -425,22 +375,33 @@ fn dispatching(
             if let Some(links) = &links {
                 check_link_targets(&links.vocabulary, verb, &input)?;
             }
-            let mut thread = None;
+            // Who a new item is for is core's record, never the list's.
+            let mut assignee = None;
             if verb == "create" {
                 if let Value::Object(fields) = &mut input {
-                    let named = fields.get("thread").and_then(Value::as_str);
-                    thread = filing_thread(invocation.actor(), named)?;
-                    match thread {
-                        Some(t) => fields.insert("thread".into(), Value::String(t.to_string())),
-                        None => fields.remove("thread"),
-                    };
+                    if let Some(raw) = fields.remove("assignee") {
+                        let raw = raw.as_str().ok_or_else(|| {
+                            invalid_at("/assignee", "an assignee is a URI".into())
+                        })?;
+                        let to = Assignee::parse(raw).map_err(|m| invalid_at("/assignee", m))?;
+                        if let Some(db) = &reads {
+                            let checked = to.clone();
+                            if let Some(problem) =
+                                db.read(move |tx| assignee_problem(tx, &checked)).await?
+                            {
+                                return Err(invalid_at("/assignee", problem));
+                            }
+                        }
+                        assignee = Some(to.uri());
+                    }
                 }
             }
-            // The state it's in before the verb: a state verb that leaves
-            // it there moved nothing.
-            let prior = match (&reads, input["uri"].as_str()) {
-                (Some(db), Some(item)) if verb != "create" => prior_state(db, item).await?,
-                _ => None,
+            // The state it's in before the verb, and who it's assigned to:
+            // a state verb that leaves it there moved nothing, and one that
+            // closes it releases its assignee.
+            let (prior, prior_assignee) = match (&reads, input["uri"].as_str()) {
+                (Some(db), Some(item)) if verb != "create" => prior_of(db, item).await?,
+                _ => (None, None),
             };
             let out = provider
                 .verbs
@@ -482,6 +443,7 @@ fn dispatching(
             };
             if let (Some(links), Some(body), Value::Object(_)) = (&links, body, &result) {
                 let item = written_ref(verb, &input, &result);
+                let thread = invocation.actor().thread_id();
                 result["link_warnings"] =
                     json!(links.item_warnings(body.to_string(), thread, item).await);
             }
@@ -495,13 +457,20 @@ fn dispatching(
             // `work_item.state_changed` says the state moved: not for a
             // verb that left it where it was.
             let moved = state.filter(|s| prior != Some(*s));
-            events.extend(canonical_events(
-                &invocation.actor().source(),
-                verb,
-                &input,
-                &result,
-                moved,
-            ));
+            let source = invocation.actor().source();
+            events.extend(canonical_events(&source, verb, &input, &result, moved));
+            if let Some(item) = written_ref(verb, &input, &result) {
+                let closed = state.is_some_and(CanonicalState::is_closed);
+                // Filed for someone: assigned, unless it was filed closed.
+                if let (Some(to), false) = (assignee, closed) {
+                    events.push(assigned(&source, &item, None, Some(to), None));
+                }
+                // Closed: who worked on it is its efforts, so it's
+                // nobody's to work on now.
+                if let (Some(from), true) = (prior_assignee, closed && verb != "create") {
+                    events.push(assigned(&source, &item, Some(from), None, None));
+                }
+            }
             Ok(HandlerOutput {
                 result,
                 inverse,
@@ -520,26 +489,30 @@ fn dispatching(
     )
 }
 
-/// The canonical state item `item_ref` is in, as the interface shows it
-/// (`v_work_item`); `None` for one it doesn't show.
-async fn prior_state(
+/// The canonical state item `item_ref` is in and who it's assigned to,
+/// as the interface shows them (`v_work_item`); `None`s for one it
+/// doesn't show.
+async fn prior_of(
     db: &oxplow_db::Database,
     item_ref: &str,
-) -> Result<Option<CanonicalState>, CommandError> {
+) -> Result<(Option<CanonicalState>, Option<String>), CommandError> {
     use rusqlite::OptionalExtension as _;
     let item = item_ref.to_string();
-    let state: Option<String> = db
+    let row: Option<(String, Option<String>)> = db
         .read(move |tx| {
             tx.query_row(
-                "SELECT state FROM v_work_item WHERE uri = ?1",
+                "SELECT state, assignee FROM v_work_item WHERE uri = ?1",
                 [&item],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()
             .map_err(oxplow_db::map_sql_err)
         })
         .await?;
-    Ok(state.and_then(|s| serde_json::from_value(json!(s)).ok()))
+    Ok(match row {
+        Some((state, assignee)) => (serde_json::from_value(json!(state)).ok(), assignee),
+        None => (None, None),
+    })
 }
 
 /// The item a verb wrote: a create's from its result, else the input's
@@ -599,8 +572,6 @@ fn external_state(
 /// - `transition`: `work_item.state_changed` when the state moved.
 /// - `link`, `comment`, `delete`: `work_item.linked`, `.commented`
 ///   (naming the answer's `comment`, when it gives one), `.deleted`.
-/// - `reorder`, `move`: `work_item.edited` naming `rank`, or `list` and
-///   `rank`.
 fn canonical_events(
     source: &str,
     verb: &str,
@@ -693,8 +664,6 @@ fn canonical_events(
                 work_item: item_ref.clone(),
             },
         ))),
-        "reorder" => events.push(edited(vec!["rank".into()])),
-        "move" => events.push(edited(vec!["list".into(), "rank".into()])),
         _ => {}
     }
     if let Some(to) = state {
@@ -760,8 +729,8 @@ pub fn create_op(registry: WorkItemsRegistry, links: LinkDeps) -> Op {
         registry,
         "create",
         create_target,
-        Some(links),
-        None,
+        Some(links.clone()),
+        Some(links.db),
     )
 }
 
@@ -835,25 +804,286 @@ pub fn delete_op(registry: WorkItemsRegistry) -> Op {
         .confirm_at_least(oxplow_domain::Confirm::Destructive)
 }
 
-// ---- oxplow.work_item.reorder / oxplow.work_item.move: a list's order ----
+// ---- oxplow.work_item.assign / oxplow.work_item.reorder: core's assignment ----
 
+pub const ASSIGN: &str = "oxplow.work_item.assign";
 pub const REORDER: &str = "oxplow.work_item.reorder";
-pub const MOVE: &str = "oxplow.work_item.move";
 
-pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
-    let shape = Shape {
-        schema: schema::<WorkItemReorderInput>(),
-        undoable: true,
-    };
-    dispatching(shape, registry, "reorder", reorder_target, None, None)
+/// Next to which item of a queue an item goes (neither: its end).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Place {
+    Before(String),
+    After(String),
 }
 
-pub fn move_op(registry: WorkItemsRegistry) -> Op {
-    let shape = Shape {
-        schema: schema::<WorkItemMoveInput>(),
-        undoable: true,
+fn place_of(before: Option<String>, after: Option<String>) -> Result<Option<Place>, CommandError> {
+    match (before, after) {
+        (Some(_), Some(_)) => Err(invalid_at(
+            "/after",
+            "give `before` or `after`, not both".into(),
+        )),
+        (Some(b), None) => Ok(Some(Place::Before(b))),
+        (None, Some(a)) => Ok(Some(Place::After(a))),
+        (None, None) => Ok(None),
+    }
+}
+
+fn place_fields(place: &Option<Place>) -> (Option<String>, Option<String>) {
+    match place {
+        Some(Place::Before(b)) => (Some(b.clone()), None),
+        Some(Place::After(a)) => (None, Some(a.clone())),
+        None => (None, None),
+    }
+}
+
+/// `work_item.assigned` for `item`: from one assignee to another (`None`:
+/// nobody), next to an item of `to`'s queue.
+fn assigned(
+    source: &str,
+    item: &str,
+    from: Option<String>,
+    to: Option<String>,
+    place: Option<Place>,
+) -> Envelope {
+    let (before, after) = place_fields(&place);
+    Envelope::typed::<WorkItemAssigned>(
+        source,
+        &WorkItemAssignedV1 {
+            work_item: item.to_string(),
+            from,
+            to,
+            before,
+            after,
+        },
+    )
+    .with_subject([item.to_string()])
+}
+
+/// Why `to` can't be given work, if it can't: a thread must exist and be
+/// open (a closed thread's work went back to nobody). The person always
+/// can.
+fn assignee_problem(
+    conn: &rusqlite::Connection,
+    to: &Assignee,
+) -> Result<Option<String>, oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let Assignee::Thread(thread) = to else {
+        return Ok(None);
     };
-    dispatching(shape, registry, "move", move_target, None, None)
+    let closed: Option<bool> = conn
+        .query_row(
+            "SELECT closed_at IS NOT NULL OR archived_at IS NOT NULL FROM threads WHERE id = ?1",
+            [thread.value()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(oxplow_db::map_sql_err)?;
+    Ok(match closed {
+        None => Some(format!("no thread `{thread}`")),
+        Some(true) => Some(format!("thread `{thread}` is closed")),
+        Some(false) => None,
+    })
+}
+
+/// An assignee's queue as the interface shows it: the open items assigned
+/// to `to` (`None`: nobody's), in order.
+fn queue_tx(conn: &rusqlite::Connection, to: Option<&str>) -> Result<Vec<String>, CommandError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT uri FROM v_work_item
+             WHERE assignee IS ?1 AND state NOT IN ('done', 'canceled')
+             ORDER BY rank IS NULL, rank, created_at, uri",
+        )
+        .map_err(oxplow_db::map_sql_err)?;
+    let rows = stmt
+        .query_map([to], |r| r.get::<_, String>(0))
+        .map_err(oxplow_db::map_sql_err)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| CommandError::from(oxplow_db::map_sql_err(e)))
+}
+
+/// Where `item` sits in `queue`: next to the item before it, else the one
+/// after it; `None` when it's alone there or not in it.
+fn place_in(queue: &[String], item: &str) -> Option<Place> {
+    let at = queue.iter().position(|u| u == item)?;
+    if at > 0 {
+        Some(Place::After(queue[at - 1].clone()))
+    } else {
+        queue.get(at + 1).map(|next| Place::Before(next.clone()))
+    }
+}
+
+/// `queue` with `item` put at `place` (its end without one).
+fn placed(queue: &[String], item: &str, place: &Option<Place>) -> Vec<String> {
+    let mut order: Vec<String> = queue.iter().filter(|u| *u != item).cloned().collect();
+    let at = match place {
+        Some(Place::Before(b)) => order.iter().position(|u| u == b).unwrap_or(order.len()),
+        Some(Place::After(a)) => order
+            .iter()
+            .position(|u| u == a)
+            .map_or(order.len(), |i| i + 1),
+        None => order.len(),
+    };
+    order.insert(at, item.to_string());
+    order
+}
+
+/// Assign `uri` to `to` — `None` keeps whom it's assigned to (a reorder)
+/// — at `place` in that queue: the run's result, its inverse and its
+/// `work_item.assigned`, or `unchanged` when nothing moves.
+fn place_item(
+    ctx: &TxCtx<'_>,
+    uri: String,
+    to: Option<Option<Assignee>>,
+    place: Option<Place>,
+    reorder: bool,
+) -> Result<HandlerOutput, CommandError> {
+    use rusqlite::OptionalExtension as _;
+    let row: Option<(String, Option<String>)> = ctx
+        .conn
+        .query_row(
+            "SELECT state, assignee FROM v_work_item WHERE uri = ?1",
+            [&uri],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(oxplow_db::map_sql_err)?;
+    let Some((state, from)) = row else {
+        return Err(invalid_at("/uri", format!("no work item `{uri}`")));
+    };
+    let to = match to {
+        None => from.clone(),
+        Some(None) => None,
+        Some(Some(assignee)) => {
+            if let Some(problem) = assignee_problem(ctx.conn, &assignee)? {
+                return Err(invalid_at("/to", problem));
+            }
+            Some(assignee.uri())
+        }
+    };
+    let closed = matches!(state.as_str(), "done" | "canceled");
+    if closed && (to.is_some() || place.is_some()) {
+        return Err(invalid_at(
+            "/uri",
+            format!("`{uri}` is {state}: a closed item is nobody's to work on"),
+        ));
+    }
+    let queue = queue_tx(ctx.conn, to.as_deref())?;
+    if let Some(Place::Before(n) | Place::After(n)) = &place {
+        let field = if matches!(place, Some(Place::Before(_))) {
+            "/before"
+        } else {
+            "/after"
+        };
+        if *n == uri || !queue.contains(n) {
+            return Err(invalid_at(
+                field,
+                format!(
+                    "`{n}` isn't in {}'s queue",
+                    to.as_deref().unwrap_or("nobody")
+                ),
+            ));
+        }
+    }
+    let from_queue = queue_tx(ctx.conn, from.as_deref())?;
+    let was = place_in(&from_queue, &uri);
+    if to == from && placed(&queue, &uri, &place) == queue {
+        return Ok(HandlerOutput {
+            result: json!({ "uri": uri, "assignee": to }),
+            unchanged: true,
+            ..HandlerOutput::default()
+        });
+    }
+    let (before, after) = place_fields(&was);
+    let inverse = if reorder {
+        CommandCall {
+            name: REORDER.into(),
+            input: json!({ "uri": uri, "before": before, "after": after }),
+        }
+    } else {
+        CommandCall {
+            name: ASSIGN.into(),
+            input: json!({ "uri": uri, "to": from, "before": before, "after": after }),
+        }
+    };
+    let source = ctx.actor().source();
+    Ok(HandlerOutput {
+        result: json!({ "uri": uri, "assignee": to }),
+        inverse: Some(inverse),
+        events: vec![assigned(&source, &uri, from, to, place)],
+        ..HandlerOutput::default()
+    })
+}
+
+/// With no list active (none, a sink) there is nothing to assign: the
+/// run succeeds as every verb does then, `{ tracked: false }`, and
+/// records nothing.
+fn untracked(registry: &WorkItemsRegistry, input: &Value) -> Option<HandlerOutput> {
+    let active = registry.get(&registry.active()).ok()?;
+    active.sink.then(|| HandlerOutput {
+        result: json!({ "uri": input["uri"], "tracked": false }),
+        unchanged: true,
+        ..HandlerOutput::default()
+    })
+}
+
+/// `oxplow.work_item.assign { uri, to?, before?, after? }`: who is going to
+/// work on an item — a thread, the person, or nobody — at the end of that
+/// queue or next to an item there. Core's, for every list; a closed item
+/// is refused (nobody's to work on), as is a closed thread. Undone by
+/// assigning it back where it was.
+pub fn assign_op(registry: WorkItemsRegistry) -> Op {
+    Op::new(
+        "work_items.write",
+        "assign",
+        schema::<WorkItemAssignInput>(),
+        true,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+            if let Some(untracked) = untracked(&registry, &input) {
+                return Ok(untracked);
+            }
+            let input: WorkItemAssignInput = parse(with_loose_refs(&registry, input)?)?;
+            let to = input
+                .to
+                .as_deref()
+                .map(|raw| Assignee::parse(raw).map_err(|m| invalid_at("/to", m)))
+                .transpose()?;
+            let place = place_of(input.before, input.after)?;
+            place_item(ctx, input.uri, Some(to), place, false)
+        })),
+    )
+}
+
+/// `oxplow.work_item.reorder { uri, before?, after? }`: an item's place in
+/// its assignee's queue (or among the unassigned). Core's, for every list.
+pub fn reorder_op(registry: WorkItemsRegistry) -> Op {
+    Op::new(
+        "work_items.write",
+        "reorder",
+        schema::<WorkItemReorderInput>(),
+        true,
+        Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input: Value| {
+            if let Some(untracked) = untracked(&registry, &input) {
+                return Ok(untracked);
+            }
+            let input: WorkItemReorderInput = parse(with_loose_refs(&registry, input)?)?;
+            let place = place_of(input.before, input.after)?;
+            place_item(ctx, input.uri, None, place, true)
+        })),
+    )
+}
+
+/// `work_item.assigned` events releasing every open item assigned to
+/// `assignee` (a thread that closed): its work goes back to nobody.
+pub fn release_all_tx(
+    conn: &rusqlite::Connection,
+    source: &str,
+    assignee: &str,
+) -> Result<Vec<Envelope>, CommandError> {
+    Ok(queue_tx(conn, Some(assignee))?
+        .into_iter()
+        .map(|item| assigned(source, &item, Some(assignee.to_string()), None, None))
+        .collect())
 }
 
 #[cfg(test)]
@@ -1100,7 +1330,7 @@ mod tests {
                 json!({
                     "title": "filed",
                     "body": "the body",
-                    "thread": fx.thread.to_string(),
+                    "assignee": fx.thread.to_string(),
                     "native": { "priority": "high" },
                 }),
                 false,
@@ -1109,8 +1339,9 @@ mod tests {
             .unwrap();
         assert_eq!(task_row(&fx.svc, &out.result).await["priority"], "high");
         assert_eq!(
-            task_row(&fx.svc, &out.result).await["thread_id"],
-            fx.thread.to_string()
+            assignee(&fx, &out.result).await,
+            Some(oxplow_domain::uri::build::thread_uri(fx.thread)),
+            "who it's for is core's, not the task's"
         );
         assert_eq!(
             task_row(&fx.svc, &out.result).await["description"],
@@ -1122,7 +1353,10 @@ mod tests {
                 Some("/native"),
             ),
             (json!({ "title": "x", "priority": "high" }), None),
-            (json!({ "title": "x", "thread": "nope" }), Some("/thread")),
+            (
+                json!({ "title": "x", "assignee": "nope" }),
+                Some("/assignee"),
+            ),
         ] {
             let err = fx
                 .svc
@@ -1305,7 +1539,7 @@ mod tests {
             .active_providers
             .insert("work_items".into(), "tracker".into());
         crate::test_fixtures::activate(&fx.svc).await;
-        let before = list_order(&fx, None).await.len();
+        let before = queue(&fx, None).await.len();
         // Never another list: the chosen one isn't running, so none files
         // it nowhere.
         let out = fx
@@ -1315,69 +1549,75 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(out.result["tracked"], json!(false));
-        assert_eq!(list_order(&fx, None).await.len(), before, "nothing filed");
+        assert_eq!(queue(&fx, None).await.len(), before, "nothing filed");
     }
 
-    /// tsk1058: the thread a work item is filed on is a common field, not
-    /// a tracker's own: an agent's create lands on its own thread unless it
-    /// names one, a person's on the one named (else the backlog).
+    /// Filing assigns nobody, whoever files — an agent's item is in the
+    /// pool, not on its thread — unless the create names an assignee, which
+    /// is core's record (the list never sees it) and must be an open thread
+    /// or the person.
     #[tokio::test]
-    async fn a_create_is_filed_on_a_thread_by_the_common_field() {
+    async fn a_create_assigns_nobody_unless_it_names_an_assignee() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let mine = fx
-            .svc
-            .commands
-            .run(&agent, CREATE, json!({ "title": "mine" }), false)
-            .await
-            .unwrap();
+        let create = |actor: Actor, input: Value| {
+            let commands = fx.svc.commands.clone();
+            async move { commands.run(&actor, CREATE, input, false).await }
+        };
+        let mine = create(agent, json!({ "title": "mine" })).await.unwrap();
+        assert_eq!(assignee(&fx, &mine.result).await, None);
+        let theirs = create(
+            Actor::Human,
+            json!({ "title": "theirs", "assignee": fx.thread.to_string() }),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            task_row(&fx.svc, &mine.result).await["thread_id"],
-            fx.thread.to_string()
+            assignee(&fx, &theirs.result).await,
+            Some(oxplow_domain::uri::build::thread_uri(fx.thread))
         );
-        let named = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                CREATE,
-                json!({ "title": "theirs", "thread": fx.thread.to_string() }),
-                false,
-            )
-            .await
-            .unwrap();
+        let me = create(
+            Actor::Human,
+            json!({ "title": "mine to do", "assignee": "oxplow:oxplow/person" }),
+        )
+        .await
+        .unwrap();
         assert_eq!(
-            task_row(&fx.svc, &named.result).await["thread_id"],
-            fx.thread.to_string()
+            assignee(&fx, &me.result).await,
+            Some("oxplow:oxplow/person".into())
         );
-        let backlog = fx
-            .svc
-            .commands
-            .run(&Actor::Human, CREATE, json!({ "title": "later" }), false)
+        for input in [
+            json!({ "title": "nowhere", "assignee": "thr999" }),
+            json!({ "title": "not one", "assignee": "tsk3" }),
+            json!({ "title": "old", "native": { "thread": fx.thread.to_string() } }),
+        ] {
+            let err = create(Actor::Human, input.clone()).await.unwrap_err();
+            assert!(
+                matches!(err, CommandError::Invalid { .. }),
+                "{input}: {err:?}"
+            );
+        }
+    }
+
+    /// Who the item a run's result names is assigned to.
+    async fn assignee(fx: &crate::test_fixtures::EffortFixture, result: &Value) -> Option<String> {
+        let item = result["uri"].as_str().unwrap().to_string();
+        fx.svc
+            .db
+            .read(move |tx| {
+                tx.query_row(
+                    "SELECT assignee FROM v_work_item WHERE uri = ?1",
+                    [item],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
             .await
-            .unwrap();
-        assert!(
-            task_row(&fx.svc, &backlog.result).await["thread_id"].is_null(),
-            "{}",
-            backlog.result
-        );
-        // oxplow's own fields are its priority only.
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                CREATE,
-                json!({ "title": "old", "native": { "thread": fx.thread.to_string() } }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
+            .unwrap()
     }
 
     /// A link belongs to its task: a person links two backlog tasks, and an
@@ -1386,7 +1626,7 @@ mod tests {
     async fn a_persons_link_belongs_to_its_task() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let from = work_item_ref(fx.task);
-        let other = file_on(&fx, "other", None).await;
+        let other = file_for(&fx, "other", None).await;
         fx.svc
             .commands
             .run(
@@ -1397,7 +1637,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let another = file_on(&fx, "another", None).await;
+        let another = file_for(&fx, "another", None).await;
         fx.svc
             .commands
             .run(
@@ -1836,9 +2076,11 @@ mod tests {
         assert_eq!(
             caused,
             vec![
-                // The list's own record, then core's event.
+                // The list's own record, then core's events: done, it's
+                // nobody's to work on.
                 ("work_item.recorded", "provider:oxplow"),
                 ("work_item.state_changed", source.as_str()),
+                ("work_item.assigned", source.as_str()),
             ]
         );
         assert!(events
@@ -1927,8 +2169,8 @@ mod tests {
             )
             .await
             .unwrap_err();
-        // A task changes lists with `oxplow.work_item.move`; the thread isn't a
-        // native field.
+        // Who works on an item is `oxplow.work_item.assign`'s, not a native
+        // field.
         assert!(
             matches!(&err, CommandError::Invalid { field, .. } if field.as_deref() == Some("/native")),
             "{err:?}"
@@ -1967,7 +2209,12 @@ mod tests {
     async fn another_threads_agent_starts_and_files_tasks_in_progress() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let other = other_threads_agent(&fx).await;
-        let later = file_on(&fx, "later", Some(fx.thread)).await;
+        let later = file_for(
+            &fx,
+            "later",
+            Some(&oxplow_domain::uri::build::thread_uri(fx.thread)),
+        )
+        .await;
         fx.svc
             .commands
             .run(
@@ -1984,7 +2231,7 @@ mod tests {
             .run(
                 &other,
                 CREATE,
-                json!({ "title": "mine now", "thread": "thr9", "state": "in_progress" }),
+                json!({ "title": "mine now", "assignee": "thr9", "state": "in_progress" }),
                 false,
             )
             .await
@@ -2016,7 +2263,7 @@ mod tests {
                     "title": "filed",
                     "body": "see [[tsk1]]",
                     "state": "in_progress",
-                    "thread": fx.thread.to_string(),
+                    "assignee": fx.thread.to_string(),
                 }),
                 false,
             )
@@ -2041,7 +2288,8 @@ mod tests {
             vec![
                 "work_item.recorded",
                 "work_item.created",
-                "work_item.state_changed"
+                "work_item.state_changed",
+                "work_item.assigned"
             ]
         );
         // The fixture's effort closes as the thread switches to this one.
@@ -2093,7 +2341,7 @@ mod tests {
             .unwrap();
         Actor::Agent {
             session_id: None,
-            thread_id: Some(ThreadId::new(9)),
+            thread_id: Some(oxplow_domain::ThreadId::new(9)),
             stream_id: Some(StreamId::new(1)),
         }
     }
@@ -2131,38 +2379,21 @@ mod tests {
         assert_eq!(before, after);
     }
 
-    /// How many tasks whose `work_item.rank` disagrees with the task
-    /// row's `sort_index` — the restated rows must never fall behind the
-    /// task table.
-    async fn stale_ranks(fx: &crate::test_fixtures::EffortFixture) -> i64 {
-        fx.svc
-            .db
-            .read(|c| {
-                c.query_row(
-                    "SELECT count(*) FROM v_work_item w JOIN task t
-                       ON w.uri = 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || t.id
-                     WHERE w.rank IS NOT t.sort_index",
-                    [],
-                    |r| r.get(0),
-                )
-                .map_err(oxplow_db::map_sql_err)
-            })
-            .await
-            .unwrap()
-    }
-
-    /// A list's work item refs in order: a thread's, or the backlog's.
-    async fn list_order(
+    /// An assignee's queue as the interface reads it: the open items
+    /// assigned to `assignee` (`None`: nobody), in order.
+    async fn queue(
         fx: &crate::test_fixtures::EffortFixture,
-        thread: Option<ThreadId>,
+        assignee: Option<&str>,
     ) -> Vec<String> {
         let rows = fx
             .svc
             .sql
             .query_sql(
-                "SELECT uri FROM v_work_item WHERE thread_id = ?1 OR (?1 IS NULL AND thread_id IS NULL) ORDER BY rank, created_at",
-                vec![match thread {
-                    Some(t) => oxplow_db::SqlCell::Int(t.value()),
+                "SELECT uri FROM v_work_item
+                 WHERE assignee IS ?1 AND state NOT IN ('done', 'canceled')
+                 ORDER BY rank IS NULL, rank, created_at, uri",
+                vec![match assignee {
+                    Some(a) => oxplow_db::SqlCell::Text(a.into()),
                     None => oxplow_db::SqlCell::Null(()),
                 }],
                 None,
@@ -2178,14 +2409,15 @@ mod tests {
             .collect()
     }
 
-    async fn file_on(
+    /// File an item as a person, assigned to `assignee` (`None`: nobody).
+    async fn file_for(
         fx: &crate::test_fixtures::EffortFixture,
         title: &str,
-        thread: Option<ThreadId>,
+        assignee: Option<&str>,
     ) -> String {
         let mut input = json!({ "title": title });
-        if let Some(t) = thread {
-            input["thread"] = json!(t.to_string());
+        if let Some(a) = assignee {
+            input["assignee"] = json!(a);
         }
         fx.svc
             .commands
@@ -2242,76 +2474,50 @@ mod tests {
         );
     }
 
-    /// P6.E1a: `oxplow.work_item.reorder` places an item before or after another
-    /// in its own list; undo puts it back where it was.
+    /// `oxplow.work_item.reorder` places an item before or after another in
+    /// its assignee's queue (core's, for every list); undo puts it back.
     #[tokio::test]
-    async fn reorder_places_an_item_and_undo_puts_it_back() {
+    async fn reorder_places_an_item_in_its_queue_and_undo_puts_it_back() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
+        let mine = oxplow_domain::uri::build::thread_uri(fx.thread);
         let t = work_item_ref(fx.task);
-        let a = file_on(&fx, "a", Some(fx.thread)).await;
-        let b = file_on(&fx, "b", Some(fx.thread)).await;
-        let c = file_on(&fx, "c", Some(fx.thread)).await;
+        let a = file_for(&fx, "a", Some(&mine)).await;
+        let b = file_for(&fx, "b", Some(&mine)).await;
+        let c = file_for(&fx, "c", Some(&mine)).await;
         assert_eq!(
-            list_order(&fx, Some(fx.thread)).await,
+            queue(&fx, Some(&mine)).await,
             vec![t.clone(), a.clone(), b.clone(), c.clone()]
         );
-
-        let out = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                REORDER,
-                json!({ "uri": c, "before": a }),
-                false,
-            )
-            .await
-            .unwrap();
+        let run = |input: Value| {
+            let commands = fx.svc.commands.clone();
+            async move { commands.run(&Actor::Human, REORDER, input, false).await }
+        };
+        let out = run(json!({ "uri": c, "before": a })).await.unwrap();
         assert_eq!(
-            list_order(&fx, Some(fx.thread)).await,
+            queue(&fx, Some(&mine)).await,
             vec![t.clone(), c.clone(), a.clone(), b.clone()]
         );
-        // Every renumbered neighbour's work_item row is restated too.
-        assert_eq!(stale_ranks(&fx).await, 0);
-        fx.svc
-            .commands
-            .run(
-                &Actor::Human,
-                REORDER,
-                json!({ "uri": t, "after": b }),
-                false,
-            )
-            .await
-            .unwrap();
+        run(json!({ "uri": t, "after": b })).await.unwrap();
         assert_eq!(
-            list_order(&fx, Some(fx.thread)).await,
+            queue(&fx, Some(&mine)).await,
             vec![c.clone(), a.clone(), b.clone(), t.clone()]
         );
-        assert_eq!(stale_ranks(&fx).await, 0);
-
         fx.svc
             .commands
             .undo(&Actor::Human, out.audit_id.unwrap(), false)
             .await
             .unwrap();
         assert_eq!(
-            list_order(&fx, Some(fx.thread)).await,
+            queue(&fx, Some(&mine)).await,
             vec![a.clone(), b.clone(), c.clone(), t.clone()]
         );
-        assert_eq!(stale_ranks(&fx).await, 0);
-
-        // The anchor must be in the same list, and there's at most one.
-        let other = file_on(&fx, "elsewhere", None).await;
+        // The anchor must be in the same queue, and there's at most one.
+        let other = file_for(&fx, "elsewhere", None).await;
         for input in [
             json!({ "uri": a, "before": other }),
             json!({ "uri": a, "before": b, "after": c }),
         ] {
-            let err = fx
-                .svc
-                .commands
-                .run(&Actor::Human, REORDER, input.clone(), false)
-                .await
-                .unwrap_err();
+            let err = run(input.clone()).await.unwrap_err();
             assert!(
                 matches!(err, CommandError::Invalid { .. }),
                 "{input}: {err:?}"
@@ -2319,33 +2525,39 @@ mod tests {
         }
     }
 
-    /// `oxplow.work_item.move` takes an item to another list (its end, or next to
-    /// an item there); undo brings it back to its place.
+    /// `oxplow.work_item.assign` gives an item to a thread, the person or
+    /// nobody (the end of that queue, or next to an item there) and logs
+    /// `work_item.assigned`; undo gives it back where it was. A closed
+    /// thread and a closed item are refused; closing an item releases it.
     #[tokio::test]
-    async fn move_takes_an_item_to_another_list_and_undo_brings_it_back() {
+    async fn assign_gives_an_item_to_someone_and_undo_gives_it_back() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
+        let mine = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let person = oxplow_domain::uri::build::person_uri(None);
         let t = work_item_ref(fx.task);
-        let a = file_on(&fx, "a", Some(fx.thread)).await;
-        let x = file_on(&fx, "x", None).await;
-        let y = file_on(&fx, "y", None).await;
-
-        let out = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                MOVE,
-                json!({ "uri": t, "to": "backlog", "before": y }),
-                false,
-            )
+        let a = file_for(&fx, "a", Some(&mine)).await;
+        let x = file_for(&fx, "x", Some(&person)).await;
+        let y = file_for(&fx, "y", Some(&person)).await;
+        let run = |input: Value| {
+            let commands = fx.svc.commands.clone();
+            async move { commands.run(&Actor::Human, ASSIGN, input, false).await }
+        };
+        let out = run(json!({ "uri": t, "to": person, "before": y }))
             .await
             .unwrap();
+        assert_eq!(out.result["assignee"], json!(person));
         assert_eq!(
-            list_order(&fx, None).await,
+            queue(&fx, Some(&person)).await,
             vec![x.clone(), t.clone(), y.clone()]
         );
-        assert_eq!(list_order(&fx, Some(fx.thread)).await, vec![a.clone()]);
-        // The thread's effort is the thread's: a move leaves it open.
+        assert_eq!(queue(&fx, Some(&mine)).await, vec![a.clone()]);
+        let logged = fx.svc.event_log_store.read_after(0, 1000).await.unwrap();
+        assert!(logged
+            .iter()
+            .any(|e| e.envelope.event_type == "work_item.assigned"
+                && e.envelope.payload["work_item"] == json!(t)
+                && e.envelope.payload["to"] == json!(person)));
+        // Its effort is its thread's: an assignment leaves it open.
         let effort = fx
             .svc
             .effort_store
@@ -2360,38 +2572,29 @@ mod tests {
             .undo(&Actor::Human, out.audit_id.unwrap(), false)
             .await
             .unwrap();
-        assert_eq!(
-            list_order(&fx, Some(fx.thread)).await,
-            vec![t.clone(), a.clone()]
-        );
-        assert_eq!(list_order(&fx, None).await, vec![x.clone(), y.clone()]);
+        assert_eq!(queue(&fx, Some(&mine)).await, vec![t.clone(), a.clone()]);
+        assert_eq!(queue(&fx, Some(&person)).await, vec![x.clone(), y.clone()]);
 
+        run(json!({ "uri": x, "to": null })).await.unwrap();
+        assert_eq!(queue(&fx, None).await, vec![x.clone()]);
+        let err = run(json!({ "uri": y, "to": "thr999" })).await.unwrap_err();
+        assert!(err.to_string().contains("thr999"), "{err}");
+
+        // Done, it's nobody's; and nobody's it stays.
         fx.svc
             .commands
             .run(
                 &Actor::Human,
-                MOVE,
-                json!({ "uri": x, "to": { "thread": fx.thread.to_string() } }),
+                NAME,
+                json!({ "uri": y, "to": "done" }),
                 false,
             )
             .await
             .unwrap();
-        assert_eq!(
-            list_order(&fx, Some(fx.thread)).await,
-            vec![t.clone(), a.clone(), x.clone()]
-        );
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                MOVE,
-                json!({ "uri": y, "to": { "thread": "thr999" } }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("thr999"), "{err}");
+        assert_eq!(queue(&fx, Some(&person)).await, Vec::<String>::new());
+        assert_eq!(assignee(&fx, &json!({ "uri": y })).await, None);
+        let err = run(json!({ "uri": y, "to": mine })).await.unwrap_err();
+        assert!(matches!(err, CommandError::Invalid { .. }), "{err:?}");
     }
 
     /// `oxplow.work_item.delete` asks first, then removes the task, logged as
@@ -2416,7 +2619,11 @@ mod tests {
             .run(&Actor::Human, DELETE, json!({ "uri": t }), true)
             .await
             .unwrap();
-        assert!(list_order(&fx, Some(fx.thread)).await.is_empty());
+        assert!(
+            queue(&fx, Some(&oxplow_domain::uri::build::thread_uri(fx.thread)))
+                .await
+                .is_empty()
+        );
         let executed = out.event_id.unwrap();
         let events = fx.svc.event_log_store.read_after(0, 500).await.unwrap();
         let caused: Vec<&str> = events

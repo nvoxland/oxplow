@@ -15,6 +15,7 @@ use super::oxplow_uri::{OxplowUri, ResourceName};
 pub const PROJECT: &str = "oxplow/project";
 pub const STREAM: &str = "oxplow/stream";
 pub const THREAD: &str = "oxplow/thread";
+pub const PERSON: &str = "oxplow/person";
 pub const EFFORT: &str = "oxplow/effort";
 pub const TURN: &str = "oxplow/turn";
 pub const SNAPSHOT: &str = "oxplow/snapshot";

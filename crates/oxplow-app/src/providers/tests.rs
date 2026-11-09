@@ -558,23 +558,23 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
 /// calls as steps through the provider's process — the comment, then the
 /// transition — recorded as one run whose `work_item.recorded` events it
 /// caused, and not undoable.
-/// tsk1058: an outside tracker's item is filed on a thread like any
-/// other — the one a person names, else an agent's own — and the
-/// tracker never sees it: the thread is oxplow's record.
+/// An outside tracker's item is assigned like any other — to the one a
+/// create names, else to nobody, an agent's filing too — and the tracker
+/// never sees it: who works on it is oxplow's record.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
+async fn an_outside_item_is_assigned_as_its_create_names() {
     let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
-    let thread_of = |item: String| {
+    let assignee_of = |item: String| {
         let svc = fx.svc.clone();
         async move {
             svc.event_pump.run_once().await.unwrap();
             let out = svc
                 .sql
                 .query_sql(
-                    "SELECT thread_id FROM v_work_item WHERE uri = ?1",
+                    "SELECT assignee FROM v_work_item WHERE uri = ?1",
                     vec![oxplow_db::SqlCell::Text(item)],
                     None,
                 )
@@ -589,7 +589,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "named", "thread": fx.thread.to_string() }),
+            json!({ "title": "named", "assignee": fx.thread.to_string() }),
             false,
         )
         .await
@@ -600,7 +600,8 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         Some("fake".to_string()),
         "{named}"
     );
-    assert_eq!(thread_of(named).await, json!([[fx.thread.value()]]));
+    let mine = oxplow_domain::uri::build::thread_uri(fx.thread);
+    assert_eq!(assignee_of(named).await, json!([[mine]]));
     let agent = Actor::Agent {
         session_id: None,
         thread_id: Some(fx.thread),
@@ -618,7 +619,7 @@ async fn an_outside_item_is_filed_on_the_thread_named_or_the_agents() {
         .await
         .unwrap();
     let own = own.result["uri"].as_str().unwrap().to_string();
-    assert_eq!(thread_of(own).await, json!([[fx.thread.value()]]));
+    assert_eq!(assignee_of(own).await, json!([[null]]));
 }
 
 #[cfg(unix)]
@@ -6349,7 +6350,7 @@ async fn file_task(fx: &EffortFixture) -> String {
         .run(
             &Actor::Human,
             crate::commands::work_item::CREATE,
-            json!({ "title": "policy work", "thread": fx.thread.to_string() }),
+            json!({ "title": "policy work", "assignee": fx.thread.to_string() }),
             false,
         )
         .await

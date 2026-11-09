@@ -19,7 +19,7 @@
           ]
         },
         "state": {
-          "description": "One of open, doing, stuck, closed, dropped (default open).",
+          "description": "One of someday, open, doing, stuck, closed, dropped (default open).",
           "type": [
             "string",
             "null"

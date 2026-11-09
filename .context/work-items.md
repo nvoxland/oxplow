@@ -25,11 +25,12 @@ list at a time, whichever implementation it is, and nothing with none.
 
 `v_work_item` (table `work_item`, V115) holds the items by URI,
 `oxplow:oxplow/work_item?id=<id>&provider=<provider>`: `title`, `body`, a canonical `state`
-(`todo`, `in_progress`, `blocked`, `done`, `canceled`), the list's own
+(`backlog` — filed, not ready — `todo` — ready to work on — `in_progress`,
+`blocked`, `done`, `canceled`), the list's own
 `native_state` and `native` JSON, `parent_uri` (NULL when the parent is
 deleted: a deleted item isn't a live one, so the dataset's parent
-relationship holds; tsk572), and (V17) `thread_id` — the list it's on, a
-thread's or the backlog (NULL) — `rank` on that list and `closed_at`.
+relationship holds; tsk572), `closed_at`, and core's assignment
+(below): `assignee` and `rank`.
 `v_work_item_link` is its links (`to_uri`, its `to_kind`, `link_type`):
 to another item of the list (`blocks`, `discovered_from`, `relates_to`,
 `duplicates`, `supersedes`, `replies_to`), or `about` any URI — what the
@@ -37,7 +38,7 @@ item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/ef
 needn't resolve; it may name something deleted or an extension's resource
 since uninstalled (resources.md "Using URIs"),
 `v_work_item_comment` its comments. Core reads work items only through
-these: a thread's items (`v_work_item`), a work item's URI summary
+these: a thread's assigned items (`v_work_item`), a work item's URI summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
 (`v_search_work_item`).
 
@@ -55,11 +56,10 @@ oxplow's state mapping are in [data-model.md](./data-model.md) "`work_item`".
 `work_item.recorded@3 { item }` events — what each verb answers with,
 and what a read back restates — carry the item as it now stands: URI,
 title, body, canonical and native state, native fields, parent, deleted,
-and, when the list keeps them, `rank`, `links`, `comments` and `list`
-(a thread's or the backlog: `List`), each the whole set (stated, the
-host restates it; absent, it keeps what it has; an item whose record
-states no `list` stays on the list its first record was filed from —
-the filing event's thread anchor). The pump consumer `work_items.project`
+and, when the list keeps them, `links` and `comments`, each the whole
+set (stated, the host restates it; absent, it keeps what it has). Who it
+is assigned to and its place in their queue are never a list's
+("Assignment"). The pump consumer `work_items.project`
 (`crates/oxplow-app/src/work_items.rs`) upserts it by URI; a replay
 restates the same row. Why one record event rather than state on each of
 `created` / `edited` / `state_changed`: the "what happened" events stay
@@ -107,6 +107,47 @@ its comments' mentions (`comment_*`, keyed by the item), restated by
 `page_ref.work_item` consumer, after `work_items.project`) and by the
 boot repair. A list writes no page refs of its own.
 
+## Assignment
+
+**Who is going to work on an item is core's record, for every list**,
+never a list's: an item is assigned to a thread
+(`oxplow:oxplow/thread?id=thr3`), the person (`oxplow:oxplow/person`, a
+resource foundation declares; its optional `id` names one of several
+later), or nobody. It is independent of the state: a backlog item can
+be assigned, which is how a person or a controller agent routes work to
+threads before it is ready. An unassigned `todo` item is **the pool**:
+what any thread may pull when it has nothing of its own
+(`oxplow/work-next`). Each assignee — nobody included — has a queue,
+the open items assigned to it in `rank` order. **A done or canceled item
+is nobody's**: who worked on it is its efforts (`v_effort.work_item`,
+`thread_id`), the same for every list. Filing assigns nobody unless the
+create names an `assignee`; who filed it is the event's thread anchor.
+
+The record is `work_item_assignment` (V7: `uri`, `assignee` NULL for
+nobody, `rank`, `assigned_at`), kept by the `work_items.project` consumer
+from core's **`work_item.assigned@1 { work_item, from?, to?, before?,
+after? }`**: the item joins `to`'s queue next to the item named, or at its
+end, and the queue is renumbered; a record of the item as done or
+canceled, from whichever list, deletes its row. `v_work_item` joins it
+(`assignee`, `rank`). The writes, all core's and in the bus's
+transaction (`commands/work_item.rs`):
+
+- `oxplow.work_item.assign { uri, to?, before?, after? }` — `to` a thread's
+  URI or id, the person's URI, or null; a closed thread (or none) is
+  refused at `/to`, a closed item at `/uri`. Undone by assigning it back
+  to its place. With no list active (none) it answers `{ tracked: false }`.
+- `oxplow.work_item.reorder { uri, before?, after? }` — its place in its
+  assignee's queue; the neighbour must be in the same queue.
+- `create { …, assignee? }` — checked first, kept from the list, and
+  logged as `work_item.assigned` once the item exists.
+- A verb that closes an assigned item logs `work_item.assigned` to nobody.
+- `oxplow.thread.close` and `oxplow.stream.archive` release their threads'
+  items to nobody.
+- The effort policy: an agent that starts an item not assigned to its
+  thread takes it (`.context/work-tracking.md` rule 1).
+- Taking a handoff assigns its item to the recipient thread
+  (`.context/agent-model.md` "Handoffs").
+
 ## Reading them in the UI
 
 The desktop reads **only the interface**, whichever list is active —
@@ -117,25 +158,24 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
 `apps/desktop/src/workItems.ts` is the one read and write path:
 
 - **`WorkItem`** is a `v_work_item` row — `uri`, `provider`, `title`,
-  `body`, `state`, `parentRef`, `threadId` (null = the backlog), `rank`,
+  `body`, `state`, `parentRef`, `assignee` (null = nobody), `rank`,
   `closedAt`, the list's own fields as `native`, and `commentCount`
   (`v_work_item_comment`).
-- **`readWorkItem`** and **`readWorkItemsByRef`** read the rest (the Tasks,
-  Backlog and Board are pages over `v_work_item`: a thread's list or
-  the backlog in list order (`rank`, then `created_at`), an item with a
-  child an epic);
+- **`readWorkItem`** and **`readWorkItemsByRef`** read the rest (Tasks
+  and Task List are pages over `v_work_item`: an assignee's queue in
+  order (`rank`, then `created_at`), an item with a child an epic);
   `readItemEfforts(ref)` an item's activity.
 - **Writes** are `work_item.*` commands by uri: `createWorkItem` (no
   list named — it files on the active one; `native` carries the list's
   own fields), `updateWorkItem`, `transitionWorkItem`, `applyItemChange`
   (an edit from any surface: fields and/or state), `deleteWorkItem`,
-  `reorderWorkItems` (a drag's new order becomes one `oxplow.work_item.reorder`
-  by neighbour, `placementFromOrder`) and `moveWorkItem`.
+  and `reorderWorkItems` (a drag's new order becomes one
+  `oxplow.work_item.reorder` by neighbour, `placementFromOrder`).
 - **The active list's profile** — `readWorkListProfile` /
   `useWorkListProfile` (one shared read, re-read on a switch): its
   provider, features, declared `fields` and `idPattern`
-  (`v_capability_provider`). Screens offer only what it can do: drag
-  reordering with `ordering`, the backlog and thread moves with `lists`,
+  (`v_capability_provider`). Screens offer only what it can do (reordering
+  and assignment are core's, so always):
   epics, parents and "+ Item" with `hierarchy`, Comment… / Link… with
   `comments` / `links`, Delete with `delete`. **Declared fields render
   generically** (`components/WorkItemFields.tsx`: an enum as a pill
@@ -156,8 +196,8 @@ their empty states.
 **One page for every item** (the `work-item` document page, the renderer of
 `oxplow/work_item`; param `uri`): the state, the title and the list's declared fields
 (forms over `oxplow.work_item.transition` and `update`), the description
-(a `markdown` viz), About (where it is; Bring to this thread, Send to
-backlog and Delete on its right-click menu, offered by the list's features),
+(a `markdown` viz), About (who it's assigned to; Assign to This Thread,
+Assign to Me, Unassign and Delete on its right-click menu),
 Links, Comments and Activity (its efforts). Links and Comments are left out
 where the list declares no such feature (`needs: [work_items.links]`,
 `[work_items.comments]`). The item's own
@@ -185,31 +225,39 @@ IPC's `ref_resolver::resolve_ref`) says which.
 The **Tasks** board (oxplow-bundled's `tasks` page, its `board`
 component) shows items as compact cards (the title and the description's
 first sentence, two lines each at most; an urgent or high priority a
-coloured edge; the rest on hover) in one column per canonical state. To
+coloured edge; the rest on hover) in one column per state but backlog
+and canceled. To
 Do groups its cards under their epics, each heading folding its items
 (remembered per person); Done holds what finished in the last three days,
 twenty at most, and links to the rest in the Task List. Each column
 scrolls on its own. Drag a card to a column to transition it, within
-its column to reorder it (with `ordering`), or use its menu: the states,
-the list's editable choice fields, Make top-level, Send to backlog or
-Bring to this thread, Delete. Its scope (this thread, its stream,
-everywhere), priority and search are its toolbar, the tab's view. The
-**Task List** (`task-list`) is the items in one state (To Do unless asked),
-closed ones latest first, on a thread, its stream, everywhere or the
-backlog, with a quick add in its rail that files a title there. **New Item** files on the active
-list: title, body, a canonical starting state (todo or blocked), the
+its column to reorder it in its assignee's queue, or use its menu: the
+states, the list's editable choice fields, Assign to (the stream's open
+threads, You, Nobody), Make top-level, Delete. Its scope (assigned to
+this thread, its stream, you, nobody, or anyone; for a closed item, the
+thread or stream whose efforts worked it), priority and search are its
+toolbar, the tab's view. The **Task List** (`task-list`) is the items in
+one state (To Do unless asked; Backlog is one), closed ones latest first,
+in the same scopes, with a quick add in its rail that files a title in
+the state it shows, assigned to whom it shows. **New Item** files on the active
+list: title, body, a canonical starting state (todo, backlog or blocked),
+who it's for (nobody unless picked), the
 list's editable fields and — with `hierarchy` — a parent.
 
 ## Reading them for the agent
 
 The agent reads work items through the interface too, with no tool of
-its own: `oxplow_query_sql` over `v_work_item` for a list in order (`WHERE
-thread_id = … ORDER BY rank IS NULL, rank, created_at`), `oxplow_read` on a
-work item's URI for one item with its `links` and `comments`, and the
-foundation page `oxplow/work-next` (the tool `oxplow_work_next`,
-param `thread: "thr3"`) for what to pick up next (an epic with its ready
-descendants, or every ready non-epic item; open `blocks` links hold an
-item). None of them belongs to an implementation, so the tool list never
+its own: `oxplow_query_sql` over `v_work_item` for a queue in order
+(`WHERE assignee = … ORDER BY rank IS NULL, rank, created_at`),
+`oxplow_read` on a work item's URI for one item with its `links` and
+`comments`, the foundation page `oxplow/thread-work` (`oxplow_thread_work`:
+what is assigned to a thread and what its efforts finished), and
+`oxplow/work-next` (the tool `oxplow_work_next`, param `thread: "thr3"`)
+for what to pick up next: the ready items assigned to the thread (an epic
+with its ready descendants, or every ready non-epic item; open `blocks`
+links hold an item), else the pool, by priority (`role: pool`). Starting
+one assigns it to the thread. A controller agent routes work with
+`oxplow.work_item.assign`. None of them belongs to an implementation, so the tool list never
 changes with a switch; with none they read empty. A source
 guard (`source_guards::only_oxplows_implementation_names_its_task_list`)
 pins the few production files that may name oxplow's task store,
@@ -254,9 +302,8 @@ refuses: a URI of another list's item (`/ref`,
 naming the active list), a parent, link target or place of another list
 (`/parent_uri`, `/target`, `/before`, `/after`), and a feature the list
 doesn't declare.
-A `create` hands the list the input with `thread` resolved
-([`filing_thread`]: the named one, else an agent's own; a person's none,
-the backlog), and the list's inverse is renamed to `work_item.<verb>`, so
+A `create` hands the list the input without its `assignee` (core's,
+above), and the list's inverse is renamed to `work_item.<verb>`, so
 an undo dispatches again. **The answer is the interface's**, terse and the
 same for every list: `{ uri }` (a comment's adds `comment`, the list's id
 for it), plus core's `state` when the verb put the item in one and
@@ -264,10 +311,8 @@ for it), plus core's `state` when the verb put the item in one and
 item from `v_work_item`. A create's, or an update's that sets a body,
 result carries its `link_warnings` (`LinkDeps::item_warnings`), for every
 list.
-`reorder` (feature `ordering`: an item's place on its list, read as
-`rank`) and `move` (feature `lists`: to a thread's list or the backlog,
-read as `thread_id`) are interface verbs like the rest; a provider that
-declares the feature must declare the verb. A Rust client, **`work_items::WorkItems`**
+`assign` and `reorder` aren't a list's verbs: they are core's
+("Assignment"). A Rust client, **`work_items::WorkItems`**
 (`Services::work_items_client()`), types the calls; the conformance
 suite uses it. Extension commands compose the same verbs:
 oxplow-bundled's Accept Review / Request Changes (P7.C5) comment on and
@@ -301,8 +346,8 @@ provider (a provider's verb receives the same input, less `create`'s
 oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
 `archived` rides on `done` or `canceled` — archiving as `done` a task that
 wasn't completed passes through `done` first, so the row reads as
-asked); `native` holds `{ priority? }` (`deny_unknown_fields`; a task
-changes lists with `oxplow.work_item.move`).
+asked); `backlog` is its own status; `native` holds `{ priority? }`
+(`deny_unknown_fields`). A task keeps no thread or order of its own.
 A `native_state` alone (no `state`) is a valid update or create: that is
 how the task writes send a status. A link belongs to its task, not to a
 thread.
@@ -442,12 +487,11 @@ canonical state round-trips, and moving again to the native state the
 row reports lands there, and core logs `work_item.state_changed` for
 the create and every move to another state; a parent resolves with `hierarchy` and is refused
 without it; links and comments follow their features and read back
-through `v_work_item_link` / `v_work_item_comment`; `reorder` follows
-`ordering` (the reordered item ranks ahead in `v_work_item.rank`) and
-`move` follows `lists` (moved to the backlog, its `thread_id` is NULL);
+through `v_work_item_link` / `v_work_item_comment`; an open item of any
+list can be assigned to the person and reordered in that queue (it ranks
+ahead in `v_work_item.rank`, reads back in `assignee`) and released;
 the log names the item in the interface's words, whichever list —
-`work_item.created`, `edited` (the rename; the other item's reorder and
-move), `linked` and `commented` as the features allow, and `deleted`
+`work_item.created`, `edited` (the rename), `assigned`, `linked` and `commented` as the features allow, and `deleted`
 for each item it deletes; reading the
 provider back restates what its writes recorded — after a
 `provider.sync` (`WorkItemsProbe::sync`; nothing to read for oxplow's

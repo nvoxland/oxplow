@@ -1484,12 +1484,10 @@ None is cross-thread, visible to the person, and acknowledged.
   `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`
   is how a recipient takes one: a native composite that checks the same
   rule (`may_settle`) against the run's actor before it composes, so a
-  stranger's run moves nothing, then composes `oxplow.work_item.move`
-  onto the recipient thread (when taking an item not there yet, on a
-  list declaring `lists`) and the settle. Ownership stays the item's
-  thread. A list's verbs run outside the transaction, so a take that
-  moves an item runs as steps and has no undo; the recipient reopens it
-  with `settle { state: open }`. A decline undoes.
+  stranger's run assigns nothing, then composes `oxplow.work_item.assign`
+  to the recipient thread (when taking an item not assigned there yet;
+  core's, for every list) and the settle, in one transaction, undone as
+  one. A decline undoes.
 - **Thread notes stay as they are.** They were the candidate carrier and
   don't fit: a note belongs to its writer's thread, has no recipient,
   state or delivery stamp, and the Explore hand-back relies on that.

@@ -129,14 +129,14 @@ impl LinkDeps {
                     (Some(t), _) => Some(t),
                     (None, Some(item)) => tx
                         .query_row(
-                            "SELECT thread_id FROM work_item WHERE uri = ?1",
+                            "SELECT assignee FROM work_item_assignment WHERE uri = ?1",
                             [item],
-                            |r| r.get::<_, Option<i64>>(0),
+                            |r| r.get::<_, Option<String>>(0),
                         )
                         .optional()
                         .map_err(oxplow_db::map_sql_err)?
                         .flatten()
-                        .map(oxplow_domain::ThreadId::new),
+                        .and_then(|a| oxplow_domain::uri::build::thread_of_uri(&a)),
                     (None, None) => None,
                 };
                 let vocabulary = deps.vocabulary.current();

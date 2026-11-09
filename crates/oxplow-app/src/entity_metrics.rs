@@ -387,12 +387,17 @@ mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at, closed_at) VALUES
-                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', 1, 10, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
-                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', 1, 20, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
-                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'done', 'done', '{\"priority\":\"high\"}', 1, 30, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
-                   ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'todo', 'ready', '{\"priority\":\"high\"}', 1, 40, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
-                   ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'in_progress', 'in_progress', '{\"priority\":\"medium\"}', 1, 50, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);",
+                 INSERT INTO work_item (uri, provider, title, state, native_state, native, created_at, updated_at, closed_at) VALUES
+                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T09:00:00Z'),
+                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-21T17:30:00Z'),
+                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-23T12:00:00Z'),
+                   ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL),
+                   ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'in_progress', 'in_progress', '{\"priority\":\"medium\"}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', NULL);
+                 -- A numeric column to aggregate and a view to join: each
+                 -- item's place in thread 1's queue.
+                 INSERT INTO work_item_assignment (uri, assignee, rank, assigned_at)
+                   SELECT uri, 'oxplow:oxplow/thread?id=thr1', 10 * CAST(substr(uri_param(uri, 'id'), 4) AS INTEGER), '2026-09-01'
+                   FROM work_item;",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -492,7 +497,7 @@ mod tests {
         let by_thread = EntityDimensionSpec {
             view: "v_work_item".into(),
             expr: "t.title".into(),
-            join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
+            join: Some("LEFT JOIN v_thread t ON t.uri = e.assignee".into()),
         };
         let rows = current(&l, &done(), Some(&by_thread)).await.unwrap();
         assert_eq!(rows.len(), 1);
@@ -590,8 +595,8 @@ mod tests {
         db.transaction(|c| {
             c.execute_batch(
                 "WITH RECURSIVE n(i) AS (SELECT 100 UNION ALL SELECT i + 1 FROM n WHERE i < 10100)
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, rank, created_at, updated_at)
-                 SELECT 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || i, 'oxplow', 't', 'todo', 'ready', '{\"priority\":\"low\"}', 1, i, '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
+                 INSERT INTO work_item (uri, provider, title, state, native_state, native, created_at, updated_at)
+                 SELECT 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || i, 'oxplow', 't', 'todo', 'ready', '{\"priority\":\"low\"}', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z' FROM n;",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })

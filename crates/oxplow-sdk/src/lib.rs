@@ -736,7 +736,7 @@ pub fn scaffold_with(
                  \x20 items:\n\
                  \x20   sql: |\n\
                  \x20     SELECT w.uri, w.title, w.state\n\
-                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20     FROM v_work_item w JOIN v_thread t ON t.uri = w.assignee\n\
                  \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                  \x20     ORDER BY w.updated_at DESC\n\
                  view:\n\
@@ -879,7 +879,7 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
     use serde_json::json;
     let str_prop = json!({ "type": "string" });
     let state = json!({ "type": "string",
-                        "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
+                        "enum": ["backlog", "todo", "in_progress", "blocked", "done", "canceled"] });
     match (capability, verb) {
         ("work_items", "create") => (
             "Create a work item.".into(),

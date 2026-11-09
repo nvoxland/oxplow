@@ -143,7 +143,7 @@ impl ProviderContract {
 }
 
 /// A work list's: the `work_item.<verb>` commands dispatch to its verbs,
-/// it records its items as `work_item.recorded@2`, and owns
+/// it records its items as `work_item.recorded@3`, and owns
 /// `oxplow:oxplow/work_item?id=…&provider=<instance>`.
 pub const WORK_ITEMS: ProviderContract = ProviderContract {
     verbs: &[
@@ -174,14 +174,6 @@ pub const WORK_ITEMS: ProviderContract = ProviderContract {
         Verb {
             name: "delete",
             needs: Need::Feature("delete"),
-        },
-        Verb {
-            name: "reorder",
-            needs: Need::Feature("ordering"),
-        },
-        Verb {
-            name: "move",
-            needs: Need::Feature("lists"),
         },
     ],
     dispatch: Some("oxplow.work_item"),
@@ -393,8 +385,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "links",
             "delete",
             "idempotent_writes",
-            "ordering",
-            "lists",
         ],
         provider: Some(&WORK_ITEMS),
     },
@@ -700,10 +690,12 @@ mod tests {
             ["create", "update", "transition"]
         );
         assert_eq!(
-            work.required(&serde_json::json!({"links": true, "lists": true, "comments": false})),
-            ["create", "update", "transition", "link", "unlink", "move"]
+            work.required(&serde_json::json!({"links": true, "comments": false})),
+            ["create", "update", "transition", "link", "unlink"]
         );
-        assert!(work.verb("reorder").is_some() && work.verb("estimate").is_none());
+        // Who works on an item and its place in their queue are core's.
+        assert!(work.verb("assign").is_none() && work.verb("reorder").is_none());
+        assert!(work.verb("estimate").is_none());
         let policy = contract("effort_policy").unwrap();
         assert_eq!(policy.required(&serde_json::json!({})), ["react"]);
         let knowledge = contract("knowledge").unwrap();

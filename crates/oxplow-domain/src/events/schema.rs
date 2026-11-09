@@ -211,6 +211,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<WorkItemStateChanged>()
             .expect("core type registers");
+        r.register::<WorkItemAssigned>()
+            .expect("core type registers");
         r.register::<ThreadCheckpoint>()
             .expect("core type registers");
         r.register::<KnowledgePageWritten>()
@@ -1932,8 +1934,10 @@ impl EventType for WorkItemCommented {
 
 /// `work_item.recorded@3`: a list's item as it now stands — how every
 /// list's items reach the work-item interface (the `work_items.project`
-/// consumer upserts it by ref), with its rank, links, comments and list
-/// when it states them. A list's verbs answer with it.
+/// consumer upserts it by ref), with its links and comments when it
+/// states them. A list's verbs answer with it. Who it's assigned to and
+/// its place in their queue aren't a list's: core records them
+/// (`work_item.assigned`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemRecordedV3 {
@@ -1945,6 +1949,37 @@ impl EventType for WorkItemRecorded {
     const TYPE: &'static str = "work_item.recorded";
     const V: u32 = 3;
     type Payload = WorkItemRecordedV3;
+}
+
+/// `work_item.assigned@1`: who is going to work on an item, or its place
+/// in their queue, changed (`oxplow.work_item.assign`, `.reorder`; a
+/// closed item or a closed thread's releases it). Core's record, for every
+/// provider; the `work_items.project` consumer keeps `v_work_item.assignee`
+/// and `rank` from it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkItemAssignedV1 {
+    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
+    pub work_item: String,
+    /// Who it was assigned to: a thread's URI, the person's; absent, nobody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// Who it's assigned to now; absent, nobody.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// Placed just before this item of `to`'s queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<String>,
+    /// Placed just after this item of `to`'s queue (neither: at its end).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<String>,
+}
+
+pub struct WorkItemAssigned;
+impl EventType for WorkItemAssigned {
+    const TYPE: &'static str = "work_item.assigned";
+    const V: u32 = 1;
+    type Payload = WorkItemAssignedV1;
 }
 
 /// How many diagnostics of each severity a file has.
@@ -2417,6 +2452,7 @@ mod tests {
                 ("ui.op_failed", 2),
                 ("vcs.commit.indexed", 2),
                 ("vcs.head.moved", 2),
+                ("work_item.assigned", 1),
                 ("work_item.commented", 2),
                 ("work_item.created", 2),
                 ("work_item.deleted", 2),

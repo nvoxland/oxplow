@@ -28,14 +28,14 @@ collectors:
         SELECT CAST(substr(uri_param(w.uri, 'id'), 4) AS INTEGER) AS id, w.title,
                w.native_state AS status,
                json_extract(w.native, '$.priority') AS priority,
-               w.thread_id, th.stream_id,
+               th.id AS thread_id, th.stream_id,
                max(w.updated_at,
                    coalesce((SELECT max(c.created_at) FROM v_work_item_comment c
                              WHERE c.uri = w.uri), ''),
                    coalesce((SELECT max(coalesce(e.ended_at, e.started_at)) FROM v_effort e
                              WHERE e.work_item = w.uri), '')) AS last_touched_at
         FROM v_work_item w
-        LEFT JOIN v_thread th ON th.id = w.thread_id
+        LEFT JOIN v_thread th ON th.uri = w.assignee
         WHERE w.state IN ('todo', 'in_progress', 'blocked')
       )
       SELECT id, title, status, priority, thread_id, stream_id, last_touched_at,
@@ -63,7 +63,7 @@ datasets:
       - { name: title, type: TEXT, doc: The task's title. }
       - { name: status, type: TEXT, doc: "The task's status: ready, in_progress or blocked." }
       - { name: priority, type: TEXT, doc: "The task's priority: low, medium, high or urgent." }
-      - { name: thread_id, type: INTEGER, doc: "The thread the task is on, or null for the backlog." }
+      - { name: thread_id, type: INTEGER, doc: "The thread the task is assigned to, or null." }
       - { name: stream_id, type: INTEGER, doc: "The stream the task's thread is in, or null for the backlog." }
       - { name: last_touched_at, type: TEXT, doc: "When the task was last edited, commented on or worked on (RFC 3339, UTC)." }
       - { name: days_idle, type: INTEGER, doc: "Whole days since last_touched_at, at the time of the sync." }

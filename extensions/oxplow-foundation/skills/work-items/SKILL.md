@@ -22,25 +22,40 @@ File one when it helps the person follow the work:
   "input": { "title": "Fix login redirect loop", "body": "…", "state": "todo" } }
 ```
 
-It goes on the active work list. `state` is `todo` (the default) or
-`in_progress`; the list's own fields go under `native`, by the names it
+It goes on the active work list, assigned to nobody unless `assignee`
+names a thread (`thr3`) or the person (`oxplow:oxplow/person`). `state`
+is `todo` (the default), `backlog` or `in_progress`; the list's own fields go under `native`, by the names it
 declares (`v_capability_provider.fields`; e.g. `{ "priority": "high" }`). Title: imperative, ≤60 chars. One reviewable
 concern per item. An epic is an item with children: file one when the
 change has three or more steps a reviewer would inspect separately;
 otherwise file a single item.
 
 Starting an item (`oxplow.work_item.transition { uri, to: "in_progress" }`)
-links your effort to it; starting an unrelated one begins a new effort.
+assigns it to your thread and links your effort to it; starting an
+unrelated one begins a new effort.
 oxplow never marks an item done. If you're tracking one, move it to
 `done` when it ships.
 
-**States:** `todo` (ready), `in_progress`, `blocked` (needs an
+**States:** `backlog` (filed, not ready yet), `todo` (ready), `in_progress`, `blocked` (needs an
 answer), `done`, `canceled` (decided against: keep the row, with the
 reasoning). A list may have its own finer state (`native_state`). Put
 state in the state, never in the title.
 
 When the person rejects your last attempt at an item, reopen that item
 rather than filing a new one.
+
+## Assigning items
+
+Who is going to work on an item is its assignee: a thread, the person, or
+nobody. An unassigned `todo` item is the pool any thread may take.
+`oxplow.work_item.assign { uri, to, before?, after? }` gives it to a
+thread or the person (`to: null`: nobody) at the end of their queue or
+next to an item there; `oxplow.work_item.reorder { uri, before? | after? }`
+moves it within its queue. That queue order is core's, whatever list
+holds the items. A controller thread routes work this way: assign items
+to the threads that should do them, in the order they should do them.
+A done or canceled item is nobody's (closing it releases it); who worked
+on it is its efforts.
 
 ## Changing items
 
@@ -72,15 +87,16 @@ Link types:
 ## Reading items
 
 - `oxplow_read { uri }` — one item: its row, its links and its comments.
-- `oxplow_work_next { thread: "thr3" }` — what to pick up next on a
-  thread's list (an epic with its ready descendants, or the ready items).
-- `oxplow_thread_work { thread }` — a thread's items by state, with their
-  efforts.
+- `oxplow_work_next { thread: "thr3" }` — what to pick up next: the ready
+  items assigned to the thread (an epic with its ready descendants, or the
+  ready items), else the pool (`role: pool`), most pressing first.
+- `oxplow_thread_work { thread }` — what is assigned to a thread and what
+  its efforts finished, with their efforts.
 - `oxplow_query_sql` over `v_work_item` (`uri`, `title`, `body`, `state`,
-  `native_state`, `native`, `parent_uri`, `thread_id` — NULL on the
-  backlog — `rank`, `closed_at`), `v_work_item_link` and
-  `v_work_item_comment` for anything else (`thread_id` joins `v_thread`): a list's items in order are
-  `WHERE thread_id = … ORDER BY rank IS NULL, rank, created_at`.
+  `native_state`, `native`, `parent_uri`, `assignee` — a thread's or the
+  person's uri, NULL for nobody — `rank`, `closed_at`), `v_work_item_link` and
+  `v_work_item_comment` for anything else (`assignee` joins `v_thread` on its `uri`): a queue in order is
+  `WHERE assignee = … ORDER BY rank IS NULL, rank, created_at`.
 
 What's been done on an item is its efforts: `v_effort` where `work_item`
 is the item's uri (`started_at`, `ended_at`, `summary`).

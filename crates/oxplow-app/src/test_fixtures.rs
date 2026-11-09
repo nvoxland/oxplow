@@ -359,13 +359,11 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
         .task_store
         .insert(&Task {
             id: TaskId::placeholder(),
-            thread_id: Some(thread),
             parent_id: None,
             title: "t".into(),
             description: String::new(),
             status: TaskStatus::InProgress,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
@@ -377,6 +375,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
         .await
         .unwrap();
     restate_task(&svc, task).await;
+    assign_to(&svc, &work_item_ref(task), Some(thread)).await;
     let effort = svc
         .effort_store
         .start(&work_item_ref(task), &thread, None)
@@ -396,7 +395,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
 }
 
 /// A task filed as a person through `oxplow.work_item.create` with
-/// `input` (on the backlog unless it names a `thread`): its id.
+/// `input` (assigned to nobody unless it names an `assignee`): its id.
 pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> TaskId {
     let out = svc
         .commands
@@ -423,6 +422,31 @@ pub async fn restate_task(svc: &crate::Services, task: TaskId) {
         .unwrap();
     svc.event_log_store
         .append(oxplow_tasks::provider::recorded(record))
+        .await
+        .unwrap();
+    svc.event_pump.deliver_projections().await.unwrap();
+}
+
+/// Assign `item` to `thread` (`None`: nobody) in the work-item interface,
+/// as `oxplow.work_item.assign` does: its `work_item.assigned`, logged and
+/// projected. For a fixture that sets up who works on what without a
+/// run to count.
+pub async fn assign_to(svc: &crate::Services, item: &str, thread: Option<ThreadId>) {
+    use oxplow_domain::events::schema::{WorkItemAssigned, WorkItemAssignedV1};
+    svc.event_log_store
+        .append(
+            oxplow_domain::Envelope::typed::<WorkItemAssigned>(
+                "human",
+                &WorkItemAssignedV1 {
+                    work_item: item.to_string(),
+                    from: None,
+                    to: thread.map(oxplow_domain::uri::build::thread_uri),
+                    before: None,
+                    after: None,
+                },
+            )
+            .with_subject([item]),
+        )
         .await
         .unwrap();
     svc.event_pump.deliver_projections().await.unwrap();

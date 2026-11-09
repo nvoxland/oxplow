@@ -1251,10 +1251,10 @@ mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
-                 INSERT INTO work_item (uri, provider, title, body, state, native_state, thread_id, created_at, updated_at)
-                   VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', 1, '2026-01-01', '2026-01-01');
-                 INSERT INTO work_item (uri, provider, title, body, state, native_state, thread_id, created_at, updated_at, deleted_at)
-                   VALUES ('oxplow:oxplow/work_item?id=b&provider=oxplow', 'oxplow', 'Deleted item', '', 'todo', 'ready', 1, '2026-01-01', '2026-01-01', '2026-01-02');",
+                 INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
+                   VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', '2026-01-01', '2026-01-01');
+                 INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at, deleted_at)
+                   VALUES ('oxplow:oxplow/work_item?id=b&provider=oxplow', 'oxplow', 'Deleted item', '', 'todo', 'ready', '2026-01-01', '2026-01-01', '2026-01-02');",
             )
         })
         .await
@@ -1423,8 +1423,7 @@ mod tests {
             vec!["v_thread".to_string(), "v_work_item".to_string()]
         );
         assert!(r.tables.is_empty(), "{:?}", r.tables);
-        let r =
-            reads("SELECT t.title FROM work_item t JOIN v_thread th ON th.id = t.thread_id").await;
+        let r = reads("SELECT t.title FROM work_item t JOIN v_thread th ON th.uri = t.uri").await;
         assert_eq!(r.tables, vec!["work_item".to_string()]);
         let r = reads("WITH c AS (SELECT title FROM work_item) SELECT * FROM c").await;
         assert_eq!(
@@ -1505,7 +1504,7 @@ mod tests {
         // are all fine.
         for ok in [
             "SELECT count(*) FROM v_work_item",
-            "SELECT t.uri FROM v_work_item t JOIN v_thread th ON th.id = t.thread_id",
+            "SELECT t.uri FROM v_work_item t JOIN v_thread th ON th.uri = t.assignee",
             "SELECT j.value FROM v_work_item t, json_each('[1]') j",
         ] {
             sl.query_sql(ok, vec![], None)
@@ -1604,20 +1603,20 @@ mod tests {
         let (_db, sl) = seeded().await;
         let out = sl
             .query_sql(
-                "SELECT uri, title, state, thread_id FROM v_work_item ORDER BY uri",
+                "SELECT uri, title, state, assignee FROM v_work_item ORDER BY uri",
                 vec![],
                 None,
             )
             .await
             .unwrap();
-        assert_eq!(out.columns, vec!["uri", "title", "state", "thread_id"]);
+        assert_eq!(out.columns, vec!["uri", "title", "state", "assignee"]);
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             json!([[
                 "oxplow:oxplow/work_item?id=a&provider=oxplow",
                 "Live item",
                 "in_progress",
-                1
+                null
             ]])
         );
         assert!(!out.truncated);

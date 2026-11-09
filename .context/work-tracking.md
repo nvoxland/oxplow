@@ -83,7 +83,8 @@ events (a checkpoint after a turn's snapshot, a commit indexed, an effort
 landed by a commit, a work item changing state). The default:
 
 1. An item started on a thread links that thread's effort, opening one if
-   none is open. A descendant refines the link (epic, then child), an
+   none is open; an agent that starts an item not assigned to its thread
+   takes it (assigned there first). A descendant refines the link (epic, then child), an
    ancestor leaves it; an unrelated item closes the effort and opens the next; the
    linked item going done or canceled closes it.
 2. A turn that changed the worktree, and ran at least one tool that isn't
@@ -93,7 +94,7 @@ landed by a commit, a work item changing state). The default:
    commit links it and leaves it open; a reset or branch switch never
    closes one.
 
-oxplow moves a `todo` item to in progress when work is linked to it, and
+oxplow moves a `backlog` or `todo` item to in progress when work is linked to it, and
 **never marks anything done**. The person can rename, link or close an
 effort afterwards. A policy may be **none**: no efforts, and the record is
 per turn.
@@ -160,8 +161,10 @@ none.
 
 `CommitOrSwitch` (`oxplow:commit-or-switch`) is the built-in, the rules
 above composed as calls (it reads first, then composes). Rule 1: the
-thread is the event's (the agent that moved the item), else the item's
-(`v_work_item.thread_id`); a person moving a backlog item opens nothing. A
+thread is the event's (the agent that moved the item), else the thread
+it's assigned to (`v_work_item.assignee`); a person moving an unassigned
+item opens nothing. An agent's start of an item not assigned to its
+thread composes `oxplow.work_item.assign` to that thread first. A
 descendant of the linked item refines the link; an ancestor leaves it. A
 task's status no longer opens or closes an effort anywhere else.
 
@@ -179,8 +182,11 @@ the thread has none open; a later item start links it (rule 1).
 
 ## Cross-thread ownership
 
-A work item is owned by the thread it is on (`work_item.thread_id`;
-`oxplow.work_item.move`); there is no second owner. Two threads may
+Who is going to work on an item is its assignee — a thread, the person or
+nobody (`v_work_item.assignee`; `oxplow.work_item.assign`, core's for
+every list, [work-items.md](./work-items.md) "Assignment") — and there is
+no second one. Who worked on it is its efforts. A done item is nobody's,
+and a closed thread's items go back to nobody. Two threads may
 still work on the same thing, and nothing refuses it (below, "No
 gates"). It is made visible, all of it bundled over existing datasets
 (oxplow-bundled):

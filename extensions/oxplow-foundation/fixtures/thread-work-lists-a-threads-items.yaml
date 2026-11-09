@@ -1,11 +1,16 @@
-# A thread's work: the open items, then the finished ones newest first by
-# when they closed.
+# A thread's work: the items assigned to it, then the ones it finished —
+# a closed item is nobody's, so it's the thread's when one of its efforts
+# worked it — newest first by when they closed.
 given:
-  - { command: oxplow.work_item.create, input: { title: older done, thread: thr1 }, bind: older }
-  - { command: oxplow.work_item.create, input: { title: newer done, thread: thr1 }, bind: newer }
-  - { command: oxplow.work_item.create, input: { title: still open, thread: thr1 } }
-  - { command: oxplow.work_item.transition, input: { uri: $older.uri, to: done } }
-  - { command: oxplow.work_item.transition, input: { uri: $newer.uri, to: done } }
+  - { command: oxplow.work_item.create, input: { title: older done, assignee: thr1 }, bind: older }
+  - { command: oxplow.work_item.create, input: { title: newer done, assignee: thr1 }, bind: newer }
+  - { command: oxplow.work_item.create, input: { title: still open, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: closed elsewhere }, bind: elsewhere }
+  - { command: oxplow.work_item.transition, input: { uri: $older.uri, to: in_progress }, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $older.uri, to: done }, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $newer.uri, to: in_progress }, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $newer.uri, to: done }, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $elsewhere.uri, to: done } }
 when: { page: oxplow/thread-work, params: { thread: thr1 } }
 expect:
   loaders:

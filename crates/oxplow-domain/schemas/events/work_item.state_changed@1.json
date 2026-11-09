@@ -1,8 +1,9 @@
 {
   "$defs": {
     "CanonicalState": {
-      "description": "The states every provider maps its own to.",
+      "description": "The states every provider maps its own to. `backlog` is filed but not\nready to work on; `todo` is ready (what an idle thread may pull).",
       "enum": [
+        "backlog",
         "todo",
         "in_progress",
         "blocked",

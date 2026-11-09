@@ -564,6 +564,11 @@ resources:
     resolve: thread
     searchable: search_thread
     icon: message-square
+  - name: person
+    description: "The person using oxplow: who a work item is assigned to when it's theirs to do (`oxplow:oxplow/person`). An id names one person when there are several."
+    label: Person
+    params: { id: { pattern: '^[A-Za-z0-9._-]+$' } }
+    icon: user
   - name: effort
     description: "A stretch of one thread's work that oxplow tracks from its start to its finish."
     label: Effort
@@ -1943,6 +1948,11 @@ commands:
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}
     tool: navigate
   # work_items.write
+  - name: work_item.assign
+    summary: "Say who is going to work on a work item: a thread (`oxplow:oxplow/thread?id=thr3`, or `thr3`), the person (`oxplow:oxplow/person`), or nobody (`to` null: the pool any thread may pull from, or the backlog for a backlog item). At the end of that assignee's queue, or before/after an item there. Core's record, for every work list: a controller agent routes work to threads with it. A done or canceled item is nobody's (closing one releases it), and a closed thread takes none. Undone by assigning it back."
+    scope: work_items.write
+    op: assign
+    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": "oxplow:oxplow/thread?id=thr3"}
   - name: work_item.comment
     summary: "Comment on a work item (oxplow: a note shown with the task)."
     scope: work_items.write
@@ -1950,7 +1960,7 @@ commands:
     needs: [work_items.comments]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "Found the cause: the redirect keeps the stale `next` param."}
   - name: work_item.create
-    summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state. `thread` is the thread it's filed on: absent, an agent's own (a person's lands on the backlog). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
+    summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state (`backlog`: not ready yet; `todo`, the default: ready to work on). It's assigned to nobody unless `assignee` names a thread or the person (see oxplow.work_item.assign). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
     scope: work_items.write
     op: create
     example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
@@ -1973,20 +1983,13 @@ commands:
     op: unlink
     needs: [work_items.links]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "target": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow", "link_type": "blocks"}
-  - name: work_item.move
-    summary: "Move a work item to a thread's list or the backlog (at the end, or before/after an item there)."
-    scope: work_items.write
-    op: move
-    needs: [work_items.lists]
-    example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": {"thread": "thr3"}}
   - name: work_item.reorder
-    summary: "Put a work item before or after another on its list (neither: at its end)."
+    summary: "Put a work item before or after another in its assignee's queue, or among the unassigned (neither: at its end). Core's, for every work list."
     scope: work_items.write
     op: reorder
-    needs: [work_items.ordering]
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "before": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow"}
   - name: work_item.transition
-    summary: "Move a work item to a canonical state (todo, in_progress, blocked, done, canceled), optionally naming the provider's own state."
+    summary: "Move a work item to a canonical state (backlog, todo, in_progress, blocked, done, canceled), optionally naming the provider's own state. Done or canceled releases its assignee."
     scope: work_items.write
     op: transition
     example: {"uri": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "to": "in_progress"}

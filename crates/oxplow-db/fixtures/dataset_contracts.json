@@ -13407,6 +13407,81 @@
         }
       ],
       "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>` (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation it comes from: the active work list (`oxplow`, a provider instance)."
+        },
+        {
+          "name": "native_id",
+          "type": "TEXT",
+          "doc": "The id the list itself knows it by (`tsk42`, `ENG-12`): the URI without `oxplow:oxplow/work_item?id=&provider=<provider>`. Match a tracker's own rows on this, never by slicing `uri`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Canonical state: `backlog` (filed, not ready), `todo` (ready to work on), `in_progress`, `blocked`, `done` or `canceled`."
+        },
+        {
+          "name": "native_state",
+          "type": "TEXT",
+          "doc": "The list's own state (oxplow: the task status, `archived` included)."
+        },
+        {
+          "name": "native",
+          "type": "TEXT",
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
+        },
+        {
+          "name": "parent_uri",
+          "type": "TEXT",
+          "doc": "The parent work item's URI (an epic); NULL at top level or when the parent is deleted."
+        },
+        {
+          "name": "assignee",
+          "type": "TEXT",
+          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.work_item.assign`); a done or canceled item has none — who worked on it is its efforts (`v_effort.work_item`)."
+        },
+        {
+          "name": "rank",
+          "type": "REAL",
+          "doc": "Its place in its assignee's queue, or among the unassigned (ascending); NULL orders by `created_at`."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When it first reached `done` or `canceled` (RFC 3339); NULL while open."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
     }
   },
   "knowledge_page": {

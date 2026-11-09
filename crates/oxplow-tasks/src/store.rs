@@ -5,7 +5,7 @@ use rusqlite::params;
 
 use crate::ids::TaskId;
 use oxplow_db::{map_sql_err, string_to_ts, ts_to_string, Database};
-use oxplow_domain::{DomainError, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, Timestamp};
 
 use crate::model::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
 
@@ -29,22 +29,6 @@ pub struct StatusChange {
 impl SqliteTaskStore {
     pub fn new(db: Database) -> Self {
         Self { db }
-    }
-
-    /// Move a task to another thread (or the backlog, `None`) at the end
-    /// of its list. Returns the moved row.
-    pub async fn move_task(&self, id: TaskId, dest: Option<ThreadId>) -> Result<Task, DomainError> {
-        let moved = self
-            .db
-            .transaction(move |tx| {
-                let item = get_task_tx(tx, id)?.ok_or(DomainError::NotFound)?;
-                if item.thread_id == dest {
-                    return Ok(item);
-                }
-                Ok(place_task_tx(tx, id, dest, Placement::End, Timestamp::now())?.task)
-            })
-            .await?;
-        Ok(moved)
     }
 
     /// Move task `id` to `to` in its own transaction ([`set_status_tx`]).
@@ -122,21 +106,6 @@ pub fn insert_tx(conn: &rusqlite::Connection, item: &Task) -> Result<TaskId, Dom
     insert_task_tx(conn, item).map_err(map_sql_err)
 }
 
-/// The next `sort_index` at the end of `thread`'s list (or the backlog's),
-/// read in the caller's transaction.
-pub fn next_sort_index_tx(
-    conn: &rusqlite::Connection,
-    thread: Option<ThreadId>,
-) -> Result<i64, DomainError> {
-    conn.query_row(
-        "SELECT COALESCE(MAX(sort_index), -1) + 1 FROM task
-         WHERE thread_id IS ?1 AND deleted_at IS NULL",
-        params![thread.map(|t| t.value())],
-        |r| r.get(0),
-    )
-    .map_err(map_sql_err)
-}
-
 /// Soft-delete task `id` at `now` in the caller's transaction — the core
 /// of `oxplow.work_item.delete`: the row's `deleted_at`. `NotFound` when
 /// it's missing or already deleted.
@@ -149,118 +118,14 @@ pub fn soft_delete_tx(
     conn.query_row(
         "UPDATE task SET deleted_at = ?2, updated_at = ?2
              WHERE id = ?1 AND deleted_at IS NULL
-             RETURNING thread_id",
+             RETURNING id",
         params![id.value(), ts_to_string(now)],
-        |r| r.get::<_, Option<i64>>(0),
+        |r| r.get::<_, i64>(0),
     )
     .optional()
     .map_err(map_sql_err)?
     .ok_or(DomainError::NotFound)?;
     Ok(())
-}
-
-/// Where in a list a task goes: its end, or next to another task there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Placement {
-    End,
-    Before(TaskId),
-    After(TaskId),
-}
-
-/// What [`place_task_tx`] did: the task as it now stands, and where it
-/// was (its list, and a neighbour there) — what an undo puts back.
-#[derive(Debug, Clone)]
-pub struct Placed {
-    pub task: Task,
-    pub from_thread: Option<ThreadId>,
-    pub from_place: Placement,
-    /// The other tasks of its new list whose place changed.
-    pub renumbered: Vec<TaskId>,
-}
-
-/// A list's live task ids in order: a thread's, or the backlog's (`None`).
-fn list_ids_tx(
-    conn: &rusqlite::Connection,
-    thread: Option<ThreadId>,
-) -> Result<Vec<TaskId>, DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id FROM task WHERE thread_id IS ?1 AND deleted_at IS NULL
-             ORDER BY sort_index ASC, created_at ASC",
-        )
-        .map_err(map_sql_err)?;
-    let ids = stmt
-        .query_map(params![thread.map(|t| t.value())], |r| r.get::<_, i64>(0))
-        .map_err(map_sql_err)?
-        .collect::<rusqlite::Result<Vec<i64>>>()
-        .map_err(map_sql_err)?;
-    Ok(ids.into_iter().map(TaskId::new).collect())
-}
-
-/// Put task `id` in `dest`'s list (`None` = the backlog) at `place`,
-/// renumbering that list's `sort_index` — the core of `oxplow.work_item.reorder`
-/// (the same list) and `oxplow.work_item.move` (another). `place` must
-/// name a task in that list.
-pub fn place_task_tx(
-    conn: &rusqlite::Connection,
-    id: TaskId,
-    dest: Option<ThreadId>,
-    place: Placement,
-    now: Timestamp,
-) -> Result<Placed, DomainError> {
-    let mut item = get_task_tx(conn, id)?.ok_or(DomainError::NotFound)?;
-    let from_thread = item.thread_id;
-    let from_list = list_ids_tx(conn, from_thread)?;
-    let at = from_list.iter().position(|t| *t == id);
-    let from_place = match at {
-        Some(i) if i > 0 => Placement::After(from_list[i - 1]),
-        Some(i) if i + 1 < from_list.len() => Placement::Before(from_list[i + 1]),
-        _ => Placement::End,
-    };
-    let mut list: Vec<TaskId> = list_ids_tx(conn, dest)?
-        .into_iter()
-        .filter(|t| *t != id)
-        .collect();
-    let index = match place {
-        Placement::End => list.len(),
-        Placement::Before(other) | Placement::After(other) => {
-            let i = list.iter().position(|t| *t == other).ok_or_else(|| {
-                DomainError::Invalid(format!("{other} isn't in the list {id} is going to"))
-            })?;
-            if matches!(place, Placement::After(_)) {
-                i + 1
-            } else {
-                i
-            }
-        }
-    };
-    list.insert(index, id);
-    let mut moved = Vec::new();
-    for (i, t) in list.iter().enumerate() {
-        if *t != id {
-            let renumbered = conn
-                .execute(
-                    "UPDATE task SET sort_index = ?2 WHERE id = ?1 AND sort_index != ?2",
-                    params![t.value(), i as i64],
-                )
-                .map_err(map_sql_err)?;
-            if renumbered > 0 {
-                moved.push(*t);
-            }
-        }
-    }
-    item.thread_id = dest;
-    item.sort_index = index as i64;
-    item.updated_at = now;
-    if update_task_tx(conn, &item).map_err(map_sql_err)? == 0 {
-        return Err(DomainError::NotFound);
-    }
-    Ok(Placed {
-        task: item,
-        from_thread,
-        from_place,
-        renumbered: moved,
-    })
 }
 
 /// Move task `id` to `to` at `now`, reading the row in the same
@@ -282,18 +147,16 @@ pub fn set_status_tx(
 pub(crate) fn insert_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<TaskId> {
     conn.execute(
         "INSERT INTO task (
-            thread_id, parent_id, title, description,
-            status, priority, sort_index, created_by, created_at, updated_at,
+            parent_id, title, description,
+            status, priority, created_by, created_at, updated_at,
             completed_at, deleted_at, author
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
-            item.thread_id.as_ref().map(|t| t.value()),
             item.parent_id.map(|p| p.value()),
             item.title,
             item.description,
             status_to_str(item.status),
             priority_to_str(item.priority),
-            item.sort_index,
             actor_to_str(item.created_by),
             ts_to_string(item.created_at),
             ts_to_string(item.updated_at),
@@ -325,24 +188,20 @@ pub fn get_task_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<Option<Tas
 pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqlite::Result<usize> {
     let rows = conn.execute(
         "UPDATE task SET
-            thread_id = ?2,
-            parent_id = ?3,
-            title = ?4,
-            description = ?5,
-            priority = ?6,
-            sort_index = ?7,
-            updated_at = ?8,
-            deleted_at = ?9,
-            author = ?10
+            parent_id = ?2,
+            title = ?3,
+            description = ?4,
+            priority = ?5,
+            updated_at = ?6,
+            deleted_at = ?7,
+            author = ?8
          WHERE id = ?1 AND deleted_at IS NULL",
         params![
             item.id.value(),
-            item.thread_id.as_ref().map(|t| t.value()),
             item.parent_id.map(|p| p.value()),
             item.title,
             item.description,
             priority_to_str(item.priority),
-            item.sort_index,
             ts_to_string(item.updated_at),
             item.deleted_at.map(ts_to_string),
             item.author.map(author_to_str),
@@ -353,6 +212,7 @@ pub(crate) fn update_task_tx(conn: &rusqlite::Connection, item: &Task) -> rusqli
 
 fn status_to_str(s: TaskStatus) -> &'static str {
     match s {
+        TaskStatus::Backlog => "backlog",
         TaskStatus::Ready => "ready",
         TaskStatus::InProgress => "in_progress",
         TaskStatus::Blocked => "blocked",
@@ -364,6 +224,7 @@ fn status_to_str(s: TaskStatus) -> &'static str {
 
 fn str_to_status(s: &str) -> Result<TaskStatus, DomainError> {
     match s {
+        "backlog" => Ok(TaskStatus::Backlog),
         "ready" => Ok(TaskStatus::Ready),
         "in_progress" => Ok(TaskStatus::InProgress),
         "blocked" => Ok(TaskStatus::Blocked),
@@ -433,13 +294,11 @@ fn str_to_author(s: &str) -> Result<TaskAuthor, DomainError> {
 
 fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let id: i64 = row.get("id")?;
-    let thread_id: Option<i64> = row.get("thread_id")?;
     let parent_id: Option<i64> = row.get("parent_id")?;
     let title: String = row.get("title")?;
     let description: String = row.get("description")?;
     let status: String = row.get("status")?;
     let priority: String = row.get("priority")?;
-    let sort_index: i64 = row.get("sort_index")?;
     let created_by: String = row.get("created_by")?;
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
@@ -459,13 +318,11 @@ fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 
     Ok(Task {
         id: TaskId::new(id),
-        thread_id: thread_id.map(ThreadId::new),
         parent_id: parent_id.map(TaskId::new),
         title,
         description,
         status: str_to_status(&status).map_err(map_err)?,
         priority: str_to_priority(&priority).map_err(map_err)?,
-        sort_index,
         created_by: str_to_actor(&created_by).map_err(map_err)?,
         created_at: string_to_ts(&created_at).map_err(map_err)?,
         updated_at: string_to_ts(&updated_at).map_err(map_err)?,
@@ -489,13 +346,6 @@ const SELECT_BASE: &str =
 /// The task rows, read and written.
 #[async_trait]
 pub trait TaskStore: Send + Sync {
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError>;
-    async fn list_by_status_for_thread(
-        &self,
-        thread: &ThreadId,
-        status: TaskStatus,
-    ) -> Result<Vec<Task>, DomainError>;
-    async fn list_backlog(&self) -> Result<Vec<Task>, DomainError>;
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError>;
     /// Insert a new task; assigns and returns the autoincrement id.
     async fn insert(&self, item: &Task) -> Result<TaskId, DomainError>;
@@ -506,55 +356,6 @@ pub trait TaskStore: Send + Sync {
 
 #[async_trait]
 impl TaskStore for SqliteTaskStore {
-    async fn list_for_thread(&self, thread: &ThreadId) -> Result<Vec<Task>, DomainError> {
-        let thread = *thread;
-        crate::db::read(&self.db, move |conn| {
-            let sql = format!(
-                "{} WHERE t.thread_id = ?1 AND t.deleted_at IS NULL \
-                     ORDER BY t.sort_index ASC, t.created_at ASC",
-                SELECT_BASE
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![thread.value()], row_to_task)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .await
-    }
-
-    async fn list_by_status_for_thread(
-        &self,
-        thread: &ThreadId,
-        status: TaskStatus,
-    ) -> Result<Vec<Task>, DomainError> {
-        let thread = *thread;
-        let status_str = status_to_str(status);
-        crate::db::read(&self.db, move |conn| {
-            let sql = format!(
-                "{} WHERE t.thread_id = ?1 AND t.status = ?2 AND t.deleted_at IS NULL \
-                     ORDER BY t.sort_index ASC, t.created_at ASC",
-                SELECT_BASE
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![thread.value(), status_str], row_to_task)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .await
-    }
-
-    async fn list_backlog(&self) -> Result<Vec<Task>, DomainError> {
-        crate::db::read(&self.db, move |conn| {
-            let sql = format!(
-                "{} WHERE t.thread_id IS NULL AND t.deleted_at IS NULL \
-                     ORDER BY t.sort_index ASC, t.created_at ASC",
-                SELECT_BASE
-            );
-            let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map([], row_to_task)?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        })
-        .await
-    }
-
     async fn get(&self, id: TaskId) -> Result<Option<Task>, DomainError> {
         crate::db::read(&self.db, move |conn| {
             let sql = format!("{} WHERE t.id = ?1", SELECT_BASE);
@@ -604,66 +405,23 @@ impl TaskStore for SqliteTaskStore {
 mod tests {
     use super::*;
     use crate::refs::work_item_ref;
-    use oxplow_db::{SqliteStreamStore, SqliteThreadStore};
-    use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread};
 
     fn ts() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
     }
 
-    async fn fixture() -> (SqliteTaskStore, ThreadId) {
-        let db = Database::in_memory();
-        let streams = SqliteStreamStore::new(db.clone());
-        let threads = SqliteThreadStore::new(db.clone());
-        let work = SqliteTaskStore::new(db);
-        let s = Stream {
-            id: StreamId::new(1),
-            kind: StreamKind::Primary,
-            title: "oxplow".into(),
-            branch: "main".into(),
-            branch_ref: "refs/heads/main".into(),
-            branch_source: "main".into(),
-            worktree_path: "/repo".into(),
-            working_pane: String::new(),
-            talking_pane: String::new(),
-            working_session_id: String::new(),
-            talking_session_id: String::new(),
-            host: oxplow_domain::HostId::LOCAL,
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
-        };
-        streams.upsert(&s).await.unwrap();
-        let t = Thread {
-            id: ThreadId::new(1),
-            stream_id: s.id,
-            title: "explore".into(),
-            sort_index: 0,
-            summary: String::new(),
-            summary_updated_at: None,
-            closed_at: None,
-            custom_prompt: None,
-            created_at: ts(),
-            updated_at: ts(),
-            archived_at: None,
-            mark: None,
-        };
-        threads.upsert(&t).await.unwrap();
-        (work, t.id)
+    async fn fixture() -> SqliteTaskStore {
+        SqliteTaskStore::new(Database::in_memory())
     }
 
-    fn item(thread: Option<ThreadId>) -> Task {
+    fn item() -> Task {
         Task {
             id: TaskId::placeholder(),
-            thread_id: thread,
             parent_id: None,
             title: "ship it".into(),
             description: String::new(),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: ts(),
             updated_at: ts(),
@@ -678,9 +436,9 @@ mod tests {
     /// children in `v_work_item` have no parent — the relationship holds.
     #[tokio::test]
     async fn a_deleted_parent_leaves_its_children_without_one() {
-        let (store, tid) = fixture().await;
-        let epic = store.insert(&item(Some(tid))).await.unwrap();
-        let mut child = item(None);
+        let store = fixture().await;
+        let epic = store.insert(&item()).await.unwrap();
+        let mut child = item();
         child.parent_id = Some(epic);
         let child = store.insert(&child).await.unwrap();
         store.soft_delete(epic).await.unwrap();
@@ -706,9 +464,9 @@ mod tests {
     /// parent, its deletion.
     #[tokio::test]
     async fn a_tasks_record_is_the_item_as_the_interface_holds_it() {
-        let (store, tid) = fixture().await;
-        let epic = store.insert(&item(Some(tid))).await.unwrap();
-        let mut child = item(None);
+        let store = fixture().await;
+        let epic = store.insert(&item()).await.unwrap();
+        let mut child = item();
         child.title = "child".into();
         child.parent_id = Some(epic);
         let child = store.insert(&child).await.unwrap();
@@ -720,15 +478,15 @@ mod tests {
         edited.title = "renamed".into();
         edited.description = "the body".into();
         store.update(&edited).await.unwrap();
-        let gone = store.insert(&item(Some(tid))).await.unwrap();
+        let gone = store.insert(&item()).await.unwrap();
         store.soft_delete(gone).await.unwrap();
-        let shipped = store.insert(&item(Some(tid))).await.unwrap();
+        let shipped = store.insert(&item()).await.unwrap();
         store.set_status(shipped, TaskStatus::Done).await.unwrap();
         store
             .set_status(shipped, TaskStatus::Archived)
             .await
             .unwrap();
-        let dropped = store.insert(&item(Some(tid))).await.unwrap();
+        let dropped = store.insert(&item()).await.unwrap();
         store
             .set_status(dropped, TaskStatus::Archived)
             .await
@@ -778,8 +536,8 @@ mod tests {
     /// commands for every list alike.
     #[tokio::test]
     async fn a_deleted_task_takes_no_edits_and_the_store_logs_nothing() {
-        let (store, tid) = fixture().await;
-        let mut filed = item(Some(tid));
+        let store = fixture().await;
+        let mut filed = item();
         filed.status = TaskStatus::InProgress;
         let id = store.insert(&filed).await.unwrap();
         store.set_status(id, TaskStatus::Blocked).await.unwrap();
@@ -810,8 +568,8 @@ mod tests {
     /// before a concurrent status change can't revert it.
     #[tokio::test]
     async fn a_stale_field_write_keeps_the_committed_status() {
-        let (store, tid) = fixture().await;
-        let id = store.insert(&item(Some(tid))).await.unwrap();
+        let store = fixture().await;
+        let id = store.insert(&item()).await.unwrap();
         let stale = store.get(id).await.unwrap().unwrap();
         store
             .db
@@ -832,8 +590,8 @@ mod tests {
     /// Field edits and a status change commit together.
     #[tokio::test]
     async fn an_edit_with_a_status_change_commits_both() {
-        let (store, tid) = fixture().await;
-        let id = store.insert(&item(Some(tid))).await.unwrap();
+        let store = fixture().await;
+        let id = store.insert(&item()).await.unwrap();
         let mut row = store.get(id).await.unwrap().unwrap();
         row.title = "renamed".into();
         row.priority = TaskPriority::High;
@@ -851,8 +609,8 @@ mod tests {
     /// `done`, and the change reports what it did.
     #[tokio::test]
     async fn set_status_tx_derives_the_row_and_reports_the_change() {
-        let (store, tid) = fixture().await;
-        let id = store.insert(&item(Some(tid))).await.unwrap();
+        let store = fixture().await;
+        let id = store.insert(&item()).await.unwrap();
         let change = store
             .db
             .transaction(move |tx| {
@@ -881,8 +639,8 @@ mod tests {
 
     #[tokio::test]
     async fn insert_then_get() {
-        let (store, tid) = fixture().await;
-        let it = item(Some(tid));
+        let store = fixture().await;
+        let it = item();
         let id = store.insert(&it).await.unwrap();
         let got = store.get(id).await.unwrap().unwrap();
         assert_eq!(got.id, id);
@@ -891,8 +649,8 @@ mod tests {
 
     #[tokio::test]
     async fn description_round_trips() {
-        let (store, tid) = fixture().await;
-        let mut it = item(Some(tid));
+        let store = fixture().await;
+        let mut it = item();
         it.description = "the detailed developer text".into();
         let id = store.insert(&it).await.unwrap();
         let got = store.get(id).await.unwrap().unwrap();
@@ -906,45 +664,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_for_thread_excludes_deleted() {
-        let (store, tid) = fixture().await;
-        let alive_id = store.insert(&item(Some(tid))).await.unwrap();
-        let dead_id = store.insert(&item(Some(tid))).await.unwrap();
-        store.soft_delete(dead_id).await.unwrap();
-        let list = store.list_for_thread(&tid).await.unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].id, alive_id);
-    }
-
-    #[tokio::test]
-    async fn backlog_items_have_no_thread() {
-        let (store, tid) = fixture().await;
-        store.insert(&item(Some(tid))).await.unwrap();
-        let backlog_id = store.insert(&item(None)).await.unwrap();
-
-        let bl = store.list_backlog().await.unwrap();
-        assert_eq!(bl.len(), 1);
-        assert_eq!(bl[0].id, backlog_id);
-    }
-
-    #[tokio::test]
-    async fn list_orders_by_sort_index() {
-        let (store, tid) = fixture().await;
-        let mut a = item(Some(tid));
-        a.sort_index = 5;
-        let mut b = item(Some(tid));
-        b.sort_index = 1;
-        let a_id = store.insert(&a).await.unwrap();
-        let b_id = store.insert(&b).await.unwrap();
-        let list = store.list_for_thread(&tid).await.unwrap();
-        assert_eq!(list[0].id, b_id);
-        assert_eq!(list[1].id, a_id);
-    }
-
-    #[tokio::test]
     async fn update_overwrites_existing() {
-        let (store, tid) = fixture().await;
-        let it = item(Some(tid));
+        let store = fixture().await;
+        let it = item();
         let id = store.insert(&it).await.unwrap();
         let mut latest = store.get(id).await.unwrap().unwrap();
         latest.title = "renamed".into();
@@ -963,8 +685,8 @@ mod tests {
     /// 1 row" without an extra read.
     #[tokio::test]
     async fn update_missing_id_returns_not_found() {
-        let (store, tid) = fixture().await;
-        let mut it = item(Some(tid));
+        let store = fixture().await;
+        let mut it = item();
         it.id = TaskId::new(999_999);
         let err = store.update(&it).await.unwrap_err();
         assert!(
@@ -979,10 +701,10 @@ mod tests {
     /// silently un-soft-deleting the row.
     #[tokio::test]
     async fn update_on_soft_deleted_returns_not_found() {
-        let (store, tid) = fixture().await;
-        let id = store.insert(&item(Some(tid))).await.unwrap();
+        let store = fixture().await;
+        let id = store.insert(&item()).await.unwrap();
         store.soft_delete(id).await.unwrap();
-        let mut latest = item(Some(ThreadId::new(1)));
+        let mut latest = item();
         latest.id = id;
         latest.title = "ressurected".into();
         let err = store.update(&latest).await.unwrap_err();

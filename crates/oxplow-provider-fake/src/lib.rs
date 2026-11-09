@@ -6,8 +6,9 @@
 //! It keeps items in memory (`oxplow:oxplow/work_item?id=W-<n>&provider=<id>`, `<id>` being the
 //! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by
 //! default), with native states
-//! `Backlog` / `Doing` / `Stuck` / `Shipped` / `Dropped` for the canonical
-//! `todo` / `in_progress` / `blocked` / `done` / `canceled`. Its config
+//! `Icebox` / `Ready` / `Doing` / `Stuck` / `Shipped` / `Dropped` for the
+//! canonical `backlog` / `todo` / `in_progress` / `blocked` / `done` /
+//! `canceled`. Its config
 //! needs a `team` (a string); a clean `check` returns the handle
 //! `fake:<team>`. The work-items verbs `create`, `update`, `transition`
 //! (undoable: its inverse moves the item back), `link`, `comment` and
@@ -344,7 +345,8 @@ impl Hooks {
 
 fn native_of(state: CanonicalState) -> &'static str {
     match state {
-        CanonicalState::Todo => "Backlog",
+        CanonicalState::Backlog => "Icebox",
+        CanonicalState::Todo => "Ready",
         CanonicalState::InProgress => "Doing",
         CanonicalState::Blocked => "Stuck",
         CanonicalState::Done => "Shipped",
@@ -395,7 +397,7 @@ pub fn plain_declarations() -> InitializeResult {
 fn declared(idempotent_writes: bool) -> InitializeResult {
     let string = json!({ "type": "string" });
     let state = json!({ "type": "string",
-                        "enum": ["todo", "in_progress", "blocked", "done", "canceled"] });
+                        "enum": ["backlog", "todo", "in_progress", "blocked", "done", "canceled"] });
     let native = json!({ "type": "object", "additionalProperties": false,
                          "properties": { "points": { "type": "integer" } } });
     let recorded_schema = Vocabulary::core()
@@ -1063,7 +1065,7 @@ async fn handle(
             };
             if hooks.bad_record {
                 let mut foreign = rows.first().map(|(_, r)| r.clone()).unwrap_or_else(
-                    || json!({ "title": "x", "state": "todo", "native_state": "Backlog" }),
+                    || json!({ "title": "x", "state": "todo", "native_state": "Ready" }),
                 );
                 foreign["uri"] = json!(oxplow_domain::uri::build::work_item_uri("other", "X-1"));
                 rows.insert(0, (after + 1, foreign));
@@ -1223,7 +1225,6 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                 native,
                 parent_uri: parent_ref,
                 deleted: false,
-                rank: None,
                 // It keeps its links and comments, so every record states
                 // them; the links asked for on create come with the item.
                 links: Some(
@@ -1234,8 +1235,6 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                         })?,
                 ),
                 comments: Some(Vec::new()),
-                // It keeps no lists: the item stays where it was filed.
-                list: None,
             };
             let events = vec![recorded(&record)];
             let result = json!({ "uri": record.uri });

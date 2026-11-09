@@ -3116,9 +3116,9 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
-                          (2, 1, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
+                 INSERT INTO task (id, title, status, priority, created_by, created_at, updated_at)
+                   VALUES (1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
+                          (2, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
                  INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
                    VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02'), (8, 'oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 1, '2026-01-01', '2026-01-02');",
             )

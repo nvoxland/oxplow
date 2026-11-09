@@ -146,7 +146,7 @@ def transform(x):
             .run(
                 &Actor::Human,
                 crate::commands::work_item::CREATE,
-                json!({ "title": "scripted", "thread": fx.thread.to_string() }),
+                json!({ "title": "scripted", "assignee": fx.thread.to_string() }),
                 false,
             )
             .await

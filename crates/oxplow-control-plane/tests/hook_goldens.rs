@@ -98,13 +98,11 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
         .task_store
         .insert(&Task {
             id: TaskId::placeholder(),
-            thread_id: Some(thread_id),
             parent_id: None,
             title: title.into(),
             description: "d".into(),
             status: TaskStatus::InProgress,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,

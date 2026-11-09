@@ -63,16 +63,15 @@ pub trait WorkItemsProbe: Send + Sync {
     async fn links(&self, item_ref: &str) -> Vec<(String, String)>;
     /// `item_ref`'s comment bodies as the interface reads them.
     async fn comments(&self, item_ref: &str) -> Vec<String>;
-    /// `item_ref`'s list and rank as the interface reads them
-    /// (`v_work_item.thread_id`, `.rank`).
-    async fn placement(&self, item_ref: &str) -> (Option<i64>, Option<f64>);
+    /// Who `item_ref` is assigned to and its rank in their queue, as the
+    /// interface reads them (`v_work_item.assignee`, `.rank`).
+    async fn placement(&self, item_ref: &str) -> (Option<String>, Option<f64>);
 }
 
 /// Run every check against `provider` (its id and declared features) as
 /// `actor`, writing through `items`, on the host's active tracker (the
 /// suite checks it's `provider`). `native` is the provider's own fields
-/// for the items it files, `None` for none; an agent `actor` files them on
-/// its thread, so `in_progress` claims it on oxplow.
+/// for the items it files, `None` for none.
 /// A create that must keep the item (the suite checks a list that keeps
 /// its items; none is a sink, checked on its own): its ref.
 async fn filed(
@@ -343,44 +342,54 @@ pub async fn suite(
         }
     }
 
-    // 5b. Ordering and lists follow the features, and read back.
+    // 5b. Who works on an item is core's, whichever list holds it: an
+    //     open item can be assigned to the person and reordered in their
+    //     queue, and released, and it reads back through the interface.
     if !other.is_empty() {
-        let reordered = items.reorder_before(actor, &other, &item).await;
-        if reordered.is_ok() != features.ordering {
-            fail(
-                "ordering",
-                format!(
-                    "reorder: {reordered:?} with ordering = {}",
-                    features.ordering
-                ),
-            );
-        }
-        if features.ordering && reordered.is_ok() {
-            probe.settle().await;
-            let (_, before) = probe.placement(&other).await;
-            let (_, after) = probe.placement(&item).await;
-            if !matches!((before, after), (Some(b), Some(a)) if b < a) {
-                fail(
-                    "ordering",
-                    format!("reordered before it, `{other}` ranks {before:?} against {after:?}"),
-                );
+        let person = oxplow_domain::uri::build::person_uri(None);
+        // Open again: a closed item is nobody's to work on.
+        for it in [&item, &other] {
+            if let Err(e) = items
+                .transition(actor, it, CanonicalState::Todo, None)
+                .await
+            {
+                fail("assignment", format!("reopen `{it}`: {e}"));
             }
         }
-        let moved = items.move_to_backlog(actor, &other).await;
-        if moved.is_ok() != features.lists {
+        for it in [&item, &other] {
+            if let Err(e) = items.assign(actor, it, Some(&person)).await {
+                fail("assignment", format!("assign `{it}` to the person: {e}"));
+            }
+        }
+        if let Err(e) = items.reorder_before(actor, &other, &item).await {
             fail(
-                "lists",
-                format!("move: {moved:?} with lists = {}", features.lists),
+                "assignment",
+                format!("reorder `{other}` before `{item}`: {e}"),
             );
         }
-        if features.lists && moved.is_ok() {
-            probe.settle().await;
-            if let (Some(thread), _) = probe.placement(&other).await {
-                fail(
-                    "lists",
-                    format!("moved to the backlog, it's on thread {thread}"),
-                );
+        probe.settle().await;
+        let (who, before) = probe.placement(&other).await;
+        let (_, after) = probe.placement(&item).await;
+        if who.as_deref() != Some(person.as_str()) {
+            fail(
+                "assignment",
+                format!("assigned to the person, `{other}` reads as {who:?}"),
+            );
+        }
+        if !matches!((before, after), (Some(b), Some(a)) if b < a) {
+            fail(
+                "assignment",
+                format!("reordered before it, `{other}` ranks {before:?} against {after:?}"),
+            );
+        }
+        for it in [&item, &other] {
+            if let Err(e) = items.assign(actor, it, None).await {
+                fail("assignment", format!("release `{it}`: {e}"));
             }
+        }
+        probe.settle().await;
+        if let (Some(who), _) = probe.placement(&other).await {
+            fail("assignment", format!("released, `{other}` reads as {who}"));
         }
     }
 
@@ -405,22 +414,17 @@ pub async fn suite(
             );
         }
     }
-    if !other.is_empty() {
-        let placed = usize::from(features.ordering) + usize::from(features.lists);
-        let edits = probe
+    if !other.is_empty()
+        && !probe
             .event_types(&other)
             .await
             .iter()
-            .filter(|t| *t == "work_item.edited")
-            .count();
-        if edits < placed {
-            fail(
-                "events",
-                format!(
-                    "{edits} work_item.edited name `{other}` after {placed} reorders and moves"
-                ),
-            );
-        }
+            .any(|t| t == "work_item.assigned")
+    {
+        fail(
+            "events",
+            format!("no work_item.assigned names `{other}` after it was assigned"),
+        );
     }
 
     // 7. Reading the provider back restates what its writes recorded:
@@ -671,10 +675,8 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                         native: serde_json::from_str(&native).ok()?,
                         parent_uri,
                         deleted: false,
-                        rank: None,
                         links: None,
                         comments: None,
-                        list: None,
                     })
                 },
             )
@@ -778,14 +780,14 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .unwrap_or_default()
     }
 
-    async fn placement(&self, item_ref: &str) -> (Option<i64>, Option<f64>) {
+    async fn placement(&self, item_ref: &str) -> (Option<String>, Option<f64>) {
         let item_ref = item_ref.to_string();
         self.0
             .db
             .read(move |c| {
                 use rusqlite::OptionalExtension;
                 c.query_row(
-                    "SELECT thread_id, rank FROM v_work_item WHERE uri = ?1",
+                    "SELECT assignee, rank FROM v_work_item WHERE uri = ?1",
                     [item_ref],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )

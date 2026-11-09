@@ -6445,7 +6445,8 @@ commands:
                 "oxplow.review_policy.write",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
-                "oxplow.work.clear_finished"
+                "oxplow.work.clear_finished",
+                "oxplow.work_item.new"
             ]
         );
         let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();

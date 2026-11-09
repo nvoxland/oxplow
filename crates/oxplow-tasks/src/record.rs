@@ -1,6 +1,6 @@
 //! A task as the work-item interface records it: what every verb answers
 //! with (`work_item.recorded`), read from the task tables in the verb's
-//! transaction — the item whole, its links, comments and list included,
+//! transaction — the item whole, its links and comments included,
 //! so the interface restates it from the record alone.
 
 use rusqlite::{params, OptionalExtension};
@@ -8,8 +8,8 @@ use serde_json::json;
 
 use crate::ids::TaskId;
 use oxplow_db::map_sql_err;
-use oxplow_domain::work_items::{CommentRecord, LinkRecord, List, WorkItemRecord};
-use oxplow_domain::{DomainError, NoteId, ThreadId};
+use oxplow_domain::work_items::{CommentRecord, LinkRecord, WorkItemRecord};
+use oxplow_domain::{DomainError, NoteId};
 
 use crate::mapping::state_pair;
 use crate::model::TaskStatus;
@@ -21,7 +21,7 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
     let row = conn
         .query_row(
             "SELECT title, description, status, completed_at IS NOT NULL, priority, author,
-                    parent_id, deleted_at IS NOT NULL, sort_index, thread_id
+                    parent_id, deleted_at IS NOT NULL
                FROM task WHERE id = ?1",
             params![id.value()],
             |r| {
@@ -34,16 +34,13 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
                     r.get::<_, Option<String>>(5)?,
                     r.get::<_, Option<i64>>(6)?,
                     r.get::<_, bool>(7)?,
-                    r.get::<_, i64>(8)?,
-                    r.get::<_, Option<i64>>(9)?,
                 ))
             },
         )
         .optional()
         .map_err(map_sql_err)?
         .ok_or(DomainError::NotFound)?;
-    let (title, body, status, completed, priority, author, parent, deleted, sort_index, thread) =
-        row;
+    let (title, body, status, completed, priority, author, parent, deleted) = row;
     let status: TaskStatus = serde_json::from_value(json!(status))
         .map_err(|e| DomainError::Invalid(format!("task {id}'s status: {e}")))?;
     let (state, native_state) = state_pair(status, completed);
@@ -82,12 +79,8 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
         native: json!({ "priority": priority, "author": author }),
         parent_uri: parent.map(|p| work_item_ref(TaskId::new(p))),
         deleted,
-        rank: Some(sort_index as f64),
         links: Some(links),
         comments: Some(comments),
-        list: Some(thread.map_or(List::Backlog, |t| {
-            List::Thread(ThreadId::new(t).to_string())
-        })),
     })
 }
 

@@ -59,8 +59,6 @@ fn run_tx(
         "unlink" => verbs::unlink_tx(conn, parse(input)?),
         "comment" => verbs::comment_tx(conn, actor, parse(input)?),
         "delete" => verbs::delete_tx(conn, parse(input)?),
-        "reorder" => verbs::reorder_tx(conn, parse(input)?),
-        "move" => verbs::move_tx(conn, parse(input)?),
         other => Err(CommandError::Invalid {
             field: None,
             message: format!("oxplow's tasks have no verb `{other}`"),
@@ -129,7 +127,7 @@ mod tests {
     }
 
     /// A verb answers with the record of what it changed — the item whole,
-    /// on its list — and its inverse by verb.
+    /// — and its inverse by verb.
     #[tokio::test]
     async fn a_verb_answers_with_the_records_of_what_it_changed() {
         let (tasks, _db) = tasks().await;
@@ -146,7 +144,6 @@ mod tests {
         let WorkItemRecordedV3 { item: record } =
             serde_json::from_value(created.events[0].payload.clone()).unwrap();
         assert_eq!(record.uri, item);
-        assert_eq!(record.list, Some(oxplow_domain::work_items::List::Backlog));
         assert_eq!(created.events[0].subject, vec![item.clone()]);
 
         let moved = tasks

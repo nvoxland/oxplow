@@ -58,9 +58,9 @@ ui:
 ```
 
 - Read items from `v_work_item`; change them only through the interface
-  commands (`oxplow.work_item.update`, `transition`, `reorder` — when the
-  active list's `features` in `v_capability_provider` include `ordering` —
-  and `move`), so the view works with whichever list is active. A component
+  commands (`oxplow.work_item.update`, `transition`, `assign` — who works
+  on it — and `reorder` — its place in that assignee's queue; both core's,
+  for every list), so the view works with whichever list is active. A component
   declares the commands it runs (`commands:`); one outside the extension's
   namespace also needs `commands:<pattern>`, approved at deploy.
 - **An effort's verdict** (`effort.verdict`, props `effort_id`) is the first

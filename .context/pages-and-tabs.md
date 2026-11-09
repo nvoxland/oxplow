@@ -861,11 +861,12 @@ margin; an embed or a slot takes its title from the page it shows):
   `priority`, `q`; `thread_id`, `stream_id`): a custom page, its `board`
   component node (the `work_item.board` replaceable) drawing its own
   toolbar, a column per state and each card's menu; no rail. `task-list`
-  (filters `show`, with the backlog, `state`, one at a time, To Do by
+  (filters `show` — assigned to this thread, its stream, me, nobody or
+  anyone — `state`, one at a time with Backlog among them, To Do by
   default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
-  `oxplow.work_item.create` (a title, filed where the list shows), its view a
+  `oxplow.work_item.create` (a title, in the state and for whom the list shows), its view a
   `list` (the `work_item.list` replaceable; drag to reorder or nest; marked rows
-  get bulk state, priority, Send to backlog, Bring to this thread and
+  get bulk state, priority, Assign to This Thread, Assign to Me, Unassign and
   Delete; `r` `i` `b` `d` set states) and New Task… in the nav bar. Both
   read bundled's `work-items` query. `comments` (params `stream_id`, `days`,
   `comment`): a `table` over `v_comment` grouped by anchored page (a row
@@ -1416,9 +1417,9 @@ its filters, so it takes the whole width with no rail; the Work panel's
 header opens it. **Task List** is one state's items at a time, the
 backlog's too, with a quick add in its rail, for triage, finding and what was
 finished. Both read `v_work_item` and offer
-only what the active list can do (`v_capability_provider`): reordering
-with `ordering`, Send to backlog and Bring to this thread with `lists`,
-epics with `hierarchy`, Delete with `delete`. There's no Archived page:
+only what the active list can do (`v_capability_provider`): epics with
+`hierarchy`, Delete with `delete`; reordering and assignment are core's,
+for every list. There's no Archived page:
 oxplow's archived tasks are done or canceled, as the interface states
 them. The ref helper is `tasksRef()`.
 

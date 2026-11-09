@@ -202,13 +202,11 @@ mod tests {
 
         let item = Task {
             id: TaskId::placeholder(),
-            thread_id: Some(t.id),
             parent_id: None,
             title: "x".into(),
             description: String::new(),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: now(),
             updated_at: now(),
@@ -244,17 +242,15 @@ mod tests {
     /// did reaches the interface through the record it answers with.
     #[tokio::test]
     async fn a_comment_and_a_link_are_in_the_record_and_nothing_else() {
-        let (db, tid, from_id) = fixture().await;
+        let (db, _tid, from_id) = fixture().await;
         let to_id = SqliteTaskStore::new(db.clone())
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(tid),
                 parent_id: None,
                 title: "y".into(),
                 description: String::new(),
                 status: TaskStatus::Ready,
                 priority: TaskPriority::Medium,
-                sort_index: 1,
                 created_by: TaskActorKind::User,
                 created_at: now(),
                 updated_at: now(),

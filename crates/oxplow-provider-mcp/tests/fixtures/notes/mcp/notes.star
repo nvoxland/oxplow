@@ -2,7 +2,7 @@
 # work items. `x.phase` is invoke / invoked (a verb) or read / records (a
 # collector); `x.output` is the tool's output, data to read.
 
-STATES = {"todo": "open", "in_progress": "doing", "blocked": "stuck", "done": "closed", "canceled": "dropped"}
+STATES = {"backlog": "someday", "todo": "open", "in_progress": "doing", "blocked": "stuck", "done": "closed", "canceled": "dropped"}
 CANONICAL = {v: k for k, v in STATES.items()}
 
 def ref(x, id):

@@ -75,17 +75,15 @@ async fn seed_thread(services: &Services) -> ThreadId {
     thread.id
 }
 
-async fn seed_in_progress_task(services: &Services, thread_id: ThreadId) {
+async fn seed_in_progress_task(services: &Services) {
     let now = Timestamp::from_unix_ms(1);
     let task = Task {
         id: TaskId::placeholder(),
-        thread_id: Some(thread_id),
         parent_id: None,
         title: "ship the thing".into(),
         description: "d".into(),
         status: TaskStatus::InProgress,
         priority: TaskPriority::Medium,
-        sort_index: 0,
         created_by: TaskActorKind::User,
         created_at: now,
         updated_at: now,
@@ -223,7 +221,7 @@ async fn an_agent_edits_without_any_tracked_work() {
 async fn a_stop_is_never_refused_and_keeps_the_final_message() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_in_progress_task(&svc, tid).await;
+    seed_in_progress_task(&svc).await;
     post_hook(
         &cp,
         &svc,
@@ -642,7 +640,7 @@ async fn post_tool_use_edit_acks_200_empty() {
     // every single edit.
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_in_progress_task(&svc, tid).await;
+    seed_in_progress_task(&svc).await;
     let target = root.join("src/x.rs");
     let resp = post_hook(
         &cp,
@@ -676,13 +674,11 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
         .task_store
         .insert(&Task {
             id: TaskId::placeholder(),
-            thread_id: Some(tid),
             parent_id: None,
             title: "ship".into(),
             description: "d".into(),
             status: TaskStatus::InProgress,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,
@@ -761,13 +757,11 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
         .task_store
         .insert(&Task {
             id: TaskId::placeholder(),
-            thread_id: Some(tid),
             parent_id: None,
             title: "decide things".into(),
             description: "d".into(),
             status: TaskStatus::InProgress,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: now,
             updated_at: now,

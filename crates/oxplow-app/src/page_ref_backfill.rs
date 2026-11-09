@@ -460,13 +460,11 @@ mod tests {
         let task_id = bare_items
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(ThreadId::new(1)),
                 parent_id: None,
                 title: "fix".into(),
                 description: "see [[src/app.rs]]".into(),
                 status: TaskStatus::Ready,
                 priority: TaskPriority::Medium,
-                sort_index: 0,
                 created_by: TaskActorKind::User,
                 created_at: ts(),
                 updated_at: ts(),

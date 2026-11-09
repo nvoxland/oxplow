@@ -254,7 +254,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
     );
     assert_eq!(created.events[0].event_type, "work_item.recorded");
-    assert_eq!(created.events[0].payload["item"]["native_state"], "Backlog");
+    assert_eq!(created.events[0].payload["item"]["native_state"], "Ready");
     invoke(&peer, &handle, "create", json!({ "title": "Second" }))
         .await
         .unwrap();

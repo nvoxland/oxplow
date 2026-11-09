@@ -16,10 +16,12 @@ use serde_json::Value;
 
 use crate::{Actor, CommandCall, CommandError, Envelope};
 
-/// The states every provider maps its own to.
+/// The states every provider maps its own to. `backlog` is filed but not
+/// ready to work on; `todo` is ready (what an idle thread may pull).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CanonicalState {
+    Backlog,
     Todo,
     InProgress,
     Blocked,
@@ -28,7 +30,8 @@ pub enum CanonicalState {
 }
 
 impl CanonicalState {
-    pub const ALL: [CanonicalState; 5] = [
+    pub const ALL: [CanonicalState; 6] = [
+        CanonicalState::Backlog,
         CanonicalState::Todo,
         CanonicalState::InProgress,
         CanonicalState::Blocked,
@@ -38,12 +41,18 @@ impl CanonicalState {
 
     pub fn as_str(self) -> &'static str {
         match self {
+            CanonicalState::Backlog => "backlog",
             CanonicalState::Todo => "todo",
             CanonicalState::InProgress => "in_progress",
             CanonicalState::Blocked => "blocked",
             CanonicalState::Done => "done",
             CanonicalState::Canceled => "canceled",
         }
+    }
+
+    /// Done or canceled: the item's work is over, and it has no assignee.
+    pub fn is_closed(self) -> bool {
+        matches!(self, CanonicalState::Done | CanonicalState::Canceled)
     }
 }
 
@@ -119,14 +128,6 @@ pub struct WorkItemsFeatures {
     /// when its reply was lost.
     #[serde(default)]
     pub idempotent_writes: bool,
-    /// Items have an order on their list (`oxplow.work_item.reorder`; read as
-    /// `v_work_item.rank`).
-    #[serde(default)]
-    pub ordering: bool,
-    /// Items are on a thread's list or the backlog, and move between them
-    /// (`oxplow.work_item.move`; read as `v_work_item.thread_id`).
-    #[serde(default)]
-    pub lists: bool,
 }
 
 /// One of an item's links, as its provider records it.
@@ -156,8 +157,9 @@ pub struct CommentRecord {
 }
 
 /// An item as its provider now has it — what `v_work_item` holds, and
-/// what a provider's `work_item.recorded` event carries. `rank`, `links`
-/// and `comments` are stated when the provider keeps them: absent, the
+/// what a provider's `work_item.recorded` event carries. Who it's
+/// assigned to and its place in that queue are core's, never a
+/// provider's. `links` and `comments` are stated when the provider keeps them: absent, the
 /// host keeps what it has; present, it's the whole set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -177,20 +179,12 @@ pub struct WorkItemRecord {
     /// Gone at the provider.
     #[serde(default)]
     pub deleted: bool,
-    /// Its order on its list (ascending).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rank: Option<f64>,
     /// Its links (from it to others), the whole set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub links: Option<Vec<LinkRecord>>,
     /// Its comments, the whole set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comments: Option<Vec<CommentRecord>>,
-    /// The list it's on, when the provider keeps lists (`lists`): stated,
-    /// the host restates it; absent, it stays on the list its first record
-    /// was filed from.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub list: Option<List>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -526,6 +520,21 @@ mod tests {
         assert!(registry.get(&registry.active()).is_err());
     }
 
+    /// An assignee is named by its URI or a thread's id, and prints as the
+    /// URI `v_work_item.assignee` holds.
+    #[test]
+    fn an_assignee_parses_from_a_uri_or_a_threads_id() {
+        let thread = Assignee::parse("thr3").unwrap();
+        assert_eq!(thread.uri(), "oxplow:oxplow/thread?id=thr3");
+        assert_eq!(Assignee::parse(&thread.uri()).unwrap(), thread);
+        let person = Assignee::parse("oxplow:oxplow/person").unwrap();
+        assert_eq!(person, Assignee::Person(None));
+        assert_eq!(person.uri(), "oxplow:oxplow/person");
+        assert_eq!(Assignee::parse("person").unwrap(), person);
+        assert!(Assignee::parse("tsk3").is_err());
+        assert!(Assignee::parse("oxplow:oxplow/effort?id=eff1").is_err());
+    }
+
     #[test]
     fn a_record_round_trips_under_its_wire_names() {
         let record = WorkItemRecord {
@@ -537,14 +546,11 @@ mod tests {
             native: serde_json::json!({ "points": 3 }),
             parent_uri: None,
             deleted: false,
-            rank: None,
             links: None,
             comments: None,
-            list: Some(List::Thread("thr3".into())),
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["uri"], "oxplow:oxplow/work_item?id=W-1&provider=fake");
-        assert_eq!(json["list"], serde_json::json!({ "thread": "thr3" }));
         assert_eq!(json["state"], "in_progress");
         assert_eq!(
             serde_json::from_value::<WorkItemRecord>(json).unwrap(),
@@ -578,7 +584,7 @@ mod tests {
 pub struct WorkItemTransitionInput {
     /// The item's URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
     pub uri: String,
-    /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
+    /// The canonical state: `backlog`, `todo`, `in_progress`, `blocked`, `done` or
     /// `canceled`. The list's own name for a state (oxplow's `ready`)
     /// goes in `native_state`.
     pub to: CanonicalState,
@@ -599,7 +605,7 @@ pub struct WorkItemCreateInput {
     /// The parent's URI, on the same provider (needs `hierarchy`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_uri: Option<String>,
-    /// The canonical state, `todo` when absent: `todo`, `in_progress`,
+    /// The canonical state, `todo` when absent: `backlog`, `todo`, `in_progress`,
     /// `blocked`, `done` or `canceled`. The list's own name for a state
     /// (oxplow's `ready`) goes in `native_state`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -612,10 +618,10 @@ pub struct WorkItemCreateInput {
     /// `create` declares them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native: Option<Value>,
-    /// The thread it's filed on (`thr3`): absent, an agent's own, or none
-    /// for a person (oxplow's backlog).
+    /// Who is going to work on it (`oxplow.work_item.assign`'s `to`):
+    /// absent, nobody. Core's record: the provider never sees it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread: Option<String>,
+    pub assignee: Option<String>,
     /// Its links, made with it (needs `links`): what it is `about`, what
     /// it blocks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -635,7 +641,7 @@ pub struct WorkItemUpdateInput {
     /// The parent's URI on the same provider, or `""` to detach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_uri: Option<String>,
-    /// The canonical state: `todo`, `in_progress`, `blocked`, `done` or
+    /// The canonical state: `backlog`, `todo`, `in_progress`, `blocked`, `done` or
     /// `canceled`. The list's own name for a state (oxplow's `ready`)
     /// goes in `native_state`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -681,41 +687,79 @@ pub struct WorkItemDeleteInput {
     pub uri: String,
 }
 
-/// `oxplow.work_item.reorder`: put an item before or after another in its own
-/// list (neither: at its end).
+/// `oxplow.work_item.reorder`: put an item before or after another in its
+/// assignee's queue (neither: at its end). Core's, for every provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemReorderInput {
     /// The task's URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`).
     pub uri: String,
-    /// Put it just before this item of the same list.
+    /// Put it just before this item of the same queue.
     #[serde(default)]
     pub before: Option<String>,
-    /// Put it just after this item of the same list.
+    /// Put it just after this item of the same queue.
     #[serde(default)]
     pub after: Option<String>,
 }
 
-/// A work list: a thread's, or the project-wide backlog — where
-/// `oxplow.work_item.move` takes an item, and where a record says it is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum List {
-    /// The project-wide backlog.
-    Backlog,
-    /// A thread's list (`thr3`).
-    Thread(String),
+/// Who an item is assigned to: a thread, or the person (one of several
+/// when it has an id). Nobody is no assignee at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Assignee {
+    Thread(crate::ThreadId),
+    Person(Option<String>),
 }
 
-/// `oxplow.work_item.move`: take an item to another list — its end, or next to
-/// an item there.
+impl Assignee {
+    /// What `oxplow.work_item.assign`'s `to` names: a thread's URI or id
+    /// (`thr3`), or the person's URI (`oxplow:oxplow/person`, `person`).
+    pub fn parse(raw: &str) -> Result<Assignee, String> {
+        use crate::uri::{build, resources};
+        if raw == "person" {
+            return Ok(Assignee::Person(None));
+        }
+        if let Ok(thread) = raw.parse::<crate::ThreadId>() {
+            return Ok(Assignee::Thread(thread));
+        }
+        if let Some(thread) = build::thread_of_uri(raw) {
+            return Ok(Assignee::Thread(thread));
+        }
+        if let Ok(person) = build::parse_resource(raw, resources::PERSON) {
+            return Ok(Assignee::Person(person.param("id").map(str::to_string)));
+        }
+        Err(format!(
+            "`{raw}` names no assignee: a thread (`oxplow:oxplow/thread?id=thr3`, `thr3`) or the \
+             person (`oxplow:oxplow/person`)"
+        ))
+    }
+
+    /// Its URI, as `v_work_item.assignee` holds it.
+    pub fn uri(&self) -> String {
+        use crate::uri::build;
+        match self {
+            Assignee::Thread(t) => build::thread_uri(*t),
+            Assignee::Person(id) => build::person_uri(id.as_deref()),
+        }
+    }
+}
+
+/// `oxplow.work_item.assign`: who is going to work on an item — a thread
+/// (`oxplow:oxplow/thread?id=thr3`), the person (`oxplow:oxplow/person`) or
+/// nobody (`to` absent or null: the pool, or the backlog for a backlog
+/// item) — at the end of that assignee's queue, or next to an item there.
+/// Core's record, for every provider (`.context/work-items.md`
+/// "Assignment").
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemMoveInput {
+pub struct WorkItemAssignInput {
     pub uri: String,
-    pub to: List,
+    /// The assignee's URI; absent or null, nobody.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// Put it just before this item of the assignee's queue.
     #[serde(default)]
     pub before: Option<String>,
+    /// Put it just after this item of the assignee's queue.
     #[serde(default)]
     pub after: Option<String>,
 }

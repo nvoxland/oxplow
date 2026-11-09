@@ -1533,7 +1533,7 @@ impl Services {
             commands::work_item::unlink_op(work_items.clone(), link_deps.clone()),
             commands::work_item::comment_op(work_items.clone()),
             commands::work_item::reorder_op(work_items.clone()),
-            commands::work_item::move_op(work_items.clone()),
+            commands::work_item::assign_op(work_items.clone()),
             commands::work_item::delete_op(work_items.clone()),
         ]
         .into_iter()
@@ -2394,13 +2394,15 @@ mod tests {
                 "oxplow.vcs.stage",
                 "oxplow.vcs.status",
                 "oxplow.vcs.uncommit",
-                // Every work list's verbs, oxplow's own included.
+                // Every work list's verbs, oxplow's own included. Who works
+                // on an item and its place in their queue are core's
+                // (`assign`, `reorder`), in the bus's transaction.
                 "oxplow.work_item.comment",
                 "oxplow.work_item.create",
                 "oxplow.work_item.delete",
                 "oxplow.work_item.link",
-                "oxplow.work_item.move",
-                "oxplow.work_item.reorder",
+                // bundled's menu entry for create.
+                "oxplow.work_item.new",
                 "oxplow.work_item.transition",
                 "oxplow.work_item.unlink",
                 "oxplow.work_item.update",

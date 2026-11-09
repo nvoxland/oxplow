@@ -1951,7 +1951,7 @@ mod tests {
             mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = a_task(&db, Some(t.id)).await;
+        let tid = a_task(&db).await;
         (SqliteEffortStore::new(db.clone()), db, tid, t.id)
     }
 
@@ -2653,7 +2653,7 @@ mod tests {
             mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = a_task(&db, Some(t.id)).await;
+        let tid = a_task(&db).await;
         // effort.end_snapshot_id references snapshot(id), not
         // file_snapshot(id). Build real snapshot grouping rows so the
         // FK validates.
@@ -2726,7 +2726,7 @@ mod tests {
             mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = a_task(&db, Some(t.id)).await;
+        let tid = a_task(&db).await;
         let snap_store = crate::SqliteSnapshotStore::new(db.clone());
         let s1 = snap_store.create_snapshot(s.id).await.unwrap();
         let s2 = snap_store.create_snapshot(s.id).await.unwrap();
@@ -2809,7 +2809,7 @@ mod tests {
             mark: None,
         };
         SqliteThreadStore::new(db.clone()).upsert(&t).await.unwrap();
-        let tid = a_task(db, Some(t.id)).await;
+        let tid = a_task(db).await;
         (s.id, t.id, tid)
     }
 

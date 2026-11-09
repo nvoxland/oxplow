@@ -13,6 +13,7 @@ use crate::model::{Task, TaskPriority, TaskStatus};
 /// oxplow's status for a canonical state.
 pub fn native_status(state: CanonicalState) -> TaskStatus {
     match state {
+        CanonicalState::Backlog => TaskStatus::Backlog,
         CanonicalState::Todo => TaskStatus::Ready,
         CanonicalState::InProgress => TaskStatus::InProgress,
         CanonicalState::Blocked => TaskStatus::Blocked,
@@ -33,6 +34,7 @@ pub fn canonical_of(task: &Task) -> CanonicalState {
 /// `canceled`.
 pub fn state_pair(status: TaskStatus, completed: bool) -> (CanonicalState, String) {
     let state = match status {
+        TaskStatus::Backlog => CanonicalState::Backlog,
         TaskStatus::Ready => CanonicalState::Todo,
         TaskStatus::InProgress => CanonicalState::InProgress,
         TaskStatus::Blocked => CanonicalState::Blocked,
@@ -71,7 +73,7 @@ pub fn oxplow_status(
             let status: TaskStatus =
                 serde_json::from_value(Value::String(raw.into())).map_err(|_| {
                     invalid(format!(
-                        "`{raw}` isn't an oxplow status (ready, in_progress, blocked, done, \
+                        "`{raw}` isn't an oxplow status (backlog, ready, in_progress, blocked, done, \
                          canceled, archived)"
                     ))
                 })?;

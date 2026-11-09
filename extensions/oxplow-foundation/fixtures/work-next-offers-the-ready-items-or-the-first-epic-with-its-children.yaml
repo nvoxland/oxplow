@@ -5,9 +5,9 @@ when: { page: work-next, params: { thread: thr1 } }
 steps:
   - expect: { loaders: { work_next: { rows: 0 } } }
   - given:
-      - { command: oxplow.work_item.create, input: { title: a, thread: thr1 }, bind: a }
-      - { command: oxplow.work_item.create, input: { title: b, thread: thr1, state: blocked } }
-      - { command: oxplow.work_item.create, input: { title: c, thread: thr1 } }
+      - { command: oxplow.work_item.create, input: { title: a, assignee: thr1 }, bind: a }
+      - { command: oxplow.work_item.create, input: { title: b, assignee: thr1, state: blocked } }
+      - { command: oxplow.work_item.create, input: { title: c, assignee: thr1 } }
   - expect: { loaders: { work_next: { rows: [{ title: a, role: ready }, { title: c, role: ready }] } } }
     bind: { c: 'loaders.work_next.rows[1].uri' }
   # An open blocker holds a; a closed one doesn't.
@@ -20,12 +20,12 @@ steps:
   # c is next, and becomes an epic once it has children.
   - given:
       - { command: oxplow.work_item.transition, input: { uri: $a.uri, to: done } }
-      - { command: oxplow.work_item.create, input: { title: x, thread: thr1 }, bind: x }
+      - { command: oxplow.work_item.create, input: { title: x, assignee: thr1 }, bind: x }
       - { command: oxplow.work_item.transition, input: { uri: $x.uri, to: in_progress } }
-      - { command: oxplow.work_item.create, input: { title: c1, thread: thr1, parent_uri: $c }, bind: c1 }
-      - { command: oxplow.work_item.create, input: { title: c2, thread: thr1, parent_uri: $c, state: done } }
-      - { command: oxplow.work_item.create, input: { title: g, thread: thr1, parent_uri: $c1.uri } }
-      - { command: oxplow.work_item.create, input: { title: y, thread: thr1 } }
+      - { command: oxplow.work_item.create, input: { title: c1, assignee: thr1, parent_uri: $c }, bind: c1 }
+      - { command: oxplow.work_item.create, input: { title: c2, assignee: thr1, parent_uri: $c, state: done } }
+      - { command: oxplow.work_item.create, input: { title: g, assignee: thr1, parent_uri: $c1.uri } }
+      - { command: oxplow.work_item.create, input: { title: y, assignee: thr1 } }
   - expect:
       loaders:
         work_next: { rows: [{ title: c, role: epic }, { title: c1, role: child }, { title: g, role: child }] }

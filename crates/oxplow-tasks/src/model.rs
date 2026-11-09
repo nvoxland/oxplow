@@ -5,13 +5,15 @@
 
 use serde::{Deserialize, Serialize};
 
-use oxplow_domain::{NoteId, ThreadId, Timestamp};
+use oxplow_domain::{NoteId, Timestamp};
 
 use crate::ids::TaskId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
+    /// Filed, not ready to work on yet.
+    Backlog,
     Ready,
     InProgress,
     Blocked,
@@ -64,15 +66,12 @@ pub enum TaskLinkType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub id: TaskId,
-    /// `None` when the task is on the project-wide backlog.
-    pub thread_id: Option<ThreadId>,
     pub parent_id: Option<TaskId>,
     pub title: String,
     /// The task's prose body — the canonical markdown detail.
     pub description: String,
     pub status: TaskStatus,
     pub priority: TaskPriority,
-    pub sort_index: i64,
     pub created_by: TaskActorKind,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,
@@ -117,13 +116,11 @@ mod tests {
         let at = |ms| Timestamp::from_unix_ms(ms);
         let mut task = Task {
             id: TaskId::new(1),
-            thread_id: None,
             parent_id: None,
             title: "t".into(),
             description: String::new(),
             status: TaskStatus::Ready,
             priority: TaskPriority::Medium,
-            sort_index: 0,
             created_by: TaskActorKind::User,
             created_at: at(1),
             updated_at: at(1),
@@ -162,12 +159,12 @@ mod tests {
     }
 
     #[test]
-    fn backlog_task_has_no_thread() {
+    fn a_backlog_task_is_a_status() {
         let item: Task = serde_json::from_str(
             r#"{
-                "id":"tsk7","thread_id":null,"parent_id":null,
+                "id":"tsk7","parent_id":null,
                 "title":"t","description":"",
-                "status":"ready","priority":"medium","sort_index":0,
+                "status":"backlog","priority":"medium",
                 "created_by":"user",
                 "created_at":"2026-04-29T12:00:00Z","updated_at":"2026-04-29T12:00:00Z",
                 "completed_at":null,"deleted_at":null,"note_count":0,
@@ -175,6 +172,6 @@ mod tests {
             }"#,
         )
         .unwrap();
-        assert!(item.thread_id.is_none());
+        assert_eq!(item.status, TaskStatus::Backlog);
     }
 }

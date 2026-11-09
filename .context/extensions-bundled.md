@@ -294,7 +294,12 @@ screens and the holder's add the review and analysis:
   host page's own nodes' actions, not an embedded page's, so the part's
   buttons are tested on the part. Each has a `panel:` fixture:
   the panel run whole, as the rail shows it. Work (`work-panel`, collapsed
-  `work-line`, no count; its header opens the Tasks board) is `oxplow-bundled`'s, beside its
+  `work-line`, no count; its header opens the Tasks board) is what the
+  thread is working on, from its efforts, not a view of task states: In
+  progress is its open effort (its item under its epic, or the effort's
+  title), Up next the ready and blocked items assigned to the thread in
+  its queue's order, Finished its closed efforts (each item once) and
+  wiki pages touched. It is `oxplow-bundled`'s, beside its
   `thread_work` dataset and `work.clear_finished` command, with a `panel:`
   fixture. Still in the holder: Waiting on You (`waiting-on-me`, a badge)
   and Comments (`comments-panel`). Each moves the same way: its parts, a
@@ -302,8 +307,9 @@ screens and the holder's add the review and analysis:
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.
 - **The task screens.** Two pages over one query, `work-items` (the items
-  a page shows by `show` — this thread, its stream, everywhere, the
-  backlog — `state`, `priority` and `q`, with the gates a row's actions
+  a page shows by `show` — assigned to this thread, its stream, you,
+  nobody or anyone; a closed item, nobody's, by the efforts that worked
+  it — `state` (`backlog` one of them), `priority` and `q`, with the gates a row's actions
   read and the order to draw them in), and New Item (`new-task`, with its
   `work-item-fields` query and the `work_item.new` command: New Task…,
   Cmd/Ctrl+Shift+N). **Tasks** (`tasks`) is the board, a custom page: the
@@ -319,14 +325,17 @@ screens and the holder's add the review and analysis:
   days, twenty at most (the `board` loader), then "All N in Task List";
   each column scrolls on its own. It is the
   `work_item.board` replaceable, its filters shared with a stand-in.
-  The board's Show has no backlog: the backlog is the Task List's.
+  The board has no backlog column: the backlog is the Task List's. A
+  card's menu assigns it (the stream's open threads, You, Nobody; the
+  page's `assignees` loader).
   **Task List** (`task-list`, each row its title over its description's
   first sentence, an urgent or high item's coloured `edge`) is the items in one state (`State`, To Do
-  unless asked; Done's link asks for done), its filters in the rail (Show
-  includes the backlog), with a quick add in the rail above them (a title; To Do, or Blocked
-  while it shows blocked items, on this thread, or in the backlog while it
-  shows the backlog), with the drag, bulk and keyboard actions, and the agents' answers about
-  what is in progress, in the backlog or finished. The pure half of the
+  unless asked; Backlog is one; Done's link asks for done), its filters in
+  the rail, with a quick add at the rail's bottom (a title, in the state
+  it shows — To Do for a started or closed one — assigned to whom it
+  shows), with the drag, bulk (Assign to This Thread, Assign to Me,
+  Unassign) and keyboard actions, and the agents' answers about what is in
+  progress, in the backlog, in the pool or finished. The pure half of the
   board (`src/board/model.ts`; a card's description is the query's
   `summary`, `first_sentence(body)`) is tested from the desktop suite
   (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.

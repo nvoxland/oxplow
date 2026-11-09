@@ -1369,13 +1369,11 @@ mod tests {
             .task_store
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(thread),
                 parent_id: None,
                 title: "t".into(),
                 description: String::new(),
                 status: TaskStatus::InProgress,
                 priority: TaskPriority::Medium,
-                sort_index: 0,
                 created_by: TaskActorKind::User,
                 created_at: now,
                 updated_at: now,

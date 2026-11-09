@@ -188,6 +188,19 @@ pub fn thread_uri(id: ThreadId) -> String {
     keyed(r::THREAD, &id.to_string())
 }
 
+/// The thread a thread URI names; `None` for any other text.
+pub fn thread_of_uri(text: &str) -> Option<ThreadId> {
+    parse_as(text, r::THREAD).ok()
+}
+
+/// The person (`oxplow:oxplow/person`); with an id, that one of several.
+pub fn person_uri(id: Option<&str>) -> String {
+    match id {
+        Some(id) => of(r::PERSON, &[("id", id)]),
+        None => of(r::PERSON, &[]),
+    }
+}
+
 pub fn effort_uri(id: EffortId) -> String {
     keyed(r::EFFORT, &id.to_string())
 }

@@ -145,7 +145,9 @@ the resource's own name for a contribution (`page?page=tasks`, `command?command=
 have none: `file?path=&rev=&filesystem=`, `dir?path=&filesystem=`, `symbol?path=&symbol=`,
 `work_item?provider=&id=`, `subagent?session=&agent=`,
 `extension_deployment?name=&hash=`, `block?path=&lines=`,
-`test?class=&name=`. A page's own params ride beside its key
+`test?class=&name=`. `person` is the person using oxplow, with none
+(`oxplow:oxplow/person`, what a work item is assigned to when it's theirs;
+an optional `id` names one of several, for later). A page's own params ride beside its key
 (`page?page=settings&area=agents`); `build::params_of` splits them.
 
 **Event sources aren't URIs.** An event's `source` says who emitted it —

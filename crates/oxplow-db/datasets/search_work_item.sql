@@ -1,7 +1,8 @@
 -- What site search indexes for each of the active list's items, through
--- the interface. Archived work leaves search, as its files do (tsk921):
--- an item on an archived thread or stream isn't indexed; the backlog
--- (no thread) is. Its comments follow its own text in the body.
+-- the interface: an item assigned to a thread is under that thread's
+-- stream; any other is project-wide. Archived work leaves search, as its
+-- files do (tsk921): an item assigned to an archived thread or stream
+-- isn't indexed. Its comments follow its own text in the body.
 SELECT CAST(w.uri AS TEXT) AS uri,
        CAST(w.title AS TEXT) AS title,
        -- Its own id first (`tsk42`, `ENG-12`), so typing it finds it.
@@ -13,7 +14,6 @@ SELECT CAST(w.uri AS TEXT) AS uri,
        CAST(CASE WHEN th.stream_id IS NULL THEN NULL ELSE 'str' || th.stream_id END AS TEXT)
          AS stream_id
 FROM ref('work_item') w
-LEFT JOIN source('threads') th ON th.id = w.thread_id
+LEFT JOIN source('threads') th ON 'oxplow:oxplow/thread?id=thr' || th.id = w.assignee
 LEFT JOIN source('streams') s ON s.id = th.stream_id
-WHERE (w.thread_id IS NULL OR th.archived_at IS NULL)
-  AND s.archived_at IS NULL
+WHERE th.id IS NULL OR (th.archived_at IS NULL AND s.archived_at IS NULL)

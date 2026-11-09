@@ -2,7 +2,7 @@
 
 
 What this doc covers: the SQLite tables, their store classes, and the
-`sort_index` queue invariant for tasks. If you're adding a new persisted concept, also
+assignment queues. If you're adding a new persisted concept, also
 read [ipc-and-stores.md](./ipc-and-stores.md).
 
 ## Extension jobs
@@ -557,8 +557,8 @@ i.e. any row that's a `parent_id` target. The UI reads it through the
 interface — an item that is some item's `parent_uri`
 (a page's `depth` column); there's no flag on the row itself.
 
-Statuses: `ready`, `in_progress`, `blocked`, `done`, `canceled`,
-`archived`. `archived` is a terminal state that hides the item from
+Statuses: `backlog`, `ready`, `in_progress`, `blocked`, `done`,
+`canceled`, `archived`. `archived` is a terminal state that hides the item from
 the default Work panel view — archived rows fold into the Done
 section's bucketing but aren't rendered unless the user flips the "Show
 archived (N)" toggle in the Done section header. The same header carries
@@ -610,12 +610,23 @@ it (`Task::set_status`).
 ### `work_item` — every provider's work items (migration `V115__work_item.sql`, P5.C1)
 
 One row per work item, keyed by its URI (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`):
-`provider`, `title`, `body`, canonical `state` (`todo`, `in_progress`,
-`blocked`, `done`, `canceled`), the provider's own `native_state`, its
-other fields as `native` JSON, `parent_uri`, timestamps and
-`deleted_at`; since V17 the interface's own `thread_id` (the list it's
-on, NULL = backlog), `rank` (order on the list) and `closed_at` (when it
-first reached done or canceled; reopened, NULL). Published as
+`provider`, `title`, `body`, canonical `state` (`backlog`, `todo`,
+`in_progress`, `blocked`, `done`, `canceled`), the provider's own
+`native_state`, its other fields as `native` JSON, `parent_uri`,
+timestamps, `deleted_at` and `closed_at` (when it first reached done or
+canceled; reopened, NULL). V7 moved the thread and rank out: they are
+core's assignment, below.
+
+**`work_item_assignment`** (V7) `(uri, assignee, rank, assigned_at)`: who
+is going to work on an item — a thread's or the person's URI, NULL for
+nobody — and its place in that assignee's queue, for every list. Kept by
+`work_items.project` from `work_item.assigned@1` (renumbering the queue
+it joins), and its row deleted when a record says the item is done or
+canceled. `v_work_item` joins it as `assignee` and `rank`
+([work-items.md](./work-items.md) "Assignment"). V7 carried the open
+items' threads and ranks over, made oxplow's ready tasks on no thread
+`backlog`, and stripped `list` and `rank` from the logged
+`work_item.recorded` payloads. Published as
 `v_work_item`: live rows **of the active work list only** (a join on the
 active `work_items` row of `capability_provider`, so with none it's
 empty). oxplow's tasks publish no model of their own (`v_task`,
@@ -642,8 +653,8 @@ records (`work_items.project`; [work-items.md](./work-items.md) "One
 writer"), oxplow's tasks' included: their verbs answer with the record
 of every task they changed (`oxplow_tasks::record::record_tx`). oxplow's
 mapping: `ready` → `todo`; `archived` → `done` when `completed_at` is
-set, else `canceled`; the rest by name. `rank` is the task's
-`sort_index`, its list (`List`) its thread. (Archiving keeps
+set, else `canceled`; the rest by name. A task keeps no thread or order:
+who works on it and its place are core's (`work_item_assignment`). (Archiving keeps
 `completed_at`; before V115 it cleared it, so V122 restored it — and
 `done` — for every task whose last archive the event log shows came
 `from: done`. Tasks archived before the event log existed have no record
@@ -2484,30 +2495,15 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   (each token double-quoted + `*` prefix), so junk input can't throw FTS5
   syntax errors. Exposed as the `search` IPC command + MCP `oxplow_search` tool.
 
-## The `sort_index` queue
+## Assignment queues
 
-`tasks.sort_index` orders work in a single numeric space scoped
-per thread. `runtime.reorderThreadQueue(streamId, threadId, entries)`
-rewrites the values in one operation; entries are `{ id }` with
-`sort_index = position`.
-
-**Visual vs persistence order for Done.** Sections in `WorkGroupList`
-render ascending by `sort_index` *except* Done, which renders
-descending (newest-finished items surface on top). The underlying
-`sort_index` space is still a single ascending line — the section is
-only flipped at render time. When a drag-reorder persists a new order,
-`finalizeReorderIds` in `plan-utils.ts` reverses each descending run
-(`done`/`canceled`/`archived`) so the `reorderItems` /
-`reorderThreadQueue` "sort_index = position" rule produces the intended
-visual result. The drag handler passes the *effective* new status of a
-row whose status is changing as part of the drop so the run detector
-sees the new section membership. Dropping any item *into* Done is a
-drop-to-top contract: the drag handler inserts the row at the head of
-the Done bucket in visual order, and `task-store.updateItem`
-bumps `sort_index` to `MAX+1` on every non-Done → Done transition, so
-the two paths agree on "newest-done on top." Any new section with a
-non-ascending display must either do the same reversal dance or get
-its own flat list.
+Each assignee — a thread, the person, nobody — has one queue: the open
+items assigned to it, ascending by `work_item_assignment.rank`, then by
+`created_at` for an item with no row. `oxplow.work_item.assign` and
+`reorder` name a neighbour in the queue (or none: its end); the
+projection inserts the item there and renumbers the queue from 0, so a
+replay of the same events gives the same order. A task row has no order
+of its own.
 
 ## Status diagrams (text)
 

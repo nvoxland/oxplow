@@ -260,8 +260,9 @@ pub fn archive_op(deps: StreamDeps) -> Op {
         "archive",
         schema::<ArchiveInput>(),
         false,
-        Handler::External(Arc::new(move |_: Invocation, input| {
+        Handler::External(Arc::new(move |invocation: Invocation, input| {
             let deps = deps.clone();
+            let source = invocation.actor().source();
             Box::pin(async move {
                 use crate::agent_status_derive::{derive_session_status, recent_activity};
                 use oxplow_domain::stores::{AgentSessionStore as _, ThreadStore as _};
@@ -348,6 +349,24 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         Ok(())
                     })
                     .await?;
+                // Its threads' work items go back to nobody.
+                let thread_uris: Vec<String> = threads
+                    .iter()
+                    .map(|t| oxplow_domain::uri::build::thread_uri(t.id))
+                    .collect();
+                let released = deps
+                    .db
+                    .read(move |tx| {
+                        let mut events = Vec::new();
+                        for thread in &thread_uris {
+                            events.extend(
+                                super::work_item::release_all_tx(tx, &source, thread)
+                                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?,
+                            );
+                        }
+                        Ok(events)
+                    })
+                    .await?;
                 // Before the worktree goes: its deletion is no one's surprise.
                 deps.stream_watches.unregister(&id);
                 deps.streams
@@ -362,6 +381,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 deps.snapshot_captures.unregister(&id);
                 Ok(HandlerOutput {
                     result: json!({ "stream": input.stream, "archived": true }),
+                    events: released,
                     ..HandlerOutput::default()
                 })
             })

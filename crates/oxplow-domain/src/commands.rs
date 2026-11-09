@@ -1355,7 +1355,7 @@ mod tests {
         let state = message(json!({ "title": "t", "state": "ready" }));
         assert!(
             state.contains(
-                r#"Expected one of: "todo", "in_progress", "blocked", "done", "canceled""#
+                r#"Expected one of: "backlog", "todo", "in_progress", "blocked", "done", "canceled""#
             ),
             "{state}"
         );

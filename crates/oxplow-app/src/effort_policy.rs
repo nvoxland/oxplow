@@ -18,11 +18,15 @@
 //! Rule 1, linking and task switch:
 //! - an item moved to `in_progress` links the thread's open effort, opening
 //!   one if none is open. The thread is the mover's (an agent's), else the
-//!   item's. A descendant of the linked item refines the link; an ancestor
+//!   thread the item is assigned to. An agent that starts an item not
+//!   assigned to its thread takes it: the item is assigned there first
+//!   (`oxplow.work_item.assign`); a person starting one assigns nothing.
+//!   A descendant of the linked item refines the link; an ancestor
 //!   leaves it; an unrelated item closes the effort (`switch`) and opens
 //!   the next;
 //! - an item moved to `done` or `canceled` closes the efforts linked to it;
-//! - work linked to a `todo` item moves the item to `in_progress`. Nothing
+//! - work linked to a `backlog` or `todo` item moves the item to
+//!   `in_progress`. Nothing
 //!   is ever marked done.
 //!
 //! Rule 2, open on change: a `thread.checkpoint` showing the worktree
@@ -138,14 +142,15 @@ impl CommitOrSwitch {
         Ok(!rows.is_empty())
     }
 
-    /// The item's state and thread, if it is a live item.
+    /// The item's state and the thread it's assigned to, if it is a live
+    /// item.
     async fn item(
         &self,
         item_ref: &str,
     ) -> Result<Option<(Option<CanonicalState>, Option<ThreadId>)>, DomainError> {
         let rows = self
             .rows(
-                "SELECT state, thread_id FROM v_work_item WHERE uri = ?1",
+                "SELECT state, assignee FROM v_work_item WHERE uri = ?1",
                 vec![SqlCell::Text(item_ref.into())],
             )
             .await?;
@@ -154,10 +159,10 @@ impl CommitOrSwitch {
                 .first()
                 .and_then(text)
                 .and_then(|s| serde_json::from_value(Value::String(s)).ok());
-            let thread = match row.get(1) {
-                Some(SqlCell::Int(t)) => Some(ThreadId::new(*t)),
-                _ => None,
-            };
+            let thread = row
+                .get(1)
+                .and_then(text)
+                .and_then(|a| oxplow_domain::uri::build::thread_of_uri(&a));
             (state, thread)
         }))
     }
@@ -186,13 +191,23 @@ impl CommitOrSwitch {
         event: &EventView,
         item_ref: &str,
     ) -> Result<Vec<CommandCall>, DomainError> {
-        let thread = match event.anchors.thread_id {
-            Some(t) => Some(t),
-            None => self.item(item_ref).await?.and_then(|(_, t)| t),
-        };
+        let assigned = self.item(item_ref).await?.and_then(|(_, t)| t);
+        let thread = event.anchors.thread_id.or(assigned);
         let Some(thread) = thread else {
             return Ok(Vec::new());
         };
+        // An agent that starts an item takes it: it's assigned to the
+        // agent's thread before its work links to it.
+        let mover_is_agent = event.source.starts_with("agent:");
+        let take = (mover_is_agent && assigned != Some(thread)).then(|| {
+            call(
+                crate::commands::work_item::ASSIGN,
+                json!({
+                    "uri": item_ref,
+                    "to": oxplow_domain::uri::build::thread_uri(thread),
+                }),
+            )
+        });
         let open_new = || {
             call(
                 crate::commands::effort::OPEN,
@@ -200,9 +215,9 @@ impl CommitOrSwitch {
             )
         };
         let Some(open) = self.open_on(thread).await? else {
-            return Ok(vec![open_new()]);
+            return Ok(take.into_iter().chain([open_new()]).collect());
         };
-        Ok(match open.work_item.as_deref() {
+        let effort = match open.work_item.as_deref() {
             Some(linked) if linked == item_ref => Vec::new(),
             Some(linked) if self.is_under(linked, item_ref).await? => Vec::new(),
             Some(linked) if !self.is_under(item_ref, linked).await? => vec![
@@ -216,7 +231,8 @@ impl CommitOrSwitch {
                 crate::commands::effort::LINK,
                 json!({ "effort": open.id.to_string(), "work_item": item_ref }),
             )],
-        })
+        };
+        Ok(take.into_iter().chain(effort).collect())
     }
 
     async fn finished(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
@@ -249,10 +265,11 @@ impl CommitOrSwitch {
         )])
     }
 
-    /// Work was linked to `item_ref`: a `todo` item moves to in progress.
+    /// Work was linked to `item_ref`: a `backlog` or `todo` item moves to in
+    /// progress.
     async fn linked(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
         Ok(match self.item(item_ref).await? {
-            Some((Some(CanonicalState::Todo), _)) => vec![call(
+            Some((Some(CanonicalState::Backlog | CanonicalState::Todo), _)) => vec![call(
                 crate::commands::work_item::NAME,
                 json!({ "uri": item_ref, "to": "in_progress" }),
             )],
@@ -282,7 +299,9 @@ impl EffortPolicy for CommitOrSwitch {
                     CanonicalState::Done | CanonicalState::Canceled => {
                         self.finished(&changed.work_item).await
                     }
-                    CanonicalState::Todo | CanonicalState::Blocked => Ok(Vec::new()),
+                    CanonicalState::Backlog | CanonicalState::Todo | CanonicalState::Blocked => {
+                        Ok(Vec::new())
+                    }
                 }
             }
             t if t == EffortLinked::TYPE => {
@@ -601,14 +620,15 @@ mod tests {
         }
     }
 
-    /// A `todo` item, on `thread` or the backlog, filed by a person.
+    /// A `todo` item filed by a person, assigned to the fixture's thread or
+    /// to nobody.
     async fn item(fx: &EffortFixture, title: &str, parent: Option<&str>, thread: bool) -> String {
         let mut input = json!({ "title": title });
         if let Some(parent) = parent {
             input["parent_uri"] = json!(parent);
         }
         if thread {
-            input["thread"] = json!(fx.thread.to_string());
+            input["assignee"] = json!(fx.thread.to_string());
         }
         let out = fx
             .svc
@@ -711,10 +731,27 @@ mod tests {
         assert_eq!(open.len(), 1);
         assert_eq!(open[0].1.as_deref(), Some(filed.as_str()));
 
-        // Done closes it; the agent's start of a backlog item opens the next.
+        // Done closes it; the agent's start of an unassigned item takes it
+        // and opens the next.
         transition(&fx, &Actor::Human, &filed, "done").await;
         let backlog = item(&fx, "backlog", None, false).await;
         transition(&fx, &agent(&fx), &backlog, "in_progress").await;
+        let assignee = fx
+            .svc
+            .sql
+            .query_sql(
+                "SELECT assignee FROM v_work_item WHERE uri = ?1",
+                vec![SqlCell::Text(backlog.clone())],
+                None,
+            )
+            .await
+            .unwrap()
+            .rows;
+        assert_eq!(
+            text(&assignee[0][0]),
+            Some(oxplow_domain::uri::build::thread_uri(fx.thread)),
+            "the agent took it"
+        );
         let all = efforts(&fx).await;
         let last = all.last().unwrap();
         assert_eq!(last.1.as_deref(), Some(backlog.as_str()));

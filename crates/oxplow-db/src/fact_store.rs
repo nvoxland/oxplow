@@ -3993,8 +3993,8 @@ mod tests {
                     [now],
                 )?;
                 conn.execute(
-                    "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-                     VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
+                    "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+                     VALUES ('t', 'in_progress', 'medium', 'user', ?1, ?1)",
                     [now],
                 )?;
                 let task_id = conn.last_insert_rowid();

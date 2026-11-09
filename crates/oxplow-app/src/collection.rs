@@ -4592,13 +4592,11 @@ mod tests {
             let task_id = SqliteTaskStore::new(db.clone())
                 .insert(&Task {
                     id: TaskId::placeholder(),
-                    thread_id: Some(thread.id),
                     parent_id: None,
                     title: "x".into(),
                     description: String::new(),
                     status: TaskStatus::InProgress,
                     priority: TaskPriority::Medium,
-                    sort_index: 0,
                     created_by: TaskActorKind::User,
                     created_at: now,
                     updated_at: now,
@@ -6748,13 +6746,11 @@ mod tests {
             let task2 = SqliteTaskStore::new(h.db.clone())
                 .insert(&Task {
                     id: TaskId::placeholder(),
-                    thread_id: Some(h.thread),
                     parent_id: None,
                     title: "t2".into(),
                     description: String::new(),
                     status: TaskStatus::InProgress,
                     priority: TaskPriority::Medium,
-                    sort_index: 0,
                     created_by: TaskActorKind::User,
                     created_at: now,
                     updated_at: now,

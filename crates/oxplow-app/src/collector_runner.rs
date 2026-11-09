@@ -2694,10 +2694,10 @@ pub(crate) mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider, active) VALUES ('work_items', 'oxplow', 1);
-                 INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at) VALUES
-                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', 1, '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', 1, '2026-01-01', '2026-01-01');",
+                 INSERT INTO work_item (uri, provider, title, state, native_state, native, created_at, updated_at) VALUES
+                   ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-01-01', '2026-01-01'),
+                   ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', '2026-01-01', '2026-01-01'),
+                   ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', '2026-01-01', '2026-01-01');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })

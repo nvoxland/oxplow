@@ -4577,13 +4577,11 @@ def transform(input):
             .task_store
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(thread),
                 parent_id: None,
                 title: "t".into(),
                 description: String::new(),
                 status: TaskStatus::InProgress,
                 priority: TaskPriority::Medium,
-                sort_index: 0,
                 created_by: TaskActorKind::User,
                 created_at: now,
                 updated_at: now,
@@ -4655,13 +4653,11 @@ def transform(input):
             .task_store
             .insert(&Task {
                 id: TaskId::placeholder(),
-                thread_id: Some(thread),
                 parent_id: None,
                 title: "t".into(),
                 description: String::new(),
                 status: TaskStatus::InProgress,
                 priority: TaskPriority::Medium,
-                sort_index: 0,
                 created_by: TaskActorKind::User,
                 created_at: now,
                 updated_at: now,
@@ -5370,12 +5366,12 @@ def transform(input):
             .transaction(|c| {
                 c.execute_batch(
                     // The active list's items, as the interface holds them.
-                    "INSERT INTO work_item (uri, provider, title, state, native_state, native, thread_id, created_at, updated_at, closed_at) VALUES
-                       ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
-                       ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
-                       ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', (SELECT min(id) FROM threads), '2026-09-01', '2026-09-01', NULL);",
+                    "INSERT INTO work_item (uri, provider, title, state, native_state, native, created_at, updated_at, closed_at) VALUES
+                       ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
+                       ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
+                       ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL),
+                       ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', NULL),
+                       ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL);",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
             })

@@ -115,8 +115,8 @@ than handing it props it does not know.
 
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | the Tasks board (the `board` component node of bundled's `tasks` page; v2) | `work_items` | no | `scope` (`thread` / `stream` / `all` / `backlog`), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
-| `work_item.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | `work_items` | no | `scope` (`thread` / `stream` / `all` / `backlog`), `thread_id` (applies when `scope` is `thread`) | — |
+| `work_item.board` | the Tasks board (the `board` component node of bundled's `tasks` page; v2) | `work_items` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
+| `work_item.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | `work_items` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
 | `work_item.detail` | a work item's description editor (the `body` node of the `work-item` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
 | `work_item.detail.state` | a work item's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `work_items` | yes | `uri` (the item) | — |
 | `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` node of the `diff-view` page). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
@@ -239,7 +239,7 @@ filters, reveal, Cmd-click.
 An extension with no provider of its own, replacing `work_item.board`
 (the `swimlanes` component: a column per canonical state, drag a card to
 another column to `oxplow.work_item.transition` it, drag within a column to
-`reorder` it only when the active provider's `features` include `ordering`,
+`reorder` it in its assignee's queue,
 click a title to rename it through an inline `<form>` with `ox-input` and a
 field refusal shown in `ox-error`, a click on a card `navigate`s, a
 Cmd/Ctrl-click opens a new tab, and a `DENIED` refusal is one line above the
