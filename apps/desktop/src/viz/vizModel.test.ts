@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -812,4 +812,24 @@ test("nestRows makes each parent hold the deeper rows after it", () => {
   const shape = (ns: ReturnType<typeof nestRows>): unknown[] => ns.map((n) => (n.kids.length ? [n.i, shape(n.kids)] : n.i));
   expect(shape(nestRows(rows as never, (r) => r[1] as number))).toEqual([[0, [[1, [2]], 3]], [4, [5]]]);
   expect(shape(nestRows([], () => 0))).toEqual([]);
+});
+
+describe("actionOptionsOf", () => {
+  test("an action's options are the rows of the loader it names", () => {
+    const loaders = {
+      stages: { result: { columns: ["value", "label", "group"], rows: [["ready", "Ready", "todo"], ["done", null, null], [null, "x", null]] } },
+    };
+    const options = actionOptionsOf(
+      [{ id: "mark", optionsFrom: "stages" }, { id: "open" }, { id: "assign", optionsFrom: "threads" }],
+      loaders,
+    );
+    // A null label shows the value; a row with no value is no option; a
+    // loader that didn't run gives none.
+    expect(options).toEqual({
+      mark: [
+        { value: "ready", label: "Ready", group: "todo" },
+        { value: "done", label: "done", group: null },
+      ],
+    });
+  });
 });

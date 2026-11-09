@@ -8,7 +8,7 @@ import { shown, load } from "../../support/ui.js";
 
 test("an effect's destructive step waits in Alerts until a person approves it", async ({ page, daemon }) => {
   await load(page);
-  await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Pear [delete]", assignee: daemon.thread });
   // The dock's Alerts icon counts it once the effect has run (it runs in the
   // background, so wait for that). It opens the Alerts panel, which links
   // to the Alerts page, where the proposal waits.
@@ -34,7 +34,7 @@ test("an effect's destructive step waits in Alerts until a person approves it", 
 
 test("approving a proposal whose run fails keeps the failure on its card, recorded once", async ({ page, daemon }) => {
   await load(page);
-  const made = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title: "Quince [delete]", thread: daemon.thread });
+  const made = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title: "Quince [delete]", assignee: daemon.thread });
   await expect(page.getByTestId("dock-alerts-badge")).toHaveText("1");
   // The task goes another way first, so the delete the effect asked for fails.
   await run(daemon, "oxplow.work_item.delete", { uri: made.result.uri });

@@ -6,6 +6,7 @@ import { commandOpenAfter, undoCommand, type VizRun, type SqlCell } from "../api
 import { FormSourceContext, useFormSource, type FormSource } from "./formSource.js";
 import { useVizPages } from "./vizPages.js";
 import { VizActionRunnerContext, useVizActionRunner, type VizActionRunner } from "./vizActionRunner.js";
+import type { ActionOption, ActionOptions } from "./vizModel.js";
 import { TabModal } from "../components/TabModal.js";
 import { InlinePromptStrip } from "../components/InlinePromptStrip.js";
 import type { FormStart } from "../tauri-bridge/generated/bindings.js";
@@ -233,7 +234,7 @@ function VizViewBody(props: VizViewProps & { lazyOpen: CollapsedSet | null; bran
     <>
       {confirm}
       {form}
-      {!compact ? <MarksBar run={shown} actions={actions} marks={marks} /> : null}
+      {!compact ? <MarksBar run={shown} actions={actions} marks={marks} options={props.actionOptions ?? NO_OPTIONS} /> : null}
       <VizBody {...props} run={shown} tree={tree} actions={actions} marks={marks} />
       {props.partButtons ? <PartButtons run={shown} actions={actions} /> : null}
     </>
@@ -269,6 +270,34 @@ function markedRecords(run: VizRun, marks: Marks): Record<string, SqlCell>[] {
   return run.result.rows.filter((r) => set.has(rowKey(r))).map((r) => rowRecord(run.result.columns, r));
 }
 
+const NO_OPTIONS: ActionOptions = {};
+
+/** A row's menu entry for `action`: one that runs it, or — for an action
+ *  with options — a submenu of them, the one the row is in (`current`)
+ *  checked and not offered. */
+function actionMenuItem(
+  action: DeclaredPageAction,
+  record: Record<string, SqlCell>,
+  options: ActionOption[] | null,
+  actions: VizActionsState | undefined,
+): MenuItem {
+  const id = `viz-action-${action.id}`;
+  if (!options) return { id, label: action.label, enabled: actions !== undefined, run: () => actions?.run(action, record) };
+  const current = action.current ? record[action.current] : null;
+  return {
+    id,
+    label: action.label,
+    enabled: actions !== undefined && options.length > 0,
+    submenu: options.map((o) => ({
+      id: `${id}-${o.value}`,
+      label: o.label,
+      checked: o.value === current,
+      enabled: actions !== undefined && o.value !== current,
+      run: () => actions?.run(action, record, o.value),
+    })),
+  };
+}
+
 /** The bulk actions (`bulk: true`) the marked rows are offered: an action
  *  any of them is offered (`when`), run on those. */
 function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: DeclaredPageAction; rows: Record<string, SqlCell>[] }[] {
@@ -280,7 +309,7 @@ function bulkOffers(run: VizRun, marked: Record<string, SqlCell>[]): { action: D
 
 /** While rows are marked: how many, the bulk actions, and Clear — in place
  *  of the viz's own buttons. */
-function MarksBar({ run, actions, marks }: { run: VizRun; actions: VizActionsState; marks: Marks }) {
+function MarksBar({ run, actions, marks, options }: { run: VizRun; actions: VizActionsState; marks: Marks; options: ActionOptions }) {
   const marked = markedRecords(run, marks);
   if (marked.length === 0) return null;
   return (
@@ -289,7 +318,7 @@ function MarksBar({ run, actions, marks }: { run: VizRun; actions: VizActionsSta
         {marked.length} selected
       </span>
       {bulkOffers(run, marked).map(({ action, rows }) => (
-        <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} />
+        <BulkButton key={action.id} run={run} action={action} rows={rows} actions={actions} options={options[action.id] ?? null} />
       ))}
       <button type="button" data-testid="viz-marks-clear" onClick={() => marks.set([], null)}>
         Clear
@@ -331,6 +360,9 @@ interface VizViewProps {
    *  another page, an embed or a row): what it shows is the page's resource,
    *  so it offers no link to open that resource. */
   isPage?: boolean;
+  /** The options of each of its actions with `options_from`, by action id:
+   *  the rows of the page loader it names (`actionOptionsOf`). */
+  actionOptions?: ActionOptions;
 }
 
 /** Where a command's `ui.open_after` page opens from a viz: in the page
@@ -353,6 +385,8 @@ function useOpenAfter() {
 interface Press {
   row: Record<string, SqlCell> | null;
   drop: Drop | null;
+  /** The `value` of the option pressed, for an action with options. */
+  option?: string | null;
 }
 
 /** `runner`: what the actions run through, when not the one the context
@@ -376,7 +410,8 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
       stream: string | null,
       confirmed: boolean,
       drop?: Drop | null,
-    ) => pressOnRun(id, action, params, row, stream, confirmed, null, drop ?? null),
+      option?: string | null,
+    ) => pressOnRun(id, action, params, row, stream, confirmed, null, drop ?? null, option ?? null),
     toast: (message: string, undo?: () => void, open?: () => void) =>
       showToast({ message, onUndo: undo, ...(open ? { link: { label: "Open", onClick: open } } : {}) }),
     // The person's click on Undo is their confirmation of it.
@@ -394,7 +429,7 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
         // action has none there: it is the toast's).
         const anchored = { ...deps, anchor: actionAnchor(run.config.id, action.id) };
         const quiet = i < presses.length - 1 ? { ...anchored, toast: () => {} } : anchored;
-        const outcome = await performVizAction(action, run, p.row, streamId, confirmed, quiet, p.drop);
+        const outcome = await performVizAction(action, run, p.row, streamId, confirmed, quiet, p.drop, p.option ?? null);
         if (typeof outcome === "object") {
           setPending({ action, presses: presses.slice(i), details: outcome.confirm });
           return;
@@ -411,12 +446,14 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
     pending,
     form,
     closeForm: () => setForm(null),
-    run: (action: DeclaredPageAction, row: Record<string, SqlCell> | null) => {
+    /** `option`: the `value` of the option pressed, for an action with options. */
+    run: (action: DeclaredPageAction, row: Record<string, SqlCell> | null, option: string | null = null) => {
       if (action.form) setForm({ action, row });
-      else void press(action, [{ row, drop: null }], false);
+      else void press(action, [{ row, drop: null, option }], false);
     },
     /** A bulk action on the marked rows, once each, in order. */
-    runMany: (action: DeclaredPageAction, rows: Record<string, SqlCell>[]) => void press(action, rows.map((row) => ({ row, drop: null })), false),
+    runMany: (action: DeclaredPageAction, rows: Record<string, SqlCell>[], option: string | null = null) =>
+      void press(action, rows.map((row) => ({ row, drop: null, option })), false),
     /** A drag action for each dropped row, with where it landed. */
     runDrops: (action: DeclaredPageAction, presses: Press[]) => void press(action, presses, false),
     confirm: () => {
@@ -453,13 +490,35 @@ function PartButton({ action: a, run, actions }: { action: VizRun["config"]["act
 }
 
 /** A bulk action's button while rows are marked; its failure beside it. */
-function BulkButton({ run, action, rows, actions }: { run: VizRun; action: DeclaredPageAction; rows: Record<string, SqlCell>[]; actions: VizActionsState }) {
+function BulkButton({ run, action, rows, actions, options }: { run: VizRun; action: DeclaredPageAction; rows: Record<string, SqlCell>[]; actions: VizActionsState; options: ActionOption[] | null }) {
   const failure = useActionAnchor(actionAnchor(run.config.id, action.id));
   return (
     <>
-      <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
-        {actions.busy === action.id ? `${action.label}…` : action.label}
-      </button>
+      {options ? (
+        // One of its options, picked: each marked row moves to it.
+        <select
+          className="ox-select"
+          data-testid={`viz-bulk-${action.id}`}
+          aria-label={action.label}
+          disabled={actions.busy !== null}
+          title={actionDoes(action)}
+          value=""
+          onChange={(e) => {
+            if (e.target.value) actions.runMany(action, rows, e.target.value);
+          }}
+        >
+          <option value="">{actions.busy === action.id ? `${action.label}…` : `${action.label}…`}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <button type="button" data-testid={`viz-bulk-${action.id}`} disabled={actions.busy !== null} title={actionDoes(action)} onClick={() => actions.runMany(action, rows)}>
+          {actions.busy === action.id ? `${action.label}…` : action.label}
+        </button>
+      )}
       {failure ? <InlineError failure={failure} testId={`viz-action-error-${action.id}`} /> : null}
     </>
   );
@@ -503,6 +562,7 @@ function RowsBody({
   isPage = false,
   partButtons = false,
   onMore,
+  actionOptions = NO_OPTIONS,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
   // A list may cap each group instead (`group.compact` in a panel,
@@ -709,12 +769,7 @@ function RowsBody({
     },
     ...rowActions
       .filter((a) => actionOffered(a, rowRecord(result.columns, row)))
-      .map((a) => ({
-      id: `viz-action-${a.id}`,
-      label: a.label,
-      enabled: actions !== undefined,
-      run: () => actions?.run(a, rowRecord(result.columns, row)),
-    })),
+      .map((a) => actionMenuItem(a, rowRecord(result.columns, row), actionOptions[a.id] ?? null, actions)),
   ];
   // Every row of every row component: focusable, with its menu from a
   // right-click or the keyboard (Menu key / Shift+F10).

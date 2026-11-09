@@ -629,7 +629,7 @@ usability.md "Keyboard").
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
 group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, enabled?, fact?, primary?,
-prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
+prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm?, options_from?, current? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,
 checked at load). A page action with `when` or `{{row.*}}` and no `row`
@@ -709,6 +709,22 @@ is gone, is the toast's (usability.md "A person's command that fails").
   result. What becomes of the acting page is `then`: `open` (default; Back
   returns), `replace` (it leaves history), `stay` (nothing opens) or
   `close`. Outside a page (a panel) a page opens in a new tab.
+- **`options_from: <loader>` is one action with a choice in it** (a Mark
+  ▸ of a list's stages, an Assign to ▸ of the open threads): the rows of
+  that loader of the same page (`value`, `label`, an optional `group`)
+  are its options. A row's menu draws it as a submenu, one entry per
+  option (`viz-action-<id>-<value>`); `current: <column>` names the row's
+  column holding the option it is in now, drawn checked and not offered.
+  With `bulk`, the marks bar draws a select. The press sends the option's
+  `value` (`PageActionCall.option`, `oxplow_run_page_action`'s `option`);
+  the server finds that row in the run's loader (`pressed_option`,
+  pages/actions.rs) and binds `{{option.value}}` / `{{option.label}}`, so
+  only what the page offered runs. It is a row action only (no `drag`,
+  `form`, `edit`, `group` or `key`), its `input` must use `{{option.*}}`,
+  and `{{option.*}}` without `options_from` is refused (spec.rs); the
+  loader must exist (schema.rs `options_loader_missing`) and `current`
+  be a column of the viz's loader. The desktop reads the options from
+  the run's loaders (`actionOptionsOf`, vizModel.ts).
 - `edit: true` makes an action the Save of a `markdown` viz's editor. Its
   one input field bound to `{{row.<text column>}}` and not `fixed` takes
   the text (`markdown_problem`).

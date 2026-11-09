@@ -133,6 +133,10 @@ pub struct RunPageActionInput {
     /// `oxplow.page.run` returned it (it must be one of the node's rows).
     #[serde(default)]
     pub row: Option<BTreeMap<String, Value>>,
+    /// For a row action with options (a Mark ▸ menu): the `value` of the
+    /// one to run, one of the rows of the page's loader it names.
+    #[serde(default)]
+    pub option: Option<String>,
     #[serde(default)]
     pub stream_id: Option<String>,
     #[serde(default)]
@@ -1230,6 +1234,7 @@ fn run_action_op(services: ServicesSlot) -> Op {
                         row: p.row.map(|r| cells(Some(r))),
                         input: None,
                         drop: None,
+                        option: p.option,
                         on_behalf_of: invocation.actor().clone(),
                         // An agent never confirms.
                         confirmed: false,

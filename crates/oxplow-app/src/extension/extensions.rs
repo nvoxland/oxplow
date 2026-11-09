@@ -4343,6 +4343,14 @@ fn action_column_problems(
 ) -> Vec<String> {
     let mut problems: Vec<String> = Vec::new();
     for a in actions {
+        if let Some(current) = a.current.as_ref().filter(|c| !cols.contains(c)) {
+            problems.push(format!(
+                "action `{}` reads its row's option from `current: {current}`, which isn't in \
+                     the query result (columns: {})",
+                a.id,
+                cols.join(", ")
+            ));
+        }
         if let Some(when) = a.when.as_ref().filter(|w| !cols.contains(w)) {
             problems.push(format!(
                 "action `{}` is offered `when: {when}`, which isn't in the \
@@ -4760,6 +4768,39 @@ mod tests {
                 err.contains("`all` is for a whole-viz action"),
                 "{action}: {err}"
             );
+        }
+    }
+
+    /// `options_from` makes a row action one entry per option: it binds
+    /// `{{option.value}}` or `{{option.label}}`, and nothing else names
+    /// `option`; `current` needs options.
+    #[test]
+    fn an_action_with_options_is_a_row_action_that_binds_the_option() {
+        let parse = |action: &str| {
+            parse_actions(
+                vec![serde_yaml::from_str(action).unwrap()],
+                &[],
+                false,
+                false,
+            )
+        };
+        let ok = parse(
+            "{ id: m, label: Mark, command: x.y.z, row: true, options_from: stages, current: stage, input: { to: '{{option.value}}', why: '{{option.label}}' } }",
+        )
+        .unwrap();
+        assert_eq!(ok[0].options_from.as_deref(), Some("stages"));
+        assert_eq!(ok[0].current.as_deref(), Some("stage"));
+        for (action, says) in [
+            ("{ id: m, label: M, command: x.y.z, options_from: s, input: { to: '{{option.value}}' } }", "`options_from` is for a row action"),
+            ("{ id: m, label: M, command: x.y.z, row: true, drag: true, options_from: s, input: { to: '{{option.value}}' } }", "`options_from` is for a row action"),
+            ("{ id: m, label: M, command: x.y.z, row: true, options_from: s, input: { to: done } }", "use `{{option.value}}`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, options_from: s, input: { to: '{{option.id}}' } }", "isn't `{{option.value}}`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, input: { to: '{{option.value}}' } }", "needs `options_from`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, current: stage, input: { to: x } }", "needs `options_from`"),
+            ("{ id: m, label: M, command: x.y.z, row: true, key: m, options_from: s, input: { to: '{{option.value}}' } }", "a `key` can't run it"),
+        ] {
+            let err = parse(action).unwrap_err();
+            assert!(err.contains(says), "{action}: {err}");
         }
     }
 
@@ -7128,6 +7169,10 @@ commands:
                 ),
                 ("bare", "title: B\nview: { viz: table }\n"),
                 ("stray", "title: S\nview: { viz: table, from: nope }\n"),
+                (
+                    "options",
+                    "title: O\nloaders: { items: { sql: SELECT 1 AS id } }\nview: { viz: table, from: items, actions: [{ id: m, label: M, command: a.b.c, row: true, options_from: nope, input: { to: '{{option.value}}' } }] }\n",
+                ),
             ],
             "",
         );
@@ -7138,6 +7183,10 @@ commands:
             (
                 "stray",
                 "shows `nope`, but there is no loader `nope` in `loaders:`",
+            ),
+            (
+                "options",
+                "action `m` takes its options from `nope`, but there is no loader `nope`",
             ),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} loaded");

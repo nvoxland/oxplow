@@ -131,6 +131,7 @@ pub(crate) fn prepare_resolved(
     row: Option<&BTreeMap<String, SqlCell>>,
     given: Option<Value>,
     drop: Option<Drop>,
+    option: Option<BTreeMap<String, SqlCell>>,
     on_behalf_of: Actor,
     confirmed: bool,
 ) -> Result<Prepared, CommandError> {
@@ -213,7 +214,7 @@ pub(crate) fn prepare_resolved(
         };
         return Ok(Prepared::Open(uri));
     }
-    let bound = bind_input(&action.input, params, row, drop.as_ref())?;
+    let bound = bind_input(&action.input, params, row, drop.as_ref(), option.as_ref())?;
     let input = match given {
         None => bound,
         Some(_) if !action.form => {
@@ -699,6 +700,7 @@ pub fn bind_input(
     params: &BTreeMap<String, SqlCell>,
     row: Option<&BTreeMap<String, SqlCell>>,
     drop: Option<&Drop>,
+    option: Option<&BTreeMap<String, SqlCell>>,
 ) -> Result<Value, CommandError> {
     let lookup = |scope: &str, name: &str| -> Result<SqlCell, CommandError> {
         let found = match scope {
@@ -712,6 +714,7 @@ pub fn bind_input(
                 u.param(&key).map(|k| SqlCell::Text(k.to_string()))
             }),
             "row" => row.and_then(|r| r.get(name)).cloned(),
+            "option" => option.and_then(|o| o.get(name)).cloned(),
             "order" => {
                 return Err(CommandError::Invalid {
                     field: Some("/input".into()),
@@ -777,7 +780,7 @@ pub fn bind_input(
             Value::Array(
                 items
                     .iter()
-                    .map(|i| bind_input(i, params, row, drop))
+                    .map(|i| bind_input(i, params, row, drop, option))
                     .collect::<Result<_, _>>()?,
             )
         }
@@ -797,7 +800,7 @@ pub fn bind_input(
                             && drop.is_none_or(|d| d.value(&p.scope, &p.name).is_none())
                     });
                 if !absent {
-                    out.insert(k.clone(), bind_input(v, params, row, drop)?);
+                    out.insert(k.clone(), bind_input(v, params, row, drop, option)?);
                 }
             }
             Value::Object(out)
@@ -840,6 +843,9 @@ loaders:
       SELECT uri, title,
              CASE :open WHEN '1' THEN 1 WHEN 'null' THEN NULL WHEN 'empty' THEN '' ELSE 0 END AS open
       FROM v_work_item
+  stages:
+    sql: |
+      SELECT 'blocked' AS value, 'Stuck' AS label UNION ALL SELECT 'done', 'Done'
 actions:
   - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: "{{param.item}}", to: done } }
   - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
@@ -851,6 +857,7 @@ view:
     - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
     - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
     - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
+    - { id: mark, label: Mark, command: oxplow.work_item.transition, row: true, options_from: stages, input: { uri: "{{row.uri}}", to: "{{option.value}}" } }
 "#,
         )
         .unwrap();
@@ -938,6 +945,7 @@ view:
         row: Option<BTreeMap<String, SqlCell>>,
         input: Option<Value>,
         drop: Option<Drop>,
+        option: Option<&'static str>,
         on_behalf_of: Actor,
     }
 
@@ -951,6 +959,7 @@ view:
                 row: None,
                 input: None,
                 drop: None,
+                option: None,
                 on_behalf_of: Actor::Human,
             }
         }
@@ -963,6 +972,10 @@ view:
         }
         fn row(mut self, row: BTreeMap<String, SqlCell>) -> Self {
             self.row = Some(row);
+            self
+        }
+        fn option(mut self, value: &'static str) -> Self {
+            self.option = Some(value);
             self
         }
 
@@ -980,6 +993,7 @@ view:
                     row: self.row,
                     input: self.input,
                     drop: self.drop,
+                    option: self.option.map(str::to_string),
                     on_behalf_of: self.on_behalf_of,
                     confirmed: false,
                 },
@@ -1121,6 +1135,32 @@ view:
             .await
             .unwrap();
         assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// An action with options runs with the one pressed, bound as
+    /// `{{option.value}}`; it needs one, and only one its loader holds.
+    #[tokio::test]
+    async fn an_option_action_binds_the_option_pressed() {
+        let (fx, _root) = fixture().await;
+        let press = || Press::on("acme/tasks", Some("items"), "mark").row(task_row(&fx));
+        let missing = press().run(&fx.svc).await.unwrap_err();
+        assert!(missing.to_string().contains("say which"), "{missing}");
+        let made_up = press().option("canceled").run(&fx.svc).await.unwrap_err();
+        assert!(
+            made_up
+                .to_string()
+                .contains("isn't one of `mark`'s options"),
+            "{made_up}"
+        );
+        let other = Press::on("acme/tasks", Some("items"), "finish-row")
+            .row(task_row(&fx))
+            .option("done")
+            .run(&fx.svc)
+            .await
+            .unwrap_err();
+        assert!(other.to_string().contains("takes no option"), "{other}");
+        press().option("blocked").run(&fx.svc).await.unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "blocked");
     }
 
     /// A row the run doesn't hold is refused: the page changed, or the
@@ -1297,7 +1337,7 @@ view:
             "order": "{{order.uri}}"
         });
         assert_eq!(
-            bind_input(&input, &BTreeMap::new(), None, Some(&drop)).unwrap(),
+            bind_input(&input, &BTreeMap::new(), None, Some(&drop), None).unwrap(),
             serde_json::json!({
                 "before": "b", "parent": "o", "to": "done", "note": "near b",
                 "order": ["x", "b", "y"]
@@ -1311,7 +1351,7 @@ view:
             serde_json::json!({ "order": "{{order.missing}}" }),
         ] {
             assert!(
-                bind_input(&bad, &BTreeMap::new(), None, Some(&drop)).is_err(),
+                bind_input(&bad, &BTreeMap::new(), None, Some(&drop), None).is_err(),
                 "{bad}"
             );
         }
@@ -1325,6 +1365,7 @@ view:
             &BTreeMap::new(),
             None,
             Some(&no_order),
+            None,
         )
         .unwrap_err();
         assert!(format!("{err:?}").contains("has no value here"), "{err:?}");
@@ -1544,10 +1585,11 @@ view:
             &params,
             Some(&row),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(bound, json!({ "a": 3, "b": "tsk42", "c": [42], "d": 1 }));
-        let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None, None).unwrap_err();
+        let err = bind_input(&json!({ "a": "{{row.id}}" }), &params, None, None, None).unwrap_err();
         assert!(err.to_string().contains("row.id"), "{err}");
     }
 
@@ -1564,6 +1606,7 @@ view:
             &BTreeMap::new(),
             Some(&row),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(bound, json!({ "agents": ["claude", "codex"] }));
@@ -1572,6 +1615,7 @@ view:
             &json!({ "agents": "{{row.order|json}}" }),
             &BTreeMap::new(),
             Some(&bad),
+            None,
             None,
         )
         .unwrap_err();
@@ -1589,6 +1633,7 @@ view:
         let bound = bind_input(
             &json!({ "from_thread": "{{param.uri.id}}", "t": "on {{param.uri.id}}" }),
             &params,
+            None,
             None,
             None,
         )

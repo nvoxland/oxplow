@@ -126,6 +126,16 @@
   cards between columns; `bulk: true` runs once per marked row; `key: f`
   runs on the cursor row. You run the command yourself; these are the
   person's gestures.
+- **One action, many choices** (a row action): `options_from: <loader>`
+  offers each row of that loader of this page (`value`, `label`, an
+  optional `group`) as an entry of a submenu, and binds the one picked as
+  `{{option.value}}` / `{{option.label}}`; `current: <column>` is the
+  row's column holding the option it is in now, shown checked and not
+  offered. A Mark ▸ of a list's stages:
+  `{ id: mark, label: Mark, command: oxplow.work_item.transition, row: true,
+  options_from: stages, current: stage, input: { uri: "{{row.uri}}", to: "{{option.value}}" } }`.
+  With `bulk: true` the marked rows get a select. No `form`, `drag`,
+  `edit`, `group` or `key` with it.
 - **In a component**, a `<form>` is fine: handle `submit` in your script
   (`preventDefault`) and run the command with `invoke`. A refusal rejects
   with `{ code, message, field? }`: when it names a `field`, show `message`

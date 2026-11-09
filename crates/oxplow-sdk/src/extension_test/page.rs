@@ -935,6 +935,7 @@ impl PageAt<'_> {
                     row: what.get("row").map(cells),
                     input,
                     drop: None,
+                    option: None,
                     on_behalf_of: Actor::Human,
                     confirmed,
                 },

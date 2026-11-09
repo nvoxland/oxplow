@@ -30,6 +30,9 @@ pub struct PageActionCall {
     pub input: Option<Value>,
     /// For a drag action, where the row landed.
     pub drop: Option<Drop>,
+    /// For an action with `options_from`, the `value` of the option
+    /// pressed.
+    pub option: Option<String>,
     pub on_behalf_of: Actor,
     pub confirmed: bool,
 }
@@ -136,6 +139,15 @@ pub async fn run_page_action(
                 ));
             }
             let row = page_row(target, &call.action)?;
+            if call.option.is_some() {
+                return Err(invalid(
+                    "/option",
+                    format!(
+                        "`{}` takes no option: only a row action has them",
+                        call.action
+                    ),
+                ));
+            }
             prepare_resolved(
                 &target.page.id,
                 &target.page.actions,
@@ -145,6 +157,7 @@ pub async fn run_page_action(
                 row.as_ref(),
                 call.input,
                 call.drop,
+                None,
                 call.on_behalf_of,
                 call.confirmed,
             )?
@@ -218,6 +231,7 @@ pub async fn run_page_action(
             } else {
                 None
             };
+            let option = pressed_option(holder, action, call.option.as_deref())?;
             let actor = format!("{}#{id}", holder.page.id);
             prepare_resolved(
                 &viz_run.config.id,
@@ -228,12 +242,65 @@ pub async fn run_page_action(
                 row.as_ref(),
                 call.input,
                 call.drop,
+                option,
                 call.on_behalf_of,
                 call.confirmed,
             )?
         }
     };
     prepared.run(svc).await
+}
+
+/// The option an action with `options_from` was pressed with: that row of
+/// the run's loader whose `value` is `pressed` (its `value`, `label`,
+/// `group`), so `{{option.*}}` binds what the page offered and nothing
+/// else. `None` for an action with no options; an option for one without,
+/// a missing one, or one the loader doesn't hold, is refused at `/option`.
+fn pressed_option(
+    run: &PageRun,
+    action: &crate::pages::spec::PageAction,
+    pressed: Option<&str>,
+) -> Result<Option<BTreeMap<String, SqlCell>>, CommandError> {
+    let (loader, pressed) = match (&action.options_from, pressed) {
+        (None, None) => return Ok(None),
+        (None, Some(_)) => {
+            return Err(invalid(
+                "/option",
+                format!("`{}` takes no option (it has no `options_from`)", action.id),
+            ))
+        }
+        (Some(_), None) => {
+            return Err(invalid(
+                "/option",
+                format!("`{}` runs with one of its options: say which", action.id),
+            ))
+        }
+        (Some(loader), Some(pressed)) => (loader, pressed),
+    };
+    let result = &run
+        .loaders
+        .get(loader)
+        .ok_or_else(|| invalid("/option", format!("loader `{loader}` didn't run")))?
+        .result;
+    result
+        .rows
+        .iter()
+        .map(|r| -> BTreeMap<String, SqlCell> {
+            result
+                .columns
+                .iter()
+                .cloned()
+                .zip(r.iter().cloned())
+                .collect()
+        })
+        .find(|r| matches!(r.get("value"), Some(SqlCell::Text(v)) if v == pressed))
+        .map(Some)
+        .ok_or_else(|| {
+            invalid(
+                "/option",
+                format!("`{pressed}` isn't one of `{}`'s options now", action.id),
+            )
+        })
 }
 
 /// The rows a form's choice or object field reads: `source` is a page
@@ -323,7 +390,7 @@ pub async fn page_form(
         .spec(&name)
         .ok_or_else(|| CommandError::Unknown { name: name.clone() })?;
     let mut values = match form.defaults.as_ref() {
-        Some(d) => match crate::viz_actions::bind_input(d, &holder.params, None, None)? {
+        Some(d) => match crate::viz_actions::bind_input(d, &holder.params, None, None, None)? {
             Value::Object(m) => m,
             _ => serde_json::Map::new(),
         },
@@ -407,7 +474,7 @@ pub async fn submit_page_form(
         _ => return Err(invalid("/node", format!("node `{node_path}` isn't a form"))),
     };
     let defaults = match form.defaults.as_ref() {
-        Some(d) => crate::viz_actions::bind_input(d, &holder.params, None, None)?,
+        Some(d) => crate::viz_actions::bind_input(d, &holder.params, None, None, None)?,
         None => Value::Object(serde_json::Map::new()),
     };
     let merged = crate::viz_actions::filled(defaults, input, &form.fixed)?;
@@ -546,7 +613,7 @@ async fn form_start(
     params: &BTreeMap<String, SqlCell>,
     row: Option<&BTreeMap<String, SqlCell>>,
 ) -> Result<crate::viz_actions::FormStart, CommandError> {
-    let values = crate::viz_actions::bind_input(&action.input, params, row, None)?;
+    let values = crate::viz_actions::bind_input(&action.input, params, row, None, None)?;
     let (choices, _, _) = form_sources(svc, &action.choices, &[], params, &Actor::Human).await?;
     let name = action
         .command

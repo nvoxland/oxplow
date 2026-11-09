@@ -40,7 +40,7 @@ test("show_page opens a temp page (a file on oxplow:temp) whose live run survive
   await expect(body.locator('[data-node="count"]')).toContainText("0");
   await reload(page);
   await expect(page.getByTestId("page-nav-title").filter({ visible: true })).toHaveText("Shown Quoll Count");
-  await run(daemon, "oxplow.work_item.create", { title: "Shown Quoll evidence", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Shown Quoll evidence", assignee: daemon.thread });
   await expect(body.locator('[data-node="count"]')).toContainText("1");
   await expect(page.getByTestId(`center-tab-${uri}`)).toBeVisible();
 });

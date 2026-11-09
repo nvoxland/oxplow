@@ -32,7 +32,7 @@ async function notesOn(daemon: Daemon, title: string): Promise<number> {
 
 test("a failed reaction is in Delivery, and a person's Retry composes it afresh", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings#area=data");
-  await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Plum [fail]", assignee: daemon.thread });
   const row = page.locator("tr", { hasText: "tsk999999" });
   await expect(row).toBeVisible();
   // The person fixes what made it fail, then retries: the effect reads the
@@ -48,7 +48,7 @@ test("a failed reaction is in Delivery, and a person's Retry composes it afresh"
 test("a person's Backfill reaches what was logged before the effect was deployed", async ({ page, daemon }) => {
   // Logged first; then an extension whose effect comments on created
   // tasks is deployed: it starts after what was already logged.
-  await run(daemon, "oxplow.work_item.create", { title: "Fig", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Fig", assignee: daemon.thread });
   const dir = extensionSource(daemon, "late");
   mkdirSync(join(dir, "effects"), { recursive: true });
   writeFileSync(

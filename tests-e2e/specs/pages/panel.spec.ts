@@ -37,7 +37,7 @@ test("a left-nav panel draws its body page, and its badge page's number", async 
   await expect(section.getByTestId(`rail-section-toggle-${id}`)).not.toContainText("1");
 
   // A write the body reads shows in it, and the badge counts it.
-  await run(daemon, "oxplow.work_item.create", { title: "Glider sugar", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Glider sugar", assignee: daemon.thread });
   await expect(section.getByTestId("rail-panel-body")).toContainText("Glider sugar");
   await expect(section.getByTestId(`rail-section-toggle-${id}`)).toContainText("1");
 });

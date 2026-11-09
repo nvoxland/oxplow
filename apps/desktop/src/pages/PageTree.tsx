@@ -18,6 +18,7 @@ import type { PickedRow } from "./railGroups.js";
 import { FormSourceContext } from "../viz/formSource.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
+import { actionOptionsOf } from "../viz/vizModel.js";
 import { CollapsibleSections } from "../components/CollapsibleSections.js";
 import { pageTabRef } from "../tabs/pageRefs.js";
 import { actionDoes, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
@@ -376,6 +377,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
         partButtons={props.partButtons ?? !compact}
         isPage={isPage}
         componentView={componentView}
+        actionOptions={actionOptionsOf(vizRun.config.actions, run.loaders)}
         {...(compact ? { compact: true, ...(props.uncapped ? {} : { maxRows: COMPACT_ROWS }), ...(props.onMore ? { onMore: props.onMore } : {}) } : {})}
       />
     </VizPagesContext.Provider>

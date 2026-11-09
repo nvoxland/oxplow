@@ -760,6 +760,17 @@ struct ComponentFile {
 }
 
 /// The vizes a node shows no rows through.
+/// The first action of `cfg` whose `options_from` names no loader of
+/// `page`: `(action, loader)`.
+fn options_loader_missing<'a>(page: &Page, cfg: &'a VizConfig) -> Option<(&'a str, &'a str)> {
+    cfg.actions.iter().find_map(|a| {
+        let loader = a.options_from.as_deref()?;
+        page.loader(loader)
+            .is_none()
+            .then_some((a.id.as_str(), loader))
+    })
+}
+
 fn reads_no_rows(viz: Viz) -> bool {
     matches!(viz, Viz::Form | Viz::Approvals)
 }
@@ -1863,21 +1874,29 @@ fn check_page(page: &Page) -> Result<(), String> {
         }
         seen.push(&node.id);
         match &node.kind {
-            NodeKind::Viz { from, config: cfg } => match from {
-                Some(from) if page.loader(from).is_none() => {
+            NodeKind::Viz { from, config: cfg } => {
+                if let Some((action, loader)) = options_loader_missing(page, cfg) {
                     return Err(format!(
-                        "node `{}` shows `{from}`, but there is no loader `{from}` in `loaders:`",
+                        "node `{}`: action `{action}` takes its options from `{loader}`, but there is no loader `{loader}` in `loaders:`",
                         node.id
                     ));
                 }
-                None if !reads_no_rows(cfg.viz) => {
-                    return Err(format!(
-                        "node `{}` needs `from`: the loader whose rows it shows",
-                        node.id
-                    ));
+                match from {
+                    Some(from) if page.loader(from).is_none() => {
+                        return Err(format!(
+                            "node `{}` shows `{from}`, but there is no loader `{from}` in `loaders:`",
+                            node.id
+                        ));
+                    }
+                    None if !reads_no_rows(cfg.viz) => {
+                        return Err(format!(
+                            "node `{}` needs `from`: the loader whose rows it shows",
+                            node.id
+                        ));
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             NodeKind::Switch { param, .. } => {
                 let declared = page.params.iter().find(|p| &p.name == param);
                 if declared.is_none_or(|p| p.role != Some(ParamRole::Filter)) {

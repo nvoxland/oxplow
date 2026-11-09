@@ -49,6 +49,7 @@ fn call(
         }),
         input: None,
         drop: None,
+        option: None,
         on_behalf_of: Actor::Human,
         confirmed: false,
     }

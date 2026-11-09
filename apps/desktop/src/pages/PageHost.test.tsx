@@ -94,7 +94,7 @@ test("a whole-page action presses on the run, asking first when its command does
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    if (!args[6]) throw new IpcCallError("Archive needs confirmation", "NEEDS_CONFIRMATION", null, []);
+    if (!args[7]) throw new IpcCallError("Archive needs confirmation", "NEEDS_CONFIRMATION", null, []);
     return { result: null, audit_id: null, event_id: null, inverse: null } as never;
   };
   const { runs } = fakePageRuns(tablePage({ actions: [fakeAction({ id: "archive", label: "Archive" })] }));
@@ -104,9 +104,9 @@ test("a whole-page action presses on the run, asking first when its command does
     </PageActionContext.Provider>,
   );
   fireEvent.click(await findByTestId("action-page-action-archive"));
-  await waitFor(() => expect(calls).toEqual([["run-1", null, "archive", null, null, null, false]]));
+  await waitFor(() => expect(calls).toEqual([["run-1", null, "archive", null, null, null, null, false]]));
   fireEvent.click(await findByTestId("page-action-confirm-run"));
-  await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, true]));
+  await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, null, true]));
   await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
 });
 
@@ -174,7 +174,7 @@ test("an `open` page action is offered by `when` and opens the URI the press ans
   await waitFor(() => expect(tabActions.map((a) => a.id)).toContain("page-action-current"));
   act(() => tabActions.find((a) => a.id === "page-action-current")!.run());
   await waitFor(() => expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs"]));
-  expect(calls).toEqual([["run-1", null, "current", null, null, null, false]]);
+  expect(calls).toEqual([["run-1", null, "current", null, null, null, null, false]]);
 });
 
 test("a whole-page form action opens its form from page_action_form and submits it as a press", async () => {
@@ -209,7 +209,7 @@ test("a whole-page form action opens its form from page_action_form and submits 
   expect(queryByTestId("page-action-form-unsupported")).toBeNull();
   fireEvent.change(title, { target: { value: "Gamma" } });
   fireEvent.click(getByTestId("viz-action-form-fields-submit"));
-  await waitFor(() => expect(calls.at(-1)).toEqual(["press", "run-1", null, "add", null, { title: "Gamma" }, null, false]));
+  await waitFor(() => expect(calls.at(-1)).toEqual(["press", "run-1", null, "add", null, { title: "Gamma" }, null, null, false]));
 });
 
 test("Refresh is offered only when the page asks for it, and re-runs the run", async () => {

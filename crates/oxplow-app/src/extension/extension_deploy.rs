@@ -2707,6 +2707,7 @@ mod tests {
                     row: None,
                     input: None,
                     drop: None,
+                    option: None,
                     on_behalf_of: oxplow_domain::Actor::Human,
                     confirmed: true,
                 },

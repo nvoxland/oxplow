@@ -199,3 +199,40 @@ test("a linked cell gets its ref's badges", async () => {
 afterAll(() => {
   mock.module("../api.js", () => pristineApi);
 });
+
+// An action with options is a submenu in the row's menu: one entry per
+// option, the row's own (`current`) checked and not offered, and the one
+// picked is what the press sends.
+test("an action with options offers each option, the row's own checked", async () => {
+  const options: Array<string | null | undefined> = [];
+  const pressing: VizActionRunner = async (_id, _action, _params, _row, _streamId, _confirmed, _input, _drop, option) => {
+    options.push(option);
+    return { result: null, audit_id: 1, event_id: null, inverse: null };
+  };
+  const marked: VizRun = {
+    ...run,
+    config: {
+      ...viz,
+      actions: [{ id: "mark", label: "Mark", command: "oxplow.work_item.transition", input: {}, row: true, optionsFrom: "stages", current: "stage" }],
+    },
+    result: { columns: ["uri", "stage"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "ready"]], truncated: false },
+  };
+  const actionOptions = {
+    mark: [
+      { value: "ready", label: "Ready", group: null },
+      { value: "done", label: "Done", group: null },
+    ],
+  };
+  const { getByTestId } = rtlRender(
+    <VizActionRunnerContext.Provider value={pressing}>
+      <VizView run={marked} onOpenPage={() => {}} actionOptions={actionOptions} />
+    </VizActionRunnerContext.Provider>,
+  );
+  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("menu-item-viz-action-mark"));
+  const own = getByTestId("menu-item-viz-action-mark-ready") as HTMLButtonElement;
+  expect(own.textContent).toContain("✓");
+  expect(own.disabled).toBe(true);
+  fireEvent.click(getByTestId("menu-item-viz-action-mark-done"));
+  await waitFor(() => expect(options).toEqual(["done"]));
+});

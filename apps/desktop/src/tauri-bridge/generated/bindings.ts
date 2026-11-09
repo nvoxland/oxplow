@@ -252,7 +252,7 @@ export const commands = {
 	onto?: { [key in string]: SqlCell } | null,
 	group?: SqlCell | null,
 	order?: { [key in string]: SqlCell }[] | null,
-} | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_page_action", { runId, node, action, row, input, drop, confirmed })),
+} | null, option: string | null, confirmed: boolean) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("run_page_action", { runId, node, action, row, input, drop, option, confirmed })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1211,6 +1211,15 @@ export type BlameLine = {
 	time: number,
 	summary: string,
 };
+
+/**
+ *  What a work list's stage means to core: the bucket each of its declared
+ *  stages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is
+ *  filed but not ready, `todo` is ready (what an idle thread may pull),
+ *  `in_progress` is started, `blocked` waits on an answer, `done` and
+ *  `canceled` are closed — and the screens draw the list's own stages.
+ */
+export type Bucket = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "canceled";
 
 /**
  *  What a deploy builds before it copies: `run` in the source folder, as
@@ -4650,6 +4659,19 @@ export type PageAction_Deserialize = {
 	 *  never on a row, group, drag or edit action.
 	 */
 	all?: boolean,
+	/**
+	 *  A row action that is one entry per option: each a row of this page's
+	 *  loader of that name (`value`, `label`, an optional `group`), the
+	 *  one pressed bound as `{{option.value}}` / `{{option.label}}` (a Mark
+	 *  ▸ menu of a list's stages, an Assign to ▸ of the open threads). The
+	 *  server checks the pressed value is one of them.
+	 */
+	optionsFrom?: string | null,
+	/**
+	 *  With `options_from`: the row's column holding the option it is in
+	 *  now, drawn checked and not offered.
+	 */
+	current?: string | null,
 };
 
 /**
@@ -4814,6 +4836,19 @@ export type PageAction_Serialize = {
 	 *  never on a row, group, drag or edit action.
 	 */
 	all: boolean,
+	/**
+	 *  A row action that is one entry per option: each a row of this page's
+	 *  loader of that name (`value`, `label`, an optional `group`), the
+	 *  one pressed bound as `{{option.value}}` / `{{option.label}}` (a Mark
+	 *  ▸ menu of a list's stages, an Assign to ▸ of the open threads). The
+	 *  server checks the pressed value is one of them.
+	 */
+	optionsFrom?: string | null,
+	/**
+	 *  With `options_from`: the row's column holding the option it is in
+	 *  now, drawn checked and not offered.
+	 */
+	current?: string | null,
 };
 
 /**
@@ -5509,6 +5544,13 @@ export type ProviderSpec = {
 	 */
 	fields?: FieldDecl[],
 	/**
+	 *  A work list's stages, in order, each in one of core's buckets:
+	 *  `[{ id, title, bucket }]` — required for a work list, which needs
+	 *  one in each of todo, in_progress and done. The first of a bucket is
+	 *  where naming the bucket lands.
+	 */
+	stages?: StageDecl[],
+	/**
 	 *  The scopes it calls over the protocol (`host/call`,
 	 *  `sql.read` or `state.read`): part of what its approval covers, and the only ones it
 	 *  may call.
@@ -6122,6 +6164,20 @@ export type SqlQueryResult = {
 	 *  keeps current carry no entry.
 	 */
 	coverage?: SourceCoverage[],
+};
+
+/**
+ *  One of a work list's stages, as it declares them in order: its id (what
+ *  a record and an input name), how a person names it, and its bucket. The
+ *  first stage of a bucket is that bucket's default — where an input
+ *  naming the bucket (`to: done`) lands.
+ */
+export type StageDecl = {
+	/**  snake_case, unique in the list (`in_review`). */
+	id: string,
+	/**  How a person names it (`In Review`). */
+	title: string,
+	bucket: Bucket,
 };
 
 export type Stream = {

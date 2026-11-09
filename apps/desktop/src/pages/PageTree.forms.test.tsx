@@ -118,6 +118,7 @@ test("a node's form action opens from page_action_form and submits through run_p
     { id: "a", title: "Alpha" },
     { title: "Renamed" },
     null,
+    null,
     false,
   ]);
 });

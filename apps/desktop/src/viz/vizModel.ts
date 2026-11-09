@@ -1173,3 +1173,39 @@ export function sourceValue(v: unknown): Source | null {
   return { kind: kind as Source["kind"], label, ...(typeof uri === "string" && uri !== "" ? { uri } : {}) };
 }
 
+
+/** One option of an action with `options_from`: a row of the page loader
+ *  it names. */
+export interface ActionOption {
+  value: string;
+  label: string;
+  group: string | null;
+}
+
+/** Each action's options, by action id. */
+export type ActionOptions = Record<string, ActionOption[]>;
+
+/** The options of `actions` that take them (`optionsFrom`): the rows of the
+ *  page's loaders by name (`value`, `label`, an optional `group`). A loader
+ *  that didn't run gives none. */
+export function actionOptionsOf(
+  actions: readonly { id: string; optionsFrom?: string | null }[],
+  loaders: Record<string, { result: { columns: string[]; rows: SqlCell[][] } | null } | undefined>,
+): ActionOptions {
+  const out: ActionOptions = {};
+  for (const a of actions) {
+    if (!a.optionsFrom) continue;
+    const result = loaders[a.optionsFrom]?.result;
+    if (!result) continue;
+    const at = (name: string) => result.columns.indexOf(name);
+    const [value, label, group] = [at("value"), at("label"), at("group")];
+    out[a.id] = result.rows
+      .filter((r) => r[value] !== null && r[value] !== undefined)
+      .map((r) => ({
+        value: String(r[value]),
+        label: String(label >= 0 && r[label] !== null ? r[label] : r[value]),
+        group: group >= 0 && r[group] !== null && r[group] !== undefined ? String(r[group]) : null,
+      }));
+  }
+  return out;
+}

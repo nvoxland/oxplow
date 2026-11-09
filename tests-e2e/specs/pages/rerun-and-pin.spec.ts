@@ -23,7 +23,7 @@ test("a page re-runs when its dataset changes, and pins to a new dashboard", asy
   const body = shown(page).getByTestId("page-file");
   await expect(body).toContainText("No numbats yet.");
   // A write elsewhere changes `v_work_item`: the open page runs again by itself.
-  await run(daemon, "oxplow.work_item.create", { title: "Numbat one", thread: daemon.thread });
+  await run(daemon, "oxplow.work_item.create", { title: "Numbat one", assignee: daemon.thread });
   await expect(body).toContainText("Numbat one");
   await page.getByTestId("page-nav-menu").filter({ visible: true }).click();
   await page.getByTestId("menu-item-page-pin").click();

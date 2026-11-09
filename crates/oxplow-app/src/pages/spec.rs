@@ -1384,6 +1384,17 @@ pub struct PageAction {
     /// never on a row, group, drag or edit action.
     #[serde(default)]
     pub all: bool,
+    /// A row action that is one entry per option: each a row of this page's
+    /// loader of that name (`value`, `label`, an optional `group`), the
+    /// one pressed bound as `{{option.value}}` / `{{option.label}}` (a Mark
+    /// ▸ menu of a list's stages, an Assign to ▸ of the open threads). The
+    /// server checks the pressed value is one of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options_from: Option<String>,
+    /// With `options_from`: the row's column holding the option it is in
+    /// now, drawn checked and not offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
 }
 
 /// The `{{param.x}}` / `{{row.x}}` placeholders in `input`, as
@@ -1479,6 +1490,14 @@ pub(crate) struct ActionFile {
     /// while there are rows.
     #[serde(default)]
     all: bool,
+    /// A row action that is one entry per row of this page's loader of
+    /// that name (`value`, `label`, `group`?): `{{option.value}}` /
+    /// `{{option.label}}` the one pressed.
+    #[serde(default)]
+    options_from: Option<String>,
+    /// With `options_from`: the row's column holding its option now.
+    #[serde(default)]
+    current: Option<String>,
 }
 
 /// The keys a row list keeps for itself: an action can't take one.
@@ -1772,8 +1791,49 @@ pub(crate) fn parse_actions(
                 ));
             }
         }
+        if f.options_from.is_some() && (!f.row || f.drag || f.form || f.edit || f.group.is_some()) {
+            return Err(format!(
+                "actions: `{}`: `options_from` is for a row action (`row: true`, not `drag`, `form`, `edit` or `group`): one menu entry per option",
+                f.id
+            ));
+        }
+        if f.options_from.is_some() && f.key.is_some() {
+            return Err(format!(
+                "actions: `{}`: an action with `options_from` asks which option, so a `key` can't run it",
+                f.id
+            ));
+        }
+        if f.current.is_some() && f.options_from.is_none() {
+            return Err(format!(
+                "actions: `{}`: `current` names the option a row is in, so it needs `options_from`",
+                f.id
+            ));
+        }
+        if f.options_from.is_some()
+            && !action_templates(&input)
+                .iter()
+                .any(|(scope, _)| scope == "option")
+        {
+            return Err(format!(
+                "actions: `{}`: an action with `options_from` binds the option pressed: use `{{{{option.value}}}}` in its `input`",
+                f.id
+            ));
+        }
         for (scope, name) in action_templates(&input) {
             match scope.as_str() {
+                "option" if f.options_from.is_some() && (name == "value" || name == "label") => {}
+                "option" if f.options_from.is_some() => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{option.{name}}}}}` isn't `{{{{option.value}}}}` or `{{{{option.label}}}}`",
+                        f.id
+                    ))
+                }
+                "option" => {
+                    return Err(format!(
+                        "actions: `{}`: `{{{{option.{name}}}}}` needs `options_from` (the loader whose rows are its options)",
+                        f.id
+                    ))
+                }
                 "param"
                     if params.iter().any(|p| {
                         p.name == name || name.strip_suffix(".id") == Some(p.name.as_str())
@@ -1860,6 +1920,8 @@ pub(crate) fn parse_actions(
             edit_field,
             one_row,
             all: f.all,
+            options_from: f.options_from,
+            current: f.current,
         });
     }
     Ok(out)

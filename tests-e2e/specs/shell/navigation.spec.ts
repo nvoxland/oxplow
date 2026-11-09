@@ -10,7 +10,7 @@ const overviewTitle = (page: import("@playwright/test").Page) => page.getByTestI
 
 /// An item the test extension's overview lists, each title a link to its page.
 async function item(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title, thread: daemon.thread });
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title, assignee: daemon.thread });
   return created.result.uri;
 }
 
