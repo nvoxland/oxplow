@@ -6,15 +6,18 @@ import { ICONS } from "../icons.js";
 import type { Extension } from "../tauri-bridge/generated/bindings.js";
 
 // A column's `icon` names one from a fixed vocabulary — the work
-// glyphs the rail draws today, the page kinds' icons and the ref-kind
+// glyphs, one per bucket (a query passes `state`), the page kinds' icons and the ref-kind
 // icons; an unknown name draws nothing.
 test("the icon vocabulary has the work glyphs, kinds and ref-kind icons; unknown names draw nothing", () => {
   expect(vizIcon("in_progress")).toEqual({ glyph: "◐", tone: "accent", label: "In progress" });
   expect(vizIcon("done")).toEqual({ glyph: "✓", tone: "success", label: "Done" });
   expect(vizIcon("blocked")).toEqual({ glyph: "⚠", tone: "danger", label: "Blocked" });
   expect(vizIcon("canceled")).toEqual({ glyph: "✗", tone: "muted", label: "Canceled" });
-  expect(vizIcon("ready")).toEqual({ glyph: "☐", tone: null, label: "Ready" });
-  expect(vizIcon("todo")).toEqual(vizIcon("ready"));
+  expect(vizIcon("todo")).toEqual({ glyph: "☐", tone: null, label: "To do" });
+  expect(vizIcon("backlog")).toEqual({ glyph: "◌", tone: "muted", label: "Backlog" });
+  // The work glyphs are the buckets: a list's own stage names none.
+  expect(vizIcon("ready")).toBeNull();
+  expect(vizIcon("archived")).toBeNull();
   for (const name of ["epic", "task", "wiki", "file", "commit", "bug", "git-pull-request"]) {
     expect(vizIcon(name), name).not.toBeNull();
     expect(VIZ_ICON_NAMES).toContain(name);

@@ -194,8 +194,10 @@ name, a built `oxplow/work_item` URI or `tsk` id parsing in desktop code.
   `oxplow.work_item.reorder` by neighbour, `placementFromOrder`).
 - **The active list's profile** — `readWorkListProfile` /
   `useWorkListProfile` (one shared read, re-read on a switch): its
-  provider, features, declared `fields` and `idPattern`
-  (`v_capability_provider`). Screens offer only what it can do (reordering
+  provider, features, declared `fields`, `stages` and `idPattern`
+  (`v_capability_provider`). A `WorkItem` carries its bucket (`state`,
+  the `Bucket` union), its `stage` and `stageTitle`; colours and glyphs
+  go by bucket (`stateColor`, `vizIcons`), words by stage. Screens offer only what it can do (reordering
   and assignment are core's, so always):
   epics, parents and "+ Item" with `hierarchy`, Comment… / Link… with
   `comments` / `links`, Delete with `delete`. **Declared fields render

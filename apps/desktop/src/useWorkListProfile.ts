@@ -10,7 +10,7 @@ import { NO_FEATURES, readWorkListProfile, type WorkListProfile } from "./workIt
  * the first read lands.
  */
 
-const LOADING: WorkListProfile = { provider: null, features: NO_FEATURES, fields: [], idPattern: null };
+const LOADING: WorkListProfile = { provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null };
 
 let current: WorkListProfile = LOADING;
 let reads = NO_READS;

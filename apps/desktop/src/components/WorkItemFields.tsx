@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CanonicalState, FieldDecl } from "../workItems.js";
+import type { Bucket, FieldDecl } from "../workItems.js";
 import { PriorityIcon, priorityColorVar } from "./Plan/plan-icons.js";
 
 /**
@@ -26,8 +26,8 @@ export function FieldBadge({ field, value }: { field: FieldDecl; value: unknown 
   );
 }
 
-/** A state's colour. */
-export function stateColor(state: CanonicalState): string {
+/** A bucket's colour (every stage in it draws in it). */
+export function stateColor(state: Bucket): string {
   switch (state) {
     case "backlog": return "var(--status-canceled)";
     case "in_progress": return "var(--status-running)";

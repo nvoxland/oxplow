@@ -557,8 +557,9 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   shows as a metric value (`16.4 s`, `42.5%`).
 - `icon` and `tone` each name another column of the row. `icon`'s value
   is an icon drawn before the cell from a fixed vocabulary
-  (`viz/vizIcons.tsx`): the work glyphs (`ready` / `todo`,
-  `in_progress`, `blocked`, `done`, `canceled`, `archived`), a file's
+  (`viz/vizIcons.tsx`): the work glyphs, one per bucket (`backlog`,
+  `todo`, `in_progress`, `blocked`, `done`, `canceled`: pass
+  `v_work_item.state`, never a list's own stage), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
   `conflicted`), the kinds (`epic`, `task`, `wiki`, `file`, `folder`,
   `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon

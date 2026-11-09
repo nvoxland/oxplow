@@ -10,11 +10,11 @@
 import { querySql, type SqlCell } from "./api.js";
 import { NO_READS } from "./viz/rerun.js";
 import { workItemUri } from "./uri/uri.js";
-import type { FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
+import type { Bucket, FieldDecl, Reads, SqlQueryResult, StageDecl, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 
-/** The state every provider maps to. */
-export type CanonicalState = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "canceled";
-
+/** One of core's six buckets, each of a list's stages in one: what oxplow
+ *  acts on. The UI draws the list's stages. */
+export type { Bucket, StageDecl };
 
 /** One item on the active work list, as `v_work_item` holds it. */
 export interface WorkItem {
@@ -23,7 +23,12 @@ export interface WorkItem {
   provider: string;
   title: string;
   body: string;
-  state: CanonicalState;
+  /** Its stage's bucket. */
+  state: Bucket;
+  /** The stage it is in, one its list declares. */
+  stage: string;
+  /** How the list names that stage (its id when it doesn't). */
+  stageTitle: string;
   /** Its parent's ref (an epic), when the list nests. */
   parentUri: string | null;
   /** Who is going to work on it: a thread's or the person's URI; null
@@ -41,7 +46,7 @@ export interface WorkItem {
   commentCount: number;
 }
 
-const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.parent_uri, w.assignee, w.rank, w.closed_at,
+const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.stage, w.stage_title, w.parent_uri, w.assignee, w.rank, w.closed_at,
   w.created_at, w.updated_at, w.native,
   (SELECT count(*) FROM v_work_item_comment c WHERE c.uri = w.uri) AS comment_count`;
 
@@ -67,7 +72,9 @@ export function itemsFromResult(result: SqlQueryResult): WorkItem[] {
       provider: String(at(row, "provider")),
       title: String(at(row, "title") ?? ""),
       body: String(at(row, "body") ?? ""),
-      state: String(at(row, "state")) as CanonicalState,
+      state: String(at(row, "state")) as Bucket,
+      stage: String(at(row, "stage") ?? ""),
+      stageTitle: String(at(row, "stage_title") ?? at(row, "stage") ?? ""),
       parentUri: text(at(row, "parent_uri")),
       assignee: text(at(row, "assignee")),
       rank: rank === null || rank === undefined ? null : Number(rank),
@@ -121,6 +128,8 @@ export interface CapabilityProvider {
   features: Record<string, unknown>;
   /** A work list's own fields. */
   fields: FieldDecl[];
+  /** A work list's stages, in its order. */
+  stages: StageDecl[];
   /** What a work list's own ids look like (a regex matched whole). */
   idPattern: string | null;
   /** The capability's active provider. */
@@ -143,12 +152,14 @@ export function capabilityProvidersFromResult(result: SqlQueryResult): Capabilit
   };
   return result.rows.map((row) => {
     const fields = jsonOf<FieldDecl[]>(at(row, "fields"), []);
+    const stages = jsonOf<StageDecl[]>(at(row, "stages"), []);
     return {
       capability: String(at(row, "capability")),
       provider: String(at(row, "provider")),
       extension: at(row, "extension") == null ? null : String(at(row, "extension")),
       features: jsonOf<Record<string, unknown>>(at(row, "features"), {}),
       fields: Array.isArray(fields) ? fields : [],
+      stages: Array.isArray(stages) ? stages : [],
       idPattern: at(row, "id_pattern") == null ? null : String(at(row, "id_pattern")),
       active: Number(at(row, "active") ?? 0) === 1,
     };
@@ -160,7 +171,7 @@ export async function readCapabilityProviders(
   capability: string,
 ): Promise<{ providers: CapabilityProvider[]; reads: Reads }> {
   const res = await querySql(
-    "SELECT capability, provider, extension, features, fields, id_pattern, active FROM v_capability_provider WHERE capability = ?1",
+    "SELECT capability, provider, extension, features, fields, stages, id_pattern, active FROM v_capability_provider WHERE capability = ?1",
     [capability],
     100,
   );
@@ -192,18 +203,21 @@ export interface WorkListProfile {
   provider: string | null;
   features: Required<WorkItemsFeatures>;
   fields: FieldDecl[];
+  /** Its stages, in its order. */
+  stages: StageDecl[];
   /** How its own ids look in text; null when it doesn't say (none). */
   idPattern: string | null;
 }
 
 export function workListProfileOf(providers: CapabilityProvider[]): WorkListProfile {
   const provider = activeProviderOf(providers);
-  if (provider === null) return { provider: null, features: NO_FEATURES, fields: [], idPattern: null };
+  if (provider === null) return { provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null };
   const row = providers.find((p) => p.capability === "work_items" && p.provider === provider);
   return {
     provider,
     features: featuresFor(providers, provider),
     fields: row?.fields ?? [],
+    stages: row?.stages ?? [],
     idPattern: row?.idPattern ?? null,
   };
 }
