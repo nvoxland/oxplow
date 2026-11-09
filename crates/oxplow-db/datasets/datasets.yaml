@@ -502,7 +502,7 @@
     - { name: "end_col", type: "INTEGER", doc: "End column (1-based)." }
     - { name: "updated_at", type: "TEXT", doc: "When the server last published this file (RFC 3339)." }
 - name: effort
-  version: 8
+  version: 9
   description: "Efforts: one span of a thread's work between a start and an end snapshot, opened and closed by oxplow and linked to a work item when there is one (.context/work-tracking.md). At most one is open per thread."
   fields:
     - { name: "id", type: "INTEGER", doc: "Effort id." }
@@ -514,7 +514,7 @@
     - { name: "start_snapshot_id", type: "INTEGER", doc: "Snapshot at the start (v_snapshot.id)." }
     - { name: "end_snapshot_id", type: "INTEGER", doc: "Snapshot at the end; NULL while open." }
     - { name: "summary", type: "", doc: "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort." }
-    - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of its first prompt. (v2)" }
+    - { name: "title", type: "", doc: "Its own title, else its work item's, else the first line of the first prompt a person typed in it (an empty prompt and a harness's message, a line that is only a tag such as `<task-notification>`, are skipped), else `Untitled effort`. Never empty. (v9)" }
     - { name: "closed_by", type: "TEXT", doc: "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)" }
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v6)" }
 - name: effort_file

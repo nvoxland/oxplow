@@ -51,7 +51,11 @@ commit and needs no task.
 **Core owns** the entity and its invariants: spans on one thread never
 overlap and at most one is open per thread; the work-item link is
 optional and can be attached later; a title (default: the linked item's
-title, else the first prompt line); how it closed (`commit`, `switch`,
+title, else the first line of the first prompt a person typed in it, else
+"Untitled effort" — never empty; `v_effort.title`). A turn with an empty
+prompt (a resume, another session's message) and a harness's message (its
+first line only a tag: `<task-notification>`, `<command-name>…`) don't
+title an effort; how it closed (`commit`, `switch`,
 `person`, `agent`). Core's commands carry the boundary, not the call time,
 so a policy may react late: opening adopts the thread's activity back to
 its previous effort's end, and closing can cut the span at a past point.

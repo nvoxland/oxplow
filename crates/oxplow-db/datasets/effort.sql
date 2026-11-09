@@ -11,19 +11,28 @@ SELECT e.id, e.work_item,
              AND (e.ended_at IS NULL OR t.started_at <= e.ended_at)
            ORDER BY t.started_at DESC LIMIT 1)
        ) AS summary,
-       -- Its own title, else its item's, else the first line of the
-       -- prompt of the thread's first turn in it.
+       -- Its own title, else its item's, else the first line of the first
+       -- prompt a person typed in it: a turn with an empty prompt (a resume,
+       -- another session's message) or a harness's message (its first line
+       -- only a tag: `<task-notification>`, `<command-name>/clear</…>`) is
+       -- skipped. With none, "Untitled effort".
        coalesce(
          nullif(trim(e.title), ''),
          (SELECT w.title FROM source('work_item') w WHERE w.uri = e.work_item),
-         (SELECT trim(CASE WHEN instr(t.prompt, char(10)) > 0
-                           THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
-                           ELSE t.prompt END)
-            FROM source('agent_turn') t
-           WHERE t.thread_id = e.thread_id
-             AND (t.ended_at IS NULL OR t.ended_at >= e.started_at)
-             AND (e.ended_at IS NULL OR t.started_at <= e.ended_at)
-           ORDER BY t.started_at LIMIT 1)
+         (SELECT l.line FROM (
+            SELECT p.started_at,
+                   trim(CASE WHEN instr(p.text, char(10)) > 0
+                             THEN substr(p.text, 1, instr(p.text, char(10)) - 1)
+                             ELSE p.text END, ' ' || char(9) || char(13)) AS line
+              FROM (SELECT t.started_at,
+                           ltrim(t.prompt, ' ' || char(9) || char(10) || char(13)) AS text
+                      FROM source('agent_turn') t
+                     WHERE t.thread_id = e.thread_id
+                       AND (t.ended_at IS NULL OR t.ended_at >= e.started_at)
+                       AND (e.ended_at IS NULL OR t.started_at <= e.ended_at)) p) l
+           WHERE l.line <> '' AND NOT (l.line LIKE '<%>' AND instr(l.line, ' ') = 0)
+           ORDER BY l.started_at LIMIT 1),
+         'Untitled effort'
        ) AS title,
        e.closed_by,
        CAST(uri('oxplow/effort', 'id', 'eff' || e.id) AS TEXT) AS uri

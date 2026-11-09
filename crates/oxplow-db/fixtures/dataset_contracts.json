@@ -5577,6 +5577,71 @@
         }
       ],
       "key": []
+    },
+    "9": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Effort id."
+        },
+        {
+          "name": "work_item",
+          "type": "TEXT",
+          "doc": "The work item it's linked to, as a canonical ref (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`); NULL while unlinked. (v2: nullable)"
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread that did the work."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "That thread's stream."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while the effort is open."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the start (v_snapshot.id)."
+        },
+        {
+          "name": "end_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot at the end; NULL while open."
+        },
+        {
+          "name": "summary",
+          "type": "",
+          "doc": "What shipped: the summary `oxplow.effort.report` recorded, else the final message of the last agent turn in the effort."
+        },
+        {
+          "name": "title",
+          "type": "",
+          "doc": "Its own title, else its work item's, else the first line of the first prompt a person typed in it (an empty prompt and a harness's message, a line that is only a tag such as `<task-notification>`, are skipped), else `Untitled effort`. Never empty. (v9)"
+        },
+        {
+          "name": "closed_by",
+          "type": "TEXT",
+          "doc": "What closed it: `commit`, `switch`, `person`, `agent` or `system`; NULL while open. (v2)"
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
+        }
+      ],
+      "key": []
     }
   },
   "effort_file": {
