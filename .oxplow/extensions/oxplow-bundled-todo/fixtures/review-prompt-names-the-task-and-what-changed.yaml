@@ -2,7 +2,7 @@
 # task, the files and the agent's claims; an effort on another provider's
 # work item names that item instead of coming back empty.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: Buttons flicker on hover., thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: Buttons flicker on hover., assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: Fix it, tools: [{ name: Edit, kind: edit, paths: [src/ui/button.ts], ok: true }], write: { path: src/ui/button.ts, body: "export {};\n" } } }
 when: { part: oxplow/review-prompt, params: { effort_id: 1 } }

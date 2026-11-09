@@ -1,5 +1,5 @@
 title: Tasks
-description: "The work items of a thread, its stream or everywhere as a kanban board: a column per state, drag a card to move it. The backlog is the Task List's."
+description: "The work items assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per state, drag a card to move it. The backlog is the Task List's."
 icon: columns-3
 category: Work
 keywords: board kanban work items columns state
@@ -15,7 +15,9 @@ params:
   options:
   - { value: thread, label: This thread }
   - { value: stream, label: This stream }
-  - { value: all, label: Everywhere }
+  - { value: me, label: Assigned to me }
+  - { value: pool, label: Unassigned }
+  - { value: all, label: Everyone's }
 - name: priority
   type: choice
   role: view
@@ -49,14 +51,15 @@ loaders:
       q: { param: q }
       thread_id: { param: thread_id }
       stream_id: { param: stream_id }
-  # The cards: every open item, and what was done in the last three days,
-  # twenty at most; the rest of Done and the canceled ones are the Task
-  # List's. Wider than one thread, a card names its thread.
+  # The cards: every ready, started or blocked item, and what was done in
+  # the last three days, twenty at most; the backlog, the rest of Done and
+  # the canceled ones are the Task List's. Wider than one assignee, a card
+  # names who it's for.
   board:
     sql: |
-      SELECT i.*, CASE WHEN :scope <> 'thread' THEN i.thread END AS thread_shown
+      SELECT i.*, CASE WHEN :scope NOT IN ('thread', 'me') THEN i.assignee_title END AS assignee_shown
       FROM items i
-      WHERE i.state <> 'canceled'
+      WHERE i.state NOT IN ('backlog', 'canceled')
         AND (i.state <> 'done' OR (i.done_rank <= 20 AND julianday(i.closed_at) >= julianday('now', '-3 days')))
       ORDER BY i.ord
     params:
@@ -77,6 +80,13 @@ loaders:
     params:
       scope:
         from: row.scope
+  # Who a card can be assigned to: the stream's open threads, then you.
+  assignees:
+    sql: |
+      SELECT t.uri, t.title FROM v_thread t
+      WHERE t.stream_id = :stream_id AND t.closed_at IS NULL AND t.archived_at IS NULL
+      UNION ALL
+      SELECT uri('oxplow/person'), 'You'
   # The list's own choice fields, for a card's menu.
   fields:
     page: oxplow/work-item-fields

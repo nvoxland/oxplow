@@ -2,7 +2,7 @@
 # axis, titles itself with its window and puts Today and Fit in the nav
 # bar. Fit writes the window it shows into the page's view params.
 given:
-  - { command: oxplow.work_item.create, input: { title: Draw it, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Draw it, assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: Draw it, tools: [{ name: Edit, kind: edit, paths: [src/a.rs], ok: true }] } }
 when: { page: timeline }

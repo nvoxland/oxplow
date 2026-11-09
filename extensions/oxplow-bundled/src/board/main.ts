@@ -5,7 +5,7 @@
 // filters are the page's view params (`show`, `priority`, `q`): a change
 // goes into the tab's address, the page runs again and the frame hears the
 // rows; Back puts the filters back.
-import { boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, filtersOf, moreLabel, moreRef, priorityOf, records, type Act, type Filters, type MenuEntry, type Rec, type Rows } from "./model.js";
+import { assigneesOf, boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, filtersOf, moreLabel, moreRef, priorityOf, records, type Act, type Filters, type MenuContext, type MenuEntry, type Rec, type Rows } from "./model.js";
 
 interface Component {
   data: Record<string, Rows>;
@@ -107,7 +107,7 @@ function start(c: Component) {
     const failed = ["board", "counts"].map((k) => data[k]?.error).find(Boolean);
     const cards = [...records(data.board), ...records(data.live).map((r) => ({ ...r, uri: null, state: "in_progress" }))];
     const columns = boardColumns(cards, records(data.counts));
-    const fields = choiceFields(records(data.fields));
+    const opts: MenuContext = { fields: choiceFields(records(data.fields)), assignees: assigneesOf(records(data.assignees)) };
     say(failed ? `The board couldn't read its items: ${failed}` : cards.length === 0 ? "Nothing here. File an item with New Task…." : null);
     board.replaceChildren(
       ...columns.map((col) => {
@@ -118,10 +118,10 @@ function start(c: Component) {
         if (col.state === "todo") {
           // To Do under its epics, each foldable; the loose cards last.
           for (const g of epicGroups(col.cards, cards)) {
-            if (g.uri === null) list.append(...g.cards.map((card) => cardEl(card, fields)));
-            else list.append(groupEl(g.uri, g.title, g.epic, g.cards, fields));
+            if (g.uri === null) list.append(...g.cards.map((card) => cardEl(card, opts)));
+            else list.append(groupEl(g.uri, g.title, g.epic, g.cards, opts));
           }
-        } else list.append(...col.cards.map((card) => cardEl(card, fields)));
+        } else list.append(...col.cards.map((card) => cardEl(card, opts)));
         section.append(head, list);
         if (col.more > 0) {
           const more = el("button", { type: "button", class: "ox-link more" }, moreLabel(col));
@@ -137,7 +137,7 @@ function start(c: Component) {
   // A compact card: its title and its description's first sentence, two
   // lines each at most; an urgent or high priority a coloured edge; the rest
   // on hover.
-  function cardEl(card: Rec, fields: ReturnType<typeof choiceFields>, nested = false): HTMLElement {
+  function cardEl(card: Rec, opts: MenuContext, nested = false): HTMLElement {
     const live = card.uri == null;
     const prio = priorityOf(card);
     const li = el("li", {
@@ -155,7 +155,7 @@ function start(c: Component) {
     title.addEventListener("keydown", (e) => {
       if (e.key === "Enter") open();
     });
-    const menu = cardMenu(card, fields);
+    const menu = cardMenu(card, opts);
     const button = el("button", { type: "button", class: "card-menu", "aria-label": `Actions for ${card.title}`, "aria-haspopup": "menu" }, "…");
     button.addEventListener("click", (e) => {
       const r = button.getBoundingClientRect();
@@ -184,7 +184,7 @@ function start(c: Component) {
   // An epic in To Do: one block, a line down its left side, its heading (a
   // fold toggle, its title — a link — and how many of its items are here;
   // its own card's menu when it is in To Do) over its items.
-  function groupEl(uri: string, title: string | null, epic: Rec | null, items: Rec[], fields: ReturnType<typeof choiceFields>): HTMLElement {
+  function groupEl(uri: string, title: string | null, epic: Rec | null, items: Rec[], opts: MenuContext): HTMLElement {
     const open = !folded.has(uri);
     const group = el("li", { class: "epic-group ox-nest", "data-epic": uri });
     const li = el("div", { class: "epic", ...(epic ? { "data-uri": uri } : {}) });
@@ -197,7 +197,7 @@ function start(c: Component) {
     });
     li.append(toggle, name, el("span", { class: "ox-faint ox-small" }, String(items.length)));
     if (epic) {
-      const menu = cardMenu(epic, fields);
+      const menu = cardMenu(epic, opts);
       li.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         openMenu(menu, e.clientX, e.clientY);
@@ -206,7 +206,7 @@ function start(c: Component) {
     group.append(li);
     if (open) {
       const under = el("ul", { class: "epic-cards" });
-      under.append(...items.map((card) => cardEl(card, fields, true)));
+      under.append(...items.map((card) => cardEl(card, opts, true)));
       group.append(under);
     }
     return group;

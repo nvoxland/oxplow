@@ -1,8 +1,8 @@
 # "See also": a work item links to the Board of its thread (the Backlog when
 # it is on none), the efforts on it once there are any, and its parent epic.
 given:
-  - { command: oxplow.work_item.create, input: { title: The epic, thread: thr1 }, bind: epic }
-  - { command: oxplow.work_item.create, input: { title: The child, thread: thr1, parent_uri: $epic.uri }, bind: child }
+  - { command: oxplow.work_item.create, input: { title: The epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: The child, assignee: thr1, parent_uri: $epic.uri }, bind: child }
   - { command: oxplow.work_item.create, input: { title: Loose end }, bind: loose }
 when: { page: work-item, params: { uri: $child.uri, thread_id: 1 } }
 expect:

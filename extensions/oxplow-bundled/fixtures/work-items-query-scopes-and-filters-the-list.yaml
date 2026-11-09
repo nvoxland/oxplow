@@ -1,17 +1,22 @@
-# The one statement of which work items a task page shows: the thread's,
-# the backlog's or everything; by state; a priority or a search keeps an
-# item that matches and its epic; open items by rank with an epic's
-# children under it, then the closed ones, done before canceled, the
-# latest first; what each row's actions may do.
+# The one statement of which work items a task page shows: the ones
+# assigned to the thread, its stream, the person, nobody or anyone (a
+# closed item is nobody's: the thread's when its efforts worked it); by
+# state; a priority or a search keeps an item that matches and its epic;
+# open items by their queue with an epic's children under it, then the
+# closed ones, done before canceled, the latest first; what each row's
+# actions may do.
 given:
-  - { command: oxplow.work_item.create, input: { title: An epic, thread: thr1, native: { priority: low } }, bind: epic }
-  - { command: oxplow.work_item.create, input: { title: Urgent child, thread: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
-  - { command: oxplow.work_item.create, input: { title: Plain child, thread: thr1, native: { priority: low }, parent_uri: $epic.uri } }
-  - { command: oxplow.work_item.create, input: { title: Loose item, thread: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
-  - { command: oxplow.work_item.create, input: { title: Backlogged } }
-  - { command: oxplow.work_item.create, input: { title: Shipped, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Dropped, thread: thr1 }, bind: dropped }
-  - { command: oxplow.work_item.transition, input: { uri: $dropped.uri, to: canceled } }
+  - { command: oxplow.work_item.create, input: { title: An epic, assignee: thr1, native: { priority: low } }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: Urgent child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: Plain child, assignee: thr1, native: { priority: low }, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
+  - { command: oxplow.work_item.create, input: { title: Backlogged, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
+  - { command: oxplow.work_item.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $shipped.uri, to: done }, as: agent }
+  - { command: oxplow.work_item.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
+  - { command: oxplow.work_item.transition, input: { uri: $dropped.uri, to: in_progress }, as: agent }
+  - { command: oxplow.work_item.transition, input: { uri: $dropped.uri, to: canceled }, as: agent }
   - { command: oxplow.work_item.transition, input: { uri: $loose.uri, to: in_progress } }
   - { command: oxplow.work_item.comment, input: { uri: $loose.uri, body: Started. } }
 when: { query: work-items, params: { show: thread, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
@@ -19,12 +24,12 @@ expect:
   rows:
     - title: An epic
       depth: 0
-      thread: Thread
+      assignee_title: Thread
       add_child: "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow"
-    - { title: Urgent child, depth: 1, parent_title: An epic, prio: urgent, prio_tone: danger, has_parent: 1, can_order: 1, can_delete: 1, can_nest: 1, can_shelve: 1, can_bring: 0, can_prioritize: 1 }
+    - { title: Urgent child, depth: 1, parent_title: An epic, prio: urgent, prio_tone: danger, has_parent: 1, can_delete: 1, can_nest: 1, not_here: 0, not_mine: 1, assigned: 1, can_prioritize: 1 }
     - { title: Plain child, depth: 1 }
     - { title: Loose item, state: in_progress, depth: 0, comments: 1, not_in_progress: 0, summary: It started here., prio_tone: null }
-    - { title: Shipped, state: done, done_rank: 1 }
+    - { title: Shipped, state: done, done_rank: 1, assigned: 0, not_mine: 0 }
     - { title: Dropped, state: canceled, done_rank: 1 }
 steps:
   - when: { query: work-items, params: { show: thread, state: all, priority: urgent, q: "", thread_id: 1, stream_id: 1 } }
@@ -32,8 +37,12 @@ steps:
   # A search reads the title or any field, and keeps the epic too.
   - when: { query: work-items, params: { show: thread, state: all, priority: any, q: plain, thread_id: 1, stream_id: 1 } }
     expect: { rows: [{ title: An epic }, { title: Plain child }] }
-  - when: { query: work-items, params: { show: backlog, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
-    expect: { rows: [{ title: Backlogged, thread: Backlog, can_bring: 1, can_shelve: 0, thread_ref: thr1 }] }
+  - when: { query: work-items, params: { show: pool, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Backlogged, state: backlog, assignee_title: Unassigned, not_here: 1, assigned: 0, here: "oxplow:oxplow/thread?id=thr1" }] }
+  - when: { query: work-items, params: { show: all, state: backlog, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Backlogged }] }
+  - when: { query: work-items, params: { show: me, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 0 }
   - when: { query: work-items, params: { show: all, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
     expect: { rows: 7 }
   - when: { query: work-items, params: { show: stream, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }

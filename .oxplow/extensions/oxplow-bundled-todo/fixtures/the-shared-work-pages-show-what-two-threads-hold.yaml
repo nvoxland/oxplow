@@ -2,7 +2,7 @@
 # efforts changed, an epic whose children sit on different threads. The thread
 # and item variants keep only their own rows.
 given:
-  - { command: oxplow.work_item.create, input: { title: Shared item, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Shared item, assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
 when: { page: oxplow/shared-work }
@@ -16,8 +16,8 @@ steps:
       - observe: { turn: { thread: $beta.id, prompt: beta, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
       # An epic whose children are on the two threads.
       - { command: oxplow.work_item.create, input: { title: Epic }, bind: epic }
-      - { command: oxplow.work_item.create, input: { title: Child A, parent_uri: $epic.uri, thread: thr1 } }
-      - { command: oxplow.work_item.create, input: { title: Child B, parent_uri: $epic.uri, thread: $beta.id } }
+      - { command: oxplow.work_item.create, input: { title: Child A, parent_uri: $epic.uri, assignee: thr1 } }
+      - { command: oxplow.work_item.create, input: { title: Child B, parent_uri: $epic.uri, assignee: $beta.id } }
   - when: { page: oxplow/shared-work }
     expect:
       loaders:

@@ -1,5 +1,5 @@
 title: Work items
-description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (the thread's list), `stream` (every thread of the stream), `all` (every item, the backlog too) or `backlog` (items on no thread). `state`: `all`, `open` (to do, in progress, blocked) or one state (`todo`, `in_progress`, `blocked`, `done`, `canceled`). `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `thread`: its thread's title or `Backlog`, `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `not_<state>`), and `ord`, the order to draw it in: open items by list and rank with each epic's children under it, then done and canceled ones, the latest first."
+description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (assigned to the thread), `stream` (assigned to any of the stream's threads), `me` (assigned to the person), `pool` (assigned to nobody: what any thread may pull) or `all`. A done or canceled item is nobody's, so for those `thread` and `stream` mean an effort there worked it, and `me` and `pool` show none. `state`: `all`, `open` (backlog, to do, in progress, blocked) or one state (`backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled`). `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `assignee` and `assignee_title`: who it's for — a thread's title, `You` or `Unassigned` — `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `not_<state>`, `not_here`, `not_mine`, `assigned`), and `ord`, the order to draw it in: open items by assignee and their queue with each epic's children under it, then done and canceled ones, the latest first."
 needs:
 - work_items
 params:
@@ -25,15 +25,31 @@ loaders:
         FROM feat, json_each(feat.fields) f
         WHERE json_extract(f.value, '$.kind') = 'enum' AND coalesce(json_extract(f.value, '$.read_only'), 0) = 0
       ),
+      here AS (SELECT CASE WHEN :thread_id IS NOT NULL THEN uri('oxplow/thread', 'id', 'thr' || :thread_id) END AS uri),
+      stream_thread AS (SELECT t.id, t.uri FROM v_thread t WHERE t.stream_id = :stream_id),
       scoped AS (
-        SELECT w.*, CASE WHEN json_valid(w.native) THEN w.native ELSE '{}' END AS nat
+        SELECT w.*, CASE WHEN json_valid(w.native) THEN w.native ELSE '{}' END AS nat,
+               w.state IN ('done', 'canceled') AS closed
         FROM v_work_item w
-        WHERE CASE :show WHEN 'thread' THEN w.thread_id = :thread_id
-                         WHEN 'stream' THEN w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id)
-                         WHEN 'backlog' THEN w.thread_id IS NULL
-                         ELSE 1 END
+        WHERE CASE WHEN w.state IN ('done', 'canceled') THEN
+                CASE :show
+                  WHEN 'thread' THEN EXISTS (SELECT 1 FROM v_effort e
+                                              WHERE e.work_item = w.uri AND e.thread_id = :thread_id)
+                  WHEN 'stream' THEN EXISTS (SELECT 1 FROM v_effort e
+                                              WHERE e.work_item = w.uri
+                                                AND e.thread_id IN (SELECT id FROM stream_thread))
+                  WHEN 'all' THEN 1
+                  ELSE 0 END
+              ELSE
+                CASE :show
+                  WHEN 'thread' THEN w.assignee = (SELECT uri FROM here)
+                  WHEN 'stream' THEN w.assignee IN (SELECT uri FROM stream_thread)
+                  WHEN 'me' THEN w.assignee = uri('oxplow/person')
+                  WHEN 'pool' THEN w.assignee IS NULL
+                  ELSE 1 END
+              END
           AND CASE :state WHEN 'all' THEN 1
-                          WHEN 'open' THEN w.state IN ('todo', 'in_progress', 'blocked')
+                          WHEN 'open' THEN w.state IN ('backlog', 'todo', 'in_progress', 'blocked')
                           ELSE w.state = :state END
       ),
       -- What the priority and the search match; an epic stays for a child that does.
@@ -43,7 +59,7 @@ loaders:
           AND (coalesce(:q, '') = '' OR instr(lower(s.title), lower(:q)) > 0 OR instr(lower(s.nat), lower(:q)) > 0)
       ),
       shown AS (
-        SELECT s.*, s.state IN ('done', 'canceled') AS closed FROM scoped s
+        SELECT s.* FROM scoped s
         WHERE s.uri IN (SELECT uri FROM hit) OR s.uri IN (SELECT parent_uri FROM hit WHERE parent_uri IS NOT NULL)
       ),
       placed AS (
@@ -56,14 +72,15 @@ loaders:
       anchored AS (
         SELECT p.*, coalesce(CASE WHEN p.depth = 1 THEN p.parent_uri END, p.uri) AS anchor FROM placed p
       )
-      SELECT w.uri, w.title, w.state, w.native, w.thread_id,
+      SELECT w.uri, w.title, w.state, w.native, w.assignee,
              first_sentence(w.body) AS summary,
              json_extract(w.nat, '$.priority') AS prio,
              CASE json_extract(w.nat, '$.priority') WHEN 'urgent' THEN 'danger' WHEN 'high' THEN 'warning' END AS prio_tone,
              (SELECT group_concat(n.value, ' · ') FROM json_each(w.nat) n
                WHERE n.key IN (SELECT name FROM choice_field) AND n.value IS NOT NULL) AS fields,
-             CASE WHEN w.thread_id IS NULL THEN 'Backlog'
-                  ELSE (SELECT t.title FROM v_thread t WHERE t.id = w.thread_id) END AS thread,
+             CASE WHEN w.assignee IS NULL THEN 'Unassigned'
+                  WHEN w.assignee = uri('oxplow/person') THEN 'You'
+                  ELSE (SELECT t.title FROM v_thread t WHERE t.uri = w.assignee) END AS assignee_title,
              w.parent_uri,
              (SELECT p.title FROM v_work_item p WHERE p.uri = w.parent_uri) AS parent_title,
              w.depth,
@@ -71,23 +88,24 @@ loaders:
              w.closed_at, w.done_rank,
              CASE WHEN coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1
                   THEN uri('oxplow/page', 'page', 'new-task', 'parent', w.uri) END AS add_child,
-             w.state <> 'todo' AS not_todo, w.state <> 'in_progress' AS not_in_progress,
-             w.state <> 'blocked' AS not_blocked, w.state <> 'done' AS not_done, w.state <> 'canceled' AS not_canceled,
-             coalesce(json_extract((SELECT f FROM feat), '$.ordering'), 0) AS can_order,
+             w.state <> 'backlog' AS not_backlog, w.state <> 'todo' AS not_todo,
+             w.state <> 'in_progress' AS not_in_progress, w.state <> 'blocked' AS not_blocked,
+             w.state <> 'done' AS not_done, w.state <> 'canceled' AS not_canceled,
              coalesce(json_extract((SELECT f FROM feat), '$.delete'), 0) AS can_delete,
              coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) AS can_nest,
              (coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1 AND w.parent_uri IS NOT NULL) AS has_parent,
-             (w.thread_id IS NOT NULL AND coalesce(json_extract((SELECT f FROM feat), '$.lists'), 0) = 1) AS can_shelve,
-             (:thread_id IS NOT NULL AND w.thread_id IS NOT :thread_id
-              AND coalesce(json_extract((SELECT f FROM feat), '$.lists'), 0) = 1) AS can_bring,
-             'thr' || :thread_id AS thread_ref,
+             -- Who it may go to next: a closed item is nobody's.
+             (NOT w.closed AND :thread_id IS NOT NULL AND w.assignee IS NOT (SELECT uri FROM here)) AS not_here,
+             (NOT w.closed AND w.assignee IS NOT uri('oxplow/person')) AS not_mine,
+             (NOT w.closed AND w.assignee IS NOT NULL) AS assigned,
+             (SELECT uri FROM here) AS here,
              EXISTS (SELECT 1 FROM feat, json_each(feat.fields) f
                       WHERE json_extract(f.value, '$.name') = 'priority' AND json_extract(f.value, '$.kind') = 'enum') AS can_prioritize,
              row_number() OVER (ORDER BY
                w.closed,
                CASE WHEN w.closed THEN w.state = 'canceled' END,
                w.done_rank,
-               coalesce((SELECT t.sort_index FROM v_thread t WHERE t.id = w.thread_id), 1e9),
+               coalesce((SELECT t.sort_index FROM v_thread t WHERE t.uri = w.assignee), 1e9),
                (SELECT a.rank IS NULL FROM v_work_item a WHERE a.uri = w.anchor),
                (SELECT a.rank FROM v_work_item a WHERE a.uri = w.anchor),
                (SELECT a.created_at FROM v_work_item a WHERE a.uri = w.anchor),

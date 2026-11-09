@@ -8,6 +8,7 @@
   "use strict";
 
   const STATES = [
+    ["backlog", "Backlog"],
     ["todo", "To do"],
     ["in_progress", "In progress"],
     ["blocked", "Blocked"],
@@ -28,27 +29,9 @@
     note.hidden = true;
   };
 
-  /** Whether the active work list keeps an order: its features say `ordering`. */
-  function hasOrdering(features) {
-    const cell = features && features.rows && features.rows[0] ? features.rows[0][0] : null;
-    if (cell === null || cell === undefined) return false;
-    let list = cell;
-    if (typeof cell === "string") {
-      try {
-        list = JSON.parse(cell);
-      } catch (_) {
-        list = cell.split(/[\s,]+/);
-      }
-    }
-    if (Array.isArray(list)) return list.includes("ordering");
-    if (list && typeof list === "object") return Object.keys(list).includes("ordering");
-    return list === "ordering";
-  }
-
   oxplow.connect().then((component) => {
     component.applyTheme();
     let current = component.data.swimlanes;
-    let ordering = hasOrdering(component.data.features);
     let editing = false;
     let dragRef = null;
     // A card is being dragged: redrawing would remove it from under the
@@ -70,7 +53,6 @@
 
     component.onUpdate(({ data }) => {
       current = data.swimlanes;
-      ordering = hasOrdering(data.features);
       if (editing || dragging) stale = true;
       else draw();
     });
@@ -114,8 +96,7 @@
             change("oxplow.work_item.transition", { uri: ref, to: state }).catch(() => {});
             return;
           }
-          // Within its column: only a work list that keeps an order can be reordered.
-          if (!ordering) return;
+          // Within its column: its place in its assignee's queue.
           const target = e.target.closest && e.target.closest(".card");
           const over = target ? cards.find((i) => i.uri === target.dataset.ref) : cards[cards.length - 1];
           if (!over || over.uri === ref) return;

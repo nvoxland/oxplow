@@ -2,7 +2,7 @@
 # (Renaming through the title's form needs Enter to submit it; a `ui` key
 # step only sends the key event, so that is still the app spec's.)
 given:
-  - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Card one, assignee: thr1 } }
 when: { part: swimlanes, params: { scope: all } }
 steps:
   - ui:

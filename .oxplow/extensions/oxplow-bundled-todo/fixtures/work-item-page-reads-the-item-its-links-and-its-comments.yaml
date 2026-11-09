@@ -1,8 +1,8 @@
 # A work item's page: the parts read the item by its uri, its list's
 # features switch the gated buttons, and links show from both ends.
 given:
-  - { command: oxplow.work_item.create, input: { title: The item, body: Some words., thread: thr1 }, bind: item }
-  - { command: oxplow.work_item.create, input: { title: Its blocker, body: Some words., thread: thr1 }, bind: blocker }
+  - { command: oxplow.work_item.create, input: { title: The item, body: Some words., assignee: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Its blocker, body: Some words., assignee: thr1 }, bind: blocker }
   - { command: oxplow.work_item.link, input: { uri: $item.uri, target: $blocker.uri, link_type: blocks } }
   - { command: oxplow.work_item.comment, input: { uri: $item.uri, body: A note. } }
 when: { page: work-item, params: { uri: $item.uri, thread_id: 1 } }

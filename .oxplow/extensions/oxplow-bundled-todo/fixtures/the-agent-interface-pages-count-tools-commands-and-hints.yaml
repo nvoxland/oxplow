@@ -21,7 +21,7 @@ given:
           - { name: mcp__oxplow__run_command, kind: mcp, ok: true }
           - { name: mcp__other__thing, kind: mcp, ok: true }
   - observe: { turn: { thread: $beta.id, prompt: three, tools: [{ name: mcp__oxplow__oxplow_query_sql, kind: mcp, ok: true }] } }
-  - { command: oxplow.work_item.create, input: { title: Task, thread: thr1 }, bind: item, as: agent }
+  - { command: oxplow.work_item.create, input: { title: Task, assignee: thr1 }, bind: item, as: agent }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
   - observe: { hint: { hint: x/never, evaluated: 120 } }
   - observe: { hint: { hint: x/spoke, evaluated: 40 } }

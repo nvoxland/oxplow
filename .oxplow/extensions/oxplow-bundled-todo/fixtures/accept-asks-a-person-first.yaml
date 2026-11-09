@@ -1,7 +1,7 @@
 # The review verbs ask a person before they act: unconfirmed, accept runs
 # nothing.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
 when:
   command: oxplow.review.accept

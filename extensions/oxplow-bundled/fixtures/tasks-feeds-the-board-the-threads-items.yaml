@@ -1,42 +1,41 @@
-# The Tasks board's rows: the open items and the done ones of the last
-# three days, twenty at most (the clock can't move here: the cap is what
-# this tests), no
-# canceled ones, each column's count, the list's choice fields; wider than
-# one thread a card names its thread; with no thread, "this thread" is
-# everything.
+# The Tasks board's rows: the ready, started and blocked items and the
+# done ones of the last three days, twenty at most (the clock can't move
+# here: the cap is what this tests), no backlog or canceled ones, each
+# column's count, the list's choice fields; wider than one assignee a card
+# names who it's for; with no thread, "this thread" is everything.
 given:
-  - { command: oxplow.work_item.create, input: { title: Next up, thread: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: In the backlog } }
-  - { command: oxplow.work_item.create, input: { title: Dropped, thread: thr1 }, bind: dropped }
+  - { command: oxplow.work_item.create, input: { title: Next up, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: In the backlog, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
   - { command: oxplow.work_item.transition, input: { uri: $dropped.uri, to: canceled } }
-  - { command: oxplow.work_item.create, input: { title: Done 1, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 2, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 3, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 4, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 5, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 6, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 7, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 8, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 9, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 10, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 11, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 12, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 13, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 14, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 15, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 16, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 17, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 18, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 19, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 20, thread: thr1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 21, thread: thr1, state: done } }
-when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 2, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 3, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 4, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 5, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 6, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 7, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 8, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 9, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 10, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 11, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 12, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 13, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 14, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 15, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 16, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 17, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 18, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 19, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 20, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 21, state: done } }
+when: { page: tasks, params: { show: all, priority: any, thread_id: 1, stream_id: 1 } }
 expect:
   loaders:
-    row: { rows: [{ scope: thread }] }
+    row: { rows: [{ scope: all }] }
     board:
       rows:
-        - { title: Next up, state: todo, thread_shown: null }
+        - { title: Next up, state: todo, assignee_shown: Thread }
         - { title: Done 21 }
         - { title: Done 20 }
         - { title: Done 19 }
@@ -57,11 +56,12 @@ expect:
         - { title: Done 4 }
         - { title: Done 3 }
         - { title: Done 2 }
-    counts: { rows: { contains: [{ state: done, n: 21 }, { state: canceled, n: 1 }, { state: todo, n: 1 }] } }
+    counts: { rows: { contains: [{ state: done, n: 21 }, { state: canceled, n: 1 }, { state: todo, n: 1 }, { state: backlog, n: 1 }] } }
     fields: { rows: { contains: [{ name: priority, kind: enum }] } }
+    assignees: { rows: [{ title: Thread }, { title: You, uri: "oxplow:oxplow/person" }] }
     live: { rows: 0 }
 steps:
-  - params: { show: all }
-    expect: { loaders: { row: { rows: [{ scope: all }] }, board: { rows: { contains: [{ title: In the backlog, thread_shown: Backlog }] } } } }
+  - params: { show: thread }
+    expect: { loaders: { row: { rows: [{ scope: thread }] }, board: { rows: [{ title: Next up, assignee_shown: null }] } } }
   - params: { show: thread, thread_id: null }
     expect: { loaders: { row: { rows: [{ scope: all }] } } }

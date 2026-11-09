@@ -20,12 +20,11 @@ ui:
 
 ## What the swimlanes do
 
-- One column per canonical state: todo, in progress, blocked, done,
-  canceled. Drag a card to another column and it runs
+- One column per canonical state: backlog, todo, in progress, blocked,
+  done, canceled. Drag a card to another column and it runs
   `oxplow.work_item.transition`.
-- Drag a card within its column and it runs `oxplow.work_item.reorder`,
-  but only when the active provider's `features` include `ordering`
-  (the page's `features` loader). Without it the drop does nothing.
+- Drag a card within its column and it runs `oxplow.work_item.reorder`:
+  its place in its assignee's queue, core's for every work list.
 - Click a title to rename the item: an inline form (Enter saves, Escape
   puts it back) that runs `oxplow.work_item.update`. A refusal naming a
   field shows under the input.
@@ -52,7 +51,7 @@ May not:
 - run a command it didn't declare (`custom_components[].commands`) or one
   outside the extension's `permissions.commands`;
 - replace the page chrome around it (the scope picker, the rail, the
-  backlog drawer stay oxplow's), or the work list itself.
+  filters stay oxplow's), or the work list itself.
 
 ## Try it
 

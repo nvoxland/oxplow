@@ -94,18 +94,18 @@ datasets:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_work
-    version: 5
-    description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), every ready item, and the last 20 finished items, wiki pages and unlinked efforts since the list was cleared."
+    version: 6
+    description: "Each thread's Work panel, one row per line in display order: what the thread is working on, from its efforts (`v_effort`) and the work assigned to it (`v_work_item.assignee`). In progress is its open effort, as its linked item (under its epic with the epic's other children) or its own title; Up next is the ready and blocked items assigned to the thread, in its queue's order; Finished is its last 20 closed efforts (each item once) and wiki pages touched since the list was cleared."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
-      - { name: grp, type: TEXT, doc: "`In progress`, `Ready` or `Finished`." }
+      - { name: grp, type: TEXT, doc: "`In progress`, `Up next` or `Finished`." }
       - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
-      - { name: icon, type: TEXT, doc: "A viz icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
+      - { name: icon, type: TEXT, doc: "A viz icon name: a work-item state (`todo`, `blocked`, `in_progress`, `done`, …), `epic` or `wiki`." }
       - { name: uri, type: TEXT, doc: "What the line opens (`work_item:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
-      - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }
+      - { name: active, type: INT, doc: "1 for the open effort's line: its item, or the effort itself." }
 event_types:
   types:
     - type: oxplow.review.accepted
@@ -263,11 +263,11 @@ custom_components:
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
   - id: board
     title: Board
-    description: "The work items as a kanban board: a column per state, drag a card to move it, a card's menu to set its state, fields and list."
+    description: "The work items as a kanban board: a column per state, drag a card to move it, a card's menu to set its state, fields and assignee."
     bundle: dist/board
-    commands: [oxplow.work_item.transition, oxplow.work_item.update, oxplow.work_item.move, oxplow.work_item.reorder, oxplow.work_item.delete]
+    commands: [oxplow.work_item.transition, oxplow.work_item.update, oxplow.work_item.assign, oxplow.work_item.reorder, oxplow.work_item.delete]
 panels:
-  # The thread's work: in progress (with its epic), ready next and recently
-  # finished, from the active work list; collapsed, the item in progress.
+  # What the thread is working on: its open effort (with its epic), the
+  # items assigned to it next, and what it finished; collapsed, the effort.
   # Its header has no count, and opens the Tasks board.
   - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=tasks' }

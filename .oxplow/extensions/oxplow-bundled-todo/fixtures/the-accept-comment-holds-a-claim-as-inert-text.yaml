@@ -1,7 +1,7 @@
 # A claim is agent-written text: the review's comment holds it as one inert
 # line, so it can't add headings, links or items to the reviewer's comment.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:

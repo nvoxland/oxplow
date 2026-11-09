@@ -4,5 +4,5 @@ when: { page: oxplow/waiting-on-me }
 expect: { alert: { firing: false } }
 steps:
   - given:
-      - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, thread: thr1 } }
+      - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, assignee: thr1 } }
   - expect: { alert: { firing: true, message: "Waiting on you: 1" } }

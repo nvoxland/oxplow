@@ -1,7 +1,7 @@
 # Token usage on slot pages: a task's turns summed and listed, a thread's
 # total; an idle thread shows nothing.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix it, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Fix it, assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { token_usage: { effort: eff1, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
   - observe: { token_usage: { effort: eff1, prompt: again, input_tokens: 99, output_tokens: 1 } }

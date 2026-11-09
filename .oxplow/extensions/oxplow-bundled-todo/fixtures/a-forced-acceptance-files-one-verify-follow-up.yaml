@@ -2,7 +2,7 @@
 # unchecked — a checklist naming each claim and decision — and a second forced acceptance of the same effort files nothing:
 # it was followed up already.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
   - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:

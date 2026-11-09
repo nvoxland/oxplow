@@ -88,7 +88,7 @@ export function epicGroups(cards: Rec[], all: Rec[]): EpicGroup[] {
 /** What a compact card says on hover: its title, then its epic, fields,
  *  thread and comments, a line each. */
 export function cardHint(card: Rec): string {
-  return [card.title, card.parent_title ? `in ${card.parent_title}` : null, card.fields, card.thread_shown, comments(card.comments)]
+  return [card.title, card.parent_title ? `in ${card.parent_title}` : null, card.fields, card.assignee_shown, comments(card.comments)]
     .filter((x) => x !== null && x !== undefined && x !== "")
     .map(String)
     .join("\n");
@@ -130,6 +130,23 @@ export function choiceFields(rows: Rec[]): Field[] {
     .filter((f) => f.values.length > 0);
 }
 
+/** Someone a card can be assigned to: a thread or the person. */
+export interface Assignee {
+  uri: string;
+  title: string;
+}
+
+/** The page's `assignees` rows: the stream's open threads, then the person. */
+export function assigneesOf(rows: Rec[]): Assignee[] {
+  return rows.filter((r) => r.uri != null).map((r) => ({ uri: String(r.uri), title: String(r.title ?? r.uri) }));
+}
+
+/** What a card's menu offers beyond the card itself. */
+export interface MenuContext {
+  fields: Field[];
+  assignees: Assignee[];
+}
+
 /** A command a card runs, as the component's `invoke` takes it. */
 export interface Act {
   command: string;
@@ -142,6 +159,7 @@ export type MenuEntry =
   | { kind: "separator" };
 
 const MARKS: { state: string; label: string; gate: string }[] = [
+  { state: "backlog", label: "Mark Backlog", gate: "not_backlog" },
   { state: "todo", label: "Mark To Do", gate: "not_todo" },
   { state: "in_progress", label: "Mark In Progress", gate: "not_in_progress" },
   { state: "blocked", label: "Mark Blocked", gate: "not_blocked" },
@@ -150,9 +168,10 @@ const MARKS: { state: string; label: string; gate: string }[] = [
 ];
 
 /** A card's menu: Open, the states it can move to, each choice field's
- *  values, then where it may go and Delete — only what its gates allow.
+ *  values, who it's assigned to (an open card: a thread, the person or
+ *  nobody), then Make top-level and Delete — only what its gates allow.
  *  The agent's live card has none. */
-export function cardMenu(card: Rec, fields: Field[]): MenuEntry[] {
+export function cardMenu(card: Rec, { fields, assignees }: MenuContext): MenuEntry[] {
   if (card.uri == null) return [];
   const uri = String(card.uri);
   const out: MenuEntry[] = [{ kind: "item", id: "open", label: "Open", open: uri }];
@@ -173,10 +192,20 @@ export function cardMenu(card: Rec, fields: Field[]): MenuEntry[] {
       })),
     ]);
   }
+  // A closed card is nobody's: no one to give it to.
+  if (truthy(card.not_done) && truthy(card.not_canceled)) {
+    const assign = (id: string, label: string, to: string | null): MenuEntry => ({
+      kind: "item", id, label, checked: (card.assignee ?? null) === to,
+      act: { command: "oxplow.work_item.assign", input: { uri, to } },
+    });
+    group([
+      { kind: "heading", label: "Assign to" },
+      ...assignees.map((a) => assign(`assign-${a.uri}`, a.title, a.uri)),
+      assign("assign-nobody", "Nobody", null),
+    ]);
+  }
   const moves: MenuEntry[] = [];
   if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { command: "oxplow.work_item.update", input: { uri, parent_uri: "" } } });
-  if (truthy(card.can_shelve)) moves.push({ kind: "item", id: "shelve", label: "Send to backlog", act: { command: "oxplow.work_item.move", input: { uri, to: "backlog" } } });
-  if (truthy(card.can_bring)) moves.push({ kind: "item", id: "bring", label: "Bring to this thread", act: { command: "oxplow.work_item.move", input: { uri, to: { thread: String(card.thread_ref) } } } });
   if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { command: "oxplow.work_item.delete", input: { uri } } });
   group(moves);
   return out;
@@ -184,12 +213,12 @@ export function cardMenu(card: Rec, fields: Field[]): MenuEntry[] {
 
 /** What dropping `card` on column `to`, ahead of `before` (null: at the
  *  end), runs: a move to that state, or within its own column a reorder
- *  when the list orders items. Null: nothing to do. */
+ *  in its assignee's queue. Null: nothing to do. */
 export function dropAct(card: Rec, to: string, before: Rec | null): Act | null {
   if (card.uri == null) return null;
   const uri = String(card.uri);
   if (to !== card.state) return { command: "oxplow.work_item.transition", input: { uri, to } };
-  if (!truthy(card.can_order) || (before && before.uri === card.uri)) return null;
+  if (before && before.uri === card.uri) return null;
   return { command: "oxplow.work_item.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
 }
 

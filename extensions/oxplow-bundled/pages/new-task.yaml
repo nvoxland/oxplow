@@ -1,5 +1,5 @@
 title: New Item
-description: "The form for a new item on the active work list - its title, description, starting state and the list's own fields."
+description: "The form for a new item on the active work list - its title, description, starting state, who it's for (nobody unless picked) and the list's own fields."
 icon: plus
 needs:
 - work_items
@@ -9,31 +9,36 @@ params:
 loaders:
   new_task:
     sql: |
-      SELECT 'todo' AS state, :parent AS parent_uri,
-             (SELECT uri_param(t.uri, 'id') FROM v_thread t WHERE t.id = :thread_id) AS thread
+      SELECT 'todo' AS state, :parent AS parent_uri
   new_task_parents:
     sql: |
       SELECT w.uri AS value, w.title AS label
       FROM v_work_item w
-      WHERE w.thread_id = :thread_id
-        AND w.state NOT IN ('done', 'canceled')
+      WHERE w.state NOT IN ('done', 'canceled')
         AND EXISTS (SELECT 1 FROM v_capability_provider p
                     WHERE p.capability = 'work_items' AND p.active = 1
                       AND json_extract(p.features, '$.hierarchy') = 1)
         AND EXISTS (SELECT 1 FROM v_work_item c WHERE c.parent_uri = w.uri)
-      ORDER BY w.rank
+      ORDER BY w.assignee IS NOT (SELECT uri FROM v_thread WHERE id = :thread_id), w.title
   new_task_states:
     sql: |
       SELECT 'todo' AS value, 'To Do' AS label
       UNION ALL
+      SELECT 'backlog', 'Backlog'
+      UNION ALL
       SELECT 'blocked', 'Blocked'
-  new_task_threads:
+  # Who it's for: nobody (the default: any thread may take it), you, or an
+  # open thread.
+  new_task_assignees:
     sql: |
-      SELECT uri_param(t.uri, 'id') AS value, t.title AS label, s.title AS "group"
-      FROM v_thread t
-      JOIN v_stream s ON s.id = t.stream_id
-      WHERE t.closed_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL
-      ORDER BY s.kind <> 'primary', s.title, t.sort_index, t.id
+      SELECT uri('oxplow/person') AS value, 'Me' AS label, NULL AS "group"
+      UNION ALL
+      SELECT * FROM (
+        SELECT t.uri, t.title, s.title
+        FROM v_thread t
+        JOIN v_stream s ON s.id = t.stream_id
+        WHERE t.closed_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL
+        ORDER BY s.kind <> 'primary', s.title, t.sort_index, t.id)
 view:
   from: new_task
   viz: form
@@ -44,18 +49,18 @@ view:
     - title
     - body
     - state
-    - thread
+    - assignee
     - parent_uri
     - name: native
       from: oxplow/work-item-fields
     choices:
       state: oxplow/new-task#new_task_states
-      thread: oxplow/new-task#new_task_threads
+      assignee: oxplow/new-task#new_task_assignees
       parent_uri: oxplow/new-task#new_task_parents
     again:
       label: Save and Another
       keep:
       - state
-      - thread
+      - assignee
       - parent_uri
       - native

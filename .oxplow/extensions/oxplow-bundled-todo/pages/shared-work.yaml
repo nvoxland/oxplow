@@ -23,10 +23,10 @@ loaders:
         GROUP BY f.path HAVING count(DISTINCT o.thread_id) >= 2
         UNION ALL
         SELECT 'Epics spread over threads', p.title, p.uri,
-               group_concat(DISTINCT t.title), group_concat(DISTINCT c.thread_id)
-        FROM v_work_item c JOIN v_work_item p ON p.uri = c.parent_uri JOIN v_thread t ON t.id = c.thread_id
-        WHERE c.thread_id IS NOT NULL AND c.closed_at IS NULL
-        GROUP BY p.uri HAVING count(DISTINCT c.thread_id) >= 2
+               group_concat(DISTINCT t.title), group_concat(DISTINCT t.id)
+        FROM v_work_item c JOIN v_work_item p ON p.uri = c.parent_uri JOIN v_thread t ON t.uri = c.assignee
+        WHERE c.closed_at IS NULL
+        GROUP BY p.uri HAVING count(DISTINCT t.id) >= 2
       )
       SELECT section, what, threads, uri FROM shared ORDER BY section, what
 view:

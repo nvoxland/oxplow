@@ -1,7 +1,7 @@
 # A card's title is its own form: Enter saves, an empty one is refused
 # under the input, Escape puts the title back.
 given:
-  - { command: oxplow.work_item.create, input: { title: Card one, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Card one, assignee: thr1 } }
 when: { part: swimlanes, params: { scope: all } }
 steps:
   - ui:

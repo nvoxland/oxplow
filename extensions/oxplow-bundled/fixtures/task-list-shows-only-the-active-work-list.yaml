@@ -1,7 +1,7 @@
 # Task List reads the work-item interface: with the work list switched to
 # none it runs nothing and says what it needs.
 given:
-  - { command: oxplow.work_item.create, input: { title: Next up, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Next up, assignee: thr1 } }
   - { command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }
 when: { page: task-list, params: { thread_id: 1 } }
 expect:

@@ -1,7 +1,7 @@
 # Finishing an item closes the effort open on it.
 given:
   - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
-  - { command: oxplow.work_item.create, input: { title: Parse blocks, thread: thr1 }, bind: item }
+  - { command: oxplow.work_item.create, input: { title: Parse blocks, assignee: thr1 }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
 when:
   command: oxplow.work_item.transition

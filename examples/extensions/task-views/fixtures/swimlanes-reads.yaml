@@ -1,9 +1,7 @@
-# The board's page reads its cards and the active provider's features,
-# which its component is fed.
+# The board's page reads its cards, which its component is fed.
 when:
   part: swimlanes
   params: { scope: all }
 expect:
   loaders:
     swimlanes: { rows: 0 }
-    features: { rows: 1 }

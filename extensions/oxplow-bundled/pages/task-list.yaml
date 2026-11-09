@@ -1,5 +1,5 @@
 title: Task List
-description: "The work items in one state, on a thread, its stream, everything or the backlog, with epics over their children and the finished ones latest first, and a quick add."
+description: "The work items in one state (the backlog's too), assigned to a thread, its stream, you, nobody or anyone, with epics over their children and the finished ones latest first, and a quick add."
 icon: check-square
 category: Work
 keywords: work items list backlog history done finished in progress
@@ -14,14 +14,16 @@ params:
   options:
   - { value: thread, label: This thread }
   - { value: stream, label: This stream }
-  - { value: all, label: Everywhere }
-  - { value: backlog, label: Backlog }
+  - { value: me, label: Assigned to me }
+  - { value: pool, label: Unassigned }
+  - { value: all, label: Everyone's }
 - name: state
   type: choice
   role: filter
   label: State
   default: todo
   options:
+  - { value: backlog, label: Backlog }
   - { value: todo, label: To do }
   - { value: in_progress, label: In progress }
   - { value: blocked, label: Blocked }
@@ -46,7 +48,8 @@ params:
 - name: stream_id
 answers:
 - {"question":"What work is in progress, across every provider?","params":{"show":"all","state":"in_progress"},"skill":"work-items"}
-- {"question":"What is in the backlog?","params":{"show":"backlog"},"skill":"work-items"}
+- {"question":"What is in the backlog?","params":{"show":"all","state":"backlog"},"skill":"work-items"}
+- {"question":"What is ready that nobody has taken?","params":{"show":"pool","state":"todo"},"skill":"work-items"}
 - {"question":"What has this thread finished?","params":{"show":"thread","state":"done","thread_id":1},"skill":"work-items"}
 loaders:
   # The scope (with no thread, "this thread" is everything) and the form a
@@ -57,12 +60,14 @@ loaders:
              uri('oxplow/page', 'page', 'new-task') AS new_task
     columns:
     - key: scope
-  # What the quick add files: To Do (Blocked while the list shows blocked
-  # items) on this thread, or in the backlog while it shows the backlog.
+  # What the quick add files: in the state the list shows (To Do while it
+  # shows a closed or started state), assigned to whom it shows — this
+  # thread, you, or nobody.
   new_item:
     sql: |
-      SELECT CASE :state WHEN 'blocked' THEN 'blocked' ELSE 'todo' END AS state,
-             CASE WHEN :scope = 'backlog' THEN NULL ELSE 'thr' || :thread_id END AS thread
+      SELECT CASE WHEN :state IN ('backlog', 'blocked') THEN :state ELSE 'todo' END AS state,
+             CASE :scope WHEN 'thread' THEN uri('oxplow/thread', 'id', 'thr' || :thread_id)
+                         WHEN 'me' THEN uri('oxplow/person') END AS assignee
     params:
       scope:
         from: row.scope
@@ -79,7 +84,7 @@ loaders:
   list:
     sql: |
       SELECT i.*,
-             CASE WHEN :scope <> 'thread' THEN i.thread END AS thread_shown
+             CASE WHEN :scope NOT IN ('thread', 'me') THEN i.assignee_title END AS assignee_shown
       FROM items i
       ORDER BY i.ord
     params:
@@ -114,8 +119,8 @@ view:
       from: uri
   - key: summary
     label: Description
-  - key: thread_shown
-    label: Thread
+  - key: assignee_shown
+    label: Assigned to
   - key: closed_at
     label: Closed
     format: relative
@@ -126,7 +131,6 @@ view:
     command: oxplow.work_item.reorder
     row: true
     drag: true
-    when: can_order
     input:
       uri: '{{row.uri}}'
       before: '{{before.uri}}'
@@ -139,6 +143,15 @@ view:
     input:
       uri: '{{row.uri}}'
       parent_uri: '{{onto.uri}}'
+  - id: to-backlog
+    label: Mark Backlog
+    command: oxplow.work_item.transition
+    row: true
+    bulk: true
+    when: not_backlog
+    input:
+      uri: '{{row.uri}}'
+      to: backlog
   - id: to-todo
     label: Mark To Do
     command: oxplow.work_item.transition
@@ -237,25 +250,33 @@ view:
     input:
       uri: '{{row.uri}}'
       parent_uri: ''
-  - id: shelve
-    label: Send to backlog
-    command: oxplow.work_item.move
+  - id: assign-here
+    label: Assign to This Thread
+    command: oxplow.work_item.assign
     row: true
     bulk: true
-    when: can_shelve
+    when: not_here
     input:
       uri: '{{row.uri}}'
-      to: backlog
-  - id: bring
-    label: Bring to this thread
-    command: oxplow.work_item.move
+      to: '{{row.here}}'
+  - id: assign-me
+    label: Assign to Me
+    command: oxplow.work_item.assign
     row: true
     bulk: true
-    when: can_bring
+    when: not_mine
     input:
       uri: '{{row.uri}}'
-      to:
-        thread: '{{row.thread_ref}}'
+      to: oxplow:oxplow/person
+  - id: unassign
+    label: Unassign
+    command: oxplow.work_item.assign
+    row: true
+    bulk: true
+    when: assigned
+    input:
+      uri: '{{row.uri}}'
+      to: null
   - id: delete
     label: Delete
     command: oxplow.work_item.delete

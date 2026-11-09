@@ -1,5 +1,5 @@
 title: Work (panel)
-description: The thread's work — in progress (with its epic), ready next, and recently finished.
+description: What the thread is working on — its open effort (with its epic), the items assigned to it next, and what it finished.
 params:
 - name: thread_id
   label: Thread
@@ -18,8 +18,8 @@ view:
   # opens the Work page.
   group:
     by: grp
-    compact: { Ready: 2, Finished: 2 }
-    grown: { Ready: 10, Finished: 10 }
+    compact: { Up next: 2, Finished: 2 }
+    grown: { Up next: 10, Finished: 10 }
   depth: depth
   columns:
   - key: title

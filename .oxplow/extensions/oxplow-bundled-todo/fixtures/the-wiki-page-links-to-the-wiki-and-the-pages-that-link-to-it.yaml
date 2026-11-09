@@ -2,7 +2,7 @@
 # to it by [[slug]].
 given:
   - { command: oxplow.knowledge.write_page, input: { slug: otters, title: Otters, body: "# Otters\n" } }
-  - { command: oxplow.work_item.create, input: { title: Feed the otters, body: "See [[otters]].", thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Feed the otters, body: "See [[otters]].", assignee: thr1 } }
 when: { page: wiki-page, params: { uri: "oxplow:oxplow/wiki?slug=otters", slug: otters } }
 expect:
   see_also:
