@@ -425,10 +425,42 @@ subsections stay in the reading column. Agent text: a `###` heading (the
 link in parentheses), the facts as `**label**: value` lines, then the body.
 The Definition page's View outline reads it as "Sections of `loader`".
 
+**A tree over paths** (`tree: { path, status? }`, in place of `id` /
+`parent` / `label`, never beside them — `shape_problem`): each row is a
+file, its folders are made from its path (folders first, then files, each
+by name), and a made folder holding one made folder and nothing else is
+joined with it into one row (`.agents/skills`). A made folder is no row of
+the result: no link, no menu, no actions; a click folds it. `status` is
+core's change vocabulary (`FileStatus`: added, modified, deleted, renamed,
+untracked, conflicted), drawn as one coloured letter at the row's end (A M
+D R U C); a made folder shows the marks of what is under it. The row's
+label is its name (a joined chain's names), drawn by the column whose key
+is the path (so its `link` still reads the whole row), the full path on
+hover, cut with "…" when long. A lazy path tree (`lazy`, `branch`) is one
+folder's level: id, parent and label come from the path alone, and a row's
+mark is its own status. The rule lives twice, once per reader, from the
+same cases: `pages/path_tree.rs` (what an agent reads: `- src/ AM`) and
+`viz/vizModel.ts` `treeNodes`. Foundation's `worktree-files` query is what
+the Git panel, the Uncommitted page and Directory read; Commit and the diff view
+give their own `path, status` rows.
+
+**Compact** (a rail panel's part, `.ox-compact` in the kit's sheet): its
+sections sit close, a detail's facts are short lines with no rules, a
+fact's buttons wrap under its value, small and whole. A panel's body keeps
+its buttons (its section buttons and a detail's fact buttons: `RailHud`
+passes `partButtons`), its collapsed line has none (one line of stats). A viz shows its first 8 rows
+(`COMPACT_ROWS`), then a "+N more" row (`viz-more`), a link to the panel's
+page (`PageTree` `more`, the panel's `open` or body). A tree counts the rows
+it shows, not the rows it has: folding a branch frees room. Its "+N more"
+counts the result's rows it doesn't show (a folded branch shows all under
+it), not the folder rows made from paths, so a panel of files says how many
+files are left.
+
 Each component names the columns it draws from in its own block: `chart`
 (`x`, `y`, `series`, `label`, `size`, `group`, and a `line`'s `targets`: a
 target line from that column's last non-null value), `tree` (`id`,
-`parent`, `label`; lazy: `lazy`, `branch`), `timeline` (`at`, `label`,
+`parent`, `label`, or `path` in their place, and `status`; lazy: `lazy`,
+`branch`), `timeline` (`at`, `label`,
 `uri`), `steps` (`label`, `status`), `sections` (`title`; optional `id`,
 `link`, `body`), `hunks` (`path`, `from`, `to` — two
 revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
@@ -540,7 +572,13 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   every Alerts row uses, its kind's icon and label, a link with a `uri`;
   an agent reads `agent in <label>`, `extension <label>`, `You`). It
   changes only what a person sees; an agent reads the raw value (but for
-  `items` and `source`).
+  `items`, `marks` and `source`). `marks` (a JSON array of strings or
+  `{text, tone?, hint?, gap?}`): short marks drawn tight, each in its tone, the
+  hint on hover (`MarksCell`), a `gap: true` mark starting a new group
+  after a muted dot; an agent reads them joined by spaces (a group after
+  ` · `), a hint in parentheses. The Git panel's changes line is one: `4A
+  5M · +179 −175 · 2U`, coloured: the tracked files, the lines, the
+  untracked files.
 - A timestamp cell shows in local time, its full time on hover.
 - A `table` sizes its columns and stripes its rows with no page settings.
   The renderer picks each column's wrap from its `format` and the texts

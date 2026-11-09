@@ -1,0 +1,28 @@
+# The one statement of which files a stream shows: `all` is one folder, its
+# unchanged files among the changed (each with its status, a folder a row of
+# its own); `changed_untracked` is every changed file, and `changed` leaves
+# out the ones git doesn't track yet.
+given:
+  - observe: { turn: { prompt: base, write: { path: src/kept.rs, body: "k\n" } } }
+  - { command: oxplow.vcs.stage, input: { stream: str1, paths: [src/kept.rs] } }
+  - { command: oxplow.vcs.commit, input: { stream: str1, message: base } }
+  - observe: { turn: { prompt: edit, write: { path: src/kept.rs, body: "changed\n" } } }
+  - observe: { turn: { prompt: new, write: { path: src/new.rs, body: "n\n" } } }
+  - observe: { analyze: { kind: working } }
+when: { query: "oxplow/worktree-files#files", params: { stream_id: 1, show: all, folder: src } }
+expect:
+  rows:
+    - { path: src/kept.rs, status: modified, is_dir: 0, file_path: src/kept.rs }
+    - { path: src/new.rs, status: untracked, is_dir: 0 }
+steps:
+  - when: { query: "oxplow/worktree-files#files", params: { stream_id: 1, show: changed_untracked } }
+    expect:
+      rows:
+        contains:
+          - { path: src/kept.rs, status: modified }
+          - { path: src/new.rs }
+  # Under `src` alone: the untracked file is left out.
+  - when: { query: "oxplow/worktree-files#files", params: { stream_id: 1, show: changed, folder: src } }
+    expect:
+      rows:
+        - { path: src/kept.rs, status: modified }

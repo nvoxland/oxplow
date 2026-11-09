@@ -2360,8 +2360,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         }
     }
     let pages = ext.page_files.clone();
-    ext.page_files.retain(|page| {
-        let problem = page_icon_problem(page)
+    ext.page_files.retain_mut(|page| {
+        let problem = page_icon_problem(page, files)
             .map(|e| ("page.invalid_icon", e))
             .or_else(|| page_ref_problem(page, &pages).map(|e| ("page.invalid_ref", e)));
         match problem {
@@ -2774,11 +2774,25 @@ pub(crate) fn qualify_page_refs(page: &mut crate::pages::schema::Page) {
     });
 }
 
-/// A page `icon` oxplow doesn't draw.
-fn page_icon_problem(page: &crate::pages::schema::Page) -> Option<String> {
-    let icon = page.icon.as_deref()?;
-    (!crate::extension::extension_resources::ICONS.contains(&icon))
-        .then(|| format!("`icon: {icon}` isn't one oxplow draws"))
+/// Resolve every icon `page` names (`pages::refs::for_each_icon`): an
+/// `assets/<name>.svg` becomes the extension's svg as a data URI. The first
+/// that can't be drawn (a name oxplow doesn't draw, a missing svg) is why
+/// the page doesn't load.
+fn page_icon_problem(
+    page: &mut crate::pages::schema::Page,
+    files: &dyn ExtensionFiles,
+) -> Option<String> {
+    let mut problem = None;
+    crate::pages::refs::for_each_icon(page, |place, icon| {
+        if problem.is_some() {
+            return;
+        }
+        match crate::extension::extension_resources::resolve_icon(icon, files) {
+            Ok(resolved) => *icon = resolved,
+            Err(why) => problem = Some(format!("{place}: {why}")),
+        }
+    });
+    problem
 }
 
 /// What `page` names that it can't: a page file of its own extension
@@ -3228,11 +3242,18 @@ pub(crate) fn shape_problem(cfg: &VizConfig, components: &[String]) -> Option<St
         Viz::Treemap => need("chart", &[("label", &chart.label), ("size", &chart.size)]),
         Viz::Tree => {
             let t = cfg.tree.clone().unwrap_or_default();
-            need(
-                "tree",
-                &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
-            )
-            .or_else(|| lazy_tree_problem(cfg, &t))
+            // Over paths, the path is the id, the parent and the label.
+            let shape = if t.path.is_some() {
+                [&t.id, &t.parent, &t.label].iter().any(|k| k.is_some()).then(|| {
+                    "`tree.path` names the id, the parent and the label: give it, or `id`/`parent`/`label`, not both".to_string()
+                })
+            } else {
+                need(
+                    "tree",
+                    &[("id", &t.id), ("parent", &t.parent), ("label", &t.label)],
+                )
+            };
+            shape.or_else(|| lazy_tree_problem(cfg, &t))
         }
         Viz::Timeline => {
             let t = cfg.timeline.clone().unwrap_or_default();
@@ -7331,6 +7352,54 @@ commands:
         }
     }
 
+    /// A tree over paths names its `path` (and maybe its `status`) in place
+    /// of `id`/`parent`/`label`, never beside them. (Both are role columns,
+    /// checked against the result as every tree column is.)
+    #[test]
+    fn a_path_tree_names_its_path_not_its_ids() {
+        let tree = |sql: &str, node: &str| viz_page("", sql, &format!("viz: tree\n{node}"));
+        let (_d, ext) = load_x(
+            &[
+                (
+                    "paths",
+                    &tree(
+                        "SELECT 'a/b.rs' AS path, 'added' AS status",
+                        "tree: { path: path, status: status }\n",
+                    ),
+                ),
+                (
+                    "both",
+                    &tree(
+                        "SELECT 'a' AS path, 'a' AS id",
+                        "tree: { path: path, id: id }\n",
+                    ),
+                ),
+                (
+                    "nostatus",
+                    &tree(
+                        "SELECT 'a' AS path",
+                        "tree: { path: path, status: status }\n",
+                    ),
+                ),
+            ],
+            "",
+        );
+        let viz = |slug: &str| node(&ext, slug);
+        let paths = viz("paths").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        let t = paths.tree.as_ref().unwrap();
+        assert_eq!(
+            (t.path.as_deref(), t.status.as_deref()),
+            (Some("path"), Some("status"))
+        );
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.lines().any(|l| l.contains("both")
+                && l.contains("`tree.path` names the id, the parent and the label")),
+            "{errs}"
+        );
+        assert!(viz("both").is_none(), "both loaded");
+    }
+
     /// `code` shows each row's file at a revision, `diff` the first row's
     /// file between two: each needs its block's columns, and the rest of
     /// the block is optional.
@@ -9535,6 +9604,62 @@ commands:
         );
         assert!(
             errs.contains("d.yaml") && errs.contains("`icon: unicorn` isn't one oxplow draws"),
+            "{errs}"
+        );
+    }
+
+    /// A page's icons (its own, its choices' options', its actions') may be
+    /// an svg the extension brings (`assets/<name>.svg`), published as a
+    /// data URI like a resource's; a missing svg or a name oxplow doesn't
+    /// draw is an error at the page.
+    #[test]
+    fn a_pages_icons_may_be_svgs_the_extension_brings() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h1v1z"/></svg>"#;
+        let choice = |icon: &str| {
+            format!(
+                "params:\n  - name: show\n    role: filter\n    default: a\n    options:\n      - {{ value: a, label: A, icon: {icon} }}\n      - {{ value: b, label: B, icon: star }}\n"
+            )
+        };
+        let (_d, ext) = load_tree(&[
+            ("assets/own.svg", svg),
+            (
+                "pages/a.yaml",
+                &viz_page(
+                    &format!("icon: assets/own.svg\n{}", choice("assets/own.svg")),
+                    "SELECT 1",
+                    "actions:\n  - { id: go, label: Go, command: x.y.z, icon: assets/own.svg }",
+                ),
+            ),
+            (
+                "pages/b.yaml",
+                &viz_page(&choice("unicorn"), "SELECT 1", ""),
+            ),
+            (
+                "pages/c.yaml",
+                &viz_page("icon: assets/gone.svg\n", "SELECT 1", ""),
+            ),
+        ]);
+        let uri = format!(
+            "data:image/svg+xml;base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, svg)
+        );
+        let a = page_of(&ext, "a").unwrap_or_else(|| panic!("{:?}", ext.errors));
+        assert_eq!(a.icon.as_deref(), Some(uri.as_str()));
+        let options = &a.params[0].options;
+        assert_eq!(options[0].icon.as_deref(), Some(uri.as_str()));
+        assert_eq!(options[1].icon.as_deref(), Some("star"));
+        assert_eq!(
+            node(&ext, "a").unwrap().actions[0].icon.as_deref(),
+            Some(uri.as_str())
+        );
+        assert!(page_of(&ext, "b").is_none() && page_of(&ext, "c").is_none());
+        let errs = shown_errors(&ext);
+        assert!(
+            errs.contains("b.yaml") && errs.contains("`icon: unicorn` isn't one oxplow draws"),
+            "{errs}"
+        );
+        assert!(
+            errs.contains("c.yaml") && errs.contains("no file `assets/gone.svg`"),
             "{errs}"
         );
     }

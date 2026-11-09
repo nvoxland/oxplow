@@ -98,9 +98,8 @@ test("the rail opens a panel's collapsed and count pages with its body", async (
 });
 
 // A body page's choice params are the panel's header toggle; the
-// viewer's pick goes with the body and the collapsed view (which follows
-// the header), not the badge or count.
-test("a choice param sends the viewer's pick with the body and collapsed parts", async () => {
+// viewer's pick goes with every part (the daemon keeps what each declares).
+test("a choice param sends the viewer's pick with every part", async () => {
   const { runs, opened } = fakePageRunsBy((key) => runOf(key.page));
   const panels = [panel("thread", { body: "x/body", collapsed: "x/line" })];
   const view = renderHook(() => useExtensionPanelRuns(panels, "str2", "thr7", { "x/p": { mode: "top" } }, runs));

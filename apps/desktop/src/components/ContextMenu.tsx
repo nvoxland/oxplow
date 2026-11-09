@@ -10,7 +10,7 @@ import {
 
 import type { MenuItem, MenuPosition } from "../menu.js";
 import { useRunner } from "../commands/RunnerContext.js";
-import { ICONS } from "../icons.js";
+import { iconFor } from "../icons.js";
 import { formatShortcut } from "../keybindings.js";
 
 interface ContextMenuProps {
@@ -169,7 +169,7 @@ export function MenuList({ items, header, onAction, minWidth = 220, framed = tru
             >
               <span style={checkStyle}>{item.checked ? "✓" : ""}</span>
               {item.swatch ? <span aria-hidden style={{ ...swatchStyle, background: item.swatch }} /> : null}
-              {item.icon && ICONS[item.icon] ? <MenuIcon name={item.icon} /> : null}
+              {iconFor(item.icon) ? <MenuIcon name={item.icon!} /> : null}
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.label}</span>
               <span style={shortcutStyle}>{hasSubmenu ? "▸" : item.shortcut ? formatShortcut(item.shortcut) : ""}</span>
             </button>
@@ -260,7 +260,7 @@ const submenuHeaderStyle: CSSProperties = {
 
 /** An item's icon (`MenuItem.icon`), before its label. */
 function MenuIcon({ name }: { name: string }) {
-  const Icon = ICONS[name]!;
+  const Icon = iconFor(name)!;
   return (
     <span aria-hidden data-testid="menu-item-icon" style={{ display: "inline-flex", marginRight: 6, color: "var(--text-secondary)" }}>
       <Icon size={14} />

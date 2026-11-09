@@ -1,4 +1,4 @@
-import { ICONS } from "../../icons.js";
+import { iconFor } from "../../icons.js";
 import type { ReactNode } from "react";
 import { useAppPreference } from "../../prefs/remembered.js";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
@@ -488,7 +488,7 @@ function RailEmpty({ label }: { label: string }) {
   );
 }
 
-/** An extension's panel (P6.G1): its body page, compact; its count in the
+/** An extension's panel (P6.G1): its body page, compact with its buttons; its count in the
  *  header (the count page's, else the badge's while it fires); and,
  *  collapsed, its collapsed page compact as the summary. */
 function ExtensionPanelSection({
@@ -507,21 +507,23 @@ function ExtensionPanelSection({
   const extensions = useExtensions();
   // The value in force is the one the body ran with (the daemon's).
   const toggles = runs.choices;
-  // A panel's part: its page drawn small.
-  const compactPage = (open: OpenPanelRun, testId: string) => (
-    <div data-testid={testId} style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
-      <PageTree run={open.run} runId={open.runId} compact streamId={streamId} onOpenPage={onOpenPage} />
+  // A panel's part: its page drawn small, its "+N more" opening the
+  // panel's page. The body keeps its buttons; the collapsed line is stats.
+  const openRef = panelOpenRef(panel, extensions);
+  const compactPage = (open: OpenPanelRun, testId: string, buttons: boolean) => (
+    <div data-testid={testId} className="ox-compact" style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
+      <PageTree run={open.run} runId={open.runId} compact partButtons={buttons} more={openRef} streamId={streamId} onOpenPage={onOpenPage} />
     </div>
   );
-  const body = runs.body ? compactPage(runs.body, "rail-panel-body") : null;
-  const collapsed = runs.collapsed ? compactPage(runs.collapsed, "rail-panel-collapsed") : undefined;
+  const body = runs.body ? compactPage(runs.body, "rail-panel-body", true) : null;
+  const collapsed = runs.collapsed ? compactPage(runs.collapsed, "rail-panel-collapsed", false) : undefined;
   return (
     <RailSection
       id={extensionPanelId(panel)}
       title={panel.title}
       count={runs.count ?? undefined}
       collapsedContent={collapsed}
-      opens={{ to: panelOpenRef(panel, extensions), name: panel.title, onNavigate: onOpenPage }}
+      opens={{ to: openRef, name: panel.title, onNavigate: onOpenPage }}
       headerAction={
         toggles.length > 0 ? (
           <>
@@ -552,7 +554,7 @@ function PanelChoiceToggle({ choice, onPick }: { choice: PanelChoice; onPick(val
         const active = o.value === choice.value;
         // An option that names an icon is the icon alone, its label the
         // hover and the button's name.
-        const Icon = o.icon ? ICONS[o.icon as keyof typeof ICONS] : undefined;
+        const Icon = iconFor(o.icon);
         return (
           <button
             key={o.value}

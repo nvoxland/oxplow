@@ -361,6 +361,38 @@ export function itemList(v: SqlCell | undefined): Item[] | null {
   }
 }
 
+/** One mark of a `marks` cell: its text, its tone, its hover; `gap`: it
+ *  starts a new group, a dot before it. */
+export interface Mark {
+  text: string;
+  tone?: string;
+  hint?: string;
+  gap?: boolean;
+}
+
+/** A `marks` cell's marks (a JSON array of strings or `{ text, tone?,
+ *  hint?, gap? }`); null when the value isn't one. */
+export function markList(v: SqlCell | undefined): Mark[] | null {
+  if (typeof v !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(v);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.flatMap((x): Mark[] => {
+      if (typeof x === "string") return x === "" ? [] : [{ text: x }];
+      if (typeof x !== "object" || x === null) return [];
+      const o = x as Record<string, unknown>;
+      if (typeof o.text !== "string" || o.text === "") return [];
+      const mark: Mark = { text: o.text };
+      if (typeof o.tone === "string" && o.tone !== "") mark.tone = o.tone;
+      if (typeof o.hint === "string" && o.hint !== "") mark.hint = o.hint;
+      if (o.gap === true || o.gap === 1) mark.gap = true;
+      return [mark];
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** How a table column's cells wrap. `nowrap`: a date, a number, a value
  *  with a unit, or short values with no spaces stay on one line.
  *  `words`: breaks only between words, so the column is at least its
@@ -368,7 +400,7 @@ export function itemList(v: SqlCell | undefined): Item[] | null {
  *  path) that break anywhere, so it is the column that gives way. */
 export type ColumnWrap = "nowrap" | "words" | "breakable";
 
-const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge"]);
+const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge", "marks"]);
 const SHORT_VALUE = 20;
 const LONGEST_WORD = 24;
 
@@ -392,6 +424,10 @@ function byFormat(v: string | number, format: ColumnFormat): string | null {
   if (format === "items") {
     const list = itemList(v);
     return list === null ? null : list.map((i) => i.text).join(" · ");
+  }
+  if (format === "marks") {
+    const list = markList(v);
+    return list === null ? null : list.map((m) => m.text).join(" ");
   }
   if (format === "source") {
     const who = sourceValue(v);
@@ -551,15 +587,123 @@ export interface TreeNode {
   lazy: boolean;
   state: "loading" | { error: string } | null;
   children: TreeNode[];
+  /** A path tree's folder made from the paths: its `row` is all nulls and
+   *  no row of the result (no menu, no link, no actions). */
+  made?: boolean;
+  /** A path tree's status marks (`tree.status`), in `STATUS_MARKS` order. */
+  marks?: readonly StatusMark[];
+  /** A path tree's full path, its hover. */
+  path?: string;
+}
+
+/** One status mark: the change status it is, its letter, its tone. */
+export interface StatusMark {
+  status: string;
+  letter: string;
+  tone: "success" | "warning" | "danger" | "accent";
+}
+
+/** Core's change statuses (`FileStatus`) as marks, in the order a folder
+ *  lists them (`pages/path_tree.rs` `MARKS`). */
+export const STATUS_MARKS: readonly StatusMark[] = [
+  { status: "added", letter: "A", tone: "success" },
+  { status: "modified", letter: "M", tone: "warning" },
+  { status: "deleted", letter: "D", tone: "danger" },
+  { status: "renamed", letter: "R", tone: "accent" },
+  { status: "untracked", letter: "U", tone: "success" },
+  { status: "conflicted", letter: "C", tone: "danger" },
+];
+
+function statusMark(v: SqlCell | undefined): StatusMark | null {
+  return typeof v === "string" ? (STATUS_MARKS.find((m) => m.status === v) ?? null) : null;
+}
+
+/** The column that is a tree row's id: `tree.id`, or a path tree's path. */
+export function treeIdColumn(viz: VizConfig): string | null {
+  return viz.tree?.id ?? viz.tree?.path ?? null;
+}
+
+const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** A path's last name. */
+function baseName(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1);
+}
+
+/** A tree over paths (`tree.path`, not lazy): each row a file, its folders
+ *  made from its path, folders first then files, each by name; a made
+ *  folder holding one made folder and nothing else joined with it (`a/b`);
+ *  a row's mark its status, a made folder's the marks under it. The
+ *  daemon's `pages/path_tree.rs` builds the same tree for an agent. */
+function pathTreeNodes(viz: VizConfig, result: SqlQueryResult): TreeNode[] {
+  const paths = columnValues(result, viz.tree?.path);
+  if (!paths) return [];
+  const statuses = columnValues(result, viz.tree?.status);
+  interface Dir {
+    row: number | null;
+    children: Map<string, Dir>;
+  }
+  const root: Dir = { row: null, children: new Map() };
+  paths.forEach((p, i) => {
+    const path = p === null ? "" : String(p).replace(/^\/+|\/+$/g, "");
+    if (path === "") return;
+    let at = root;
+    for (const seg of path.split("/")) {
+      let next = at.children.get(seg);
+      if (!next) {
+        next = { row: null, children: new Map() };
+        at.children.set(seg, next);
+      }
+      at = next;
+    }
+    if (at.row === null) at.row = i;
+  });
+  const blank = result.columns.map(() => null);
+  const build = (dir: Dir, prefix: string): TreeNode[] => {
+    const out = [...dir.children.keys()].sort(byName).map((name) => {
+      const d = dir.children.get(name)!;
+      const path = prefix === "" ? name : `${prefix}/${name}`;
+      const children = build(d, path);
+      const own = d.row === null ? null : statusMark(statuses?.[d.row]);
+      const marks = own ? [own] : STATUS_MARKS.filter((m) => children.some((c) => c.marks?.includes(m)));
+      let node: TreeNode = {
+        label: name,
+        row: d.row === null ? blank : result.rows[d.row]!,
+        id: path,
+        branch: children.length > 0,
+        lazy: false,
+        state: null,
+        children,
+        made: d.row === null,
+        marks,
+        path,
+      };
+      // A made folder whose one child is a made folder reads as one row.
+      while (node.made && node.children.length === 1 && node.children[0]!.made && node.children[0]!.branch) {
+        const only = node.children[0]!;
+        node = { ...node, label: `${node.label}/${only.label}`, id: only.id, path: only.path, marks: only.marks, children: only.children };
+      }
+      return node;
+    });
+    // Folders first, then files.
+    return [...out.filter((n) => n.branch), ...out.filter((n) => !n.branch)];
+  };
+  return build(root, "");
 }
 
 /** `tree` viz: each row under the row whose `tree.id` its `tree.parent`
  *  names; a row with no parent, or one not in the result, is a root. A
  *  cycle is broken at the first row seen twice. */
 export function treeNodes(viz: VizConfig, result: SqlQueryResult): TreeNode[] {
-  const ids = columnValues(result, viz.tree?.id);
-  const parents = columnValues(result, viz.tree?.parent);
-  const labels = columnValues(result, viz.tree?.label);
+  if (viz.tree?.path && !viz.tree.lazy) return pathTreeNodes(viz, result);
+  // A lazy path tree is one level: id the path, parent its folder, label
+  // its name, mark its own status.
+  const paths = viz.tree?.path ? columnValues(result, viz.tree.path) : null;
+  const statuses = paths ? columnValues(result, viz.tree?.status) : null;
+  const ids = paths ?? columnValues(result, viz.tree?.id);
+  const parents = paths ? paths.map((p) => (p === null || !String(p).includes("/") ? null : String(p).slice(0, String(p).lastIndexOf("/")))) : columnValues(result, viz.tree?.parent);
+  const labels = paths ? paths.map((p) => (p === null ? null : baseName(String(p)))) : columnValues(result, viz.tree?.label);
   if (!ids || !parents || !labels) return [];
   const key = (v: SqlCell) => (v === null ? null : String(v));
   const idIndex = new Map<string, number>();
@@ -582,7 +726,10 @@ export function treeNodes(viz: VizConfig, result: SqlQueryResult): TreeNode[] {
         if (child) children.push(child);
       }
     });
-    return { label: formatCell(labels[at] ?? null), row: result.rows[at]!, id: key(ids[at] ?? null), branch: children.length > 0, lazy: false, state: null, children };
+    const node: TreeNode = { label: formatCell(labels[at] ?? null), row: result.rows[at]!, id: key(ids[at] ?? null), branch: children.length > 0, lazy: false, state: null, children };
+    if (!paths) return node;
+    const mark = statusMark(statuses?.[at]);
+    return { ...node, made: false, marks: mark ? [mark] : [], path: key(paths[at] ?? null) ?? undefined };
   };
   const roots: TreeNode[] = [];
   parentOf.forEach((p, i) => {
@@ -640,7 +787,8 @@ export function lazyTreeProblem(viz: VizConfig, result: SqlQueryResult): string 
 
 /** The rows a tree draws, in its order: a spliced branch's rows under it. */
 export function drawnTreeRows(nodes: readonly TreeNode[]): SqlCell[][] {
-  return nodes.flatMap((n) => [n.row, ...drawnTreeRows(n.children)]);
+  // A made folder is no row of the result.
+  return nodes.flatMap((n) => [...(n.made ? [] : [n.row]), ...drawnTreeRows(n.children)]);
 }
 
 /** The lazy branches to run: those in `open` that are reachable, a parent
@@ -648,7 +796,8 @@ export function drawnTreeRows(nodes: readonly TreeNode[]): SqlCell[][] {
  *  left open under a closed one keeps its place without running. Each
  *  with its id cell, the lazy param's value. */
 export function wantedBranches(viz: VizConfig, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): { id: string; value: SqlCell }[] {
-  const idAt = viz.tree?.id ? result.columns.indexOf(viz.tree.id) : -1;
+  const idColumn = treeIdColumn(viz);
+  const idAt = idColumn ? result.columns.indexOf(idColumn) : -1;
   const out: { id: string; value: SqlCell }[] = [];
   const walk = (nodes: readonly TreeNode[]) => {
     for (const n of nodes) {

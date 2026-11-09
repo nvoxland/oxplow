@@ -54,6 +54,18 @@
   font-size: var(--text-xs);
 }
 
+/* A rail panel's part (`.ox-compact`, `RailHud`) is narrow: its sections
+   sit close (`:not(#ox-none)` outranks the frame rules above whatever the
+   nesting), a detail's facts are short lines with no rules, and a fact's
+   buttons wrap under its value, small, their labels whole. */
+.ox-compact .ox-section:not(#ox-none) { margin-top: var(--space-2); }
+.ox-compact [data-node]:first-child > .ox-section:not(#ox-none) { margin-top: 0; }
+.ox-compact .ox-facts { column-gap: var(--space-3); font-size: inherit; }
+.ox-compact .ox-fact dt, .ox-compact .ox-fact dd { padding: 2px 0; border-bottom: 0; }
+.ox-compact .ox-fact dd { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--space-3); overflow-wrap: normal; font-weight: normal; }
+.ox-compact .ox-fact-actions { margin-left: 0; }
+.ox-compact .ox-fact-actions .ox-button { padding: 0 6px; font-size: inherit; white-space: nowrap; }
+
 /* Buttons: one primary per region, the rest plain. */
 .ox-button {
   font: inherit;

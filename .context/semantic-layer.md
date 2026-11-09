@@ -1424,7 +1424,7 @@ oxplow-bundled change cards) only read them.
   duplicates), stamped `computed_at` / `events_to`. Both write the file
   rows; a list that saw older events than the stored one is dropped
   (`change_store::write_files`). Readers of the file list (the
-  Uncommitted panel) read stage one; readers of the deep rows compare
+  Git panel) read stage one; readers of the deep rows compare
   `events_to` with `files_events_to` to know whether it's caught up.
 - **Keeping it current (P7.B4).** The `change.analyze` async pump consumer
   (`change_reactor.rs`) recomputes them as the stream moves: on a
@@ -1441,7 +1441,7 @@ oxplow-bundled change cards) only read them.
   watcher (250 ms debounce) calls `ref_moves.paths_moved`, and the relist looks
   at those paths alone (`git-integration.md` "The working-files list"), so an edit
   made outside oxplow shows in `v_change_file` (and the rail's
-  Uncommitted panel) without waiting for a snapshot take. Moves queued
+  Git panel) without waiting for a snapshot take. Moves queued
   during a relist are folded into one relist per stream. The deep analysis is
   **paced** (`change_reactor::deep_pacing`, the same mechanism as
   collectors' — metrics.md "Pacing"): a take records core's job in

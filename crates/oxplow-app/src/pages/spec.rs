@@ -284,6 +284,18 @@ pub struct VizTree {
     pub id: Option<String>,
     pub parent: Option<String>,
     pub label: Option<String>,
+    /// A tree over paths, in place of `id`/`parent`/`label`: each row a
+    /// file (or a folder), its folders made from its path, a folder that
+    /// holds one folder and nothing else joined with it (`a/b`). A lazy
+    /// one reads id, parent and label from it alone (`pages/path_tree.rs`).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// A column of core's change statuses (`added`, `modified`, `deleted`,
+    /// `renamed`, `untracked`, `conflicted`), each row's drawn as a
+    /// coloured letter at its end (A M D R U C); a made folder shows the
+    /// marks of what is under it.
+    #[serde(default)]
+    pub status: Option<String>,
     /// The column a row's value reads from, beside its label: one line, the
     /// whole of it on hover.
     #[serde(default)]
@@ -878,6 +890,12 @@ pub enum ColumnFormat {
     /// ` · `; `hint` is the item's hover text, `uri` makes it a link. An
     /// agent reads them joined by ` · `, a hint in parentheses.
     Items,
+    /// Short marks (a JSON array): each element is a string or `{ "text":
+    /// …, "tone"?: …, "hint"?: … }`, drawn as small tight letters, each in
+    /// its own `tone` (`accent`, `success`, `warning`, `danger`, `muted`) —
+    /// a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
+    /// agent reads them joined by spaces, a hint in parentheses.
+    Marks,
     /// Who caused it (a JSON object `{ "kind": "agent" | "you" |
     /// "extension" | "page", "label": …, "uri"?: … }`): a small chip with
     /// the kind's icon, a link when it has a `uri` (an agent's thread, an
@@ -1633,12 +1651,8 @@ pub(crate) fn parse_actions(
                     .iter()
                     .any(|(scope, _)| scope == "row"));
         if let Some(icon) = &f.icon {
-            if !crate::extension::extension_resources::ICONS.contains(&icon.as_str()) {
-                return Err(format!(
-                    "actions: `{}`: `icon: {icon}` isn't one oxplow draws; use one of {}",
-                    f.id,
-                    crate::extension::extension_resources::ICONS.join(", ")
-                ));
+            if let Some(why) = crate::extension::extension_resources::icon_problem(icon) {
+                return Err(format!("actions: `{}`: {why}", f.id));
             }
         }
         if let Some(name) = &f.submenu {
@@ -2056,7 +2070,7 @@ impl VizConfig {
         }
         if let Some(t) = &self.tree {
             out.extend(
-                [&t.id, &t.parent, &t.label, &t.branch]
+                [&t.id, &t.parent, &t.label, &t.path, &t.status, &t.branch]
                     .into_iter()
                     .flatten()
                     .map(|k| ("tree", k)),

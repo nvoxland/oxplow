@@ -15,7 +15,11 @@ const MODE = {
   name: "mode",
   label: "Show",
   default: "recent",
-  options: [{ value: "recent", label: "Recent" }, { value: "top", label: "Top", icon: "star" }],
+  options: [
+    { value: "recent", label: "Recent" },
+    { value: "top", label: "Top", icon: "star" },
+    { value: "own", label: "Own", icon: `data:image/svg+xml;base64,${btoa("<svg/>")}` },
+  ],
 };
 const rowsOf: Record<string, SqlCell[][]> = {
   "x/body": [["body row"]],
@@ -115,6 +119,10 @@ test("a choice option with an icon is an icon button, its label the hover", asyn
   expect(top.getAttribute("title")).toBe("Top");
   expect(top.getAttribute("aria-label")).toBe("Top");
   expect(view.getByTestId("rail-panel-choice-mode-recent").textContent).toBe("Recent");
+  // An svg its extension brought is an icon too.
+  const own = view.getByTestId("rail-panel-choice-mode-own");
+  expect(own.querySelector("[data-testid=svg-icon]")).not.toBeNull();
+  expect(own.getAttribute("title")).toBe("Own");
 });
 
 test("a count of zero draws no badge in the header", async () => {

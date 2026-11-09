@@ -57,6 +57,7 @@ import {
   timelineEntries,
   treeNodes,
   lazyTreeNodes,
+  markList,
   lazyTreeProblem,
   drawnTreeRows,
   treemapItems,
@@ -90,6 +91,7 @@ import { DataTable, type DataColumn, type RowProps } from "../kit/DataTable.js";
 import { Facts } from "../kit/Facts.js";
 import { DelayedLoading } from "../kit/useDelayed.js";
 import { ItemsCell } from "./ItemsCell.js";
+import { MarksCell } from "./MarksCell.js";
 import { SourceChip } from "../kit/SourceChip.js";
 import { DisclosureGlyph } from "../kit/Disclosure.js";
 import { OpenPageLink } from "../kit/OpenPageLink.js";
@@ -119,7 +121,9 @@ import { VIZ_ROW_DRAG_MIME } from "../dragMimes.js";
 import { VizIcon, vizIcon, toneColor } from "./vizIcons.js";
 import { useExtensions } from "../extensionsStore.js";
 
-type CellRenderer = (row: SqlCell[], col: DisplayColumn) => ReactNode;
+/** A cell; `display` is the text it shows in place of its value (a path
+ *  tree's name for the path, which the link still reads). */
+type CellRenderer = (row: SqlCell[], col: DisplayColumn, display?: string) => ReactNode;
 
 /**
  * Renders a viz run's result in the viz's viz. Shared by the viz page,
@@ -295,6 +299,9 @@ interface VizViewProps {
   /** Where links go; without it they navigate through the route context. */
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   maxRows?: number;
+  /** Where the rows past `maxRows` are: a compact viz's "+N more" opens
+   *  it (a panel's page); without it, the row says how many. */
+  more?: TabRef | null;
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
@@ -491,9 +498,13 @@ function RowsBody({
   tree = null,
   isPage = false,
   partButtons = false,
+  more = null,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
-  const limited = limitRows(run.result, maxRows);
+  // A tree caps the rows it shows, not the rows it has: folding frees rows.
+  const capsShown = viz.viz === "tree";
+  const limited = capsShown ? run.result : limitRows(run.result, maxRows);
+  const past = run.result.rows.length - limited.rows.length;
   // The rows under a parent folded away (a `depth` viz: an epic's
   // children), kept in this step's history state like the groups'.
   const rowsClosed = useCollapsedSet("viz-rows.closed");
@@ -578,17 +589,20 @@ function RowsBody({
       </span>
     );
   };
-  const cell: CellRenderer = (row, c) => {
+  const cell: CellRenderer = (row, c, display) => {
     const raw = row[c.index] ?? null;
-    const formatted = formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
+    const formatted = display ?? formatCell(raw, c.unitIndex === null ? undefined : (row[c.unitIndex] ?? null), c.format);
     // A timestamp keeps its full local time a hover away.
     // A highlighted column marks its param's current value in the text.
     const needle = c.highlight === null ? "" : String(run.params[c.highlight] ?? "");
     const series = c.format === "sparkline" ? sparklineValues(raw) : null;
     const itemsList = c.format === "items" ? itemList(raw) : null;
     const source = c.format === "source" ? sourceValue(raw) : null;
+    const marksList = c.format === "marks" ? markList(raw) : null;
     const text = source ? (
       <SourceChip source={source} />
+    ) : marksList ? (
+      <MarksCell marks={marksList} />
     ) : itemsList ? (
       <ItemsCell items={itemsList} linkStyle={linkStyle} />
     ) : series ? (
@@ -951,7 +965,10 @@ function RowsBody({
           const own = viz.actions.filter((a) => a.fact === key && offeredWholePage(a, result));
           return own.length > 0 ? own.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />) : null;
         }}
-        {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }} tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null } : null} />
+        {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }}
+        tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null, cap: compact ? (maxRows ?? null) : null, more } : null}
+      />
+      {compact && past > 0 ? <MoreRow count={past} more={more} onOpenPage={onOpenPage} /> : null}
       {ctxMenu.menu}
     </>
   );
@@ -1118,8 +1135,9 @@ function Viz({
   compact: boolean;
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
-  /** A tree's nodes, and the open set a lazy tree's branches toggle. */
-  tree: { nodes: TreeNode[]; open: CollapsedSet | null } | null;
+  /** A tree's nodes, the open set a lazy tree's branches toggle, and how
+   *  many visible rows it shows (compact) and where the rest are. */
+  tree: { nodes: TreeNode[]; open: CollapsedSet | null; cap: number | null; more: TabRef | null } | null;
   rowMenu: RowMenu;
   rowsView: RowsView;
   onCustomFailure?(reason: string): void;
@@ -1150,6 +1168,9 @@ function Viz({
         <TreeViz
           nodes={tree!.nodes}
           lazyOpen={tree!.open}
+          cap={tree!.cap}
+          more={tree!.more}
+          onOpenPage={onOpenPage}
           problem={lazyTreeProblem(viz, result)}
           label={treeLabelColumn(viz, cols, result.columns)}
           columns={treeValueColumns(viz, result.columns)}
@@ -1539,7 +1560,8 @@ export function FormModal({
 /** The column a tree's labels are drawn as: its declared column (so its
  *  link, icon and tone apply), else the plain `tree.label` column. */
 function treeLabelColumn(viz: VizRun["config"], cols: DisplayColumn[], resultColumns: string[]): DisplayColumn | null {
-  const key = viz.tree?.label;
+  // A path tree's label is its path's column, drawn by its name.
+  const key = viz.tree?.label ?? viz.tree?.path;
   if (!key) return null;
   const declared = cols.find((c) => c.key === key);
   if (declared) return declared;
@@ -1567,9 +1589,36 @@ interface TreeVizProps {
 /** `tree`: nested rows, each branch collapsible. A branch the result
  *  nests is open by default (the closed ones, by index path, are this
  *  step's history state); a lazy branch (`tree.lazy`) is closed by default
- *  and opens by its id (`lazyOpen`), its row's click or Enter toggling it. */
-function TreeViz({ nodes, lazyOpen, problem, ...rest }: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null }) {
+ *  and opens by its id (`lazyOpen`), its row's click or Enter toggling it.
+ *  With a `cap` (compact) it draws that many visible rows, in order, and
+ *  says how many more: folding a branch frees rows. */
+function TreeViz({
+  nodes,
+  lazyOpen,
+  problem,
+  cap = null,
+  more = null,
+  onOpenPage,
+  ...rest
+}: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null; cap?: number | null; more?: TabRef | null; onOpenPage?(ref: TabRef): void }) {
   const closed = useCollapsedSet("viz-tree.closed");
+  const isOpen = (n: TreeNode, path: string) => treeNodeOpen(n, path, closed, lazyOpen);
+  // The visible rows' paths, in order, each with how many of the result's
+  // rows it stands for: its own (a made folder has none) and, folded, all
+  // under it. "+N more" counts those past the cap, so it counts files, not
+  // the folder rows made from their paths.
+  const visible: { path: string; rows: number }[] = [];
+  const rowsIn = (list: readonly TreeNode[]): number => list.reduce((sum, n) => sum + (n.made ? 0 : 1) + rowsIn(n.children), 0);
+  const walk = (list: readonly TreeNode[], prefix: string) =>
+    list.forEach((n, i) => {
+      const path = prefix === "" ? String(i) : `${prefix}.${i}`;
+      const open = isOpen(n, path);
+      visible.push({ path, rows: (n.made ? 0 : 1) + (open ? 0 : rowsIn(n.children)) });
+      if (open) walk(n.children, path);
+    });
+  walk(nodes, "");
+  const shown = cap === null ? null : new Set(visible.slice(0, cap).map((v) => v.path));
+  const past = cap === null ? 0 : visible.slice(cap).reduce((sum, v) => sum + v.rows, 0);
   return (
     <>
       {problem ? (
@@ -1579,44 +1628,80 @@ function TreeViz({ nodes, lazyOpen, problem, ...rest }: TreeVizProps & { nodes: 
       ) : null}
       <ul data-testid="viz-tree" style={treeListStyle}>
         {nodes.map((n, i) => (
-          <TreeItem key={n.id ?? i} node={n} path={String(i)} closed={closed} lazyOpen={lazyOpen} {...rest} />
+          <TreeItem key={n.id ?? i} node={n} path={String(i)} closed={closed} lazyOpen={lazyOpen} shown={shown} {...rest} />
         ))}
       </ul>
+      {past > 0 ? <MoreRow count={past} more={more} onOpenPage={onOpenPage} /> : null}
     </>
   );
 }
 
-function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet; lazyOpen: CollapsedSet | null }) {
+/** Whether tree node `n` (at index path `path`) is open: a lazy branch by
+ *  its id in `lazyOpen`, any other branch unless `closed` holds it. */
+function treeNodeOpen(n: TreeNode, path: string, closed: CollapsedSet, lazyOpen: CollapsedSet | null): boolean {
+  const lazy = n.lazy && lazyOpen !== null && n.id !== null;
+  return lazy ? lazyOpen.has(n.id!) : n.branch && !closed.has(path);
+}
+
+/** The row after a compact viz's last: how many rows it doesn't show, a
+ *  link to where they are when it has one. */
+function MoreRow({ count, more, onOpenPage }: { count: number; more: TabRef | null; onOpenPage?(ref: TabRef): void }) {
+  const text = `+${count} more`;
+  return (
+    <div data-testid="viz-more" style={{ padding: "2px 0 0 20px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+      {more ? (
+        <RouteLink to={more} onNavigate={tabNavigate(more, onOpenPage)} style={linkStyle}>
+          {text}
+        </RouteLink>
+      ) : (
+        text
+      )}
+    </div>
+  );
+}
+
+/** A row that is no row of the result (a path tree's made folder): it
+ *  looks plain and offers nothing. */
+const NO_LOOK: RowLookOut = { props: {}, emphasized: false, indent: 0, fold: null, picks: false, selected: false };
+
+function TreeItem({ node, path, closed, lazyOpen, shown, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet; lazyOpen: CollapsedSet | null; shown: ReadonlySet<string> | null }) {
   const { label, cell, rowMenu, rowLook } = rest;
+  if (shown && !shown.has(path)) return null;
   const lazy = node.lazy && lazyOpen !== null && node.id !== null;
-  const open = lazy ? lazyOpen.has(node.id!) : node.branch && !closed.has(path);
-  const toggle = () => (lazy ? lazyOpen.toggle(node.id!) : closed.toggle(path));
-  const look = rowLook(node.row);
-  const menu = rowMenu(node.row);
+  const open = treeNodeOpen(node, path, closed, lazyOpen);
+  const toggle = () => (lazy ? lazyOpen!.toggle(node.id!) : closed.toggle(path));
+  const look = node.made ? NO_LOOK : rowLook(node.row);
+  // A made folder opens and closes on a click; it is nothing to act on.
+  const menu = node.made ? { onClick: toggle } : rowMenu(node.row);
   // A lazy branch's row opens on a plain click or Enter; a control or link
   // in it, and a marking click, keep their meaning.
-  const props = lazy
-    ? {
-        ...menu,
-        onClick: (e: React.MouseEvent) => {
-          if (e.metaKey || e.ctrlKey || e.shiftKey || (e.target as Element).closest("a, button, input, select, textarea")) return menu.onClick?.(e);
-          toggle();
-        },
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" && e.target === e.currentTarget) {
-            e.preventDefault();
+  const props =
+    lazy && !node.made
+      ? {
+          ...menu,
+          onClick: (e: React.MouseEvent) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || (e.target as Element).closest("a, button, input, select, textarea")) return menu.onClick?.(e);
             toggle();
-            return;
-          }
-          menu.onKeyDown(e);
-        },
-      }
-    : menu;
+          },
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === "Enter" && e.target === e.currentTarget) {
+              e.preventDefault();
+              toggle();
+              return;
+            }
+            (menu as ReturnType<RowMenu>).onKeyDown(e);
+          },
+        }
+      : menu;
+  // A path tree's row reads as its name (a made folder's as its joined
+  // names); its own column, when declared, still links it.
+  const text = node.made ? node.label : label ? cell(node.row, label, node.path !== undefined ? node.label : undefined) : node.label;
+  const children = node.children.map((c, i) => [c, `${path}.${i}`] as const).filter(([, p]) => !shown || shown.has(p));
   return (
     <li data-testid="viz-tree-node">
       <div
         data-testid="viz-tree-row"
-        className={[look.picks || lazy ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
+        className={[look.picks || lazy || node.made ? "ox-clickable" : "", look.selected ? "ox-selected" : ""].filter(Boolean).join(" ") || undefined}
         style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 0", ...(look.emphasized || look.selected ? emphasisStyle : {}) }}
         {...props}
         {...look.props}
@@ -1626,16 +1711,24 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
             type="button"
             aria-expanded={open}
             aria-label={open ? "Collapse" : "Expand"}
-            onClick={toggle}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggle();
+            }}
             style={disclosureStyle}
           >
             <DisclosureGlyph open={open} />
           </button>
         ) : (
-          <span style={{ display: "inline-block", width: 16 }} />
+          <span style={{ display: "inline-block", width: 16, flexShrink: 0 }} />
         )}
-        <span style={{ flexShrink: 0 }}>{label ? cell(node.row, label) : node.label}</span>
+        <span data-testid="viz-tree-label" title={node.path} style={treeLabelStyle}>
+          {text}
+        </span>
         <TreeRowValue node={node} columns={rest.columns} />
+        {node.marks && node.marks.length > 0 ? (
+          <MarksCell marks={node.marks.map((m) => ({ text: m.letter, tone: m.tone, hint: m.status }))} style={{ marginLeft: "auto", paddingLeft: 6 }} />
+        ) : null}
       </div>
       {open && node.state === "loading" ? (
         <DelayedLoading>
@@ -1649,16 +1742,20 @@ function TreeItem({ node, path, closed, lazyOpen, ...rest }: TreeVizProps & { no
           {node.state.error}
         </div>
       ) : null}
-      {node.children.length > 0 && open ? (
+      {children.length > 0 && open ? (
         <ul style={{ ...treeListStyle, paddingLeft: 16 }}>
           {node.children.map((c, i) => (
-            <TreeItem key={c.id ?? i} node={c} path={`${path}.${i}`} closed={closed} lazyOpen={lazyOpen} {...rest} />
+            <TreeItem key={c.id ?? i} node={c} path={`${path}.${i}`} closed={closed} lazyOpen={lazyOpen} shown={shown} {...rest} />
           ))}
         </ul>
       ) : null}
     </li>
   );
 }
+
+/** A tree row's label: it gives way first, cut with "…" (its path, when
+ *  it has one, on hover). */
+const treeLabelStyle: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" };
 
 /** A tree row's `value` (its first line, the whole on hover) and `count`,
  *  beside its label. */

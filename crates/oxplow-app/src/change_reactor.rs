@@ -738,6 +738,15 @@ mod tests {
         check("staged, then changed again", &["staged.txt"]).await;
         write("ignored.txt", "x\n");
         check("an ignored file", &["ignored.txt"]).await;
+        // Ignored by its own folder's `.gitignore` (`*`, as an installed
+        // skill's folder is), the ignore file itself among them.
+        write("skills/x/.gitignore", "*\n");
+        write("skills/x/.oxplow", "");
+        check(
+            "a file its folder's .gitignore ignores",
+            &["skills/x/.gitignore", "skills/x/.oxplow", "skills/x"],
+        )
+        .await;
         std::fs::rename(root.join("moved.txt"), root.join("renamed.txt")).unwrap();
         check("a rename", &["moved.txt", "renamed.txt"]).await;
         write("staged-moved.txt", "one\ntwo\nthree\nfour\n");

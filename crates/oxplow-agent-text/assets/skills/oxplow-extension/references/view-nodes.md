@@ -103,6 +103,16 @@ under the node's heading, above its viz: what a thing is, above its facts
   (a param with a `default`, the top level) and `branch: <column>`, one
   level per param value (`WHERE parent = :folder`); a folder opens by
   setting the param to its `id`.
+- A tree of files: `tree: { path, status? }` in place of `id`/`parent`/
+  `label`. Return one row per file (`SELECT path, status …`); the tree makes
+  the folders, joins a chain of lone folders into one row, and draws
+  `status` (`added`, `modified`, `deleted`, `renamed`, `untracked`,
+  `conflicted`) as a coloured A M D R U C at the row's end, a folder with
+  the marks under it. Declare a column with `key: <the path column>` for its
+  `link`; it is drawn by the file's name. For the stream's own files read
+  foundation's query: `{ page: oxplow/worktree-files, loader: files, params:
+  { stream_id: { param: stream_id }, show: changed_untracked } }` (`show`:
+  `changed`, `changed_untracked`, or `all` — one `folder`, for a lazy tree).
 - `sections`: one subsection per row, in row order: `sections: { title:
   <column>, id?, link?, body?, group?, group_link? }`. Use it when a page is about several
   things (every extension, every failing check, every page of one): each
@@ -187,9 +197,15 @@ exists for actions and links).
 - `width` is pixels; the rest share the space. `format`: `date`,
   `datetime`, `relative` (how long ago), `bytes`, `duration`
   (milliseconds), `integer`, `percent` (a 0-1 fraction), `sparkline` (a
-  JSON array of numbers), `badge` (a pill in the column's `tone`), `items`
-  and `source` (below). It changes only what the person sees; agents read
-  the raw values (but for `items` and `source`).
+  JSON array of numbers), `badge` (a pill in the column's `tone`), `items`,
+  `marks` and `source` (below). It changes only what the person sees;
+  agents read the raw values (but for `items`, `marks` and `source`).
+- `format: marks`: short marks drawn tight, each in its own colour, a JSON
+  array of strings or `{ "text": ..., "tone"?: ..., "hint"?: ..., "gap"?: true }` (tone:
+  `accent`, `success`, `warning`, `danger`, `muted`; hint: its hover; `gap`:
+  it starts a new group, a dot before it). For
+  counts that read by colour: `4A 5M · +179 −175 · 2U`. An agent reads them joined
+  by spaces.
 - `format: items`: the value is a JSON array of items, each a string or
   `{ "text": ..., "hint"?: ..., "uri"?: ... }`, drawn inline separated by
   " · " in a `detail` or `sections` fact, a `table` or `list` cell. `hint`
@@ -253,7 +269,8 @@ row action) or the page (`page-format.md`).
 - `form: true` opens the command's form instead of running it. `group:
   <value>` puts the button in that group's heading. `prominent: true` keeps
   one a button in the nav bar (only for what a person comes to do);
-  `icon:` names an icon (`plus`, `pencil`, `play`, …).
+  `icon:` names an icon (`plus`, `pencil`, `play`, …) or an svg in the
+  extension (`assets/<name>.svg`).
 - A page's actions without `row` or `group` go in its ☰ menu. Copy and Add
   to Context are on every page: don't declare them.
 - An action runs as the page acting for whoever pressed it.

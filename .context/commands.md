@@ -212,7 +212,7 @@ priority order; a command for one matches `enabledAgents =~
 `shellAvailable` (the app, not a browser window), `streamKind`
 (`primary` / `worktree`), `streamShown`, `threadShown`, `treeDirty` (the
 shown stream's working tree has uncommitted changes: the files the
-Uncommitted panel counts, `v_change_file` of its `working` change; the
+Git panel counts, `v_change_file` of its `working` change; the
 window reads it in `treeDirty.ts`), `vcsEnabled`.
 A command's `when` is checked where it registers — it parses, names only
 these keys, and compares each to a value of its kind (`true`/`false` for

@@ -1181,15 +1181,31 @@ zone grouping); each appears only when it has content:
    finished. The header count (`work-count`) is in progress + ready, never
    an alert. Rows link (Cmd-click opens a new tab) and offer Add to
    Context on right-click.
-3. **Uncommitted** — an `oxplow-foundation` panel, stream-scoped,
-   over the working change's stage-one file list (`v_change_file` /
+3. **Git** — an `oxplow-foundation` panel, stream-scoped, its header
+   opening Git Status. Its header toggle (`show`, declared by every part)
+   picks one of three views. **Uncommitted and untracked** / **Uncommitted**:
+   the working change's stage-one file list (`v_change_file` /
    `v_change.conflicted` / `in_progress`, kept current by `change.analyze`
-   on every move — the app no longer polls git for it). The body page
-   `uncommitted` is a folder tree: each file its A/M/D (toned) linking to
-   the file, each folder the letters under it, a merge or rebase in
-   progress as a red row on top. Collapsed, `uncommitted-line`: `3A 2M 1D
-   +10 −4` and the conflict line, opening the Uncommitted page; the count
-   (`uncommitted-count`) is the changed files.
+   on every move — the app no longer polls git for it), read through
+   foundation's `worktree-files` query, which the Uncommitted page and
+   Directory read too: a path tree (`tree: { path, status }`), each file
+   linking to itself with its coloured mark at the row's end (A M D U),
+   each folder the marks under it, a chain of lone folders one row.
+   **Overview**: the changes in one line (the collapsed line's, with the
+   untracked files: `4A 5M · +179 −175 · 2U`), then
+   foundation's `git-branch` part, the one Git Status shows: a line for
+   the upstream (`Remote  origin/main ↑5 ↓0`, or "Not pushed yet" / "No
+   remote"; Publish, Push, Pull, Fetch on it) and, on a worktree, one for
+   the default branch it is a worktree of (`Worktree of  main ↑1 ↓1`;
+   Merge out, Merge in, Rebase on it). The panel passes `with_branch: '0'`,
+   so the part leaves out the branch's name. The body draws its buttons;
+   the collapsed line draws none. Body `git` and collapsed `git-line` are
+   each a `switch` on `show`. Collapsed: `3A 2M 1D · +10 −4` as coloured
+   marks, and a merge or rebase or conflicts as a red line, opening the
+   Uncommitted page; in the Overview, only the branch's ↑/↓ (`origin/main
+   ↑5 ↓0`, "worktree of main ↑1 ↓1"), plain text. The count (`git-count`)
+   is the uncommitted files the toggle shows (the Overview counts the
+   untracked ones).
 4. **Comments** — an `oxplow-bundled` panel: the stream-scoped
    body part `comments-panel` over `v_comment` shows two open-comment count rows split
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each

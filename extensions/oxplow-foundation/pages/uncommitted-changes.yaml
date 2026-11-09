@@ -7,19 +7,19 @@ params:
 answers:
 - {"question":"Which uncommitted files are staged, and which does git not track yet?","params":{"stream_id":1},"skill":"oxplow-codebase"}
 loaders:
+  # The stream's working change and its files: the one statement, which the
+  # Git panel reads too.
   row:
-    sql: |
-      SELECT id AS change_id, base_revision, head_revision
-      FROM v_change WHERE kind = 'working' AND target = '' AND stream_id = :stream_id
-    columns:
-    - key: change_id
-    - key: base_revision
-    - key: head_revision
+    page: oxplow/worktree-files
+    loader: change
+    params: { stream_id: { param: stream_id } }
   clean:
     sql: |
       SELECT 'Nothing to commit.' AS message
-      WHERE NOT EXISTS (SELECT 1 FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-                        WHERE c.kind = 'working' AND c.target = '' AND c.stream_id = :stream_id)
+      WHERE NOT EXISTS (SELECT 1 FROM v_change_file WHERE change_id = :change_id)
+    params:
+      change_id:
+        from: row.change_id
   commit_form:
     sql: |
       SELECT 'str' || :stream_id AS stream, '' AS message
@@ -28,32 +28,9 @@ loaders:
       change_id:
         from: row.change_id
   files:
-    sql: |
-      WITH RECURSIVE f(path, status) AS (
-        SELECT path, status
-        FROM v_change_file WHERE change_id = :change_id
-      ), d(path) AS (
-        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM f WHERE instr(path, '/') > 0
-        UNION
-        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM d WHERE instr(path, '/') > 0
-      )
-      SELECT path AS id,
-             CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END AS parent,
-             substr(path, length(rtrim(path, replace(path, '/', ''))) + 1) AS name,
-             'folder' AS icon, NULL AS file, :base_revision AS base_revision, :head_revision AS head_revision
-      FROM d
-      UNION ALL
-      SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,
-             substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), status, path, :base_revision, :head_revision
-      FROM f
-      ORDER BY 1
-    params:
-      change_id:
-        from: row.change_id
-      base_revision:
-        from: row.base_revision
-      head_revision:
-        from: row.head_revision
+    page: oxplow/worktree-files
+    loader: files
+    params: { stream_id: { param: stream_id }, show: changed_untracked }
 view:
   stack:
   - id: clean
@@ -79,16 +56,14 @@ view:
     from: files
     viz: tree
     tree:
-      id: id
-      parent: parent
-      label: name
+      path: path
+      status: status
     columns:
-    - key: name
+    - key: path
       label: File
-      icon: icon
       link:
         kind: diff-at
-        from: file
+        from: path
         base: base_revision
         head: head_revision
     empty: Nothing is uncommitted.

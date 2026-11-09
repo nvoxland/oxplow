@@ -1,0 +1,91 @@
+title: Branch
+description: "Where the stream's branch stands, with the buttons that act on it: against its upstream (Publish, Push, Pull, Fetch) and, on a worktree, against the default branch it is a worktree of (Merge out, Merge in, Rebase). Git Status shows it with the branch's name; the Git panel without, as its header says the stream."
+params:
+- name: stream_id
+  label: Stream
+# Whether to say the branch's name: 0 where the host already says it.
+- name: with_branch
+  label: With the branch
+  default: '1'
+loaders:
+  status:
+    page: oxplow/branch-status
+    loader: facts
+    params: { stream_id: { param: stream_id } }
+  branch:
+    sql: |
+      SELECT s.*, :with_branch = '1' AS show_branch FROM status s
+# One line a comparison, its buttons on it: the host titles it.
+view:
+  stack:
+  - id: branch
+    title: Branch
+    hide_title: true
+    from: branch
+    viz: detail
+    columns:
+    - key: branch
+      label: Branch
+      when: show_branch
+    - key: remote_marks
+      label: Remote
+      format: marks
+    - key: base_marks
+      label: Worktree of
+      format: marks
+      when: on_worktree
+    empty: No branch is checked out.
+    actions:
+    - id: merge-out
+      label: Merge out
+      command: oxplow.vcs.merge_out
+      when: can_merge_out
+      fact: base_marks
+      input:
+        stream: str{{row.target_stream}}
+        rev: '{{row.branch}}'
+    - id: merge-base
+      label: Merge in
+      command: oxplow.vcs.merge
+      when: is_behind
+      fact: base_marks
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.base}}'
+    - id: rebase-base
+      label: Rebase
+      command: oxplow.git.rebase
+      when: is_behind
+      fact: base_marks
+      input:
+        stream: str{{param.stream_id}}
+        rev: '{{row.base}}'
+    - id: publish
+      label: Publish
+      when: can_publish
+      fact: remote_marks
+      command: oxplow.git.publish
+      input:
+        stream: str{{param.stream_id}}
+    - id: push
+      label: Push
+      when: has_upstream
+      enabled: can_push
+      fact: remote_marks
+      command: oxplow.vcs.push
+      input:
+        stream: str{{param.stream_id}}
+    - id: pull
+      label: Pull
+      command: oxplow.vcs.pull
+      fact: remote_marks
+      when: has_upstream
+      input:
+        stream: str{{param.stream_id}}
+    - id: fetch
+      label: Fetch
+      command: oxplow.vcs.fetch
+      fact: remote_marks
+      when: has_upstream
+      input:
+        stream: str{{param.stream_id}}

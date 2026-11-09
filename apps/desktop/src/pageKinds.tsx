@@ -32,7 +32,7 @@ import {
   Scale,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
-import { ICONS } from "./icons.js";
+import { iconFor } from "./icons.js";
 import { resourceIcon, resourceInfo } from "./resources.js";
 import { useExtensions } from "./extensionsStore.js";
 import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
@@ -117,7 +117,7 @@ function declaredPageOf(extensions: Extension[] | null, kind: string): { icon: s
  *  id or it names none. */
 export function declaredPageIcon(extensions: Extension[] | null, kind: string): LucideIcon | null {
   const icon = declaredPageOf(extensions, kind)?.icon;
-  return icon ? (ICONS[icon] ?? null) : null;
+  return iconFor(icon);
 }
 
 export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref"> {

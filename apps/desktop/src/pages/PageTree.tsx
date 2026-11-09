@@ -122,6 +122,9 @@ export interface PageTreeProps {
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   /** Drawn small (a rail panel): its vizes compact, a few rows each. */
   compact?: boolean;
+  /** Where a compact viz's rows past its few are: its "+N more" opens it
+   *  (a panel's page). */
+  more?: TabRef | null;
   /** Its vizes' whole-viz actions as buttons above them; default: unless
    *  compact (an expanded row's page is compact and keeps them). */
   partButtons?: boolean;
@@ -370,7 +373,7 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
         partButtons={props.partButtons ?? !compact}
         isPage={isPage}
         componentView={componentView}
-        {...(compact ? { compact: true, maxRows: COMPACT_ROWS } : {})}
+        {...(compact ? { compact: true, maxRows: COMPACT_ROWS, more: props.more ?? null } : {})}
       />
     </VizPagesContext.Provider>
     </FormSourceContext.Provider>

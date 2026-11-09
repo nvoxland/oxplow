@@ -15,8 +15,8 @@ expect:
     files:
       rows:
         contains:
-          - { id: tracked.txt, icon: modified }
-          - { id: loose.txt, icon: added }
+          - { path: tracked.txt, status: modified }
+          - { path: loose.txt, status: added }
     commit_form: { rows: [{ stream: str1 }] }
 steps:
   # The commit form submits for real, and the commit is read back. (The page

@@ -1,0 +1,101 @@
+title: Branch Status
+description: "How far a stream's branch is from its upstream and, on a worktree, from the default branch. `status` is the branch's one row as the Branch part (Git Status, the Git panel) reads it (what to say, and which of Merge out, Merge in, Rebase, Publish, Push, Pull and Fetch apply). `facts` is `status` with each comparison as marks (`remote_marks`, `base_marks`), `marks` each comparison as coloured marks (↑ the commits the other lacks, ↓ the ones it has; a branch with no upstream says why), `line` all of them in one line, the Git panel's collapsed view. The one statement of where a branch stands."
+params:
+- name: stream_id
+loaders:
+  row:
+    sql: |
+      SELECT s.branch AS branch FROM v_stream s WHERE s.id = :stream_id
+  # What a worktree's branch is compared with. Git doesn't record the branch
+  # one came from, so it is the default branch, for a worktree made anywhere.
+  base:
+    sql: |
+      SELECT b.name AS name FROM v_branch b WHERE b.kind = 'local' AND b.is_default = 1
+  status:
+    sql: |
+      SELECT b.name AS branch,
+             CASE WHEN w.id IS NOT NULL THEN 'Worktree of ' || :base ELSE 'Repository' END AS heading,
+             (b.upstream IS NULL AND EXISTS (SELECT 1 FROM v_branch r WHERE r.kind = 'remote')) AS can_publish,
+             CASE WHEN b.upstream IS NULL AND NOT EXISTS (SELECT 1 FROM v_branch r WHERE r.kind = 'remote') THEN 'No remote'
+                  WHEN b.upstream IS NULL THEN 'Not pushed yet'
+                  WHEN b.ahead = 0 AND b.behind = 0 THEN 'In sync with ' || b.upstream
+                  WHEN b.behind = 0 THEN b.ahead || ' ahead of ' || b.upstream
+                  WHEN b.ahead = 0 THEN b.behind || ' behind ' || b.upstream
+                  ELSE b.ahead || ' ahead of, ' || b.behind || ' behind ' || b.upstream END AS remote,
+             (b.upstream IS NOT NULL AND b.ahead > 0) AS can_push,
+             b.upstream IS NOT NULL AS has_upstream,
+             w.id IS NOT NULL AS on_worktree,
+             :base AS base,
+             CASE WHEN d.ahead = 0 AND d.behind = 0 THEN 'Even with ' || :base END AS compared,
+             w.id IS NOT NULL AND coalesce(d.ahead = 0 AND d.behind = 0, 0) AS is_even,
+             coalesce(d.ahead > 0, 0) AS is_ahead,
+             coalesce(d.behind > 0, 0) AS is_behind,
+             CASE WHEN d.ahead > 0 THEN d.ahead || CASE d.ahead WHEN 1 THEN ' commit ' ELSE ' commits ' END || :base || ' lacks' END AS ahead_says,
+             CASE WHEN d.behind > 0 THEN d.behind || CASE d.behind WHEN 1 THEN ' commit' ELSE ' commits' END || ' from ' || :base END AS behind_says,
+             t.id AS target_stream,
+             coalesce(d.ahead > 0, 0) AND t.id IS NOT NULL AS can_merge_out
+      FROM v_branch b
+      LEFT JOIN v_stream w ON w.id = :stream_id AND w.kind = 'worktree' AND :base <> b.name
+      LEFT JOIN v_branch_divergence d ON w.id IS NOT NULL AND d.base = :base AND d.head = :branch
+      LEFT JOIN v_stream t ON w.id IS NOT NULL AND t.branch = :base AND t.archived_at IS NULL
+      WHERE b.kind = 'local' AND b.name = :branch
+    params:
+      branch:
+        from: row.branch
+      base:
+        from: base.name
+  # Each comparison (`ord` 1 the upstream, 2 the default branch on a
+  # worktree) as its marks, in order (`sub`): what it is against, then ↑ ↓
+  # (or why there is nothing to compare).
+  marks:
+    sql: |
+      WITH cmp AS (
+        SELECT 1 AS ord, coalesce(b.upstream, 'Remote') AS against, b.ahead, b.behind,
+               CASE WHEN b.upstream IS NOT NULL THEN NULL
+                    WHEN EXISTS (SELECT 1 FROM v_branch r WHERE r.kind = 'remote') THEN 'Not pushed yet'
+                    ELSE 'No remote' END AS note
+        FROM v_branch b WHERE b.kind = 'local' AND b.name = :branch
+        UNION ALL
+        SELECT 2, :base, d.ahead, d.behind, NULL
+        FROM v_stream w JOIN v_branch_divergence d ON d.base = :base AND d.head = :branch
+        WHERE w.id = :stream_id AND w.kind = 'worktree' AND :base <> :branch
+      )
+      SELECT ord, -1 AS sub, against, against AS text, 'muted' AS tone,
+             CASE ord WHEN 1 THEN 'the upstream' ELSE 'the default branch this worktree is compared with' END AS hint
+      FROM cmp WHERE note IS NULL
+      UNION ALL
+      SELECT ord, 0, against, note, 'muted',
+             CASE note WHEN 'No remote' THEN 'the repository has no remote' ELSE 'the branch has no upstream' END AS hint
+      FROM cmp WHERE note IS NOT NULL
+      UNION ALL
+      SELECT ord, 1, against, '↑' || ahead, CASE WHEN ahead > 0 THEN 'success' ELSE 'muted' END,
+             ahead || CASE ahead WHEN 1 THEN ' commit ' ELSE ' commits ' END || against || ' lacks'
+      FROM cmp WHERE note IS NULL
+      UNION ALL
+      SELECT ord, 2, against, '↓' || behind, CASE WHEN behind > 0 THEN 'warning' ELSE 'muted' END,
+             behind || CASE behind WHEN 1 THEN ' commit' ELSE ' commits' END || ' from ' || against
+      FROM cmp WHERE note IS NULL
+    params:
+      branch:
+        from: row.branch
+      base:
+        from: base.name
+  # The comparisons as the Branch part's facts: `remote_marks` against the
+  # upstream, `base_marks` against the default branch (null off a worktree).
+  facts:
+    sql: |
+      SELECT s.*,
+             (SELECT json_group_array(json_object('text', text, 'tone', tone, 'hint', hint))
+                FROM (SELECT * FROM marks WHERE ord = 1 ORDER BY sub)) AS remote_marks,
+             (SELECT CASE WHEN count(*) > 0 THEN json_group_array(json_object('text', text, 'tone', tone, 'hint', hint)) END
+                FROM (SELECT * FROM marks WHERE ord = 2 ORDER BY sub)) AS base_marks
+      FROM status s
+  # The comparisons in one line; the default branch's said as what it is to
+  # the branch ("worktree of main"), set apart from the upstream's.
+  line:
+    sql: |
+      SELECT (SELECT json_group_array(CASE WHEN ord = 2 AND sub = -1
+                       THEN json_object('text', 'worktree of ' || text, 'tone', tone, 'hint', hint, 'gap', json('true'))
+                       ELSE json_object('text', text, 'tone', tone, 'hint', hint) END)
+                FROM (SELECT * FROM marks ORDER BY ord, sub)) AS sync
+      FROM (SELECT 1) WHERE EXISTS (SELECT 1 FROM marks)

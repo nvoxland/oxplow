@@ -77,3 +77,14 @@ test("every rail group's body is indented from its heading", () => {
   const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   expect(sheet).toMatch(/\.ox-rail-group\s*>\s*:not\(\.ox-rail-group-head\)\s*\{[^}]*margin-left:\s*var\(--space-3\)/);
 });
+
+// A rail panel's part (`.ox-compact`) is narrow: its sections sit close, a
+// detail's facts are short lines with no rules, and a fact's buttons wrap
+// under its value as small buttons whose labels never break.
+test("a compact part is tight: close sections, ruleless facts, buttons that wrap whole", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-compact [^{]*\.ox-section[^{]*\{[^}]*margin-top:\s*var\(--space-2\)/);
+  expect(sheet).toMatch(/\.ox-compact \.ox-fact dt,\s*\.ox-compact \.ox-fact dd\s*\{[^}]*border-bottom:\s*0/);
+  expect(sheet).toMatch(/\.ox-compact \.ox-fact dd\s*\{[^}]*flex-wrap:\s*wrap/);
+  expect(sheet).toMatch(/\.ox-compact \.ox-fact-actions \.ox-button\s*\{[^}]*white-space:\s*nowrap/);
+});

@@ -86,7 +86,8 @@ pub const ICONS: &[&str] = &[
     "zap",
 ];
 
-/// Where an extension keeps the svg a resource's `icon:` may name.
+/// Where an extension keeps the svgs its `icon:`s may name (a resource's,
+/// a page's, a choice option's, an action's).
 const SVG_ICON_DIR: &str = "assets/";
 
 /// The largest svg a resource may bring.
@@ -154,6 +155,60 @@ fn svg_problem(svg: &str) -> Option<String> {
     None
 }
 
+/// Why `icon` can't be an icon: neither a name oxplow draws nor an svg of
+/// the extension's own (`assets/<name>.svg`, read when it loads).
+pub(crate) fn icon_problem(icon: &str) -> Option<String> {
+    (!icon.starts_with(SVG_ICON_DIR) && !ICONS.contains(&icon)).then(|| {
+        format!(
+            "`icon: {icon}` isn't one oxplow draws; use one of {} (or `assets/<name>.svg`, an svg in the extension)",
+            ICONS.join(", ")
+        )
+    })
+}
+
+/// The icon `icon` names, resolved: an `assets/<name>.svg` read from the
+/// extension and published as a `data:` URI (the desktop draws it as a mask
+/// in the text's color); a name oxplow draws as it is. One that is neither,
+/// or an svg that isn't there, isn't inside the extension, isn't an svg or
+/// isn't inert, is why not.
+pub(crate) fn resolve_icon(
+    icon: &str,
+    files: &dyn crate::extension::extensions::ExtensionFiles,
+) -> Result<String, String> {
+    if let Some(why) = icon_problem(icon) {
+        return Err(why);
+    }
+    if icon.starts_with(SVG_ICON_DIR) {
+        svg_icon(icon, files)
+    } else {
+        Ok(icon.to_string())
+    }
+}
+
+/// The svg at `path` in the extension, as a `data:` URI.
+fn svg_icon(
+    path: &str,
+    files: &dyn crate::extension::extensions::ExtensionFiles,
+) -> Result<String, String> {
+    use base64::Engine as _;
+    if path.contains("..") || !oxplow_domain::service::valid_path(path) {
+        return Err("the icon must be a file inside the extension".to_string());
+    }
+    if !path.ends_with(".svg") {
+        return Err("an icon file is an svg (`assets/<name>.svg`)".to_string());
+    }
+    let svg = files
+        .read(path)
+        .ok_or_else(|| format!("no file `{path}` in the extension"))?;
+    if let Some(why) = svg_problem(&svg) {
+        return Err(format!("`{path}`: {why}"));
+    }
+    Ok(format!(
+        "data:image/svg+xml;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(svg)
+    ))
+}
+
 /// Read the svg each `icon: assets/<x>.svg` names, and publish it in the
 /// resource as a `data:` URI (the desktop draws it as an image). One that
 /// isn't there, isn't inside the extension, isn't an svg or isn't inert is
@@ -163,34 +218,19 @@ pub(crate) fn inline_svg_icons(
     errors: &mut Vec<Diagnostic>,
     files: &dyn crate::extension::extensions::ExtensionFiles,
 ) -> Vec<ExtensionResource> {
-    use base64::Engine as _;
     resources
         .into_iter()
         .filter_map(|mut r| {
             let Some(path) = r.decl.icon.clone().filter(|i| i.starts_with(SVG_ICON_DIR)) else {
                 return Some(r);
             };
-            let why = (|| {
-                if path.contains("..") || !oxplow_domain::service::valid_path(&path) {
-                    return Some("the icon must be a file inside the extension".to_string());
+            let why = match svg_icon(&path, files) {
+                Ok(uri) => {
+                    r.decl.icon = Some(uri);
+                    None
                 }
-                if !path.ends_with(".svg") {
-                    return Some("an icon file is an svg (`assets/<name>.svg`)".to_string());
-                }
-                match files.read(&path) {
-                    None => Some(format!("no file `{path}` in the extension")),
-                    Some(svg) => {
-                        if let Some(why) = svg_problem(&svg) {
-                            return Some(format!("`{path}`: {why}"));
-                        }
-                        r.decl.icon = Some(format!(
-                            "data:image/svg+xml;base64,{}",
-                            base64::engine::general_purpose::STANDARD.encode(svg)
-                        ));
-                        None
-                    }
-                }
-            })();
+                Err(why) => Some(why),
+            };
             match why {
                 None => Some(r),
                 Some(why) => {
@@ -404,11 +444,8 @@ fn decl_of(
     if let Some(icon) = &f.icon {
         // An `assets/<x>.svg` is the extension's own, read when it loads
         // ([`inline_svg_icons`]); any other is a name oxplow draws.
-        if !icon.starts_with(SVG_ICON_DIR) && !ICONS.contains(&icon.as_str()) {
-            return Err(named(format!(
-                "`icon: {icon}` isn't one oxplow draws; use one of {} (or `assets/<name>.svg`, an svg in the extension)",
-                ICONS.join(", ")
-            )));
+        if let Some(why) = icon_problem(icon) {
+            return Err(named(why));
         }
     }
     Ok(ResourceDecl {

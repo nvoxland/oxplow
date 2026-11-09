@@ -137,7 +137,7 @@ pub(super) async fn first_stream(host: &Host) -> Result<oxplow_domain::StreamId,
 }
 
 /// `change: { kind?, target, files?: [{ path, status?, additions?,
-/// deletions?, zone?, is_test? }], functions?: [{ path, symbol, name?, status?,
+/// deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, name?, status?,
 /// container?, signature_changed?, body_changed?, start_line?, visibility?,
 /// is_test?, length?, params_before?, params_after?, complexity?, complexity_delta? }] }`:
 /// what the change analysis stored for a change (`SqliteChangeStore::
@@ -174,7 +174,9 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
             deletions: int(&f, "deletions").unwrap_or(0),
             zone: Some(text(&f, "zone").unwrap_or_else(|| "other".into())),
             is_test: flag(&f, "is_test"),
-            ..Default::default()
+            // A working tree's file: in the index, or not tracked yet.
+            staged: f.get("staged").and_then(Value::as_bool),
+            untracked: f.get("untracked").and_then(Value::as_bool),
         });
     }
     for f in list("functions") {

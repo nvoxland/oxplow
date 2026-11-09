@@ -1455,6 +1455,14 @@ export type ColumnFormat =
  */
 "items" |
 /**
+ *  Short marks (a JSON array): each element is a string or `{ "text":
+ *  …, "tone"?: …, "hint"?: … }`, drawn as small tight letters, each in
+ *  its own `tone` (`success`, `warning`, `danger`, `info`, `muted`) —
+ *  a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
+ *  agent reads them joined by spaces, a hint in parentheses.
+ */
+"marks" |
+/**
  *  Who caused it (a JSON object `{ "kind": "agent" | "you" |
  *  "extension" | "page", "label": …, "uri"?: … }`): a small chip with
  *  the kind's icon, a link when it has a `uri` (an agent's thread, an
@@ -7012,6 +7020,20 @@ export type VizTree = {
 	id: string | null,
 	parent: string | null,
 	label: string | null,
+	/**
+	 *  A tree over paths, in place of `id`/`parent`/`label`: each row a
+	 *  file (or a folder), its folders made from its path, a folder that
+	 *  holds one folder and nothing else joined with it (`a/b`). A lazy
+	 *  one reads id, parent and label from it alone (`pages/path_tree.rs`).
+	 */
+	path?: string | null,
+	/**
+	 *  A column of core's change statuses (`added`, `modified`, `deleted`,
+	 *  `renamed`, `untracked`, `conflicted`), each row's drawn as a
+	 *  coloured letter at its end (A M D R U C); a made folder shows the
+	 *  marks of what is under it.
+	 */
+	status?: string | null,
 	/**
 	 *  The column a row's value reads from, beside its label: one line, the
 	 *  whole of it on hover.

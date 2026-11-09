@@ -138,7 +138,7 @@ test("a core resource's row reads as one", () => {
 describe("a resource's icon", () => {
   afterEach(() => setResources([]));
 
-  test("a name oxplow draws is its component, an svg the extension brought is drawn as an image", () => {
+  test("a name oxplow draws is its component, an svg the extension brought is its own icon (`iconFor`)", () => {
     setResources([ACME_PR, { ...ACME_PR, resource: "acme/own", icon: "data:image/svg+xml;base64,PHN2Zy8+" }]);
     expect(resourceIcon("acme/pr")).toBe(GitPullRequest);
     const own = resourceIcon("acme/own");

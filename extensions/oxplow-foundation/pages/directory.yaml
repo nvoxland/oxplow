@@ -40,7 +40,8 @@ loaders:
   row:
     sql: |
       SELECT v.is_local, v.shown, v.scope AS eff_scope, v.compare AS eff_compare,
-             CASE v.scope WHEN 'all' THEN '' WHEN 'uncommitted' THEN 'working' ELSE 'range' END AS change_kind
+             CASE v.scope WHEN 'all' THEN 'all' WHEN 'changed' THEN 'changed' ELSE 'changed_untracked' END AS show,
+             CASE WHEN v.scope = 'all' THEN v.shown ELSE :path END AS list_folder
       FROM (SELECT (:filesystem = 'oxplow:local' AND :rev = '') AS is_local,
                    CASE WHEN :folder <> '' THEN :folder ELSE :path END AS shown,
                    CASE WHEN :filesystem = 'oxplow:local' AND :rev = '' THEN :scope ELSE 'all' END AS scope,
@@ -50,7 +51,8 @@ loaders:
     - key: shown
     - key: eff_scope
     - key: eff_compare
-    - key: change_kind
+    - key: show
+    - key: list_folder
   # Where a branch comparison starts: the merge base with the branch Show
   # names. `d.base = :eff_scope` names the one pair, so the divergence
   # dataset walks that pair alone; a correlated `d.base = v.scope` named no
@@ -58,7 +60,7 @@ loaders:
   # also with Show at "all files" (where nothing reads it).
   range:
     sql: |
-      SELECT CASE WHEN :eff_scope IN ('all', 'uncommitted') THEN ''
+      SELECT CASE WHEN :eff_scope IN ('all', 'uncommitted', 'changed') THEN ''
                   ELSE coalesce((SELECT 'git:' || d.merge_base || '..working' FROM v_branch_divergence d
                                  WHERE d.base = :eff_scope AND d.head = 'HEAD'), '') END AS change_target
     columns:
@@ -66,72 +68,53 @@ loaders:
     params:
       eff_scope:
         from: row.eff_scope
+  # The files the Show filter names: the one statement (`worktree-files`),
+  # a folder's level when all files are shown (a lazy tree), else every
+  # changed file under the folder (the tree makes their folders).
+  files:
+    page: oxplow/worktree-files
+    loader: files
+    params:
+      stream_id: { param: stream_id }
+      show: { from: row.show }
+      target: { from: range.change_target }
+      folder: { from: row.list_folder }
+      filesystem: { param: filesystem }
+      rev: { param: rev }
   tree:
     sql: |
-      WITH RECURSIVE ch(id, base_revision) AS (
-        SELECT c.id, c.base_revision FROM v_change c WHERE c.kind = :change_kind AND c.target = :change_target
-      ), f(path, status) AS (
-        SELECT cf.path, CASE WHEN cf.untracked = 1 THEN 'untracked' ELSE cf.status END
-        FROM v_change_file cf WHERE cf.change_id = (SELECT id FROM ch)
-          AND (:path = '' OR cf.path LIKE :path || '/%')
-      ), d(path) AS (
-        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM f WHERE instr(path, '/') > 0
-        UNION
-        SELECT substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) FROM d WHERE instr(path, '/') > 0
-      ), listing(path, parent, name, kind, status, uri) AS (
-        SELECT w.path, w.parent, w.name, w.kind, w.status, w.uri FROM v_file w
-        WHERE w.stream_id = :stream_id AND w.filesystem = :filesystem AND w.rev = :rev
-          AND w.parent = :shown
-      ), rows(path, parent, name, kind, status, uri) AS (
-        SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,
-               substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), 'dir', NULL, uri('oxplow/dir', 'path', path)
-        FROM d WHERE :eff_scope <> 'all' AND (:path = '' OR path LIKE :path || '/%')
-        UNION ALL
-        SELECT path, CASE WHEN instr(path, '/') > 0 THEN substr(path, 1, length(rtrim(path, replace(path, '/', ''))) - 1) END,
-               substr(path, length(rtrim(path, replace(path, '/', ''))) + 1), 'file', status, uri('oxplow/file', 'path', path)
-        FROM f WHERE :eff_scope <> 'all'
-        UNION ALL
-        SELECT path, parent, name, kind, status, uri FROM listing WHERE :eff_scope = 'all'
-      )
-      SELECT r.path AS id, r.parent, r.name,
-             CASE WHEN r.kind = 'dir' THEN 'folder' ELSE coalesce(r.status, 'file') END AS icon,
-             r.status, (r.kind = 'dir') AS is_dir,
-             (r.kind = 'dir' AND :eff_scope = 'all') AS opens,
+      SELECT f.path AS id, f.path, f.status,
+             substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1) AS name,
+             f.is_dir, (f.is_dir AND :eff_scope = 'all') AS opens,
              CASE
-               WHEN r.kind = 'dir' THEN NULL
-               WHEN :eff_compare <> 'none' THEN uri('oxplow/page', 'page', 'diff', 'path', r.path, 'left', 'git:' || :eff_compare, 'right', 'working', 'label', :eff_compare || '..working')
-               WHEN :eff_scope <> 'all' THEN uri('oxplow/page', 'page', 'diff', 'path', r.path, 'left', (SELECT base_revision FROM ch), 'right', 'working', 'label', 'changes')
-               ELSE r.uri
+               WHEN f.is_dir THEN NULL
+               WHEN :eff_compare <> 'none' THEN uri('oxplow/page', 'page', 'diff', 'path', f.path, 'left', 'git:' || :eff_compare, 'right', 'working', 'label', :eff_compare || '..working')
+               WHEN :eff_scope <> 'all' THEN uri('oxplow/page', 'page', 'diff', 'path', f.path, 'left', f.base_revision, 'right', 'working', 'label', 'changes')
+               ELSE f.uri
              END AS target,
-             CASE WHEN r.kind = 'dir' THEN r.uri END AS folder_uri,
-             json_array(r.path) AS paths_json,
-             (r.kind = 'file') AS is_file,
+             CASE WHEN f.is_dir THEN f.uri END AS folder_uri,
+             json_array(f.path) AS paths_json,
+             (NOT f.is_dir) AS is_file,
              :is_local AS can_write,
-             (:is_local AND r.status IS NOT NULL AND r.kind = 'file') AS is_changed,
-             (:is_local AND r.status = 'untracked') AS is_untracked,
-             (:is_local AND r.kind = 'file') AS is_local_file,
-             CASE WHEN r.kind = 'dir' THEN r.path || '/' ELSE substr(r.path, 1, length(r.path) - length(r.name)) END || 'new-file.txt' AS new_file_path,
-             CASE WHEN r.kind = 'dir' THEN r.path || '/' ELSE substr(r.path, 1, length(r.path) - length(r.name)) END || 'new-folder' AS new_folder_path,
+             (:is_local AND f.status IS NOT NULL AND NOT f.is_dir) AS is_changed,
+             (:is_local AND f.status = 'untracked') AS is_untracked,
+             (:is_local AND NOT f.is_dir) AS is_local_file,
+             CASE WHEN f.is_dir THEN f.path || '/' ELSE rtrim(f.path, replace(f.path, '/', '')) END || 'new-file.txt' AS new_file_path,
+             CASE WHEN f.is_dir THEN f.path || '/' ELSE rtrim(f.path, replace(f.path, '/', '')) END || 'new-folder' AS new_folder_path,
              (:is_local AND NOT EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
-                     WHERE g.key = 'generated' AND e.value = r.name)) AS can_mark,
+                     WHERE g.key = 'generated' AND e.value = substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1))) AS can_mark,
              (:is_local AND EXISTS (SELECT 1 FROM v_config_value g, json_each(json_extract(g.value, '$.exclude')) e
-                     WHERE g.key = 'generated' AND e.value = r.name)) AS marked,
-             uri('oxplow/page', 'page', 'file-history', 'path', r.path) AS history_uri
-      FROM rows r
-      ORDER BY (r.kind = 'dir') DESC, r.path
+                     WHERE g.key = 'generated' AND e.value = substr(f.path, length(rtrim(f.path, replace(f.path, '/', ''))) + 1))) AS marked,
+             uri('oxplow/page', 'page', 'file-history', 'path', f.path) AS history_uri
+      FROM files f
+      ORDER BY f.is_dir DESC, f.path
     params:
-      change_kind:
-        from: row.change_kind
-      change_target:
-        from: range.change_target
       eff_scope:
         from: row.eff_scope
       eff_compare:
         from: row.eff_compare
       is_local:
         from: row.is_local
-      shown:
-        from: row.shown
   # The folder above it (none at the top of the filesystem).
   parent_folder:
     sql: |
@@ -148,15 +131,13 @@ view:
     from: tree
     viz: tree
     tree:
-      id: id
-      parent: parent
-      label: name
+      path: path
+      status: status
       lazy: folder
       branch: opens
     columns:
-    - key: name
+    - key: path
       label: Name
-      icon: icon
       link:
         kind: page
         from: target

@@ -411,6 +411,69 @@ describe("structure components (P6.A2)", () => {
     ]);
   });
 
+  // A tree over paths (`tree.path`): the same cases as the daemon's
+  // (`pages/path_tree.rs`), so what an agent reads is what the window draws.
+  describe("a path tree", () => {
+    const pathViz = viz({ viz: "tree", tree: { path: "path", status: "status" } as never });
+    const shown = (rows: [string, string | null][]) => {
+      const out: string[] = [];
+      const walk = (nodes: ReturnType<typeof treeNodes>, depth: number) => {
+        for (const n of nodes) {
+          const marks = (n.marks ?? []).map((m) => m.letter).join("");
+          const row = n.made ? "" : ` #${rows.findIndex((r) => r[0] === n.row[0])}`;
+          out.push(`${"  ".repeat(depth)}${n.label} ${marks}${row}`);
+          walk(n.children, depth + 1);
+        }
+      };
+      walk(treeNodes(pathViz, result(["path", "status"], rows)), 0);
+      return out;
+    };
+
+    test("folders are made and carry the marks under them", () => {
+      expect(shown([["src/ui/a.rs", "modified"], ["src/new.rs", "added"], ["old.rs", "deleted"], ["README.md", null]])).toEqual([
+        "src AM",
+        "  ui M",
+        "    a.rs M #0",
+        "  new.rs A #1",
+        "README.md  #3",
+        "old.rs D #2",
+      ]);
+    });
+
+    test("a chain of lone folders is one row", () => {
+      expect(shown([[".agents/skills/x/SKILL.md", "untracked"], ["a/b/c.rs", "added"], ["a/d.rs", "added"]])).toEqual([
+        ".agents/skills/x U",
+        "  SKILL.md U #0",
+        "a A",
+        "  b A",
+        "    c.rs A #1",
+        "  d.rs A #2",
+      ]);
+    });
+
+    test("a folder row keeps its row and status", () => {
+      expect(shown([["lib", "renamed"], ["lib/x/y.rs", "weird"]])).toEqual(["lib R #0", "  x ", "    y.rs  #1"]);
+    });
+
+    test("each node's id is its path, a made folder's row no row of the result", () => {
+      const nodes = treeNodes(pathViz, result(["path", "status"], [["a/b/c.rs", "added"]]));
+      expect(nodes[0]).toMatchObject({ id: "a/b", label: "a/b", made: true, branch: true });
+      expect(nodes[0]!.children[0]).toMatchObject({ id: "a/b/c.rs", label: "c.rs", made: false });
+      expect(drawnTreeRows(nodes)).toEqual([["a/b/c.rs", "added"]]);
+    });
+
+    // A lazy one is one folder's level: names from the paths, no folders
+    // made, each row's own status.
+    test("a lazy path tree is the level it was given, by name", () => {
+      const lazy = viz({ viz: "tree", tree: { path: "path", status: "status", lazy: "folder", branch: "d" } as never, params: [{ name: "folder", label: null, default: "", options: [] }] as never });
+      const nodes = lazyTreeNodes(lazy, result(["path", "status", "d"], [["src/ui", null, 1], ["src/a.rs", "modified", 0]]), new Set(), new Map());
+      expect(nodes.map((n) => [n.id, n.label, n.lazy, (n.marks ?? []).map((m) => m.letter).join("")])).toEqual([
+        ["src/ui", "ui", true, ""],
+        ["src/a.rs", "a.rs", false, "M"],
+      ]);
+    });
+  });
+
   // A lazy tree (`tree.lazy`): the result is one level; a row the `branch`
   // column marks opens into the rows of its own run, spliced under it.
   const lazyViz = viz({

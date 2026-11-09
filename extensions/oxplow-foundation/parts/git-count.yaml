@@ -1,0 +1,23 @@
+title: Git count
+description: How many uncommitted files the stream has, counted as the panel's header picks (the Branch view counts them with the untracked ones).
+params:
+- name: stream_id
+  label: Stream
+# The panel's header toggle: every part declares it, so they agree.
+- name: show
+  role: filter
+  label: Show
+  default: changed_untracked
+  options:
+  - { value: changed_untracked, label: Uncommitted and untracked, icon: assets/file-plus.svg }
+  - { value: changed, label: Uncommitted, icon: assets/file-diff.svg }
+  - { value: overview, label: Overview, icon: layout-dashboard }
+loaders:
+  uncommitted_count:
+    page: oxplow/worktree-files
+    loader: count
+    params: { stream_id: { param: stream_id }, show: { param: show } }
+view:
+  from: uncommitted_count
+  viz: number
+badge: { loader: uncommitted_count, column: files }

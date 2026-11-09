@@ -391,6 +391,40 @@ fn items(c: &SqlCell) -> String {
         .join(" · ")
 }
 
+/// A `marks` cell as its marks joined by spaces, a hint in parentheses
+/// (`1A (added) 2M`); a value that is not a list of marks reads as it is.
+fn marks(c: &SqlCell) -> String {
+    let raw = cell(c);
+    let Ok(serde_json::Value::Array(list)) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return raw;
+    };
+    // A mark with `gap` starts a new group: a dot before it.
+    let mut out = String::new();
+    for m in &list {
+        let (text, gap) = match m {
+            serde_json::Value::String(text) => (text.clone(), false),
+            serde_json::Value::Object(o) => {
+                let Some(text) = o.get("text").and_then(|t| t.as_str()) else {
+                    continue;
+                };
+                let gap = matches!(o.get("gap"), Some(serde_json::Value::Bool(true)))
+                    || o.get("gap").and_then(|g| g.as_i64()) == Some(1);
+                let text = match o.get("hint").and_then(|h| h.as_str()) {
+                    Some(hint) if !hint.is_empty() => format!("{text} ({hint})"),
+                    _ => text.to_string(),
+                };
+                (text, gap)
+            }
+            _ => continue,
+        };
+        if !out.is_empty() {
+            out.push_str(if gap { " · " } else { " " });
+        }
+        out.push_str(&text);
+    }
+    out
+}
+
 /// A `source` cell (`{ kind, label, uri? }`) as who: `agent in <label>`,
 /// `<kind> <label>`, `You`. A value that isn't one reads as it is.
 fn source(c: &SqlCell) -> String {
@@ -425,6 +459,7 @@ fn value(run: &VizRun, r: &[SqlCell], i: usize) -> String {
         .and_then(|c| c.format);
     match format {
         Some(ColumnFormat::Items) => items(c),
+        Some(ColumnFormat::Marks) => marks(c),
         Some(ColumnFormat::Source) => source(c),
         _ => cell(c),
     }
@@ -547,6 +582,9 @@ fn shown(run: &VizRun) -> Vec<(usize, String)> {
 /// parent isn't in the result are roots.
 fn tree(run: &VizRun) -> String {
     let t = run.config.tree.clone().unwrap_or_default();
+    if let Some(path) = column(run, t.path.as_ref()) {
+        return path_tree(run, &t, path);
+    }
     let (Some(id), Some(parent), Some(label)) = (
         column(run, t.id.as_ref()),
         column(run, t.parent.as_ref()),
@@ -643,6 +681,84 @@ fn tree(run: &VizRun) -> String {
         ));
     }
     text
+}
+
+/// A tree over paths (`tree.path`): its folders made from the paths, each
+/// name with its status letters (`pages/path_tree.rs`). A lazy one is one
+/// folder's level: each row by its name, a branch marked `▸`.
+fn path_tree(run: &VizRun, t: &crate::pages::spec::VizTree, path: usize) -> String {
+    use crate::pages::path_tree;
+    let rows = &run.result.rows;
+    let status_col = column(run, t.status.as_ref());
+    let status_of = |r: &[SqlCell]| -> Option<String> {
+        status_col
+            .and_then(|c| r.get(c))
+            .map(cell)
+            .filter(|s| !s.is_empty())
+    };
+    let letters = |marks: &[&path_tree::Mark]| -> String {
+        let l: String = marks.iter().map(|m| m.letter).collect();
+        if l.is_empty() {
+            l
+        } else {
+            format!(" {l}")
+        }
+    };
+    if let Some(param) = t.lazy.as_deref() {
+        let branch = column(run, t.branch.as_ref());
+        let lines: Vec<String> = rows
+            .iter()
+            .map(|r| {
+                let p = r.get(path).map(cell).unwrap_or_default();
+                let name = p
+                    .trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                let opens = branch.and_then(|b| r.get(b)).is_some_and(truthy);
+                let mark: Vec<&path_tree::Mark> = status_of(r)
+                    .as_deref()
+                    .and_then(path_tree::mark)
+                    .into_iter()
+                    .collect();
+                format!(
+                    "- {}{name}{}",
+                    if opens { "▸ " } else { "" },
+                    letters(&mark)
+                )
+            })
+            .collect();
+        let now = run.params.get(param).map(cell).unwrap_or_default();
+        return format!(
+            "{}\n\nA ▸ row opens with `{param}=<id>`: run the viz with it to read that level (this run: `{param}={now}`).",
+            capped_lines(lines)
+        );
+    }
+    let paths: Vec<(String, Option<String>)> = rows
+        .iter()
+        .map(|r| (r.get(path).map(cell).unwrap_or_default(), status_of(r)))
+        .collect();
+    fn walk(
+        nodes: &[path_tree::PathNode],
+        depth: usize,
+        letters: &dyn Fn(&[&path_tree::Mark]) -> String,
+        out: &mut Vec<String>,
+    ) {
+        for n in nodes {
+            let slash = if n.is_folder() { "/" } else { "" };
+            out.push(format!(
+                "{}- {}{slash}{}",
+                "  ".repeat(depth),
+                n.label,
+                letters(&n.marks)
+            ));
+            walk(&n.children, depth + 1, letters, out);
+        }
+    }
+    let mut lines = Vec::new();
+    walk(&path_tree::build(&paths), 0, &letters, &mut lines);
+    capped_lines(lines)
 }
 
 /// A cell that counts as true: not null, zero, empty or false.
@@ -1427,6 +1543,67 @@ mod tests {
         );
     }
 
+    /// A tree over paths reads as its folders, made from the paths, each
+    /// name with its status letters; a chain of lone folders reads as one.
+    #[test]
+    fn a_path_tree_reads_as_folders_with_their_marks() {
+        let r = with(
+            run(
+                Viz::Tree,
+                None,
+                &["path", "status"],
+                vec![
+                    vec![t("src/ui/a.rs"), t("modified")],
+                    vec![t("src/new.rs"), t("added")],
+                    vec![t(".agents/skills/x/.oxplow"), t("untracked")],
+                    vec![t("README.md"), SqlCell::Null(())],
+                ],
+            ),
+            |l| {
+                l.tree = Some(crate::pages::spec::VizTree {
+                    path: Some("path".into()),
+                    status: Some("status".into()),
+                    ..Default::default()
+                })
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- .agents/skills/x/ U\n  - .oxplow U\n- src/ AM\n  - ui/ M\n    - a.rs M\n  - new.rs A\n- README.md"
+        );
+    }
+
+    /// A lazy tree over paths is one level: each row's name from its path,
+    /// a branch marked, its own status letter.
+    #[test]
+    fn a_lazy_path_tree_reads_one_level_by_name() {
+        let mut r = with(
+            run(
+                Viz::Tree,
+                None,
+                &["path", "status", "is_dir"],
+                vec![
+                    vec![t("src/ui"), SqlCell::Null(()), SqlCell::Int(1)],
+                    vec![t("src/a.rs"), t("modified"), SqlCell::Int(0)],
+                ],
+            ),
+            |l| {
+                l.tree = Some(crate::pages::spec::VizTree {
+                    path: Some("path".into()),
+                    status: Some("status".into()),
+                    lazy: Some("folder".into()),
+                    branch: Some("is_dir".into()),
+                    ..Default::default()
+                })
+            },
+        );
+        r.params.insert("folder".into(), t("src"));
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "- ▸ ui\n- a.rs M\n\nA ▸ row opens with `folder=<id>`: run the viz with it to read that level (this run: `folder=src`)."
+        );
+    }
+
     /// A tree nests each row under the row its parent names.
     #[test]
     fn a_tree_nests_rows_under_their_parents() {
@@ -1717,6 +1894,36 @@ mod tests {
         assert_eq!(
             render(&r, &Resolved::default()),
             "**perms**: plain · sql.read (may run its own SQL) · to\n**other**: [1]"
+        );
+    }
+
+    /// A `marks` column reads as its marks joined by spaces, a hint in
+    /// parentheses (`1A (added) 2M`); its tones are only how it looks.
+    #[test]
+    fn a_marks_column_reads_as_its_marks() {
+        let marks = r#"[{"text":"1A","tone":"success","hint":"added"},{"text":"2M","tone":"warning"},{"text":"+3","gap":true}]"#;
+        let r = with(
+            run(Viz::Detail, None, &["changes"], vec![vec![t(marks)]]),
+            |l| {
+                l.columns = vec![crate::pages::spec::PageColumn {
+                    key: "changes".into(),
+                    label: None,
+                    link: None,
+                    unit: None,
+                    icon: None,
+                    tone: None,
+                    width: None,
+                    format: Some(crate::pages::spec::ColumnFormat::Marks),
+                    highlight: None,
+                    select: None,
+                    expand: None,
+                    when: None,
+                }];
+            },
+        );
+        assert_eq!(
+            render(&r, &Resolved::default()),
+            "**changes**: 1A (added) 2M · +3"
         );
     }
 

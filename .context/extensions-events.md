@@ -304,8 +304,11 @@ and `_`, and an icon that is neither in
 `fixtures/core_icons.json`) nor an `assets/<name>.svg` of the extension's own
 (it must exist, sit inside the extension, be an svg of at most 32 KiB and inert: no
 script, event handler or `foreignObject`). Such a file is read at load and
-published as a `data:image/svg+xml;base64,…` icon, which the desktop draws as an
-`<img>`.
+published as a `data:image/svg+xml;base64,…` icon. The desktop draws every such
+icon (a resource's, a page's, an option's, an action's, an agent harness's
+logo) one way, `iconFor` in `src/icons.ts`: the mask of an empty element
+in the text's color, so it follows the theme like a built-in icon and its
+markup is never injected.
 
 **Registering** is the vocabulary reactor's: oxplow-foundation's
 resources plus each enabled extension's go into one `ResourceRegistry`,
@@ -323,7 +326,7 @@ rows (core's too) once (`useResourcesLoader`, in `App`, re-read on
 and `useResources` subscribes to:
 - `resourceIcon` / the page-kind helpers fall back to a resource's icon
   (`ICONS`, a lucide component per allowed name — a Rust test
-  keeps the two lists equal; or the extension's own svg, drawn as an image)
+  keeps the two lists equal; or the extension's own svg, `iconFor`)
   and label;
 - opening a URI of the resource (`openRef`, resources.md "The desktop")
   opens it as itself, drawn by the renderer the daemon offers

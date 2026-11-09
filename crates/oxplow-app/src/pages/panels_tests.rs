@@ -42,7 +42,7 @@ view: { viz: table, from: things }
     write(
         dir.path(),
         &format!("{ext}/parts/n.yaml"),
-        "title: Things count\nparams: [{ name: thread_id }]\nloaders:\n  n: { sql: \"SELECT 1 AS x UNION ALL SELECT 2 UNION ALL SELECT 3\" }\nview: { viz: table, from: n }\n",
+        "title: Things count\nparams: [{ name: thread_id }, { name: mode, default: few, options: [{ value: few, label: Few }, { value: many, label: Many }] }]\nloaders:\n  n: { sql: \"SELECT 1 AS x UNION ALL SELECT 2 UNION ALL SELECT 3\" }\nview: { viz: table, from: n }\n",
     );
     write(
         dir.path(),
@@ -276,7 +276,7 @@ async fn an_open_part_run_carries_its_view_on_every_snapshot() {
 /// (a pick it no longer offers is its default), every other part with no
 /// param of its own, and nothing for a part the panel hasn't.
 #[tokio::test]
-async fn a_part_request_names_its_page_and_the_body_and_its_collapsed_view_take_the_toggles() {
+async fn a_part_request_names_its_page_and_every_part_that_declares_a_toggle_takes_it() {
     use crate::pages::runner::RunTarget;
     let (_dir, svc) = project().await;
     let things = find_panel(&svc, "acme/things").await.unwrap();
@@ -308,7 +308,17 @@ async fn a_part_request_names_its_page_and_the_body_and_its_collapsed_view_take_
         .unwrap()
         .unwrap();
     assert!(matches!(&count.target, RunTarget::Page(p) if p == "acme/n"));
-    assert!(count.params.is_empty());
+    // Every part that declares the toggle follows the header: the count
+    // counts what the body shows.
+    assert_eq!(
+        count.params,
+        BTreeMap::from([("mode".to_string(), SqlCell::Text("few".into()))])
+    );
+    let alarm = part_request(&svc, &things, PanelPart::Badge, ctx.clone(), &gone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(alarm.params.is_empty(), "the badge declares no toggle");
     let plain = find_panel(&svc, "acme/plain").await.unwrap();
     assert!(part_request(&svc, &plain, PanelPart::Badge, ctx, &gone)
         .await

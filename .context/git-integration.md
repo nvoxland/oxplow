@@ -96,7 +96,9 @@ event stream.
 **Nothing here is a hardcoded path list.** `WorkspaceFilter`
 (`crates/oxplow-fs-watch`) is the single source of truth and layers, in
 order: `.git` (the only hardcoded segment — `DEFAULT_IGNORED_SEGMENTS`)
-and `.oxplow` defaults → `generated.include` (forces a path back in) →
+and the root's `.oxplow` defaults (only the root's: a file or folder named
+`.oxplow` deeper down, such as an installed skill's marker, is the
+project's and follows its `.gitignore`) → `generated.include` (forces a path back in) →
 `generated.exclude` → **`.gitignore`**, root + nested, with full
 hierarchical semantics, under the exclude file and git's global
 excludes file (`core.excludesFile`, found as git finds it).
@@ -105,7 +107,7 @@ because a Rust/JS repo gitignores them, not because we name them.
 
 Two questions, one filter: `ignore` is "should oxplow watch this?" and
 `ignore_in_trees` is "would git see it?" (what `Trees` uses: diffs, the
-working tree, the Uncommitted panel). They differ only on
+working tree, the Git panel). They differ only on
 `.oxplow/wiki/`, which is watched and snapshotted though git ignores it,
 so it is never reported as uncommitted.
 

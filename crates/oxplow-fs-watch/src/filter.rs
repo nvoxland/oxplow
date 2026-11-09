@@ -36,7 +36,7 @@ const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
 /// consumers, and the indexer — no consumer keeps its own skip-list.
 ///
 /// A path is ignored when, in precedence order:
-/// 1. it is under `.git` or `.oxplow` (except `.oxplow/wiki/`) —
+/// 1. it is under `.git`, or under the root's `.oxplow` (except `.oxplow/wiki/`) —
 ///    absolute, never overridable;
 /// 2. otherwise, if it matches an **`include`** entry it is **kept**
 ///    (force-track something `.gitignore` would otherwise drop);
@@ -349,14 +349,24 @@ impl WorkspaceFilter {
         //    lists — but `.oxplow` DOES honour its own `.gitignore`
         //    negations, so a file the project declares shareable (notably
         //    `project.yaml`) is watched.
-        let mut comps = path.components().peekable();
+        //    Only the root's `.oxplow` is oxplow's: a file or folder of that
+        //    name deeper down (an installed skill's `.oxplow` marker) is the
+        //    project's, judged by the rules below like any other path.
+        let rel = if path.is_absolute() {
+            path.strip_prefix(&self.shared.root).unwrap_or(path)
+        } else {
+            path
+        };
+        let mut comps = rel.components().peekable();
+        let mut first = true;
         while let Some(c) = comps.next() {
             if let Component::Normal(seg) = c {
+                let at_root = std::mem::replace(&mut first, false);
                 let s = match seg.to_str() {
                     Some(s) => s,
                     None => continue,
                 };
-                if s == ".oxplow" {
+                if s == ".oxplow" && at_root {
                     let next = comps.peek().and_then(|c| match c {
                         Component::Normal(n) => n.to_str(),
                         _ => None,
@@ -603,6 +613,35 @@ mod tests {
         assert!(filter.ignore_in_trees(inside, false));
         assert!(filter.ignore(Path::new(".claude/worktrees/x"), true));
         assert!(!filter.ignore(Path::new("src/a.rs"), false));
+    }
+
+    /// Only the root's `.oxplow` is oxplow's state folder. A file named
+    /// `.oxplow` deeper down (an installed skill's marker) follows git's
+    /// rules: ignored where its folder's `.gitignore` ignores it, kept
+    /// where nothing does.
+    #[test]
+    fn only_the_roots_oxplow_is_oxplows() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir_all(root.join(".agents/skills/x")).unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join(".agents/skills/x/.gitignore"), "*\n").unwrap();
+        let none = Vec::<String>::new;
+        let filter = WorkspaceFilter::build(&root, none(), none(), None);
+        let marker = Path::new(".agents/skills/x/.oxplow");
+        assert!(filter.ignore(marker, false), "its folder ignores it");
+        assert!(filter.ignore_in_trees(marker, false));
+        assert!(
+            filter.ignore(&root.join(marker), false),
+            "absolute, the same"
+        );
+        let kept = Path::new("docs/.oxplow");
+        assert!(!filter.ignore(kept, false) && !filter.ignore_in_trees(kept, false));
+        assert!(
+            !filter.ignore(Path::new(".oxplow"), true),
+            "the root's is walked"
+        );
+        assert!(filter.ignore(Path::new(".oxplow/state.sqlite"), false));
     }
 
     /// A personal extension source (`.oxplow/.gitignore` ignores it) is

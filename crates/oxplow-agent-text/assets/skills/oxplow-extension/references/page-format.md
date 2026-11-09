@@ -119,7 +119,7 @@ caller's, else the viewer's context, else `default`. **`stream_id`,
 `thread_id`, `effort_id` and `uri` are filled in from what the person is
 looking at.** Don't hardcode ids.
 
-- `type`: `text` (default), `choice` (`options: [{ value, label, icon? }]` with a
+- `type`: `text` (default), `choice` (`options: [{ value, label, icon? }]`, an `icon` one oxplow draws or `assets/<name>.svg` in the extension, with a
   `default` that is one of them, or `options_from`: a query of `queries/`
   (`<query>`, its last loader, or `<query>#<loader>`) whose rows are
   `value`, `label`, optional `group` — or `'#<loader>'`, a loader of this

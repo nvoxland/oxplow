@@ -135,8 +135,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a panel: `when: { panel: <id | ext/id>, thread?, stream?, choices? }`
      runs the panel whole, as the rail shows it: its `body`, `collapsed`,
      `count` and `badge` parts, each from the view `thread` / `stream` name
-     (default: the project's first stream, its first thread), the body and
-     the collapsed view with the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
+     (default: the project's first stream, its first thread), every part
+     that declares a toggle with the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
      offer falls back to its default). Never `params`: a part's scope id is
      the view's. `expect: { body?, collapsed?, count_page?, badge?, count?,
      alert?, choices?, text? }` — each part is checked as a page's `expect`
@@ -218,7 +218,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      commit: { sha, at, subject, files?: [{ path, status?, additions?,
      deletions? }] } } }` (a commit the git indexer read), `{ observe: {
      change: { kind?, target, files?: [{ path, status?, additions?,
-     deletions?, zone?, is_test? }], functions?: [{ path, symbol, status?,
+     deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
      complexity_delta?, … }] } } }` (what the change analysis stored for a
      change: `kind` is `commit` by default, an effort's `target` is its id

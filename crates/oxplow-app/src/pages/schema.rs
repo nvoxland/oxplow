@@ -1606,11 +1606,8 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         if !callout {
             return Err("`icon` is for a section with `callout: true`".to_string());
         }
-        if !crate::extension::extension_resources::ICONS.contains(&icon.as_str()) {
-            return Err(format!(
-                "`icon: {icon}` isn't one oxplow draws; use one of {}",
-                crate::extension::extension_resources::ICONS.join(", ")
-            ));
+        if let Some(why) = crate::extension::extension_resources::icon_problem(icon) {
+            return Err(why);
         }
     }
     let collapsible = flag(&mut map, "collapsible")?;

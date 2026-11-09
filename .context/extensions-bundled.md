@@ -272,9 +272,26 @@ screens and the holder's add the review and analysis:
   its header opens the `go-to` page beside them). Both parts read
   foundation's `thread-go-to` query, which reads the `thread-bookmarks`
   query, the one statement of which bookmarks a thread sees; the Go To page
-  reads it too. Uncommitted (`uncommitted`, collapsed `uncommitted-line`,
-  count `uncommitted-count`) is foundation's too, beside the
-  `uncommitted-changes` page its header opens. Each has a `panel:` fixture:
+  reads it too. Git (`git`, collapsed `git-line`, count `git-count`) is
+  foundation's too; its header opens Git Status (`git-dashboard`). Its
+  files parts, the `uncommitted-changes` page and Directory read foundation's `worktree-files` query, the one statement of
+  which files a stream shows: `show` is `changed`, `changed_untracked` or
+  `all` (one folder), `target` the change (`''`: the working tree). Its rows
+  are paths with their status, drawn by a path tree (`tree: { path, status
+  }`). Where a branch stands is foundation's `branch-status` query, the
+  one statement of it: `status` (the row and which buttons apply) and
+  `facts` / `marks` / `line` (↑ ahead, ↓ behind its upstream and, on a worktree, the
+  default branch, as coloured marks). Its `facts` (`status` with each
+  comparison's marks) are drawn, one line each with its buttons, by the
+  `git-branch` part, which Git Status and the panel's
+  Overview both embed (the panel with `with_branch: '0'`). The panel's
+  header toggle (`show`: uncommitted with untracked files, without, or
+  `overview`) is declared by all three parts, so the body and the line
+  (each a `switch` on it) and the count (the uncommitted files; the
+  Overview counts the untracked ones) agree. The body draws its buttons;
+  the collapsed line has none. A fixture's `expect.nodes` sees only the
+  host page's own nodes' actions, not an embedded page's, so the part's
+  buttons are tested on the part. Each has a `panel:` fixture:
   the panel run whole, as the rail shows it. Still in the holder: Waiting on
   You (`waiting-on-me`, a badge), Comments (`comments-panel`) and Work
   (`work`, collapsed `work-line`, count `work-count`). Each moves the same way: its parts, a
