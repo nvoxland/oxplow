@@ -599,8 +599,8 @@ The same table is the `v_replaceable` dataset.
 <!-- replaceables:begin (generated from oxplow_domain::replaceable::REPLACEABLE; bless with OXPLOW_BLESS=1) -->
 | Target | What it is | Bound to a provider | Version | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | board | no | 1 | `scope`, `thread_id` | — |
-| `work_item.list` | list | no | 1 | `scope`, `thread_id` | — |
+| `work_item.board` | board | no | 2 | `scope`, `thread_id` | `show`, `priority`, `q` |
+| `work_item.list` | list | no | 2 | `scope`, `thread_id` | — |
 | `work_item.detail` | description editor | no | 1 | `uri` | — |
 | `work_item.detail.state` | state control | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |

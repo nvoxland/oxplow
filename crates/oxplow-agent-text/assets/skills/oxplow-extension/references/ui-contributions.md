@@ -16,8 +16,6 @@
     `effort_id`, `change_id`, …;
   - `oxplow/work-item.sections` (a work item's page, whichever
     list; oxplow-bundled's, so declare `requires: [oxplow-bundled]`) → `uri`;
-  - `oxplow/tasks.sections` (the Tasks page; also needs `requires: [oxplow-bundled]`) → `thread_id`,
-    `stream_id`;
   - `oxplow/new-session.sections` (sections `start`, `earlier`) →
     `thread_id`.
   `oxplow_find_page`/`oxplow.page.describe` on a page's file shows its slot
@@ -55,7 +53,7 @@ page declares each prop as a param:
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }   # props: scope, thread_id
+    - { page: swimlanes, at: work_item.board, version: 2 }   # props: scope, thread_id (stream_id is implicit)
     - { page: edit-item, at: work_item.detail, version: 1 }  # props: uri
 ```
 
@@ -75,8 +73,10 @@ ui:
   `replacements: { <target>: <extension> | oxplow }` in the project config
   (a person-only key: tell them, don't set it). One extension replacing a
   view shows by itself.
-- The page around the view stays oxplow's (the Board's scope picker, a work
-  item's state pill and Move To), so an item can always move.
+- The page around the view stays oxplow's (the Task List's filters, a work
+  item's state pill and Move To), so an item can always move. The Tasks
+  board is a whole custom page: its stand-in draws its filters too, through
+  the shared view (`show`, `priority`, `q`).
 - A target whose `view` (in `v_replaceable`) lists keys shares them with its
   page: a replacement component reads `component.viewParams`, writes
   `setViewParams` and follows `onViewParams` for exactly those keys (any

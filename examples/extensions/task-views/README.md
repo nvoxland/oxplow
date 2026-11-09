@@ -13,8 +13,8 @@ work-item commands, so they work with whichever list is active.
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
-    - { page: compact-list, at: work_item.list, version: 1 }
+    - { page: swimlanes, at: work_item.board, version: 2 }
+    - { page: compact-list, at: work_item.list, version: 2 }
     - { page: edit-item, at: work_item.detail, version: 1 }
 ```
 

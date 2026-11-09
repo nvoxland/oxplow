@@ -88,3 +88,16 @@ test("a compact part is tight: close sections, ruleless facts, buttons that wrap
   expect(sheet).toMatch(/\.ox-compact \.ox-fact dd\s*\{[^}]*flex-wrap:\s*wrap/);
   expect(sheet).toMatch(/\.ox-compact \.ox-fact-actions \.ox-button\s*\{[^}]*white-space:\s*nowrap/);
 });
+
+// A component that draws its own menu (the Tasks board's card menu) draws it
+// with the kit's: a raised list over the page, its items full-width buttons
+// that light up under the pointer and the keyboard, a rule between groups
+// and a danger look for a delete.
+test("the kit has a menu: a raised list of items, separators and a danger item", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-menu\s*\{[^}]*position:\s*fixed[^}]*background:\s*var\(--surface-elevated\)/);
+  expect(sheet).toMatch(/\.ox-menu-item\s*\{[^}]*width:\s*100%/);
+  expect(sheet).toMatch(/\.ox-menu-item:hover,\s*\.ox-menu-item:focus-visible\s*\{[^}]*background:\s*var\(--accent-soft-bg\)/);
+  expect(sheet).toMatch(/\.ox-menu-separator\s*\{[^}]*border-top:\s*1px solid var\(--border-subtle\)/);
+  expect(sheet).toMatch(/\.ox-menu-item\.ox-danger\s*\{[^}]*color:\s*var\(--severity-critical\)/);
+});

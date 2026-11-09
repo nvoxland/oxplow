@@ -3,7 +3,7 @@ description: The work items as a plain table, with Done and Edit… on each row.
 params:
 - name: scope
   role: filter
-  label: Scope (thread / stream / all)
+  label: Scope (thread / stream / all / backlog)
   default: all
 - name: thread_id
   label: Thread
@@ -17,6 +17,7 @@ loaders:
       WHERE :scope = 'all'
          OR (:scope = 'thread' AND w.thread_id = :thread_id)
          OR (:scope = 'stream' AND w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id))
+         OR (:scope = 'backlog' AND w.thread_id IS NULL)
       ORDER BY w.updated_at DESC
 view:
   from: compact_list

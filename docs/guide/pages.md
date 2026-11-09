@@ -425,7 +425,7 @@ a bookmark doesn't freeze it to one date.
 ## Replacing a view
 
 An extension can put its own page where one of oxplow's views is: the
-Board's cards (`work_item.board`), the Tasks list (`work_item.list`) or a
+Tasks board (`work_item.board`), the Task List's list (`work_item.list`) or a
 task's description editor (`work_item.detail`). It needs no work-items provider of its
 own: a view reads `v_work_item` and changes items through the work-item
 commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so it
@@ -435,13 +435,14 @@ works with whichever list is active.
 # extension.yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
+    - { page: swimlanes, at: work_item.board, version: 2 }
 ```
 
 The part gets the view's props as params and must declare all of them: the
-Board gets `scope` (`thread`, `backlog` or `all`) and `thread_id`; the list
-gets `scope` (`thread`, `stream` or `all`) and `thread_id`, and its part may
-declare `stream_id`; the editor gets `uri`. Settings → Integrations lists
+board and the list get `scope` (`thread`, `stream`, `all` or `backlog`) and
+`thread_id`, and may declare `stream_id`; a board replacement also shares
+the board's filters (`show`, `priority`, `q`) as its view, since the board
+draws them itself; the editor gets `uri`. Settings → Integrations lists
 each replaced view with a choice of whose to show (Default, oxplow's own, or
 an extension); a small "replaced by" badge says whose it is, and if it can't
 load, oxplow's own shows with a line saying why. Some views also share

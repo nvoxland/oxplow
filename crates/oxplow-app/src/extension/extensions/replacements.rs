@@ -401,8 +401,8 @@ mod tests {
                 target: "work_item.board".into(),
                 capability: "work_items".into(),
                 page: "tracker/board".into(),
-                version: 1,
-                view: vec![],
+                version: 2,
+                view: vec!["show".into(), "priority".into(), "q".into()],
                 label: "board".into(),
                 bound_to_provider: false,
             }]
@@ -413,8 +413,8 @@ mod tests {
                 "nor a replaceable component (work_item.board, work_item.list, work_item.detail, work_item.detail.state, vcs.history.graph, effort.verdict)",
             ),
             (
-                "{ page: board, at: work_item.board, version: 2 }",
-                "`work_item.board` is at version 1 of its props contract, not 2",
+                "{ page: board, at: work_item.board, version: 1 }",
+                "`work_item.board` is at version 2 of its props contract, not 1",
             ),
             (
                 "{ page: nope, at: work_item.board }",
@@ -518,7 +518,7 @@ mod tests {
         );
         assert!(ext.ui.replacements.is_empty());
         let ext = load("",
-            "    - { page: board, at: work_item.board, version: 1 }\n    - { page: board, at: work_item.list }\n    - { page: state, at: work_item.detail }\n",
+            "    - { page: board, at: work_item.board, version: 2 }\n    - { page: board, at: work_item.list }\n    - { page: state, at: work_item.detail }\n",
         );
         assert_eq!(said(&ext), "");
         assert_eq!(
@@ -528,8 +528,8 @@ mod tests {
                 .map(|r| (r.target.as_str(), r.bound_to_provider, r.version))
                 .collect::<Vec<_>>(),
             vec![
-                ("work_item.board", false, 1),
-                ("work_item.list", false, 1),
+                ("work_item.board", false, 2),
+                ("work_item.list", false, 2),
                 ("work_item.detail", false, 1)
             ]
         );

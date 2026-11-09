@@ -327,6 +327,38 @@
 .ox-param-edit .ox-select { width: 100%; min-width: 0; }
 .ox-param-check { justify-self: start; margin: 0 var(--space-2); }
 .ox-params-more { align-self: start; background: none; border: none; padding: var(--space-1) 0; font: inherit; font-size: var(--text-xs); }
+/* A menu a component draws itself (the Tasks board's card menu): a raised
+   list over the page at the pointer, its items full-width buttons, a rule
+   between groups, a delete in the danger colour. Escape closes it; the
+   component owns that. */
+.ox-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 180px;
+  padding: var(--space-1);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+}
+.ox-menu-item {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  cursor: pointer;
+}
+.ox-menu-item:hover, .ox-menu-item:focus-visible { background: var(--accent-soft-bg); outline: none; }
+.ox-menu-item.ox-danger { color: var(--severity-critical); }
+.ox-menu-separator { border-top: 1px solid var(--border-subtle); margin: var(--space-1) 0; }
+.ox-menu-heading { font-size: var(--text-xs); color: var(--text-secondary); padding: var(--space-1) var(--space-2) 0; }
+
 .ox-popover {
   position: fixed;
   z-index: 1000;

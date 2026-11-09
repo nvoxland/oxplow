@@ -196,7 +196,7 @@ mod tests {
         );
         assert_eq!(
             replaceable("work_item.board").map(|r| r.view),
-            Some(&[][..])
+            Some(&["show", "priority", "q"][..])
         );
     }
 }

@@ -99,8 +99,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     else onOpenPage?.({ id: uri });
   };
   // A page whose view is one component *is* that component: it says the
-  // title and the actions, which core draws.
-  const whole = page?.view.kind === "component";
+  // title and the actions, which core draws. One another extension stands
+  // in for (`replaceable:`) is drawn as any replaced node, by `PageTree`.
+  const whole = page?.view.kind === "component" && !run?.tree.replacedBy;
   const [frameTitle, setFrameTitle] = useState<string | null>(null);
   const [frameActions, setFrameActions] = useState<FrameAction[]>([]);
   const frameHost = useRef<BridgeHost | null>(null);

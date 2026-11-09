@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { PageHost } from "./PageHost.js";
 import { PageNavigationContext } from "../tabs/PageNavigationContext.js";
 import { PageActionContext, PageFormsContext, type PageForms, type RunPageAction } from "./useNodeActions.js";
-import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing/fakeRun.js";
+import { fakeAction, fakePage, fakePageRuns, fakeRun, gridPage, loader, node, tablePage } from "./testing/fakeRun.js";
 import { createPageRuns, type PageKey } from "../pageRuns.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { CommandSpec, FormStart, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -359,4 +359,22 @@ test("Copy puts the open run's text on the clipboard, as an agent reads it", asy
   } finally {
     Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
   }
+});
+
+// A custom page (its view one `component` node) that is `replaceable:` and
+// another extension stands in for (the Tasks board, `work_item.board`):
+// the page draws the stand-in, as any replaced node, never its own frame.
+test("a custom page another extension replaces draws the replacement, not its own component", async () => {
+  const lanes = fakeRun(fakePage(node.viz("lanes", "rows"), { id: "beta/lanes", extension: "beta", slug: "lanes" }), {
+    loaders: { rows: loader(["lane"], [["Doing"]]) },
+  });
+  const page = fakePage({ ...node.component("board", "board"), replaceable: "work_item.board" });
+  const run = fakeRun(page, {});
+  const { runs } = fakePageRuns({ ...run, tree: { ...run.tree, replacedBy: "beta", embed: lanes } });
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  await view.findByTestId("replacement-work_item.board");
+  expect(view.container.textContent).toContain("Doing");
+  expect(view.queryByTestId("custom-component")).toBeNull();
+  expect(view.queryByTestId("custom-component-fallback")).toBeNull();
+  expect(view.queryByTestId("custom-component-loading")).toBeNull();
 });

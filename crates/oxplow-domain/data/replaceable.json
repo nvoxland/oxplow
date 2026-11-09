@@ -3,27 +3,31 @@
     "target": "work_item.board",
     "capability": "work_items",
     "bound_to_provider": false,
-    "version": 1,
+    "version": 2,
     "props": [
       "scope",
       "thread_id"
     ],
-    "view": [],
+    "view": [
+      "show",
+      "priority",
+      "q"
+    ],
     "label": "board",
-    "about": "The Board's columns of cards (the `board-cards` part of the `board` document): `scope` is `thread`, `backlog` or `all`; `thread_id` the viewed thread, which applies when `scope` is `thread`. A view of the capability as a whole, so any extension may bring one: it reads `v_work_item` and runs the interface verbs (`oxplow.work_item.transition`, `reorder`, `update`, …), whichever list is active."
+    "about": "The Tasks board (the `board` component of oxplow-bundled's `tasks` page): `scope` is `thread`, `stream`, `all` or `backlog`; `thread_id` the viewed thread, which applies when `scope` is `thread`; a page's `stream_id` (implicit, as on every page) is the viewed stream, which applies when `scope` is `stream`. A view of the capability as a whole, so any extension may bring one: it reads `v_work_item` and runs the interface verbs (`oxplow.work_item.transition`, `reorder`, `update`, …), whichever list is active. It shares the page's filters (`show`, `priority`, `q`, the tab's view): it draws them, as oxplow's board does, since the page has no rail."
   },
   {
     "target": "work_item.list",
     "capability": "work_items",
     "bound_to_provider": false,
-    "version": 1,
+    "version": 2,
     "props": [
       "scope",
       "thread_id"
     ],
     "view": [],
     "label": "list",
-    "about": "The Tasks page's list (the `list` part of the `tasks` document): `scope` is `thread`, `stream` or `all`; `thread_id` the thread when `scope` is `thread`, else null. Its `stream_id` is the scope's stream. The page's filters, summary and backlog parts stay oxplow's."
+    "about": "The Task List's list (the `list` node of oxplow-bundled's `task-list` page): `scope` is `thread`, `stream`, `all` or `backlog`; `thread_id` the viewed thread, which applies when `scope` is `thread`. The page's filters and New Task… stay oxplow's."
   },
   {
     "target": "work_item.detail",

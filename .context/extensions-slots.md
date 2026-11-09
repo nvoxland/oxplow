@@ -67,7 +67,6 @@ loaders' first rows and params are what a mount can take):
 |---|---|---|
 | `oxplow/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
 | `oxplow/work-item.sections` | the Work Item page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
-| `oxplow/tasks.sections` | the Tasks page (nodes `list`, `summary`, `backlog`; `at: { before: list }` puts a strip above the list) | `show`, `priority`, `thread_id`, `stream_id` |
 | `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
 | `oxplow/new-session.sections` | the New Session page (nodes `start`, `earlier`) | `stream_id`, `thread_id`, `q` |
@@ -96,7 +95,7 @@ scope made of part-pages, not a placement of one page.
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 1 }
+    - { page: swimlanes, at: work_item.board, version: 2 }
 ```
 
 The targets are one table of data, `crates/oxplow-domain/data/replaceable.json`
@@ -116,8 +115,8 @@ than handing it props it does not know.
 
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | the Board's columns of cards (the `board` page's node) | `work_items` | no | `scope` (`thread` / `backlog` / `all`), `thread_id` (applies when `scope` is `thread`) | — |
-| `work_item.list` | the Tasks page's list: the scope picker, detail pane and backlog drawer stay oxplow's | `work_items` | no | `scope` (`thread` / `stream` / `all`), `thread_id` (the thread when `scope` is `thread`, else null) | — |
+| `work_item.board` | the Tasks board (the `board` component node of bundled's `tasks` page; v2) | `work_items` | no | `scope` (`thread` / `stream` / `all` / `backlog`), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
+| `work_item.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | `work_items` | no | `scope` (`thread` / `stream` / `all` / `backlog`), `thread_id` (applies when `scope` is `thread`) | — |
 | `work_item.detail` | a work item's description editor (the `body` node of the `work-item` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `work_items` | no | `uri` (the item) | — |
 | `work_item.detail.state` | a work item's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `work_items` | yes | `uri` (the item) | — |
 | `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` node of the `diff-view` page). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
@@ -198,7 +197,7 @@ has `replaced_by`): the embed (kit vizzes, or `viz: custom` with its
 sandbox and, for an extension that isn't oxplow's own, a "by <extension>" mark,
 sharing the view its target's contract lists) under a hover title naming
 the extension (`replacement-<target>`, no chip), kept fresh as any page run is. The page's own chrome
-(the Board's scope picker) stays oxplow's. A run with an `error` draws
+(a Task List's filters) stays oxplow's; the Tasks board has none, so its stand-in shares its filters (`view`). A run with an `error` draws
 the core component under a line saying whose it was and why ("beads's
 board couldn't load: …. Showing oxplow's.", `replacement-fallback`),
 outside the replacement's frame: no badge. Nothing is decided in the
