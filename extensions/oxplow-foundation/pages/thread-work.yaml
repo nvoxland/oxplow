@@ -9,7 +9,8 @@ answers:
 loaders:
   thread_work:
     sql: |
-      SELECT w.uri, w.title, w.state,
+      -- `state` is the bucket; `stage` is how the list names it.
+      SELECT w.uri, w.title, w.state, coalesce(w.stage_title, w.stage) AS stage,
              coalesce((SELECT group_concat(e.uri, ' ') FROM v_effort e WHERE e.work_item = w.uri), '') AS efforts
       FROM v_work_item w
       WHERE w.assignee = uri('oxplow/thread', 'id', :thread)
@@ -30,8 +31,8 @@ view:
     link:
       kind: page
       from: uri
-  - key: state
-    label: State
+  - key: stage
+    label: Stage
   - key: efforts
     label: Efforts
   empty: The thread has no work items.

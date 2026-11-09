@@ -160,8 +160,8 @@ target with that choice (a `<select>`: Default, oxplow's own, each
 extension). Every target has a `label` a person reads, in the same table
 ("board", "state control", "history graph"), carried on each
 `UiReplacement`. A state control replacement lists the tracker's own
-states, each with **Move Here** (`oxplow.work_item.transition` with the
-`native_state`); oxplow's Move To stays beside it.
+stages, each with **Move Here** (`oxplow.work_item.transition` with the
+stage id); oxplow's Move To stays beside it.
 
 **At load** (`replacements::parse_replacements`, errors at the entry's
 line): the target is in the table; the page is one of the extension's and

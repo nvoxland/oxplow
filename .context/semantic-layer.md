@@ -794,7 +794,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_thread` | threads within a stream |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
-| `v_work_item` | the active work list's items (`uri`, `provider`, `native_id`, canonical `state`, `native_state`, `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxplow's tasks have no dataset of their own (`v_task` was removed) and keep their own fields in `native_state` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
+| `v_work_item` | the active work list's items (`uri`, `provider`, `native_id`, `state` (the bucket), `stage` and `stage_title` (the list's own stage, as it declares it), `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxplow's tasks have no dataset of their own (`v_task` was removed) and keep their own fields in `stage` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
 | `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` URI; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |

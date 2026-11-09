@@ -1,6 +1,6 @@
 ---
 name: work-items
-description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), states, epics and link types, and reading items (read, the work-next page, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, and on v_work_item.
+description: The project's work list — when filing a work item is worth it, the work_item.* commands (create, transition, update, link, comment), stages and buckets, epics and link types, and reading items (read, the work-next page, v_work_item). Loads on the oxplow `run_command` tool with work_item.*, and on v_work_item.
 ---
 
 # Work items
@@ -19,12 +19,13 @@ File one when it helps the person follow the work:
 
 ```json
 { "id": "oxplow.work_item.create",
-  "input": { "title": "Fix login redirect loop", "body": "…", "state": "todo" } }
+  "input": { "title": "Fix login redirect loop", "body": "…", "stage": "todo" } }
 ```
 
 It goes on the active work list, assigned to nobody unless `assignee`
-names a thread (`thr3`) or the person (`oxplow:oxplow/person`). `state`
-is `todo` (the default), `backlog` or `in_progress`; the list's own fields go under `native`, by the names it
+names a thread (`thr3`) or the person (`oxplow:oxplow/person`). `stage`
+is one of the list's stages or a bucket (`todo`, the default, `backlog` or
+`in_progress`); the list's own fields go under `native`, by the names it
 declares (`v_capability_provider.fields`; e.g. `{ "priority": "high" }`). Title: imperative, ≤60 chars. One reviewable
 concern per item. An epic is an item with children: file one when the
 change has three or more steps a reviewer would inspect separately;
@@ -36,10 +37,15 @@ unrelated one begins a new effort.
 oxplow never marks an item done. If you're tracking one, move it to
 `done` when it ships.
 
-**States:** `backlog` (filed, not ready yet), `todo` (ready), `in_progress`, `blocked` (needs an
-answer), `done`, `canceled` (decided against: keep the row, with the
-reasoning). A list may have its own finer state (`native_state`). Put
-state in the state, never in the title.
+**Stages and buckets.** Each list declares its own stages, in order
+(`v_capability_provider.stages`: `id`, `title`, `bucket`; oxplow's tasks:
+`backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). Every
+stage is in one of six buckets, which is what oxplow acts on:
+`backlog` (filed, not ready yet), `todo` (ready), `in_progress`,
+`blocked` (needs an answer), `done`, `canceled` (decided against: keep
+the row, with the reasoning). Where a command takes a stage (`to`,
+`stage`) you may name a bucket instead: it lands on the first stage the
+list declares in it. Put the stage in the stage, never in the title.
 
 When the person rejects your last attempt at an item, reopen that item
 rather than filing a new one.
@@ -60,9 +66,9 @@ on it is its efforts.
 ## Changing items
 
 The same commands change any list's items, by canonical uri
-(`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): `oxplow.work_item.transition { uri, to,
-native_state? }`, `oxplow.work_item.update { uri, title?, body?, parent_uri?,
-state?, native? }`, `oxplow.work_item.link { uri, target, link_type }`
+(`oxplow:oxplow/work_item?id=<id>&provider=<provider>`): `oxplow.work_item.transition { uri, to }`
+(`to`: a stage or a bucket), `oxplow.work_item.update { uri, title?, body?, parent_uri?,
+stage?, native? }`, `oxplow.work_item.link { uri, target, link_type }`
 (and `oxplow.work_item.unlink`, the same input),
 `oxplow.work_item.comment { uri, body }`. `oxplow.work_item.create` takes
 `links: [{ target, link_type }]` too. The active list's own ids work as
@@ -92,8 +98,8 @@ Link types:
   ready items), else the pool (`role: pool`), most pressing first.
 - `oxplow_thread_work { thread }` — what is assigned to a thread and what
   its efforts finished, with their efforts.
-- `oxplow_query_sql` over `v_work_item` (`uri`, `title`, `body`, `state`,
-  `native_state`, `native`, `parent_uri`, `assignee` — a thread's or the
+- `oxplow_query_sql` over `v_work_item` (`uri`, `title`, `body`, `state` — the
+  bucket — `stage`, `stage_title`, `native`, `parent_uri`, `assignee` — a thread's or the
   person's uri, NULL for nobody — `rank`, `closed_at`), `v_work_item_link` and
   `v_work_item_comment` for anything else (`assignee` joins `v_thread` on its `uri`): a queue in order is
   `WHERE assignee = … ORDER BY rank IS NULL, rank, created_at`.
