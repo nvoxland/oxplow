@@ -4,6 +4,26 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
 
 ## What works today: Explore Data
 
+- **The Tasks board: oxplow-bundled's built component** (`pages/tasks.yaml`,
+  `custom_components: board`, source `extensions/oxplow-bundled/src/board/`,
+  built by bundled's `package.json` with `bun build`, no dependencies). The
+  worked example of a custom page that **reuses core where it fits and draws
+  the rest itself**. Core's: the nav bar (`setTitle`, `setActions`: New
+  Task…), the confirmation a delete asks for, the record and line of an
+  `invoke` that fails, the tab's `#` with Back and Forward, the page's
+  loaders as its data (the shared `work-items` query), the kit's sheet
+  (`.ox-toolbar`, `.ox-select`, `.ox-input`, `.ox-board`, `.ox-card`, the
+  drag classes and `.ox-menu`) and the theme's tokens. Its own: the
+  toolbar, the columns, drag and drop, and a card's menu. **A custom page
+  owns its controls through `role: view` params** (`show`, `priority`,
+  `q`): they ride the tab's `#` like filters, the rail never draws them,
+  and the component sets them with `setViewParams` and hears Back through
+  `onViewParams`. With no `filter` param, `rail:`, sections or see-also, the
+  page draws no rail and the frame has the whole width. Its pure half
+  (`model.ts`) is tested from the desktop suite (`viz/boardModel.test.ts`),
+  the frame by a `ui:` fixture. What the library doesn't give it: icons (a
+  card has no state glyph; its column says the state) and the host's own
+  context menu (it draws `.ox-menu`).
 - **Timeline: oxplow-bundled's other built component** (`pages/timeline.yaml`,
   source `src/timeline/`, built with `vis-timeline` by bundled's
   `package.json`). The page is the worked example of a component that owns
@@ -358,7 +378,9 @@ around it** (`component_harness.rs`, `PageAt::ui`):
 writes the page's view by the rail's rule (`pageViewChange`: a selection
 pushes a history step, a filter replaces), which a whole-page component
 hears through `onViewParams`. A page's rail stacked above its body (a
-narrow window) is capped and scrolls, so the body keeps the height.
+narrow window) is capped and scrolls, so the body keeps the height. A
+custom page whose controls are its own declares them `role: view`
+(the Tasks board): no rail is drawn, and the frame takes the width.
 
 **Whose view a component has** (protocol 9, `viz/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
@@ -469,7 +491,8 @@ ends the component and its table shows.
 named in every bundle's CSP `style-src`) is a few `ox-` classes in
 oxplow's look — text, card, badge, buttons, forms (`ox-form`, `ox-field`,
 `ox-label`, `ox-input`/`ox-select`/`ox-textarea` with the accent focus
-ring, `ox-error`), drag and drop (`ox-drag`, `ox-dragging`,
+ring, `ox-error`), a menu (`ox-menu`, `ox-menu-item`, `ox-menu-separator`,
+`ox-menu-heading`, `ox-danger`), drag and drop (`ox-drag`, `ox-dragging`,
 `ox-drop-target`, the Work board's dashed accent drop look), table,
 states, chart series. They read only the theme's tokens (`kitSheet.test.ts`:
 every `var(--x)` is one the app's root defines, and no literal color). A

@@ -1,0 +1,95 @@
+title: Work items
+description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (the thread's list), `stream` (every thread of the stream), `all` (every item, the backlog too) or `backlog` (items on no thread). `state`: `all`, `open` (to do, in progress, blocked), `in_progress` or `done` (done and canceled). `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`fields`: the list's editable choice fields joined, `thread`: its thread's title or `Backlog`, `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `not_<state>`), and `ord`, the order to draw it in: open items by list and rank with each epic's children under it, then done and canceled ones, the latest first."
+needs:
+- work_items
+params:
+- name: show
+  default: thread
+- name: state
+  default: all
+- name: priority
+  default: any
+- name: q
+  default: ''
+- name: thread_id
+- name: stream_id
+loaders:
+  items:
+    sql: |
+      WITH feat AS (
+        SELECT p.features AS f, CASE WHEN json_valid(p.fields) THEN p.fields ELSE '[]' END AS fields
+        FROM v_capability_provider p WHERE p.capability = 'work_items' AND p.active = 1
+      ),
+      choice_field AS (
+        SELECT json_extract(f.value, '$.name') AS name
+        FROM feat, json_each(feat.fields) f
+        WHERE json_extract(f.value, '$.kind') = 'enum' AND coalesce(json_extract(f.value, '$.read_only'), 0) = 0
+      ),
+      scoped AS (
+        SELECT w.*, CASE WHEN json_valid(w.native) THEN w.native ELSE '{}' END AS nat
+        FROM v_work_item w
+        WHERE CASE :show WHEN 'thread' THEN w.thread_id = :thread_id
+                         WHEN 'stream' THEN w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id)
+                         WHEN 'backlog' THEN w.thread_id IS NULL
+                         ELSE 1 END
+          AND CASE :state WHEN 'open' THEN w.state IN ('todo', 'in_progress', 'blocked')
+                          WHEN 'in_progress' THEN w.state = 'in_progress'
+                          WHEN 'done' THEN w.state IN ('done', 'canceled')
+                          ELSE 1 END
+      ),
+      -- What the priority and the search match; an epic stays for a child that does.
+      hit AS (
+        SELECT s.uri, s.parent_uri FROM scoped s
+        WHERE (:priority = 'any' OR json_extract(s.nat, '$.priority') = :priority)
+          AND (coalesce(:q, '') = '' OR instr(lower(s.title), lower(:q)) > 0 OR instr(lower(s.nat), lower(:q)) > 0)
+      ),
+      shown AS (
+        SELECT s.*, s.state IN ('done', 'canceled') AS closed FROM scoped s
+        WHERE s.uri IN (SELECT uri FROM hit) OR s.uri IN (SELECT parent_uri FROM hit WHERE parent_uri IS NOT NULL)
+      ),
+      placed AS (
+        SELECT s.*,
+               -- An open item under a shown epic is drawn under it.
+               CASE WHEN NOT s.closed AND s.parent_uri IN (SELECT uri FROM shown) THEN 1 ELSE 0 END AS depth,
+               CASE WHEN s.closed THEN row_number() OVER (PARTITION BY s.state ORDER BY s.closed_at DESC, s.created_at DESC, s.uri DESC) END AS done_rank
+        FROM shown s
+      ),
+      anchored AS (
+        SELECT p.*, coalesce(CASE WHEN p.depth = 1 THEN p.parent_uri END, p.uri) AS anchor FROM placed p
+      )
+      SELECT w.uri, w.title, w.state, w.native, w.thread_id,
+             json_extract(w.nat, '$.priority') AS prio,
+             (SELECT group_concat(n.value, ' · ') FROM json_each(w.nat) n
+               WHERE n.key IN (SELECT name FROM choice_field) AND n.value IS NOT NULL) AS fields,
+             CASE WHEN w.thread_id IS NULL THEN 'Backlog'
+                  ELSE (SELECT t.title FROM v_thread t WHERE t.id = w.thread_id) END AS thread,
+             w.parent_uri,
+             (SELECT p.title FROM v_work_item p WHERE p.uri = w.parent_uri) AS parent_title,
+             w.depth,
+             (SELECT count(*) FROM v_work_item_comment c WHERE c.uri = w.uri) AS comments,
+             w.closed_at, w.done_rank,
+             CASE WHEN coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1
+                  THEN uri('oxplow/page', 'page', 'new-task', 'parent', w.uri) END AS add_child,
+             w.state <> 'todo' AS not_todo, w.state <> 'in_progress' AS not_in_progress,
+             w.state <> 'blocked' AS not_blocked, w.state <> 'done' AS not_done, w.state <> 'canceled' AS not_canceled,
+             coalesce(json_extract((SELECT f FROM feat), '$.ordering'), 0) AS can_order,
+             coalesce(json_extract((SELECT f FROM feat), '$.delete'), 0) AS can_delete,
+             coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) AS can_nest,
+             (coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1 AND w.parent_uri IS NOT NULL) AS has_parent,
+             (w.thread_id IS NOT NULL AND coalesce(json_extract((SELECT f FROM feat), '$.lists'), 0) = 1) AS can_shelve,
+             (:thread_id IS NOT NULL AND w.thread_id IS NOT :thread_id
+              AND coalesce(json_extract((SELECT f FROM feat), '$.lists'), 0) = 1) AS can_bring,
+             'thr' || :thread_id AS thread_ref,
+             EXISTS (SELECT 1 FROM feat, json_each(feat.fields) f
+                      WHERE json_extract(f.value, '$.name') = 'priority' AND json_extract(f.value, '$.kind') = 'enum') AS can_prioritize,
+             row_number() OVER (ORDER BY
+               w.closed,
+               CASE WHEN w.closed THEN w.state = 'canceled' END,
+               w.done_rank,
+               coalesce((SELECT t.sort_index FROM v_thread t WHERE t.id = w.thread_id), 1e9),
+               (SELECT a.rank IS NULL FROM v_work_item a WHERE a.uri = w.anchor),
+               (SELECT a.rank FROM v_work_item a WHERE a.uri = w.anchor),
+               (SELECT a.created_at FROM v_work_item a WHERE a.uri = w.anchor),
+               w.anchor, w.depth, w.rank IS NULL, w.rank, w.created_at, w.uri) AS ord
+      FROM anchored w
+      ORDER BY ord

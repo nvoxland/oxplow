@@ -1,0 +1,89 @@
+title: Tasks
+description: "The work items of a thread, its stream, everything or the backlog as a kanban board: a column per state, drag a card to move it."
+icon: columns-3
+category: Work
+keywords: board kanban work items columns state
+needs:
+- work_items
+# The board's filters are its view (the tab's `#`): the board draws them
+# in its own toolbar, so the page has no rail.
+params:
+- name: show
+  type: choice
+  role: view
+  default: thread
+  options:
+  - { value: thread, label: This thread }
+  - { value: stream, label: This stream }
+  - { value: all, label: Everywhere }
+  - { value: backlog, label: Backlog }
+- name: priority
+  type: choice
+  role: view
+  default: any
+  options:
+  - { value: any, label: Any }
+  - { value: urgent, label: Urgent }
+  - { value: high, label: High }
+  - { value: medium, label: Medium }
+  - { value: low, label: Low }
+- name: q
+  type: search
+  role: view
+  label: Search
+- name: thread_id
+- name: stream_id
+loaders:
+  # The scope (with no thread, "this thread" is everything) and the form a
+  # new item is filed with.
+  row:
+    sql: |
+      SELECT CASE WHEN :show = 'thread' AND :thread_id IS NULL THEN 'all' ELSE :show END AS scope,
+             uri('oxplow/page', 'page', 'new-task') AS new_task
+  items:
+    page: oxplow/work-items
+    loader: items
+    params:
+      show: { from: row.scope }
+      state: all
+      priority: { param: priority }
+      q: { param: q }
+      thread_id: { param: thread_id }
+      stream_id: { param: stream_id }
+  # The cards: every open item and the ten latest done; canceled ones are
+  # on the Task List. Wider than one thread, a card names its thread.
+  board:
+    sql: |
+      SELECT i.*, CASE WHEN :scope <> 'thread' THEN i.thread END AS thread_shown
+      FROM items i
+      WHERE i.state <> 'canceled' AND (i.state <> 'done' OR i.done_rank <= 10)
+      ORDER BY i.ord
+    params:
+      scope:
+        from: row.scope
+  # How many items each column has, shown or not.
+  counts:
+    sql: |
+      SELECT state, count(*) AS n FROM items GROUP BY state
+  # A turn the agent has open on the thread: a live card at the top of In Progress.
+  live:
+    sql: |
+      SELECT 'Agent is working: ' || CASE WHEN instr(trim(t.prompt), char(10)) > 0
+                                          THEN substr(trim(t.prompt), 1, instr(trim(t.prompt), char(10)) - 1)
+                                          ELSE trim(t.prompt) END AS title
+      FROM v_agent_turn t
+      WHERE :scope = 'thread' AND t.thread_id = :thread_id AND t.ended_at IS NULL
+    params:
+      scope:
+        from: row.scope
+  # The list's own choice fields, for a card's menu.
+  fields:
+    page: oxplow/work-item-fields
+    loader: work_item_fields
+# Another extension may stand in for the board (`work_item.board`: `scope`
+# from the row, `thread_id`, `stream_id`).
+view:
+  id: board
+  replaceable: work_item.board
+  component:
+    id: board

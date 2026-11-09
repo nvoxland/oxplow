@@ -219,7 +219,8 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   instead of an input (not on a page that fills: its viz draws the picks), it is in the `#`, and a pick pushes an entry. `view`
   rides the `#` like a filter but is state the page or the system sets:
   the rail never draws it (not in Filters, not counted for Reset) and a
-  person never edits it; a `for:` page may take one (`ParamRole::rides_view`
+  person never edits it; a `for:` page may take one, and a custom page whose
+  component draws its own controls declares them so (the Tasks board) (`ParamRole::rides_view`
   is the one test for "rides the `#`"). A `filter`, `selection` or `view`
   param found in a `?` is refused.
 - **`options_from`** makes a choice whose options rows list: `value`,

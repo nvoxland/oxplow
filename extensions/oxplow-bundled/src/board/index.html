@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/component-lib/oxplow-kit.css">
+<link rel="stylesheet" href="board.css">
+<div class="ox-toolbar" id="toolbar">
+  <label class="ox-sr-only" for="show">Show</label>
+  <select id="show" class="ox-select">
+    <option value="thread">This thread</option>
+    <option value="stream">This stream</option>
+    <option value="all">Everywhere</option>
+    <option value="backlog">Backlog</option>
+  </select>
+  <label class="ox-sr-only" for="priority">Priority</label>
+  <select id="priority" class="ox-select">
+    <option value="any">Any priority</option>
+    <option value="urgent">Urgent</option>
+    <option value="high">High</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+  </select>
+  <label class="ox-sr-only" for="q">Search</label>
+  <input id="q" class="ox-input" type="search" placeholder="Search tasks" autocomplete="off">
+</div>
+<p id="note" class="ox-muted ox-small" hidden></p>
+<div id="board" class="ox-board" aria-label="Tasks by state"></div>
+<script src="/component-lib/oxplow-component.js"></script>
+<script src="main.js"></script>

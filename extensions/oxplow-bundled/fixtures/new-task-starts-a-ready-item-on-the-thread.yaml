@@ -1,0 +1,5 @@
+# New Task… opens this form: a new item starts To Do, on the thread it was
+# opened from, under no epic unless one is given.
+when: { form: new-task, params: { thread_id: 1 } }
+expect:
+  values: { state: todo, thread: thr1, parent_uri: null }

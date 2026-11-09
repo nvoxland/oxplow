@@ -164,7 +164,7 @@ where the list declares no such feature (`needs: [work_items.links]`,
 list's extension may replace its state part (`work_item.detail.state`,
 decided by the page run from the item's `provider`); About's menu always offers the moves, so an item
 can always move. **Custom views** need no provider: any extension may
-replace the Board (`work_item.board`), the Tasks list (`work_item.list`)
+replace the Tasks board (`work_item.board`), the Task List's list (`work_item.list`)
 or an item's description editor (`work_item.detail`) — with a
 page or component over `v_work_item` that changes items only through the
 interface commands, so it works with whichever list is active; the person
@@ -182,14 +182,15 @@ link** — its raw text, muted, tooltip "nothing resolves this URI; its
 extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
-The **Board** (the `board` page, oxplow-bundled's `board` document with its
-`board-cards` part: a `viz: board` over `v_work_item`) shows
-items as cards in one column per canonical state. Drag a card to a
-column (a `drag: true` action on `oxplow.work_item.transition`), or
-right-click → Move To, to transition it through the work list. Its scope
-(this thread, the backlog, everything) is the page's `show` filter. List
-rows and Board cards drag as viz rows, which the agent terminal reads as
-context URIs. **New Item** files on the active
+The **Tasks** board (oxplow-bundled's `tasks` page, its `board`
+component) shows items as cards in one column per canonical state, the
+latest ten done in Done. Drag a card to a column to transition it, within
+its column to reorder it (with `ordering`), or use its menu: the states,
+the list's editable choice fields, Make top-level, Send to backlog or
+Bring to this thread, Delete. Its scope (this thread, its stream,
+everywhere, the backlog), priority and search are its toolbar, the tab's
+view. The **Task List** (`task-list`) is the same work as a list by state,
+the closed items latest first. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
 

@@ -857,17 +857,15 @@ margin; an embed or a slot takes its title from the page it shows):
   `left_at`, `right`, `right_lines`, `right_at`; label `{{param.left}} ↔
   {{param.right}}`): a `code` viz of two rows with `sync: true`, the
   ranges marked.
-- **Lists and boards.** oxplow-bundled's `tasks` (params `show`, `priority`, `thread_id`,
-  `stream_id`): `list` (the `work_item.list` replaceable), `summary`,
-  `backlog`, then a `sections` slot (`oxplow/tasks.sections`) where bundled mounts the thread's
-  tokens, plan, shared work and the handoff pages. `backlog` (badge
-  `backlog-count`; params `q`, `thread_id`): a quick-add `form` over
-  `oxplow.work_item.create` and a state-grouped `list` of the items on no
-  thread (drag to reorder; marked rows get bulk state, priority, Bring to
-  this thread and Delete; `r` `i` `b` `d` set states). `board` (params
-  `show`: this thread, the backlog or everything): a `board` viz of
-  `v_work_item` grouped by state, the `work_item.board` replaceable, drag
-  to a column to move a card. `comments` (params `stream_id`, `days`,
+- **Lists and boards.** oxplow-bundled's `tasks` (view params `show`,
+  `priority`, `q`; `thread_id`, `stream_id`): a custom page, its `board`
+  component node (the `work_item.board` replaceable) drawing its own
+  toolbar, a column per state and each card's menu; no rail. `task-list`
+  (filters `show`, `state`, `priority`, `q`): a state-grouped `list` (the
+  `work_item.list` replaceable; drag to reorder, nest or move; marked rows
+  get bulk state, priority, Send to backlog, Bring to this thread and
+  Delete; `r` `i` `b` `d` set states) and New Task… in the nav bar. Both
+  read bundled's `work-items` query. `comments` (params `stream_id`, `days`,
   `comment`): a `table` over `v_comment` grouped by anchored page (a row
   selects `comment`) and a `list` of the picked thread's
   `v_comment_message` rows; row actions reply (a form), resolve, reopen,
@@ -884,7 +882,7 @@ margin; an embed or a slot takes its title from the page it shows):
   `v_change_file`, then its `sections` slot. `problems` (`stream_id`,
   `severity`), `symbols` (`stream_id`, `path`, `filter`), `closed-threads`,
   `go-to`, `dashboards`, `hook-events`, `catalog` (foundation's);
-  oxplow-bundled adds `wiki-index`, `wiki-freshness` (`slug`) and `done-work`.
+  oxplow-bundled adds `wiki-index` and `wiki-freshness` (`slug`).
 - **Forms and settings.** `new-stream` (one `form` over
   `oxplow.stream.create`, `visible_if` on its source), bundled's `new-task`,
   `stream-settings` (param `stream`) and `thread-settings` (param
@@ -1180,7 +1178,7 @@ zone grouping); each appears only when it has content:
    arrow and no buttons. In the rail, In progress shows whole and Ready
    and Finished two rows each (`group.compact`), each with "+N more",
    which grows the panel; grown, ten each (`group.grown`), and "+N more"
-   opens the Work page. Status and kind show as row icons. Collapsed, the
+   opens the Tasks board, as the header does. Status and kind show as row icons. Collapsed, the
    `work-line` part: the active item (with its epic), else the last
    finished. The header has no count. Rows link (Cmd-click opens a new
    tab) and offer Add to Context on right-click.
@@ -1410,32 +1408,16 @@ testids are gone); Go To's bookmarks are the always-visible curated nav. E2e
 probes that used to click `rail-page-*` should drive `title-bar-search` → the
 launcher (type, then assert `page-<kind>` on the body).
 
-**Work pages split (post-Phase-3).** The single `AllWorkPage` was
-replaced by four focused pages so each has one job:
-
-- **Tasks** (the `tasks` page, an oxplow-bundled page file) — the thread's items by state,
-  or its stream's or everything's (the `show` filter); the last five done and a "View all done →"
-  link to Done Work; the agent's open turn is a live row in In progress. Ref helper is `tasksRef()`.
-- **Done work** (the `done-work` page, an oxplow-bundled page file) —
-  full descending list of the current thread's closed items (done and canceled).
-- **Backlog** (the `backlog` page, an oxplow-bundled page file) — the active list's items on no thread
-  (`v_work_item.thread_id IS NULL`); `oxplow.work_item.move` takes one to a thread and back (its
-  Bring to this thread action needs the `lists` feature).
-
-Tasks and Backlog read `v_work_item` and offer only what the active list can
-do (`v_capability_provider`): drag reordering with `ordering`, Send to
-backlog and Bring to this thread with `lists`, epics with `hierarchy`,
-Delete with `delete`. Rows show the list's editable enum fields (oxplow's
-priority). There's no Archived page: oxplow's archived tasks are done or
-canceled, as the interface states them.
-
-The pages reuse the shared `<Card>` from
-`apps/desktop/src/components/Card.tsx`; GitDashboardPage uses the same
-shell so the dashboard vocabulary is consistent across IA.
-
-Named ref helpers — `tasksRef()`, `doneWorkRef()`,
-`backlogRef()` — mirror the GitDashboard pattern
-(`gitDashboardRef`, `uncommittedChangesRef`).
+**The task pages** (oxplow-bundled; extensions-bundled.md "The task
+screens"). **Tasks** is the board, a custom page whose component draws
+its filters, so it takes the whole width with no rail; the Work panel's
+header opens it. **Task List** is the same work as a list by state, for
+finding, sorting and what was finished. Both read `v_work_item` and offer
+only what the active list can do (`v_capability_provider`): reordering
+with `ordering`, Send to backlog and Bring to this thread with `lists`,
+epics with `hierarchy`, Delete with `delete`. There's no Archived page:
+oxplow's archived tasks are done or canceled, as the interface states
+them. The ref helper is `tasksRef()`.
 
 ## Navigation model: a tab is a session of entries
 

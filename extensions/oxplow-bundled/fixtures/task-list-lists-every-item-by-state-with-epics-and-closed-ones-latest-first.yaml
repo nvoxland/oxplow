@@ -1,0 +1,27 @@
+# Task List: the thread's items by state, an epic's children under it, the
+# closed ones latest first with when they closed; wider than one thread,
+# each row says its thread; with no thread, "this thread" is everything.
+given:
+  - { command: oxplow.work_item.create, input: { title: An epic, thread: thr1 }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: Its child, thread: thr1, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: In the backlog } }
+  - { command: oxplow.work_item.create, input: { title: First done, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Second done, thread: thr1, state: done } }
+when: { page: task-list, params: { show: thread, state: all, priority: any, thread_id: 1, stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ scope: thread, new_task: "oxplow:oxplow/page?page=new-task" }] }
+    list:
+      rows:
+        - { title: An epic, depth: 0, thread_shown: null, plus: "+" }
+        - { title: Its child, depth: 1 }
+        - { title: Second done, closed_at: $any, plus: null }
+        - { title: First done }
+  actions: [new]
+steps:
+  - params: { state: done }
+    expect: { loaders: { list: { rows: [{ title: Second done }, { title: First done }] } } }
+  - params: { state: all, show: all }
+    expect: { loaders: { list: { rows: { contains: [{ title: In the backlog, thread_shown: Backlog }] } } } }
+  - params: { show: thread, thread_id: null }
+    expect: { loaders: { row: { rows: [{ scope: all }] } } }

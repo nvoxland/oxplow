@@ -1,0 +1,38 @@
+# The Tasks board itself, drawn by its component: a card per item in its
+# state's column; a card dragged to another column moves the item there;
+# a card's menu sets a field; the toolbar's Show is the tab's view, and
+# Back puts it back; a title opens the item and New Task… the form.
+given:
+  - { command: oxplow.work_item.create, input: { title: Next up, thread: thr1, native: { priority: low } } }
+  - { command: oxplow.work_item.create, input: { title: Someday } }
+when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+steps:
+  - ui:
+      - expect:
+          title: Tasks
+          actions: [new]
+          count: { '[data-testid="column-todo"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 0 }
+          text: { '[data-testid="column-todo"] .card-title': Next up }
+      - drag: { from: '[data-testid="column-todo"] .ox-card', to: '[data-testid="column-in_progress"]' }
+      - expect:
+          invoked: [{ command: oxplow.work_item.transition, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: in_progress }, ok: true }]
+          count: { '[data-testid="column-in_progress"] .ox-card': 1, '[data-testid="column-todo"] .ox-card': 0 }
+      # The card's menu: its field's values, each an update.
+      - click: '[data-testid="column-in_progress"] .card-menu'
+      - expect: { visible: '[data-testid="card-menu"]', text: { '[data-id="priority-low"]': "✓ Low" } }
+      - click: '[data-id="priority-high"]'
+      - expect:
+          invoked:
+            - { command: oxplow.work_item.transition, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: in_progress }, ok: true }
+            - { command: oxplow.work_item.update, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", native: { priority: high } }, ok: true }
+      # Show is the tab's view: the backlog's card, then Back to the thread's.
+      - fill: { "#show": backlog }
+      - expect:
+          view_params: { show: backlog }
+          text: { '[data-testid="column-todo"] .card-title': Someday }
+      - view_params: { show: null }
+      - expect: { count: { '[data-testid="column-todo"] .ox-card': 0, '[data-testid="column-in_progress"] .ox-card': 1 } }
+      - click: '[data-testid="column-in_progress"] .card-title'
+      - expect: { navigated: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"] }
+      - press: new
+      - expect: { navigated: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "oxplow:oxplow/page?page=new-task"] }

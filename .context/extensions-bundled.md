@@ -217,7 +217,7 @@ screens and the holder's add the review and analysis:
   definitions (the Extension page's tables, the definition pages' links to
   each other, the data catalog) links the same way, pinning the definition
   renderer, because the bare URI opens the data view.
-- **Dashboards and review.** `planning`, `review`, `quality` and `usage`;
+- **Dashboards and review.** `review`, `quality` and `usage`;
   the code-quality `findings`; the `change-review` page (treemap,
   look-here-first, functions, co-change, zones) mounted in the
   `oxplow/diff-view.sections`, `commit.sections` and
@@ -226,18 +226,18 @@ screens and the holder's add the review and analysis:
 - **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
   failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
   and `effort-plan`, mounted at `oxplow/diff-view.sections`.
-  `task-tokens` mounts at `oxplow/work-item.sections`;
-  `thread-tokens` at `oxplow/tasks.sections`.
+  `task-tokens` mounts at `oxplow/work-item.sections`. `thread-tokens`,
+  `thread-plan`, `thread-shared-work` and the two handoff strips mounted
+  on the old Tasks page; its board has no slot, so they mount nowhere
+  until they move.
 - **Metric nudges.** The `threshold-crossed` advisory (with
   `metric-deltas`).
 - **Git History's commit graph.** The `history-graph` component, replacing
   core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
-- **The work list and wiki screens.** oxplow-bundled's `tasks`, `backlog`,
-  `board`, `done-work`, `work-item` (and its helper pages), `new-task`,
-  `wiki-index`, `wiki-page`, `wiki-freshness`, `hand-off` and the
-  handoff strips on Tasks. Their menu entries are bundled's commands:
-  `work_item.new`, `knowledge.new_page`, `handoff.offer` and
+- **The work list and wiki screens.** `work-item` (and its helper pages),
+  `wiki-index`, `wiki-page`, `wiki-freshness` and `hand-off`. Their menu
+  entries are the commands `knowledge.new_page`, `handoff.offer` and
   `effort.link_to_task`. Each runs the same operation as a foundation
   command and adds the label, shortcut and form a person uses.
 - **Explore Data.** The `explore-data` page and its component (source in
@@ -294,13 +294,32 @@ screens and the holder's add the review and analysis:
   host page's own nodes' actions, not an embedded page's, so the part's
   buttons are tested on the part. Each has a `panel:` fixture:
   the panel run whole, as the rail shows it. Work (`work-panel`, collapsed
-  `work-line`, no count; its header opens the `work` page) is `oxplow-bundled`'s, beside its
+  `work-line`, no count; its header opens the Tasks board) is `oxplow-bundled`'s, beside its
   `thread_work` dataset and `work.clear_finished` command, with a `panel:`
   fixture. Still in the holder: Waiting on You (`waiting-on-me`, a badge)
   and Comments (`comments-panel`). Each moves the same way: its parts, a
   `panel:` fixture, and any rule it repeats with a foundation page made one
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.
+- **The task screens.** Two pages over one query, `work-items` (the items
+  a page shows by `show` — this thread, its stream, everywhere, the
+  backlog — `state`, `priority` and `q`, with the gates a row's actions
+  read and the order to draw them in), and New Item (`new-task`, with its
+  `work-item-fields` query and the `work_item.new` command: New Task…,
+  Cmd/Ctrl+Shift+N). **Tasks** (`tasks`) is the board, a custom page: the
+  `board` component (`src/board/`, built into `dist/` by bundled's
+  `package.json`; the manifest's `build:` runs it) draws its own toolbar,
+  columns and card menu with the kit's classes and runs the work-item
+  commands it declares; core draws its nav bar (New Task…), confirms a
+  delete and records what fails. Its filters are `role: view` params, so the
+  page has no rail and the board has the whole width. It is the
+  `work_item.board` replaceable, its filters shared with a stand-in.
+  **Task List** (`task-list`) is the same work as a `list` by state, its
+  filters in the rail (`State` adds open, in progress, done or canceled),
+  with the drag, bulk and keyboard actions, and the agents' answers about
+  what is in progress, in the backlog or finished. The pure half of the
+  board (`src/board/model.ts`) is tested from the desktop suite
+  (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.
 - **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
   job `reasoning`, the command `oxplow.effort.infer_reasoning` and the
   effects `infer-reasoning` / `store-reasoning`, writing through core's
@@ -369,7 +388,7 @@ available to every extension:
 - `bar`, `line`, `treemap` and `grid` viz, with `chart` and `children`.
 - `commit` and `metric` link kinds; `file` links with `line`. (A `task`
   kind came and went: a work item links as `page`, by its URI.)
-- the Work Item and Tasks pages' section slots, with slot params checked at load.
+- the Work Item page's section slot, with slot params checked at load.
 - Page `category`.
 - Page `actions:` as commands.
 - Disabling extensions per project.

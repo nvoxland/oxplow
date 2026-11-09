@@ -99,9 +99,6 @@ intent:
     - name: work-count-counts-the-active-item-and-the-ready-ones
       input: { part: oxplow/work-count, params: { thread_id: 1 } }
       expect: the active item and the ready ones, not the finished
-    - name: planning-shows-only-the-active-work-list
-      input: { page: oxplow/planning }
-      expect: ready and backlog items gone once the work list is none
     - name: work-shows-only-the-active-work-list
       input: { part: oxplow/work, params: { thread_id: 1 } }
       expect: only the unlinked effort once the work list is none
@@ -294,9 +291,6 @@ intent:
     - name: duplicate-lines-restates-both-sides-of-every-duplicate-block
       input: { collector: oxplow.duplicate_lines }
       expect: both sides of a duplicate block are facts on their own block
-    - name: board-lists-work-items-by-scope
-      input: { page: board, params: { show: thread, thread_id: 1 } }
-      expect: the thread's cards, the backlog's or all of them by the scope; the row names the scope drawn
     - name: wiki-page-reads-its-body-even-before-it-is-written
       input: { page: wiki-page, params: { slug: otters } }
       expect: the body of a written page and of a slug not written yet, freshness, no references
@@ -306,18 +300,9 @@ intent:
     - name: work-item-states-name-where-a-transition-may-go
       input: { query: 'work-item#work_item_states' }
       expect: each state a transition may move an item to, with its plain name
-    - name: backlog-lists-items-on-no-thread-with-epics-and-search
-      input: { page: backlog, params: { q: "", thread_id: 1 } }
-      expect: x
-    - name: tasks-lists-its-scope-by-state-with-epics-and-a-summary
-      input: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
-      expect: the scope's items by state with epics nested, the priority filter keeping an epic for its child, the last five done, the summary's counts
     - name: the-slot-page-links-the-mounted-page-and-its-host
-      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.tasks.sections-0" } }
+      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0" } }
       expect: the page a slot mount shows, the page that hosts it and the slot
-    - name: done-work-lists-closed-items-latest-first
-      input: { page: done-work }
-      expect: the done-work page lists what its loaders read
     - name: wiki-index-lists-pages-newest-change-first-and-searches
       input: { page: wiki-index }
       expect: the wiki-index page lists what its loaders read
@@ -325,16 +310,16 @@ intent:
       input: { page: wiki-freshness }
       expect: the wiki-freshness page lists what its loaders read
     - name: the-slot-page-links-to-its-extension
-      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.tasks.sections-0' } }
+      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0' } }
       expect: its see-also links name the extension that declares it
     - name: the-work-item-page-links-to-its-board-efforts-and-parent-epic
       input: { page: work-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }
-      expect: its see-also links open the board (or backlog), its efforts and its parent epic
+      expect: its see-also links open the Tasks board (at its thread, or the backlog), its efforts and its parent epic
     - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
       input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
       expect: its see-also links open the wiki and the work that links to it
     - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.tasks.sections-0"} }
+      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0"} }
       expect: its description is a paragraph above the facts
     - name: dashboards-list-the-dashboard-pages
       input: { page: dashboards }
@@ -344,8 +329,6 @@ intent:
       expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
 ui:
   mounts:
-    - { page: thread-handoffs-in, at: oxplow/tasks.sections, position: { before: list } }
-    - { page: thread-handoffs-out, at: oxplow/tasks.sections, position: { before: list } }
     - { page: extension-runs, at: oxplow/extension.runs }
     - { page: change-review, at: oxplow/diff-view.sections }
     - { page: change-review, at: oxplow/commit.sections }
@@ -355,9 +338,6 @@ ui:
     - { page: effort-nudges, at: oxplow/diff-view.sections }
     - { page: effort-plan, at: oxplow/diff-view.sections }
     - { page: task-tokens, at: oxplow/work-item.sections }
-    - { page: thread-tokens, at: oxplow/tasks.sections, position: { before: list } }
-    - { page: thread-plan, at: oxplow/tasks.sections, position: { before: list } }
-    - { page: thread-shared-work, at: oxplow/tasks.sections, position: { before: list } }
     - { page: item-shared-work, at: oxplow/work-item.sections }
     - { page: file-co-change, at: oxplow/diff.file-header }
     - { page: decisions, at: oxplow/diff-view.sections }
@@ -720,15 +700,9 @@ commands:
         effort: { type: string, description: "The effort (`eff<id>`)." }
         again: { type: boolean, description: "Ask a new job even though one was asked for this effort (a changed binding or new activity answers afresh)." }
     example: {"effort": "eff3"}
-  # The person's menu entries for foundation's work, wiki, handoff and
-  # effort commands. Foundation keeps the commands (an agent runs them);
+  # The person's menu entries for foundation's wiki, handoff and effort
+  # commands. Foundation keeps the commands (an agent runs them);
   # these add the labels, shortcuts and forms a person uses.
-  - name: work_item.new
-    summary: "The person's menu entry for `oxplow.work_item.create`: New Task… opens the new-task form and shows the task it files."
-    scope: work_items.write
-    op: create
-    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
-    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
   - name: knowledge.new_page
     summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Wiki Page… opens the wiki and shows the page it writes."
     scope: knowledge.write

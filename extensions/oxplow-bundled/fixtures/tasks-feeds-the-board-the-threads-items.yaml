@@ -1,0 +1,45 @@
+# The Tasks board's rows: the open items and the ten latest done, no
+# canceled ones, each column's count, the list's choice fields; wider than
+# one thread a card names its thread; with no thread, "this thread" is
+# everything.
+given:
+  - { command: oxplow.work_item.create, input: { title: Next up, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: In the backlog } }
+  - { command: oxplow.work_item.create, input: { title: Dropped, thread: thr1 }, bind: dropped }
+  - { command: oxplow.work_item.transition, input: { uri: $dropped.uri, to: canceled } }
+  - { command: oxplow.work_item.create, input: { title: Done 1, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 2, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 3, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 4, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 5, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 6, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 7, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 8, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 9, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 10, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 11, thread: thr1, state: done } }
+when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ scope: thread }] }
+    board:
+      rows:
+        - { title: Next up, state: todo, thread_shown: null }
+        - { title: Done 11 }
+        - { title: Done 10 }
+        - { title: Done 9 }
+        - { title: Done 8 }
+        - { title: Done 7 }
+        - { title: Done 6 }
+        - { title: Done 5 }
+        - { title: Done 4 }
+        - { title: Done 3 }
+        - { title: Done 2 }
+    counts: { rows: { contains: [{ state: done, n: 11 }, { state: canceled, n: 1 }, { state: todo, n: 1 }] } }
+    fields: { rows: { contains: [{ name: priority, kind: enum }] } }
+    live: { rows: 0 }
+steps:
+  - params: { show: backlog }
+    expect: { loaders: { row: { rows: [{ scope: backlog }] }, board: { rows: [{ title: In the backlog, thread_shown: Backlog }] } } }
+  - params: { show: thread, thread_id: null }
+    expect: { loaders: { row: { rows: [{ scope: all }] } } }

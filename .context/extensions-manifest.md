@@ -503,7 +503,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - **slots** on pages (`oxplow/diff-view.sections`,
 >     `commit.sections`, `uncommitted-changes.sections`,
 >     `new-session.sections`, `diff.file-header`; oxplow-bundled's
->     `oxplow/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
+>     `oxplow/work-item.sections`), **advisories**, per-project **disabling**;
 >   - page alerts, panels, and extension-declared measures, metrics,
 >     dimensions and fact collectors (see extensions-jobs.md "Contributing metrics");
 >   - whole-page and row actions;
