@@ -1,5 +1,5 @@
 title: Swimlanes
-description: The work items as a column per state; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
+description: The work items as a column per stage of the active list; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
 params:
 - name: scope
   role: filter
@@ -12,14 +12,24 @@ params:
 loaders:
   swimlanes:
     sql: |
-      SELECT w.uri, w.title, w.state, w.rank
+      SELECT w.uri, w.title, w.stage, w.rank
       FROM v_work_item w
       WHERE :scope = 'all'
          OR (:scope = 'thread' AND w.assignee = uri('oxplow/thread', 'id', 'thr' || :thread_id))
          OR (:scope = 'stream' AND w.assignee IN (SELECT t.uri FROM v_thread t WHERE t.stream_id = :stream_id))
          OR (:scope = 'me' AND w.assignee = uri('oxplow/person'))
          OR (:scope = 'pool' AND w.assignee IS NULL)
-      ORDER BY w.state, w.rank
+      ORDER BY w.stage, w.rank
+  stages:
+    sql: |
+      SELECT CAST(json_extract(s.value, '$.id') AS TEXT) AS value,
+             CAST(json_extract(s.value, '$.title') AS TEXT) AS label,
+             CAST(json_extract(s.value, '$.bucket') AS TEXT) AS bucket,
+             CAST(s.key AS INTEGER) AS ord
+      FROM v_capability_provider p,
+           json_each(CASE WHEN json_valid(p.stages) THEN p.stages ELSE '[]' END) s
+      WHERE p.capability = 'work_items' AND p.active = 1
+      ORDER BY ord
 view:
   from: swimlanes
   viz: custom

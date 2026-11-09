@@ -860,15 +860,15 @@ margin; an embed or a slot takes its title from the page it shows):
 - **Lists and boards.** oxplow-bundled's `tasks` (view params `show`,
   `priority`, `q`; `thread_id`, `stream_id`): a custom page, its `board`
   component node (the `work_item.board` replaceable) drawing its own
-  toolbar, a column per state and each card's menu; no rail. `task-list`
-  (filters `show` — assigned to this thread, its stream, me, nobody or
-  anyone — `state`, one at a time with Backlog among them, To Do by
-  default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
-  `oxplow.work_item.create` (a title, in the state and for whom the list shows), its view a
+  toolbar, a column per stage of the list (but backlog and canceled) and each
+  card's menu; no rail. `task-list` (filters `show` — assigned to this
+  thread, its stream, me, nobody or anyone — `state`, one of the list's
+  stages, `todo` (its first to-do stage) by default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
+  `oxplow.work_item.create` (a title, in the stage and for whom the list shows), its view a
   `list` (the `work_item.list` replaceable; drag to reorder or nest; marked rows
-  get bulk state, priority, Assign to This Thread, Assign to Me, Unassign and
-  Delete; `r` `i` `b` `d` set states) and New Task… in the nav bar. Both
-  read bundled's `work-items` query. `comments` (params `stream_id`, `days`,
+  get bulk Mark (a select of the stages), priority, Assign to (the threads
+  and You), Unassign and Delete) and New Task… in the nav bar. Both read
+  bundled's `work-items` query and its stages from `work-item-stages`. `comments` (params `stream_id`, `days`,
   `comment`): a `table` over `v_comment` grouped by anchored page (a row
   selects `comment`) and a `list` of the picked thread's
   `v_comment_message` rows; row actions reply (a form), resolve, reopen,

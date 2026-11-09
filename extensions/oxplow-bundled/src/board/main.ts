@@ -5,7 +5,7 @@
 // filters are the page's view params (`show`, `priority`, `q`): a change
 // goes into the tab's address, the page runs again and the frame hears the
 // rows; Back puts the filters back.
-import { assigneesOf, boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, filtersOf, moreLabel, moreRef, priorityOf, records, type Act, type Filters, type MenuContext, type MenuEntry, type Rec, type Rows } from "./model.js";
+import { assigneesOf, boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, filtersOf, moreLabel, moreRef, priorityOf, records, stagesOf, type Act, type Filters, type MenuContext, type MenuEntry, type Rec, type Rows } from "./model.js";
 
 interface Component {
   data: Record<string, Rows>;
@@ -104,19 +104,20 @@ function start(c: Component) {
   function render() {
     closeMenu();
     const board = $<HTMLDivElement>("board");
-    const failed = ["board", "counts"].map((k) => data[k]?.error).find(Boolean);
-    const cards = [...records(data.board), ...records(data.live).map((r) => ({ ...r, uri: null, state: "in_progress" }))];
-    const columns = boardColumns(cards, records(data.counts));
-    const opts: MenuContext = { fields: choiceFields(records(data.fields)), assignees: assigneesOf(records(data.assignees)) };
+    const failed = ["board", "counts", "stages"].map((k) => data[k]?.error).find(Boolean);
+    const cards = [...records(data.board), ...records(data.live).map((r) => ({ ...r, uri: null }))];
+    const stages = stagesOf(records(data.stages));
+    const columns = boardColumns(cards, records(data.counts), stages);
+    const opts: MenuContext = { fields: choiceFields(records(data.fields)), assignees: assigneesOf(records(data.assignees)), stages };
     say(failed ? `The board couldn't read its items: ${failed}` : cards.length === 0 ? "Nothing here. File an item with New Task…." : null);
     board.replaceChildren(
       ...columns.map((col) => {
-        const section = el("section", { class: "ox-board-column", "data-state": col.state, "data-testid": `column-${col.state}` });
+        const section = el("section", { class: "ox-board-column", "data-stage": col.stage, "data-bucket": col.bucket, "data-testid": `column-${col.stage}` });
         const head = el("div", { class: "column-head" });
         head.append(el("h2", { class: "ox-heading" }, col.label), el("span", { class: "ox-faint ox-small count" }, String(col.total)));
         const list = el("ul", { class: "cards" });
-        if (col.state === "todo") {
-          // To Do under its epics, each foldable; the loose cards last.
+        if (col.bucket === "todo") {
+          // A to-do stage under its epics, each foldable; the loose cards last.
           for (const g of epicGroups(col.cards, cards)) {
             if (g.uri === null) list.append(...g.cards.map((card) => cardEl(card, opts)));
             else list.append(groupEl(g.uri, g.title, g.epic, g.cards, opts));
@@ -128,7 +129,7 @@ function start(c: Component) {
           more.addEventListener("click", () => void c.navigate(moreRef(filters())));
           section.append(more);
         }
-        dropZone(section, list, col.state);
+        dropZone(section, list, col.stage);
         return section;
       }),
     );
@@ -212,7 +213,7 @@ function start(c: Component) {
     return group;
   }
 
-  function dropZone(section: HTMLElement, list: HTMLElement, state: string) {
+  function dropZone(section: HTMLElement, list: HTMLElement, stage: string) {
     const beforeAt = (y: number): HTMLElement | null =>
       [...list.querySelectorAll<HTMLElement>(".ox-card:not(.live)")].find((li) => {
         const r = li.getBoundingClientRect();
@@ -224,7 +225,7 @@ function start(c: Component) {
       clearDrop();
       section.classList.add("ox-drop-target");
       const before = beforeAt(e.clientY);
-      if (before && dragging.state === state) before.dataset.drop = "before";
+      if (before && dragging.stage === stage) before.dataset.drop = "before";
     });
     section.addEventListener("dragleave", (e) => {
       if (!section.contains(e.relatedTarget as Node | null)) section.classList.remove("ox-drop-target");
@@ -234,9 +235,9 @@ function start(c: Component) {
       const card = dragging;
       clearDrop();
       if (!card) return;
-      const beforeLi = dragging?.state === state ? beforeAt(e.clientY) : null;
+      const beforeLi = dragging?.stage === stage ? beforeAt(e.clientY) : null;
       const before = beforeLi ? records(data.board).find((r) => String(r.uri) === beforeLi.dataset.uri) ?? null : null;
-      const act = dropAct(card, state, before);
+      const act = dropAct(card, stage, before);
       if (!act) return;
       // Drawn where it lands at once; the re-run redraws it, a refusal puts it back.
       const li = document.querySelector<HTMLElement>(`.ox-card[data-uri="${CSS.escape(String(card.uri))}"]`);

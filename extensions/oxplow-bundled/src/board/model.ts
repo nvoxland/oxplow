@@ -17,35 +17,51 @@ export function records(rows: Rows | undefined): Rec[] {
   return rows.rows.map((r) => Object.fromEntries(rows.columns.map((c, i) => [c, r[i] ?? null])));
 }
 
-/** The board's columns, in order. Canceled items are only on the Task List. */
-export const COLUMNS: { state: string; label: string }[] = [
-  { state: "todo", label: "To Do" },
-  { state: "in_progress", label: "In Progress" },
-  { state: "blocked", label: "Blocked" },
-  { state: "done", label: "Done" },
-];
+/** One of the list's stages: its id, its name and its bucket. */
+export interface Stage {
+  value: string;
+  label: string;
+  bucket: string;
+}
+
+/** The `work-item-stages` query's rows, in the list's order. */
+export function stagesOf(rows: Rec[]): Stage[] {
+  return rows
+    .filter((r) => r.value != null)
+    .map((r) => ({ value: String(r.value), label: String(r.label ?? r.value), bucket: String(r.bucket ?? "") }));
+}
+
+/** Buckets the board leaves to the Task List. */
+const OFF_BOARD = new Set(["backlog", "canceled"]);
 
 export interface Column {
-  state: string;
+  /** The stage it holds. */
+  stage: string;
+  bucket: string;
   label: string;
   cards: Rec[];
-  /** How many items are in this state, shown or not. */
+  /** How many items are in this stage, shown or not. */
   total: number;
   /** How many the column doesn't show (Done shows the latest few). */
   more: number;
 }
 
-/** The columns from the board's rows and the per-state counts. The agent's
- *  live card (no `uri`) leads its column. */
-export function boardColumns(board: Rec[], counts: Rec[]): Column[] {
-  const n = new Map(counts.map((c) => [String(c.state), Number(c.n) || 0]));
-  return COLUMNS.map(({ state, label }) => {
-    const here = board.filter((r) => r.state === state);
-    const cards = [...here.filter((r) => r.uri == null), ...here.filter((r) => r.uri != null)];
-    const items = cards.filter((r) => r.uri != null).length;
-    const total = n.get(state) ?? items;
-    return { state, label, cards, total, more: Math.max(0, total - items) };
-  });
+/** The columns: a stage of the list each, in its order, but its backlog
+ *  and canceled ones (the Task List's), from the board's rows and the
+ *  per-stage counts. The agent's live card (no `uri`) leads the first
+ *  started stage. */
+export function boardColumns(board: Rec[], counts: Rec[], stages: Stage[]): Column[] {
+  const n = new Map(counts.map((c) => [String(c.stage), Number(c.n) || 0]));
+  const started = stages.find((s) => s.bucket === "in_progress")?.value;
+  const live = board.filter((r) => r.uri == null);
+  return stages
+    .filter((s) => !OFF_BOARD.has(s.bucket))
+    .map(({ value: stage, label, bucket }) => {
+      const cards = [...(stage === started ? live : []), ...board.filter((r) => r.uri != null && r.stage === stage)];
+      const items = cards.filter((r) => r.uri != null).length;
+      const total = n.get(stage) ?? items;
+      return { stage, bucket, label, cards, total, more: Math.max(0, total - items) };
+    });
 }
 
 /** A run of To Do cards under one epic: its heading (the epic's card when
@@ -103,10 +119,10 @@ export function priorityOf(card: Rec): string | null {
   return typeof p === "string" && PRIORITIES.includes(p) ? p : null;
 }
 
-/** The line under a column with more than it shows: Done's goes to its
- *  whole history in the Task List. */
+/** The line under a column with more than it shows: a done stage's goes
+ *  to its whole history in the Task List. */
 export function moreLabel(col: Column): string {
-  return col.state === "done" ? `All ${col.total} in Task List` : `${col.more} more…`;
+  return col.bucket === "done" ? `All ${col.total} in Task List` : `${col.more} more…`;
 }
 
 /** "2 comments", "1 comment", or null. */
@@ -145,6 +161,8 @@ export function assigneesOf(rows: Rec[]): Assignee[] {
 export interface MenuContext {
   fields: Field[];
   assignees: Assignee[];
+  /** Every stage of the list, the backlog's and canceled ones too. */
+  stages: Stage[];
 }
 
 /** A command a card runs, as the component's `invoke` takes it. */
@@ -158,29 +176,20 @@ export type MenuEntry =
   | { kind: "heading"; label: string }
   | { kind: "separator" };
 
-const MARKS: { state: string; label: string; gate: string }[] = [
-  { state: "backlog", label: "Mark Backlog", gate: "not_backlog" },
-  { state: "todo", label: "Mark To Do", gate: "not_todo" },
-  { state: "in_progress", label: "Mark In Progress", gate: "not_in_progress" },
-  { state: "blocked", label: "Mark Blocked", gate: "not_blocked" },
-  { state: "done", label: "Mark Done", gate: "not_done" },
-  { state: "canceled", label: "Mark Canceled", gate: "not_canceled" },
-];
-
-/** A card's menu: Open, the states it can move to, each choice field's
+/** A card's menu: Open, the list's other stages it can move to, each choice field's
  *  values, who it's assigned to (an open card: a thread, the person or
  *  nobody), then Make top-level and Delete — only what its gates allow.
  *  The agent's live card has none. */
-export function cardMenu(card: Rec, { fields, assignees }: MenuContext): MenuEntry[] {
+export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext): MenuEntry[] {
   if (card.uri == null) return [];
   const uri = String(card.uri);
   const out: MenuEntry[] = [{ kind: "item", id: "open", label: "Open", open: uri }];
   const group = (entries: MenuEntry[]) => {
     if (entries.length > 0) out.push({ kind: "separator" }, ...entries);
   };
-  group(MARKS.filter((m) => truthy(card[m.gate])).map((m) => ({
-    kind: "item" as const, id: `to-${m.state}`, label: m.label,
-    act: { command: "oxplow.work_item.transition", input: { uri, to: m.state } },
+  group(stages.filter((s) => s.value !== card.stage).map((s) => ({
+    kind: "item" as const, id: `to-${s.value}`, label: `Mark ${s.label}`,
+    act: { command: "oxplow.work_item.transition", input: { uri, to: s.value } },
   })));
   const native = parseObject(card.native);
   for (const f of fields) {
@@ -193,7 +202,7 @@ export function cardMenu(card: Rec, { fields, assignees }: MenuContext): MenuEnt
     ]);
   }
   // A closed card is nobody's: no one to give it to.
-  if (truthy(card.not_done) && truthy(card.not_canceled)) {
+  if (truthy(card.is_open)) {
     const assign = (id: string, label: string, to: string | null): MenuEntry => ({
       kind: "item", id, label, checked: (card.assignee ?? null) === to,
       act: { command: "oxplow.work_item.assign", input: { uri, to } },
@@ -211,13 +220,13 @@ export function cardMenu(card: Rec, { fields, assignees }: MenuContext): MenuEnt
   return out;
 }
 
-/** What dropping `card` on column `to`, ahead of `before` (null: at the
- *  end), runs: a move to that state, or within its own column a reorder
- *  in its assignee's queue. Null: nothing to do. */
+/** What dropping `card` on the column of stage `to`, ahead of `before`
+ *  (null: at the end), runs: a move to that stage, or within its own
+ *  column a reorder in its assignee's queue. Null: nothing to do. */
 export function dropAct(card: Rec, to: string, before: Rec | null): Act | null {
   if (card.uri == null) return null;
   const uri = String(card.uri);
-  if (to !== card.state) return { command: "oxplow.work_item.transition", input: { uri, to } };
+  if (to !== card.stage) return { command: "oxplow.work_item.transition", input: { uri, to } };
   if (before && before.uri === card.uri) return null;
   return { command: "oxplow.work_item.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
 }

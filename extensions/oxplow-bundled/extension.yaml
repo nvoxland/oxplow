@@ -259,11 +259,11 @@ commands:
     ui: {"label": "New Task…", "group": "Tasks", "keywords": ["work item"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
     example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
 custom_components:
-  # The Tasks board: the work items as cards in a column per state, its own
+  # The Tasks board: the work items as cards in a column per stage, its own
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
   - id: board
     title: Board
-    description: "The work items as a kanban board: a column per state, drag a card to move it, a card's menu to set its state, fields and assignee."
+    description: "The work items as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
     bundle: dist/board
     commands: [oxplow.work_item.transition, oxplow.work_item.update, oxplow.work_item.assign, oxplow.work_item.reorder, oxplow.work_item.delete]
 panels:

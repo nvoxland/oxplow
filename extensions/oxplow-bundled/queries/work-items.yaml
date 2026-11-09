@@ -1,5 +1,5 @@
 title: Work items
-description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (assigned to the thread), `stream` (assigned to any of the stream's threads), `me` (assigned to the person), `pool` (assigned to nobody: what any thread may pull) or `all`. A done or canceled item is nobody's, so for those `thread` and `stream` mean an effort there worked it, and `me` and `pool` show none. `state`: `all`, `open` (backlog, to do, in progress, blocked) or one state (`backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled`). `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `assignee` and `assignee_title`: who it's for — a thread's title, `You` or `Unassigned` — `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `not_<state>`, `not_here`, `not_mine`, `assigned`), and `ord`, the order to draw it in: open items by assignee and their queue with each epic's children under it, then done and canceled ones, the latest first."
+description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (assigned to the thread), `stream` (assigned to any of the stream's threads), `me` (assigned to the person), `pool` (assigned to nobody: what any thread may pull) or `all`. A done or canceled item is nobody's, so for those `thread` and `stream` mean an effort there worked it, and `me` and `pool` show none. `state`: `all`, `open` (any stage but a done or canceled one), one of the list's stages (`work-item-stages`), or a bucket (`backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled`) for its first stage. `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`state`: its bucket, `stage` and `stage_title`: the list's stage and its name for it, `summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `assignee` and `assignee_title`: who it's for — a thread's title, `You` or `Unassigned` — `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `is_open`, `not_here`, `not_mine`, `assigned`), and `ord`, the order to draw it in: open items by assignee and their queue with each epic's children under it, then done and canceled ones, the latest first."
 needs:
 - work_items
 params:
@@ -17,8 +17,17 @@ loaders:
   items:
     sql: |
       WITH feat AS (
-        SELECT p.features AS f, CASE WHEN json_valid(p.fields) THEN p.fields ELSE '[]' END AS fields
+        SELECT p.features AS f, CASE WHEN json_valid(p.fields) THEN p.fields ELSE '[]' END AS fields,
+               CASE WHEN json_valid(p.stages) THEN p.stages ELSE '[]' END AS stages
         FROM v_capability_provider p WHERE p.capability = 'work_items' AND p.active = 1
+      ),
+      -- The stage `state` names: one of the list's, else a bucket's first.
+      target AS (
+        SELECT coalesce(
+                 (SELECT CAST(json_extract(s.value, '$.id') AS TEXT) FROM feat, json_each(feat.stages) s
+                   WHERE json_extract(s.value, '$.id') = :state),
+                 (SELECT CAST(json_extract(s.value, '$.id') AS TEXT) FROM feat, json_each(feat.stages) s
+                   WHERE json_extract(s.value, '$.bucket') = :state ORDER BY CAST(s.key AS INTEGER) LIMIT 1)) AS stage
       ),
       choice_field AS (
         SELECT json_extract(f.value, '$.name') AS name
@@ -49,8 +58,8 @@ loaders:
                   ELSE 1 END
               END
           AND CASE :state WHEN 'all' THEN 1
-                          WHEN 'open' THEN w.state IN ('backlog', 'todo', 'in_progress', 'blocked')
-                          ELSE w.state = :state END
+                          WHEN 'open' THEN w.state NOT IN ('done', 'canceled')
+                          ELSE w.stage = (SELECT stage FROM target) END
       ),
       -- What the priority and the search match; an epic stays for a child that does.
       hit AS (
@@ -72,7 +81,8 @@ loaders:
       anchored AS (
         SELECT p.*, coalesce(CASE WHEN p.depth = 1 THEN p.parent_uri END, p.uri) AS anchor FROM placed p
       )
-      SELECT w.uri, w.title, w.state, w.native, w.assignee,
+      SELECT w.uri, w.title, w.state, w.stage, coalesce(w.stage_title, w.stage) AS stage_title,
+             w.native, w.assignee,
              first_sentence(w.body) AS summary,
              json_extract(w.nat, '$.priority') AS prio,
              CASE json_extract(w.nat, '$.priority') WHEN 'urgent' THEN 'danger' WHEN 'high' THEN 'warning' END AS prio_tone,
@@ -88,9 +98,7 @@ loaders:
              w.closed_at, w.done_rank,
              CASE WHEN coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1
                   THEN uri('oxplow/page', 'page', 'new-task', 'parent', w.uri) END AS add_child,
-             w.state <> 'backlog' AS not_backlog, w.state <> 'todo' AS not_todo,
-             w.state <> 'in_progress' AS not_in_progress, w.state <> 'blocked' AS not_blocked,
-             w.state <> 'done' AS not_done, w.state <> 'canceled' AS not_canceled,
+             NOT w.closed AS is_open,
              coalesce(json_extract((SELECT f FROM feat), '$.delete'), 0) AS can_delete,
              coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) AS can_nest,
              (coalesce(json_extract((SELECT f FROM feat), '$.hierarchy'), 0) = 1 AND w.parent_uri IS NOT NULL) AS has_parent,

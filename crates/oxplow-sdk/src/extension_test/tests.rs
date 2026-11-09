@@ -2292,6 +2292,55 @@ steps:
     );
 }
 
+/// A press of an action with options names the one picked (`option:`):
+/// it binds as `{{option.value}}`, and one the page doesn't offer is
+/// refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_page_fixture_presses_an_action_with_an_option() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let page = "title: Items
+params: [{ name: uri }]
+loaders:
+  items: { sql: \"SELECT title, uri, state FROM v_work_item WHERE uri = :uri\" }
+  marks: { sql: \"SELECT 'in_progress' AS value, 'Started' AS label\" }
+view:
+  from: items
+  viz: table
+  actions:
+    - { id: mark, label: Mark, command: oxplow.work_item.transition, input: { uri: '{{row.uri}}', to: '{{option.value}}' }, row: true, options_from: marks, current: state }
+";
+    let fixture = |option: &str, expect: &str| {
+        format!(
+            "requires: [oxplow-bundled]\ngiven: [{{ command: oxplow.work_item.create, input: {{ title: First }}, bind: first }}]
+when: {{ page: items, params: {{ uri: $first.uri }} }}
+steps:
+  - press: {{ action: mark, node: items, row: {{ uri: $first.uri }}, option: {option} }}
+    expect: {expect}
+"
+        )
+    };
+    paged(
+        root,
+        page,
+        &[(
+            "pressed",
+            &(fixture("in_progress", "{ ok: true }")
+                + "  - expect: { loaders: { items: { rows: [{ state: in_progress }] } } }\n"),
+        )],
+    );
+    let report = test_extension(root, "paged", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    paged(
+        root,
+        page,
+        &[("pressed", &fixture("done", "{ ok: false, refused: $any }"))],
+    );
+    let report = test_extension(root, "paged", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page step submits a form node with what a person would fill in,
 /// and the command it names runs for real.
 #[tokio::test(flavor = "multi_thread")]

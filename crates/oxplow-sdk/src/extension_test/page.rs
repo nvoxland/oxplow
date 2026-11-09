@@ -935,7 +935,10 @@ impl PageAt<'_> {
                     row: what.get("row").map(cells),
                     input,
                     drop: None,
-                    option: None,
+                    option: what
+                        .get("option")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     on_behalf_of: Actor::Human,
                     confirmed,
                 },

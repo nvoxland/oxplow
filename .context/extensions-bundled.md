@@ -309,9 +309,13 @@ screens and the holder's add the review and analysis:
 - **The task screens.** Two pages over one query, `work-items` (the items
   a page shows by `show` — assigned to this thread, its stream, you,
   nobody or anyone; a closed item, nobody's, by the efforts that worked
-  it — `state` (`backlog` one of them), `priority` and `q`, with the gates a row's actions
-  read and the order to draw them in), and New Item (`new-task`, with its
-  `work-item-fields` query and the `work_item.new` command: New Task…,
+  it — `state` (a stage of the list, or a bucket for its first stage,
+  `open` or `all`), `priority` and `q`, each row's bucket, stage and stage
+  title, the gates a row's actions read and the order to draw them in),
+  the active list's stages (`work-item-stages`: `value`, `label`,
+  `bucket`, `ord`, `is_default`, and `filter`, a bucket's first stage
+  named by its bucket, so a static `todo` default fits any list), and New
+  Item (`new-task`, with its `work-item-fields` query and the `work_item.new` command: New Task…,
   Cmd/Ctrl+Shift+N). **Tasks** (`tasks`) is the board, a custom page: the
   `board` component (`src/board/`, built into `dist/` by bundled's
   `package.json`; the manifest's `build:` runs it) draws its own toolbar,
@@ -320,7 +324,9 @@ screens and the holder's add the review and analysis:
   delete and records what fails. Its filters are `role: view` params, so the
   page has no rail and the board has the whole width. A card is its title and
   its description's first sentence, two lines each at most (an urgent or
-  high priority a coloured edge, the rest on hover); To Do is grouped under
+  high priority a coloured edge, the rest on hover), a column per stage of
+  the list but its backlog and canceled ones (the page's `stages` loader,
+  bundled's `work-item-stages` query); a to-do stage is grouped under
   foldable epic headings, each epic the kit's nesting panel (`ox-nest`, as Task List's epics) (folds in page memory); Done is the last three
   days, twenty at most (the `board` loader), then "All N in Task List";
   each column scrolls on its own. It is the
@@ -329,12 +335,13 @@ screens and the holder's add the review and analysis:
   card's menu assigns it (the stream's open threads, You, Nobody; the
   page's `assignees` loader).
   **Task List** (`task-list`, each row its title over its description's
-  first sentence, an urgent or high item's coloured `edge`) is the items in one state (`State`, To Do
-  unless asked; Backlog is one; Done's link asks for done), its filters in
-  the rail, with a quick add at the rail's bottom (a title, in the state
-  it shows — To Do for a started or closed one — assigned to whom it
-  shows), with the drag, bulk (Assign to This Thread, Assign to Me,
-  Unassign) and keyboard actions, and the agents' answers about what is in
+  first sentence, an urgent or high item's coloured `edge`) is the items in one stage (`State`, its
+  options the stages, `todo` — the first to-do stage — unless asked; Done's
+  link asks for done), its filters in the rail, with a quick add at the
+  rail's bottom (a title, in the stage it shows — the first to-do stage for
+  a started or closed one — assigned to whom it shows), with the drag and
+  bulk actions (Mark ▸ the stages and Assign to ▸ the stream's threads and
+  You, each one action with `options_from`; Unassign), and the agents' answers about what is in
   progress, in the backlog, in the pool or finished. The pure half of the
   board (`src/board/model.ts`; a card's description is the query's
   `summary`, `first_sentence(body)`) is tested from the desktop suite

@@ -56,9 +56,10 @@ own questions and share its extension files with your team. See
 
 ## Task
 
-A **task** is an optional durable work item. The common states are
-`todo`, `in_progress`, `blocked`, `done`, and `canceled`; a provider can
-have additional native states. Tasks can form epics and dependency
+A **task** is an optional durable work item. Each work list declares its
+own stages, and puts each one in a bucket oxplow understands: `backlog`,
+`todo`, `in_progress`, `blocked`, `done`, or `canceled`. The screens show
+the list's stages; oxplow acts on the buckets. Tasks can form epics and dependency
 links. Creating or closing a task is not a prerequisite for editing or
 ending an agent turn.
 

@@ -6,7 +6,7 @@ work-item commands, so they work with whichever list is active.
 
 | Replaces | Part | What it is |
 |---|---|---|
-| `work_item.board` | `swimlanes` | A `viz: custom` component: a column per state, cards you drag |
+| `work_item.board` | `swimlanes` | A `viz: custom` component: a column per stage of the active list, cards you drag |
 | `work_item.list` | `compact-list` | A table with title (a page link), state and updated; row actions **Done** and **Edit…** |
 | `work_item.detail` | `edit-item` | A `viz: form` over `oxplow.work_item.update`: title and body, `uri` fixed |
 
@@ -20,9 +20,11 @@ ui:
 
 ## What the swimlanes do
 
-- One column per canonical state: backlog, todo, in progress, blocked,
-  done, canceled. Drag a card to another column and it runs
-  `oxplow.work_item.transition`.
+- One column per stage of the active work list, in the list's order and
+  titled as the list names it (the `stages` loader reads them from
+  `v_capability_provider.stages`). A card sits in the column of its
+  `stage`. Drag a card to another column and it runs
+  `oxplow.work_item.transition` with that column's stage id.
 - Drag a card within its column and it runs `oxplow.work_item.reorder`:
   its place in its assignee's queue, core's for every work list.
 - Click a title to rename the item: an inline form (Enter saves, Escape

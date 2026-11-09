@@ -9,13 +9,13 @@ when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream
 steps:
   - ui:
       - expect:
-          count: { '[data-testid="column-todo"] .epic': 1, '[data-testid="column-todo"] .ox-card.nested': 1, '[data-testid="column-todo"] .epic-group .ox-card': 1, '[data-testid="column-todo"] .ox-card': 2 }
+          count: { '[data-testid="column-ready"] .epic': 1, '[data-testid="column-ready"] .ox-card.nested': 1, '[data-testid="column-ready"] .epic-group .ox-card': 1, '[data-testid="column-ready"] .ox-card': 2 }
           text:
-            '[data-testid="column-todo"] .epic-title': An epic
-            '[data-testid="column-todo"] .ox-card.nested.prio-urgent .card-title': Its child
-            '[data-testid="column-todo"] .ox-card.prio-low .card-title': Loose item
-            '[data-testid="column-todo"] .ox-card.prio-low .card-desc': It breaks the build.
-      - click: '[data-testid="column-todo"] .epic-toggle'
-      - expect: { count: { '[data-testid="column-todo"] .ox-card.nested': 0, '[data-testid="column-todo"] .ox-card': 1 } }
-      - click: '[data-testid="column-todo"] .epic-title'
+            '[data-testid="column-ready"] .epic-title': An epic
+            '[data-testid="column-ready"] .ox-card.nested.prio-urgent .card-title': Its child
+            '[data-testid="column-ready"] .ox-card.prio-low .card-title': Loose item
+            '[data-testid="column-ready"] .ox-card.prio-low .card-desc': It breaks the build.
+      - click: '[data-testid="column-ready"] .epic-toggle'
+      - expect: { count: { '[data-testid="column-ready"] .ox-card.nested': 0, '[data-testid="column-ready"] .ox-card': 1 } }
+      - click: '[data-testid="column-ready"] .epic-title'
       - expect: { navigated: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"] }

@@ -11,25 +11,32 @@ Use work items when they help people and agents follow the work.
 
 ## Lifecycle
 
-Every provider maps its states to a common vocabulary:
+Every work list declares its own stages, in its own order and with its
+own names. Each stage is in one of six buckets, and those are what oxplow
+acts on:
 
 ```text
-todo → in_progress → done
-                   ↘ blocked / canceled
+backlog → todo → in_progress → done
+                             ↘ blocked / canceled
 ```
 
-The built-in list displays `todo` as **To Do** and can archive items.
-Another provider may have additional native states or fields.
+- **backlog** — filed, but not ready to work on yet.
+- **todo** — ready. An idle thread can pick up an unassigned one.
+- **in_progress** — work someone is doing.
+- **blocked** — work waiting on an answer or another dependency.
+- **done** — finished work.
+- **canceled** — work that will not be completed.
 
-- **To Do** — planned work that has not started.
-- **In Progress** — work someone is doing.
-- **Blocked** — work waiting on an answer or another dependency.
-- **Done** — finished work.
-- **Canceled** — work that will not be completed.
+The built-in list's stages are Backlog, Ready, In Progress, Blocked,
+Done, and Canceled, one per bucket. Another list can have several stages
+in one bucket, such as "In Review" next to "In Progress". The board, the
+Task List's State filter and its Mark menu show the list's stages. A
+command that takes a stage also takes a bucket name, and lands on the
+first stage the list declares in that bucket.
 
 Oxplow does not automatically mark work done. A person or agent updates
 the item. The selected effort policy can link activity to an item and
-move linked To Do work into progress; see
+move linked to-do work into progress; see
 [Local History](local-history.md#effort).
 
 ## Planning useful items
@@ -47,7 +54,7 @@ prerequisites rather than hiding them in prose alone.
 
 The built-in work list provides thread lists and a backlog, with grouping,
 ordering, comments, and links. Open work pages from the launcher; use
-their row actions to create, edit, move, or archive items. An external
+their row actions to create, edit, move, assign, or cancel items. An external
 provider's available actions depend on its declared capabilities.
 
 Agents read work through the semantic layer and change it through the

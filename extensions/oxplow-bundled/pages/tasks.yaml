@@ -1,5 +1,5 @@
 title: Tasks
-description: "The work items assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per state, drag a card to move it. The backlog is the Task List's."
+description: "The work items assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per stage of the list, drag a card to move it. The backlog is the Task List's."
 icon: columns-3
 category: Work
 keywords: board kanban work items columns state
@@ -65,11 +65,17 @@ loaders:
     params:
       scope:
         from: row.scope
-  # How many items each column has, shown or not.
+  # The list's stages: the board's columns (but its backlog and canceled
+  # ones, the Task List's) and a card's Mark entries.
+  stages:
+    page: oxplow/work-item-stages
+    loader: work_item_stages
+  # How many items each stage has, shown or not.
   counts:
     sql: |
-      SELECT state, count(*) AS n FROM items GROUP BY state
-  # A turn the agent has open on the thread: a live card at the top of In Progress.
+      SELECT stage, count(*) AS n FROM items GROUP BY stage
+  # A turn the agent has open on the thread: a live card at the top of the
+  # first started stage.
   live:
     sql: |
       SELECT 'Agent is working: ' || CASE WHEN instr(trim(t.prompt), char(10)) > 0

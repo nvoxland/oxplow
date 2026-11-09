@@ -1,13 +1,14 @@
 # Task List's quick add asks only for a title; what it files is the
-# list's: the state it shows, assigned to whom it shows.
+# list's: the stage it shows (its list's first to-do stage for a started
+# or closed one), assigned to whom it shows.
 when: { form: task-list, node: add, params: { show: thread, state: todo, thread_id: 1, stream_id: 1 } }
 expect:
-  values: { state: todo, assignee: "oxplow:oxplow/thread?id=thr1" }
+  values: { stage: todo, assignee: "oxplow:oxplow/thread?id=thr1" }
   fields: [title]
 steps:
   - when: { form: task-list, node: add, params: { show: me, state: backlog, thread_id: 1, stream_id: 1 } }
     expect:
-      values: { state: backlog, assignee: "oxplow:oxplow/person" }
+      values: { stage: backlog, assignee: "oxplow:oxplow/person" }
   - when: { form: task-list, node: add, params: { show: pool, state: done, thread_id: 1, stream_id: 1 } }
     expect:
-      values: { state: todo, assignee: null }
+      values: { stage: todo, assignee: null }

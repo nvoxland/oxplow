@@ -184,8 +184,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `ui` steps, and the steps after them, didn't run. With `--require-ui` (CI's run) that is an
      error, not a warning, so a run that can't draw fails.
      Write the `ui` fixture first, then the component. A step can also act as a person would: `{ press: {
-     action, node?, row?: { uri: $t.uri }, input? } }` presses one of the
-     page's actions, `{ submit: { node, input } }` submits a form node —
+     action, node?, row?: { uri: $t.uri }, input?, option? } }` presses one of the
+     page's actions (`option`: the `value` picked, for one with `options_from`), `{ submit: { node, input } }` submits a form node —
      for real; its `expect` is `{ ok: true, result? }` or `{ ok: false,
      refused: <part of the reason> }` (none: a no fails the step), and the
      next `expect` step shows what it changed. What a step sets off (a reaction to its event, a

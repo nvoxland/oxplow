@@ -1,5 +1,5 @@
 title: New Item
-description: "The form for a new item on the active work list - its title, description, starting state, who it's for (nobody unless picked) and the list's own fields."
+description: "The form for a new item on the active work list - its title, description, starting stage, who it's for (nobody unless picked) and the list's own fields."
 icon: plus
 needs:
 - work_items
@@ -9,7 +9,7 @@ params:
 loaders:
   new_task:
     sql: |
-      SELECT 'todo' AS state, :parent AS parent_uri
+      SELECT 'todo' AS stage, :parent AS parent_uri
   new_task_parents:
     sql: |
       SELECT w.uri AS value, w.title AS label
@@ -20,13 +20,16 @@ loaders:
                       AND json_extract(p.features, '$.hierarchy') = 1)
         AND EXISTS (SELECT 1 FROM v_work_item c WHERE c.parent_uri = w.uri)
       ORDER BY w.assignee IS NOT (SELECT uri FROM v_thread WHERE id = :thread_id), w.title
-  new_task_states:
+  # Where it may start: the list's backlog, to-do and blocked stages, a
+  # bucket's first named by its bucket (`todo`, the default).
+  stages:
+    page: oxplow/work-item-stages
+    loader: work_item_stages
+  new_task_stages:
     sql: |
-      SELECT 'todo' AS value, 'To Do' AS label
-      UNION ALL
-      SELECT 'backlog', 'Backlog'
-      UNION ALL
-      SELECT 'blocked', 'Blocked'
+      SELECT filter AS value, label FROM stages
+      WHERE bucket IN ('backlog', 'todo', 'blocked')
+      ORDER BY ord
   # Who it's for: nobody (the default: any thread may take it), you, or an
   # open thread.
   new_task_assignees:
@@ -48,19 +51,19 @@ view:
     fields:
     - title
     - body
-    - state
+    - stage
     - assignee
     - parent_uri
     - name: native
       from: oxplow/work-item-fields
     choices:
-      state: oxplow/new-task#new_task_states
+      stage: oxplow/new-task#new_task_stages
       assignee: oxplow/new-task#new_task_assignees
       parent_uri: oxplow/new-task#new_task_parents
     again:
       label: Save and Another
       keep:
-      - state
+      - stage
       - assignee
       - parent_uri
       - native

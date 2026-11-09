@@ -1,7 +1,8 @@
 # The Tasks board's rows: the ready, started and blocked items and the
 # done ones of the last three days, twenty at most (the clock can't move
 # here: the cap is what this tests), no backlog or canceled ones, each
-# column's count, the list's choice fields; wider than one assignee a card
+# list's stages (the board's columns are the ones but backlog and
+# canceled), each stage's count, the list's choice fields; wider than one assignee a card
 # names who it's for; with no thread, "this thread" is everything.
 given:
   - { command: oxplow.work_item.create, input: { title: Next up, assignee: thr1 } }
@@ -35,7 +36,7 @@ expect:
     row: { rows: [{ scope: all }] }
     board:
       rows:
-        - { title: Next up, state: todo, assignee_shown: Thread }
+        - { title: Next up, state: todo, stage: ready, assignee_shown: Thread }
         - { title: Done 21 }
         - { title: Done 20 }
         - { title: Done 19 }
@@ -56,7 +57,8 @@ expect:
         - { title: Done 4 }
         - { title: Done 3 }
         - { title: Done 2 }
-    counts: { rows: { contains: [{ state: done, n: 21 }, { state: canceled, n: 1 }, { state: todo, n: 1 }, { state: backlog, n: 1 }] } }
+    counts: { rows: { contains: [{ stage: done, n: 21 }, { stage: canceled, n: 1 }, { stage: ready, n: 1 }, { stage: backlog, n: 1 }] } }
+    stages: { rows: [{ value: backlog }, { value: ready, label: Ready, bucket: todo }, { value: in_progress }, { value: blocked }, { value: done }, { value: canceled }] }
     fields: { rows: { contains: [{ name: priority, kind: enum }] } }
     assignees: { rows: [{ title: Thread }, { title: You, uri: "oxplow:oxplow/person" }] }
     live: { rows: 0 }

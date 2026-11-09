@@ -1,0 +1,13 @@
+# The active work list's stages, in its order, each with its bucket. A
+# bucket's first stage is its default, and `filter` names it by its
+# bucket, the way commands take a bucket: a page's `todo` default is
+# the list's first to-do stage, whatever the list calls it.
+when: { query: work-item-stages }
+expect:
+  rows:
+    - { value: backlog, label: Backlog, bucket: backlog, filter: backlog, is_default: 1 }
+    - { value: ready, label: Ready, bucket: todo, filter: todo, is_default: 1 }
+    - { value: in_progress, label: In Progress, bucket: in_progress, filter: in_progress, is_default: 1 }
+    - { value: blocked, label: Blocked, bucket: blocked, filter: blocked }
+    - { value: done, label: Done, bucket: done, filter: done }
+    - { value: canceled, label: Canceled, bucket: canceled, filter: canceled }

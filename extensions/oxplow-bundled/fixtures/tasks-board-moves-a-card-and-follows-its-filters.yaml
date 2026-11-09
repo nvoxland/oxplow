@@ -1,5 +1,6 @@
-# The Tasks board itself, drawn by its component: a card per item in its
-# state's column; a card dragged to another column moves the item there;
+# The Tasks board itself, drawn by its component: a column per stage of
+# the list (oxplow's Ready, In Progress, Blocked, Done), a card per item
+# in its stage's column; a card dragged to another column moves the item there;
 # a card's menu sets a field and who it's for; the toolbar's Show is the
 # tab's view, and Back puts it back; a title opens the item and New Task…
 # the form.
@@ -12,12 +13,12 @@ steps:
       - expect:
           title: Tasks
           actions: [new]
-          count: { '[data-testid="column-todo"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 0 }
-          text: { '[data-testid="column-todo"] .card-title': Next up }
-      - drag: { from: '[data-testid="column-todo"] .ox-card', to: '[data-testid="column-in_progress"]' }
+          count: { '[data-testid="column-ready"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 0 }
+          text: { '[data-testid="column-ready"] h2': Ready, '[data-testid="column-in_progress"] h2': In Progress, '[data-testid="column-ready"] .card-title': Next up }
+      - drag: { from: '[data-testid="column-ready"] .ox-card', to: '[data-testid="column-in_progress"]' }
       - expect:
           invoked: [{ command: oxplow.work_item.transition, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: in_progress }, ok: true }]
-          count: { '[data-testid="column-in_progress"] .ox-card': 1, '[data-testid="column-todo"] .ox-card': 0 }
+          count: { '[data-testid="column-in_progress"] .ox-card': 1, '[data-testid="column-ready"] .ox-card': 0 }
       # The card's menu: its field's values, each an update.
       - click: '[data-testid="column-in_progress"] .card-menu'
       - expect: { visible: '[data-testid="card-menu"]', text: { '[data-id="priority-low"]': "✓ Low" } }
@@ -32,8 +33,8 @@ steps:
       - fill: { "#show": all }
       - expect:
           view_params: { show: all }
-          text: { '[data-testid="column-todo"] .card-title': Someday }
-      - click: '[data-testid="column-todo"] .card-menu'
+          text: { '[data-testid="column-ready"] .card-title': Someday }
+      - click: '[data-testid="column-ready"] .card-menu'
       - click: '[data-id="assign-oxplow:oxplow/thread?id=thr1"]'
       - expect:
           invoked:
@@ -41,7 +42,7 @@ steps:
             - { command: oxplow.work_item.update, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", native: { priority: high } }, ok: true }
             - { command: oxplow.work_item.assign, input: { uri: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow", to: "oxplow:oxplow/thread?id=thr1" }, ok: true }
       - view_params: { show: null }
-      - expect: { count: { '[data-testid="column-todo"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 1 } }
+      - expect: { count: { '[data-testid="column-ready"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 1 } }
       - click: '[data-testid="column-in_progress"] .card-title'
       - expect: { navigated: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"] }
       - press: new

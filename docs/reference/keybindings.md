@@ -64,7 +64,7 @@ Standard Monaco bindings apply. The most-used:
 LSP go-to-definition / hover / references all flow through the
 oxplow LSP bridge — same servers the agent calls via MCP.
 
-## Tasks (Tasks / Backlog / Done Work / Archived pages)
+## Tasks (Tasks board and Task List)
 
 | Action | Key |
 |---|---|
@@ -72,11 +72,11 @@ oxplow LSP bridge — same servers the agent calls via MCP.
 | File the new row | type a title and press `Enter` |
 | Edit selected item | `Enter` |
 | Cancel inline edit | `Escape` |
-| Delete / archive / cancel | right-click the row — no single-key shortcut |
+| Delete / cancel / move to another stage | right-click the row — no single-key shortcut |
 | Open a row's menu from the keyboard | `Menu` key or `Shift+F10` |
 | Reorder | drag with the row handle |
 
-Destructive actions (delete, archive, cancel) are deliberately
+Destructive actions (delete, cancel) are deliberately
 behind a menu, never a single keystroke — that keeps the queue
 from losing data to a stray keypress.
 

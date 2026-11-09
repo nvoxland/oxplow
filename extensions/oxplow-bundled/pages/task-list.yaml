@@ -1,5 +1,5 @@
 title: Task List
-description: "The work items in one state (the backlog's too), assigned to a thread, its stream, you, nobody or anyone, with epics over their children and the finished ones latest first, and a quick add."
+description: "The work items in one of the list's stages, assigned to a thread, its stream, you, nobody or anyone, with epics over their children, the finished ones latest first, and a quick add."
 icon: check-square
 category: Work
 keywords: work items list backlog history done finished in progress
@@ -17,18 +17,14 @@ params:
   - { value: me, label: Assigned to me }
   - { value: pool, label: Unassigned }
   - { value: all, label: Everyone's }
+# One of the list's stages, as it names them; `todo` is its first to-do
+# stage (a bucket names its first stage).
 - name: state
   type: choice
   role: filter
   label: State
   default: todo
-  options:
-  - { value: backlog, label: Backlog }
-  - { value: todo, label: To do }
-  - { value: in_progress, label: In progress }
-  - { value: blocked, label: Blocked }
-  - { value: done, label: Done }
-  - { value: canceled, label: Canceled }
+  options_from: '#state_options'
 - name: priority
   type: choice
   role: filter
@@ -60,12 +56,30 @@ loaders:
              uri('oxplow/page', 'page', 'new-task') AS new_task
     columns:
     - key: scope
-  # What the quick add files: in the state the list shows (To Do while it
-  # shows a closed or started state), assigned to whom it shows — this
-  # thread, you, or nobody.
+  # The list's stages: the State filter's options, and Mark's.
+  stages:
+    page: oxplow/work-item-stages
+    loader: work_item_stages
+  state_options:
+    sql: SELECT filter AS value, label FROM stages ORDER BY ord
+  marks:
+    sql: SELECT value, label FROM stages ORDER BY ord
+  # Who Assign to offers: the stream's open threads, then you.
+  assignees:
+    sql: |
+      SELECT * FROM (SELECT t.uri AS value, t.title AS label FROM v_thread t
+                     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL AND t.archived_at IS NULL
+                     ORDER BY t.sort_index, t.id)
+      UNION ALL
+      SELECT uri('oxplow/person'), 'You'
+  # What the quick add files: in the stage the list shows (its first to-do
+  # stage while it shows a started or closed one), assigned to whom it
+  # shows — this thread, you, or nobody.
   new_item:
     sql: |
-      SELECT CASE WHEN :state IN ('backlog', 'blocked') THEN :state ELSE 'todo' END AS state,
+      SELECT coalesce((SELECT s.filter FROM stages s
+                        WHERE (s.filter = :state OR s.value = :state) AND s.bucket IN ('backlog', 'todo', 'blocked')),
+                      'todo') AS stage,
              CASE :scope WHEN 'thread' THEN uri('oxplow/thread', 'id', 'thr' || :thread_id)
                          WHEN 'me' THEN uri('oxplow/person') END AS assignee
     params:
@@ -124,7 +138,7 @@ view:
   - key: closed_at
     label: Closed
     format: relative
-  empty: Nothing here in this state. Add one under New item.
+  empty: Nothing here in this stage. Add one under New item.
   actions:
   - id: reorder
     label: Reorder
@@ -143,64 +157,17 @@ view:
     input:
       uri: '{{row.uri}}'
       parent_uri: '{{onto.uri}}'
-  - id: to-backlog
-    label: Mark Backlog
+  # Mark ▸ the list's stages, the row's own checked.
+  - id: mark
+    label: Mark
     command: oxplow.work_item.transition
     row: true
     bulk: true
-    when: not_backlog
+    options_from: marks
+    current: stage
     input:
       uri: '{{row.uri}}'
-      to: backlog
-  - id: to-todo
-    label: Mark To Do
-    command: oxplow.work_item.transition
-    row: true
-    bulk: true
-    key: r
-    when: not_todo
-    input:
-      uri: '{{row.uri}}'
-      to: todo
-  - id: to-in-progress
-    label: Mark In Progress
-    command: oxplow.work_item.transition
-    row: true
-    bulk: true
-    key: i
-    when: not_in_progress
-    input:
-      uri: '{{row.uri}}'
-      to: in_progress
-  - id: to-blocked
-    label: Mark Blocked
-    command: oxplow.work_item.transition
-    row: true
-    bulk: true
-    key: b
-    when: not_blocked
-    input:
-      uri: '{{row.uri}}'
-      to: blocked
-  - id: to-done
-    label: Mark Done
-    command: oxplow.work_item.transition
-    row: true
-    bulk: true
-    key: d
-    when: not_done
-    input:
-      uri: '{{row.uri}}'
-      to: done
-  - id: to-canceled
-    label: Mark Canceled
-    command: oxplow.work_item.transition
-    row: true
-    bulk: true
-    when: not_canceled
-    input:
-      uri: '{{row.uri}}'
-      to: canceled
+      to: '{{option.value}}'
   - id: priority-urgent
     label: Priority Urgent
     command: oxplow.work_item.update
@@ -250,24 +217,18 @@ view:
     input:
       uri: '{{row.uri}}'
       parent_uri: ''
-  - id: assign-here
-    label: Assign to This Thread
+  # Assign to ▸ the stream's threads and you; a closed item is nobody's.
+  - id: assign
+    label: Assign to
     command: oxplow.work_item.assign
     row: true
     bulk: true
-    when: not_here
+    when: is_open
+    options_from: assignees
+    current: assignee
     input:
       uri: '{{row.uri}}'
-      to: '{{row.here}}'
-  - id: assign-me
-    label: Assign to Me
-    command: oxplow.work_item.assign
-    row: true
-    bulk: true
-    when: not_mine
-    input:
-      uri: '{{row.uri}}'
-      to: oxplow:oxplow/person
+      to: '{{option.value}}'
   - id: unassign
     label: Unassign
     command: oxplow.work_item.assign

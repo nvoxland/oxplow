@@ -10,7 +10,7 @@ expect:
   loaders:
     # The page's row names its tab: the item's title.
     row: { rows: [{ title: The item }] }
-    state: { rows: [{ to: todo }] }
+    state: { rows: [{ to: ready }] }
     fields: { rows: [{ title: The item, native: '{"priority":"medium","author":"user"}' }] }
     body: { rows: [{ body: Some words. }] }
     # On the viewed thread: it can be sent to the backlog and deleted, not brought.

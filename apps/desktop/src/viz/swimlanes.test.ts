@@ -11,17 +11,27 @@ const dir = join(import.meta.dir, "../../../../examples/extensions/task-views/co
 const page = readFileSync(join(dir, "index.html"), "utf8").replace(/<script[\s\S]*?<\/script>/g, "");
 const script = readFileSync(join(dir, "app.js"), "utf8");
 
-type Item = { uri: string; title: string; state: string };
+type Item = { uri: string; title: string; stage: string };
+// A list's own stages, in its order: not core's buckets, to show the lanes follow the list.
+const STAGES: Array<[string, string, string]> = [
+  ["backlog", "Backlog", "backlog"],
+  ["ready", "Ready", "todo"],
+  ["in_progress", "In Progress", "in_progress"],
+  ["review", "In review", "in_progress"],
+  ["blocked", "Blocked", "blocked"],
+  ["done", "Done", "done"],
+  ["canceled", "Canceled", "canceled"],
+];
 const ITEMS: Item[] = [
-  { uri: "oxplow:oxplow/work_item?id=1&provider=a", title: "First", state: "todo" },
-  { uri: "oxplow:oxplow/work_item?id=2&provider=a", title: "Second", state: "todo" },
-  { uri: "oxplow:oxplow/work_item?id=3&provider=a", title: "Third", state: "todo" },
-  { uri: "oxplow:oxplow/work_item?id=4&provider=a", title: "Fourth", state: "done" },
+  { uri: "oxplow:oxplow/work_item?id=1&provider=a", title: "First", stage: "ready" },
+  { uri: "oxplow:oxplow/work_item?id=2&provider=a", title: "Second", stage: "ready" },
+  { uri: "oxplow:oxplow/work_item?id=3&provider=a", title: "Third", stage: "ready" },
+  { uri: "oxplow:oxplow/work_item?id=4&provider=a", title: "Fourth", stage: "done" },
 ];
 const run = (items: Item[]) => ({
   config: { id: "task_views/swimlanes" },
   params: { scope: "thread", thread_id: "t1" },
-  result: { columns: ["uri", "title", "state", "rank"], rows: items.map((i, n) => [i.uri, i.title, i.state, n]), truncated: false },
+  result: { columns: ["uri", "title", "stage", "rank"], rows: items.map((i, n) => [i.uri, i.title, i.stage, n]), truncated: false },
 });
 
 let invokes: Array<[string, unknown]> = [];
@@ -36,6 +46,11 @@ async function start(items = ITEMS) {
     connect: async () => ({
       data: {
         swimlanes: run(items).result,
+        stages: {
+          columns: ["value", "label", "bucket", "ord"],
+          rows: STAGES.map(([value, label, bucket], n) => [value, label, bucket, n]),
+          truncated: false,
+        },
       },
       applyTheme() {},
       onUpdate: () => () => {},
@@ -55,7 +70,7 @@ async function start(items = ITEMS) {
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
-const lane = (state: string) => document.querySelector<HTMLElement>(`.lane[data-state="${state}"]`)!;
+const lane = (stage: string) => document.querySelector<HTMLElement>(`.lane[data-stage="${stage}"]`)!;
 const card = (ref: string) => document.querySelector<HTMLElement>(`.card[data-ref="${ref}"]`)!;
 const fire = (el: Element, type: string, init: Record<string, unknown> = {}) => {
   const e = new Event(type, { bubbles: true, cancelable: true });
@@ -79,22 +94,20 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-test("one column per state, each card in its state's, with counts", async () => {
+test("one column per stage of the list, in its order and titled as it names them, each card in its stage's, with counts", async () => {
   await start();
-  expect([...document.querySelectorAll(".lane")].map((l) => (l as HTMLElement).dataset.state)).toEqual([
-    "backlog",
-    "todo",
-    "in_progress",
-    "blocked",
-    "done",
-    "canceled",
-  ]);
-  expect([...lane("todo").querySelectorAll(".card")].map((c) => (c as HTMLElement).dataset.ref)).toEqual([
+  expect([...document.querySelectorAll(".lane")].map((l) => (l as HTMLElement).dataset.stage)).toEqual(
+    STAGES.map(([id]) => id),
+  );
+  expect([...document.querySelectorAll(".lane h3")].map((h) => h.firstChild!.textContent!.trim())).toEqual(
+    STAGES.map(([, title]) => title),
+  );
+  expect([...lane("ready").querySelectorAll(".card")].map((c) => (c as HTMLElement).dataset.ref)).toEqual([
     "oxplow:oxplow/work_item?id=1&provider=a",
     "oxplow:oxplow/work_item?id=2&provider=a",
     "oxplow:oxplow/work_item?id=3&provider=a",
   ]);
-  expect(lane("todo").querySelector(".ox-badge")!.textContent).toBe("3");
+  expect(lane("ready").querySelector(".ox-badge")!.textContent).toBe("3");
   expect(lane("done").querySelectorAll(".card").length).toBe(1);
   expect(card("oxplow:oxplow/work_item?id=1&provider=a").classList.contains("ox-drag")).toBe(true);
 });

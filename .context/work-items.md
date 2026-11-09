@@ -217,7 +217,7 @@ changes. With **none** active every read is empty and the screens show
 their empty states.
 
 **One page for every item** (the `work-item` document page, the renderer of
-`oxplow/work_item`; param `uri`): the state, the title and the list's declared fields
+`oxplow/work_item`; param `uri`): the stage (a form over the list's stages), the title and the list's declared fields
 (forms over `oxplow.work_item.transition` and `update`), the description
 (a `markdown` viz), About (who it's assigned to; Assign to This Thread,
 Assign to Me, Unassign and Delete on its right-click menu),
@@ -248,22 +248,29 @@ IPC's `ref_resolver::resolve_ref`) says which.
 The **Tasks** board (oxplow-bundled's `tasks` page, its `board`
 component) shows items as compact cards (the title and the description's
 first sentence, two lines each at most; an urgent or high priority a
-coloured edge; the rest on hover) in one column per state but backlog
-and canceled. To
-Do groups its cards under their epics, each heading folding its items
+coloured edge; the rest on hover) in one column per stage of the list
+(`column-<stage id>`, its title the stage's), in its order, but its
+backlog and canceled ones. A to-do stage groups its cards under their epics, each heading folding its items
 (remembered per person); Done holds what finished in the last three days,
-twenty at most, and links to the rest in the Task List. Each column
+twenty at most, and links to the rest in the Task List (a done stage's
+column, by its bucket). The agent's live card leads the first started
+stage. Each column
 scrolls on its own. Drag a card to a column to transition it, within
-its column to reorder it in its assignee's queue, or use its menu: the
-states, the list's editable choice fields, Assign to (the stream's open
+its column to reorder it in its assignee's queue, or use its menu: Mark
+<each other stage>, the list's editable choice fields, Assign to (the stream's open
 threads, You, Nobody), Make top-level, Delete. Its scope (assigned to
 this thread, its stream, you, nobody, or anyone; for a closed item, the
 thread or stream whose efforts worked it), priority and search are its
 toolbar, the tab's view. The **Task List** (`task-list`) is the items in
-one state (To Do unless asked; Backlog is one), closed ones latest first,
-in the same scopes, with a quick add in its rail that files a title in
-the state it shows, assigned to whom it shows. **New Item** files on the active
-list: title, body, a canonical starting state (todo, backlog or blocked),
+one stage (its State filter lists the list's stages; `todo`, the default,
+is the first to-do stage), closed ones latest first, in the same scopes,
+with a quick add in its rail that files a title in the stage it shows
+(the first to-do stage for a started or closed one), assigned to whom it
+shows. A row's Mark ▸ and Assign to ▸ are one action each over a loader
+(`options_from`: the stages; the stream's open threads and You), the
+row's own checked; Unassign stays its own. **New Item** files on the active
+list: title, body, a starting stage (the list's backlog, to-do and blocked
+ones),
 who it's for (nobody unless picked), the
 list's editable fields and — with `hierarchy` — a parent.
 
