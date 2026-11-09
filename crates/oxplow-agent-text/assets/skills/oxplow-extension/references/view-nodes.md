@@ -197,7 +197,9 @@ exists for actions and links).
 - `width` is pixels; the rest share the space. `format`: `date`,
   `datetime`, `relative` (how long ago), `bytes`, `duration`
   (milliseconds), `integer`, `percent` (a 0-1 fraction), `sparkline` (a
-  JSON array of numbers), `badge` (a pill in the column's `tone`), `items`,
+  JSON array of numbers), `badge` (a pill in the column's `tone`),
+  `markdown` (inline markdown on its line: emphasis, code and links, a
+  wikilink by its title; a description's `first_sentence(body)`), `items`,
   `marks` and `source` (below). It changes only what the person sees;
   agents read the raw values (but for `items`, `marks` and `source`).
 - `format: marks`: short marks drawn tight, each in its own colour, a JSON

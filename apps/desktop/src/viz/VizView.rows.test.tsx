@@ -168,6 +168,30 @@ test("sparkline and badge formats draw a line and a pill", () => {
   expect(second.querySelector("[data-testid=viz-badge]")!.textContent).toBe("low");
 });
 
+// A markdown cell draws its inline marks on one line: blocks unwrap, a
+// link is a link; the agent still reads the text as written.
+test("a markdown format draws its inline markdown on one line", () => {
+  const run = {
+    config: {
+      ...base,
+      viz: "table",
+      columns: [{ key: "summary", label: null, link: null, unit: null, icon: null, tone: null, format: "markdown" }],
+    },
+    params: {},
+    result: { columns: ["summary"], rows: [["- Fix **it** in `a.ts`, see [the spec](https://example.com/spec)."], [null]], truncated: false },
+  } as unknown as VizRun;
+  const view = render(<VizView run={run} onOpenPage={() => {}} />);
+  const first = view.getByTestId("viz-row-0");
+  const md = first.querySelector("[data-testid=viz-markdown]")!;
+  expect(md.tagName).toBe("SPAN");
+  expect(md.querySelector("strong")!.textContent).toBe("it");
+  expect(md.querySelector("code")!.textContent).toBe("a.ts");
+  expect(md.querySelector("a")!.textContent).toContain("the spec");
+  // No block survives: no list, no paragraph.
+  expect(md.querySelector("ul, li, p, div")).toBeNull();
+  expect(view.getByTestId("viz-row-1").querySelector("[data-testid=viz-markdown]")).toBeNull();
+});
+
 // A line chart's targets column draws a target line on its series.
 test("a line's targets column draws each series' target line", () => {
   const run = {

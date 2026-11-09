@@ -117,6 +117,18 @@ never reset.
   popovers is open) reach the owner with the text as it is now. Enter
   adds a line.
 
+## One line
+
+`<Markdown value={text} inline />` draws one line of markdown in a `span`
+that flows in its text: only `INLINE_ELEMENTS` (`inlineMarkdown.ts`:
+emphasis, strikethrough, code, links, a line break) survive, every block
+unwrapping into the line (react-markdown's `allowedElements` +
+`unwrapDisallowed`), with the same link behavior and titles as the
+viewer. A page column's `format: markdown` draws its cell this way (a
+description's `first_sentence(body)`, which keeps its inline markdown and
+cuts outside code spans and links). A component's frame draws the same
+line through the kit (`renderMarkdown`, below).
+
 ## Where it is used
 
 The page `markdown` viz node is the owner a declared

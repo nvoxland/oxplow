@@ -64,6 +64,9 @@ export interface MarkdownProps {
   /** View: the URI of the file the markdown came from (a `.md` drawn as a
    *  page): its relative links and images are that file's folder's. */
   base?: string | null;
+  /** View: one line of inline marks and links, blocks unwrapped (a list
+   *  row's excerpt). */
+  inline?: boolean;
   /** View: a height past which it scrolls. */
   maxHeight?: number | string;
   className?: string;
@@ -72,6 +75,7 @@ export interface MarkdownProps {
 
 export function Markdown(props: MarkdownProps) {
   if (props.onChange || props.onCommit) return <MarkdownEditor {...props} />;
+  if (props.inline) return <MarkdownView body={props.value} base={props.base} className={props.className} style={props.style} inline testId={props.testId} />;
   const view = <MarkdownView body={props.value} base={props.base} maxHeight={props.maxHeight} className={props.className} style={props.style} />;
   return props.testId ? <div data-testid={props.testId}>{view}</div> : view;
 }

@@ -570,7 +570,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - `width` is pixels (a table lays out fixed; cells are cut to one line).
   `format` (`ColumnFormat`): `date`, `datetime`, `relative`, `bytes`,
   `duration` (ms), `integer`, `percent` (a 0–1 fraction), `sparkline` (a
-  JSON array of numbers), `badge` (a pill in the column's `tone`), `items` (a JSON array of
+  JSON array of numbers), `badge` (a pill in the column's `tone`),
+  `markdown` (inline markdown on its line: `Markdown inline`, the viewer
+  keeping only `INLINE_ELEMENTS` — emphasis, code, links, a wikilink by
+  its title — and unwrapping blocks; `first_sentence(body)` is its usual
+  value), `items` (a JSON array of
   strings or `{text, hint?, uri?}`, drawn inline separated by " · ", the
   hint on hover, the uri a link; an agent reads `text (hint) · text`),
   `source` (who caused the row, a JSON object `{kind, label, uri?}` with

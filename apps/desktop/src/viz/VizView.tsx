@@ -17,6 +17,7 @@ import { Sparkline } from "../components/Sparkline.js";
 import { squarify } from "../components/charts/squarify.js";
 import { formatFullDateTime, formatMetricValue, formatMetricValueExact } from "../components/format.js";
 import { MarkdownViz } from "./MarkdownViz.js";
+import { Markdown } from "../components/Markdown/Markdown.js";
 import { DiffPane } from "../components/Diff/DiffPane.js";
 import { CommandConfirm } from "../components/CommandConfirm.js";
 import { ResultCompleteness } from "./ResultCompleteness.js";
@@ -670,6 +671,8 @@ function RowsBody({
     const marksList = c.format === "marks" ? markList(raw) : null;
     const text = source ? (
       <SourceChip source={source} />
+    ) : c.format === "markdown" && typeof raw === "string" && raw !== "" ? (
+      <Markdown value={raw} inline testId="viz-markdown" />
     ) : marksList ? (
       <MarksCell marks={marksList} />
     ) : itemsList ? (

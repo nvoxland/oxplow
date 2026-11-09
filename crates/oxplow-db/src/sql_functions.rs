@@ -8,10 +8,12 @@
 //!   `uri_key(uri)` the param that names it (`thr3`; anything that isn't a
 //!   URI as it was). A NULL value leaves its param out.
 //! - `first_sentence(markdown)` is a description's opening for a card or a
-//!   list row: the first line that isn't a heading, its list, quote,
-//!   emphasis (`*`, `__`) and code marks dropped (a lone `_` is an
-//!   identifier's), up to the first `.`, `!` or `?` that ends a sentence;
-//!   NULL when there's no such line.
+//!   list row to draw as markdown (a `markdown` column, the kit's
+//!   `renderMarkdown`): the first line that isn't a heading, the list and
+//!   quote marks that lead it dropped, up to the first `.`, `!` or `?` that
+//!   ends a sentence outside a code span, a link and a wikilink — its
+//!   inline markdown kept, so it still renders; NULL when there's no such
+//!   line.
 
 use rusqlite::functions::{Context, FunctionFlags};
 use rusqlite::types::ValueRef;
@@ -199,7 +201,8 @@ fn uri_key(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
     Ok(Some(key.unwrap_or(t)))
 }
 
-/// The first sentence of a markdown description (the module's doc).
+/// The first sentence of a markdown description, its inline markdown
+/// kept (the module's doc).
 fn first_sentence(body: &str) -> Option<String> {
     let line = body
         .lines()
@@ -231,17 +234,65 @@ fn first_sentence(body: &str) -> Option<String> {
             break;
         }
     }
-    let text = rest.replace("__", "").replace(['*', '`'], "");
-    let text = text.trim();
-    let chars: Vec<char> = text.chars().collect();
-    let end = chars.iter().enumerate().position(|(i, c)| {
-        matches!(c, '.' | '!' | '?') && chars.get(i + 1).is_none_or(|n| n.is_whitespace())
-    });
+    let chars: Vec<char> = rest.trim().chars().collect();
+    let end = sentence_end(&chars);
     let sentence: String = match end {
         Some(i) => chars[..=i].iter().collect(),
-        None => text.to_string(),
+        None => chars.iter().collect(),
     };
     (!sentence.is_empty()).then_some(sentence)
+}
+
+/// Where the first sentence of a line of inline markdown ends: the first
+/// `.`, `!` or `?` followed by whitespace or the end, outside a code span,
+/// a link's text or target and a wikilink, and not escaped — so the cut
+/// leaves markdown that still renders.
+fn sentence_end(chars: &[char]) -> Option<usize> {
+    let run = |at: usize| chars[at..].iter().take_while(|c| **c == '`').count();
+    let (mut i, mut brackets, mut parens) = (0, 0usize, 0usize);
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => {
+                i += 2;
+                continue;
+            }
+            '`' => {
+                // A code span runs to the next run of as many backticks.
+                let open = run(i);
+                let mut j = i + open;
+                while j < chars.len() {
+                    let close = run(j);
+                    if close == open {
+                        break;
+                    }
+                    j += close.max(1);
+                }
+                i = j + open;
+                continue;
+            }
+            '[' => brackets += 1,
+            ']' => {
+                brackets = brackets.saturating_sub(1);
+                if brackets == 0 && chars.get(i + 1) == Some(&'(') {
+                    parens = 1;
+                    i += 2;
+                    continue;
+                }
+            }
+            '(' if parens > 0 => parens += 1,
+            ')' if parens > 0 => parens -= 1,
+            '.' | '!' | '?'
+                if brackets == 0
+                    && parens == 0
+                    && chars.get(i + 1).is_none_or(|n| n.is_whitespace()) =>
+            {
+                return Some(i);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn text(ctx: &Context<'_>, i: usize) -> rusqlite::Result<Option<String>> {
@@ -363,9 +414,10 @@ mod tests {
         assert_eq!(run("SELECT uri_key(NULL)").unwrap(), None);
     }
 
-    /// A description's first sentence, for a card or a list row: past
-    /// headings, list, quote, emphasis and code marks, to the first `.`,
-    /// `!` or `?` that ends a sentence.
+    /// A description's first sentence, for a card or a list row to draw
+    /// as markdown: past headings and the list and quote marks that lead
+    /// its first line, to the first `.`, `!` or `?` that ends a sentence
+    /// outside a code span, a link or a wikilink, its inline markdown kept.
     #[test]
     fn first_sentence_reads_a_descriptions_opening() {
         let first = |body: &str| {
@@ -383,13 +435,26 @@ mod tests {
             ),
             (
                 "## Context\n\n- **The panel** times out after 5s\nmore",
-                Some("The panel times out after 5s"),
+                Some("**The panel** times out after 5s"),
             ),
             (
                 "> Quoted first: yes! Then more.",
                 Some("Quoted first: yes!"),
             ),
-            ("See `v_effort.title`. Done.", Some("See v_effort.title.")),
+            ("See `v_effort.title`. Done.", Some("See `v_effort.title`.")),
+            ("Run `a. b` now. Then.", Some("Run `a. b` now.")),
+            (
+                "Read [the spec](https://x.y/a.b?c=d. e) first. Then.",
+                Some("Read [the spec](https://x.y/a.b?c=d. e) first."),
+            ),
+            (
+                "Follow-up from [[tsk242]]/[[notes. v2|the notes]]. More.",
+                Some("Follow-up from [[tsk242]]/[[notes. v2|the notes]]."),
+            ),
+            (
+                "Ends in a \\. Not here. Here.",
+                Some("Ends in a \\. Not here."),
+            ),
             (
                 "Version 1.2 ships soon. Next.",
                 Some("Version 1.2 ships soon."),

@@ -133,6 +133,7 @@ view:
       from: uri
   - key: summary
     label: Description
+    format: markdown
   - key: assignee_shown
     label: Assigned to
   - key: closed_at

@@ -885,6 +885,10 @@ pub enum ColumnFormat {
     Sparkline,
     /// A short value as a pill, in the column's `tone`.
     Badge,
+    /// Inline markdown (a description's `first_sentence`), drawn on its
+    /// line: emphasis, code and links (a wikilink opens its page, by its
+    /// title); a block's marks unwrap. An agent reads it as written.
+    Markdown,
     /// A list of items (a JSON array): each element is a string or
     /// `{ "text": …, "hint"?: …, "uri"?: … }`, drawn inline separated by
     /// ` · `; `hint` is the item's hover text, `uri` makes it a link. An

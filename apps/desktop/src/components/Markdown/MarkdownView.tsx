@@ -34,6 +34,7 @@ import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
 import { CopyCodeButton } from "./CopyCodeButton.js";
 import { rehypeHighlightCode } from "./codeHighlight.js";
 import { InlineView } from "./InlineView.js";
+import { INLINE_ELEMENTS } from "./inlineMarkdown.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
 import { readBytesAt } from "../../api.js";
 import { mediaType } from "../../filesystem.js";
@@ -736,6 +737,11 @@ export interface MarkdownViewProps {
   /** Extra style overrides for the outer wrapper. */
   style?: CSSProperties;
   className?: string;
+  /** One line: only inline marks and links (`INLINE_ELEMENTS`), blocks
+   *  unwrapped, in a `span` that flows in its text. */
+  inline?: boolean;
+  /** `data-testid` on its root. */
+  testId?: string;
 }
 
 /**
@@ -750,7 +756,7 @@ export interface MarkdownViewProps {
  * fences draw as diagrams (pan and zoom, the lightbox); other code blocks
  * carry a Copy button.
  */
-export function MarkdownView({ body, base = null, maxHeight, style, className }: MarkdownViewProps) {
+export function MarkdownView({ body, base = null, maxHeight, style, className, inline = false, testId }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
   // …and the active work list's ids do too.
@@ -759,7 +765,7 @@ export function MarkdownView({ body, base = null, maxHeight, style, className }:
     () => preprocessWikilinks(body, (id) => workItemRefOfMention(profile, id)),
     [body, refKinds, profile],
   );
-  const ref = useRef<HTMLDivElement | null>(null);
+  const ref = useRef<HTMLDivElement & HTMLSpanElement>(null);
   const [lightbox, setLightbox] = useState<LightboxContent | null>(null);
   // Keep a stable handle to setLightbox so the imperative mermaid
   // effect can read it without re-running on every render.
@@ -877,11 +883,13 @@ export function MarkdownView({ body, base = null, maxHeight, style, className }:
     ...style,
   };
 
-  const wrapperClassName = ["oxplow-md", className].filter(Boolean).join(" ");
+  const wrapperClassName = ["oxplow-md", inline ? "oxplow-md-inline" : null, className].filter(Boolean).join(" ");
+  const Root = inline ? "span" : "div";
 
   return (
-    <div ref={ref} className={wrapperClassName} style={wrapperStyle}>
+    <Root ref={ref} className={wrapperClassName} style={wrapperStyle} data-testid={testId}>
       <ReactMarkdown
+        {...(inline ? { allowedElements: INLINE_ELEMENTS, unwrapDisallowed: true } : {})}
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlightCode]}
         urlTransform={urlTransform}
@@ -956,7 +964,7 @@ export function MarkdownView({ body, base = null, maxHeight, style, className }:
       >
         {processedBody}
       </ReactMarkdown>
-      <MediaLightbox content={lightbox} onClose={() => setLightbox(null)} />
-    </div>
+      {inline ? null : <MediaLightbox content={lightbox} onClose={() => setLightbox(null)} />}
+    </Root>
   );
 }
