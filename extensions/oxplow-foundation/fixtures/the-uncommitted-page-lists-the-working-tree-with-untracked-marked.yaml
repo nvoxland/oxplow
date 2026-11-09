@@ -1,5 +1,5 @@
 # The uncommitted page makes the stream's working change and lists the
-# working tree's files as a tree, an untracked one is an added file, as in the rail and the summary;
+# working tree's files as a tree, an untracked one marked untracked (U), as in the rail;
 # the commit form shows once there are files to commit.
 given:
   - observe: { turn: { prompt: base, write: { path: tracked.txt, body: "x\n" } } }
@@ -16,7 +16,7 @@ expect:
       rows:
         contains:
           - { path: tracked.txt, status: modified }
-          - { path: loose.txt, status: added }
+          - { path: loose.txt, status: untracked }
     commit_form: { rows: [{ stream: str1 }] }
 steps:
   # The commit form submits for real, and the commit is read back. (The page

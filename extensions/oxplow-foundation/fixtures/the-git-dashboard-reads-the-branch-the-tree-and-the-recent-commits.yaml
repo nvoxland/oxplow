@@ -14,7 +14,7 @@ expect:
   loaders:
     upstream/branch: { rows: [{ branch: main, show_branch: 1, heading: Repository, remote: No remote, can_publish: 0, can_push: 0, has_upstream: 0, on_worktree: 0, compared: null }] }
     recent: { rows: [{ subject: first, commit_ref: $any }] }
-    uncommitted/files: { rows: { contains: [{ path: new.txt, status: added }] } }
+    uncommitted/files: { rows: { contains: [{ path: new.txt, status: untracked }] } }
     uncommitted/commit_form: { rows: [{ stream: str1 }] }
 steps:
   - submit: { node: uncommitted/commit, input: { stream: str1, message: Add new } }

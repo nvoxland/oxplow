@@ -623,7 +623,10 @@ pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), Strin
 /// …`: the change is made and analyzed to the end
 /// (`change_analysis::ensure_change`, what `oxplow_ensure_change` calls), so a
 /// page reads its files and functions without waiting for the background
-/// analysis. `streamId` of `working` defaults to the primary stream's.
+/// analysis. `streamId` of `working` defaults to the primary stream's. A
+/// working change's file list is refreshed first (`refresh_files`), as the
+/// change reactor does on every move in the app: that is what says which
+/// files are staged or untracked.
 pub(super) async fn observe_analyze(host: &Host, body: &Value) -> Result<(), String> {
     let mut target = body.clone();
     if target.get("kind").and_then(Value::as_str) == Some("working")
@@ -632,8 +635,14 @@ pub(super) async fn observe_analyze(host: &Host, body: &Value) -> Result<(), Str
         let stream = first_stream(host).await?;
         target["streamId"] = json!(stream.to_string());
     }
+    let working = target.get("kind").and_then(Value::as_str) == Some("working");
     let target: oxplow_app::change_analysis::ChangeTarget =
         serde_json::from_value(target).map_err(|e| format!("`analyze`: {e}"))?;
+    if working {
+        oxplow_app::change_analysis::refresh_files(&host.svc, target.clone())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     oxplow_app::change_analysis::ensure_change(&host.svc, target)
         .await
         .map(|_| ())

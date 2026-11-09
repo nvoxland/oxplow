@@ -1,11 +1,17 @@
 title: Branch
-description: "Where the stream's branch stands, with the buttons that act on it: against its upstream (Publish, Push, Pull, Fetch) and, on a worktree, against the default branch it is a worktree of (Merge out, Merge in, Rebase). Git Status shows it with the branch's name; the Git panel without, as its header says the stream."
+description: "Where the stream's branch stands, with the buttons that act on it: against its upstream (Publish while it has none, else Push, Pull, Fetch) and, on a worktree, against the default branch it is a worktree of (Merge out, Merge in, Rebase). Git Status shows it with the branch's name; the Git panel without, as its header says the stream."
 params:
 - name: stream_id
   label: Stream
 # Whether to say the branch's name: 0 where the host already says it.
 - name: with_branch
   label: With the branch
+  default: '1'
+# Whether a worktree's branch not pushed yet offers Publish: Git Status
+# does; the Git panel passes 0, so there only the main checkout offers it,
+# and a worktree with no upstream has no Remote line at all.
+- name: publish_worktree
+  label: Publish a worktree
   default: '1'
 loaders:
   status:
@@ -14,7 +20,10 @@ loaders:
     params: { stream_id: { param: stream_id } }
   branch:
     sql: |
-      SELECT s.*, :with_branch = '1' AS show_branch FROM status s
+      SELECT s.*, :with_branch = '1' AS show_branch,
+             (s.can_publish AND (NOT s.on_worktree OR :publish_worktree = '1')) AS offer_publish,
+             (s.has_upstream OR NOT s.on_worktree OR :publish_worktree = '1') AS show_remote
+      FROM status s
 # One line a comparison, its buttons on it: the host titles it.
 view:
   stack:
@@ -30,6 +39,7 @@ view:
     - key: remote_marks
       label: Remote
       format: marks
+      when: show_remote
     - key: base_marks
       label: Worktree of
       format: marks
@@ -62,7 +72,7 @@ view:
         rev: '{{row.base}}'
     - id: publish
       label: Publish
-      when: can_publish
+      when: offer_publish
       fact: remote_marks
       command: oxplow.git.publish
       input:

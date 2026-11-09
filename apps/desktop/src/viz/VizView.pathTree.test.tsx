@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render as rtlRender, within } from "@testing-librar
 
 import type { ReactElement, ReactNode } from "react";
 import type { VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import type { TabRef } from "../tabs/tabState.js";
 import { VizActionRunnerContext, type VizActionRunner } from "./vizActionRunner.js";
 
 // A tree over paths (`tree.path`) draws its made folders, each name with
@@ -95,15 +94,15 @@ test("a long name is cut short, its whole path on hover", () => {
 
 test("compact, a tree shows its first visible rows and how many more, and folding frees rows", () => {
   const files: [string, string][] = Array.from({ length: 10 }, (_, i) => [`dir/f${i}.rs`, "added"]);
-  const opened: TabRef[] = [];
-  const more = { kind: "page", id: "oxplow:oxplow/page?page=uncommitted-changes" } as unknown as TabRef;
-  const view = render(<VizView run={runOf([...files, ["top.rs", "modified"]])} compact maxRows={8} more={more} onOpenPage={(ref) => opened.push(ref)} />);
+  let asked = 0;
+  const view = render(<VizView run={runOf([...files, ["top.rs", "modified"]])} compact maxRows={8} onMore={() => asked++} onOpenPage={() => {}} />);
   // `dir` and seven of its files; `top.rs` and three files are past the cap.
   expect(view.getAllByTestId("viz-tree-row")).toHaveLength(8);
   const moreRow = view.getByTestId("viz-more");
   expect(moreRow.textContent).toBe("+4 more");
+  // It asks for the rest (a rail panel grows to show them).
   fireEvent.click(within(moreRow).getByRole("button"));
-  expect(opened).toHaveLength(1);
+  expect(asked).toBe(1);
   // Folded, `dir` is one row: everything fits.
   fireEvent.click(within(view.getAllByTestId("viz-tree-row")[0]!).getByRole("button", { name: "Collapse" }));
   expect(labels(view)).toEqual(["dir", "top.rs"]);
@@ -130,7 +129,7 @@ test("compact, a list past its cap says how many more", () => {
   const run = { ...list, result: { columns: ["path"], rows: Array.from({ length: 11 }, (_, i) => [`f${i}`]), truncated: false } } as unknown as VizRun;
   const view = render(<VizView run={run} compact maxRows={8} onOpenPage={() => {}} />);
   expect(view.getByTestId("viz-more").textContent).toBe("+3 more");
-  // With nowhere to open, it is text.
+  // With no one to ask, it is text.
   expect(within(view.getByTestId("viz-more")).queryByRole("button")).toBeNull();
 });
 

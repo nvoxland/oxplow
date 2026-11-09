@@ -299,9 +299,9 @@ interface VizViewProps {
   /** Where links go; without it they navigate through the route context. */
   onOpenPage?(ref: TabRef, opts?: { newTab?: boolean }): void;
   maxRows?: number;
-  /** Where the rows past `maxRows` are: a compact viz's "+N more" opens
-   *  it (a panel's page); without it, the row says how many. */
-  more?: TabRef | null;
+  /** Asks for the rows past `maxRows`: a compact viz's "+N more" calls it
+   *  (a rail panel grows to show them); without it, the row says how many. */
+  onMore?(): void;
   streamId?: string | null;
   /** Small inline rendering for strips (a number as plain text). */
   compact?: boolean;
@@ -498,7 +498,7 @@ function RowsBody({
   tree = null,
   isPage = false,
   partButtons = false,
-  more = null,
+  onMore,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
   // A tree caps the rows it shows, not the rows it has: folding frees rows.
@@ -966,9 +966,9 @@ function RowsBody({
           return own.length > 0 ? own.map((a) => <PartButton key={a.id} action={a} run={run} actions={actions} />) : null;
         }}
         {...{ run, result, viz, cols, cell, iconCell, first, compact, streamId, onOpenPage, rowMenu, rowsView, onCustomFailure, onCustomReady, componentView, fitCustom, onSetParam, isPage }}
-        tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null, cap: compact ? (maxRows ?? null) : null, more } : null}
+        tree={treeNodesDrawn ? { nodes: treeNodesDrawn, open: tree?.open ?? null, cap: compact ? (maxRows ?? null) : null, onMore } : null}
       />
-      {compact && past > 0 ? <MoreRow count={past} more={more} onOpenPage={onOpenPage} /> : null}
+      {compact && past > 0 ? <MoreRow count={past} onMore={onMore} /> : null}
       {ctxMenu.menu}
     </>
   );
@@ -1136,8 +1136,8 @@ function Viz({
   streamId: string | null;
   onOpenPage?(ref: TabRef): void;
   /** A tree's nodes, the open set a lazy tree's branches toggle, and how
-   *  many visible rows it shows (compact) and where the rest are. */
-  tree: { nodes: TreeNode[]; open: CollapsedSet | null; cap: number | null; more: TabRef | null } | null;
+   *  many visible rows it shows (compact) and who to ask for the rest. */
+  tree: { nodes: TreeNode[]; open: CollapsedSet | null; cap: number | null; onMore?: (() => void) | undefined } | null;
   rowMenu: RowMenu;
   rowsView: RowsView;
   onCustomFailure?(reason: string): void;
@@ -1169,8 +1169,7 @@ function Viz({
           nodes={tree!.nodes}
           lazyOpen={tree!.open}
           cap={tree!.cap}
-          more={tree!.more}
-          onOpenPage={onOpenPage}
+          onMore={tree!.onMore}
           problem={lazyTreeProblem(viz, result)}
           label={treeLabelColumn(viz, cols, result.columns)}
           columns={treeValueColumns(viz, result.columns)}
@@ -1597,10 +1596,9 @@ function TreeViz({
   lazyOpen,
   problem,
   cap = null,
-  more = null,
-  onOpenPage,
+  onMore,
   ...rest
-}: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null; cap?: number | null; more?: TabRef | null; onOpenPage?(ref: TabRef): void }) {
+}: TreeVizProps & { nodes: TreeNode[]; lazyOpen: CollapsedSet | null; problem: string | null; cap?: number | null; onMore?: (() => void) | undefined }) {
   const closed = useCollapsedSet("viz-tree.closed");
   const isOpen = (n: TreeNode, path: string) => treeNodeOpen(n, path, closed, lazyOpen);
   // The visible rows' paths, in order, each with how many of the result's
@@ -1631,7 +1629,7 @@ function TreeViz({
           <TreeItem key={n.id ?? i} node={n} path={String(i)} closed={closed} lazyOpen={lazyOpen} shown={shown} {...rest} />
         ))}
       </ul>
-      {past > 0 ? <MoreRow count={past} more={more} onOpenPage={onOpenPage} /> : null}
+      {past > 0 ? <MoreRow count={past} onMore={onMore} /> : null}
     </>
   );
 }
@@ -1644,15 +1642,15 @@ function treeNodeOpen(n: TreeNode, path: string, closed: CollapsedSet, lazyOpen:
 }
 
 /** The row after a compact viz's last: how many rows it doesn't show, a
- *  link to where they are when it has one. */
-function MoreRow({ count, more, onOpenPage }: { count: number; more: TabRef | null; onOpenPage?(ref: TabRef): void }) {
+ *  button asking for them when someone can show them. */
+function MoreRow({ count, onMore }: { count: number; onMore?: (() => void) | undefined }) {
   const text = `+${count} more`;
   return (
     <div data-testid="viz-more" style={{ padding: "2px 0 0 20px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
-      {more ? (
-        <RouteLink to={more} onNavigate={tabNavigate(more, onOpenPage)} style={linkStyle}>
+      {onMore ? (
+        <button type="button" onClick={onMore} title="Show them all" style={linkStyle}>
           {text}
-        </RouteLink>
+        </button>
       ) : (
         text
       )}

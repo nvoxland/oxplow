@@ -1717,6 +1717,60 @@ intent:
     );
 }
 
+/// A query example's `steps` run as a page example's do: each `when`
+/// re-runs what it names and checks its `expect`. A step that doesn't
+/// hold is a finding, never passed over.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_query_fixtures_steps_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/kinds/extension.yaml",
+        "manifest: 2\nname: kinds\nintent:\n  purpose: test\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/queries/options.yaml",
+        "title: Options\nparams: [{ name: n, default: 2 }]\nloaders:\n  every: { rows: [{ value: 1, label: one }, { value: 2, label: two }] }\n  some: { sql: 'SELECT value, label FROM every WHERE value <= :n' }\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options, params: { n: 1 } }\nexpect: { rows: 1 }\nsteps:\n  - when: { query: options, params: { n: 2 } }\n    expect: { rows: 2 }\n",
+    );
+    let report = test_extension(root, "kinds", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options, params: { n: 1 } }\nexpect: { rows: 1 }\nsteps:\n  - when: { query: options, params: { n: 2 } }\n    expect: { rows: 5 }\n",
+    );
+    let errors = test_extension(root, "kinds", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(errors.contains("steps[0]"), "{errors}");
+
+    // A step a query example can't run (it has no actions) says so.
+    write(
+        root,
+        ".oxplow/extensions/kinds/fixtures/query.yaml",
+        "when: { query: options }\nexpect: { rows: 2 }\nsteps:\n  - press: { action: go }\n",
+    );
+    let errors = test_extension(root, "kinds", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("steps[0]: a query example's step is"),
+        "{errors}"
+    );
+}
+
 /// A page with a work-item loader, one param and an answer.
 fn pager(root: &Path, query: &str, answer_params: &str, expect: &str) {
     write(

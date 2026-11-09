@@ -124,7 +124,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a part: `when: { part: <slug | ext/slug>, params? }`, the same
      `expect` as a page's; a query: `when: { query: <slug | ext/slug>[#loader],
      params? }`, `expect: { rows, columns? }` — the rows of its last loader
-     (or the named one), compared as a `sql` example's are. `<page>#<loader>`
+     (or the named one), compared as a `sql` example's are; its `steps` are
+     `{ given }` or `{ when, expect }`, as a page's. `<page>#<loader>`
      names a loader of any page file, run alone as the app runs it for a
      list (a page's own `options_from: '#x'` list does not run with the
      page, so this is how it is tested). `page:` on a

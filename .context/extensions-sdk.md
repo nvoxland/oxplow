@@ -532,7 +532,9 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `subagent` (a hand-back) and `pre: true` on a tool; none can set the time of a hook (a tool call
   or a turn is as old as the run), only a `run`'s `days_ago`,
   `analyze` (`change_analysis::ensure_change`: a working or commit change
-  analyzed to the end; real files come from `turn.write` and real commits from
+  analyzed to the end, a working one's file list refreshed first
+  (`refresh_files`, as the change reactor does on every move: which files
+  are staged or untracked); real files come from `turn.write` and real commits from
   `oxplow.vcs.stage` / `oxplow.vcs.commit`, a throwaway's forks keep their
   streams in their own folder),
   `refs` (branches, tags and stream heads, `replace_branches` /
@@ -551,6 +553,9 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   any page file, run alone through `options::source_rows` as an option list
   or a form's open runs it (a page's own `options_from: '#x'` loader does
   not run with the page). A bare `query: <page>` of a page is a finding.
+  Its `steps` run as a page example's: `{ given }`, or `{ when, expect }`
+  (the query again with other params, or any page, part or panel;
+  `query_steps`). A query has no actions, so any other step is a finding.
 - `when: { sql, params? }`, `expect: { rows, columns? }` — a read-only query
   over the published datasets, run as a page loader would (an inline page of
   one `sql` loader, `sql_example`) and compared as a loader's: a dataset, a

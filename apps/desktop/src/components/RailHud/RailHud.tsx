@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { useAppPreference } from "../../prefs/remembered.js";
 import { RAIL_SECTION_DRAG_MIME } from "../../dragMimes.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Minimize2 } from "lucide-react";
 import type { TabRef } from "../../tabs/tabState.js";
 import { getPanelLayout, setPanelLayout } from "../../api.js";
 import { useExtensions } from "../../extensionsStore.js";
@@ -20,7 +22,7 @@ import {
   type LayoutEdit,
   type LayoutSync,
 } from "../Panels/panelLayout.js";
-import { type OpenPanelRun, type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
+import { type PanelChoice, type PanelRuns } from "../Panels/usePanelRuns.js";
 import { PageTree } from "../../pages/PageTree.js";
 import { usePanelRuns } from "../Panels/PanelRunsContext.js";
 import { useContextMenu } from "../useRowContextMenu.js";
@@ -186,6 +188,9 @@ function RailSection({
   headerAction,
   collapsedContent,
   opens,
+  filled = false,
+  hidden = false,
+  onRestore,
   children,
 }: {
   id: RailSectionId;
@@ -198,10 +203,22 @@ function RailSection({
   /** When set, the header ends with the open-page arrow (`OpenPageLink`,
    *  as a section heading's) to this content's full page. */
   opens?: { to: TabRef; name: string; onNavigate(ref: TabRef): void };
+  /** Grown to the whole rail: it fills the rail's height, its chevron
+   *  is the shrink button (`onRestore`), and it takes focus so Escape
+   *  reaches the rail. */
+  filled?: boolean;
+  /** Out of sight while another panel fills the rail; still mounted, so
+   *  it keeps its state, and still in the person's layout. */
+  hidden?: boolean;
+  onRestore?(): void;
   children: ReactNode;
 }) {
   const ctx = useContext(RailSectionsContext);
-  const expanded = ctx ? ctx.isExpanded(id) : true;
+  const expanded = filled || (ctx ? ctx.isExpanded(id) : true);
+  const card = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (filled) card.current?.focus({ preventScroll: true });
+  }, [filled]);
   const headerMenu = useContextMenu();
   const side = ctx ? ctx.dropSide(id) : null;
   const titleColor = tone === "danger" ? "var(--diff-del-fg, #f85149)" : "var(--text-primary)";
@@ -210,13 +227,17 @@ function RailSection({
     // is not overflow-clipped, so the insertion line can sit in the gap.
     <div
       data-testid={`rail-section-${id}`}
+      data-filled={filled ? "true" : undefined}
       {...(ctx ? ctx.dropZone(id) : {})}
       style={{
         position: "relative",
         margin: "0 6px 6px",
         // Don't let the flex column shrink panels when total height exceeds
-        // the viewport — they stack and the column scrolls.
-        flexShrink: 0,
+        // the viewport — they stack and the column scrolls. A filled one
+        // takes the column's height and scrolls inside.
+        ...(filled ? { flex: "1 1 0", minHeight: 0, flexDirection: "column" as const } : { flexShrink: 0 }),
+        display: hidden ? "none" : filled ? "flex" : undefined,
+        viewTransitionName: `rail-section-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`,
       }}
     >
       {side ? (
@@ -237,7 +258,10 @@ function RailSection({
         />
       ) : null}
       <div
+        ref={card}
+        tabIndex={filled ? -1 : undefined}
         style={{
+          ...(filled ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" as const, outline: "none" } : {}),
           // Inset, rounded card (matching the Search box) that recesses
           // below the lighter rail; the gap between cards reveals the rail
           // (IntelliJ-style grouping). Its edge is the strong one: the
@@ -259,6 +283,7 @@ function RailSection({
           // disappear into it. This one is bluer than the rail and lighter
           // than the card below; the divider closes it off from the content.
           background: "linear-gradient(var(--rail-panel-header-bg), var(--rail-panel-header-bg)), var(--surface-card)",
+          flexShrink: 0,
           borderBottom: expanded ? "1px solid var(--border-subtle)" : undefined,
         }}
         onContextMenu={(e) =>
@@ -267,6 +292,8 @@ function RailSection({
             : undefined
         }
       >
+        {/* A filled panel has nothing to be moved among: no drag handle. */}
+        {filled ? null : (
         <span
           {...(ctx ? ctx.dragHandle(id) : {})}
           data-testid={`rail-section-drag-${id}`}
@@ -284,12 +311,13 @@ function RailSection({
         >
           ⠿
         </span>
+        )}
         <button
           type="button"
           data-testid={`rail-section-toggle-${id}`}
-          onClick={() => ctx?.setCollapsed(id, expanded)}
+          onClick={() => (filled ? onRestore?.() : ctx?.setCollapsed(id, expanded))}
           aria-expanded={expanded}
-          title={expanded ? "Collapse" : "Expand"}
+          title={filled ? "Shrink" : expanded ? "Collapse" : "Expand"}
           style={{
             flex: 1,
             display: "flex",
@@ -308,7 +336,7 @@ function RailSection({
           }}
         >
           <span aria-hidden style={{ width: 14, display: "inline-flex", justifyContent: "center", fontSize: 16, lineHeight: 1 }}>
-            {expanded ? "▾" : "▸"}
+            {filled ? <Minimize2 size={12} aria-hidden /> : expanded ? "▾" : "▸"}
           </span>
           <span>{title}</span>
           {count != null && count > 0 ? (
@@ -356,6 +384,11 @@ export function RailHud({
   const sections = useRailSections(available);
   const addMenu = useContextMenu();
   const titleOf = (id: string) => extPanels.find((p) => extensionPanelId(p) === id)?.title ?? id;
+  // The panel grown to the whole rail ("+N more"), if any: the window's
+  // state only, never the person's layout. One at a time; gone with it.
+  const [filledWanted, setFilled] = useState<RailSectionId | null>(null);
+  const filled = filledWanted !== null && sections.order.includes(filledWanted) ? filledWanted : null;
+  const fill = useCallback((id: RailSectionId | null) => withViewTransition(() => setFilled(id)), []);
 
   // Every visible panel always renders (a stable list); each shows its own
   // empty state when it has no content.
@@ -368,6 +401,10 @@ export function RailHud({
         runs={panelRuns[panel.id] ?? { body: null, badge: null, collapsed: null, count: null, choices: [] }}
         streamId={streamId ?? null}
         onOpenPage={onOpenPage}
+        filled={filled === id}
+        hidden={filled !== null && filled !== id}
+        onFill={() => fill(id)}
+        onRestore={() => fill(null)}
       />
     ) : null;
   }
@@ -389,12 +426,18 @@ export function RailHud({
         overflow: "hidden",
         position: "relative",
       }}
+      onKeyDown={(e) => {
+        // Escape puts the rail back from a filled panel.
+        if (e.key !== "Escape" || filled === null || e.defaultPrevented) return;
+        e.preventDefault();
+        fill(null);
+      }}
     >
-      <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ flex: 1, overflow: filled ? "hidden" : "auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <RailSectionsContext.Provider value={sections.value}>
           {sections.order.map((id) => renderSection(id))}
         </RailSectionsContext.Provider>
-        {sections.hidden.length > 0 ? (
+        {sections.hidden.length > 0 && filled === null ? (
           <button
             type="button"
             data-testid="rail-add-panel"
@@ -414,6 +457,15 @@ export function RailHud({
       <RailResizeHandle onChange={width.setFromDelta} />
     </aside>
   );
+}
+
+/** Run a change to what the rail shows as a view transition where the
+ *  webview has them (the panel grows or shrinks into place); at once
+ *  elsewhere. */
+function withViewTransition(change: () => void) {
+  const doc = document as Document & { startViewTransition?(update: () => void): unknown };
+  if (typeof doc.startViewTransition === "function") doc.startViewTransition(() => flushSync(change));
+  else change();
 }
 
 const RAIL_MIN_WIDTH = 260;
@@ -496,31 +548,52 @@ function ExtensionPanelSection({
   runs,
   streamId,
   onOpenPage,
+  filled,
+  hidden,
+  onFill,
+  onRestore,
 }: {
   panel: ExtensionPanel;
   /** The panel's runs, from the rail's one owner (`useExtensionPanelRuns`). */
   runs: PanelRuns;
   streamId: string | null;
   onOpenPage(ref: TabRef): void;
+  /** Grown to the whole rail: its body every row, scrolling. */
+  filled: boolean;
+  /** Another panel fills the rail. */
+  hidden: boolean;
+  onFill(): void;
+  onRestore(): void;
 }) {
   const { choose } = usePanelRuns();
   const extensions = useExtensions();
   // The value in force is the one the body ran with (the daemon's).
   const toggles = runs.choices;
-  // A panel's part: its page drawn small, its "+N more" opening the
-  // panel's page. The body keeps its buttons; the collapsed line is stats.
+  // A panel's part: its page drawn small. The body keeps its buttons and
+  // its "+N more" grows the panel to the whole rail, where it shows every
+  // row and scrolls; the collapsed line is stats.
   const openRef = panelOpenRef(panel, extensions);
-  const compactPage = (open: OpenPanelRun, testId: string, buttons: boolean) => (
-    <div data-testid={testId} className="ox-compact" style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
-      <PageTree run={open.run} runId={open.runId} compact partButtons={buttons} more={openRef} streamId={streamId} onOpenPage={onOpenPage} />
+  const body = runs.body ? (
+    <div
+      data-testid="rail-panel-body"
+      className="ox-compact"
+      style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)", ...(filled ? { flex: 1, minHeight: 0, overflowY: "auto" as const } : {}) }}
+    >
+      <PageTree run={runs.body.run} runId={runs.body.runId} compact partButtons uncapped={filled} onMore={onFill} streamId={streamId} onOpenPage={onOpenPage} />
     </div>
-  );
-  const body = runs.body ? compactPage(runs.body, "rail-panel-body", true) : null;
-  const collapsed = runs.collapsed ? compactPage(runs.collapsed, "rail-panel-collapsed", false) : undefined;
+  ) : null;
+  const collapsed = runs.collapsed ? (
+    <div data-testid="rail-panel-collapsed" className="ox-compact" style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)" }}>
+      <PageTree run={runs.collapsed.run} runId={runs.collapsed.runId} compact partButtons={false} streamId={streamId} onOpenPage={onOpenPage} />
+    </div>
+  ) : undefined;
   return (
     <RailSection
       id={extensionPanelId(panel)}
       title={panel.title}
+      filled={filled}
+      hidden={hidden}
+      onRestore={onRestore}
       count={runs.count ?? undefined}
       collapsedContent={collapsed}
       opens={{ to: openRef, name: panel.title, onNavigate: onOpenPage }}

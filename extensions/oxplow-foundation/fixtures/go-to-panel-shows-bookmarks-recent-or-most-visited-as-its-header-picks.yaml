@@ -1,7 +1,7 @@
 # The rail's Go To panel: one kind of page at a time, picked by its header's
 # icons — the thread's bookmarks (first), its recent pages (when each was
-# opened) or its most visited (how often), six at most. Collapsed, the same
-# pages, as icons.
+# opened) or its most visited (how often), 20 at most, so the panel can grow
+# to show them all. Collapsed, the first six of them, as icons.
 given:
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/page?page=git-dashboard", page_kind: git-dashboard, label: Git, scope: thread, thread: thr1 } }
   - { command: oxplow.bookmark.set, input: { uri: "oxplow:oxplow/file?path=a.rs", page_kind: file, label: a.rs, scope: project, thread: thr1 } }
@@ -16,6 +16,20 @@ given:
   - observe: { visit: { page: "oxplow:oxplow/file?path=f3.rs", kind: file, label: f3.rs, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=f4.rs", kind: file, label: f4.rs, thread: thr1 } }
   - observe: { visit: { page: "oxplow:oxplow/file?path=f5.rs", kind: file, label: f5.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f6.rs", kind: file, label: f6.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f7.rs", kind: file, label: f7.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f8.rs", kind: file, label: f8.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f9.rs", kind: file, label: f9.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f10.rs", kind: file, label: f10.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f11.rs", kind: file, label: f11.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f12.rs", kind: file, label: f12.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f13.rs", kind: file, label: f13.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f14.rs", kind: file, label: f14.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f15.rs", kind: file, label: f15.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f16.rs", kind: file, label: f16.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f17.rs", kind: file, label: f17.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f18.rs", kind: file, label: f18.rs, thread: thr1 } }
+  - observe: { visit: { page: "oxplow:oxplow/file?path=f19.rs", kind: file, label: f19.rs, thread: thr1 } }
 when: { panel: go-to, thread: thr1 }
 expect:
   choices: [{ name: mode, value: bookmarks }]
@@ -40,7 +54,22 @@ steps:
         loaders:
           go_to:
             rows:
-              - { grp: Recent, title: f5.rs, times: null }
+              # 20 of the 22 it opened: Settings and DEV.md are older.
+              - { grp: Recent, title: f19.rs, times: null }
+              - { title: f18.rs }
+              - { title: f17.rs }
+              - { title: f16.rs }
+              - { title: f15.rs }
+              - { title: f14.rs }
+              - { title: f13.rs }
+              - { title: f12.rs }
+              - { title: f11.rs }
+              - { title: f10.rs }
+              - { title: f9.rs }
+              - { title: f8.rs }
+              - { title: f7.rs }
+              - { title: f6.rs }
+              - { title: f5.rs }
               - { title: f4.rs }
               - { title: f3.rs }
               - { title: f2.rs }
@@ -58,6 +87,20 @@ steps:
           go_to:
             rows:
               - { grp: Most visited, title: DEV.md, times: "3×", at: null }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
+              - { times: "1×" }
               - { times: "1×" }
               - { times: "1×" }
               - { times: "1×" }

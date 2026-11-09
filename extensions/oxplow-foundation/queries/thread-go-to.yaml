@@ -1,8 +1,10 @@
 title: Thread Go To
-description: "The pages a thread goes to, of one kind (`mode`): its bookmarks (`bookmarks`, as `thread-bookmarks` has them), the pages it opened last (`recent`), or the ones it opens most over 30 days (`top`) — six at most for the last two. Each row's `grp` names the kind, `at` when it was last opened (recent), `times` how often (top)."
+description: "The pages a thread goes to, of one kind (`mode`): its bookmarks (`bookmarks`, as `thread-bookmarks` has them), the pages it opened last (`recent`), or the ones it opens most over 30 days (`top`) — `limit` at most for the last two (20 unless given: the panel's body, which grows to show them all; its collapsed icons ask for 6). Each row's `grp` names the kind, `at` when it was last opened (recent), `times` how often (top)."
 params:
 - name: thread_id
 - name: mode
+- name: limit
+  default: '20'
 loaders:
   # What the thread has bookmarked: the one rule.
   bookmarks:
@@ -38,10 +40,10 @@ loaders:
         FROM bookmarks WHERE :mode = 'bookmarks'
         UNION ALL
         SELECT ord, 'Recent', uri, page_kind, label, visited_at, NULL FROM recent
-        WHERE :mode = 'recent' AND ord <= 6
+        WHERE :mode = 'recent' AND ord <= CAST(:limit AS INTEGER)
         UNION ALL
         SELECT ord, 'Most visited', uri, page_kind, label, NULL, visits FROM top
-        WHERE :mode = 'top' AND ord <= 6
+        WHERE :mode = 'top' AND ord <= CAST(:limit AS INTEGER)
       )
       -- A wiki page shows its title now, not the one it had then.
       SELECT r.grp,

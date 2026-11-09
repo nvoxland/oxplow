@@ -72,5 +72,5 @@ steps:
         loaders:
           sync_line:
             rows:
-              - sync: '[{"text":"No remote","tone":"muted","hint":"the repository has no remote"}]'
+              - sync: '[{"text":"No remote","tone":null,"hint":"the repository has no remote"}]'
       count: 3

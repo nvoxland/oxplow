@@ -1195,10 +1195,12 @@ zone grouping); each appears only when it has content:
    untracked files: `4A 5M · +179 −175 · 2U`), then
    foundation's `git-branch` part, the one Git Status shows: a line for
    the upstream (`Remote  origin/main ↑5 ↓0`, or "Not pushed yet" / "No
-   remote"; Publish, Push, Pull, Fetch on it) and, on a worktree, one for
+   remote"; Push, Pull, Fetch on it once it has an upstream, Publish
+   before) and, on a worktree, one for
    the default branch it is a worktree of (`Worktree of  main ↑1 ↓1`;
    Merge out, Merge in, Rebase on it). The panel passes `with_branch: '0'`,
-   so the part leaves out the branch's name. The body draws its buttons;
+   so the part leaves out the branch's name, and `publish_worktree: '0'`,
+   so a worktree not pushed yet offers no Publish there (Git Status does). The body draws its buttons;
    the collapsed line draws none. Body `git` and collapsed `git-line` are
    each a `switch` on `show`. Collapsed: `3A 2M 1D · +10 −4` as coloured
    marks, and a merge or rebase or conflicts as a red line, opening the
@@ -1211,12 +1213,15 @@ zone grouping); each appears only when it has content:
    by intent — "For me" (`note`) and "For the agent" (`followup`) — each
    row and the header (`open` is the `comments` page) opening the Comments inbox.
 5. **Go To** — an `oxplow-foundation` panel (`oxplow/go-to`, beside its `go-to` page):
-   the thread-scoped body page `go-to-panel` lists the bookmarks the thread sees
-   (the `thread-bookmarks` query), then its History — or, through the header's
-   Recent / Most visited toggle (the page's `mode` choice param), its most
-   visited pages over 30 days with their counts — from `v_page_visit`,
-   each row with its page's icon; collapsed, `go-to-bookmarks` shows the
-   bookmarks alone. There is **no "Pages"
+   the thread-scoped body page `go-to-panel` shows one kind at a time,
+   picked by the header's icons (the page's `mode` choice param): the
+   bookmarks the thread sees (the `thread-bookmarks` query), its 20 most
+   recent pages, or its 20 most visited over 30 days with their counts,
+   from `v_page_visit` (foundation's `thread-go-to` query, `limit` 20),
+   each row with its page's icon. Past 8 rows its "+N more" grows the panel
+   to the whole rail. Collapsed, `go-to-icons` shows the first 6 of the same
+   kind as icons (`limit: '6'`). The macOS Go menu reads the body's rows.
+   There is **no "Pages"
    section**: the launcher is the one discovery surface for all pages,
    and users pin what they want always-visible by starring (the ☆ on each
    page's nav bar, scoped thread / stream / project).
@@ -1230,6 +1235,19 @@ zone grouping); each appears only when it has content:
    the `keywords` — where each token must start a word, since a page's
    keywords can hold its whole description and a short subsequence ("todo")
    is in almost any description.
+
+**A panel grows to the whole rail.** A panel's body shows 8 rows per viz;
+past them its "+N more" (`viz-more`) is a button that fills the rail with
+that panel (`RailHud` `filled`): the other panels are hidden (`display:
+none`, still mounted, still in the layout), the body shows every row
+(`PageTree` `uncapped`) and scrolls (`overflow-y: auto`). Its header has
+no drag handle, and its chevron is the shrink icon ("Shrink"); it and Escape (the card takes focus,
+the rail's `keydown` hears it) put the rail back, with its order and
+collapsed panels as they were. A panel whose rows fit has no "+N more", so
+nothing grows it. It is the window's state only, never `panel_layout`; one
+panel at a time. The change runs as a view transition
+(`document.startViewTransition`, each section its own
+`view-transition-name`) where the webview has it, at once elsewhere.
 
 ## The dock
 

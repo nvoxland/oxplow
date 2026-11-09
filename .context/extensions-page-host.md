@@ -293,7 +293,10 @@ the user guide is `docs/guide/pages.md`.
     as Comments opens the inbox; absent, the body page. `collapsed` is the
     extension's own page shown while the panel is collapsed: the same view,
     smaller (Go To's is its pages as `viz: icons`); absent, a collapsed panel
-    is just its header. Every part — collapsed, count, badge — takes the
+    is just its header. A body with more rows than the rail shows ends in
+    "+N more", which grows the panel to the whole rail until its shrink
+    button or Escape (`pages-and-tabs.md` "A panel grows to the whole
+    rail"). Every part — collapsed, count, badge — takes the
     body's toggles that its page declares, so it follows the header's pick
     (Uncommitted's count counts what its tree shows). A body's choice param is the
     header's toggle; an option with an `icon` is that icon alone there, its

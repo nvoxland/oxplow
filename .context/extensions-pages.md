@@ -449,8 +449,10 @@ sections sit close, a detail's facts are short lines with no rules, a
 fact's buttons wrap under its value, small and whole. A panel's body keeps
 its buttons (its section buttons and a detail's fact buttons: `RailHud`
 passes `partButtons`), its collapsed line has none (one line of stats). A viz shows its first 8 rows
-(`COMPACT_ROWS`), then a "+N more" row (`viz-more`), a link to the panel's
-page (`PageTree` `more`, the panel's `open` or body). A tree counts the rows
+(`COMPACT_ROWS`), then a "+N more" row (`viz-more`). In a rail panel it is
+a button that grows the panel to the whole rail (`PageTree` `onMore`), where
+the body shows every row (`uncapped`) and scrolls; with no `onMore` it is
+text. A tree counts the rows
 it shows, not the rows it has: folding a branch frees room. Its "+N more"
 counts the result's rows it doesn't show (a folded branch shows all under
 it), not the folder rows made from paths, so a panel of files says how many

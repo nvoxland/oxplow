@@ -1,5 +1,5 @@
 title: Go To (collapsed)
-description: The Go To panel collapsed — the same pages as its open view, of the kind its header picks, each as its icon alone.
+description: The Go To panel collapsed — the first six of its open view's pages, of the kind its header picks, each as its icon alone.
 params:
 - name: thread_id
   label: Thread
@@ -15,7 +15,7 @@ loaders:
   go_to:
     page: oxplow/thread-go-to
     loader: pages
-    params: { thread_id: { param: thread_id }, mode: { param: mode } }
+    params: { thread_id: { param: thread_id }, mode: { param: mode }, limit: '6' }
 view:
   from: go_to
   viz: icons

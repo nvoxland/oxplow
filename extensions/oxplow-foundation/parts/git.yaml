@@ -67,4 +67,4 @@ view:
         hide_title: true
         embed:
           page: oxplow/git-branch
-          params: { with_branch: '0' }
+          params: { with_branch: '0', publish_worktree: '0' }

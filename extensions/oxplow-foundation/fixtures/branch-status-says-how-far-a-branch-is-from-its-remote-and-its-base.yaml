@@ -22,11 +22,12 @@ given:
           - { name: origin/main, kind: remote, head: $more.rev }
           - { name: feat, head: $feature.rev, stream: 2 }
 # The worktree: not pushed yet (there is a remote), one commit each way from
-# the default branch it is a worktree of.
+# the default branch it is a worktree of. Its one line (the Git panel's,
+# collapsed) leaves out the upstream it has none of: only the base.
 when: { query: "oxplow/branch-status#line", params: { stream_id: 2 } }
 expect:
   rows:
-    - sync: '[{"text":"Not pushed yet","tone":"muted","hint":"the branch has no upstream"},{"text":"worktree of main","tone":"muted","hint":"the default branch this worktree is compared with","gap":true},{"text":"↑1","tone":"success","hint":"1 commit main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from main"}]'
+    - sync: '[{"text":"worktree of main","tone":null,"hint":"the default branch this worktree is compared with","gap":true},{"text":"↑1","tone":"success","hint":"1 commit main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from main"}]'
 steps:
   - when: { query: "oxplow/branch-status#status", params: { stream_id: 2 } }
     expect:
@@ -36,13 +37,13 @@ steps:
   - when: { query: "oxplow/branch-status#facts", params: { stream_id: 2 } }
     expect:
       rows:
-        - remote_marks: '[{"text":"Not pushed yet","tone":"muted","hint":"the branch has no upstream"}]'
-          base_marks: '[{"text":"main","tone":"muted","hint":"the default branch this worktree is compared with"},{"text":"↑1","tone":"success","hint":"1 commit main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from main"}]'
+        - remote_marks: '[{"text":"Not pushed yet","tone":null,"hint":"the branch has no upstream"}]'
+          base_marks: '[{"text":"main","tone":null,"hint":"the default branch this worktree is compared with"},{"text":"↑1","tone":"success","hint":"1 commit main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from main"}]'
   # The main stream: its upstream only (it is no worktree).
   - when: { query: "oxplow/branch-status#line", params: { stream_id: 1 } }
     expect:
       rows:
-        - sync: '[{"text":"origin/main","tone":"muted","hint":"the upstream"},{"text":"↑2","tone":"success","hint":"2 commits origin/main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from origin/main"}]'
+        - sync: '[{"text":"origin/main","tone":null,"hint":"the upstream"},{"text":"↑2","tone":"success","hint":"2 commits origin/main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from origin/main"}]'
   - when: { query: "oxplow/branch-status#status", params: { stream_id: 1 } }
     expect:
       rows:
@@ -50,5 +51,21 @@ steps:
   - when: { query: "oxplow/branch-status#facts", params: { stream_id: 1 } }
     expect:
       rows:
-        - remote_marks: '[{"text":"origin/main","tone":"muted","hint":"the upstream"},{"text":"↑2","tone":"success","hint":"2 commits origin/main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from origin/main"}]'
+        - remote_marks: '[{"text":"origin/main","tone":null,"hint":"the upstream"},{"text":"↑2","tone":"success","hint":"2 commits origin/main lacks"},{"text":"↓1","tone":"warning","hint":"1 commit from origin/main"}]'
           base_marks: null
+  # Publish: Git Status offers it on a worktree not pushed yet; the Git
+  # panel (`publish_worktree: '0'`) offers it only on the main checkout.
+  - when: { part: oxplow/git-branch, params: { stream_id: 2 } }
+    expect:
+      loaders:
+        branch: { rows: [{ offer_publish: 1, has_upstream: 0, show_remote: 1 }] }
+  # In the Git panel a worktree with no upstream has no Remote line at all.
+  - when: { part: oxplow/git-branch, params: { stream_id: 2, publish_worktree: '0' } }
+    expect:
+      loaders:
+        branch: { rows: [{ offer_publish: 0, has_upstream: 0, show_remote: 0 }] }
+  # The main checkout has an upstream: Push, Pull and Fetch, no Publish.
+  - when: { part: oxplow/git-branch, params: { stream_id: 1, publish_worktree: '0' } }
+    expect:
+      loaders:
+        branch: { rows: [{ offer_publish: 0, has_upstream: 1, show_remote: 1 }] }

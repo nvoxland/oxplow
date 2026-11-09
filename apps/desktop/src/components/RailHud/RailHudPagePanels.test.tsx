@@ -23,6 +23,9 @@ const panel: ExtensionPanel = {
   count: null,
   pages: true,
 };
+// A second panel, so a panel that grows has others to hide.
+const other: ExtensionPanel = { ...panel, id: "z/o", title: "Other", body: "z/other", badge: null };
+const layoutSaves: unknown[] = [];
 const pageOf = (slug: string) =>
   fakePage(node.viz("rows", "rows", { columns: [{ key: "t" } as never], actions: slug === "body" ? [fakeAction({ id: "tidy", label: "Tidy" })] : [] }), {
     id: `z/${slug}`,
@@ -34,9 +37,11 @@ const pageOf = (slug: string) =>
 mock.module("../../api.js", () => ({
   ...realApi,
   getPanelLayout: async () => [],
-  setPanelLayout: async () => {},
+  setPanelLayout: async (layout: unknown) => {
+    layoutSaves.push(layout);
+  },
   listExtensions: async () => [
-    { name: "z", namespace: "z", enabled: true, pages: [], pageFiles: [pageOf("body"), pageOf("badge")], panels: [panel], ui: { slots: [], commands: [], decorators: [], replacements: [] } },
+    { name: "z", namespace: "z", enabled: true, pages: [], pageFiles: [pageOf("body"), pageOf("badge"), pageOf("other")], panels: [panel, other], ui: { slots: [], commands: [], decorators: [], replacements: [] } },
   ],
   subscribeOxplowEvents: () => () => {},
   querySql: async () => ({ columns: [], rows: [], truncated: false, reads: { datasets: [], tables: [], measures: [] }, freshness: {} }),
@@ -54,7 +59,9 @@ function fakeStore(opened: PageKey[], bodyRows: string[][] = [["body row"]]) {
       const run: PageRun =
         key.page === "z/badge"
           ? { ...fakeRun(pageOf("badge"), { loaders: { rows: loader(["t"], [["x"]]) } }), alert: { firing: true, count: 2, value: null, message: "2 waiting" } as never }
-          : fakeRun(pageOf("body"), { loaders: { rows: loader(["t"], bodyRows) } });
+          : key.page === "z/other"
+            ? fakeRun(pageOf("other"), { loaders: { rows: loader(["t"], [["other row"]]) } })
+            : fakeRun(pageOf("body"), { loaders: { rows: loader(["t"], bodyRows) } });
       // The daemon's word: the header counts by the badge (no count page).
       const panel = key.page === "z/badge" ? { counts: true, count: 2, choices: [] } : { counts: false, count: null, choices: [] };
       return { runId: `run-${key.page}`, run, panel };
@@ -82,12 +89,13 @@ test("the body page drawn small, the badge page's alert as the count and an Aler
       <Alerts />
     </PanelRunsProvider>,
   );
-  await waitFor(() => expect(view.getByTestId("rail-panel-body").textContent).toContain("body row"));
+  await waitFor(() => expect(view.getAllByTestId("rail-panel-body")[0]!.textContent).toContain("body row"));
   // Each part is the daemon's to bind (`open_panel_part`): the window names
   // the panel and the part, never the stream's id.
   expect(opened.map((k) => [k.page, k.panel, k.params, k.streamId])).toEqual([
     ["z/body", { panel: "z/w", part: "body", choices: {} }, {}, "str1"],
     ["z/badge", { panel: "z/w", part: "badge", choices: {} }, {}, "str1"],
+    ["z/other", { panel: "z/o", part: "body", choices: {} }, {}, "str1"],
   ]);
   await waitFor(() => expect(view.getByTestId("rail-section-toggle-ext:z/w").textContent).toContain("2"));
   expect(view.getByTestId("alerts").textContent).toBe("2 waiting@oxplow:oxplow/page?page=z/badge");
@@ -98,20 +106,61 @@ test("the body page drawn small, the badge page's alert as the count and an Aler
   expect(openedPages).toEqual(["oxplow:oxplow/page?page=z/body"]);
 });
 
-// A body with more rows than a panel shows ends with how many more, which
-// opens the panel's page.
-test("a panel's rows past its few end with how many more, opening the panel's page", async () => {
-  const openedPages: string[] = [];
+// A body with more rows than a panel shows ends with how many more. That
+// row grows the panel to the whole rail: the other panels are hidden, the
+// body shows every row and scrolls. The shrink button or Escape puts the
+// rail back. It is the window's state only: the layout is never saved.
+test("a panel's \"+N more\" grows it to the whole rail, and shrink or Escape puts the rail back", async () => {
+  layoutSaves.length = 0;
   const rows = Array.from({ length: 11 }, (_, i) => [`row ${i}`]);
   const view = render(
     <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([], rows)}>
-      <RailHud streamId="str1" onOpenPage={(ref) => openedPages.push(ref.id)} />
+      <RailHud streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
-  const more = await waitFor(() => view.getByTestId("viz-more"));
-  expect(more.textContent).toBe("+3 more");
-  fireEvent.click(within(more).getByRole("button"));
-  expect(openedPages).toEqual(["oxplow:oxplow/page?page=z/body"]);
+  const section = () => view.getByTestId("rail-section-ext:z/w");
+  const otherSection = () => view.getByTestId("rail-section-ext:z/o");
+  const grow = async () => {
+    const more = await waitFor(() => within(section()).getByTestId("viz-more"));
+    expect(more.textContent).toBe("+3 more");
+    fireEvent.click(within(more).getByRole("button"));
+  };
+  await waitFor(() => expect(otherSection().textContent).toContain("other row"));
+  await grow();
+  expect(section().getAttribute("data-filled")).toBe("true");
+  expect(otherSection().style.display).toBe("none");
+  // Every row, and no "+N more": the body scrolls instead.
+  expect(within(section()).queryByTestId("viz-more")).toBeNull();
+  expect(section().textContent).toContain("row 10");
+  expect(within(section()).getByTestId("rail-panel-body").style.overflowY).toBe("auto");
+  // Nothing to reorder it among: no drag handle.
+  expect(within(section()).queryByTestId("rail-section-drag-ext:z/w")).toBeNull();
+  // The header's chevron is the shrink button now.
+  expect(within(section()).queryByTestId("rail-section-toggle-ext:z/w")?.getAttribute("title")).toBe("Shrink");
+  fireEvent.click(within(section()).getByTestId("rail-section-toggle-ext:z/w"));
+  expect(section().getAttribute("data-filled")).toBeNull();
+  expect(otherSection().style.display).toBe("");
+  // Restored, it is capped again and its chevron collapses it.
+  expect(within(section()).getByTestId("viz-more").textContent).toBe("+3 more");
+  expect(within(section()).getByTestId("rail-section-toggle-ext:z/w").getAttribute("title")).toBe("Collapse");
+  expect(within(section()).getByTestId("rail-section-drag-ext:z/w")).toBeTruthy();
+  // Escape puts the rail back too.
+  await grow();
+  fireEvent.keyDown(section(), { key: "Escape" });
+  expect(section().getAttribute("data-filled")).toBeNull();
+  expect(otherSection().style.display).toBe("");
+  expect(layoutSaves).toEqual([]);
+});
+
+// A panel whose rows fit has no "+N more", so nothing to grow it.
+test("a panel whose rows fit offers no way to grow it", async () => {
+  const view = render(
+    <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([])}>
+      <RailHud streamId="str1" onOpenPage={() => {}} />
+    </PanelRunsProvider>,
+  );
+  await waitFor(() => expect(view.getByTestId("rail-section-ext:z/w").textContent).toContain("body row"));
+  expect(view.queryByTestId("viz-more")).toBeNull();
 });
 
 // The body is drawn small but keeps its buttons: the panel is where they
@@ -122,7 +171,7 @@ test("a panel's body draws its buttons", async () => {
       <RailHud streamId="str1" onOpenPage={() => {}} />
     </PanelRunsProvider>,
   );
-  const body = await waitFor(() => view.getByTestId("rail-panel-body"));
+  const body = await waitFor(() => within(view.getByTestId("rail-section-ext:z/w")).getByTestId("rail-panel-body"));
   await waitFor(() => expect(within(body).getByTestId("viz-action-tidy").textContent).toBe("Tidy"));
   // Drawn as a compact part: the kit's sheet keeps it tight.
   expect(body.classList.contains("ox-compact")).toBe(true);

@@ -60,11 +60,11 @@ loaders:
         FROM v_stream w JOIN v_branch_divergence d ON d.base = :base AND d.head = :branch
         WHERE w.id = :stream_id AND w.kind = 'worktree' AND :base <> :branch
       )
-      SELECT ord, -1 AS sub, against, against AS text, 'muted' AS tone,
+      SELECT ord, -1 AS sub, against, against AS text, NULL AS tone,
              CASE ord WHEN 1 THEN 'the upstream' ELSE 'the default branch this worktree is compared with' END AS hint
       FROM cmp WHERE note IS NULL
       UNION ALL
-      SELECT ord, 0, against, note, 'muted',
+      SELECT ord, 0, against, note, NULL,
              CASE note WHEN 'No remote' THEN 'the repository has no remote' ELSE 'the branch has no upstream' END AS hint
       FROM cmp WHERE note IS NOT NULL
       UNION ALL
@@ -97,5 +97,9 @@ loaders:
       SELECT (SELECT json_group_array(CASE WHEN ord = 2 AND sub = -1
                        THEN json_object('text', 'worktree of ' || text, 'tone', tone, 'hint', hint, 'gap', json('true'))
                        ELSE json_object('text', text, 'tone', tone, 'hint', hint) END)
-                FROM (SELECT * FROM marks ORDER BY ord, sub)) AS sync
+                -- A worktree with no upstream: its base alone, no word
+                -- on the upstream it has none of.
+                FROM (SELECT * FROM marks
+                      WHERE NOT (ord = 1 AND sub = 0 AND EXISTS (SELECT 1 FROM marks WHERE ord = 2))
+                      ORDER BY ord, sub)) AS sync
       FROM (SELECT 1) WHERE EXISTS (SELECT 1 FROM marks)
