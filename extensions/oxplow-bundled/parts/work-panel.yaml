@@ -1,4 +1,4 @@
-title: Work
+title: Work (panel)
 description: The thread's work — in progress (with its epic), ready next, and recently finished.
 params:
 - name: thread_id
@@ -7,7 +7,7 @@ loaders:
   work:
     sql: |
       SELECT grp, title, icon, uri, depth, active,
-             CASE grp WHEN 'Finished' THEN uri('oxplow/page', 'page', 'thread-activity', 'thread_id', thread_id) END AS grp_ref
+             CASE grp WHEN 'Finished' THEN uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || thread_id) END AS grp_ref
       FROM v_oxplow_thread_work
       WHERE thread_id = :thread_id
       ORDER BY g, ord

@@ -91,8 +91,8 @@ datasets:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_work
-    version: 4
-    description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), up to 10 ready items, and the last 5 finished items, wiki pages and unlinked efforts since the list was cleared."
+    version: 5
+    description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), every ready item, and the last 20 finished items, wiki pages and unlinked efforts since the list was cleared."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: grp, type: TEXT, doc: "`In progress`, `Ready` or `Finished`." }
@@ -247,3 +247,9 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
+panels:
+  # The thread's work: in progress (with its epic), ready next and recently
+  # finished, from the active work list; collapsed, the item in progress;
+  # counted by in progress + ready. Its header opens the Work page, the
+  # same list in a tab.
+  - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, count: work-count, open: 'oxplow:oxplow/page?page=work' }

@@ -1,0 +1,8 @@
+# The Work panel's header opens the Work page: the same list, in a tab,
+# for the viewer's thread.
+given:
+  - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
+when: { page: oxplow/work, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work/work: { rows: [{ grp: Ready, title: Next up }] }

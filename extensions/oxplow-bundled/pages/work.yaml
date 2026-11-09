@@ -1,0 +1,13 @@
+title: Work
+description: The thread's work in a tab — in progress (with its epic), every ready item and the last 20 finished; the Work panel's header opens it.
+icon: check-square
+category: Work
+params:
+- name: thread_id
+  label: Thread
+view:
+  id: work
+  embed:
+    page: oxplow/work-panel
+    params:
+      thread_id: { param: thread_id }

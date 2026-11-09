@@ -1,0 +1,41 @@
+# Grown to the whole rail, the Work panel has the thread's whole queue:
+# every ready item, and the last 20 finished (the rail itself shows 8
+# rows and "+N more" until it grows).
+given:
+  - { command: oxplow.work_item.create, input: { title: Ready 1, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 2, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 3, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 4, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 5, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 6, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 7, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 8, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 9, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 10, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 11, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 12, state: todo, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 1, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 2, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 3, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 4, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 5, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 6, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 7, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 8, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 9, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 10, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 11, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 12, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 13, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 14, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 15, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 16, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 17, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 18, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 19, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 20, state: done, thread: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Done 21, state: done, thread: thr1 } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work: { rows: 32 }

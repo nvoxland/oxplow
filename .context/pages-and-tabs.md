@@ -1168,18 +1168,21 @@ zone grouping); each appears only when it has content:
 2. **Work** — an `oxplow-bundled` panel, thread-scoped, over
    its dataset `thread_work` (one row per line, per thread), which reads the
    work-item interface (`v_work_item`): whichever list is active, nothing
-   with none. The body page `work` groups the lines (`group`): "In
+   with none. Its header opens the `work` page, the same list in a tab.
+   The body part `work-panel` groups the lines (`group`): "In
    progress" (the active item; under its epic, with the epic's other
    children indented and the active one emphasized, when it has one, plus
-   an open effort no item names), "Ready" (10, by `rank` then
-   `created_at`) and "Finished" (5 done items, wiki pages and unlinked
-   efforts, its heading opening the thread's activity, with a `clear`
+   an open effort no item names), "Ready" (every one, by `rank` then
+   `created_at`) and "Finished" (the last 20 done items, wiki pages and
+   unlinked efforts, its heading opening the thread's whole list,
+   foundation's `thread-work`, with a `clear`
    group action: `oxplow.work.clear_finished` records an event and the
    `finished_cleared` dataset hides what finished before it — per thread,
    no longer browser-local). Status and kind show as row icons. Collapsed,
    the `work-line` part: the active item (with its epic), else the last
    finished. The header count (`work-count`) is in progress + ready, never
-   an alert. Rows link (Cmd-click opens a new tab) and offer Add to
+   an alert. The rail shows 8 rows and "+N more", which grows the panel to
+   the whole rail: the whole queue, so the dataset caps only Finished. Rows link (Cmd-click opens a new tab) and offer Add to
    Context on right-click.
 3. **Git** — an `oxplow-foundation` panel, stream-scoped, its header
    opening Git Status. Its header toggle (`show`, declared by every part)

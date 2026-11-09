@@ -58,13 +58,13 @@ SELECT thread_id, 'Ready', 1, rn, title, 'todo', uri, 0, 0 FROM (
   SELECT i.*, row_number() OVER (PARTITION BY i.thread_id ORDER BY i.pos) AS rn
   FROM item i
   WHERE i.state = 'todo' AND NOT i.is_epic AND i.thread_id IS NOT NULL
-) WHERE rn <= 10
+)
 UNION ALL
 SELECT thread_id, 'Finished', 3, rn, title, icon, uri, 0, 0 FROM (
   SELECT f.*, row_number() OVER (PARTITION BY f.thread_id ORDER BY f.at DESC) AS rn
   FROM finished f LEFT JOIN ref('finished_cleared') c ON c.thread_id = f.thread_id
   WHERE c.cleared_at IS NULL OR f.at > c.cleared_at
-) WHERE rn <= 5
+) WHERE rn <= 20
 )
 -- One type per column: a UNION blends its arms' types.
 SELECT CAST(thread_id AS INTEGER) AS thread_id, CAST(grp AS TEXT) AS grp, CAST(g AS INTEGER) AS g,
