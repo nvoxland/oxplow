@@ -558,13 +558,10 @@ interface — an item that is some item's `parent_uri`
 (a page's `depth` column); there's no flag on the row itself.
 
 Statuses: `backlog`, `ready`, `in_progress`, `blocked`, `done`,
-`canceled`, `archived`. `archived` is a terminal state that hides the item from
-the default Work panel view — archived rows fold into the Done
-section's bucketing but aren't rendered unless the user flips the "Show
-archived (N)" toggle in the Done section header. The same header carries
-an "Archive all" action that bulk-archives every visible Done/Canceled
-row. The work-next page's blocker check reads the interface, where
-archived is done or canceled. `parent_id` chains items under
+`canceled` — each one of the list's declared stages, in the bucket of its
+name (`ready` in `todo`; `capabilities::BUILT_INS`). V8 removed
+`archived`: an archived task became done when it was completed, else
+canceled. `parent_id` chains items under
 epics. The `description` (markdown) is the single prose field, structured
 however the author sees fit — the model is not prompted toward any
 template, and is meant to be human-readable, wiki-formatted for
@@ -603,16 +600,16 @@ nothing populated either automatically — they were vestigial. The
 Backlog page never actually grouped or filtered by them despite the
 old doc claim.
 
-`completed_at` is set on entering `done` and kept when a done task is
-archived (archiving is tidying, not undoing); moving anywhere else clears
-it (`Task::set_status`).
+`completed_at` is set on entering `done`; moving anywhere else clears it
+(`Task::set_status`).
 
 ### `work_item` — every provider's work items (migration `V115__work_item.sql`, P5.C1)
 
 One row per work item, keyed by its URI (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`):
-`provider`, `title`, `body`, canonical `state` (`backlog`, `todo`,
-`in_progress`, `blocked`, `done`, `canceled`), the provider's own
-`native_state`, its other fields as `native` JSON, `parent_uri`,
+`provider`, `title`, `body`, `stage` (one the list declares; V8 renamed
+it from `native_state`), its bucket as `state` (`backlog`, `todo`,
+`in_progress`, `blocked`, `done`, `canceled`: the projection's lookup in
+`capability_provider.stages_json`), its other fields as `native` JSON, `parent_uri`,
 timestamps, `deleted_at` and `closed_at` (when it first reached done or
 canceled; reopened, NULL). V7 moved the thread and rank out: they are
 core's assignment, below.
@@ -631,7 +628,7 @@ items' threads and ranks over, made oxplow's ready tasks on no thread
 active `work_items` row of `capability_provider`, so with none it's
 empty). oxplow's tasks publish no model of their own (`v_task`,
 `v_task_link` and `v_task_note` were removed): everything reads the
-interface, and oxplow's own fields are `native_state` and `native`.
+interface, and oxplow's own fields are `stage` and `native`.
 
 **`work_item_link`** `(from_uri, to_uri, link_type, created_at)` and
 **`work_item_comment`** `(id, uri, body, author, created_at)` (V17) are
@@ -644,21 +641,17 @@ triggers that copied `task_link` / `task_note` in).
 six). An item's page refs are restated from these and `work_item`
 (`work_item_refs::restate_tx`, "page_ref" below).
 `capability_provider.fields_json` (V18) is an implementation's declared
-fields. Capability rows are published when services are built
+fields, `stages_json` (V8) a work list's declared stages. Capability rows are published when services are built
 (`CapabilityRegistry::publish_now`), so the first read sees the active
 list.
 
 Every list's rows arrive by projection from its `work_item.recorded`
 records (`work_items.project`; [work-items.md](./work-items.md) "One
 writer"), oxplow's tasks' included: their verbs answer with the record
-of every task they changed (`oxplow_tasks::record::record_tx`). oxplow's
-mapping: `ready` → `todo`; `archived` → `done` when `completed_at` is
-set, else `canceled`; the rest by name. A task keeps no thread or order:
-who works on it and its place are core's (`work_item_assignment`). (Archiving keeps
-`completed_at`; before V115 it cleared it, so V122 restored it — and
-`done` — for every task whose last archive the event log shows came
-`from: done`. Tasks archived before the event log existed have no record
-and stay `canceled`.) `native` carries a list's declared fields (oxplow:
+of every task they changed (`oxplow_tasks::record::record_tx`): a task's
+stage is its status. A task keeps no thread or order: who works on it
+and its place are core's (`work_item_assignment`). V8 rewrote the logged
+records to state their `stage` (an `archived` one its bucket's). `native` carries a list's declared fields (oxplow:
 `priority`, `author`; V29 dropped the rest). A row's `thread_id` is the
 list its record states, else the thread that filed it (first record);
 `closed_at` when a record first closed it. Threads and streams are
@@ -2508,15 +2501,15 @@ of its own.
 ## Status diagrams (text)
 
 ```
-task:    ready ─► in_progress ─► done ─► archived
-                   ╰─────────► blocked ◄─┘
-                   ╰─────────► canceled ─► archived
+task:    backlog ─► ready ─► in_progress ─► done
+                             ╰─────────► blocked
+                             ╰─────────► canceled
 ```
 
 ### Transitions to `in_progress` (server-side guard)
 
 `taskstore.updateItem` rejects any direct jump into `in_progress`
-from `canceled` or `archived` (those are explicit "abandoned" states
+from `canceled` (an explicit "abandoned" state
 the user must re-`ready` first). All other sources are accepted:
 
 - `ready → in_progress` (normal pickup)

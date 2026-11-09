@@ -34,6 +34,7 @@ use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, Ev
 use oxplow_domain::events::Envelope;
 use oxplow_domain::stores::StreamStore as _;
 use oxplow_domain::vocabulary::VocabularyHandle;
+use oxplow_domain::work_items::Bucket;
 use oxplow_domain::DomainError;
 use serde_json::Value;
 
@@ -65,6 +66,15 @@ pub const BUILT_INS: &[BuiltIn] = &[
                 read_only: true,
             },
         ],
+        // Its statuses, each its bucket's only stage.
+        stages: &[
+            ("backlog", "Backlog", Bucket::Backlog),
+            ("ready", "Ready", Bucket::Todo),
+            ("in_progress", "In Progress", Bucket::InProgress),
+            ("blocked", "Blocked", Bucket::Blocked),
+            ("done", "Done", Bucket::Done),
+            ("canceled", "Canceled", Bucket::Canceled),
+        ],
         config_schema: None,
     },
     BuiltIn {
@@ -75,6 +85,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &[],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
     BuiltIn {
@@ -85,6 +96,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &["contents"],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
     // The same capture, recording what changed and keeping no bytes.
@@ -96,6 +108,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &[],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
     // Knowledge: pages as Markdown under `.oxplow/wiki`, pinned to snapshots.
@@ -107,6 +120,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &[],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
     // Agent harnesses: what runs in an agent session.
@@ -179,6 +193,7 @@ const fn harness(
         features,
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     }
 }
@@ -200,6 +215,8 @@ pub struct BuiltIn {
     pub id_pattern: Option<&'static str>,
     /// Its own fields (a work list's, kept in `native`).
     pub fields: &'static [BuiltInField],
+    /// A work list's stages, in order: `(id, title, bucket)`.
+    pub stages: &'static [(&'static str, &'static str, Bucket)],
     /// The JSON Schema a declaration's `config:` must meet; `None` takes
     /// no config.
     pub config_schema: Option<&'static str>,
@@ -230,6 +247,23 @@ fn built_in_fields(b: &BuiltIn) -> Value {
             .collect::<Vec<_>>(),
     )
     .expect("fields serialize")
+}
+
+/// A built-in's stages, as an implementation declares them.
+fn built_in_stages(b: &BuiltIn) -> Value {
+    serde_json::to_value(built_in_stage_decls(b)).expect("stages serialize")
+}
+
+/// A built-in's stages as declarations.
+pub fn built_in_stage_decls(b: &BuiltIn) -> Vec<oxplow_domain::work_items::StageDecl> {
+    b.stages
+        .iter()
+        .map(|(id, title, bucket)| oxplow_domain::work_items::StageDecl {
+            id: (*id).into(),
+            title: (*title).into(),
+            bucket: *bucket,
+        })
+        .collect()
 }
 
 /// A built-in's features, as an implementation declares them.
@@ -299,6 +333,9 @@ pub struct Implementation {
     pub features: Value,
     /// Its own fields, as it declares them (a JSON array of `FieldDecl`).
     pub fields: Value,
+    /// A work list's stages, as it declares them (a JSON array of
+    /// `StageDecl`); `[]` for any other.
+    pub stages: Value,
     /// What its items' own ids look like (a work list's), when it says.
     pub id_pattern: Option<String>,
     /// Its logo as a data URI, when its declaration has an `icon:`.
@@ -343,6 +380,7 @@ impl Implementation {
             source: Source::None,
             features: Value::Object(features),
             fields: Value::Array(Vec::new()),
+            stages: Value::Array(Vec::new()),
             // Nothing in text is none's: it keeps no items.
             id_pattern: None,
             icon: None,
@@ -610,6 +648,7 @@ impl CapabilityRegistry {
                         source: Source::BuiltIn(b.entry),
                         features: built_in_features(b),
                         fields: built_in_fields(b),
+                        stages: built_in_stages(b),
                         id_pattern: b.id_pattern.map(str::to_string),
                         icon: None,
                         config: Value::Object(Default::default()),
@@ -1051,6 +1090,7 @@ impl CapabilityRegistry {
                     choosable: spec.choosable,
                     optional: spec.optional,
                     fields: i.fields.clone(),
+                    stages: i.stages.clone(),
                     id_pattern: i.id_pattern.clone(),
                     description: i.description.clone(),
                 });
@@ -1074,6 +1114,7 @@ impl CapabilityRegistry {
                         choosable: spec.choosable,
                         optional: spec.optional,
                         fields: Value::Array(Vec::new()),
+                        stages: Value::Array(Vec::new()),
                         id_pattern: None,
                         description: None,
                     });
@@ -1151,6 +1192,7 @@ pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Ve
                     source: Source::BuiltIn(b.entry),
                     features: built_in_features(b),
                     fields: built_in_fields(b),
+                    stages: built_in_stages(b),
                     id_pattern: b.id_pattern.map(str::to_string),
                     icon: d.icon.clone(),
                     config: d.config.clone(),
@@ -1177,6 +1219,7 @@ fn provider_implementation(
         source: Source::ProviderKind(kind.name),
         features: serde_json::json!({ "decide_native": kind.decides_natively }),
         fields: serde_json::Value::Array(Vec::new()),
+        stages: serde_json::Value::Array(Vec::new()),
         id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
@@ -1204,6 +1247,7 @@ fn scripted_implementation(
         },
         features: serde_json::json!({}),
         fields: serde_json::Value::Array(Vec::new()),
+        stages: serde_json::Value::Array(Vec::new()),
         id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
@@ -1352,6 +1396,7 @@ mod tests {
             source: Source::BuiltIn(entry),
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
+            stages: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
@@ -1462,6 +1507,7 @@ mod tests {
             source: Source::External,
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
+            stages: serde_json::Value::Array(Vec::new()),
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
@@ -1790,6 +1836,7 @@ mod tests {
                 source: Source::External,
                 features: serde_json::json!({ "comments": false, "links": true, "delete": true }),
                 fields: serde_json::Value::Array(Vec::new()),
+                stages: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
@@ -1823,6 +1870,7 @@ mod tests {
                 source: Source::External,
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
+                stages: serde_json::Value::Array(Vec::new()),
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),

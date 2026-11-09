@@ -107,16 +107,18 @@ A scripted **work-items** provider, lib + bin, that the host's tests and the con
 stdio. `declarations()` is its `InitializeResult`: the `work_items`
 capability (hierarchy, comments, links, delete and `idempotent_writes`),
 the work-items verbs `create` / `update` / `transition` (undoable: its
-inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`state` /
-`native_state`, its `native.points`; `additionalProperties: false`), one
+inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`stage`,
+one of its own; its `native.points`; `additionalProperties: false`), one
 command of its own, `estimate { uri, points }`, the
 `work_item.recorded@3` event type with the core schema (its records
 state its links and comments), a
 `work_items`
 collector over the `work_item` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
-live in memory as `oxplow:oxplow/work_item?id=W-<n>&provider=fake` with native states `Icebox`,
-`Ready`, `Doing`, `Stuck`, `Shipped`, `Dropped` (one per canonical state); every
+live in memory as `oxplow:oxplow/work_item?id=W-<n>&provider=fake` in its stages `icebox`,
+`ready`, `doing`, `stuck`, `shipped`, `dropped` (one per bucket, declared
+in its manifest's `stages:`; `STAGES`, and `with_its_stages` for a test
+that turns a scaffold into the fake); every
 `invoke` returns the `work_item.recorded` events the host logs. Each
 write bumps the item's revision (a deleted item stays, marked
 `deleted`); `read` streams each item changed after the cursor, in
@@ -406,12 +408,19 @@ providers:
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
     id_pattern: "[A-Z]+-\\d+"     # a work list's own ids (optional)
+    stages:                      # a work list's workflow (required for one)
+      - { id: ready, title: Ready, bucket: todo }
+      - { id: doing, title: Doing, bucket: in_progress }
+      - { id: shipped, title: Shipped, bucket: done }
     needs: [sql.read]            # scopes it calls (`host/call`); read ones only
 ```
 
 `fields` (a work list's own, kept in `native`: `[{ name, title, kind:
-enum|text|number, values? }]`, work-items.md "Declared fields") are
-published with the instance's capability row. `id_pattern` (a regex
+enum|text|number, values? }]`, work-items.md "Declared fields") and
+`stages` (its workflow, each in one of core's buckets, work-items.md
+"Buckets and stages") are published with the instance's capability row.
+A work list must declare `stages:` (one in each of todo, in_progress and
+done; `stages_problem`), and nothing else may. `id_pattern` (a regex
 matched whole) is what a work list's ids look
 like: while it's the active one, a loose id (`ENG-12`) in a work-item
 command resolves to its item (`work_item::with_loose_refs`,
@@ -420,7 +429,8 @@ work-items.md).
 The loader refuses (into `errors`) an id that isn't lowercase
 snake_case, is `oxplow` or a core namespace, or repeats
 (`capability::instance_id_problem`); a capability with no provider
-contract; an `id_pattern` that isn't a regex, or `fields` / `idPattern`
+contract; a work list without `stages:`, or stages `stages_problem`
+refuses, or `stages:` on anything else; an `id_pattern` that isn't a regex, or `fields` / `idPattern`
 on a capability that keeps no items; an entry or declarations path
 outside the folder (or the manifest, or under a retired UI folder); a bad host
 pattern; and declarations that don't parse, speak another protocol

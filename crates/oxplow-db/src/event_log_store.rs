@@ -627,7 +627,7 @@ mod tests {
             "human",
             &WorkItemStateChangedV1 {
                 work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
-                to: oxplow_domain::work_items::CanonicalState::InProgress,
+                to: oxplow_domain::work_items::Bucket::InProgress,
             },
         )
         .with_dedupe_key("k1")

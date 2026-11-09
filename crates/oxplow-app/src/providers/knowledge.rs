@@ -127,7 +127,7 @@ impl ExternalKnowledge {
         let events = out
             .events
             .into_iter()
-            .map(|d| self.instance.envelope(call.actor(), None, d))
+            .map(|d| self.instance.envelope(call.actor(), d))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((out.result, events))
     }

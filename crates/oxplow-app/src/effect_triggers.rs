@@ -978,7 +978,7 @@ mod tests {
         ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, WorkItemEdited,
         WorkItemStateChanged, WorkItemStateChangedV1,
     };
-    use oxplow_domain::work_items::CanonicalState;
+    use oxplow_domain::work_items::Bucket;
     use oxplow_domain::Envelope;
     use serde_json::Value;
     use std::path::Path;
@@ -1017,7 +1017,7 @@ mod tests {
 
     /// The task's state change, anchored to the fixture's thread as the
     /// command that makes it would: an effect reacting runs for that thread.
-    fn state_changed(fx: &crate::test_fixtures::TaskEffortFixture, to: CanonicalState) -> Envelope {
+    fn state_changed(fx: &crate::test_fixtures::TaskEffortFixture, to: Bucket) -> Envelope {
         let mut env = Envelope::typed::<WorkItemStateChanged>(
             "human",
             &WorkItemStateChangedV1 {
@@ -1063,7 +1063,7 @@ mod tests {
         .await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         consumer.handle(&ev).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT effect FROM v_effect_run ORDER BY id").await,
@@ -1106,7 +1106,7 @@ mod tests {
         start(svc).await;
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         assert!(consumer.handles("work_item.state_changed"));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
@@ -1143,7 +1143,7 @@ mod tests {
         let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(svc, stamp, &[("stamp.star", script)]).await;
         start(svc).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1195,11 +1195,11 @@ mod tests {
     async fn an_effect_never_reacts_to_the_past_or_to_what_where_excludes() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let early = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let early = log(svc, state_changed(&fx, Bucket::Done)).await;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         consumer.handle(&early).await.unwrap();
-        let blocked = log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
+        let blocked = log(svc, state_changed(&fx, Bucket::Blocked)).await;
         consumer.handle(&blocked).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT count(*) FROM v_effect_run").await,
@@ -1216,7 +1216,7 @@ mod tests {
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
         let before = title(&fx).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before, "not sent again");
         let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
@@ -1248,12 +1248,12 @@ mod tests {
                     .unwrap()
             }
         };
-        let cut_off = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let cut_off = log(svc, state_changed(&fx, Bucket::Done)).await;
         claim(&cut_off, ReactionOrigin::Backfill).await;
-        let live = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let live = log(svc, state_changed(&fx, Bucket::Done)).await;
         claim(&live, ReactionOrigin::Live).await;
         // tsk935: an automatic attempt cut off the same way is recovered too.
-        let auto = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let auto = log(svc, state_changed(&fx, Bucket::Done)).await;
         claim(&auto, ReactionOrigin::Auto).await;
 
         assert_eq!(recover_interrupted(svc).await.unwrap(), 2);
@@ -1361,7 +1361,7 @@ mod tests {
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
         let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
         register_probe(svc, keys.clone(), fail.clone());
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1444,7 +1444,7 @@ mod tests {
         )
         .unwrap();
         svc.commands.register(note).unwrap();
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1493,7 +1493,7 @@ mod tests {
         start(svc).await;
         register(svc);
         let before = title(&fx).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before);
 
@@ -1547,7 +1547,7 @@ mod tests {
             .unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
         // A reaction never made isn't one to retry either.
-        let other = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let other = log(svc, state_changed(&fx, Bucket::Done)).await;
         let refused = retry(svc, &human, &other, true).await.unwrap_err();
         assert!(refused.to_string().contains("hasn't reacted"), "{refused}");
         // An agent retries an interrupted one without being asked.
@@ -1556,7 +1556,7 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let third = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let third = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &third).await;
         let out = retry(svc, &agent, &third, false).await.unwrap();
         assert_eq!(out.result["outcome"], json!("ok"));
@@ -1571,7 +1571,7 @@ mod tests {
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
         register(svc);
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &ev).await;
         let human = oxplow_domain::Actor::Human;
 
@@ -1764,7 +1764,7 @@ mod tests {
         )
         .await;
         start(svc).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1798,7 +1798,7 @@ mod tests {
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
-            let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+            let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(
@@ -1809,7 +1809,7 @@ mod tests {
             .await,
             json!([["effect", "disabled"]])
         );
-        let fourth = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let fourth = log(svc, state_changed(&fx, Bucket::Done)).await;
         consumer.handle(&fourth).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT count(*) FROM v_effect_run").await,
@@ -1847,7 +1847,7 @@ mod tests {
         extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
         start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         let running = {
             let (consumer, ev) = (consumer.clone(), ev.clone());
             tokio::spawn(async move { consumer.handle(&ev).await })
@@ -1890,7 +1890,7 @@ mod tests {
         extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
         start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         let running = {
             let (consumer, ev) = (consumer.clone(), ev.clone());
             tokio::spawn(async move { consumer.handle(&ev).await })
@@ -1940,7 +1940,7 @@ mod tests {
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
-            let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+            let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(
@@ -2113,7 +2113,7 @@ mod tests {
         let svc = &fx.svc;
         retitle_by_subject(&fx).await;
         start(svc).await;
-        let mut stored = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let mut stored = log(svc, state_changed(&fx, Bucket::Done)).await;
         stored.envelope.id = oxplow_domain::EventId::generate();
         stored.envelope.subject = vec!["oxplow:oxplow/effort?id=eff77".into()];
         EffectTriggers::new(Arc::downgrade(svc))
@@ -2146,10 +2146,10 @@ mod tests {
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
-        let past = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let past = log(svc, state_changed(&fx, Bucket::Done)).await;
         start(svc).await;
         // The live consumer hasn't reached this one yet.
-        let after = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let after = log(svc, state_changed(&fx, Bucket::Done)).await;
         let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/mark-done" }))
             .await
             .unwrap();
@@ -2209,10 +2209,10 @@ mod tests {
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         for _ in 0..5 {
-            log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
+            log(svc, state_changed(&fx, Bucket::Blocked)).await;
         }
-        let first = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        let last = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let first = log(svc, state_changed(&fx, Bucket::Done)).await;
+        let last = log(svc, state_changed(&fx, Bucket::Done)).await;
         start(svc).await;
         let (_, decl) = find_effect(svc, "acme/mark-done").unwrap();
         let vocabulary = svc.vocabulary.current();
@@ -2289,9 +2289,9 @@ mod tests {
         // excludes.
         let mut past = Vec::new();
         for _ in 0..3 {
-            past.push(log(svc, state_changed(&fx, CanonicalState::Done)).await);
+            past.push(log(svc, state_changed(&fx, Bucket::Done)).await);
         }
-        log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
+        log(svc, state_changed(&fx, Bucket::Blocked)).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for ev in &past {
@@ -2387,7 +2387,7 @@ mod tests {
         register(svc);
         let mut past = Vec::new();
         for _ in 0..3 {
-            past.push(log(svc, state_changed(&fx, CanonicalState::Done)).await);
+            past.push(log(svc, state_changed(&fx, Bucket::Done)).await);
         }
         start(svc).await;
         let planned = |input: Value| async move {
@@ -2439,7 +2439,7 @@ mod tests {
         extension(svc, MARK_DONE, &[("mark.star", broken)]).await;
         register(svc);
         for _ in 0..5 {
-            log(svc, state_changed(&fx, CanonicalState::Done)).await;
+            log(svc, state_changed(&fx, Bucket::Done)).await;
         }
         let input = json!({ "effect": "acme/mark-done" });
         start(svc).await;

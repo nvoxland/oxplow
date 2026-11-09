@@ -2352,7 +2352,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
         );
         write(
             d.path(),

@@ -11,12 +11,12 @@ use serde_json::{json, Value};
 
 use crate::ids::TaskId;
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput,
-    WorkItemLinkInput, WorkItemTransitionInput, WorkItemUpdateInput,
+    provider_of, WorkItemCommentInput, WorkItemCreateInput, WorkItemDeleteInput, WorkItemLinkInput,
+    WorkItemTransitionInput, WorkItemUpdateInput,
 };
 use oxplow_domain::{Actor, CommandCall, CommandError, DomainError, Timestamp};
 
-use crate::mapping::{canonical_of, native_status, oxplow_native, oxplow_status, status_str};
+use crate::mapping::{oxplow_native, status_of, status_str};
 use crate::model::{Task, TaskActorKind, TaskAuthor, TaskLinkType, TaskPriority, TaskStatus};
 use crate::refs::{task_of_work_item_ref, work_item_ref, PROVIDER};
 use crate::store;
@@ -128,8 +128,12 @@ pub fn create_tx(
         .transpose()?;
     let native = oxplow_native(input.native.as_ref())?;
     let now = Timestamp::now();
-    let status =
-        oxplow_status(input.state, input.native_state.as_deref())?.unwrap_or(TaskStatus::Ready);
+    let status = input
+        .stage
+        .as_deref()
+        .map(|s| status_of(s, "/stage"))
+        .transpose()?
+        .unwrap_or(TaskStatus::Ready);
     let item = Task {
         id: TaskId::placeholder(),
         parent_id,
@@ -140,11 +144,7 @@ pub fn create_tx(
         created_by: TaskActorKind::User,
         created_at: now,
         updated_at: now,
-        // Filed straight into `archived`: completed when it was asked as
-        // `done`, so it reads back as asked.
-        completed_at: (status == TaskStatus::Done
-            || (status == TaskStatus::Archived && input.state == Some(CanonicalState::Done)))
-        .then_some(now),
+        completed_at: (status == TaskStatus::Done).then_some(now),
         deleted_at: None,
         note_count: 0,
         author: task_author(actor),
@@ -184,7 +184,11 @@ pub fn update_tx(
         Some(r) => Some(Some(task_ref(r, "/parent_uri")?)),
     };
     let native = oxplow_native(input.native.as_ref())?;
-    let status = oxplow_status(input.state, input.native_state.as_deref())?;
+    let status = input
+        .stage
+        .as_deref()
+        .map(|s| status_of(s, "/stage"))
+        .transpose()?;
     let not_found = |e: DomainError| match e {
         DomainError::NotFound => CommandError::Failed {
             message: format!("task {id} not found"),
@@ -211,11 +215,8 @@ pub fn update_tx(
     item.updated_at = now;
     let after_fields = store::update_with_status_tx(conn, &item, None, now).map_err(not_found)?;
     if let Some(to) = status {
-        set_status_through(conn, &after_fields, to, input.state, now)?;
+        set_status(conn, &after_fields, to, now)?;
     }
-    // A state given in either word is undone as the prior status whole:
-    // its canonical state and its native one (`archived` is both).
-    let moved = input.state.is_some() || input.native_state.is_some();
     let inverse = WorkItemUpdateInput {
         uri: input.uri.clone(),
         title: input.title.as_ref().map(|_| before.title.clone()),
@@ -224,8 +225,7 @@ pub fn update_tx(
             .parent_uri
             .as_ref()
             .map(|_| before.parent_id.map(work_item_ref).unwrap_or_default()),
-        state: moved.then(|| canonical_of(&before)),
-        native_state: moved.then(|| status_str(before.status)),
+        stage: status.map(|_| status_str(before.status)),
         native: native
             .priority
             .map(|_| json!({ "priority": before.priority })),
@@ -240,63 +240,42 @@ pub fn update_tx(
     })
 }
 
-/// Move `task` to `to` at `now`. An archive keeps whether the task was
-/// completed; archiving it as `done` (or `canceled`, `asked`) when it
-/// isn't (or is) passes through that state first, so the item reads as
-/// asked. The change reported is from the task as it was.
-fn set_status_through(
+/// Move `task` to `to` at `now`; the change reported is from the task as
+/// it was.
+fn set_status(
     conn: &rusqlite::Connection,
     task: &Task,
     to: TaskStatus,
-    asked: Option<CanonicalState>,
     now: Timestamp,
 ) -> Result<store::StatusChange, CommandError> {
-    let set = |status: TaskStatus| {
-        store::set_status_tx(conn, task.id, status, now).map_err(|e| match e {
-            DomainError::NotFound => CommandError::Failed {
-                message: format!("task {} not found", task.id),
-            },
-            other => CommandError::from(other),
-        })
-    };
-    let through = (to == TaskStatus::Archived)
-        .then_some(asked)
-        .flatten()
-        .map(native_status)
-        .filter(|&status| task.completed_at.is_some() != (status == TaskStatus::Done));
-    let before = match through {
-        Some(status) => Some(set(status)?.before),
-        None => None,
-    };
-    let mut change = set(to)?;
-    if let Some(before) = before {
-        change.before = before;
-    }
-    Ok(change)
+    store::set_status_tx(conn, task.id, to, now).map_err(|e| match e {
+        DomainError::NotFound => CommandError::Failed {
+            message: format!("task {} not found", task.id),
+        },
+        other => CommandError::from(other),
+    })
 }
 
-/// `transition`: the status move ([`set_status_through`]).
+/// `transition`: the status move ([`set_status`]).
 pub fn transition_tx(
     conn: &rusqlite::Connection,
     input: WorkItemTransitionInput,
 ) -> Result<Answer, CommandError> {
     let id = task_ref(&input.uri, "/uri")?;
-    let to = oxplow_status(Some(input.to), input.native_state.as_deref())?
-        .ok_or_else(|| invalid_at("/to", "a transition needs a state".into()))?;
+    let to = status_of(&input.to, "/to")?;
     let task = store::get_task_tx(conn, id)
         .map_err(CommandError::from)?
         .ok_or_else(|| CommandError::Failed {
             message: format!("task {id} not found"),
         })?;
-    let change = set_status_through(conn, &task, to, Some(input.to), Timestamp::now())?;
+    let change = set_status(conn, &task, to, Timestamp::now())?;
     Ok(Answer {
         result: json!({ "uri": input.uri }),
         inverse: Some(CommandCall {
             name: "transition".into(),
             input: serde_json::to_value(WorkItemTransitionInput {
                 uri: input.uri,
-                to: canonical_of(&change.before),
-                native_state: Some(status_str(change.before.status)),
+                to: status_str(change.before.status),
             })
             .expect("input serializes"),
         }),

@@ -321,7 +321,7 @@ mod tests {
     async fn resolves_task_title_and_status() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "state": "in_progress" })).await;
+        let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "stage": "in_progress" })).await;
 
         let summary = resolve_ref(
             &services,

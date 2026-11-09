@@ -1327,7 +1327,7 @@ mod tests {
             #[serde(default)]
             body: Option<String>,
             #[serde(default)]
-            state: Option<crate::work_items::CanonicalState>,
+            state: Option<crate::work_items::Bucket>,
         }
         let schema = serde_json::to_value(schemars::schema_for!(Create)).unwrap();
         let v = InputValidator::compile(&schema).unwrap();

@@ -16,11 +16,16 @@ use serde_json::Value;
 
 use crate::{Actor, CommandCall, CommandError, Envelope};
 
-/// The states every provider maps its own to. `backlog` is filed but not
-/// ready to work on; `todo` is ready (what an idle thread may pull).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+/// What a work list's stage means to core: the bucket each of its declared
+/// stages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is
+/// filed but not ready, `todo` is ready (what an idle thread may pull),
+/// `in_progress` is started, `blocked` waits on an answer, `done` and
+/// `canceled` are closed — and the screens draw the list's own stages.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, specta::Type,
+)]
 #[serde(rename_all = "snake_case")]
-pub enum CanonicalState {
+pub enum Bucket {
     Backlog,
     Todo,
     InProgress,
@@ -29,30 +34,129 @@ pub enum CanonicalState {
     Canceled,
 }
 
-impl CanonicalState {
-    pub const ALL: [CanonicalState; 6] = [
-        CanonicalState::Backlog,
-        CanonicalState::Todo,
-        CanonicalState::InProgress,
-        CanonicalState::Blocked,
-        CanonicalState::Done,
-        CanonicalState::Canceled,
+impl Bucket {
+    pub const ALL: [Bucket; 6] = [
+        Bucket::Backlog,
+        Bucket::Todo,
+        Bucket::InProgress,
+        Bucket::Blocked,
+        Bucket::Done,
+        Bucket::Canceled,
     ];
 
     pub fn as_str(self) -> &'static str {
         match self {
-            CanonicalState::Backlog => "backlog",
-            CanonicalState::Todo => "todo",
-            CanonicalState::InProgress => "in_progress",
-            CanonicalState::Blocked => "blocked",
-            CanonicalState::Done => "done",
-            CanonicalState::Canceled => "canceled",
+            Bucket::Backlog => "backlog",
+            Bucket::Todo => "todo",
+            Bucket::InProgress => "in_progress",
+            Bucket::Blocked => "blocked",
+            Bucket::Done => "done",
+            Bucket::Canceled => "canceled",
         }
     }
 
     /// Done or canceled: the item's work is over, and it has no assignee.
     pub fn is_closed(self) -> bool {
-        matches!(self, CanonicalState::Done | CanonicalState::Canceled)
+        matches!(self, Bucket::Done | Bucket::Canceled)
+    }
+
+    /// The bucket a name spells (`in_progress`), if it is one.
+    pub fn named(name: &str) -> Option<Bucket> {
+        Bucket::ALL.into_iter().find(|b| b.as_str() == name)
+    }
+}
+
+/// One of a work list's stages, as it declares them in order: its id (what
+/// a record and an input name), how a person names it, and its bucket. The
+/// first stage of a bucket is that bucket's default — where an input
+/// naming the bucket (`to: done`) lands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type)]
+#[serde(deny_unknown_fields)]
+pub struct StageDecl {
+    /// snake_case, unique in the list (`in_review`).
+    pub id: String,
+    /// How a person names it (`In Review`).
+    pub title: String,
+    pub bucket: Bucket,
+}
+
+/// The buckets every work list must have a stage in: where a new item
+/// lands (`todo`), what starting it means (`in_progress`) and finishing it
+/// (`done`).
+pub const REQUIRED_BUCKETS: [Bucket; 3] = [Bucket::Todo, Bucket::InProgress, Bucket::Done];
+
+/// What's wrong with `stages`, if anything: ids snake_case and unique,
+/// titles given, a stage in each required bucket, and a stage named like a
+/// bucket in that bucket.
+pub fn stages_problem(stages: &[StageDecl]) -> Option<String> {
+    let snake = |n: &str| {
+        n.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+            && n.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    let bad = stages.iter().enumerate().find_map(|(i, st)| {
+        if !snake(&st.id) {
+            Some(format!("stage `{}`: its id must be snake_case", st.id))
+        } else if stages[..i].iter().any(|o| o.id == st.id) {
+            Some(format!("stage `{}` is declared twice", st.id))
+        } else if st.title.trim().is_empty() {
+            Some(format!("stage `{}` needs a title", st.id))
+        } else if Bucket::named(&st.id).is_some_and(|b| b != st.bucket) {
+            Some(format!(
+                "stage `{}` is named like a bucket, so it must be in it, not `{}`",
+                st.id,
+                st.bucket.as_str()
+            ))
+        } else {
+            None
+        }
+    });
+    bad.or_else(|| {
+        REQUIRED_BUCKETS
+            .iter()
+            .find(|b| !stages.iter().any(|st| st.bucket == **b))
+            .map(|b| {
+                format!(
+                    "no stage is in `{}`: a work list needs one in each of todo, \
+                     in_progress and done",
+                    b.as_str()
+                )
+            })
+    })
+}
+
+/// The bucket of stage `id` in `stages`; `None` for a stage it doesn't
+/// declare.
+pub fn bucket_of(stages: &[StageDecl], id: &str) -> Option<Bucket> {
+    stages.iter().find(|s| s.id == id).map(|s| s.bucket)
+}
+
+/// The stage a name means in `stages`: a stage's id, else a bucket's name
+/// for that bucket's default (its first stage). Else what's wrong, naming
+/// the stages.
+pub fn resolve_stage<'a>(stages: &'a [StageDecl], name: &str) -> Result<&'a StageDecl, String> {
+    if let Some(stage) = stages.iter().find(|s| s.id == name) {
+        return Ok(stage);
+    }
+    let ids = || {
+        stages
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match Bucket::named(name) {
+        Some(bucket) => stages.iter().find(|s| s.bucket == bucket).ok_or_else(|| {
+            format!(
+                "this work list has no stage in `{name}` (its stages: {})",
+                ids()
+            )
+        }),
+        None => Err(format!(
+            "`{name}` isn't one of this work list's stages ({}) or a bucket \
+             (backlog, todo, in_progress, blocked, done, canceled)",
+            ids()
+        )),
     }
 }
 
@@ -169,8 +273,9 @@ pub struct WorkItemRecord {
     pub title: String,
     #[serde(default)]
     pub body: String,
-    pub state: CanonicalState,
-    pub native_state: String,
+    /// Which of the list's declared stages it's in (its bucket is core's
+    /// lookup).
+    pub stage: String,
     /// Provider-specific fields.
     #[serde(default)]
     pub native: serde_json::Value,
@@ -282,6 +387,21 @@ pub struct WorkItemsProvider {
     /// It takes any item's ref and keeps nothing (none): verbs naming
     /// another list's items reach it instead of being refused.
     pub sink: bool,
+    /// Its stages, in order, as it declares them ([`StageDecl`]).
+    pub stages: Vec<StageDecl>,
+}
+
+/// A stage named like each bucket, in it: the stages of a list that has
+/// no workflow of its own (none, a sink).
+pub fn bucket_stages() -> Vec<StageDecl> {
+    Bucket::ALL
+        .into_iter()
+        .map(|b| StageDecl {
+            id: b.as_str().into(),
+            title: b.as_str().replace('_', " "),
+            bucket: b,
+        })
+        .collect()
 }
 
 impl std::fmt::Debug for WorkItemsProvider {
@@ -472,7 +592,63 @@ mod tests {
             verbs: Arc::new(Nothing),
             id_pattern: None,
             sink: false,
+            stages: bucket_stages(),
         }
+    }
+
+    fn stage(id: &str, bucket: Bucket) -> StageDecl {
+        StageDecl {
+            id: id.into(),
+            title: id.into(),
+            bucket,
+        }
+    }
+
+    /// A list declares its stages: snake_case ids once each, titled, one
+    /// in each of todo, in_progress and done, and a stage named like a
+    /// bucket in that bucket.
+    #[test]
+    fn stages_need_ids_titles_and_the_required_buckets() {
+        let ok = vec![
+            stage("ready", Bucket::Todo),
+            stage("doing", Bucket::InProgress),
+            stage("in_review", Bucket::InProgress),
+            stage("shipped", Bucket::Done),
+        ];
+        assert_eq!(stages_problem(&ok), None);
+        let mut twice = ok.clone();
+        twice.push(stage("ready", Bucket::Todo));
+        assert!(stages_problem(&twice).unwrap().contains("twice"));
+        let mut misnamed = ok.clone();
+        misnamed.push(stage("done", Bucket::Canceled));
+        assert!(stages_problem(&misnamed)
+            .unwrap()
+            .contains("named like a bucket"));
+        assert!(stages_problem(&ok[..2]).unwrap().contains("`done`"));
+        assert!(stages_problem(&[stage("Ready", Bucket::Todo)])
+            .unwrap()
+            .contains("snake_case"));
+    }
+
+    /// A stage's id names it; a bucket's name its first stage; anything
+    /// else is refused naming the stages.
+    #[test]
+    fn a_name_resolves_to_a_stage_or_its_buckets_default() {
+        let stages = vec![
+            stage("ready", Bucket::Todo),
+            stage("doing", Bucket::InProgress),
+            stage("in_review", Bucket::InProgress),
+            stage("shipped", Bucket::Done),
+        ];
+        assert_eq!(resolve_stage(&stages, "in_review").unwrap().id, "in_review");
+        assert_eq!(resolve_stage(&stages, "in_progress").unwrap().id, "doing");
+        assert_eq!(resolve_stage(&stages, "done").unwrap().id, "shipped");
+        let none = resolve_stage(&stages, "blocked").unwrap_err();
+        assert!(none.contains("no stage in `blocked`"), "{none}");
+        let bad = resolve_stage(&stages, "nope").unwrap_err();
+        assert!(bad.contains("ready, doing, in_review, shipped"), "{bad}");
+        assert_eq!(bucket_of(&stages, "in_review"), Some(Bucket::InProgress));
+        assert_eq!(bucket_of(&stages, "nope"), None);
     }
 
     #[test]
@@ -541,8 +717,7 @@ mod tests {
             uri: "oxplow:oxplow/work_item?id=W-1&provider=fake".into(),
             title: "t".into(),
             body: String::new(),
-            state: CanonicalState::InProgress,
-            native_state: "doing".into(),
+            stage: "doing".into(),
             native: serde_json::json!({ "points": 3 }),
             parent_uri: None,
             deleted: false,
@@ -551,7 +726,7 @@ mod tests {
         };
         let json = serde_json::to_value(&record).unwrap();
         assert_eq!(json["uri"], "oxplow:oxplow/work_item?id=W-1&provider=fake");
-        assert_eq!(json["state"], "in_progress");
+        assert_eq!(json["stage"], "doing");
         assert_eq!(
             serde_json::from_value::<WorkItemRecord>(json).unwrap(),
             record
@@ -574,24 +749,20 @@ mod tests {
 //
 // What a `oxplow.work_item.<verb>` command takes, and what a list's verb
 // receives (`WorkItemVerbs::invoke`): the `v_work_item` columns, a
-// canonical `state` with the list's `native_state`, and `native` for its
-// own fields.
+// `stage` (core resolves a bucket to the list's default before the list
+// sees it), and `native` for its own fields.
 
-/// Move an item to a canonical state, and optionally to one of its
-/// provider's own states that maps to it.
+/// Move an item to one of its list's stages.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkItemTransitionInput {
     /// The item's URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, `oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
     pub uri: String,
-    /// The canonical state: `backlog`, `todo`, `in_progress`, `blocked`, `done` or
-    /// `canceled`. The list's own name for a state (oxplow's `ready`)
-    /// goes in `native_state`.
-    pub to: CanonicalState,
-    /// The provider's own state, which must map to `to` (oxplow:
-    /// `archived` with `done` or `canceled`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
+    /// A stage the list declares (`v_capability_provider.stages`), or a
+    /// bucket — `backlog`, `todo`, `in_progress`, `blocked`, `done`,
+    /// `canceled` — for that bucket's default stage. Core resolves it: the
+    /// list receives its own stage's id.
+    pub to: String,
 }
 
 /// A new item on the active tracker, optionally straight into
@@ -605,15 +776,11 @@ pub struct WorkItemCreateInput {
     /// The parent's URI, on the same provider (needs `hierarchy`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_uri: Option<String>,
-    /// The canonical state, `todo` when absent: `backlog`, `todo`, `in_progress`,
-    /// `blocked`, `done` or `canceled`. The list's own name for a state
-    /// (oxplow's `ready`) goes in `native_state`.
+    /// The stage it starts in — a stage the list declares, or a bucket for
+    /// its default — `todo`'s default when absent. Core resolves it: the
+    /// list receives its own stage's id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<CanonicalState>,
-    /// The provider's own state, which must map to `state` when both are
-    /// given.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
+    pub stage: Option<String>,
     /// The tracker's own fields (oxplow: `{ priority? }`), as its
     /// `create` declares them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -641,15 +808,9 @@ pub struct WorkItemUpdateInput {
     /// The parent's URI on the same provider, or `""` to detach.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_uri: Option<String>,
-    /// The canonical state: `backlog`, `todo`, `in_progress`, `blocked`, `done` or
-    /// `canceled`. The list's own name for a state (oxplow's `ready`)
-    /// goes in `native_state`.
+    /// The stage to move it to, as `transition`'s `to`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub state: Option<CanonicalState>,
-    /// The provider's own state, which must map to `state` when both are
-    /// given.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_state: Option<String>,
+    pub stage: Option<String>,
     /// The provider's own fields to change (oxplow: `{ priority? }`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native: Option<Value>,

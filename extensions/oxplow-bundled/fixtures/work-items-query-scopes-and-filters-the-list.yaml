@@ -10,7 +10,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: Urgent child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
   - { command: oxplow.work_item.create, input: { title: Plain child, assignee: thr1, native: { priority: low }, parent_uri: $epic.uri } }
   - { command: oxplow.work_item.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
-  - { command: oxplow.work_item.create, input: { title: Backlogged, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: Backlogged, stage: backlog } }
   - { command: oxplow.work_item.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
   - { command: oxplow.work_item.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
   - { command: oxplow.work_item.transition, input: { uri: $shipped.uri, to: done }, as: agent }

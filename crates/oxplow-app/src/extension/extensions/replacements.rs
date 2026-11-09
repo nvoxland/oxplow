@@ -376,7 +376,7 @@ mod tests {
         );
     }
 
-    const PROVIDER: &str = "providers:\n  - { id: fake, capability: work_items, entry: bin/provider, declarations: provider.json }\n";
+    const PROVIDER: &str = "providers:\n  - { id: fake, capability: work_items, entry: bin/provider, declarations: provider.json, stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }] }\n";
 
     /// What a replacement's own checks said (the provider's missing
     /// program and declarations are another check's errors).

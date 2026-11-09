@@ -1,7 +1,7 @@
 {
   "$defs": {
-    "CanonicalState": {
-      "description": "The states every provider maps its own to. `backlog` is filed but not\nready to work on; `todo` is ready (what an idle thread may pull).",
+    "Bucket": {
+      "description": "What a work list's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
       "enum": [
         "backlog",
         "todo",
@@ -18,7 +18,7 @@
   "description": "`work_item.state_changed@1`: a `work_item.*` command put an item in\na canonical state — logged by core for every provider, anchored to the\nthread of whoever ran it (`.context/work-items.md`). A create always\nlogs one; for a provider oxplow can't read the prior state of, a\ntransition or update that names a state logs one even when the item\nwas already there.",
   "properties": {
     "to": {
-      "$ref": "#/$defs/CanonicalState"
+      "$ref": "#/$defs/Bucket"
     },
     "work_item": {
       "description": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>`.",

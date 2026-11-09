@@ -254,7 +254,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
     );
     assert_eq!(created.events[0].event_type, "work_item.recorded");
-    assert_eq!(created.events[0].payload["item"]["native_state"], "Ready");
+    assert_eq!(created.events[0].payload["item"]["stage"], "ready");
     invoke(&peer, &handle, "create", json!({ "title": "Second" }))
         .await
         .unwrap();
@@ -262,16 +262,16 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "in_progress" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "doing" }),
     )
     .await
     .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["native_state"], "Doing");
+    assert_eq!(moved.events[0].payload["item"]["stage"], "doing");
     let refused = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "shipped" }),
     )
     .await
     .unwrap_err();
@@ -492,7 +492,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "shipped" }),
     )
     .await;
     assert!(moved.is_ok(), "{moved:?}");
@@ -501,7 +501,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "shipped" }),
     )
     .await;
     assert!(

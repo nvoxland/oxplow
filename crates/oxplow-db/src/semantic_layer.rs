@@ -1251,9 +1251,9 @@ mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'Thread', '2026-01-01', '2026-01-01');
                  INSERT INTO capability_provider (capability, provider) VALUES ('work_items', 'oxplow');
-                 INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
+                 INSERT INTO work_item (uri, provider, title, body, state, stage, created_at, updated_at)
                    VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'oxplow', 'Live item', '', 'in_progress', 'in_progress', '2026-01-01', '2026-01-01');
-                 INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at, deleted_at)
+                 INSERT INTO work_item (uri, provider, title, body, state, stage, created_at, updated_at, deleted_at)
                    VALUES ('oxplow:oxplow/work_item?id=b&provider=oxplow', 'oxplow', 'Deleted item', '', 'todo', 'ready', '2026-01-01', '2026-01-01', '2026-01-02');",
             )
         })

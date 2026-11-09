@@ -44,6 +44,9 @@ pub struct CapabilityProvider {
     pub optional: bool,
     /// Its own fields, as it declares them (a JSON array).
     pub fields: Value,
+    /// A work list's stages, in order, as it declares them (a JSON array
+    /// of `{ id, title, bucket }`); `[]` for any other.
+    pub stages: Value,
     /// What a work list's own ids look like (a regex matched whole), if
     /// it says: how its ids are recognized in text.
     pub id_pattern: Option<String>,
@@ -55,8 +58,9 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
     conn.execute(
         "INSERT INTO capability_provider
            (capability, provider, extension, features_json, active, title, source, available,
-            chosen_by, capability_title, choosable, optional, fields_json, id_pattern, description)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            chosen_by, capability_title, choosable, optional, fields_json, id_pattern, description,
+            stages_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             row.capability,
             row.provider,
@@ -73,6 +77,7 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
             row.fields.to_string(),
             row.id_pattern,
             row.description,
+            row.stages.to_string(),
         ],
     )
     .map_err(map_sql_err)?;
@@ -91,7 +96,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
         .prepare(
             "SELECT capability, provider, extension, features_json, active, title, source,
                     available, chosen_by, capability_title, choosable, optional, fields_json,
-                    id_pattern, description
+                    id_pattern, description, stages_json
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
@@ -99,6 +104,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
         .query_map([], |r| {
             let features: String = r.get(3)?;
             let fields: String = r.get(12)?;
+            let stages: String = r.get(15)?;
             Ok(CapabilityProvider {
                 capability: r.get(0)?,
                 provider: r.get(1)?,
@@ -115,6 +121,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 fields: serde_json::from_str(&fields).unwrap_or(Value::Null),
                 id_pattern: r.get(13)?,
                 description: r.get(14)?,
+                stages: serde_json::from_str(&stages).unwrap_or(Value::Null),
             })
         })
         .map_err(map_sql_err)?;
@@ -157,6 +164,7 @@ mod tests {
             choosable: true,
             optional: false,
             fields: serde_json::json!([]),
+            stages: serde_json::json!([]),
             id_pattern: None,
             description: None,
         }

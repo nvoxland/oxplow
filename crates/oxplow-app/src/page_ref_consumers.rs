@@ -101,7 +101,7 @@ mod tests {
         let edges = db
             .transaction(move |conn| {
                 conn.execute(
-                    "INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
+                    "INSERT INTO work_item (uri, provider, title, body, state, stage, created_at, updated_at)
                      VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')",
                     [],
                 )
@@ -173,7 +173,7 @@ mod tests {
         };
         db.transaction(move |conn| {
             let run = |sql: &str| conn.execute(sql, []).map(|_| ()).map_err(oxplow_db::map_sql_err);
-            run("INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
+            run("INSERT INTO work_item (uri, provider, title, body, state, stage, created_at, updated_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-1&provider=issues', 'issues', 'Fix it', 'see [[src/app.rs]]', 'todo', 'Todo', 't', 't')")?;
             // A list's own link type.
             run("INSERT INTO work_item_link (from_uri, to_uri, link_type, created_at)
@@ -207,7 +207,7 @@ mod tests {
             run("DELETE FROM work_item_link")?;
             let recorded = oxplow_domain::events::schema::WorkItemRecordedV3 {
                 item: serde_json::from_value(serde_json::json!({
-                    "uri": item, "title": "Fix it", "state": "todo", "native_state": "Todo",
+                    "uri": item, "title": "Fix it", "stage": "todo",
                     "links": []
                 }))
                 .unwrap(),

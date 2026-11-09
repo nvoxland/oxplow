@@ -1318,6 +1318,7 @@ impl Services {
                     features: serde_json::to_value(vcs.features())
                         .unwrap_or(serde_json::Value::Null),
                     fields: serde_json::Value::Array(Vec::new()),
+                    stages: serde_json::Value::Array(Vec::new()),
                     id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),

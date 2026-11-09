@@ -5,14 +5,13 @@
 //!
 //! It keeps items in memory (`oxplow:oxplow/work_item?id=W-<n>&provider=<id>`, `<id>` being the
 //! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by
-//! default), with native states
-//! `Icebox` / `Ready` / `Doing` / `Stuck` / `Shipped` / `Dropped` for the
-//! canonical `backlog` / `todo` / `in_progress` / `blocked` / `done` /
-//! `canceled`. Its config
+//! default), in its own stages — `icebox`, `ready`, `doing`, `stuck`,
+//! `shipped`, `dropped`, one in each of core's buckets, as its manifest
+//! declares them ([`STAGES`]). Its config
 //! needs a `team` (a string); a clean `check` returns the handle
 //! `fake:<team>`. The work-items verbs `create`, `update`, `transition`
 //! (undoable: its inverse moves the item back), `link`, `comment` and
-//! `delete`, over the contract's inputs (`state` / `native_state`, the
+//! `delete`, over the contract's inputs (`stage` — one of its own — the
 //! fake's `native.points`), plus one command of its own, `estimate` —
 //! each returns `work_item.recorded` events (the item as it now stands).
 //! Collector `work_items` streams every item changed after the cursor
@@ -118,7 +117,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oxplow_domain::events::schema::{EventType, WorkItemRecorded};
-use oxplow_domain::work_items::{CanonicalState, CommentRecord, LinkRecord, WorkItemRecord};
+use oxplow_domain::work_items::{CommentRecord, LinkRecord, WorkItemRecord};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
@@ -343,21 +342,28 @@ impl Hooks {
     }
 }
 
-fn native_of(state: CanonicalState) -> &'static str {
-    match state {
-        CanonicalState::Backlog => "Icebox",
-        CanonicalState::Todo => "Ready",
-        CanonicalState::InProgress => "Doing",
-        CanonicalState::Blocked => "Stuck",
-        CanonicalState::Done => "Shipped",
-        CanonicalState::Canceled => "Dropped",
-    }
-}
+/// The fake's stages, as its manifest declares them (`stages:` in
+/// `tests-e2e/fixtures/extension/extension.yaml`): its ids. Core resolves a
+/// bucket to one of them before the fake sees it.
+pub const STAGES: [&str; 6] = ["icebox", "ready", "doing", "stuck", "shipped", "dropped"];
 
-fn canonical_of(native: &str) -> Option<CanonicalState> {
-    CanonicalState::ALL
-        .into_iter()
-        .find(|s| native_of(*s).eq_ignore_ascii_case(native))
+/// `manifest` (a scaffolded provider's, whose stages are named after their
+/// buckets) with the fake's own stage ids: what a test that turns a
+/// scaffold into the fake writes, since the fake takes only its own.
+pub fn with_its_stages(manifest: &str) -> String {
+    [
+        "backlog",
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled",
+    ]
+    .iter()
+    .zip(STAGES)
+    .fold(manifest.to_string(), |m, (bucket, own)| {
+        m.replace(&format!("{{ id: {bucket},"), &format!("{{ id: {own},"))
+    })
 }
 
 pub(crate) fn command(name: &str, summary: &str, input_schema: Value) -> CommandDecl {
@@ -396,8 +402,7 @@ pub fn plain_declarations() -> InitializeResult {
 
 fn declared(idempotent_writes: bool) -> InitializeResult {
     let string = json!({ "type": "string" });
-    let state = json!({ "type": "string",
-                        "enum": ["backlog", "todo", "in_progress", "blocked", "done", "canceled"] });
+    let stage = json!({ "type": "string", "enum": STAGES });
     let native = json!({ "type": "object", "additionalProperties": false,
                          "properties": { "points": { "type": "integer" } } });
     let recorded_schema = Vocabulary::core()
@@ -406,9 +411,9 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
         .unwrap_or(Value::Null);
     let mut transition = command(
         "transition",
-        "Move a work item to a canonical state, optionally naming a fake state.",
+        "Move a work item to one of its stages.",
         json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
-                "properties": { "uri": string, "to": state, "native_state": string } }),
+                "properties": { "uri": string, "to": stage } }),
     );
     transition.undoable = true;
     InitializeResult {
@@ -430,7 +435,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
                 "Create a work item.",
                 json!({ "type": "object", "required": ["title"], "additionalProperties": false,
                         "properties": { "title": string, "body": string, "parent_uri": string,
-                                        "state": state, "native_state": string,
+                                        "stage": stage,
                                         "native": native,
                                         "links": { "type": "array", "items": {
                                             "type": "object",
@@ -441,11 +446,11 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             ),
             command(
                 "update",
-                "Edit a work item's title, body, parent, state or points.",
+                "Edit a work item's title, body, parent, stage or points.",
                 json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
                         "properties": { "uri": string, "title": string, "body": string,
-                                        "parent_uri": string, "state": state,
-                                        "native_state": string, "native": native } }),
+                                        "parent_uri": string, "stage": stage,
+                                        "native": native } }),
             ),
             transition,
             command(
@@ -1064,9 +1069,10 @@ async fn handle(
                 (w.hooks.clone(), rows)
             };
             if hooks.bad_record {
-                let mut foreign = rows.first().map(|(_, r)| r.clone()).unwrap_or_else(
-                    || json!({ "title": "x", "state": "todo", "native_state": "Ready" }),
-                );
+                let mut foreign = rows
+                    .first()
+                    .map(|(_, r)| r.clone())
+                    .unwrap_or_else(|| json!({ "title": "x", "stage": "ready" }));
                 foreign["uri"] = json!(oxplow_domain::uri::build::work_item_uri("other", "X-1"));
                 rows.insert(0, (after + 1, foreign));
             }
@@ -1146,36 +1152,16 @@ fn recorded(record: &WorkItemRecord) -> EventDraft {
     }
 }
 
-/// The canonical state `input` asks for (`field` and `native_state`),
-/// checked against each other: a fake state must map to the canonical
-/// one. `None` when neither is given.
-fn requested_state(input: &Value, field: &str) -> Result<Option<CanonicalState>, ProtocolError> {
-    let canonical = match input.get(field).and_then(Value::as_str) {
-        None => None,
-        Some(raw) => Some(
-            serde_json::from_value::<CanonicalState>(Value::String(raw.into())).map_err(|_| {
-                ProtocolError::InvalidInput {
-                    field: format!("/{field}"),
-                    message: format!("`{raw}` isn't a canonical state"),
-                }
-            })?,
-        ),
-    };
-    let native = match input.get("native_state").and_then(Value::as_str) {
-        None => None,
-        Some(raw) => Some(
-            canonical_of(raw).ok_or_else(|| ProtocolError::InvalidInput {
-                field: "/native_state".into(),
-                message: format!("`{raw}` isn't a fake state"),
-            })?,
-        ),
-    };
-    match (canonical, native) {
-        (Some(c), Some(n)) if c != n => Err(ProtocolError::InvalidInput {
-            field: "/native_state".into(),
-            message: format!("`{}` is {}, not {}", native_of(n), n.as_str(), c.as_str()),
+/// The stage `input` names at `field`, one of the fake's own; `None` when
+/// it names none.
+fn requested_stage(input: &Value, field: &str) -> Result<Option<String>, ProtocolError> {
+    match input.get(field).and_then(Value::as_str) {
+        None => Ok(None),
+        Some(raw) if STAGES.contains(&raw) => Ok(Some(raw.into())),
+        Some(raw) => Err(ProtocolError::InvalidInput {
+            field: format!("/{field}"),
+            message: format!("`{raw}` isn't a fake stage"),
         }),
-        (c, n) => Ok(c.or(n)),
     }
 }
 
@@ -1205,7 +1191,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     });
                 }
             }
-            let state = requested_state(&input, "state")?.unwrap_or(CanonicalState::Todo);
+            let stage = requested_stage(&input, "stage")?.unwrap_or_else(|| "ready".into());
             let n = w.next;
             w.next += 1;
             let mut native = json!({ "team": "fake" });
@@ -1220,8 +1206,7 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .into(),
-                state,
-                native_state: native_of(state).into(),
+                stage,
                 native,
                 parent_uri: parent_ref,
                 deleted: false,
@@ -1268,16 +1253,15 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     if let Some(p) = input.get("parent_uri").and_then(Value::as_str) {
                         item.record.parent_uri = (!p.is_empty()).then(|| p.to_string());
                     }
-                    if let Some(state) = requested_state(&input, "state")? {
-                        item.record.state = state;
-                        item.record.native_state = native_of(state).into();
+                    if let Some(stage) = requested_stage(&input, "stage")? {
+                        item.record.stage = stage;
                     }
                     if let Some(points) = points_of(&input) {
                         item.record.native["points"] = points.into();
                     }
                 }
                 "transition" => {
-                    let state = requested_state(&input, "to")?.ok_or_else(|| {
+                    let stage = requested_stage(&input, "to")?.ok_or_else(|| {
                         ProtocolError::InvalidInput {
                             field: "/to".into(),
                             message: "required".into(),
@@ -1285,14 +1269,9 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
                     })?;
                     inverse = Some(CommandCall {
                         command: "transition".into(),
-                        input: json!({
-                            "uri": item_ref,
-                            "to": item.record.state.as_str(),
-                            "native_state": item.record.native_state,
-                        }),
+                        input: json!({ "uri": item_ref, "to": item.record.stage }),
                     });
-                    item.record.state = state;
-                    item.record.native_state = native_of(state).into();
+                    item.record.stage = stage;
                 }
                 "link" => {
                     let link = LinkRecord {

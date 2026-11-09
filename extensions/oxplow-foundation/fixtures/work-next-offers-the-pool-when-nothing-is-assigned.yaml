@@ -5,11 +5,11 @@
 when: { page: work-next, params: { thread: thr1 } }
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Other }, bind: other }
-  - { command: oxplow.work_item.create, input: { title: later, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: later, stage: backlog } }
   - { command: oxplow.work_item.create, input: { title: theirs, assignee: $other.id } }
   - { command: oxplow.work_item.create, input: { title: whenever, native: { priority: low } } }
   - { command: oxplow.work_item.create, input: { title: soon, native: { priority: urgent } }, bind: soon }
-  - { command: oxplow.work_item.create, input: { title: stuck, state: blocked } }
+  - { command: oxplow.work_item.create, input: { title: stuck, stage: blocked } }
 expect:
   loaders:
     work_next: { rows: [{ title: soon, role: pool }, { title: whenever, role: pool }] }

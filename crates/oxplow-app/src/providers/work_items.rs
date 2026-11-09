@@ -8,9 +8,9 @@
 //!
 //! The verbs and their inputs are the work-items contract every provider
 //! implements — the `v_work_item` columns: `create { title, body?,
-//! parent_uri?, state?, native_state?, native? }`, `update { ref, title?,
-//! body?, parent_uri? ("" detaches), state?, native_state?, native? }`,
-//! `transition { ref, to, native_state? }`, `link { ref, target,
+//! parent_uri?, stage, native? }`, `update { uri, title?, body?,
+//! parent_uri? ("" detaches), stage?, native? }`, `transition { uri, to }`
+//! (each stage one it declares: core resolved a bucket to it), `link { uri, target,
 //! link_type }`, `comment { ref, body }` and `delete { ref }`.
 
 use std::collections::BTreeMap;
@@ -101,6 +101,7 @@ impl ExternalWorkItems {
             id: instance.id.clone(),
             id_pattern: instance.spec.id_pattern.clone(),
             sink: false,
+            stages: instance.spec.stages.clone(),
             features,
             verbs: Arc::new(ExternalWorkItems {
                 instance: instance.clone(),
@@ -124,15 +125,6 @@ impl WorkItemVerbs for ExternalWorkItems {
     ) -> Result<VerbOutcome, CommandError> {
         let actor = call.actor().clone();
         let id = &self.instance.id;
-        // The thread a create is filed on is oxplow's record, not the
-        // tracker's (tsk1058): it anchors the item, the provider never sees it.
-        let mut input = input;
-        let filed_on = match (verb, &mut input) {
-            ("create", Value::Object(fields)) => fields
-                .remove("thread")
-                .and_then(|t| t.as_str().and_then(|t| t.parse().ok())),
-            _ => None,
-        };
         let validator = self.inputs.get(verb).ok_or_else(|| CommandError::Invalid {
             field: None,
             message: format!("{id} work items don't support `{verb}`"),
@@ -151,7 +143,7 @@ impl WorkItemVerbs for ExternalWorkItems {
         let events = out
             .events
             .into_iter()
-            .map(|d| self.instance.envelope(&actor, filed_on, d))
+            .map(|d| self.instance.envelope(&actor, d))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(VerbOutcome {
             result: out.result,

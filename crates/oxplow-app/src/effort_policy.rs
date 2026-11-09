@@ -54,7 +54,7 @@ use oxplow_domain::events::schema::{
     WorkItemStateChanged, WorkItemStateChangedV1,
 };
 use oxplow_domain::events::EventView;
-use oxplow_domain::work_items::CanonicalState;
+use oxplow_domain::work_items::Bucket;
 use oxplow_domain::{Actor, CommandCall, DomainError, EffortId, StoredEvent, ThreadId};
 use serde_json::{json, Value};
 
@@ -147,7 +147,7 @@ impl CommitOrSwitch {
     async fn item(
         &self,
         item_ref: &str,
-    ) -> Result<Option<(Option<CanonicalState>, Option<ThreadId>)>, DomainError> {
+    ) -> Result<Option<(Option<Bucket>, Option<ThreadId>)>, DomainError> {
         let rows = self
             .rows(
                 "SELECT state, assignee FROM v_work_item WHERE uri = ?1",
@@ -269,7 +269,7 @@ impl CommitOrSwitch {
     /// progress.
     async fn linked(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
         Ok(match self.item(item_ref).await? {
-            Some((Some(CanonicalState::Backlog | CanonicalState::Todo), _)) => vec![call(
+            Some((Some(Bucket::Backlog | Bucket::Todo), _)) => vec![call(
                 crate::commands::work_item::NAME,
                 json!({ "uri": item_ref, "to": "in_progress" }),
             )],
@@ -295,13 +295,9 @@ impl EffortPolicy for CommitOrSwitch {
                 let changed: WorkItemStateChangedV1 =
                     serde_json::from_value(payload).map_err(storage)?;
                 match changed.to {
-                    CanonicalState::InProgress => self.started(event, &changed.work_item).await,
-                    CanonicalState::Done | CanonicalState::Canceled => {
-                        self.finished(&changed.work_item).await
-                    }
-                    CanonicalState::Backlog | CanonicalState::Todo | CanonicalState::Blocked => {
-                        Ok(Vec::new())
-                    }
+                    Bucket::InProgress => self.started(event, &changed.work_item).await,
+                    Bucket::Done | Bucket::Canceled => self.finished(&changed.work_item).await,
+                    Bucket::Backlog | Bucket::Todo | Bucket::Blocked => Ok(Vec::new()),
                 }
             }
             t if t == EffortLinked::TYPE => {

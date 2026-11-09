@@ -5388,7 +5388,7 @@ columns: [{ key: title }]
             "provider.json",
             &serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap(),
         );
-        let body = "providers:\n  - id: tracker\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n    network: [api.example.com]\n";
+        let body = "providers:\n  - id: tracker\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n    network: [api.example.com]\n";
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),

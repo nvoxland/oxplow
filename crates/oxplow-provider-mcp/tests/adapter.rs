@@ -208,10 +208,7 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes" })
     );
     let row = &created.events[0].payload["item"];
-    assert_eq!(
-        (row["state"].clone(), row["native_state"].clone()),
-        (json!("todo"), json!("open"))
-    );
+    assert_eq!(row["stage"], json!("open"));
     assert_eq!(
         created.events[0].subject,
         ["oxplow:oxplow/work_item?id=N-1&provider=notes"]
@@ -234,20 +231,22 @@ async fn the_mapping_turns_verbs_into_tool_calls_and_output_into_outcomes() {
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "stuck" }),
     )
     .await
     .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["native_state"], "stuck");
+    assert_eq!(moved.events[0].payload["item"]["stage"], "stuck");
+    // A stage the server doesn't have is its tool's error, refused at the
+    // field it names.
     let wrong = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "done", "native_state": "dropped" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "nowhere" }),
     )
     .await;
     assert!(
-        matches!(&wrong, Err(ProtocolError::InvalidInput { field, .. }) if field == "/native_state"),
+        matches!(&wrong, Err(ProtocolError::InvalidInput { field, .. }) if field == "/stage"),
         "{wrong:?}"
     );
     let missing = invoke(
@@ -614,11 +613,11 @@ async fn a_server_by_url_is_pinned_and_called() {
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "blocked" }),
+        json!({ "uri": "oxplow:oxplow/work_item?id=N-1&provider=notes", "to": "stuck" }),
     )
     .await
     .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["native_state"], "stuck");
+    assert_eq!(moved.events[0].payload["item"]["stage"], "stuck");
     let (streamed, result) = read(&peer, &handle, None).await;
     assert_eq!(result["records"], 1);
     assert_eq!(

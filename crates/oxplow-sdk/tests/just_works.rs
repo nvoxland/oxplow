@@ -424,6 +424,12 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
     )
     .unwrap();
+    let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
+    std::fs::write(
+        ext.join("extension.yaml"),
+        oxplow_provider_fake::with_its_stages(&manifest),
+    )
+    .unwrap();
     std::fs::write(
         ext.join("fixtures/provider-fake.yaml"),
         "config: { team: core }\n",

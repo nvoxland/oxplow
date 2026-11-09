@@ -11,7 +11,7 @@ use oxplow_db::map_sql_err;
 use oxplow_domain::work_items::{CommentRecord, LinkRecord, WorkItemRecord};
 use oxplow_domain::{DomainError, NoteId};
 
-use crate::mapping::state_pair;
+use crate::mapping::status_str;
 use crate::model::TaskStatus;
 use crate::refs::work_item_ref;
 
@@ -20,7 +20,7 @@ use crate::refs::work_item_ref;
 pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemRecord, DomainError> {
     let row = conn
         .query_row(
-            "SELECT title, description, status, completed_at IS NOT NULL, priority, author,
+            "SELECT title, description, status, priority, author,
                     parent_id, deleted_at IS NOT NULL
                FROM task WHERE id = ?1",
             params![id.value()],
@@ -29,21 +29,19 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
-                    r.get::<_, bool>(3)?,
-                    r.get::<_, String>(4)?,
-                    r.get::<_, Option<String>>(5)?,
-                    r.get::<_, Option<i64>>(6)?,
-                    r.get::<_, bool>(7)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, Option<i64>>(5)?,
+                    r.get::<_, bool>(6)?,
                 ))
             },
         )
         .optional()
         .map_err(map_sql_err)?
         .ok_or(DomainError::NotFound)?;
-    let (title, body, status, completed, priority, author, parent, deleted) = row;
+    let (title, body, status, priority, author, parent, deleted) = row;
     let status: TaskStatus = serde_json::from_value(json!(status))
         .map_err(|e| DomainError::Invalid(format!("task {id}'s status: {e}")))?;
-    let (state, native_state) = state_pair(status, completed);
     let links = rows(
         conn,
         "SELECT to_uri, link_type FROM task_link WHERE from_item_id = ?1
@@ -74,8 +72,7 @@ pub fn record_tx(conn: &rusqlite::Connection, id: TaskId) -> Result<WorkItemReco
         uri: work_item_ref(id),
         title,
         body,
-        state,
-        native_state,
+        stage: status_str(status),
         native: json!({ "priority": priority, "author": author }),
         parent_uri: parent.map(|p| work_item_ref(TaskId::new(p))),
         deleted,

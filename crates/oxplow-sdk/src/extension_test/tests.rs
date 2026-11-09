@@ -459,7 +459,7 @@ async fn a_command_fixture_lists_the_commands_an_effect_ran_not_their_sequence()
     write(
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: T, state: in_progress }, bind: t }]
+            "requires: [oxplow-bundled]\ngiven: [{ command: oxplow.work_item.create, input: { title: T, stage: in_progress }, bind: t }]
 when: { command: oxplow.work_item.transition, input: { uri: $t.uri, to: done } }
 expect:
   ok: true

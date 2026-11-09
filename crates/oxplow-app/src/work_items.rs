@@ -18,7 +18,7 @@ use oxplow_domain::events::schema::{
     EventType, WorkItemAssigned, WorkItemAssignedV1, WorkItemRecorded, WorkItemRecordedV3,
 };
 use oxplow_domain::work_items::{
-    provider_of, CanonicalState, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider,
+    provider_of, Bucket, WorkItemVerbs, WorkItemsFeatures, WorkItemsProvider,
 };
 use oxplow_domain::{Actor, CommandError, CommandOutcome, DomainError, StoredEvent};
 use serde_json::{json, Value};
@@ -58,6 +58,7 @@ pub fn built_in_provider(entry: &str, db: &oxplow_db::Database) -> Option<WorkIt
         verbs,
         id_pattern: built_in.id_pattern.map(str::to_string),
         sink: false,
+        stages: crate::capabilities::built_in_stage_decls(built_in),
     })
 }
 
@@ -126,6 +127,7 @@ pub fn none_provider() -> WorkItemsProvider {
         verbs: Arc::new(Sink),
         id_pattern: Some(".+".into()),
         sink: true,
+        stages: oxplow_domain::work_items::bucket_stages(),
     }
 }
 
@@ -156,8 +158,8 @@ pub struct NewItem {
     pub title: String,
     pub body: String,
     pub parent_uri: Option<String>,
-    pub state: Option<CanonicalState>,
-    pub native_state: Option<String>,
+    /// A stage of the list, or a bucket for its default.
+    pub stage: Option<String>,
     pub native: Option<Value>,
 }
 
@@ -195,8 +197,7 @@ impl WorkItems {
             title: item.title,
             body: (!item.body.is_empty()).then_some(item.body),
             parent_uri: item.parent_uri,
-            state: item.state,
-            native_state: item.native_state,
+            stage: item.stage,
             native: item.native,
             assignee: None,
             links: Vec::new(),
@@ -227,14 +228,10 @@ impl WorkItems {
         &self,
         actor: &Actor,
         item_ref: &str,
-        to: CanonicalState,
-        native_state: Option<&str>,
+        to: &str,
     ) -> Result<CommandOutcome, CommandError> {
-        let mut input = json!({ "uri": item_ref, "to": to });
-        if let Some(n) = native_state {
-            input["native_state"] = n.into();
-        }
-        self.run(actor, work_item::NAME, input).await
+        self.run(actor, work_item::NAME, json!({ "uri": item_ref, "to": to }))
+            .await
     }
 
     pub async fn link(
@@ -373,14 +370,15 @@ impl EventConsumer for WorkItemsProjection {
             .map_err(|e| DomainError::Invalid(e.to_string()))?
             .to_string();
         let at = event.envelope.at.to_string();
+        let bucket = stage_bucket_tx(conn, &provider, &item.stage)?;
         conn.execute(
-            "INSERT INTO work_item (uri, provider, title, body, state, native_state, native,
+            "INSERT INTO work_item (uri, provider, title, body, state, stage, native,
                                     parent_uri, created_at, updated_at, deleted_at, closed_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, CASE WHEN ?10 THEN ?9 END,
                      CASE WHEN ?5 IN ('done', 'canceled') THEN ?9 END)
              ON CONFLICT(uri) DO UPDATE SET
                 title = excluded.title, body = excluded.body, state = excluded.state,
-                native_state = excluded.native_state, native = excluded.native,
+                stage = excluded.stage, native = excluded.native,
                 parent_uri = excluded.parent_uri, updated_at = excluded.updated_at,
                 -- When it first closed (as recorded); reopened, open again.
                 closed_at = CASE WHEN excluded.closed_at IS NULL THEN NULL
@@ -391,8 +389,8 @@ impl EventConsumer for WorkItemsProjection {
                 provider,
                 item.title,
                 item.body,
-                item.state.as_str(),
-                item.native_state,
+                bucket.as_str(),
+                item.stage,
                 item.native.to_string(),
                 item.parent_uri,
                 at,
@@ -404,7 +402,7 @@ impl EventConsumer for WorkItemsProjection {
         // What the record states, it restates whole; what it leaves out,
         // the host keeps.
         // Closed, by whichever list: nobody's to work on.
-        if item.state.is_closed() {
+        if bucket.is_closed() {
             conn.execute(
                 "DELETE FROM work_item_assignment WHERE uri = ?1",
                 [&item.uri],
@@ -460,6 +458,43 @@ impl EventConsumer for WorkItemsProjection {
         }
         Ok(())
     }
+}
+
+/// The bucket of `provider`'s stage `stage`, as the list declares it
+/// (`capability_provider.stages_json`): a record names its stage, and what
+/// it means to core is the list's declaration. A stage the list doesn't
+/// declare is refused (the event dead-letters), naming the ones it does.
+fn stage_bucket_tx(
+    conn: &rusqlite::Connection,
+    provider: &str,
+    stage: &str,
+) -> Result<Bucket, DomainError> {
+    let storage = |e: rusqlite::Error| DomainError::Storage(e.to_string());
+    let declared: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT json_extract(s.value, '$.id'), json_extract(s.value, '$.bucket')
+               FROM capability_provider c, json_each(c.stages_json) s
+              WHERE c.capability = 'work_items' AND c.provider = ?1",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([provider], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(storage)?;
+    declared
+        .iter()
+        .find(|(id, _)| id == stage)
+        .and_then(|(_, b)| Bucket::named(b))
+        .ok_or_else(|| {
+            DomainError::Invalid(format!(
+                "`{provider}` recorded stage `{stage}`, which it doesn't declare (its stages: {})",
+                declared
+                    .iter()
+                    .map(|(id, _)| id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })
 }
 
 /// Keep `assigned` in `work_item_assignment`: the item goes to `to`'s
@@ -619,6 +654,31 @@ mod tests {
         }
     }
 
+    /// The fake as a listed work list, its stages declared, though it
+    /// isn't running: what the projection reads a record's bucket from.
+    async fn list_fake(svc: &crate::Services) {
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO capability_provider
+                       (capability, provider, features_json, active, title, source, available,
+                        capability_title, choosable, optional, stages_json)
+                     VALUES ('work_items', 'fake', '{}', 0, 'fake', 'external', 0,
+                             'Work list', 1, 1, ?1)",
+                    [serde_json::json!([
+                        { "id": "ready", "title": "Ready", "bucket": "todo" },
+                        { "id": "in_progress", "title": "Doing", "bucket": "in_progress" },
+                        { "id": "shipped", "title": "Shipped", "bucket": "done" }
+                    ])
+                    .to_string()],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
     fn recorded(item_ref: &str, title: &str, deleted: bool) -> Envelope {
         Envelope::typed::<WorkItemRecorded>(
             "provider:fake",
@@ -627,8 +687,8 @@ mod tests {
                     uri: item_ref.into(),
                     title: title.into(),
                     body: String::new(),
-                    state: CanonicalState::InProgress,
-                    native_state: "Doing".into(),
+                    // A stage both the fake and oxplow's tasks declare.
+                    stage: "in_progress".into(),
                     native: json!({ "points": 3 }),
                     parent_uri: None,
                     deleted,
@@ -664,6 +724,7 @@ mod tests {
     async fn a_providers_records_are_projected_by_ref() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
+        list_fake(svc).await;
         let r = "oxplow:oxplow/work_item?id=W-1&provider=fake";
         svc.event_log_store
             .append(recorded(r, "first", false))
@@ -738,6 +799,7 @@ mod tests {
     async fn a_restated_link_keeps_when_it_was_made() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
+        list_fake(svc).await;
         let r = "oxplow:oxplow/work_item?id=W-1&provider=fake";
         let mut first = recorded_with_links(
             r,
@@ -821,6 +883,7 @@ mod tests {
     async fn an_assignment_places_an_item_in_its_queue_and_a_close_releases_it() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
+        list_fake(svc).await;
         let (a, b, c) = (
             "oxplow:oxplow/work_item?id=W-1&provider=fake",
             "oxplow:oxplow/work_item?id=W-2&provider=fake",
@@ -858,8 +921,7 @@ mod tests {
             .unwrap();
         let mut done = recorded(b, b, false);
         let mut payload: WorkItemRecordedV3 = serde_json::from_value(done.payload.clone()).unwrap();
-        payload.item.state = CanonicalState::Done;
-        payload.item.native_state = "Shipped".into();
+        payload.item.stage = "shipped".into();
         done.payload = serde_json::to_value(payload).unwrap();
         svc.event_log_store.append(done).await.unwrap();
         svc.event_pump.run_once().await.unwrap();

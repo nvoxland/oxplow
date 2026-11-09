@@ -1963,7 +1963,7 @@ commands:
     summary: "File a work item on the active tracker (the one the person chose), optionally straight into a state (`backlog`: not ready yet; `todo`, the default: ready to work on). It's assigned to nobody unless `assignee` names a thread or the person (see oxplow.work_item.assign). `native` is the tracker's own fields as its create declares them (oxplow: { priority }). On oxplow the result carries `link_warnings`: the `[[…]]` links in the body that don't resolve."
     scope: work_items.write
     op: create
-    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "state": "todo"}
+    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
   - name: work_item.delete
     summary: "Delete a work item."
     scope: work_items.write

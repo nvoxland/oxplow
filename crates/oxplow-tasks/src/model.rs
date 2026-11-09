@@ -19,7 +19,6 @@ pub enum TaskStatus {
     Blocked,
     Done,
     Canceled,
-    Archived,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
@@ -83,13 +82,11 @@ pub struct Task {
 
 impl Task {
     /// Move to `to` at `now`: `completed_at` is set on entering `done` and
-    /// cleared on moving anywhere but `done` or `archived` — archiving is
-    /// tidying, so an archived task still says whether (and when) it was
-    /// completed; `updated_at` moves.
+    /// cleared on leaving it; `updated_at` moves.
     pub fn set_status(&mut self, to: TaskStatus, now: Timestamp) {
         if to == TaskStatus::Done && self.status != TaskStatus::Done {
             self.completed_at = Some(now);
-        } else if to != TaskStatus::Done && to != TaskStatus::Archived {
+        } else if to != TaskStatus::Done {
             self.completed_at = None;
         }
         self.status = to;
@@ -112,7 +109,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archiving_a_done_task_keeps_when_it_was_completed() {
+    fn done_says_when_it_was_completed_and_reopening_clears_it() {
         let at = |ms| Timestamp::from_unix_ms(ms);
         let mut task = Task {
             id: TaskId::new(1),
@@ -130,16 +127,9 @@ mod tests {
             author: None,
         };
         task.set_status(TaskStatus::Done, at(2));
-        task.set_status(TaskStatus::Archived, at(3));
-        assert_eq!(
-            task.completed_at,
-            Some(at(2)),
-            "archiving is tidying, not undoing"
-        );
+        assert_eq!(task.completed_at, Some(at(2)));
         task.set_status(TaskStatus::Ready, at(4));
         assert_eq!(task.completed_at, None, "reopened: no longer completed");
-        task.set_status(TaskStatus::Archived, at(5));
-        assert_eq!(task.completed_at, None);
     }
 
     #[test]

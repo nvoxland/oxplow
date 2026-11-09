@@ -127,6 +127,7 @@ mod tests {
             source: Source::BuiltIn(entry),
             features: serde_json::json!({}),
             fields: serde_json::json!([]),
+            stages: serde_json::json!([]),
             id_pattern: None,
             icon: None,
             config: serde_json::json!({}),

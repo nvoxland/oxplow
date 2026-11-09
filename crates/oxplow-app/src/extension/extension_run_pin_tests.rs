@@ -269,7 +269,7 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
             "human",
             &WorkItemStateChangedV1 {
                 work_item: oxplow_tasks::work_item_ref(fx.task),
-                to: oxplow_domain::work_items::CanonicalState::Done,
+                to: oxplow_domain::work_items::Bucket::Done,
             },
         );
         let id = env.id.clone();

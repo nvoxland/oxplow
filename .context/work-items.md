@@ -19,15 +19,14 @@ tools — reads work items through `v_work_item`, `v_work_item_link` and
 nothing outside a work list's implementation reads that list's own
 tables (`oxplow-dev` is the one development exception). oxplow's tasks
 publish no dataset of their own — `v_task`, `v_task_link` and
-`v_task_note` were removed; their own fields are `native_state` and
+`v_task_note` were removed; their own fields are `stage` and
 `native`. The views show **the active work list's items only**: one
 list at a time, whichever implementation it is, and nothing with none.
 
 `v_work_item` (table `work_item`, V115) holds the items by URI,
-`oxplow:oxplow/work_item?id=<id>&provider=<provider>`: `title`, `body`, a canonical `state`
-(`backlog` — filed, not ready — `todo` — ready to work on — `in_progress`,
-`blocked`, `done`, `canceled`), the list's own
-`native_state` and `native` JSON, `parent_uri` (NULL when the parent is
+`oxplow:oxplow/work_item?id=<id>&provider=<provider>`: `title`, `body`, its `stage`
+(one the list declares, below) with the list's `stage_title` and its
+bucket as `state`, the list's own `native` JSON, `parent_uri` (NULL when the parent is
 deleted: a deleted item isn't a live one, so the dataset's parent
 relationship holds; tsk572), `closed_at`, and core's assignment
 (below): `assignee` and `rank`.
@@ -42,6 +41,28 @@ these: a thread's assigned items (`v_work_item`), a work item's URI summary
 (`ref_resolver`), a `[[…]]` link's check (`link_check`) and search
 (`v_search_work_item`).
 
+**Buckets and stages.** A work list declares its own **stages**, its
+workflow in order — `[{ id, title, bucket }]`
+(`oxplow_domain::work_items::StageDecl`, checked by `stages_problem`: ids
+snake_case and unique, titles given, a stage in each of `todo`,
+`in_progress` and `done`, and a stage named like a bucket in it) — and
+core keeps six **buckets**, `Bucket`: `backlog` (filed, not ready),
+`todo` (ready: what an idle thread may pull), `in_progress` (started),
+`blocked` (waits on an answer), `done` and `canceled` (closed). Core acts
+on buckets only — efforts, assignment and its release, the pool, Waiting
+on Me — and the screens draw the list's stages: a board's columns, a
+state picker, a Mark menu. **The first stage of a bucket is its
+default**: an input naming the bucket (`to: done`) lands there, so an
+agent or an effect speaks buckets and works with any list. A record
+names only its stage; the projection looks its bucket up in the list's
+declaration (`stage_bucket_tx`, from `capability_provider.stages_json`),
+and an undeclared stage dead-letters. Published as
+`v_capability_provider.stages`. A built-in's are core's table's
+(`BuiltIn.stages`: oxplow's tasks' are its statuses, `backlog`, `ready`
+"Ready", `in_progress`, `blocked`, `done`, `canceled`); an external
+provider's are its `providers:` entry's `stages:`, which a work list must
+declare. None's are the six buckets' names (`bucket_stages`).
+
 **Declared fields.** What a list keeps in `native` beyond those columns
 is declared, so screens render and edit it without knowing which list is
 active: `[{ name, title, kind: enum|text|number, values? }]`
@@ -55,7 +76,7 @@ oxplow's state mapping are in [data-model.md](./data-model.md) "`work_item`".
 **One writer, one schema.** Every list's rows arrive by projection: its
 `work_item.recorded@3 { item }` events — what each verb answers with,
 and what a read back restates — carry the item as it now stands: URI,
-title, body, canonical and native state, native fields, parent, deleted,
+title, body, stage, native fields, parent, deleted,
 and, when the list keeps them, `links` and `comments`, each the whole
 set (stated, the host restates it; absent, it keeps what it has). Who it
 is assigned to and its place in their queue are never a list's
@@ -323,16 +344,20 @@ transition an effort's work item whatever its provider
 provider (a provider's verb receives the same input, less `create`'s
 `thread`):
 
-- `create { title, body?, parent_uri?, state?, native_state?, native?,
-  thread? }` — **always on the active tracker**: the person
+- `create { title, body?, parent_uri?, stage?, native?, assignee? }` —
+  **always on the active tracker**: the person
   chose it, and nothing a caller says — a person, an agent, an effect or
   oxplow itself — files anywhere else. One that isn't running is an
-  error, never a fallback. `thread` is the thread it's filed on: absent,
-  an agent's own; a person's without one has none (oxplow: the backlog);
-- `update { uri, title?, body?, parent_uri? ("" detaches), state?,
-  native_state?, native? }`;
-- `transition { uri, to, native_state? }` — `to` canonical; a
-  `native_state` must map to it;
+  error, never a fallback. `stage` absent is `todo`'s default; `assignee`
+  is core's ("Assignment");
+- `update { uri, title?, body?, parent_uri? ("" detaches), stage?,
+  native? }`;
+- `transition { uri, to }`;
+- a `stage` / `to` is one of the list's stages or a bucket's name for its
+  default: core resolves it before the list sees it
+  (`commands/work_item.rs` `resolve_stages`), and refuses anything else at
+  its field naming the list's stages, so a list's verb only ever receives
+  its own stage ids;
 - `link { uri, target, link_type }` / `unlink` (same input): the provider
   names its link types, and **every list with `links` takes `about` to
   any URI** (the conformance suite checks it). A target that is an item
@@ -343,14 +368,10 @@ provider (a provider's verb receives the same input, less `create`'s
   `comment { uri, body }`, `delete { uri }` (Destructive; only with
   `features.delete`).
 
-oxplow's mapping: its status is its `native_state` (`ready` is `todo`;
-`archived` rides on `done` or `canceled` — archiving as `done` a task that
-wasn't completed passes through `done` first, so the row reads as
-asked); `backlog` is its own status; `native` holds `{ priority? }`
-(`deny_unknown_fields`). A task keeps no thread or order of its own.
-A `native_state` alone (no `state`) is a valid update or create: that is
-how the task writes send a status. A link belongs to its task, not to a
-thread.
+oxplow's mapping: its status is its stage, one each (V8 made its old
+`archived` tasks done when completed, else canceled); `native` holds
+`{ priority? }` (`deny_unknown_fields`). A task keeps no thread or order
+of its own. A link belongs to its task, not to a thread.
 `oxplow.work_item.comment` and `oxplow.work_item.link` refuse a deleted task (tsk572).
 A comment's `task_note.author` names who made it (`note_author`, tsk1000):
 `user`, `agent` (a page acting for one included), `effect:<namespace>/<id>`
@@ -378,11 +399,11 @@ anchored to the actor's thread. A list logs none of them itself
 
 Whether the state moved: core reads the item's state as the interface
 shows it (`v_work_item.state`) before a transition or an update runs, and
-logs `state_changed` only when the state its answer recorded differs — a
-transition to the state it's in moves nothing, so the effort policy
-doesn't act on it. A create always counts. `to` is taken from the
-`work_item.recorded` its answer carries (a create with none: the state it
-asked for, else `todo`).
+logs `state_changed` only when the bucket of the stage its answer
+recorded differs — a transition within a bucket moves nothing the effort
+policy acts on; it logs `edited` naming `stage` instead. A create always
+counts. `to` is the bucket of the stage the `work_item.recorded` its
+answer carries (a create with none: the stage it asked for).
 `edited` names what the command set, not a diff: a list's prior values
 aren't readable for every list. These are the only versions: the `@1`
 ones spoke oxplow's task list (its statuses, field names and note URIs)
@@ -482,10 +503,12 @@ left }` (`left`: the items it filed and didn't delete, for a person to
 clean up in the provider's own system), writing
 through the `WorkItems` client (so it exercises the dispatching commands
 a person and an agent run) — is what every provider must do: create
-lands a `todo` row; an update changes only what it names; every
-canonical state round-trips, and moving again to the native state the
-row reports lands there, and core logs `work_item.state_changed` for
-the create and every move to another state; a parent resolves with `hierarchy` and is refused
+lands a row in `todo`'s default stage; an update changes only what it
+names; the list's stages pass `stages_problem`, every declared stage
+round-trips and reads back in its bucket, naming a bucket lands on its
+default, an undeclared stage is refused, and core logs
+`work_item.state_changed` for the create and every move to another
+bucket; a parent resolves with `hierarchy` and is refused
 without it; links and comments follow their features and read back
 through `v_work_item_link` / `v_work_item_comment`; an open item of any
 list can be assigned to the person and reordered in that queue (it ranks

@@ -475,9 +475,23 @@ mod tests {
             })
             .await
             .unwrap();
-        // Its row in the interface, as its record put it there.
+        // Its row in the interface, as its record put it there: its stage's
+        // bucket is the list's declaration.
+        let stages = serde_json::to_string(&crate::capabilities::built_in_stage_decls(
+            crate::capabilities::built_in("oxplow:tasks").unwrap(),
+        ))
+        .unwrap();
         db.transaction(move |tx| {
             use crate::event_pump::EventConsumer as _;
+            tx.execute(
+                "INSERT INTO capability_provider
+                   (capability, provider, features_json, active, title, source, available,
+                    capability_title, choosable, optional, stages_json)
+                 VALUES ('work_items', 'oxplow', '{}', 1, 'oxplow', 'builtin', 1,
+                         'Work list', 1, 1, ?1)",
+                [&stages],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
             let record = oxplow_tasks::record::record_tx(tx, task_id)?;
             crate::work_items::WorkItemsProjection.handle(
                 tx,
@@ -530,7 +544,7 @@ mod tests {
         // Another list's item, as its records left it in the interface.
         db.transaction(|tx| {
             for sql in [
-                "INSERT INTO work_item (uri, provider, title, body, state, native_state, created_at, updated_at)
+                "INSERT INTO work_item (uri, provider, title, body, state, stage, created_at, updated_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
                 "INSERT INTO work_item_link (from_uri, to_uri, link_type, created_at)
                  VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'oxplow:oxplow/work_item?id=ENG-7&provider=issues', 'parent_of', 't')",

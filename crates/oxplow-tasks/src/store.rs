@@ -218,7 +218,6 @@ fn status_to_str(s: TaskStatus) -> &'static str {
         TaskStatus::Blocked => "blocked",
         TaskStatus::Done => "done",
         TaskStatus::Canceled => "canceled",
-        TaskStatus::Archived => "archived",
     }
 }
 
@@ -230,7 +229,6 @@ fn str_to_status(s: &str) -> Result<TaskStatus, DomainError> {
         "blocked" => Ok(TaskStatus::Blocked),
         "done" => Ok(TaskStatus::Done),
         "canceled" => Ok(TaskStatus::Canceled),
-        "archived" => Ok(TaskStatus::Archived),
         other => Err(DomainError::Invalid(format!(
             "unknown task status: {other}"
         ))),
@@ -482,13 +480,9 @@ mod tests {
         store.soft_delete(gone).await.unwrap();
         let shipped = store.insert(&item()).await.unwrap();
         store.set_status(shipped, TaskStatus::Done).await.unwrap();
-        store
-            .set_status(shipped, TaskStatus::Archived)
-            .await
-            .unwrap();
         let dropped = store.insert(&item()).await.unwrap();
         store
-            .set_status(dropped, TaskStatus::Archived)
+            .set_status(dropped, TaskStatus::Canceled)
             .await
             .unwrap();
 
@@ -499,12 +493,11 @@ mod tests {
                 .map(|&id| {
                     let w = crate::record::record_tx(c, id).unwrap();
                     format!(
-                        "{}|{}|{}|{}|{}|{}|{}",
+                        "{}|{}|{}|{}|{}|{}",
                         w.uri,
                         w.title,
                         w.body,
-                        w.state.as_str(),
-                        w.native_state,
+                        w.stage,
                         w.parent_uri.unwrap_or_default(),
                         w.deleted
                     )
@@ -521,11 +514,11 @@ mod tests {
         assert_eq!(interface, 0);
         let r = |id: TaskId| work_item_ref(id);
         let mut expected = vec![
-            format!("{}|ship it||in_progress|in_progress||false", r(epic)),
-            format!("{}|renamed|the body|todo|ready|{}|false", r(child), r(epic)),
-            format!("{}|ship it||todo|ready||true", r(gone)),
-            format!("{}|ship it||done|archived||false", r(shipped)),
-            format!("{}|ship it||canceled|archived||false", r(dropped)),
+            format!("{}|ship it||in_progress||false", r(epic)),
+            format!("{}|renamed|the body|ready|{}|false", r(child), r(epic)),
+            format!("{}|ship it||ready||true", r(gone)),
+            format!("{}|ship it||done||false", r(shipped)),
+            format!("{}|ship it||canceled||false", r(dropped)),
         ];
         expected.sort();
         assert_eq!(rows, expected);

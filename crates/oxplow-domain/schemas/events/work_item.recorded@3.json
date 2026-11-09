@@ -1,17 +1,5 @@
 {
   "$defs": {
-    "CanonicalState": {
-      "description": "The states every provider maps its own to. `backlog` is filed but not\nready to work on; `todo` is ready (what an idle thread may pull).",
-      "enum": [
-        "backlog",
-        "todo",
-        "in_progress",
-        "blocked",
-        "done",
-        "canceled"
-      ],
-      "type": "string"
-    },
     "CommentRecord": {
       "additionalProperties": false,
       "description": "One of an item's comments, as its provider records it.",
@@ -99,17 +87,15 @@
           "default": null,
           "description": "Provider-specific fields."
         },
-        "native_state": {
-          "type": "string"
-        },
         "parent_uri": {
           "type": [
             "string",
             "null"
           ]
         },
-        "state": {
-          "$ref": "#/$defs/CanonicalState"
+        "stage": {
+          "description": "Which of the list's declared stages it's in (its bucket is core's\nlookup).",
+          "type": "string"
         },
         "title": {
           "type": "string"
@@ -122,8 +108,7 @@
       "required": [
         "uri",
         "title",
-        "state",
-        "native_state"
+        "stage"
       ],
       "type": "object"
     }

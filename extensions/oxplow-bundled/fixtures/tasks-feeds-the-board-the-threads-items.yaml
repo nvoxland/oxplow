@@ -5,30 +5,30 @@
 # names who it's for; with no thread, "this thread" is everything.
 given:
   - { command: oxplow.work_item.create, input: { title: Next up, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: In the backlog, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: In the backlog, stage: backlog } }
   - { command: oxplow.work_item.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
   - { command: oxplow.work_item.transition, input: { uri: $dropped.uri, to: canceled } }
-  - { command: oxplow.work_item.create, input: { title: Done 1, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 2, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 3, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 4, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 5, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 6, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 7, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 8, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 9, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 10, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 11, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 12, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 13, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 14, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 15, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 16, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 17, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 18, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 19, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 20, state: done } }
-  - { command: oxplow.work_item.create, input: { title: Done 21, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 1, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 2, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 3, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 4, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 5, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 6, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 7, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 8, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 9, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 10, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 11, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 12, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 13, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 14, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 15, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 16, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 17, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 18, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 19, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 20, stage: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 21, stage: done } }
 when: { page: tasks, params: { show: all, priority: any, thread_id: 1, stream_id: 1 } }
 expect:
   loaders:

@@ -398,6 +398,20 @@ pub fn scaffold_with(
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
             ));
+            if capability == "work_items" {
+                // A work list's own workflow: one stage in each of core's
+                // buckets to start; rename, add or drop them (a stage in
+                // each of todo, in_progress and done is required).
+                manifest.push_str(
+                    "    stages:\n\
+                     \x20     - { id: backlog, title: Backlog, bucket: backlog }\n\
+                     \x20     - { id: todo, title: To Do, bucket: todo }\n\
+                     \x20     - { id: in_progress, title: In Progress, bucket: in_progress }\n\
+                     \x20     - { id: blocked, title: Blocked, bucket: blocked }\n\
+                     \x20     - { id: done, title: Done, bucket: done }\n\
+                     \x20     - { id: canceled, title: Canceled, bucket: canceled }\n",
+                );
+            }
             if let Some(needs) = starter.needs {
                 manifest.push_str(needs);
             }
@@ -878,25 +892,25 @@ fn provider_starter(capability: &str) -> ProviderStarter {
 fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
     use serde_json::json;
     let str_prop = json!({ "type": "string" });
-    let state = json!({ "type": "string",
-                        "enum": ["backlog", "todo", "in_progress", "blocked", "done", "canceled"] });
+    // One of the list's stages (its manifest's `stages:`): core resolves a
+    // bucket to one before the list sees it.
+    let stage = json!({ "type": "string" });
     match (capability, verb) {
         ("work_items", "create") => (
             "Create a work item.".into(),
             json!({ "type": "object", "required": ["title"], "additionalProperties": false,
-                    "properties": { "title": str_prop, "body": str_prop,
-                                    "state": state, "native_state": str_prop } }),
+                    "properties": { "title": str_prop, "body": str_prop, "stage": stage } }),
         ),
         ("work_items", "update") => (
-            "Change a work item's title, body or state.".into(),
+            "Change a work item's title, body or stage.".into(),
             json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
                     "properties": { "uri": str_prop, "title": str_prop, "body": str_prop,
-                                    "state": state, "native_state": str_prop } }),
+                                    "stage": stage } }),
         ),
         ("work_items", "transition") => (
-            "Move a work item to a canonical state, optionally naming a native one.".into(),
+            "Move a work item to one of its stages.".into(),
             json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
-                    "properties": { "uri": str_prop, "to": state, "native_state": str_prop } }),
+                    "properties": { "uri": str_prop, "to": stage } }),
         ),
         ("agent_harness", "launch") => (
             "How a session of it starts: the launch's input in, { spec: { kind: pty, command, env } } out — \

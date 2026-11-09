@@ -17,6 +17,14 @@ providers:
     capability: work_items
     entry: bin/provider
     declarations: provider.json
+    # Its own workflow, one stage in each of core's buckets.
+    stages:
+      - { id: icebox, title: Icebox, bucket: backlog }
+      - { id: ready, title: Ready, bucket: todo }
+      - { id: doing, title: Doing, bucket: in_progress }
+      - { id: stuck, title: Stuck, bucket: blocked }
+      - { id: shipped, title: Shipped, bucket: done }
+      - { id: dropped, title: Dropped, bucket: canceled }
   # The agent every session runs: the fake harness (a scripted terminal
   # agent) behind the provider protocol, so no spec starts a real agent CLI.
   - id: scripted

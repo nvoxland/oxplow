@@ -26,7 +26,7 @@ collectors:
     input: |
       WITH touched AS (
         SELECT CAST(substr(uri_param(w.uri, 'id'), 4) AS INTEGER) AS id, w.title,
-               w.native_state AS status,
+               w.stage AS status,
                json_extract(w.native, '$.priority') AS priority,
                th.id AS thread_id, th.stream_id,
                max(w.updated_at,

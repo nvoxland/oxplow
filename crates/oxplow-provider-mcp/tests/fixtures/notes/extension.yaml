@@ -21,3 +21,11 @@ providers:
       mapping: mcp/notes.star
       tools: mcp/tools.json
     declarations: provider.json
+    # A note's states, one in each of core's buckets.
+    stages:
+      - { id: someday, title: Someday, bucket: backlog }
+      - { id: open, title: Open, bucket: todo }
+      - { id: doing, title: Doing, bucket: in_progress }
+      - { id: stuck, title: Stuck, bucket: blocked }
+      - { id: closed, title: Closed, bucket: done }
+      - { id: dropped, title: Dropped, bucket: canceled }

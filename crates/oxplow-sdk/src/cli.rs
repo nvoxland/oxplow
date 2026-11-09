@@ -990,6 +990,11 @@ mod tests {
             serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
         )
         .unwrap();
+        // Its stages, in the scaffold's buckets.
+        let manifest = oxplow_provider_fake::with_its_stages(
+            &std::fs::read_to_string(ext.join("extension.yaml")).unwrap(),
+        );
+        std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(

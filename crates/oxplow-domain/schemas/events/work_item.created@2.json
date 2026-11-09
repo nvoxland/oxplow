@@ -1,7 +1,7 @@
 {
   "$defs": {
-    "CanonicalState": {
-      "description": "The states every provider maps its own to. `backlog` is filed but not\nready to work on; `todo` is ready (what an idle thread may pull).",
+    "Bucket": {
+      "description": "What a work list's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
       "enum": [
         "backlog",
         "todo",
@@ -18,7 +18,7 @@
   "description": "`work_item.created@2`: an item was filed on a work list, in `state`.",
   "properties": {
     "state": {
-      "$ref": "#/$defs/CanonicalState",
+      "$ref": "#/$defs/Bucket",
       "description": "The canonical state it was filed in."
     },
     "work_item": {

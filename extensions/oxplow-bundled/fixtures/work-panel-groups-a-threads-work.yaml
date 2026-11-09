@@ -8,9 +8,9 @@ given:
   - { command: oxplow.work_item.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
   - { command: oxplow.effort.open, input: { thread: thr1, work_item: $shipped.uri } }
   - { command: oxplow.work_item.transition, input: { uri: $shipped.uri, to: done } }
-  - { command: oxplow.work_item.create, input: { title: Done elsewhere, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done elsewhere, stage: done } }
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Next up, state: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Next up, stage: todo, assignee: thr1 } }
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:

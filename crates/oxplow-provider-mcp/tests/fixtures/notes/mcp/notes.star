@@ -2,8 +2,8 @@
 # work items. `x.phase` is invoke / invoked (a verb) or read / records (a
 # collector); `x.output` is the tool's output, data to read.
 
-STATES = {"backlog": "someday", "todo": "open", "in_progress": "doing", "blocked": "stuck", "done": "closed", "canceled": "dropped"}
-CANONICAL = {v: k for k, v in STATES.items()}
+# A note's state is its stage: the manifest declares them (`stages:`), and
+# core resolves a bucket to one of them before the mapping sees it.
 
 def ref(x, id):
     return uri.build("oxplow/work_item", provider = x["provider"], id = id)
@@ -20,8 +20,7 @@ def record(x, note):
         "uri": ref(x, note["id"]),
         "title": note["title"],
         "body": note["body"],
-        "state": CANONICAL[note["state"]],
-        "native_state": note["state"],
+        "stage": note["state"],
         "native": {},
         "parent_uri": ref(x, note["parent"]) if note["parent"] else None,
         "deleted": False,
@@ -29,19 +28,6 @@ def record(x, note):
 
 def refuse(field, message):
     return {"refuse": {"field": field, "message": message}}
-
-# The note state `input` asks for (`field` canonical, `native_state` the
-# note's), or a refusal when they disagree.
-def state_of(input, field):
-    to = input.get(field)
-    native = input.get("native_state")
-    if to and native and STATES[to] != native:
-        return None, refuse("/native_state", "`%s` isn't %s" % (native, to))
-    if to:
-        return STATES[to], None
-    if native and native not in CANONICAL:
-        return None, refuse("/native_state", "`%s` isn't a note state" % native)
-    return native, None
 
 def tool_call(x):
     input = x["input"]
@@ -67,15 +53,13 @@ def tool_call(x):
             if not pid:
                 return refuse("/parent_uri", "`%s` isn't a note" % parent)
             args["parent"] = pid
-    state, refused = state_of(input, "to" if x["command"] == "transition" else "state")
-    if refused:
-        return refused
-    if state:
-        args["state"] = state
+    stage = input.get("to" if x["command"] == "transition" else "stage")
+    if stage:
+        args["state"] = stage
     return {"tool": "create_item" if x["command"] == "create" else "update_item", "arguments": args}
 
 # The note argument a tool error names, as the verb's input field.
-FIELDS = {"id": "/uri", "parent": "/parent_uri", "state": "/native_state"}
+FIELDS = {"id": "/uri", "parent": "/parent_uri", "state": "/stage"}
 
 def transform(x):
     phase = x["phase"]

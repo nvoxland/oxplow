@@ -5366,7 +5366,7 @@ def transform(input):
             .transaction(|c| {
                 c.execute_batch(
                     // The active list's items, as the interface holds them.
-                    "INSERT INTO work_item (uri, provider, title, state, native_state, native, created_at, updated_at, closed_at) VALUES
+                    "INSERT INTO work_item (uri, provider, title, state, stage, native, created_at, updated_at, closed_at) VALUES
                        ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
                        ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
                        ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL),

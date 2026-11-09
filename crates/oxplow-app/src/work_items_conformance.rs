@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use oxplow_domain::work_items::{
-    CanonicalState, VerbCall, WorkItemRecord, WorkItemVerbs, WorkItemsFeatures,
+    Bucket, VerbCall, WorkItemRecord, WorkItemVerbs, WorkItemsFeatures,
 };
 use oxplow_domain::Actor;
 
@@ -44,6 +44,10 @@ pub trait WorkItemsProbe: Send + Sync {
     /// Settle the host's projections (the event pump) before a read.
     async fn settle(&self);
     async fn record(&self, item_ref: &str) -> Option<WorkItemRecord>;
+    /// `item_ref`'s bucket as the interface reads it (`v_work_item.state`).
+    async fn bucket(&self, item_ref: &str) -> Option<Bucket>;
+    /// `provider`'s stages as it declares them (`v_capability_provider.stages`).
+    async fn stages(&self, provider: &str) -> Vec<oxplow_domain::work_items::StageDecl>;
     /// The type of every logged event whose subject names `item_ref`.
     async fn event_types(&self, item_ref: &str) -> Vec<String>;
     /// Read `provider` back through its collectors (`oxplow.provider.sync`), its
@@ -132,7 +136,17 @@ pub async fn suite(
     };
     let mut created: Vec<String> = Vec::new();
 
-    // 1. A new item is a row in its canonical `todo` state.
+    // 1. A new item is a row in `todo`'s default stage.
+    let stages = probe.stages(provider).await;
+    if let Some(problem) = oxplow_domain::work_items::stages_problem(&stages) {
+        fail("stages", format!("`{provider}`'s stages: {problem}"));
+    }
+    let default_of = |bucket: Bucket| {
+        stages
+            .iter()
+            .find(|st| st.bucket == bucket)
+            .map(|st| st.id.clone())
+    };
     let item = match filed(items, actor, new("conformance item", None)).await {
         Ok(r) => r,
         Err(e) => {
@@ -159,13 +173,20 @@ pub async fn suite(
     }
     match probe.record(&item).await {
         None => fail("create", format!("no v_work_item row for `{item}`")),
-        Some(r) if r.title != "conformance item" || r.state != CanonicalState::Todo => fail(
-            "create",
-            format!(
-                "row is {:?} / {:?}, want the title and `todo`",
-                r.title, r.state
-            ),
-        ),
+        Some(r)
+            if r.title != "conformance item"
+                || Some(&r.stage) != default_of(Bucket::Todo).as_ref() =>
+        {
+            fail(
+                "create",
+                format!(
+                    "row is {:?} / {:?}, want the title and todo's default stage {:?}",
+                    r.title,
+                    r.stage,
+                    default_of(Bucket::Todo)
+                ),
+            )
+        }
         Some(_) => {}
     }
 
@@ -193,62 +214,77 @@ pub async fn suite(
         }
     }
 
-    // 3. Every canonical state round-trips, and core logs each move as
-    //    `work_item.state_changed`, whoever the provider. Moving again to
-    //    the native state the row reports lands on the same state.
-    let mut was = CanonicalState::Todo;
-    for state in CanonicalState::ALL {
+    // 3. Every declared stage round-trips and reads back in its bucket;
+    //    naming a bucket lands on its default stage; core logs
+    //    `work_item.state_changed` for each move to another bucket, whoever
+    //    the provider; a name that is neither is refused.
+    let mut was = Bucket::Todo;
+    for stage in &stages {
         let changes_before = state_changes(probe, &item).await;
-        if let Err(e) = items.transition(actor, &item, state, None).await {
-            fail("transition", format!("to {}: {e}", state.as_str()));
+        if let Err(e) = items.transition(actor, &item, &stage.id).await {
+            fail("transition", format!("to {}: {e}", stage.id));
             continue;
         }
         probe.settle().await;
-        if state != was && state_changes(probe, &item).await <= changes_before {
+        if stage.bucket != was && state_changes(probe, &item).await <= changes_before {
             fail(
                 "state_changed",
                 format!(
                     "moving from {} to {} logged no work_item.state_changed",
                     was.as_str(),
-                    state.as_str()
+                    stage.bucket.as_str()
                 ),
             );
         }
-        was = state;
-        let row = probe.record(&item).await;
-        let got = row.as_ref().map(|r| r.state);
-        if got != Some(state) {
+        was = stage.bucket;
+        let got = (
+            probe.record(&item).await.map(|r| r.stage),
+            probe.bucket(&item).await,
+        );
+        if got != (Some(stage.id.clone()), Some(stage.bucket)) {
             fail(
                 "transition",
-                format!("after moving to {}, the row says {got:?}", state.as_str()),
+                format!(
+                    "after moving to {} ({}), the row says {got:?}",
+                    stage.id,
+                    stage.bucket.as_str()
+                ),
             );
         }
-        if let Some(native) = row.map(|r| r.native_state) {
-            match items.transition(actor, &item, state, Some(&native)).await {
-                Err(e) => fail(
-                    "native_state",
-                    format!(
-                        "moving to {} with its own native state `{native}` failed: {e}",
-                        state.as_str()
-                    ),
-                ),
-                Ok(_) => {
-                    probe.settle().await;
-                    let again = probe.record(&item).await;
-                    if again.as_ref().map(|r| (r.state, r.native_state.as_str()))
-                        != Some((state, native.as_str()))
-                    {
-                        fail(
-                            "native_state",
-                            format!(
-                                "after moving to {} / `{native}`, the row is {again:?}",
-                                state.as_str()
-                            ),
-                        );
-                    }
+    }
+    for bucket in Bucket::ALL {
+        let Some(default) = default_of(bucket) else {
+            continue;
+        };
+        match items.transition(actor, &item, bucket.as_str()).await {
+            Err(e) => fail(
+                "transition",
+                format!("to the bucket {}: {e}", bucket.as_str()),
+            ),
+            Ok(_) => {
+                probe.settle().await;
+                let got = probe.record(&item).await.map(|r| r.stage);
+                if got.as_ref() != Some(&default) {
+                    fail(
+                        "transition",
+                        format!(
+                            "naming the bucket {} landed on {got:?}, not its default `{default}`",
+                            bucket.as_str()
+                        ),
+                    );
                 }
             }
         }
+    }
+    if items
+        .transition(actor, &item, "no_such_stage_here")
+        .await
+        .is_ok()
+    {
+        fail(
+            "transition",
+            "a stage the list doesn't declare was taken".into(),
+        );
     }
 
     // 4. A parent resolves with `hierarchy`, and is refused without it.
@@ -349,10 +385,7 @@ pub async fn suite(
         let person = oxplow_domain::uri::build::person_uri(None);
         // Open again: a closed item is nobody's to work on.
         for it in [&item, &other] {
-            if let Err(e) = items
-                .transition(actor, it, CanonicalState::Todo, None)
-                .await
-            {
+            if let Err(e) = items.transition(actor, it, Bucket::Todo.as_str()).await {
                 fail("assignment", format!("reopen `{it}`: {e}"));
             }
         }
@@ -632,17 +665,9 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .db
             .read(move |c| {
                 use rusqlite::OptionalExtension;
-                let row: Option<(
-                    String,
-                    String,
-                    String,
-                    String,
-                    String,
-                    String,
-                    Option<String>,
-                )> = c
+                let row: Option<(String, String, String, String, String, Option<String>)> = c
                     .query_row(
-                        "SELECT uri, title, body, state, native_state, native, parent_uri
+                        "SELECT uri, title, body, stage, native, parent_uri
                      FROM work_item WHERE uri = ?1 AND deleted_at IS NULL",
                         [item_ref],
                         |r| {
@@ -652,8 +677,7 @@ impl WorkItemsProbe for ServicesProbe<'_> {
                                 r.get::<_, String>(2)?,
                                 r.get::<_, String>(3)?,
                                 r.get::<_, String>(4)?,
-                                r.get::<_, String>(5)?,
-                                r.get::<_, Option<String>>(6)?,
+                                r.get::<_, Option<String>>(5)?,
                             ))
                         },
                     )
@@ -664,22 +688,61 @@ impl WorkItemsProbe for ServicesProbe<'_> {
             .await
             .ok()
             .flatten()
-            .and_then(
-                |(item_ref, title, body, state, native_state, native, parent_uri)| {
-                    Some(WorkItemRecord {
-                        uri: item_ref,
-                        title,
-                        body,
-                        state: serde_json::from_value(serde_json::Value::String(state)).ok()?,
-                        native_state,
-                        native: serde_json::from_str(&native).ok()?,
-                        parent_uri,
-                        deleted: false,
-                        links: None,
-                        comments: None,
-                    })
-                },
-            )
+            .and_then(|(item_ref, title, body, stage, native, parent_uri)| {
+                Some(WorkItemRecord {
+                    uri: item_ref,
+                    title,
+                    body,
+                    stage,
+                    native: serde_json::from_str(&native).ok()?,
+                    parent_uri,
+                    deleted: false,
+                    links: None,
+                    comments: None,
+                })
+            })
+    }
+
+    async fn bucket(&self, item_ref: &str) -> Option<Bucket> {
+        let item_ref = item_ref.to_string();
+        self.0
+            .db
+            .read(move |c| {
+                use rusqlite::OptionalExtension;
+                c.query_row(
+                    "SELECT state FROM work_item WHERE uri = ?1",
+                    [item_ref],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sql)
+            })
+            .await
+            .ok()
+            .flatten()
+            .and_then(|s| Bucket::named(&s))
+    }
+
+    async fn stages(&self, provider: &str) -> Vec<oxplow_domain::work_items::StageDecl> {
+        let provider = provider.to_string();
+        self.0
+            .db
+            .read(move |c| {
+                use rusqlite::OptionalExtension;
+                c.query_row(
+                    "SELECT stages_json FROM capability_provider
+                      WHERE capability = 'work_items' AND provider = ?1",
+                    [provider],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sql)
+            })
+            .await
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default()
     }
 
     async fn sync(&self, provider: &str) -> Result<bool, String> {

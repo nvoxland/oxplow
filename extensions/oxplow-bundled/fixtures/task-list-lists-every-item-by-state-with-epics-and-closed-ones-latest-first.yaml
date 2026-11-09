@@ -7,11 +7,11 @@
 given:
   - { command: oxplow.work_item.create, input: { title: An epic, assignee: thr1 }, bind: epic }
   - { command: oxplow.work_item.create, input: { title: Its child, assignee: thr1, parent_uri: $epic.uri } }
-  - { command: oxplow.work_item.create, input: { title: In the backlog, state: backlog } }
+  - { command: oxplow.work_item.create, input: { title: In the backlog, stage: backlog } }
   - { command: oxplow.work_item.create, input: { title: Mine, assignee: "oxplow:oxplow/person" } }
   - { command: oxplow.work_item.create, input: { title: First done, assignee: thr1 }, bind: first }
   - { command: oxplow.work_item.create, input: { title: Second done, assignee: thr1 }, bind: second }
-  - { command: oxplow.work_item.create, input: { title: Done elsewhere, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done elsewhere, stage: done } }
   - { command: oxplow.work_item.transition, input: { uri: $first.uri, to: in_progress }, as: agent }
   - { command: oxplow.work_item.transition, input: { uri: $first.uri, to: done }, as: agent }
   - { command: oxplow.work_item.transition, input: { uri: $second.uri, to: in_progress }, as: agent }

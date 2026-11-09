@@ -496,12 +496,7 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         "{err}"
     );
     let moved = items
-        .transition(
-            &Actor::Human,
-            &item,
-            oxplow_domain::work_items::CanonicalState::Done,
-            None,
-        )
+        .transition(&Actor::Human, &item, "done")
         .await
         .unwrap();
     let executed = moved.event_id.clone().unwrap();
@@ -550,8 +545,8 @@ async fn work_item_commands_write_another_providers_items_through_its_process() 
         .await
         .unwrap();
     fx.svc.event_pump.run_once().await.unwrap();
-    let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
-    assert_eq!(state, oxplow_domain::work_items::CanonicalState::Todo);
+    let state = ServicesProbe(&fx.svc).bucket(&item).await.unwrap();
+    assert_eq!(state, oxplow_domain::work_items::Bucket::Todo);
 }
 
 /// P7 review (tsk713): a composite over another provider's item runs its
@@ -670,8 +665,8 @@ async fn a_composite_writes_another_providers_item_as_steps() {
         .iter()
         .any(|a| a.command == "oxplow.work_item.comment"));
     fx.svc.event_pump.run_once().await.unwrap();
-    let state = ServicesProbe(&fx.svc).record(&item).await.unwrap().state;
-    assert_eq!(state, oxplow_domain::work_items::CanonicalState::Done);
+    let state = ServicesProbe(&fx.svc).bucket(&item).await.unwrap();
+    assert_eq!(state, oxplow_domain::work_items::Bucket::Done);
 }
 
 /// P7.A1: a provider's verb input is checked against what it declares
@@ -731,12 +726,12 @@ async fn an_external_verb_input_is_checked_and_stays_on_its_provider() {
         "{err:?}"
     );
     let err = run(
-        json!({ "uri": item, "to": "done", "native_state": "Doing" }),
+        json!({ "uri": item, "to": "no_such_stage" }),
         "oxplow.work_item.transition",
     )
     .await
     .unwrap_err();
-    assert!(err.to_string().contains("native_state"), "{err}");
+    assert!(err.to_string().contains("icebox, ready, doing"), "{err}");
 
     // Delete is destructive: a person is asked, an agent's run is not.
     let agent = Actor::Agent {
@@ -1100,7 +1095,7 @@ async fn provider_args_stay_inside_the_extension_folder() {
     );
 }
 
-const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n";
+const ADAPTER_MANIFEST: &str = "manifest: 2\nname: tracker\nintent:\n  purpose: notes over MCP\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: notes\n    capability: work_items\n    adapter:\n      mcp: { command: [bin/server, --stdio] }\n      mapping: mcp/x.star\n      tools: mcp/tools.json\n    declarations: provider.json\n    stages: [{ id: someday, title: Someday, bucket: backlog }, { id: open, title: Open, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: closed, title: Closed, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n";
 
 /// A private extension whose provider is an MCP server behind oxplow's
 /// adapter: the server, its mapping and its pinned tools.
@@ -5118,7 +5113,7 @@ fn done_envelope(fx: &TaskEffortFixture) -> oxplow_domain::Envelope {
         "human",
         &WorkItemStateChangedV1 {
             work_item: oxplow_tasks::work_item_ref(fx.task),
-            to: oxplow_domain::work_items::CanonicalState::Done,
+            to: oxplow_domain::work_items::Bucket::Done,
         },
     );
     env.anchors.thread_id = Some(fx.thread);
@@ -5324,7 +5319,7 @@ async fn an_interrupted_attempt_retries_only_toward_a_declaring_provider() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failure_that_wont_pass_isnt_retried() {
-    let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\", \"native_state\": \"Nonsense\"}}]}\n";
+    let bad_second = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"from effect\"}}, {\"name\": \"oxplow.work_item.create\", \"input\": {\"title\": \"second\", \"stage\": \"nonsense\"}}]}\n";
     for (hooks, script) in [("", bad_second), ("refuse-auth", FILE_ON_FAKE)] {
         let fx = with_effect(hooks, script).await;
         react(&fx).await;

@@ -1725,7 +1725,7 @@ impl EventType for ThreadCheckpoint {
 pub struct WorkItemStateChangedV1 {
     /// `oxplow:oxplow/work_item?id=<id>&provider=<provider>`.
     pub work_item: String,
-    pub to: crate::work_items::CanonicalState,
+    pub to: crate::work_items::Bucket,
 }
 
 pub struct WorkItemStateChanged;
@@ -1829,7 +1829,7 @@ pub struct WorkItemCreatedV2 {
     /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
     pub work_item: String,
     /// The canonical state it was filed in.
-    pub state: crate::work_items::CanonicalState,
+    pub state: crate::work_items::Bucket,
 }
 
 pub struct WorkItemCreated;
@@ -1861,9 +1861,10 @@ impl EventType for WorkItemDeleted {
 pub struct WorkItemEditedV2 {
     /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
     pub work_item: String,
-    /// The fields the command set: `title`, `body`, `parent`, `rank` (its
-    /// place in its list), `list` (moved to another), and
-    /// `native.<name>` for each of the list's own fields.
+    /// The fields the command set: `title`, `body`, `parent`, `stage` (a
+    /// move between two stages of one bucket; a move to another bucket is
+    /// `work_item.state_changed`), and `native.<name>` for each of the
+    /// list's own fields.
     pub fields: Vec<String>,
 }
 
@@ -2475,7 +2476,7 @@ mod tests {
             "human",
             &WorkItemStateChangedV1 {
                 work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
-                to: crate::work_items::CanonicalState::InProgress,
+                to: crate::work_items::Bucket::InProgress,
             },
         );
         assert_eq!(ok.event_type, "work_item.state_changed");

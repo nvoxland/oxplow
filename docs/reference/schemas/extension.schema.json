@@ -2920,6 +2920,14 @@
           },
           "default": []
         },
+        "stages": {
+          "description": "A work list's stages, in order, each in one of core's buckets:\n`[{ id, title, bucket }]` — required for a work list, which needs\none in each of todo, in_progress and done. The first of a bucket is\nwhere naming the bucket lands.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StageDecl"
+          },
+          "default": []
+        },
         "needs": {
           "description": "The scopes it calls over the protocol (`host/call`,\n`sql.read` or `state.read`): part of what its approval covers, and the only ones it\nmay call.",
           "type": "array",
@@ -3187,6 +3195,41 @@
           "type": "string",
           "const": "enum"
         }
+      ]
+    },
+    "StageDecl": {
+      "description": "One of a work list's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "snake_case, unique in the list (`in_review`).",
+          "type": "string"
+        },
+        "title": {
+          "description": "How a person names it (`In Review`).",
+          "type": "string"
+        },
+        "bucket": {
+          "$ref": "#/definitions/Bucket"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "bucket"
+      ]
+    },
+    "Bucket": {
+      "description": "What a work list's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
+      "type": "string",
+      "enum": [
+        "backlog",
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled"
       ]
     },
     "EffectFile": {

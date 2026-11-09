@@ -1269,12 +1269,10 @@ impl Instance {
     }
 
     /// A returned event as the envelope the bus logs: a type it declared,
-    /// and (for a work-item record) an item of its own. `filed_on` is the
-    /// thread a new item was filed on (`oxplow.work_item.create`'s, tsk1058).
+    /// and (for a work-item record) an item of its own.
     pub(crate) fn envelope(
         &self,
         actor: &Actor,
-        filed_on: Option<oxplow_domain::ThreadId>,
         draft: EventDraft,
     ) -> Result<Envelope, CommandError> {
         let failed = |message: String| CommandError::Failed { message };
@@ -1308,16 +1306,11 @@ impl Instance {
             check_subject(&self.spec.capability, &self.id, &self.ext.name, subject)
                 .map_err(failed)?;
         }
-        // The thread an item was filed on anchors its record, so it keeps
-        // that thread (tsk1041, tsk1058); otherwise an agent's thread
-        // anchors what it did.
-        let mut anchors = match actor {
+        // An agent's thread anchors what it did.
+        let anchors = match actor {
             Actor::Agent { .. } => actor.anchors(),
             _ => oxplow_domain::Anchors::default(),
         };
-        if filed_on.is_some() {
-            anchors.thread_id = filed_on;
-        }
         Envelope::new(draft.event_type, draft.v, actor.source(), draft.payload)
             .map(|e| e.with_subject(draft.subject).with_anchors(anchors))
             .map_err(|e| failed(e.to_string()))
@@ -2164,7 +2157,7 @@ impl ProviderRegistry {
         let events = out
             .events
             .into_iter()
-            .map(|d| instance.envelope(invocation.actor(), None, d))
+            .map(|d| instance.envelope(invocation.actor(), d))
             .collect::<Result<Vec<_>, _>>()?;
         let inverse = match out.inverse {
             None => None,

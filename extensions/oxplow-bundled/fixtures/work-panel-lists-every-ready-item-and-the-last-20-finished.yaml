@@ -2,18 +2,18 @@
 # every item assigned to it next, and the last 20 efforts it finished (the
 # rail itself shows 8 rows and "+N more" until it grows).
 given:
-  - { command: oxplow.work_item.create, input: { title: Ready 1, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 2, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 3, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 4, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 5, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 6, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 7, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 8, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 9, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 10, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 11, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ready 12, state: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 1, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 2, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 3, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 4, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 5, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 6, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 7, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 8, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 9, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 10, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 11, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Ready 12, stage: todo, assignee: thr1 } }
   - { command: oxplow.effort.open, input: { thread: thr1, title: Done 1 } }
   - { command: oxplow.effort.open, input: { thread: thr1, title: Done 2 } }
   - { command: oxplow.effort.open, input: { thread: thr1, title: Done 3 } }

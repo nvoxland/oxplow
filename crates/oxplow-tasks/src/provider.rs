@@ -156,82 +156,47 @@ mod tests {
             .unwrap();
         let WorkItemRecordedV3 { item: record } =
             serde_json::from_value(moved.events[0].payload.clone()).unwrap();
-        assert_eq!(record.state.as_str(), "done");
+        assert_eq!(record.stage, "done");
         assert_eq!(moved.inverse.unwrap().name, "transition");
     }
 
-    fn recorded_state(out: &VerbOutcome) -> (String, String) {
+    fn recorded_stage(out: &VerbOutcome) -> String {
         let WorkItemRecordedV3 { item } =
             serde_json::from_value(out.events[0].payload.clone()).unwrap();
-        (item.state.as_str().to_string(), item.native_state)
+        item.stage
     }
 
-    /// `done` + `archived` means a completed task that was archived: a
-    /// create or an update asked for it records `done`, as a transition
-    /// does, not `canceled`.
+    /// A create or an update names one of oxplow's stages (core resolved a
+    /// bucket to it), and an update's inverse names the stage it left.
     #[tokio::test]
-    async fn filing_or_updating_into_done_archived_reads_as_done() {
+    async fn a_stage_is_recorded_and_an_update_undoes_to_the_one_it_left() {
         let (tasks, _db) = tasks().await;
         let filed = tasks
             .invoke(
                 VerbCall::bare(&Actor::Human, None),
                 "create",
-                json!({ "title": "t", "state": "done", "native_state": "archived" }),
+                json!({ "title": "t", "stage": "backlog" }),
             )
             .await
             .unwrap();
-        assert_eq!(recorded_state(&filed), ("done".into(), "archived".into()));
-
-        let plain = tasks
-            .invoke(
-                VerbCall::bare(&Actor::Human, None),
-                "create",
-                json!({ "title": "u" }),
-            )
-            .await
-            .unwrap();
-        let item = plain.result["uri"].as_str().unwrap().to_string();
-        let updated = tasks
-            .invoke(
-                VerbCall::bare(&Actor::Human, None),
-                "update",
-                json!({ "uri": item, "state": "done", "native_state": "archived" }),
-            )
-            .await
-            .unwrap();
-        assert_eq!(recorded_state(&updated), ("done".into(), "archived".into()));
-    }
-
-    /// An update's inverse names the task's prior status whole, so undoing
-    /// a state change on an archived task archives it again.
-    #[tokio::test]
-    async fn undoing_a_state_update_on_an_archived_task_restores_archived() {
-        let (tasks, _db) = tasks().await;
-        let filed = tasks
-            .invoke(
-                VerbCall::bare(&Actor::Human, None),
-                "create",
-                json!({ "title": "t", "state": "done", "native_state": "archived" }),
-            )
-            .await
-            .unwrap();
+        assert_eq!(recorded_stage(&filed), "backlog");
         let item = filed.result["uri"].as_str().unwrap().to_string();
-        let reopened = tasks
+        let started = tasks
             .invoke(
                 VerbCall::bare(&Actor::Human, None),
                 "update",
-                json!({ "uri": item, "state": "todo" }),
+                json!({ "uri": item, "stage": "in_progress" }),
             )
             .await
             .unwrap();
-        assert_eq!(recorded_state(&reopened), ("todo".into(), "ready".into()));
-        let inverse = reopened.inverse.unwrap();
-        assert_eq!(inverse.name, "update");
+        assert_eq!(recorded_stage(&started), "in_progress");
+        let inverse = started.inverse.unwrap();
+        assert_eq!(inverse.input["stage"], "backlog");
         let undone = tasks
             .invoke(VerbCall::bare(&Actor::Human, None), "update", inverse.input)
             .await
             .unwrap();
-        assert_eq!(recorded_state(&undone), ("done".into(), "archived".into()));
+        assert_eq!(recorded_stage(&undone), "backlog");
     }
 
     /// A refused verb writes nothing: its transaction rolls back, and the
@@ -243,12 +208,12 @@ mod tests {
             .invoke(
                 VerbCall::bare(&Actor::Human, None),
                 "create",
-                json!({ "title": "t", "native_state": "nope" }),
+                json!({ "title": "t", "stage": "nope" }),
             )
             .await
             .unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field, .. } if field.as_deref() == Some("/native_state")),
+            matches!(&err, CommandError::Invalid { field, .. } if field.as_deref() == Some("/stage")),
             "{err:?}"
         );
         let rows: i64 = db

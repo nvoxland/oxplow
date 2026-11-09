@@ -2,8 +2,8 @@
 # to none, only the effort no item names is left.
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Next up, state: todo, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Stuck, state: blocked, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Next up, stage: todo, assignee: thr1 } }
+  - { command: oxplow.work_item.create, input: { title: Stuck, stage: blocked, assignee: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Someday } }
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:

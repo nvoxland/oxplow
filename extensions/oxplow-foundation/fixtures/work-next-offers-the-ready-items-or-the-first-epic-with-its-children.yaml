@@ -6,7 +6,7 @@ steps:
   - expect: { loaders: { work_next: { rows: 0 } } }
   - given:
       - { command: oxplow.work_item.create, input: { title: a, assignee: thr1 }, bind: a }
-      - { command: oxplow.work_item.create, input: { title: b, assignee: thr1, state: blocked } }
+      - { command: oxplow.work_item.create, input: { title: b, assignee: thr1, stage: blocked } }
       - { command: oxplow.work_item.create, input: { title: c, assignee: thr1 } }
   - expect: { loaders: { work_next: { rows: [{ title: a, role: ready }, { title: c, role: ready }] } } }
     bind: { c: 'loaders.work_next.rows[1].uri' }
@@ -23,7 +23,7 @@ steps:
       - { command: oxplow.work_item.create, input: { title: x, assignee: thr1 }, bind: x }
       - { command: oxplow.work_item.transition, input: { uri: $x.uri, to: in_progress } }
       - { command: oxplow.work_item.create, input: { title: c1, assignee: thr1, parent_uri: $c }, bind: c1 }
-      - { command: oxplow.work_item.create, input: { title: c2, assignee: thr1, parent_uri: $c, state: done } }
+      - { command: oxplow.work_item.create, input: { title: c2, assignee: thr1, parent_uri: $c, stage: done } }
       - { command: oxplow.work_item.create, input: { title: g, assignee: thr1, parent_uri: $c1.uri } }
       - { command: oxplow.work_item.create, input: { title: y, assignee: thr1 } }
   - expect:

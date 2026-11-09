@@ -2,8 +2,6 @@
   "item": {
     "title": "Fix the login redirect",
     "body": "",
-    "state": "in_progress",
-    "native_state": "In Progress",
     "native": {
       "team": "ENG",
       "estimate": 3
@@ -23,6 +21,7 @@
       }
     ],
     "uri": "work_item:issues:ENG-12",
-    "parent_uri": "work_item:issues:ENG-1"
+    "parent_uri": "work_item:issues:ENG-1",
+    "stage": "in_progress"
   }
 }

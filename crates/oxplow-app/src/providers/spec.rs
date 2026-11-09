@@ -98,11 +98,35 @@ pub struct ProviderSpec {
     /// values? }]`.
     #[serde(default)]
     pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
+    /// A work list's stages, in order, each in one of core's buckets:
+    /// `[{ id, title, bucket }]` — required for a work list, which needs
+    /// one in each of todo, in_progress and done. The first of a bucket is
+    /// where naming the bucket lands.
+    #[serde(default)]
+    pub stages: Vec<oxplow_domain::work_items::StageDecl>,
     /// The scopes it calls over the protocol (`host/call`,
     /// `sql.read` or `state.read`): part of what its approval covers, and the only ones it
     /// may call.
     #[serde(default)]
     pub needs: Vec<String>,
+}
+
+/// What's wrong with `spec`'s stages: a work list declares them (core's
+/// buckets need its stages to mean anything), and nothing else does.
+fn stages_problem(spec: &ProviderSpec) -> Option<String> {
+    match (contract_of(spec).items, spec.stages.is_empty()) {
+        (true, true) => Some(
+            "a work list declares its `stages:` (`[{ id, title, bucket }]`, one in each of \
+             todo, in_progress and done)"
+                .into(),
+        ),
+        (true, false) => oxplow_domain::work_items::stages_problem(&spec.stages),
+        (false, false) => Some(format!(
+            "stages are a work list's; `{}` has none",
+            spec.capability
+        )),
+        (false, true) => None,
+    }
 }
 
 /// How a credential is obtained by signing in: OAuth 2.1's
@@ -888,6 +912,7 @@ pub fn parse_providers(
                 oxplow_domain::work_items::fields_problem(&spec.fields)
                     .map(|p| format!("provider `{id}`: {p}"))
             })
+            .or_else(|| stages_problem(&spec).map(|p| format!("provider `{id}`: {p}")))
         {
             Some(problem)
         } else if let Some(pattern) = &spec.id_pattern {

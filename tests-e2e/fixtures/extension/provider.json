@@ -36,19 +36,16 @@
           "parent_uri": {
             "type": "string"
           },
-          "state": {
+          "stage": {
             "type": "string",
             "enum": [
-              "backlog",
-              "todo",
-              "in_progress",
-              "blocked",
-              "done",
-              "canceled"
+              "icebox",
+              "ready",
+              "doing",
+              "stuck",
+              "shipped",
+              "dropped"
             ]
-          },
-          "native_state": {
-            "type": "string"
           },
           "native": {
             "type": "object",
@@ -86,7 +83,7 @@
     },
     {
       "name": "update",
-      "summary": "Edit a work item's title, body, parent, state or points.",
+      "summary": "Edit a work item's title, body, parent, stage or points.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -106,19 +103,16 @@
           "parent_uri": {
             "type": "string"
           },
-          "state": {
+          "stage": {
             "type": "string",
             "enum": [
-              "backlog",
-              "todo",
-              "in_progress",
-              "blocked",
-              "done",
-              "canceled"
+              "icebox",
+              "ready",
+              "doing",
+              "stuck",
+              "shipped",
+              "dropped"
             ]
-          },
-          "native_state": {
-            "type": "string"
           },
           "native": {
             "type": "object",
@@ -137,7 +131,7 @@
     },
     {
       "name": "transition",
-      "summary": "Move a work item to a canonical state, optionally naming a fake state.",
+      "summary": "Move a work item to one of its stages.",
       "input_schema": {
         "type": "object",
         "required": [
@@ -152,16 +146,13 @@
           "to": {
             "type": "string",
             "enum": [
-              "backlog",
-              "todo",
-              "in_progress",
-              "blocked",
-              "done",
-              "canceled"
+              "icebox",
+              "ready",
+              "doing",
+              "stuck",
+              "shipped",
+              "dropped"
             ]
-          },
-          "native_state": {
-            "type": "string"
           }
         }
       },
@@ -323,10 +314,8 @@
                 "type": "string",
                 "default": ""
               },
-              "state": {
-                "$ref": "#/$defs/CanonicalState"
-              },
-              "native_state": {
+              "stage": {
+                "description": "Which of the list's declared stages it's in (its bucket is core's\nlookup).",
                 "type": "string"
               },
               "native": {
@@ -369,20 +358,7 @@
             "required": [
               "uri",
               "title",
-              "state",
-              "native_state"
-            ]
-          },
-          "CanonicalState": {
-            "description": "The states every provider maps its own to. `backlog` is filed but not\nready to work on; `todo` is ready (what an idle thread may pull).",
-            "type": "string",
-            "enum": [
-              "backlog",
-              "todo",
-              "in_progress",
-              "blocked",
-              "done",
-              "canceled"
+              "stage"
             ]
           },
           "LinkRecord": {

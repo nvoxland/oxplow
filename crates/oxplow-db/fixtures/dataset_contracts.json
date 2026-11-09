@@ -12015,6 +12015,91 @@
         }
       ],
       "key": []
+    },
+    "10": {
+      "columns": [
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "`work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `ai_provider`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation's id: what `activeProviders` names, a work item ref's segment (`oxplow:oxplow/work_item?id=…&provider=<provider>`), `git`, `none`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension declaring it; NULL for core's."
+        },
+        {
+          "name": "features",
+          "type": "TEXT",
+          "doc": "The features it declares, as JSON (`work_items`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 on the capability's active implementation."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "How a person names it. (v3)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "How it's loaded: `core`, `builtin`, `external`, `none`; `unknown` for a choice nothing provides. (v3)"
+        },
+        {
+          "name": "available",
+          "type": "INTEGER",
+          "doc": "0 for a chosen implementation that isn't there to use. (v3)"
+        },
+        {
+          "name": "chosen_by",
+          "type": "TEXT",
+          "doc": "On the active row, why it's the one: `personal` (a person's own `.oxplow/personal.yaml`), `project` (`activeProviders`), `default`, `fallback` (the choice isn't available), or `declared` on every row of a capability many implementations serve. NULL on the rest. (v3)"
+        },
+        {
+          "name": "capability_title",
+          "type": "TEXT",
+          "doc": "How a person names the capability (`Work list`). (v4)"
+        },
+        {
+          "name": "choosable",
+          "type": "INTEGER",
+          "doc": "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`, `knowledge`). (v4)"
+        },
+        {
+          "name": "optional",
+          "type": "INTEGER",
+          "doc": "1 when the capability may be `none`. (v4)"
+        },
+        {
+          "name": "fields",
+          "type": "TEXT",
+          "doc": "Its own fields as a JSON array of `{ name, title, kind: enum|text|number, values? }`: what a work list keeps in `native` (oxplow's tasks: `priority`)."
+        },
+        {
+          "name": "stages",
+          "type": "TEXT",
+          "doc": "A work list's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxplow's tasks: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "What a work list's own ids look like, a regex matched whole (oxplow's tasks: `tsk\\d+`): how its ids are recognized in text, as core's vocabulary recognizes them. NULL when it doesn't say. (v6)"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what this implementation is (`description:` in `implementations:`); NULL when its declaration says nothing or it is core's own. Joins `v_contribution` where `kind = 'implementation'` on `extension` and `local = capability || '.' || provider`."
+        }
+      ],
+      "key": []
     }
   },
   "command_proposal": {
@@ -13444,6 +13529,86 @@
           "name": "native_state",
           "type": "TEXT",
           "doc": "The list's own state (oxplow: the task status, `archived` included)."
+        },
+        {
+          "name": "native",
+          "type": "TEXT",
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
+        },
+        {
+          "name": "parent_uri",
+          "type": "TEXT",
+          "doc": "The parent work item's URI (an epic); NULL at top level or when the parent is deleted."
+        },
+        {
+          "name": "assignee",
+          "type": "TEXT",
+          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.work_item.assign`); a done or canceled item has none — who worked on it is its efforts (`v_effort.work_item`)."
+        },
+        {
+          "name": "rank",
+          "type": "REAL",
+          "doc": "Its place in its assignee's queue, or among the unassigned (ascending); NULL orders by `created_at`."
+        },
+        {
+          "name": "closed_at",
+          "type": "TEXT",
+          "doc": "When it first reached `done` or `canceled` (RFC 3339); NULL while open."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/work_item?id=<id>&provider=<provider>` (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation it comes from: the active work list (`oxplow`, a provider instance)."
+        },
+        {
+          "name": "native_id",
+          "type": "TEXT",
+          "doc": "The id the list itself knows it by (`tsk42`, `ENG-12`): the URI without `oxplow:oxplow/work_item?id=&provider=<provider>`. Match a tracker's own rows on this, never by slicing `uri`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Markdown body."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Its bucket, what its stage means to core: `backlog` (filed, not ready), `todo` (ready to work on), `in_progress`, `blocked`, `done` or `canceled`."
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "doc": "The list's own stage, one it declares (`v_capability_provider.stages`; oxplow's tasks: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`)."
+        },
+        {
+          "name": "stage_title",
+          "type": "TEXT",
+          "doc": "How the list names its stage (`Ready`)."
         },
         {
           "name": "native",

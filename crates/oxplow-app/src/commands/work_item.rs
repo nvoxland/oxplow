@@ -10,9 +10,10 @@
 //! `links`, `comments`, `delete`) is refused before anything runs.
 //!
 //! The inputs are the interface's (`oxplow_domain::work_items`): the
-//! `v_work_item` columns, a canonical `state` and the provider's
-//! `native_state`, and `native` for its own fields; a loose id is the
-//! active list's ([`with_loose_refs`]).
+//! `v_work_item` columns: a `stage` (one the list declares, or a bucket
+//! for its default — core resolves it, [`resolve_stages`]) and `native`
+//! for its own fields; a loose id is the active list's
+//! ([`with_loose_refs`]).
 //!
 //! **Assignment is core's** ([`assign_op`], [`reorder_op`]): who is going
 //! to work on an item — a thread, the person or nobody — and its place in
@@ -39,9 +40,9 @@ use oxplow_domain::events::schema::{
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::work_items::{
-    provider_of, Assignee, CanonicalState, WorkItemAssignInput, WorkItemCommentInput,
-    WorkItemCreateInput, WorkItemDeleteInput, WorkItemLinkInput, WorkItemReorderInput,
-    WorkItemTransitionInput, WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry,
+    provider_of, Assignee, Bucket, WorkItemAssignInput, WorkItemCommentInput, WorkItemCreateInput,
+    WorkItemDeleteInput, WorkItemLinkInput, WorkItemReorderInput, WorkItemTransitionInput,
+    WorkItemUpdateInput, WorkItemsProvider, WorkItemsRegistry,
 };
 use oxplow_domain::{CommandCall, CommandError};
 use serde_json::{json, Value};
@@ -396,12 +397,15 @@ fn dispatching(
                     }
                 }
             }
-            // The state it's in before the verb, and who it's assigned to:
-            // a state verb that leaves it there moved nothing, and one that
-            // closes it releases its assignee.
-            let (prior, prior_assignee) = match (&reads, input["uri"].as_str()) {
+            // A stage is the list's: a bucket's name means its default, and
+            // the list receives its own stage's id.
+            resolve_stages(&provider, verb, &mut input)?;
+            // The stage and bucket it's in before the verb, and who it's
+            // assigned to: a verb that leaves its bucket moved nothing, and
+            // one that closes it releases its assignee.
+            let prior = match (&reads, input["uri"].as_str()) {
                 (Some(db), Some(item)) if verb != "create" => prior_of(db, item).await?,
-                _ => (None, None),
+                _ => Prior::default(),
             };
             let out = provider
                 .verbs
@@ -448,26 +452,35 @@ fn dispatching(
                     json!(links.item_warnings(body.to_string(), thread, item).await);
             }
             let mut events = out.events;
-            let state = external_state(verb, &input, &result, &events);
+            let stage = recorded_stage(verb, &input, &result, &events);
+            let state = stage
+                .as_deref()
+                .and_then(|st| oxplow_domain::work_items::bucket_of(&provider.stages, st));
             // The interface's answer, the same for every list: the item and,
-            // when the verb put it in one, its state.
-            if let (Some(state), Value::Object(fields)) = (state, &mut result) {
+            // when the verb put it in one, its stage and bucket.
+            if let (Some(stage), Some(state), Value::Object(fields)) = (&stage, state, &mut result)
+            {
+                fields.insert("stage".into(), json!(stage));
                 fields.insert("state".into(), json!(state));
             }
-            // `work_item.state_changed` says the state moved: not for a
-            // verb that left it where it was.
-            let moved = state.filter(|s| prior != Some(*s));
+            // `work_item.state_changed` says the bucket moved: not for a
+            // verb that left it there. A move between two of a bucket's
+            // stages is an edit of the stage.
+            let moved = state.filter(|s| prior.state != Some(*s));
+            let restaged = stage.is_some() && stage != prior.stage && moved.is_none();
             let source = invocation.actor().source();
-            events.extend(canonical_events(&source, verb, &input, &result, moved));
+            events.extend(canonical_events(
+                &source, verb, &input, &result, moved, restaged,
+            ));
             if let Some(item) = written_ref(verb, &input, &result) {
-                let closed = state.is_some_and(CanonicalState::is_closed);
+                let closed = state.is_some_and(Bucket::is_closed);
                 // Filed for someone: assigned, unless it was filed closed.
                 if let (Some(to), false) = (assignee, closed) {
                     events.push(assigned(&source, &item, None, Some(to), None));
                 }
                 // Closed: who worked on it is its efforts, so it's
                 // nobody's to work on now.
-                if let (Some(from), true) = (prior_assignee, closed && verb != "create") {
+                if let (Some(from), true) = (prior.assignee, closed && verb != "create") {
                     events.push(assigned(&source, &item, Some(from), None, None));
                 }
             }
@@ -489,30 +502,75 @@ fn dispatching(
     )
 }
 
-/// The canonical state item `item_ref` is in and who it's assigned to,
-/// as the interface shows them (`v_work_item`); `None`s for one it
-/// doesn't show.
-async fn prior_of(
-    db: &oxplow_db::Database,
-    item_ref: &str,
-) -> Result<(Option<CanonicalState>, Option<String>), CommandError> {
+/// What an item was before a verb: its stage, its bucket and who it's
+/// assigned to, as the interface shows them; empty for one it doesn't.
+#[derive(Debug, Default)]
+struct Prior {
+    stage: Option<String>,
+    state: Option<Bucket>,
+    assignee: Option<String>,
+}
+
+/// `item_ref` as the interface shows it before the verb (`v_work_item`).
+async fn prior_of(db: &oxplow_db::Database, item_ref: &str) -> Result<Prior, CommandError> {
     use rusqlite::OptionalExtension as _;
     let item = item_ref.to_string();
-    let row: Option<(String, Option<String>)> = db
+    let row: Option<(String, String, Option<String>)> = db
         .read(move |tx| {
             tx.query_row(
-                "SELECT state, assignee FROM v_work_item WHERE uri = ?1",
+                "SELECT stage, state, assignee FROM v_work_item WHERE uri = ?1",
                 [&item],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()
             .map_err(oxplow_db::map_sql_err)
         })
         .await?;
     Ok(match row {
-        Some((state, assignee)) => (serde_json::from_value(json!(state)).ok(), assignee),
-        None => (None, None),
+        Some((stage, state, assignee)) => Prior {
+            stage: Some(stage),
+            state: Bucket::named(&state),
+            assignee,
+        },
+        None => Prior::default(),
     })
+}
+
+/// `input`'s stage — `transition`'s `to`, `create`'s and `update`'s
+/// `stage` — as one of `provider`'s stages: a stage id stays, a bucket's
+/// name becomes that bucket's default, anything else is refused at its
+/// field naming the list's stages. A create naming none starts in
+/// `todo`'s default.
+fn resolve_stages(
+    provider: &WorkItemsProvider,
+    verb: &str,
+    input: &mut Value,
+) -> Result<(), CommandError> {
+    let field = match verb {
+        "transition" => "to",
+        "create" | "update" => "stage",
+        _ => return Ok(()),
+    };
+    let Value::Object(fields) = input else {
+        return Ok(());
+    };
+    let named = match fields.get(field) {
+        Some(Value::String(name)) => Some(name.clone()),
+        Some(other) => {
+            return Err(invalid_at(
+                &format!("/{field}"),
+                format!("a stage is its id (a string), not {other}"),
+            ))
+        }
+        None if verb == "create" => Some(Bucket::Todo.as_str().to_string()),
+        None => None,
+    };
+    if let Some(name) = named {
+        let stage = oxplow_domain::work_items::resolve_stage(&provider.stages, &name)
+            .map_err(|m| invalid_at(&format!("/{field}"), format!("{}: {m}", provider.id)))?;
+        fields.insert(field.into(), Value::String(stage.id.clone()));
+    }
+    Ok(())
 }
 
 /// The item a verb wrote: a create's from its result, else the input's
@@ -522,22 +580,22 @@ fn written_ref(verb: &str, input: &Value, result: &Value) -> Option<String> {
     source["uri"].as_str().map(str::to_string)
 }
 
-/// The state a state verb put its item in, from the item its answer
-/// recorded; a create its answer recorded no item for is in the state it
-/// asked for. Whether that is a move is the caller's question: the state
-/// it was in before (`prior_state`) says.
-fn external_state(
+/// The stage a state verb put its item in, from the item its answer
+/// recorded; a create its answer recorded no item for is in the stage it
+/// asked for (resolved already). Whether that is a move is the caller's
+/// question: the stage it was in before ([`prior_of`]) says.
+fn recorded_stage(
     verb: &str,
     input: &Value,
     result: &Value,
     events: &[Envelope],
-) -> Option<CanonicalState> {
-    let names_state = match verb {
+) -> Option<String> {
+    let names_stage = match verb {
         "create" | "transition" => true,
-        "update" => input.get("state").is_some() || input.get("native_state").is_some(),
+        "update" => input.get("stage").is_some(),
         _ => false,
     };
-    if !names_state {
+    if !names_stage {
         return None;
     }
     let item_ref = written_ref(verb, input, result)?;
@@ -551,11 +609,9 @@ fn external_state(
             .ok()
         })
         .find(|r| r.item.uri == item_ref)
-        .map(|r| r.item.state);
+        .map(|r| r.item.stage);
     match verb {
-        "create" => recorded.or_else(|| {
-            Some(serde_json::from_value(input["state"].clone()).unwrap_or(CanonicalState::Todo))
-        }),
+        "create" => recorded.or_else(|| input["stage"].as_str().map(str::to_string)),
         _ => recorded,
     }
 }
@@ -569,7 +625,9 @@ fn external_state(
 /// - `update`: `work_item.edited` naming the fields the input set
 ///   (`title`, `body`, `parent`, `native.<name>`), and
 ///   `work_item.state_changed` when the state moved.
-/// - `transition`: `work_item.state_changed` when the state moved.
+/// - `transition`: `work_item.state_changed` when the bucket moved, else
+///   `work_item.edited` naming `stage` when it moved between two of the
+///   bucket's stages (as an update's does).
 /// - `link`, `comment`, `delete`: `work_item.linked`, `.commented`
 ///   (naming the answer's `comment`, when it gives one), `.deleted`.
 fn canonical_events(
@@ -577,7 +635,8 @@ fn canonical_events(
     verb: &str,
     input: &Value,
     result: &Value,
-    state: Option<CanonicalState>,
+    state: Option<Bucket>,
+    restaged: bool,
 ) -> Vec<Envelope> {
     let Some(item_ref) = written_ref(verb, input, result) else {
         return Vec::new();
@@ -618,10 +677,14 @@ fn canonical_events(
             if let Some(Value::Object(native)) = input.get("native") {
                 fields.extend(native.keys().map(|k| format!("native.{k}")));
             }
+            if restaged {
+                fields.push("stage".into());
+            }
             if !fields.is_empty() {
                 events.push(edited(fields));
             }
         }
+        "transition" if restaged => events.push(edited(vec!["stage".into()])),
         // A link already there, or none to remove, changed nothing.
         "link" if result["linked"] != json!(false) => {
             let target = input["target"].as_str().unwrap_or_default().to_string();
@@ -1234,77 +1297,45 @@ mod tests {
         );
     }
 
-    /// P7.A1: `transition` names a canonical state and, optionally, the
-    /// provider's own — oxplow's `archived` rides on `done` or `canceled`;
-    /// a native state that doesn't map to the canonical one is refused at
-    /// `/native_state`; the inverse carries both, so undo restores the
-    /// exact status.
+    /// `transition` names one of the list's stages or a bucket for its
+    /// default; anything else is refused at `/to` naming the stages; the
+    /// inverse names the stage it left, so undo restores it. A move between
+    /// two stages of one bucket isn't a state change.
     #[tokio::test]
-    async fn a_transition_takes_a_state_and_an_optional_native_state() {
+    async fn a_transition_takes_a_stage_or_a_bucket() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let t = work_item_ref(fx.task);
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                NAME,
-                json!({ "uri": t, "to": "in_progress", "native_state": "done" }),
-                false,
-            )
-            .await
-            .unwrap_err();
+        let run = |input: Value| {
+            let commands = fx.svc.commands.clone();
+            async move { commands.run(&Actor::Human, NAME, input, false).await }
+        };
+        let err = run(json!({ "uri": t, "to": "shipped" })).await.unwrap_err();
         assert!(
-            matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/native_state"),
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == "/to" && message.contains("backlog, ready, in_progress, blocked, done, canceled")),
             "{err:?}"
         );
-        let err = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                NAME,
-                json!({ "uri": t, "to": "done", "native_state": "Shipped" }),
-                false,
-            )
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("isn't an oxplow status"), "{err}");
-
-        let out = fx
-            .svc
-            .commands
-            .run(
-                &Actor::Human,
-                NAME,
-                json!({ "uri": t, "to": "done", "native_state": "archived" }),
-                false,
-            )
-            .await
-            .unwrap();
-        assert_eq!(task_row(&fx.svc, &out.result).await["status"], "archived");
+        // A bucket lands on its default stage: oxplow's `todo` is `ready`.
+        let out = run(json!({ "uri": t, "to": "todo" })).await.unwrap();
+        assert_eq!(out.result["stage"], "ready");
+        assert_eq!(out.result["state"], "todo");
+        assert_eq!(task_row(&fx.svc, &out.result).await["status"], "ready");
         let inverse = out.inverse.clone().unwrap();
         assert_eq!(inverse.name, NAME);
-        assert_eq!(
-            inverse.input,
-            json!({ "uri": t, "to": "in_progress", "native_state": "in_progress" })
-        );
+        assert_eq!(inverse.input, json!({ "uri": t, "to": "in_progress" }));
         let row = fx
             .svc
             .sql
             .query_sql(
-                "SELECT state, native_state FROM v_work_item WHERE uri = ?1",
+                "SELECT state, stage, stage_title FROM v_work_item WHERE uri = ?1",
                 vec![oxplow_db::SqlCell::Text(t.clone())],
                 None,
             )
             .await
             .unwrap();
         assert_eq!(
-            row.rows[0],
-            vec![
-                oxplow_db::SqlCell::Text("done".into()),
-                oxplow_db::SqlCell::Text("archived".into())
-            ]
+            serde_json::to_value(&row.rows[0]).unwrap(),
+            json!(["todo", "ready", "Ready"])
         );
         fx.svc
             .commands
@@ -2119,7 +2150,7 @@ mod tests {
                 &agent,
                 UPDATE,
                 json!({
-                    "uri": work_item_ref(fx.task), "title": "renamed", "state": "blocked",
+                    "uri": work_item_ref(fx.task), "title": "renamed", "stage": "blocked",
                     "native": { "priority": "urgent" }
                 }),
                 false,
@@ -2189,7 +2220,7 @@ mod tests {
             .run(
                 &other,
                 UPDATE,
-                json!({ "uri": work_item_ref(fx.task), "title": "renamed", "state": "done" }),
+                json!({ "uri": work_item_ref(fx.task), "title": "renamed", "stage": "done" }),
                 false,
             )
             .await
@@ -2231,7 +2262,7 @@ mod tests {
             .run(
                 &other,
                 CREATE,
-                json!({ "title": "mine now", "assignee": "thr9", "state": "in_progress" }),
+                json!({ "title": "mine now", "assignee": "thr9", "stage": "in_progress" }),
                 false,
             )
             .await
@@ -2262,7 +2293,7 @@ mod tests {
                 json!({
                     "title": "filed",
                     "body": "see [[tsk1]]",
-                    "state": "in_progress",
+                    "stage": "in_progress",
                     "assignee": fx.thread.to_string(),
                 }),
                 false,
