@@ -1,7 +1,5 @@
 # The rail's Work panel run whole: the body groups the thread's work, the
-# collapsed line is the item in progress, and the count is in progress +
-# ready (finished isn't counted). The Finished heading opens the thread's
-# whole list.
+# collapsed line is the item in progress, and the header has no count.
 given:
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - { command: oxplow.work_item.create, input: { title: Next up, state: todo, thread: thr1 } }
@@ -12,12 +10,12 @@ expect:
     loaders:
       work:
         rows:
-          - { grp: In progress, title: Work in progress }
+          - { grp: In progress, title: Untitled effort }
           - { grp: Ready, title: Next up }
-          - { grp: Finished, title: Shipped, grp_ref: 'oxplow:oxplow/page?page=thread-work&thread=thr1' }
+          - { grp: Finished, title: Shipped }
   collapsed:
     loaders:
       work_line:
         rows:
-          - { title: Work in progress, active: 1 }
-  count: 2
+          - { title: Untitled effort, active: 1 }
+  count: null

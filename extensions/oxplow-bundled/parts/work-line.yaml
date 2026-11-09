@@ -17,7 +17,6 @@ loaders:
 view:
   from: work_line
   viz: list
-  emphasis: active
   depth: depth
   columns:
   - key: title

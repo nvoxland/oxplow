@@ -6,20 +6,20 @@ params:
 loaders:
   work:
     sql: |
-      SELECT grp, title, icon, uri, depth, active,
-             CASE grp WHEN 'Finished' THEN uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || thread_id) END AS grp_ref
+      SELECT grp, title, icon, uri, depth, active
       FROM v_oxplow_thread_work
       WHERE thread_id = :thread_id
       ORDER BY g, ord
 view:
   from: work
   viz: list
+  # In the rail, In progress shows whole and the others two rows each;
+  # grown to the rail, ten. Past that, "+N more" grows the panel, then
+  # opens the Work page.
   group:
     by: grp
-    link:
-      kind: page
-      from: grp_ref
-  emphasis: active
+    compact: { Ready: 2, Finished: 2 }
+    grown: { Ready: 10, Finished: 10 }
   depth: depth
   columns:
   - key: title
@@ -29,10 +29,3 @@ view:
       kind: page
       from: uri
   empty: No active work
-  actions:
-  - id: clear
-    label: clear
-    command: oxplow.work.clear_finished
-    group: Finished
-    input:
-      thread_id: '{{param.thread_id}}'

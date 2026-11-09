@@ -6,11 +6,17 @@
 -- it's whichever list is active. An epic is an item with children; it's
 -- shown as context, never as the active item. A linked effort shows as
 -- its item.
-WITH item AS (
-  SELECT w.*, EXISTS (SELECT 1 FROM ref('work_item') c WHERE c.parent_uri = w.uri) AS is_epic,
+-- The items that have children, found once: an EXISTS per item searched
+-- every item for each (1.2 s over 1,600 items, and `item` is read several
+-- times below).
+WITH parent AS (
+  SELECT DISTINCT parent_uri AS uri FROM ref('work_item') WHERE parent_uri IS NOT NULL
+),
+item AS (
+  SELECT w.*, p.uri IS NOT NULL AS is_epic,
          row_number() OVER (PARTITION BY w.thread_id
                             ORDER BY w.rank IS NULL, w.rank, w.created_at) AS pos
-  FROM ref('work_item') w
+  FROM ref('work_item') w LEFT JOIN parent p ON p.uri = w.uri
 ),
 active AS (
   SELECT * FROM (
@@ -24,7 +30,7 @@ epic AS (
   FROM active a JOIN item e ON e.uri = a.parent_uri AND e.is_epic
 ),
 unlinked AS (
-  SELECT e.thread_id, e.id, e.uri, coalesce(e.title, 'Work in progress') AS title, e.ended_at
+  SELECT e.thread_id, e.id, e.uri, e.title, e.ended_at
   FROM ref('effort') e
   WHERE e.work_item IS NULL
 ),

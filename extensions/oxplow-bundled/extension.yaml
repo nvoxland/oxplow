@@ -249,7 +249,6 @@ commands:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
 panels:
   # The thread's work: in progress (with its epic), ready next and recently
-  # finished, from the active work list; collapsed, the item in progress;
-  # counted by in progress + ready. Its header opens the Work page, the
-  # same list in a tab.
-  - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, count: work-count, open: 'oxplow:oxplow/page?page=work' }
+  # finished, from the active work list; collapsed, the item in progress.
+  # Its header has no count, and opens the Work page, the same list in a tab.
+  - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=work' }

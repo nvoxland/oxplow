@@ -8,8 +8,8 @@ given:
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:
-    work: { rows: [{ grp: In progress, title: Work in progress }, { grp: Ready, title: Next up }] }
+    work: { rows: [{ grp: In progress, title: Untitled effort }, { grp: Ready, title: Next up }] }
 steps:
   - given:
       - { command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }
-  - expect: { loaders: { work: { rows: [{ grp: In progress, title: Work in progress }] } } }
+  - expect: { loaders: { work: { rows: [{ grp: In progress, title: Untitled effort }] } } }

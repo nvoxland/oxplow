@@ -294,7 +294,7 @@ screens and the holder's add the review and analysis:
   host page's own nodes' actions, not an embedded page's, so the part's
   buttons are tested on the part. Each has a `panel:` fixture:
   the panel run whole, as the rail shows it. Work (`work-panel`, collapsed
-  `work-line`, count `work-count`; its header opens the `work` page) is `oxplow-bundled`'s, beside its
+  `work-line`, no count; its header opens the `work` page) is `oxplow-bundled`'s, beside its
   `thread_work` dataset and `work.clear_finished` command, with a `panel:`
   fixture. Still in the holder: Waiting on You (`waiting-on-me`, a badge)
   and Comments (`comments-panel`). Each moves the same way: its parts, a
