@@ -925,6 +925,16 @@ pub struct VizGroup {
     /// progress`. A value with none shows as it is.
     #[serde(default)]
     pub labels: std::collections::BTreeMap<String, String>,
+    /// A list drawn compact (a rail panel): the rows a group shows, by
+    /// value (`Ready: 2`), then "+N more" after it, which grows the panel
+    /// (as the list's own "+N more" does). A group not named shows every
+    /// row, and the list isn't cut at the panel's row cap.
+    #[serde(default)]
+    pub compact: std::collections::BTreeMap<String, u32>,
+    /// The same, for a panel grown to the whole rail: there "+N more"
+    /// opens the page the panel's header opens. A page shows every row.
+    #[serde(default)]
+    pub grown: std::collections::BTreeMap<String, u32>,
 }
 
 /// A value the viewer (or an agent) can set when running the viz,

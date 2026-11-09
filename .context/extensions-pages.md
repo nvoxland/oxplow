@@ -597,7 +597,13 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 under a heading per distinct `by` value, in the order each first appears,
 folding (▾ / ▸) and counting its rows; `labels: { value: heading }` names a
 heading in plain words while the value stays what a drop binds
-(`in_progress: In Progress`); `emphasis` (`list` / `table` /
+(`in_progress: In Progress`); `compact: { value: n }` and `grown: { value:
+n }` (`list` only) cap a group's rows in a rail panel and in one grown to the
+whole rail: the heading still counts them all, and the group ends in "+N
+more", which grows the panel, or, grown, opens the page its header opens. A
+group not named shows every row, and a list that caps its groups isn't cut
+at the panel's row cap. A page and an agent's read show every row
+(`capGroups`, `VizView.rows.test.tsx`); `emphasis` (`list` / `table` /
 `tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
 a whole number 0–8 that indents. They are never shown as cells.
 

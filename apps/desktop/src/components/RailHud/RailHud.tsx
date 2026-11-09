@@ -190,6 +190,7 @@ function RailSection({
   opens,
   filled = false,
   hidden = false,
+  morphing = false,
   onRestore,
   children,
 }: {
@@ -210,6 +211,10 @@ function RailSection({
   /** Out of sight while another panel fills the rail; still mounted, so
    *  it keeps its state, and still in the person's layout. */
   hidden?: boolean;
+  /** A grow or shrink runs as a view transition: only then is the section
+   *  named for it. A name makes it the box its fixed descendants place
+   *  against, so at rest a row's menu would be clipped by the rail. */
+  morphing?: boolean;
   onRestore?(): void;
   children: ReactNode;
 }) {
@@ -237,7 +242,7 @@ function RailSection({
         // takes the column's height and scrolls inside.
         ...(filled ? { flex: "1 1 0", minHeight: 0, flexDirection: "column" as const } : { flexShrink: 0 }),
         display: hidden ? "none" : filled ? "flex" : undefined,
-        viewTransitionName: `rail-section-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`,
+        ...(morphing ? { viewTransitionName: `rail-section-${id.replace(/[^A-Za-z0-9_-]/g, "-")}` } : {}),
       }}
     >
       {side ? (
@@ -388,7 +393,9 @@ export function RailHud({
   // state only, never the person's layout. One at a time; gone with it.
   const [filledWanted, setFilled] = useState<RailSectionId | null>(null);
   const filled = filledWanted !== null && sections.order.includes(filledWanted) ? filledWanted : null;
-  const fill = useCallback((id: RailSectionId | null) => withViewTransition(() => setFilled(id)), []);
+  // While a grow or shrink transition runs, the sections carry their names.
+  const [morphing, setMorphing] = useState(false);
+  const fill = useCallback((id: RailSectionId | null) => withViewTransition(() => setFilled(id), setMorphing), []);
 
   // Every visible panel always renders (a stable list); each shows its own
   // empty state when it has no content.
@@ -403,6 +410,7 @@ export function RailHud({
         onOpenPage={onOpenPage}
         filled={filled === id}
         hidden={filled !== null && filled !== id}
+        morphing={morphing}
         onFill={() => fill(id)}
         onRestore={() => fill(null)}
       />
@@ -462,10 +470,18 @@ export function RailHud({
 /** Run a change to what the rail shows as a view transition where the
  *  webview has them (the panel grows or shrinks into place); at once
  *  elsewhere. */
-function withViewTransition(change: () => void) {
-  const doc = document as Document & { startViewTransition?(update: () => void): unknown };
-  if (typeof doc.startViewTransition === "function") doc.startViewTransition(() => flushSync(change));
-  else change();
+/** Runs `change` as a view transition where the webview has one, at once
+ *  elsewhere; `naming` is on for its length (the old and new snapshots
+ *  both need the sections' names). */
+function withViewTransition(change: () => void, naming: (on: boolean) => void) {
+  const doc = document as Document & { startViewTransition?(update: () => void): { finished: Promise<unknown> } };
+  if (typeof doc.startViewTransition !== "function") {
+    change();
+    return;
+  }
+  flushSync(() => naming(true));
+  const transition = doc.startViewTransition(() => flushSync(change));
+  void transition.finished.finally(() => naming(false));
 }
 
 const RAIL_MIN_WIDTH = 260;
@@ -550,6 +566,7 @@ function ExtensionPanelSection({
   onOpenPage,
   filled,
   hidden,
+  morphing,
   onFill,
   onRestore,
 }: {
@@ -562,6 +579,8 @@ function ExtensionPanelSection({
   filled: boolean;
   /** Another panel fills the rail. */
   hidden: boolean;
+  /** A grow or shrink transition is running. */
+  morphing: boolean;
   onFill(): void;
   onRestore(): void;
 }) {
@@ -570,8 +589,10 @@ function ExtensionPanelSection({
   // The value in force is the one the body ran with (the daemon's).
   const toggles = runs.choices;
   // A panel's part: its page drawn small. The body keeps its buttons and
-  // its "+N more" grows the panel to the whole rail, where it shows every
-  // row and scrolls; the collapsed line is stats.
+  // its "+N more" asks for the next size up: in the rail it grows the panel
+  // to the whole rail, where it scrolls; grown (where only a list that caps
+  // its groups still has one) it opens the panel's page. The collapsed
+  // line is stats.
   const openRef = panelOpenRef(panel, extensions);
   const body = runs.body ? (
     <div
@@ -579,7 +600,7 @@ function ExtensionPanelSection({
       className="ox-compact"
       style={{ padding: "4px 10px 8px", fontSize: "var(--text-xs)", ...(filled ? { flex: 1, minHeight: 0, overflowY: "auto" as const } : {}) }}
     >
-      <PageTree run={runs.body.run} runId={runs.body.runId} compact partButtons uncapped={filled} onMore={onFill} streamId={streamId} onOpenPage={onOpenPage} />
+      <PageTree run={runs.body.run} runId={runs.body.runId} compact partButtons uncapped={filled} onMore={filled ? () => onOpenPage(openRef) : onFill} streamId={streamId} onOpenPage={onOpenPage} />
     </div>
   ) : null;
   const collapsed = runs.collapsed ? (
@@ -593,6 +614,7 @@ function ExtensionPanelSection({
       title={panel.title}
       filled={filled}
       hidden={hidden}
+      morphing={morphing}
       onRestore={onRestore}
       count={runs.count ?? undefined}
       collapsedContent={collapsed}

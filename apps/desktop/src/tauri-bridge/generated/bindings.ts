@@ -1457,7 +1457,7 @@ export type ColumnFormat =
 /**
  *  Short marks (a JSON array): each element is a string or `{ "text":
  *  …, "tone"?: …, "hint"?: … }`, drawn as small tight letters, each in
- *  its own `tone` (`success`, `warning`, `danger`, `info`, `muted`) —
+ *  its own `tone` (`accent`, `success`, `warning`, `danger`, `muted`) —
  *  a file's A/M/D, a change's `+3 −1`. `hint` is the mark's hover. An
  *  agent reads them joined by spaces, a hint in parentheses.
  */
@@ -6896,6 +6896,18 @@ export type VizGroup = {
 	 *  progress`. A value with none shows as it is.
 	 */
 	labels?: { [key in string]: string },
+	/**
+	 *  A list drawn compact (a rail panel): the rows a group shows, by
+	 *  value (`Ready: 2`), then "+N more" after it, which grows the panel
+	 *  (as the list's own "+N more" does). A group not named shows every
+	 *  row, and the list isn't cut at the panel's row cap.
+	 */
+	compact?: { [key in string]: number },
+	/**
+	 *  The same, for a panel grown to the whole rail: there "+N more"
+	 *  opens the page the panel's header opens. A page shows every row.
+	 */
+	grown?: { [key in string]: number },
 };
 
 /**  `hunks` viz: the file and the two revisions each row diffs. */

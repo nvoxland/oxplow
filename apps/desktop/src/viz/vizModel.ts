@@ -122,6 +122,19 @@ export interface RowGroup {
   label: string;
   rows: SqlCell[][];
   ref: LinkTarget | null;
+  /** How many rows the group has: its `rows` are only what shows when
+   *  capped (`capGroups`). */
+  total: number;
+}
+
+/** Each group cut to its cap in `caps` (by group key: `group.compact`
+ *  or `group.grown`); a group with none keeps every row. `total` stays
+ *  what it holds. */
+export function capGroups(groups: RowGroup[], caps: Partial<Record<string, number>>): RowGroup[] {
+  return groups.map((g) => {
+    const cap = caps[g.key];
+    return cap === undefined || g.rows.length <= cap ? g : { ...g, rows: g.rows.slice(0, cap) };
+  });
 }
 
 /** A grouped viz's rows under a heading per distinct `group.by` value:
@@ -137,7 +150,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
   const labelOf = (v: SqlCell): string => (v !== null && viz.group?.labels?.[String(v)]) || formatCell(v);
   const groups = new Map<string, RowGroup>();
   for (const v of viz.group?.values ?? []) {
-    groups.set(v, { key: v, value: v, label: labelOf(v), rows: [], ref: null });
+    groups.set(v, { key: v, value: v, label: labelOf(v), rows: [], ref: null, total: 0 });
   }
   for (const row of result.rows) {
     const v = row[i] ?? null;
@@ -147,6 +160,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
     if (g) {
       if (g.rows.length === 0 && link) g.ref = cellLinkRef(link, by, row, result.columns);
       g.rows.push(row);
+      g.total += 1;
       continue;
     }
     groups.set(key, {
@@ -155,6 +169,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
       label: labelOf(v),
       rows: [row],
       ref: link ? cellLinkRef(link, by, row, result.columns) : null,
+      total: 1,
     });
   }
   return [...groups.values()];

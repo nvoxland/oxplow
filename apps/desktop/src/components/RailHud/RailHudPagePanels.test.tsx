@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 
-import type { ExtensionPanel, PageRun } from "../../tauri-bridge/generated/bindings.js";
+import type { ExtensionPanel, PageRun, SqlCell, VizGroup } from "../../tauri-bridge/generated/bindings.js";
 import { createPageRuns, type PageKey } from "../../pageRuns.js";
 import { decl, fakeAction, fakePage, fakeRun, loader, node } from "../../pages/testing/fakeRun.js";
 
@@ -26,14 +26,23 @@ const panel: ExtensionPanel = {
 // A second panel, so a panel that grows has others to hide.
 const other: ExtensionPanel = { ...panel, id: "z/o", title: "Other", body: "z/other", badge: null };
 const layoutSaves: unknown[] = [];
+// The body's grouping, when a test sets one: rows `[group, title]`.
+let bodyGroup: VizGroup | null = null;
 const pageOf = (slug: string) =>
-  fakePage(node.viz("rows", "rows", { columns: [{ key: "t" } as never], actions: slug === "body" ? [fakeAction({ id: "tidy", label: "Tidy" })] : [] }), {
+  fakePage(
+    node.viz("rows", "rows", {
+      columns: [{ key: "t" } as never],
+      actions: slug === "body" ? [fakeAction({ id: "tidy", label: "Tidy" })] : [],
+      ...(slug === "body" && bodyGroup ? { viz: "list" as const, group: bodyGroup } : {}),
+    }),
+    {
     id: `z/${slug}`,
     extension: "z",
     slug,
     title: slug,
     loaders: [decl("rows")],
-  });
+  },
+  );
 mock.module("../../api.js", () => ({
   ...realApi,
   getPanelLayout: async () => [],
@@ -52,7 +61,7 @@ const { usePanelRuns } = await import("../Panels/PanelRunsContext.js");
 
 afterEach(cleanup);
 
-function fakeStore(opened: PageKey[], bodyRows: string[][] = [["body row"]]) {
+function fakeStore(opened: PageKey[], bodyRows: SqlCell[][] = [["body row"]], bodyColumns: string[] = ["t"]) {
   return createPageRuns({
     open: async (key) => {
       opened.push(key);
@@ -61,7 +70,7 @@ function fakeStore(opened: PageKey[], bodyRows: string[][] = [["body row"]]) {
           ? { ...fakeRun(pageOf("badge"), { loaders: { rows: loader(["t"], [["x"]]) } }), alert: { firing: true, count: 2, value: null, message: "2 waiting" } as never }
           : key.page === "z/other"
             ? fakeRun(pageOf("other"), { loaders: { rows: loader(["t"], [["other row"]]) } })
-            : fakeRun(pageOf("body"), { loaders: { rows: loader(["t"], bodyRows) } });
+            : fakeRun(pageOf("body"), { loaders: { rows: loader(bodyColumns, bodyRows) } });
       // The daemon's word: the header counts by the badge (no count page).
       const panel = key.page === "z/badge" ? { counts: true, count: 2, choices: [] } : { counts: false, count: null, choices: [] };
       return { runId: `run-${key.page}`, run, panel };
@@ -150,6 +159,47 @@ test("a panel's \"+N more\" grows it to the whole rail, and shrink or Escape put
   expect(section().getAttribute("data-filled")).toBeNull();
   expect(otherSection().style.display).toBe("");
   expect(layoutSaves).toEqual([]);
+});
+
+// A list that caps its groups (`group.compact`, `group.grown`) ends each
+// capped group in "+N more": in the rail it grows the panel, grown it
+// opens the panel's page.
+test("a capped group's +N more grows the panel, and grown it opens the panel's page", async () => {
+  bodyGroup = { by: "g", link: null, values: [], labels: {}, compact: { Ready: 1 }, grown: { Ready: 2 } };
+  const opened: string[] = [];
+  const rows = ["a", "b", "c"].map((t): SqlCell[] => ["Ready", t]);
+  try {
+    const view = render(
+      <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([], rows, ["g", "t"])}>
+        <RailHud streamId="str1" onOpenPage={(ref) => opened.push(ref.id)} />
+      </PanelRunsProvider>,
+    );
+    const section = () => view.getByTestId("rail-section-ext:z/w");
+    const more = () => within(section()).getByTestId("viz-group-more-Ready");
+    await waitFor(() => expect(more().textContent).toBe("+2 more"));
+    fireEvent.click(within(more()).getByRole("button"));
+    expect(section().getAttribute("data-filled")).toBe("true");
+    expect(more().textContent).toBe("+1 more");
+    fireEvent.click(within(more()).getByRole("button"));
+    expect(opened).toEqual(["oxplow:oxplow/page?page=z/body"]);
+  } finally {
+    bodyGroup = null;
+  }
+});
+
+// A section is named for a view transition only while one runs: a name
+// makes the section the box its fixed descendants place against, so a
+// row's right-click menu would be clipped by the rail.
+test("at rest no rail section carries a view-transition name", async () => {
+  const view = render(
+    <PanelRunsProvider streamId="str1" threadId={null} pageRuns={fakeStore([])}>
+      <RailHud streamId="str1" onOpenPage={() => {}} />
+    </PanelRunsProvider>,
+  );
+  await waitFor(() => expect(view.getByTestId("rail-section-ext:z/w").textContent).toContain("body row"));
+  for (const id of ["ext:z/w", "ext:z/o"]) {
+    expect(view.getByTestId(`rail-section-${id}`).getAttribute("style") ?? "").not.toContain("view-transition-name");
+  }
 });
 
 // A panel whose rows fit has no "+N more", so nothing to grow it.

@@ -122,10 +122,11 @@ export interface PageTreeProps {
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   /** Drawn small (a rail panel): its vizes compact, a few rows each. */
   compact?: boolean;
-  /** Asks for a compact viz's rows past its few: its "+N more" calls it
-   *  (a rail panel grows to the whole rail). */
+  /** Asks for the next size up: a compact viz's "+N more" calls it (a
+   *  rail panel grows to the whole rail; grown, it opens its page). */
   onMore?(): void;
-  /** Compact but every row (a rail panel grown to the whole rail). */
+  /** Compact but not cut at a few rows (a rail panel grown to the whole
+   *  rail): every row, except a list's groups capped by `group.grown`. */
   uncapped?: boolean;
   /** Its vizes' whole-viz actions as buttons above them; default: unless
    *  compact (an expanded row's page is compact and keeps them). */

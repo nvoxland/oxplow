@@ -3411,6 +3411,16 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
             "`group` is only for `list`, `table` and `board`, not `{viz}`"
         ));
     }
+    if cfg
+        .group
+        .as_ref()
+        .is_some_and(|g| !g.compact.is_empty() || !g.grown.is_empty())
+        && cfg.viz != Viz::List
+    {
+        return Some(format!(
+            "`group.compact` and `group.grown` are only for `list`, not `{viz}`"
+        ));
+    }
     if cfg.depth.is_some() && !rows {
         return Some(format!(
             "`depth` is only for `list` and `table`, not `{viz}`"
@@ -9143,6 +9153,8 @@ commands:
                 ("e", &viz_page("", "SELECT 1", "viz: list\nactions: [{ id: x, label: X, command: a.b.c, group: Ready }]\n")),
                 ("f", &viz_page("", "SELECT 1", "viz: list\ngroup: { by: g }\nactions: [{ id: x, label: X, command: a.b.c, group: Ready, row: true }]\n")),
                 ("g", &viz_page("", "SELECT 1 AS x, 2 AS y", "viz: bar\nchart: { x: x, y: y }\nemphasis: x\n")),
+                // A group's row caps draw a "+N more" only a list has.
+                ("h", &viz_page("", "SELECT 1 AS g", "viz: table\ngroup: { by: g, compact: { Ready: 2 } }\n")),
             ],
             "",
         );
@@ -9160,6 +9172,8 @@ commands:
                 }),
                 values: Vec::new(),
                 labels: Default::default(),
+                compact: Default::default(),
+                grown: Default::default(),
             })
         );
         assert_eq!(a.emphasis.as_deref(), Some("current"));
@@ -9175,6 +9189,7 @@ commands:
             ("e", "`group: Ready` needs the viz to have a `group`"),
             ("f", "a group action isn't a row action"),
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
+            ("h", "`group.compact` and `group.grown` are only for `list`"),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(

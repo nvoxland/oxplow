@@ -476,6 +476,60 @@ test("a list row leaves out its empty cells", () => {
   expect(view.getByTestId("viz-row-1").textContent).not.toContain("—");
 });
 
+// A list can cap its groups: `group.compact` in a rail panel,
+// `group.grown` in a panel grown to the whole rail, by group value. A
+// capped group ends in "+N more", which asks for the next size up (the
+// view's `onMore`: the panel grows, a grown one opens its page). A group
+// not named shows every row, and the panel's own row cap doesn't cut the
+// list, so no group is cut off whole. A page shows every row.
+const many: SqlCell[][] = [
+  ["In progress", null, 1, "Active", "in_progress", null, 1, 0, "u1"],
+  ["In progress", null, 2, "Also active", "in_progress", null, 0, 0, "u2"],
+  ["In progress", null, 3, "And this", "in_progress", null, 0, 0, "u3"],
+  ...[4, 5, 6, 7, 8, 9].map((n): SqlCell[] => ["Ready", null, n, `Next ${n}`, "todo", null, 0, 0, `u${n}`]),
+  ...[10, 11, 12, 13].map((n): SqlCell[] => ["Finished", null, n, `Done ${n}`, "done", null, 0, 0, `u${n}`]),
+];
+const runOfMany = (viz: Partial<VizConfig>): VizRun =>
+  ({ config: { ...base, ...viz }, params: {}, result: { columns, rows: many, truncated: false } }) as unknown as VizRun;
+const capped: Partial<VizConfig> = {
+  group: { by: "bucket", link: null, values: [], labels: {}, compact: { Ready: 2, Finished: 2 }, grown: { Ready: 3, Finished: 3 } },
+  columns: [{ key: "title", label: null, link: null, unit: null, icon: null, tone: null }],
+};
+const shownOf = (view: ReturnType<typeof render>) => view.getAllByTestId(/^viz-row-\d+$/).map((r) => r.textContent ?? "");
+const groupMore = (view: ReturnType<typeof render>, group: string) => view.queryByTestId(`viz-group-more-${group}`);
+
+test("in a panel, a list caps each group `group.compact` names, and a group's +N more grows the panel", () => {
+  let more = 0;
+  const view = render(<VizView run={runOfMany(capped)} compact maxRows={8} onMore={() => more++} onOpenPage={() => {}} />);
+  // In progress isn't named: all three. Ready and Finished: two each.
+  expect(shownOf(view)).toEqual(["Active", "Also active", "And this", "Next 4", "Next 5", "Done 10", "Done 11"]);
+  // The heading counts the group, not what shows.
+  expect(view.getAllByTestId("viz-group-count").map((c) => c.textContent)).toEqual(["3", "6", "4"]);
+  // No cut of the whole list.
+  expect(view.queryByTestId("viz-more")).toBeNull();
+  expect(groupMore(view, "In progress")).toBeNull();
+  expect(groupMore(view, "Ready")!.textContent).toBe("+4 more");
+  expect(groupMore(view, "Finished")!.textContent).toBe("+2 more");
+  fireEvent.click(groupMore(view, "Finished")!.querySelector("button")!);
+  expect(more).toBe(1);
+});
+
+test("grown, a list caps each group `group.grown` names, and +N more asks for the page", () => {
+  let more = 0;
+  const view = render(<VizView run={runOfMany(capped)} compact onMore={() => more++} onOpenPage={() => {}} />);
+  expect(shownOf(view)).toEqual(["Active", "Also active", "And this", "Next 4", "Next 5", "Next 6", "Done 10", "Done 11", "Done 12"]);
+  expect(groupMore(view, "Ready")!.textContent).toBe("+3 more");
+  expect(groupMore(view, "Finished")!.textContent).toBe("+1 more");
+  fireEvent.click(groupMore(view, "Ready")!.querySelector("button")!);
+  expect(more).toBe(1);
+});
+
+test("a page shows every row of every group", () => {
+  const view = render(<VizView run={runOfMany(capped)} onOpenPage={() => {}} />);
+  expect(view.getAllByTestId(/^viz-row-\d+$/)).toHaveLength(13);
+  expect(groupMore(view, "Ready")).toBeNull();
+});
+
 // `mock.module` outlives this file: put the real modules back for the files that run after it.
 afterAll(() => {
   mock.module("../api.js", () => realApi);

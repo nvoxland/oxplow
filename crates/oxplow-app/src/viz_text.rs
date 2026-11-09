@@ -1476,6 +1476,8 @@ mod tests {
                 link: None,
                 values: Vec::new(),
                 labels: Default::default(),
+                compact: Default::default(),
+                grown: Default::default(),
             });
             l.depth = Some("d".into());
         });
@@ -1496,6 +1498,8 @@ mod tests {
                 link: None,
                 values: vec!["todo".into(), "done".into()],
                 labels: Default::default(),
+                compact: Default::default(),
+                grown: Default::default(),
             });
         });
         assert_eq!(

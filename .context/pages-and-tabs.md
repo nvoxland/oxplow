@@ -1168,22 +1168,22 @@ zone grouping); each appears only when it has content:
 2. **Work** — an `oxplow-bundled` panel, thread-scoped, over
    its dataset `thread_work` (one row per line, per thread), which reads the
    work-item interface (`v_work_item`): whichever list is active, nothing
-   with none. Its header opens the `work` page, the same list in a tab.
-   The body part `work-panel` groups the lines (`group`): "In
+   with none. Its header opens the `work` page, the same list in a tab,
+   every row. The body part `work-panel` groups the lines (`group`): "In
    progress" (the active item; under its epic, with the epic's other
-   children indented and the active one emphasized, when it has one, plus
-   an open effort no item names), "Ready" (every one, by `rank` then
+   children indented beside it, when it has one, plus an open effort no
+   item names; no row is highlighted: its state icon says which is active), "Ready" (every one, by `rank` then
    `created_at`) and "Finished" (the last 20 done items, wiki pages and
-   unlinked efforts, its heading opening the thread's whole list,
-   foundation's `thread-work`, with a `clear`
-   group action: `oxplow.work.clear_finished` records an event and the
-   `finished_cleared` dataset hides what finished before it — per thread,
-   no longer browser-local). Status and kind show as row icons. Collapsed,
-   the `work-line` part: the active item (with its epic), else the last
-   finished. The header count (`work-count`) is in progress + ready, never
-   an alert. The rail shows 8 rows and "+N more", which grows the panel to
-   the whole rail: the whole queue, so the dataset caps only Finished. Rows link (Cmd-click opens a new tab) and offer Add to
-   Context on right-click.
+   unlinked efforts, newest first; `oxplow.work.clear_finished` records an
+   event and the `finished_cleared` dataset hides what finished before
+   it, though the panel has no button for it). The headings have no
+   arrow and no buttons. In the rail, In progress shows whole and Ready
+   and Finished two rows each (`group.compact`), each with "+N more",
+   which grows the panel; grown, ten each (`group.grown`), and "+N more"
+   opens the Work page. Status and kind show as row icons. Collapsed, the
+   `work-line` part: the active item (with its epic), else the last
+   finished. The header has no count. Rows link (Cmd-click opens a new
+   tab) and offer Add to Context on right-click.
 3. **Git** — an `oxplow-foundation` panel, stream-scoped, its header
    opening Git Status. Its header toggle (`show`, declared by every part)
    picks one of three views. **Uncommitted and untracked** / **Uncommitted**:
@@ -1247,10 +1247,17 @@ none`, still mounted, still in the layout), the body shows every row
 no drag handle, and its chevron is the shrink icon ("Shrink"); it and Escape (the card takes focus,
 the rail's `keydown` hears it) put the rail back, with its order and
 collapsed panels as they were. A panel whose rows fit has no "+N more", so
-nothing grows it. It is the window's state only, never `panel_layout`; one
+nothing grows it. A list that caps its groups (`group.compact` /
+`group.grown`) has a "+N more" per capped group instead of one for the
+list: in the rail it grows the panel, grown it opens the panel's page
+(`open`, else its body): "+N more" always asks for the next size up. It
+is the window's state only, never `panel_layout`; one
 panel at a time. The change runs as a view transition
-(`document.startViewTransition`, each section its own
-`view-transition-name`) where the webview has it, at once elsewhere.
+(`document.startViewTransition`) where the webview has it, at once
+elsewhere. Each section carries its own `view-transition-name` only while
+the transition runs (`morphing`): a name makes the section the box its
+`position: fixed` descendants place against, so at rest a row's
+right-click menu would be clipped by the rail.
 
 ## The dock
 

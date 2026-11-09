@@ -237,8 +237,11 @@ exists for actions and links).
   sometimes (a merge's second parent) rather than a section of its own.
   Unknown values draw nothing.
 
-Row styling on `list`/`table`: `group: { by: <column>, link?, labels? }` (`labels: { stored_value: Heading }` names a heading in plain words) puts rows
-under a heading per value; `emphasis: <column>` highlights rows whose value
+Row styling on `list`/`table`: `group: { by: <column>, link?, labels?, compact?, grown? }` (`labels: { stored_value: Heading }` names a heading in plain words) puts rows
+under a heading per value. On a `list` in a rail panel, `compact: { Ready: 2 }`
+shows that many of a group's rows, then "+N more" (it grows the panel), and
+`grown: { Ready: 10 }` does the same in the grown panel (there "+N more"
+opens the panel's page); a group not named shows all, and a page shows all; `emphasis: <column>` highlights rows whose value
 is truthy; `depth: <column>` indents.
 
 ## Actions

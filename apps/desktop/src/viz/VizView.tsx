@@ -51,6 +51,7 @@ import {
   foldedAway,
   rowEmphasized,
   rowGroups,
+  capGroups,
   rowRef,
   sparklineValues,
   stepItems,
@@ -501,8 +502,13 @@ function RowsBody({
   onMore,
 }: VizViewProps & { actions?: VizActionsState; marks?: Marks; tree?: LazyTree | null }) {
   const viz = run.config;
+  // A list may cap each group instead (`group.compact` in a panel,
+  // `group.grown` in a panel grown to the rail; a page caps nothing): its
+  // groups end in "+N more", and the list itself isn't cut.
+  const groupCaps = viz.viz === "list" && compact ? ((maxRows !== undefined ? viz.group?.compact : viz.group?.grown) ?? {}) : {};
+  const capsGroups = Object.keys(groupCaps).length > 0;
   // A tree caps the rows it shows, not the rows it has: folding frees rows.
-  const capsShown = viz.viz === "tree";
+  const capsShown = viz.viz === "tree" || capsGroups;
   const limited = capsShown ? run.result : limitRows(run.result, maxRows);
   const past = run.result.rows.length - limited.rows.length;
   // The rows under a parent folded away (a `depth` viz: an epic's
@@ -761,7 +767,8 @@ function RowsBody({
     ...(picks ? { "aria-selected": picks.selected(row) } : {}),
   });
   // A grouped list or table: its headings, each with its group's actions.
-  const groups = rowGroups(viz, result);
+  const allGroups = rowGroups(viz, result);
+  const groups = allGroups && capsGroups ? capGroups(allGroups, groupCaps) : allGroups;
   // A tree draws its rows in nesting order (a lazy tree's spliced rows too).
   const treeNodesDrawn = viz.viz === "tree" ? (tree?.nodes ?? treeNodes(viz, result)) : null;
   drawn = groups ? groups.filter((g) => !folded.has(g.key)).flatMap((g) => g.rows) : treeNodesDrawn ? drawnTreeRows(treeNodesDrawn) : result.rows;
@@ -913,6 +920,7 @@ function RowsBody({
   };
   const rowsView: RowsView = {
     groups,
+    onMore,
     folded: (g) => folded.has(g.key),
     detail,
     heading,
@@ -1016,6 +1024,8 @@ interface RowsView {
   /** What a row opens under itself (its `expand` viz nodes), if anything. */
   detail(row: SqlCell[], index: number): ReactNode;
   heading(g: RowGroup): ReactNode;
+  /** What a capped group's "+N more" asks for: the next size up. */
+  onMore?: (() => void) | undefined;
   /** A drop target for a whole group (a board column). */
   groupDrop(g: RowGroup): Record<string, unknown>;
   rowLook: RowLook;
@@ -1065,7 +1075,7 @@ function GroupHeading({
       <span>{group.label}</span>
       {ref ? <OpenPageLink to={ref} name={group.label} onNavigate={tabNavigate(ref, onOpenPage)} /> : null}
       <span data-testid="viz-group-count" style={{ fontWeight: "normal", color: "var(--text-muted)" }}>
-        {group.rows.length}
+        {group.total}
       </span>
       {actions.length > 0 ? (
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 4 }}>
@@ -1643,10 +1653,10 @@ function treeNodeOpen(n: TreeNode, path: string, closed: CollapsedSet, lazyOpen:
 
 /** The row after a compact viz's last: how many rows it doesn't show, a
  *  button asking for them when someone can show them. */
-function MoreRow({ count, onMore }: { count: number; onMore?: (() => void) | undefined }) {
+function MoreRow({ count, onMore, testId = "viz-more" }: { count: number; onMore?: (() => void) | undefined; testId?: string }) {
   const text = `+${count} more`;
   return (
-    <div data-testid="viz-more" style={{ padding: "2px 0 0 20px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
+    <div data-testid={testId} style={{ padding: "2px 0 0 20px", fontSize: "var(--text-xs)", color: "var(--text-secondary)" }}>
       {onMore ? (
         <button type="button" onClick={onMore} title="Show them all" style={linkStyle}>
           {text}
@@ -2108,6 +2118,11 @@ function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProp
                 </li>
               );
             })}
+            {group && !view?.folded(group) && group.total > group.rows.length ? (
+              <li>
+                <MoreRow count={group.total - group.rows.length} onMore={view?.onMore} testId={`viz-group-more-${group.key}`} />
+              </li>
+            ) : null}
           </Fragment>
         ))}
       </ul>
