@@ -2553,4 +2553,45 @@ mod tests {
             "task.acceptance_criteria column must be dropped by V18 (cols: {cols:?})"
         );
     }
+
+    /// An item on no thread's list was the backlog: migrating a database
+    /// that holds one puts it in the backlog state, which the old tables'
+    /// checks don't allow, so the tables are rebuilt before it moves.
+    #[test]
+    fn an_unthreaded_ready_item_migrates_to_the_backlog() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        crate::sql_functions::register(&conn).unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(6))
+            .run(&mut conn)
+            .unwrap();
+        let now = "2026-11-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO task (id, title, status, priority, created_by, created_at, updated_at)
+             VALUES (1, 't', 'ready', 'medium', 'user', ?1, ?1)",
+            [now],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO work_item (uri, provider, title, state, native_state, created_at, updated_at)
+             VALUES ('work_item:oxplow:tsk1', 'oxplow', 't', 'todo', 'ready', ?1, ?1)",
+            [now],
+        )
+        .unwrap();
+
+        migrate_and_compile(&mut conn).unwrap();
+
+        let status: String = conn
+            .query_row("SELECT status FROM task WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        let (state, stage): (String, String) = conn
+            .query_row(
+                "SELECT state, stage FROM work_item WHERE uri = 'work_item:oxplow:tsk1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "backlog");
+        assert_eq!((state.as_str(), stage.as_str()), ("backlog", "backlog"));
+    }
 }

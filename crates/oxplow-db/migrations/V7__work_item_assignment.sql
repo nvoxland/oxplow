@@ -25,18 +25,13 @@ FROM work_item
 WHERE deleted_at IS NULL AND state NOT IN ('done', 'canceled')
   AND (thread_id IS NOT NULL OR rank IS NOT NULL);
 
--- oxplow's ready tasks on no thread were the backlog: they are now in the
--- backlog state.
-UPDATE task SET status = 'backlog'
-WHERE thread_id IS NULL AND status = 'ready' AND deleted_at IS NULL;
-UPDATE work_item SET state = 'backlog', native_state = 'backlog'
-WHERE provider = 'oxplow' AND thread_id IS NULL AND state = 'todo';
-
 -- A list's logged records no longer state the list or rank they were on.
 UPDATE event_log SET payload = json_remove(payload, '$.item.list', '$.item.rank')
 WHERE type = 'work_item.recorded';
 
 -- work_item: the backlog state; no thread or rank (the assignment's now).
+-- oxplow's to-do items on no thread were the backlog: they move to the
+-- backlog state as they're copied (the old table's check refuses it).
 CREATE TABLE work_item_new (
     uri TEXT PRIMARY KEY,
     provider TEXT NOT NULL,
@@ -54,8 +49,12 @@ CREATE TABLE work_item_new (
 );
 INSERT INTO work_item_new (uri, provider, title, body, state, native_state, native,
                            parent_uri, created_at, updated_at, deleted_at, closed_at)
-SELECT uri, provider, title, body, state, native_state, native,
-       parent_uri, created_at, updated_at, deleted_at, closed_at
+SELECT uri, provider, title, body,
+       CASE WHEN provider = 'oxplow' AND thread_id IS NULL AND state = 'todo'
+            THEN 'backlog' ELSE state END,
+       CASE WHEN provider = 'oxplow' AND thread_id IS NULL AND state = 'todo'
+            THEN 'backlog' ELSE native_state END,
+       native, parent_uri, created_at, updated_at, deleted_at, closed_at
 FROM work_item;
 DROP TABLE work_item;
 ALTER TABLE work_item_new RENAME TO work_item;
@@ -63,6 +62,8 @@ CREATE INDEX idx_work_item_provider ON work_item(provider, deleted_at);
 CREATE INDEX idx_work_item_parent ON work_item(parent_uri);
 
 -- task: the backlog status; no thread or order (core's assignment).
+-- Ready tasks on no thread were the backlog: they move to the backlog
+-- status as they're copied.
 CREATE TEMP TABLE task_seq AS SELECT seq FROM sqlite_sequence WHERE name = 'task';
 CREATE TABLE task_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,8 +81,10 @@ CREATE TABLE task_new (
     author TEXT CHECK (author IN ('user', 'agent')));
 INSERT INTO task_new (id, parent_id, title, description, status, priority, created_by,
                       created_at, updated_at, completed_at, deleted_at, author)
-SELECT id, parent_id, title, description, status, priority, created_by,
-       created_at, updated_at, completed_at, deleted_at, author
+SELECT id, parent_id, title, description,
+       CASE WHEN thread_id IS NULL AND status = 'ready' AND deleted_at IS NULL
+            THEN 'backlog' ELSE status END,
+       priority, created_by, created_at, updated_at, completed_at, deleted_at, author
 FROM task;
 DROP TABLE task;
 ALTER TABLE task_new RENAME TO task;

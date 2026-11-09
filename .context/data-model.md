@@ -113,7 +113,15 @@ the app, by a script that checked their tables, indexes and triggers equal
 a fresh baseline's (views and materialized `m_v_*` tables aside) and
 rewrote `refinery_schema_history` to the baseline row. With no other
 users, a squash like that is the sanctioned way to drop history; editing a
-migration in place is not.
+migration in place is not. The one exception: a migration that has
+never applied on any database (it failed inside its transaction
+everywhere it ran) has no checksum stored, so it is fixed in place.
+A migration that rebuilds a table to widen a CHECK moves rows to the new
+value in the rebuild's `INSERT … SELECT`, never with an `UPDATE` before
+it: the old table's check refuses the new value, and a fresh test
+database has no rows to show it. Test such a migration on a database
+migrated to the version before it (`runner().set_target(Target::Version(n))`)
+that holds a row it moves.
 
 A sweeping rename (an id, a column, a command) skips the applied
 migrations and the published model golden (`fixtures/dataset_contracts.json`,
