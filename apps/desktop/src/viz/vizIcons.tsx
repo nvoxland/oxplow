@@ -40,6 +40,7 @@ export type VizIconSpec =
  *  states `v_work_item` uses, so a query can pass its state), and a file's
  *  change status (`v_file.status`). */
 const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: string }> = {
+  backlog: { glyph: "◌", tone: "muted", label: "Backlog" },
   ready: { glyph: "☐", tone: null, label: "Ready" },
   todo: { glyph: "☐", tone: null, label: "Ready" },
   in_progress: { glyph: "◐", tone: "accent", label: "In progress" },

@@ -29,6 +29,7 @@ export function FieldBadge({ field, value }: { field: FieldDecl; value: unknown 
 /** A state's colour. */
 export function stateColor(state: CanonicalState): string {
   switch (state) {
+    case "backlog": return "var(--status-canceled)";
     case "in_progress": return "var(--status-running)";
     case "todo": return "var(--status-ready)";
     case "done": return "var(--status-done)";

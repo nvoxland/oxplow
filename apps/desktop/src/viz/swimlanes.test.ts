@@ -28,15 +28,14 @@ let invokes: Array<[string, unknown]> = [];
 let opened: Array<[string, unknown]> = [];
 let rejection: unknown = null;
 
-/** Load the page and start its script; `features` is what the work list says it can do. */
-async function start(features: string[], items = ITEMS) {
+/** Load the page and start its script. */
+async function start(items = ITEMS) {
   document.body.innerHTML = page;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).oxplow = {
     connect: async () => ({
       data: {
         swimlanes: run(items).result,
-        features: { columns: ["features"], rows: [[JSON.stringify(features)]], truncated: false },
       },
       applyTheme() {},
       onUpdate: () => () => {},
@@ -81,8 +80,9 @@ afterEach(() => {
 });
 
 test("one column per state, each card in its state's, with counts", async () => {
-  await start([]);
+  await start();
   expect([...document.querySelectorAll(".lane")].map((l) => (l as HTMLElement).dataset.state)).toEqual([
+    "backlog",
     "todo",
     "in_progress",
     "blocked",
@@ -100,7 +100,7 @@ test("one column per state, each card in its state's, with counts", async () => 
 });
 
 test("a card dropped on another column is transitioned; the dragged-over column is marked", async () => {
-  await start([]);
+  await start();
   fire(card("oxplow:oxplow/work_item?id=1&provider=a"), "dragstart");
   expect(card("oxplow:oxplow/work_item?id=1&provider=a").classList.contains("ox-dragging")).toBe(true);
   fire(lane("blocked"), "dragover");
@@ -111,8 +111,8 @@ test("a card dropped on another column is transitioned; the dragged-over column 
   expect(invokes).toEqual([["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=1&provider=a", to: "blocked" }]]);
 });
 
-test("a drop within a column reorders it only when the work list keeps an order", async () => {
-  await start(["ordering"]);
+test("a drop within a column reorders it in its assignee's queue", async () => {
+  await start();
   await drag("oxplow:oxplow/work_item?id=3&provider=a", card("oxplow:oxplow/work_item?id=1&provider=a"));
   await drag("oxplow:oxplow/work_item?id=1&provider=a", card("oxplow:oxplow/work_item?id=2&provider=a"));
   expect(invokes).toEqual([
@@ -120,14 +120,10 @@ test("a drop within a column reorders it only when the work list keeps an order"
     ["oxplow.work_item.reorder", { uri: "oxplow:oxplow/work_item?id=1&provider=a", after: "oxplow:oxplow/work_item?id=2&provider=a" }],
   ]);
 
-  invokes = [];
-  await start([]);
-  await drag("oxplow:oxplow/work_item?id=3&provider=a", card("oxplow:oxplow/work_item?id=1&provider=a"));
-  expect(invokes).toEqual([]);
 });
 
 test("a title is edited in place: Enter submits it, Escape leaves it as it was", async () => {
-  await start([]);
+  await start();
   const title = () => card("oxplow:oxplow/work_item?id=1&provider=a").querySelector<HTMLElement>(".title")!;
   title().click();
   const input = card("oxplow:oxplow/work_item?id=1&provider=a").querySelector<HTMLInputElement>("form .ox-input")!;
@@ -148,7 +144,7 @@ test("a title is edited in place: Enter submits it, Escape leaves it as it was",
 });
 
 test("a rejection naming a field shows under the input", async () => {
-  await start([]);
+  await start();
   card("oxplow:oxplow/work_item?id=2&provider=a").querySelector<HTMLElement>(".title")!.click();
   const form = card("oxplow:oxplow/work_item?id=2&provider=a").querySelector("form")!;
   form.querySelector<HTMLInputElement>(".ox-input")!.value = "";
@@ -162,7 +158,7 @@ test("a rejection naming a field shows under the input", async () => {
 });
 
 test("a refusal of the board's commands is a one-line note above the board", async () => {
-  await start([]);
+  await start();
   rejection = { code: "DENIED", message: "not deployed" };
   await drag("oxplow:oxplow/work_item?id=1&provider=a", lane("done"));
   const note = document.getElementById("note")!;
@@ -172,7 +168,7 @@ test("a refusal of the board's commands is a one-line note above the board", asy
 });
 
 test("clicking a card opens it; Cmd/Ctrl-click opens it in a new tab", async () => {
-  await start([]);
+  await start();
   card("oxplow:oxplow/work_item?id=4&provider=a").click();
   fire(card("oxplow:oxplow/work_item?id=4&provider=a"), "click", { metaKey: true });
   fire(card("oxplow:oxplow/work_item?id=4&provider=a"), "click", { ctrlKey: true });

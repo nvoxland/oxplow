@@ -9,12 +9,11 @@
  */
 import { querySql, type SqlCell } from "./api.js";
 import { NO_READS } from "./viz/rerun.js";
-import { threadIdOf } from "./modelIds.js";
 import { workItemUri } from "./uri/uri.js";
 import type { FieldDecl, Reads, SqlQueryResult, WorkItemsFeatures } from "./tauri-bridge/generated/bindings.js";
 
 /** The state every provider maps to. */
-export type CanonicalState = "todo" | "in_progress" | "blocked" | "done" | "canceled";
+export type CanonicalState = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "canceled";
 
 
 /** One item on the active work list, as `v_work_item` holds it. */
@@ -27,9 +26,11 @@ export interface WorkItem {
   state: CanonicalState;
   /** Its parent's ref (an epic), when the list nests. */
   parentUri: string | null;
-  /** The thread whose list it's on (`thr3`); null on the backlog. */
-  threadId: string | null;
-  /** Its place on its list (ascending); null orders by creation. */
+  /** Who is going to work on it: a thread's or the person's URI; null
+   *  for nobody (and for a done or canceled item). Core's record. */
+  assignee: string | null;
+  /** Its place in its assignee's queue (ascending); null orders by
+   *  creation. */
   rank: number | null;
   /** When it reached done or canceled. */
   closedAt: string | null;
@@ -40,7 +41,7 @@ export interface WorkItem {
   commentCount: number;
 }
 
-const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.parent_uri, w.thread_id, w.rank, w.closed_at,
+const COLUMNS = `w.uri, w.provider, w.title, w.body, w.state, w.parent_uri, w.assignee, w.rank, w.closed_at,
   w.created_at, w.updated_at, w.native,
   (SELECT count(*) FROM v_work_item_comment c WHERE c.uri = w.uri) AS comment_count`;
 
@@ -60,7 +61,6 @@ export function itemsFromResult(result: SqlQueryResult): WorkItem[] {
   const col = (name: string) => result.columns.indexOf(name);
   const at = (row: SqlCell[], name: string) => row[col(name)];
   return result.rows.map((row) => {
-    const thread = at(row, "thread_id");
     const rank = at(row, "rank");
     return {
       uri: String(at(row, "uri")),
@@ -69,7 +69,7 @@ export function itemsFromResult(result: SqlQueryResult): WorkItem[] {
       body: String(at(row, "body") ?? ""),
       state: String(at(row, "state")) as CanonicalState,
       parentUri: text(at(row, "parent_uri")),
-      threadId: thread === null || thread === undefined ? null : threadIdOf(Number(thread)),
+      assignee: text(at(row, "assignee")),
       rank: rank === null || rank === undefined ? null : Number(rank),
       closedAt: text(at(row, "closed_at")),
       createdAt: String(at(row, "created_at") ?? ""),
@@ -110,8 +110,6 @@ export const NO_FEATURES: Required<WorkItemsFeatures> = {
   links: false,
   delete: false,
   idempotent_writes: false,
-  ordering: false,
-  lists: false,
 };
 
 /** One capability's provider, with its flags and fields as declared. */
@@ -185,8 +183,6 @@ export function featuresFor(providers: CapabilityProvider[], provider: string): 
     links: f.links === true,
     delete: f.delete === true,
     idempotent_writes: f.idempotent_writes === true,
-    ordering: f.ordering === true,
-    lists: f.lists === true,
   };
 }
 

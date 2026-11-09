@@ -16,7 +16,7 @@ import {
 const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
   ({
     columns: [
-      "uri", "provider", "title", "body", "state", "parent_uri", "thread_id", "rank", "closed_at",
+      "uri", "provider", "title", "body", "state", "parent_uri", "assignee", "rank", "closed_at",
       "created_at", "updated_at", "native", "comment_count",
     ],
     rows,
@@ -30,7 +30,7 @@ const result = (rows: SqlQueryResult["rows"]): SqlQueryResult =>
 test("rows read as work items: the interface's columns and the list's own fields", () => {
   const items = itemsFromResult(
     result([
-      ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "oxplow", "Fix it", "", "in_progress", null, 2, 1.5, null, "t0", "t1", '{"priority":"high","author":"agent"}', 3],
+      ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "oxplow", "Fix it", "", "in_progress", null, "oxplow:oxplow/thread?id=thr2", 1.5, null, "t0", "t1", '{"priority":"high","author":"agent"}', 3],
       ["oxplow:oxplow/work_item?id=ENG-1&provider=issues", "issues", "Theirs", "b", "done", "oxplow:oxplow/work_item?id=ENG-0&provider=issues", null, null, "t2", "t0", "t1", null, 0],
     ]),
   );
@@ -41,7 +41,7 @@ test("rows read as work items: the interface's columns and the list's own fields
     body: "",
     state: "in_progress",
     parentUri: null,
-    threadId: "thr2",
+    assignee: "oxplow:oxplow/thread?id=thr2",
     rank: 1.5,
     closedAt: null,
     createdAt: "t0",
@@ -49,7 +49,7 @@ test("rows read as work items: the interface's columns and the list's own fields
     native: { priority: "high", author: "agent" },
     commentCount: 3,
   });
-  expect(items[1]).toMatchObject({ threadId: null, rank: null, closedAt: "t2", native: {}, parentUri: "oxplow:oxplow/work_item?id=ENG-0&provider=issues" });
+  expect(items[1]).toMatchObject({ assignee: null, rank: null, closedAt: "t2", native: {}, parentUri: "oxplow:oxplow/work_item?id=ENG-0&provider=issues" });
 });
 
 // A provider's flags and fields come from v_capability_provider; a
@@ -62,7 +62,7 @@ test("capability providers read with their features and fields; an unknown provi
         "work_items",
         "oxplow",
         null,
-        '{"hierarchy":true,"comments":true,"links":true,"delete":true,"ordering":true,"lists":true}',
+        '{"hierarchy":true,"comments":true,"links":true,"delete":true}',
         '[{"name":"priority","title":"Priority","kind":"enum","values":["high","low"],"read_only":false}]',
         1,
       ],
@@ -72,13 +72,13 @@ test("capability providers read with their features and fields; an unknown provi
     reads: { datasets: ["v_capability_provider"], tables: [], measures: [] },
     freshness: {},
   } as unknown as SqlQueryResult);
-  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false, ordering: true, lists: true });
-  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, idempotent_writes: false, ordering: false, lists: false });
-  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, idempotent_writes: false, ordering: false, lists: false });
+  expect(featuresFor(providers, "oxplow")).toEqual({ hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false });
+  expect(featuresFor(providers, "fake")).toEqual({ hierarchy: false, comments: true, links: false, delete: false, idempotent_writes: false });
+  expect(featuresFor(providers, "issues")).toEqual({ hierarchy: false, comments: false, links: false, delete: false, idempotent_writes: false });
   expect(providers.find((p) => p.provider === "fake")?.extension).toBe("tracker");
   expect(workListProfileOf(providers)).toEqual({
     provider: "oxplow",
-    features: { hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false, ordering: true, lists: true },
+    features: { hierarchy: true, comments: true, links: true, delete: true, idempotent_writes: false },
     fields: [{ name: "priority", title: "Priority", kind: "enum", values: ["high", "low"], read_only: false }],
     idPattern: null,
   });

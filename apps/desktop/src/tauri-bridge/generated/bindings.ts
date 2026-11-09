@@ -6741,7 +6741,7 @@ export type VizConfig_Deserialize = {
 	/**
 	 *  For `list` / `table`: a column whose value is a tone (`danger`,
 	 *  `warning`, …) drawn as a coloured bar down the row's left edge; a row
-	 *  with none has a quiet one, so every row lines up.
+	 *  with none has an invisible one, so every row lines up.
 	 */
 	edge: string | null,
 	/**
@@ -6813,7 +6813,7 @@ export type VizConfig_Serialize = {
 	/**
 	 *  For `list` / `table`: a column whose value is a tone (`danger`,
 	 *  `warning`, …) drawn as a coloured bar down the row's left edge; a row
-	 *  with none has a quiet one, so every row lines up.
+	 *  with none has an invisible one, so every row lines up.
 	 */
 	edge: string | null,
 	/**
@@ -7109,16 +7109,6 @@ export type WorkItemsFeatures = {
 	 *  when its reply was lost.
 	 */
 	idempotent_writes?: boolean,
-	/**
-	 *  Items have an order on their list (`oxplow.work_item.reorder`; read as
-	 *  `v_work_item.rank`).
-	 */
-	ordering?: boolean,
-	/**
-	 *  Items are on a thread's list or the backlog, and move between them
-	 *  (`oxplow.work_item.move`; read as `v_work_item.thread_id`).
-	 */
-	lists?: boolean,
 };
 
 export type WorkspaceContext = {

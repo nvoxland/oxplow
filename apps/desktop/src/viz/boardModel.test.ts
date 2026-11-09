@@ -8,8 +8,8 @@ import { boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, fi
 
 const item = (over: Record<string, unknown>) => ({
   uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "Fix it", state: "todo", native: '{"priority":"low","author":"user"}',
-  not_todo: 0, not_in_progress: 1, not_blocked: 1, not_done: 1, not_canceled: 1,
-  can_order: 1, can_delete: 1, has_parent: 0, can_shelve: 1, can_bring: 0, thread_ref: "thr1",
+  not_backlog: 1, not_todo: 0, not_in_progress: 1, not_blocked: 1, not_done: 1, not_canceled: 1,
+  can_delete: 1, has_parent: 0, assignee: "oxplow:oxplow/thread?id=thr1",
   ...over,
 });
 
@@ -39,40 +39,48 @@ test("only the list's editable choice fields are menu fields, with their values"
   ])).toEqual([{ name: "priority", title: "Priority", values: ["urgent", "high", "medium", "low"] }]);
 });
 
+const assignees = [
+  { uri: "oxplow:oxplow/thread?id=thr1", title: "Main" },
+  { uri: "oxplow:oxplow/person", title: "You" },
+];
+
 test("a card's menu offers what its gates allow, each as the command it runs", () => {
   const fields = [{ name: "priority", title: "Priority", values: ["high", "low"] }];
-  const menu = cardMenu(item({}), fields);
+  const menu = cardMenu(item({}), { fields, assignees });
   const labels = menu.map((m) => (m.kind === "item" ? m.label : m.kind === "heading" ? `# ${m.label}` : "---"));
-  expect(labels).toEqual(["Open", "---", "Mark In Progress", "Mark Blocked", "Mark Done", "Mark Canceled", "---", "# Priority", "High", "Low", "---", "Send to backlog", "Delete"]);
+  expect(labels).toEqual(["Open", "---", "Mark Backlog", "Mark In Progress", "Mark Blocked", "Mark Done", "Mark Canceled", "---", "# Priority", "High", "Low", "---", "# Assign to", "Main", "You", "Nobody", "---", "Delete"]);
+  // Who it's for: its assignee checked, each choice an assign.
+  expect(menu.find((m) => m.kind === "item" && m.label === "Main")).toMatchObject({ checked: true });
+  expect(menu.find((m) => m.kind === "item" && m.label === "You")).toMatchObject({ checked: false, act: { command: "oxplow.work_item.assign", input: { uri: item({}).uri, to: "oxplow:oxplow/person" } } });
+  expect(menu.find((m) => m.kind === "item" && m.label === "Nobody")).toMatchObject({ act: { command: "oxplow.work_item.assign", input: { to: null } } });
   const low = menu.find((m) => m.kind === "item" && m.label === "Low");
   expect(low).toMatchObject({ checked: true, act: { command: "oxplow.work_item.update", input: { uri: item({}).uri, native: { priority: "low" } } } });
   expect(menu.find((m) => m.kind === "item" && m.label === "Delete")).toMatchObject({ danger: true, act: { command: "oxplow.work_item.delete", input: { uri: item({}).uri } } });
   expect(menu[0]).toMatchObject({ kind: "item", label: "Open", open: item({}).uri });
-  // An epic's child can leave it; a card on another list can come here.
-  const child = cardMenu(item({ has_parent: 1, can_shelve: 0, can_bring: 1, can_delete: 0 }), []);
-  expect(child.filter((m) => m.kind === "item").map((m) => m.kind === "item" && m.label)).toContain("Make top-level");
-  expect(child.find((m) => m.kind === "item" && m.label === "Bring to this thread")).toMatchObject({ act: { command: "oxplow.work_item.move", input: { to: { thread: "thr1" } } } });
+  // An epic's child can leave it; a closed card is nobody's to assign.
+  const child = cardMenu(item({ has_parent: 1, can_delete: 0 }), { fields: [], assignees });
   expect(child.find((m) => m.kind === "item" && m.label === "Make top-level")).toMatchObject({ act: { command: "oxplow.work_item.update", input: { parent_uri: "" } } });
+  const done = cardMenu(item({ state: "done", not_done: 0, assignee: null }), { fields: [], assignees });
+  expect(done.some((m) => m.kind === "heading" && m.label === "Assign to")).toBe(false);
 });
 
 test("the agent's live card has no menu and doesn't move", () => {
   const live = item({ uri: null, title: "Agent is working: x", state: "in_progress" });
-  expect(cardMenu(live, [])).toEqual([]);
+  expect(cardMenu(live, { fields: [], assignees })).toEqual([]);
   expect(dropAct(live, "done", null)).toBeNull();
 });
 
-test("a drop on another column moves the item there; within its column it reorders when the list can", () => {
+test("a drop on another column moves the item there; within its column it reorders in its queue", () => {
   const card = item({});
   expect(dropAct(card, "in_progress", null)).toEqual({ command: "oxplow.work_item.transition", input: { uri: card.uri, to: "in_progress" } });
   const other = item({ uri: "oxplow:oxplow/work_item?id=tsk2&provider=oxplow" });
   expect(dropAct(card, "todo", other)).toEqual({ command: "oxplow.work_item.reorder", input: { uri: card.uri, before: other.uri } });
   expect(dropAct(card, "todo", null)).toEqual({ command: "oxplow.work_item.reorder", input: { uri: card.uri } });
-  expect(dropAct(item({ can_order: 0 }), "todo", other)).toBeNull();
   expect(dropAct(card, "todo", card)).toBeNull();
 });
 
 test("the filters are the tab's view, else what the page ran with, else the defaults", () => {
-  expect(filtersOf({ show: "backlog" }, { show: "thread", priority: "high", q: null })).toEqual({ show: "backlog", priority: "high", q: "" });
+  expect(filtersOf({ show: "pool" }, { show: "thread", priority: "high", q: null })).toEqual({ show: "pool", priority: "high", q: "" });
   expect(filtersOf(null, {})).toEqual({ show: "thread", priority: "any", q: "" });
 });
 
@@ -105,7 +113,7 @@ test("To Do groups its cards under their epics, in order, the loose ones last; a
 });
 
 test("a compact card says the rest on hover: its epic, fields, thread and comments", () => {
-  expect(cardHint(item({ title: "Fix it", parent_title: "An epic", fields: "high · user", thread_shown: "Main", comments: 2 }))).toBe("Fix it\nin An epic\nhigh · user\nMain\n2 comments");
+  expect(cardHint(item({ title: "Fix it", parent_title: "An epic", fields: "high · user", assignee_shown: "Main", comments: 2 }))).toBe("Fix it\nin An epic\nhigh · user\nMain\n2 comments");
   expect(cardHint(item({ title: "Fix it", fields: null, comments: 0 }))).toBe("Fix it");
 });
 
