@@ -26,7 +26,8 @@ import { useResources } from "../../resources.js";
 import { readWorkspaceIndex } from "../../workspaceFiles.js";
 import { useWorkListProfile } from "../../useWorkListProfile.js";
 import { workItemRefOfMention } from "../../workItems.js";
-import { MarkdownView, postprocessWikilinks, preprocessWikilinks } from "./MarkdownView.js";
+import { MarkdownView } from "./MarkdownView.js";
+import { postprocessWikilinks, preprocessWikilinks } from "./markdownLinks.js";
 import { RichTextField, type RichTextCommentConfig } from "./RichTextField.js";
 import { fileOptions, mergeRefOptions, type RefSearch } from "./refOptions.js";
 

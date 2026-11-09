@@ -18,6 +18,7 @@ import { IpcCallError } from "../ipc-error.js";
 import type { PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { createBridgeHost, initMessage, pageData, type HostedData, type PageInit, type ViewInit } from "./componentBridge.js";
 import { nodeById, nodeRunOf } from "./nodeRun.js";
+import { NO_LOOKUPS, markdownTree } from "../components/Markdown/markdownTree.js";
 
 /** What the server mounts: the bundle's version, the page run, the node
  *  that shows the component, and what the frame is told of its page and
@@ -107,6 +108,8 @@ export async function runHarness(
               return true;
             },
             confirm: async (command) => (await server.rpc("confirm", { command })) === true,
+            // The app's parse and link rules; no titles (it reads nothing of the app's).
+            markdown: (text, inline) => markdownTree(text, inline, NO_LOOKUPS),
             onReady: () => server.record("ready", true),
             querySql: async (sql: string, params: SqlCell[]) => (await server.rpc("querySql", { sql, params })) as never,
             openForm: async (command, input) => (await server.rpc("openForm", { command, input })) as never,

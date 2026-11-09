@@ -15,6 +15,8 @@ const LOADING: WorkListProfile = { provider: null, features: NO_FEATURES, fields
 let current: WorkListProfile = LOADING;
 let reads = NO_READS;
 let started = false;
+/** The first read: what `loadWorkListProfile` waits for. */
+let first: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 async function refresh(): Promise<void> {
@@ -31,12 +33,20 @@ async function refresh(): Promise<void> {
 function start(): void {
   if (started) return;
   started = true;
-  void refresh();
+  first = refresh();
   const rerun = coalesce(() => void refresh());
   subscribeOxplowEvents((event) => {
     if (readsChanged(event as Record<string, unknown>, reads)) rerun.schedule();
   });
   onRemoteReconnect(rerun.schedule);
+}
+
+/** The profile once it has been read (a component frame's markdown, which
+ *  reads a list's ids by it). */
+export async function loadWorkListProfile(): Promise<WorkListProfile> {
+  start();
+  await first;
+  return current;
 }
 
 export function useWorkListProfile(): WorkListProfile {

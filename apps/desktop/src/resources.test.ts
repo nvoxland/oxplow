@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { GitPullRequest } from "lucide-react";
 
-import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Markdown/MarkdownView.js";
+import { linkRef, parseMarkdownLink, preprocessWikilinks } from "./components/Markdown/markdownLinks.js";
 import { pageKindIconComponent, pageKindLabel } from "./pageKinds.js";
-import { extensionWikilinkRef, resourceIcon, resourcesFromResult, setResources, type Resource } from "./resources.js";
+import { resourceIcon } from "./resources.js";
+import { extensionWikilinkRef, resourcesFromResult, setResources, type Resource } from "./resourceStore.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
 import { refTargetNow } from "./tabs/refOpener.js";
 import { effortUri, resourceUri } from "./uri/uri.js";

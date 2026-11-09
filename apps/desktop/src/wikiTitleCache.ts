@@ -118,6 +118,14 @@ export function useWikiRef(slug: string | null | undefined): { title: string | n
   return state;
 }
 
+/** The same as `useWikiRef`, awaited (a component frame's markdown, drawn
+ *  once its titles are known). */
+export async function loadWikiRef(slug: string): Promise<{ title: string | null; status: RefStatus }> {
+  ensureSubscribed();
+  if (!loaded) await (inFlight ?? refresh());
+  return wikiRefSnapshot(slug);
+}
+
 /**
  * Resolve a wiki slug to its page title. Returns `null` while the
  * cache is still loading or if the slug isn't known (deleted page,

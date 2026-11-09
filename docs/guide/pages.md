@@ -315,7 +315,13 @@ oxplow.connect().then((component) => {
 can be picked up, plus `ox-dragging` while it is; `ox-drop-target` for
 where it may land), the states `ox-ok`, `ox-waiting`, `ox-running` and
 `ox-bad`, and chart series `ox-series-1` to `ox-series-8` (a `fill` for
-SVG, a `background` otherwise). They only work after `applyTheme()`, which also sets the app's `color-scheme` so the frame stays transparent. `invoke`
+SVG, a `background` otherwise). They only work after `applyTheme()`, which also sets the app's `color-scheme` so the frame stays transparent.
+To show markdown (an item's description, say), call
+`component.renderMarkdown(element, text)`, or with `{ inline: true }` for
+one line. Oxplow reads it the way its own views do: `[[wikilinks]]` and
+links to its pages show their titles and open them. A web link shows its
+text with the address on hover, because a component can't open anything
+outside oxplow. `invoke`
 resolves with the command's result; a command your extension writes as
 a script answers `{ result, children }` — its script's own `result`, and
 the commands it composed. A

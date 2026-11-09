@@ -33,7 +33,8 @@ import {
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
 import { iconFor } from "./icons.js";
-import { resourceIcon, resourceInfo } from "./resources.js";
+import { resourceIcon } from "./resources.js";
+import { resourceInfo } from "./resourceStore.js";
 import { useExtensions } from "./extensionsStore.js";
 import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";

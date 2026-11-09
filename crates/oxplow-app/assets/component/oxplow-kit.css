@@ -62,6 +62,24 @@
 .ox-link { color: var(--accent); cursor: pointer; text-decoration: none; }
 .ox-link:hover { color: var(--accent-hover); text-decoration: underline; }
 
+/* Markdown a component draws (`renderMarkdown`): oxplow's reading look. */
+.ox-md { line-height: 1.5; overflow-wrap: anywhere; }
+.ox-md > :first-child { margin-top: 0; }
+.ox-md > :last-child { margin-bottom: 0; }
+.ox-md p, .ox-md ul, .ox-md ol, .ox-md blockquote, .ox-md pre { margin: 0 0 8px; }
+.ox-md ul, .ox-md ol { padding-left: 20px; }
+.ox-md h1, .ox-md h2, .ox-md h3, .ox-md h4, .ox-md h5, .ox-md h6 { margin: 12px 0 6px; font-size: var(--text-md); font-weight: 600; }
+.ox-md blockquote { padding-left: 10px; border-left: 3px solid var(--border-strong); color: var(--text-secondary); }
+.ox-md code { font-family: var(--font-mono); font-size: 0.92em; padding: 0 3px; border-radius: 3px; background: var(--bg-2); }
+.ox-md pre { padding: 8px; border-radius: 4px; background: var(--bg-2); overflow-x: auto; }
+.ox-md pre code { padding: 0; background: none; }
+.ox-md hr { border: none; border-top: 1px solid var(--border-subtle); }
+/* A line flows in its element, whatever that element's own display. */
+.ox-md-inline * { display: inline; }
+.ox-md-inline br { display: initial; }
+.ox-md-weblink { text-decoration: underline dotted; }
+.ox-broken { color: var(--text-muted); text-decoration: line-through; cursor: help; }
+
 /* Surfaces */
 .ox-card {
   background: var(--surface-card);

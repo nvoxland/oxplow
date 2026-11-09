@@ -3,7 +3,8 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import { ReactWidgetRenderer } from "@tiptap/react";
 
 import { PageKindIcon } from "../../pageKinds.js";
-import { BrokenLink, parseMarkdownLink, parsedLinkIconKind, refLinkNames, useRefLinkTitle } from "./MarkdownView.js";
+import { BrokenLink, useRefLinkTitle } from "./MarkdownView.js";
+import { parseMarkdownLink, parsedLinkIconKind, refLinkNames } from "./markdownLinks.js";
 
 /**
  * A ref link's title in the editor, as the viewer shows it

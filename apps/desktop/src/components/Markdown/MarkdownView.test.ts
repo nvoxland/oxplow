@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, relativeFilePath } from "./MarkdownView.js";
+import { linkRef, parseMarkdownLink, postprocessWikilinks, preprocessWikilinks, refLinkOf, relativeFilePath } from "./markdownLinks.js";
 import {
   directoryRef,
   fileRef,

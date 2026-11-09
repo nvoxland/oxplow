@@ -81,6 +81,13 @@ export function useWorkItemRef(id: string | null | undefined): { title: string |
   return state;
 }
 
+/** The same as `useWorkItemRef`, awaited (a component frame's markdown,
+ *  drawn once its titles are known). */
+export async function loadWorkItemRef(id: string): Promise<{ title: string | null; status: RefStatus }> {
+  if (!titles.has(id)) await fetchTitle(id);
+  return refSnapshot(id);
+}
+
 /**
  * Resolve a work-item ref to its title. Returns `null` while the lookup is
  * in flight or if the ref isn't known — callers fall back to its label.

@@ -31,7 +31,7 @@ test("frame messages parse into their requests and ready; anything else is refus
     "invoke",
     { method: "invoke", command: "a" },
     { id: "1", method: "exec", command: "x" },
-    // The frame's `query` is gone: protocol 12 has no such request.
+    // The frame's `query` is gone: protocol 13 has no such request.
     { id: "1", method: "query", asset: "a", params: {} },
     { id: "1", method: "invoke", input: {} },
   ]) {
@@ -74,11 +74,11 @@ test("theme tokens carry the root's color-scheme, so the frame paints no opaque 
 // 12: `init` and `update` carry the page's data — each loader's rows by
 // name, its params and props — and `update` says which loaders changed; a
 // page shows an inline page under it (`showView`) in place of a viz spec.
-test("init carries the run, the data, params, props and tokens, at protocol 12", () => {
+test("init carries the run, the data, params, props and tokens, at protocol 13", () => {
   const r = { config: { id: "x/b", custom: { component: "b", props: { a: 1 } } }, params: { n: 2 }, result: { columns: ["k"], rows: [[1]], truncated: false } } as unknown as VizRun;
   expect(initMessage(vizData(r), { "--accent": "#08f" })).toEqual({
     type: "init",
-    protocol: 12,
+    protocol: 13,
     run: r,
     data: { rows: { columns: ["k"], rows: [[1]], truncated: false } },
     params: { n: 2 },
@@ -95,7 +95,7 @@ test("a component shown as a page gets its page, its view and the page's data, a
   const data: HostedData = { run: null, data: { items: { columns: ["id"], rows: [["a"]], truncated: false } }, params: { from: null }, props: { size: 3 } };
   expect(initMessage(data, {}, page, view)).toEqual({
     type: "init",
-    protocol: 12,
+    protocol: 13,
     run: null,
     data: data.data,
     params: { from: null },
@@ -181,6 +181,7 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
     },
     confirm: async () => true,
     onReady: () => calls.push(["ready"]),
+    markdown: async () => [],
     ...deps,
   }, sent);
   const send = (data: unknown) => channel.port2.postMessage(data);
@@ -421,6 +422,30 @@ test("querySql and openForm answer with the host's result; a closed form is CANC
     { id: "f", ok: true, result: { made: 1 } },
     { id: "g", ok: false, error: { code: "CANCELLED", message: "The person closed the form for `acme.closed`." } },
   ]);
+  h.channel.port1.close();
+});
+
+// A frame's markdown is the host's to read (protocol 13): the tree comes
+// back as data, never HTML.
+test("markdown parses and answers the host's tree", async () => {
+  expect(parseFrameMessage({ id: "1", method: "markdown", text: "**a**", inline: true })).toEqual({
+    type: "request",
+    request: { id: "1", method: "markdown", text: "**a**", inline: true },
+  });
+  expect(parseFrameMessage({ id: "2", method: "markdown", text: "a" })).toEqual({ type: "request", request: { id: "2", method: "markdown", text: "a", inline: false } });
+  expect(parseFrameMessage({ id: "3", method: "markdown", text: 1 })).toBeNull();
+  expect(parseFrameMessage({ id: "4", method: "markdown", text: "a", inline: "yes" })).toBeNull();
+  const asked: [string, boolean][] = [];
+  const h = harness({
+    markdown: async (text, inline) => {
+      asked.push([text, inline]);
+      return [{ tag: "strong", children: [text] }];
+    },
+  });
+  h.send({ id: "m", method: "markdown", text: "a", inline: true });
+  await h.settle();
+  expect(asked).toEqual([["a", true]]);
+  expect(h.received).toEqual([{ id: "m", ok: true, result: [{ tag: "strong", children: ["a"] }] }]);
   h.channel.port1.close();
 });
 

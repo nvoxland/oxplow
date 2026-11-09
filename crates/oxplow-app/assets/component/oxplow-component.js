@@ -60,7 +60,13 @@
   "use strict";
 
   // The protocol this library speaks; `init` says which one the host does.
-  const PROTOCOL = 12;
+  const PROTOCOL = 13;
+
+  // The elements renderMarkdown draws; anything else leaves its text.
+  const MARKDOWN_TAGS = new Set([
+    "strong", "em", "del", "code", "br",
+    "p", "ul", "ol", "li", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6", "hr",
+  ]);
 
   function component(port, init) {
     let next = 0;
@@ -190,6 +196,56 @@
       // Run read-only SQL over oxplow's datasets (`?1` parameters): needs
       // `sql: read` on the component. Resolves `{ columns, rows, truncated }`.
       querySql: (sql, params) => call({ method: "querySql", sql, params: params || [] }),
+      // Draw markdown into `element`, its children replaced: oxplow reads it
+      // as its own views do (GFM, wikilinks, a link by its page's title) and
+      // hands back the elements to draw, which this builds — no HTML
+      // crosses. `{ inline: true }` keeps one line (emphasis, code, links).
+      // A link to one of oxplow's pages opens it (Cmd/Ctrl-click: a new
+      // tab), and its click goes no further; a web link is its text with
+      // the URL on hover (a component opens nothing off oxplow); a broken
+      // one says why on hover. The element gets the kit's `ox-md` class
+      // (`ox-md-inline` for a line). Resolves once drawn.
+      renderMarkdown(element, text, options) {
+        const inline = !!(options && options.inline);
+        return call({ method: "markdown", text: String(text == null ? "" : text), inline }).then((tree) => {
+          const doc = element.ownerDocument;
+          const build = (node) => {
+            if (typeof node === "string") return [doc.createTextNode(node)];
+            const kids = () => (node.children || []).flatMap(build);
+            if (node.tag === "a") {
+              if (node.ref) {
+                const a = doc.createElement("a");
+                a.className = "ox-link ox-md-link";
+                a.setAttribute("role", "link");
+                a.tabIndex = 0;
+                a.append(...kids());
+                const open = (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  call({ method: "navigate", uri: node.ref, newTab: event.metaKey || event.ctrlKey, replace: false }).catch(() => {});
+                };
+                a.addEventListener("click", open);
+                a.addEventListener("keydown", (event) => {
+                  if (event.key === "Enter") open(event);
+                });
+                return [a];
+              }
+              const span = doc.createElement("span");
+              span.className = node.broken ? "ox-broken" : "ox-md-weblink";
+              if (node.broken || node.href) span.title = node.broken || node.href;
+              span.append(...kids());
+              return [span];
+            }
+            if (!MARKDOWN_TAGS.has(node.tag)) return kids();
+            const el = doc.createElement(node.tag);
+            el.append(...kids());
+            return [el];
+          };
+          element.classList.add("ox-md");
+          element.classList.toggle("ox-md-inline", inline);
+          element.replaceChildren(...tree.flatMap(build));
+        });
+      },
       // Open a declared command's form in oxplow, starting from `input`;
       // resolves with its result once submitted, rejects `CANCELLED` when
       // the person closes it. Or a form of the component's own —

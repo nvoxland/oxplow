@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUriOf, humanRefTypeForTest } from "./useBacklinks.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
-import { setResources, type Resource } from "../resources.js";
+import { setResources, type Resource } from "../resourceStore.js";
 import { collectorUri, commitUri, dirUri, effortUri, fileUri, pageUri, resourceUri, wikiUri, workItemUri } from "../uri/uri.js";
 import {
   directoryRef,

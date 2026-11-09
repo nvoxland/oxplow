@@ -30,7 +30,7 @@ import { SelectionToolbar, selectionToolbarVisible } from "./SelectionToolbar.js
 import { ContextMenu } from "../ContextMenu.js";
 import type { MenuItem } from "../../menu.js";
 import { followLink, linkMenu, type OpenRef } from "./links.js";
-import { refLinkOf, type MentionRef } from "./MarkdownView.js";
+import { refLinkOf, type MentionRef } from "./markdownLinks.js";
 import { pastedLink, type RefLink } from "./refPaste.js";
 import { linkTarget } from "../../uri/uri.js";
 import type { RefSearch } from "./refOptions.js";

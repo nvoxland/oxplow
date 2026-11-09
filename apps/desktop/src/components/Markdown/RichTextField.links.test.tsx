@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
-import { setResources, type Resource } from "../../resources.js";
+import { setResources, type Resource } from "../../resourceStore.js";
 import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavigationContext.js";
 import { pageUri, resourceUri, workItemUri } from "../../uri/uri.js";
 import { RichTextField } from "./RichTextField.js";

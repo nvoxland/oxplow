@@ -11,7 +11,7 @@ import type { MenuItem } from "../../menu.js";
 import type { NavigateOptions } from "../../tabs/PageNavigationContext.js";
 import { externalUrlRef } from "../../tabs/pageRefs.js";
 import { workItemLabel } from "../../workItemRef.js";
-import { linkRef, parseMarkdownLink } from "./MarkdownView.js";
+import { linkRef, parseMarkdownLink } from "./markdownLinks.js";
 
 /** How a link opens a page: the page navigation's `openRef`, or none
  *  (outside a page nothing opens in a tab). */

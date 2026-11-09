@@ -127,7 +127,16 @@ unwrapping into the line (react-markdown's `allowedElements` +
 viewer. A page column's `format: markdown` draws its cell this way (a
 description's `first_sentence(body)`, which keeps its inline markdown and
 cuts outside code spans and links). A component's frame draws the same
-line through the kit (`renderMarkdown`, below).
+line through the kit (`renderMarkdown`: extensions-components.md
+"Markdown in a frame"), from the same parse and link rules.
+
+**Where the rules live.** `markdownLinks.ts` is a link's meaning with no
+React — wikilinks in and out (`preprocessWikilinks`,
+`postprocessWikilinks`, `refLinkOf`), `parseMarkdownLink`, `linkRef`,
+the title rule (`refLinkTitle`, which `useRefLinkTitle` runs over the
+title caches' hooks) and the URLs a link may hold (`urlTransform`).
+`MarkdownView.tsx` draws with them; `markdownTree.ts` builds a frame's
+tree with them.
 
 ## Where it is used
 

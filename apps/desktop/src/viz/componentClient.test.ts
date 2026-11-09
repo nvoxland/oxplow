@@ -23,6 +23,7 @@ function harness(deps: Partial<BridgeDeps> = {}, protocol: unknown = BRIDGE_PROT
       invoke: async () => ({ result: { done: true } }) as never,
       navigate: () => true,
       confirm: async () => true,
+      markdown: async () => [],
       onReady: () => {
         readies += 1;
       },
@@ -399,5 +400,60 @@ test("a form the person closes rejects CANCELLED", async () => {
   const c = await connecting;
   const closed = await c.openForm({ title: "T", schema: { type: "object" } }).catch((e: unknown) => e);
   expect(closed).toMatchObject({ code: "CANCELLED" });
+  h.close();
+});
+
+// renderMarkdown draws the host's tree into an element with createElement
+// only: a ref link opens its page through `navigate` (Cmd-click in a new
+// tab, and the click goes no further), a web link is text with its URL on
+// hover — a frame opens nothing off oxplow — a broken one says why, and a
+// tag the kit doesn't draw leaves only its text.
+test("renderMarkdown builds the host's tree; its links open oxplow's pages only", async () => {
+  const opened: [string, boolean][] = [];
+  const asked: [string, boolean][] = [];
+  const ref = "oxplow:oxplow/work_item?id=tsk7&provider=oxplow";
+  const h = harness({
+    navigate: (uri, opts) => {
+      opened.push([uri, opts.newTab]);
+      return true;
+    },
+    markdown: async (text, inline) => {
+      asked.push([text, inline]);
+      return [
+        "Fix ",
+        { tag: "strong", children: ["it"] },
+        ", see ",
+        { tag: "a", ref, children: ["The item"] },
+        " or ",
+        { tag: "a", href: "https://example.com/d", children: ["docs"] },
+        ", ",
+        { tag: "a", broken: "Broken link: tsk9", children: ["gone"] },
+        { tag: "script", children: [" alert"] },
+      ];
+    },
+  });
+  const connecting = connect({ target: h.frame });
+  h.init();
+  const c = await connecting;
+  const el = document.createElement("div");
+  let clicks = 0;
+  el.addEventListener("click", () => (clicks += 1));
+  await c.renderMarkdown(el, "Fix **it**", { inline: true });
+  expect(asked).toEqual([["Fix **it**", true]]);
+  expect(el.classList.contains("ox-md")).toBe(true);
+  expect(el.classList.contains("ox-md-inline")).toBe(true);
+  expect(el.querySelector("strong")!.textContent).toBe("it");
+  expect(el.querySelector("script")).toBeNull();
+  expect(el.textContent).toBe("Fix it, see The item or docs, gone alert");
+  const link = el.querySelector("a")!;
+  expect(link.getAttribute("href")).toBeNull();
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true, metaKey: true }));
+  await settle();
+  expect(opened).toEqual([[ref, true]]);
+  expect(clicks).toBe(0);
+  const web = el.querySelector(".ox-md-weblink")!;
+  expect(web.tagName).toBe("SPAN");
+  expect(web.getAttribute("title")).toBe("https://example.com/d");
+  expect(el.querySelector(".ox-broken")!.getAttribute("title")).toBe("Broken link: tsk9");
   h.close();
 });

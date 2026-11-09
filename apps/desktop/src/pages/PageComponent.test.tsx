@@ -73,7 +73,7 @@ test("a component node is fed every loader of its page, its params and props, an
   expect(loads).toEqual(["acme/chart"]);
   const { init, port, received } = await startFrame(frame);
   expect(init).toMatchObject({
-    protocol: 12,
+    protocol: 13,
     run: null,
     data: { items: { columns: ["id"], rows: [["a"]], truncated: false } },
     params: { q: "x" },

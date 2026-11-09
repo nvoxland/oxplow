@@ -449,7 +449,8 @@ classic. `oxplow.connect()` waits for `init`, answers `ready`, and
 resolves with `{ data, params, run (the latest of each), page, props,
 tokens, protocol, onUpdate(fn({ run, data, params, changed })) →
 unsubscribe, invoke(command, input), navigate(uri, { newTab, replace }),
-querySql, openForm (a command's, or `{ title, schema, values }`),
+querySql, renderMarkdown(element, text, { inline? }), openForm (a
+command's, or `{ title, schema, values }`),
 signIn, cancelSignIn, setTitle, setActions, showView, onAction,
 viewParams, setViewParams, onViewParams, historyState, setHistoryState,
 onHistoryState, pageMemory, applyTheme(doc?) }` (the `.d.ts` beside it
@@ -457,11 +458,32 @@ is the reference; `viewParams` / `historyState` are null where the host
 gives no view). A failed request rejects with the host's `{ code,
 message }`. `init` carries `protocol` (`BRIDGE_PROTOCOL` in
 `componentBridge.ts`, `PROTOCOL` in the library — one number, bumped when
-a message's shape changes; now 12), and `connect` rejects a host that
+a message's shape changes; now 13), and `connect` rejects a host that
 speaks another. One app is one library version. `componentClient.test.ts`
 drives the served file against the real `createBridgeHost` and the real
 `init` (`initMessage`, which `CustomComponentViz` posts), so the two
-cannot drift. `oxplow extension new component <name>` scaffolds an
+cannot drift.
+
+**Markdown in a frame** (`renderMarkdown`, protocol 13). A component
+sends the text (`markdown { text, inline }`); the host answers the tree
+to draw (`markdownTree`, `components/Markdown/markdownTree.ts`): the
+viewer's parse (remark + GFM), its wikilinks and link rules
+(`markdownLinks.ts`, shared with `MarkdownView`) and a link's title by the
+viewer's rule (`refLinkTitle`), reduced to the elements a frame may draw
+— `INLINE_ELEMENTS` for a line, plus the blocks for a body. A link is a
+`ref` (the library draws a link that `navigate`s, Cmd/Ctrl-click a new
+tab, its click stopped there), a web page's `href` (drawn as its text with
+the URL on hover: a frame opens nothing off oxplow, which would be a way
+out for its data) or `broken` (why, on hover); raw HTML, images, tables
+and a `javascript:` URL never cross (`urlTransform`). No HTML crosses at
+all: the library builds each node with `createElement`, and any tag
+outside its own list leaves its text. The element gets the kit's `ox-md`
+(and `ox-md-inline`, whose children flow in the element whatever its own
+display). The app's host looks titles up in its caches (`liveTreeDeps`);
+the test harness's host runs the same tree with none (`NO_LOOKUPS`) —
+`markdownTree`, `markdownLinks` and `resourceStore` import no React, so
+the harness stays React-free (`harnessBuild.test.ts`). The Tasks board's
+cards draw their description this way. `oxplow extension new component <name>` scaffolds an
 extension — the component, a page that shows it and a bundle that uses
 the library — that checks and tests clean (`just_works.rs`). The
 reference is in `docs/guide/pages.md` "Custom components".

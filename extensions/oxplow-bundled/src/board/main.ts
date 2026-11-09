@@ -20,6 +20,7 @@ interface Component {
   setViewParams(params: Record<string, string | null>): Promise<null>;
   pageMemory: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<null> };
   onViewParams(fn: (params: Record<string, string>) => void): () => void;
+  renderMarkdown(element: Element, text: string, options?: { inline?: boolean }): Promise<void>;
   applyTheme(): void;
 }
 declare const oxplow: { connect(): Promise<Component> };
@@ -148,8 +149,14 @@ function start(c: Component) {
     });
     const title = el(live ? "span" : "a", { class: live ? "card-title" : "card-title ox-link", ...(live ? {} : { role: "link", tabindex: "0" }) }, String(card.title ?? ""));
     li.append(title);
+    // Its description's first sentence, its markdown drawn (as written
+    // until oxplow has read it).
     const desc = card.summary == null ? null : String(card.summary);
-    if (desc) li.append(el("span", { class: "card-desc" }, desc));
+    if (desc) {
+      const line = el("span", { class: "card-desc" }, desc);
+      li.append(line);
+      void c.renderMarkdown(line, desc, { inline: true }).catch(() => {});
+    }
     if (live) return li;
     const open = () => void c.navigate(String(card.uri));
     title.addEventListener("click", open);
