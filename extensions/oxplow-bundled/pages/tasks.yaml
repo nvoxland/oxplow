@@ -1,5 +1,5 @@
 title: Tasks
-description: "The work items of a thread, its stream, everything or the backlog as a kanban board: a column per state, drag a card to move it."
+description: "The work items of a thread, its stream or everywhere as a kanban board: a column per state, drag a card to move it. The backlog is the Task List's."
 icon: columns-3
 category: Work
 keywords: board kanban work items columns state
@@ -16,7 +16,6 @@ params:
   - { value: thread, label: This thread }
   - { value: stream, label: This stream }
   - { value: all, label: Everywhere }
-  - { value: backlog, label: Backlog }
 - name: priority
   type: choice
   role: view
@@ -50,13 +49,15 @@ loaders:
       q: { param: q }
       thread_id: { param: thread_id }
       stream_id: { param: stream_id }
-  # The cards: every open item and the ten latest done; canceled ones are
-  # on the Task List. Wider than one thread, a card names its thread.
+  # The cards: every open item, and what was done in the last three days,
+  # twenty at most; the rest of Done and the canceled ones are the Task
+  # List's. Wider than one thread, a card names its thread.
   board:
     sql: |
       SELECT i.*, CASE WHEN :scope <> 'thread' THEN i.thread END AS thread_shown
       FROM items i
-      WHERE i.state <> 'canceled' AND (i.state <> 'done' OR i.done_rank <= 10)
+      WHERE i.state <> 'canceled'
+        AND (i.state <> 'done' OR (i.done_rank <= 20 AND julianday(i.closed_at) >= julianday('now', '-3 days')))
       ORDER BY i.ord
     params:
       scope:

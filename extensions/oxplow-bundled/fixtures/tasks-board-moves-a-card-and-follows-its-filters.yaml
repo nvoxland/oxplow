@@ -25,10 +25,11 @@ steps:
           invoked:
             - { command: oxplow.work_item.transition, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", to: in_progress }, ok: true }
             - { command: oxplow.work_item.update, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", native: { priority: high } }, ok: true }
-      # Show is the tab's view: the backlog's card, then Back to the thread's.
-      - fill: { "#show": backlog }
+      # Show is the tab's view: everywhere's cards (the backlog's too), then
+      # Back to the thread's.
+      - fill: { "#show": all }
       - expect:
-          view_params: { show: backlog }
+          view_params: { show: all }
           text: { '[data-testid="column-todo"] .card-title': Someday }
       - view_params: { show: null }
       - expect: { count: { '[data-testid="column-todo"] .ox-card': 0, '[data-testid="column-in_progress"] .ox-card': 1 } }

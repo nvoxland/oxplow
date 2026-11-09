@@ -7,7 +7,7 @@ given:
   - { command: oxplow.work_item.create, input: { title: An epic, thread: thr1, native: { priority: low } }, bind: epic }
   - { command: oxplow.work_item.create, input: { title: Urgent child, thread: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
   - { command: oxplow.work_item.create, input: { title: Plain child, thread: thr1, native: { priority: low }, parent_uri: $epic.uri } }
-  - { command: oxplow.work_item.create, input: { title: Loose item, thread: thr1, native: { priority: low } }, bind: loose }
+  - { command: oxplow.work_item.create, input: { title: Loose item, thread: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
   - { command: oxplow.work_item.create, input: { title: Backlogged } }
   - { command: oxplow.work_item.create, input: { title: Shipped, thread: thr1, state: done } }
   - { command: oxplow.work_item.create, input: { title: Dropped, thread: thr1 }, bind: dropped }
@@ -21,9 +21,9 @@ expect:
       depth: 0
       thread: Thread
       add_child: "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow"
-    - { title: Urgent child, depth: 1, parent_title: An epic, prio: urgent, has_parent: 1, can_order: 1, can_delete: 1, can_nest: 1, can_shelve: 1, can_bring: 0, can_prioritize: 1 }
+    - { title: Urgent child, depth: 1, parent_title: An epic, prio: urgent, prio_tone: danger, has_parent: 1, can_order: 1, can_delete: 1, can_nest: 1, can_shelve: 1, can_bring: 0, can_prioritize: 1 }
     - { title: Plain child, depth: 1 }
-    - { title: Loose item, state: in_progress, depth: 0, comments: 1, not_in_progress: 0 }
+    - { title: Loose item, state: in_progress, depth: 0, comments: 1, not_in_progress: 0, summary: It started here., prio_tone: null }
     - { title: Shipped, state: done, done_rank: 1 }
     - { title: Dropped, state: canceled, done_rank: 1 }
 steps:
@@ -43,4 +43,8 @@ steps:
   - when: { query: work-items, params: { show: thread, state: in_progress, priority: any, q: "", thread_id: 1, stream_id: 1 } }
     expect: { rows: [{ title: Loose item, depth: 0 }] }
   - when: { query: work-items, params: { show: thread, state: done, priority: any, q: "", thread_id: 1, stream_id: 1 } }
-    expect: { rows: [{ title: Shipped }, { title: Dropped }] }
+    expect: { rows: [{ title: Shipped }] }
+  - when: { query: work-items, params: { show: thread, state: canceled, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Dropped }] }
+  - when: { query: work-items, params: { show: thread, state: todo, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }] }

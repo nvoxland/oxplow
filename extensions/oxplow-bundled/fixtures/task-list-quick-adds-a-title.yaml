@@ -1,0 +1,6 @@
+# Task List's quick add asks only for a title; what it files and where is
+# the list's.
+when: { form: task-list, node: add, params: { show: thread, state: todo, thread_id: 1, stream_id: 1 } }
+expect:
+  values: { state: todo, thread: thr1 }
+  fields: [title]

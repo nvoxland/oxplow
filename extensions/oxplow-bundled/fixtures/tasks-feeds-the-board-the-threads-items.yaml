@@ -1,4 +1,6 @@
-# The Tasks board's rows: the open items and the ten latest done, no
+# The Tasks board's rows: the open items and the done ones of the last
+# three days, twenty at most (the clock can't move here: the cap is what
+# this tests), no
 # canceled ones, each column's count, the list's choice fields; wider than
 # one thread a card names its thread; with no thread, "this thread" is
 # everything.
@@ -18,6 +20,16 @@ given:
   - { command: oxplow.work_item.create, input: { title: Done 9, thread: thr1, state: done } }
   - { command: oxplow.work_item.create, input: { title: Done 10, thread: thr1, state: done } }
   - { command: oxplow.work_item.create, input: { title: Done 11, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 12, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 13, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 14, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 15, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 16, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 17, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 18, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 19, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 20, thread: thr1, state: done } }
+  - { command: oxplow.work_item.create, input: { title: Done 21, thread: thr1, state: done } }
 when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
 expect:
   loaders:
@@ -25,6 +37,16 @@ expect:
     board:
       rows:
         - { title: Next up, state: todo, thread_shown: null }
+        - { title: Done 21 }
+        - { title: Done 20 }
+        - { title: Done 19 }
+        - { title: Done 18 }
+        - { title: Done 17 }
+        - { title: Done 16 }
+        - { title: Done 15 }
+        - { title: Done 14 }
+        - { title: Done 13 }
+        - { title: Done 12 }
         - { title: Done 11 }
         - { title: Done 10 }
         - { title: Done 9 }
@@ -35,11 +57,11 @@ expect:
         - { title: Done 4 }
         - { title: Done 3 }
         - { title: Done 2 }
-    counts: { rows: { contains: [{ state: done, n: 11 }, { state: canceled, n: 1 }, { state: todo, n: 1 }] } }
+    counts: { rows: { contains: [{ state: done, n: 21 }, { state: canceled, n: 1 }, { state: todo, n: 1 }] } }
     fields: { rows: { contains: [{ name: priority, kind: enum }] } }
     live: { rows: 0 }
 steps:
-  - params: { show: backlog }
-    expect: { loaders: { row: { rows: [{ scope: backlog }] }, board: { rows: [{ title: In the backlog, thread_shown: Backlog }] } } }
+  - params: { show: all }
+    expect: { loaders: { row: { rows: [{ scope: all }] }, board: { rows: { contains: [{ title: In the backlog, thread_shown: Backlog }] } } } }
   - params: { show: thread, thread_id: null }
     expect: { loaders: { row: { rows: [{ scope: all }] } } }

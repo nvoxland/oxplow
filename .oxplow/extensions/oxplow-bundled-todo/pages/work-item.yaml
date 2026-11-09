@@ -67,7 +67,7 @@ loaders:
   related:
     sql: |
       SELECT CASE WHEN w.thread_id IS NULL THEN 'Backlog' ELSE 'Tasks' END AS title,
-             CASE WHEN w.thread_id IS NULL THEN 'oxplow:oxplow/page?page=tasks#show=backlog'
+             CASE WHEN w.thread_id IS NULL THEN 'oxplow:oxplow/page?page=task-list#show=backlog'
                   ELSE uri('oxplow/page', 'page', 'tasks', 'thread_id', w.thread_id) END AS uri,
              CASE WHEN w.thread_id IS NULL THEN 'The work items on no thread'
                   ELSE 'The work items of its thread' END AS description,

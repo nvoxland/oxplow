@@ -48,6 +48,73 @@ export function boardColumns(board: Rec[], counts: Rec[]): Column[] {
   });
 }
 
+/** A run of To Do cards under one epic: its heading (the epic's card when
+ *  the epic is in this column too) and its children. The loose cards are
+ *  the last group, `uri` null, with no heading. */
+export interface EpicGroup {
+  uri: string | null;
+  title: string | null;
+  /** The epic's own card, when it is in this column. */
+  epic: Rec | null;
+  cards: Rec[];
+}
+
+/** `cards` (one column's) under their epics, in the order each first
+ *  appears; `all` (every card on the board) says which items are epics. */
+export function epicGroups(cards: Rec[], all: Rec[]): EpicGroup[] {
+  const epics = new Set(all.map((r) => r.parent_uri).filter((u): u is string => typeof u === "string"));
+  const groups = new Map<string, EpicGroup>();
+  const loose: Rec[] = [];
+  const group = (uri: string, title: string | null) => {
+    let g = groups.get(uri);
+    if (!g) groups.set(uri, (g = { uri, title, epic: null, cards: [] }));
+    return g;
+  };
+  for (const card of cards) {
+    const uri = card.uri == null ? null : String(card.uri);
+    if (uri && epics.has(uri)) {
+      const g = group(uri, String(card.title ?? ""));
+      g.epic = card;
+      g.title = String(card.title ?? "");
+    } else if (typeof card.parent_uri === "string") {
+      group(card.parent_uri, card.parent_title == null ? null : String(card.parent_title)).cards.push(card);
+    } else loose.push(card);
+  }
+  const out = [...groups.values()];
+  if (loose.length > 0 || out.length === 0) out.push({ uri: null, title: null, epic: null, cards: loose });
+  return out;
+}
+
+/** What a compact card says on hover: its title, then its epic, fields,
+ *  thread and comments, a line each. */
+export function cardHint(card: Rec): string {
+  return [card.title, card.parent_title ? `in ${card.parent_title}` : null, card.fields, card.thread_shown, comments(card.comments)]
+    .filter((x) => x !== null && x !== undefined && x !== "")
+    .map(String)
+    .join("\n");
+}
+
+const PRIORITIES = ["urgent", "high", "medium", "low"];
+
+/** A card's priority (the list's `priority` field), for its coloured edge;
+ *  null without one the board knows. */
+export function priorityOf(card: Rec): string | null {
+  const p = parseObject(card.native).priority;
+  return typeof p === "string" && PRIORITIES.includes(p) ? p : null;
+}
+
+/** The line under a column with more than it shows: Done's goes to its
+ *  whole history in the Task List. */
+export function moreLabel(col: Column): string {
+  return col.state === "done" ? `All ${col.total} in Task List` : `${col.more} more…`;
+}
+
+/** "2 comments", "1 comment", or null. */
+export function comments(n: unknown): string | null {
+  const k = Number(n) || 0;
+  return k === 0 ? null : k === 1 ? "1 comment" : `${k} comments`;
+}
+
 export interface Field {
   name: string;
   title: string;

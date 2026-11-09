@@ -1,5 +1,5 @@
 title: Work items
-description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (the thread's list), `stream` (every thread of the stream), `all` (every item, the backlog too) or `backlog` (items on no thread). `state`: `all`, `open` (to do, in progress, blocked), `in_progress` or `done` (done and canceled). `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`fields`: the list's editable choice fields joined, `thread`: its thread's title or `Backlog`, `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `not_<state>`), and `ord`, the order to draw it in: open items by list and rank with each epic's children under it, then done and canceled ones, the latest first."
+description: "The active work list's items that a task page shows, filtered once for every page. `show`: `thread` (the thread's list), `stream` (every thread of the stream), `all` (every item, the backlog too) or `backlog` (items on no thread). `state`: `all`, `open` (to do, in progress, blocked) or one state (`todo`, `in_progress`, `blocked`, `done`, `canceled`). `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `thread`: its thread's title or `Backlog`, `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `not_<state>`), and `ord`, the order to draw it in: open items by list and rank with each epic's children under it, then done and canceled ones, the latest first."
 needs:
 - work_items
 params:
@@ -32,10 +32,9 @@ loaders:
                          WHEN 'stream' THEN w.thread_id IN (SELECT t.id FROM v_thread t WHERE t.stream_id = :stream_id)
                          WHEN 'backlog' THEN w.thread_id IS NULL
                          ELSE 1 END
-          AND CASE :state WHEN 'open' THEN w.state IN ('todo', 'in_progress', 'blocked')
-                          WHEN 'in_progress' THEN w.state = 'in_progress'
-                          WHEN 'done' THEN w.state IN ('done', 'canceled')
-                          ELSE 1 END
+          AND CASE :state WHEN 'all' THEN 1
+                          WHEN 'open' THEN w.state IN ('todo', 'in_progress', 'blocked')
+                          ELSE w.state = :state END
       ),
       -- What the priority and the search match; an epic stays for a child that does.
       hit AS (
@@ -58,7 +57,9 @@ loaders:
         SELECT p.*, coalesce(CASE WHEN p.depth = 1 THEN p.parent_uri END, p.uri) AS anchor FROM placed p
       )
       SELECT w.uri, w.title, w.state, w.native, w.thread_id,
+             first_sentence(w.body) AS summary,
              json_extract(w.nat, '$.priority') AS prio,
+             CASE json_extract(w.nat, '$.priority') WHEN 'urgent' THEN 'danger' WHEN 'high' THEN 'warning' END AS prio_tone,
              (SELECT group_concat(n.value, ' · ') FROM json_each(w.nat) n
                WHERE n.key IN (SELECT name FROM choice_field) AND n.value IS NOT NULL) AS fields,
              CASE WHEN w.thread_id IS NULL THEN 'Backlog'

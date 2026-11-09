@@ -312,13 +312,23 @@ screens and the holder's add the review and analysis:
   columns and card menu with the kit's classes and runs the work-item
   commands it declares; core draws its nav bar (New Task…), confirms a
   delete and records what fails. Its filters are `role: view` params, so the
-  page has no rail and the board has the whole width. It is the
+  page has no rail and the board has the whole width. A card is its title and
+  its description's first sentence, two lines each at most (an urgent or
+  high priority a coloured edge, the rest on hover); To Do is grouped under
+  foldable epic headings, each epic the kit's nesting panel (`ox-nest`, as Task List's epics) (folds in page memory); Done is the last three
+  days, twenty at most (the `board` loader), then "All N in Task List";
+  each column scrolls on its own. It is the
   `work_item.board` replaceable, its filters shared with a stand-in.
-  **Task List** (`task-list`) is the same work as a `list` by state, its
-  filters in the rail (`State` adds open, in progress, done or canceled),
-  with the drag, bulk and keyboard actions, and the agents' answers about
+  The board's Show has no backlog: the backlog is the Task List's.
+  **Task List** (`task-list`, each row its title over its description's
+  first sentence, an urgent or high item's coloured `edge`) is the items in one state (`State`, To Do
+  unless asked; Done's link asks for done), its filters in the rail (Show
+  includes the backlog), with a quick add in the rail above them (a title; To Do, or Blocked
+  while it shows blocked items, on this thread, or in the backlog while it
+  shows the backlog), with the drag, bulk and keyboard actions, and the agents' answers about
   what is in progress, in the backlog or finished. The pure half of the
-  board (`src/board/model.ts`) is tested from the desktop suite
+  board (`src/board/model.ts`; a card's description is the query's
+  `summary`, `first_sentence(body)`) is tested from the desktop suite
   (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.
 - **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
   job `reasoning`, the command `oxplow.effort.infer_reasoning` and the

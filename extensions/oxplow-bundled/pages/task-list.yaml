@@ -1,5 +1,5 @@
 title: Task List
-description: "The work items of a thread, its stream, everything or the backlog, listed by state with epics over their children and the finished ones latest first; Tasks shows the same work as a board."
+description: "The work items in one state, on a thread, its stream, everything or the backlog, with epics over their children and the finished ones latest first, and a quick add."
 icon: check-square
 category: Work
 keywords: work items list backlog history done finished in progress
@@ -20,12 +20,13 @@ params:
   type: choice
   role: filter
   label: State
-  default: all
+  default: todo
   options:
-  - { value: all, label: Any }
-  - { value: open, label: Open }
+  - { value: todo, label: To do }
   - { value: in_progress, label: In progress }
-  - { value: done, label: Done or canceled }
+  - { value: blocked, label: Blocked }
+  - { value: done, label: Done }
+  - { value: canceled, label: Canceled }
 - name: priority
   type: choice
   role: filter
@@ -56,6 +57,15 @@ loaders:
              uri('oxplow/page', 'page', 'new-task') AS new_task
     columns:
     - key: scope
+  # What the quick add files: To Do (Blocked while the list shows blocked
+  # items) on this thread, or in the backlog while it shows the backlog.
+  new_item:
+    sql: |
+      SELECT CASE :state WHEN 'blocked' THEN 'blocked' ELSE 'todo' END AS state,
+             CASE WHEN :scope = 'backlog' THEN NULL ELSE 'thr' || :thread_id END AS thread
+    params:
+      scope:
+        from: row.scope
   items:
     page: oxplow/work-items
     loader: items
@@ -69,8 +79,7 @@ loaders:
   list:
     sql: |
       SELECT i.*,
-             CASE WHEN :scope <> 'thread' THEN i.thread END AS thread_shown,
-             CASE WHEN i.add_child IS NOT NULL AND i.state NOT IN ('done', 'canceled') THEN '+' END AS plus
+             CASE WHEN :scope <> 'thread' THEN i.thread END AS thread_shown
       FROM items i
       ORDER BY i.ord
     params:
@@ -78,43 +87,39 @@ loaders:
         from: row.scope
 actions:
 - { id: new, label: New Task…, open: new_task, prominent: true, icon: plus }
+# The quick add sits in the rail (Details), above the filters.
+rail:
+  id: add
+  title: New item
+  from: new_item
+  viz: form
+  form:
+    command: oxplow.work_item.create
+    then: stay
+    fields: [title]
 view:
   id: list
   replaceable: work_item.list
   title: Task List
   from: list
   viz: list
-  group:
-    by: state
-    values: [in_progress, todo, blocked, done, canceled]
-    labels:
-      in_progress: In Progress
-      todo: To Do
-      blocked: Blocked
-      done: Done
-      canceled: Canceled
   depth: depth
+  # An urgent or high item's coloured bar, as on the board's cards.
+  edge: prio_tone
   columns:
   - key: title
     label: Item
     link:
       kind: page
       from: uri
-    icon: state
-  - key: fields
-    label: Fields
+  - key: summary
+    label: Description
   - key: thread_shown
     label: Thread
   - key: closed_at
     label: Closed
     format: relative
-  - key: plus
-    label: ''
-    link:
-      kind: page
-      from: add_child
-    width: 40
-  empty: Nothing here. File an item with New Task….
+  empty: Nothing here in this state. Add one under New item.
   actions:
   - id: reorder
     label: Reorder
@@ -134,14 +139,6 @@ view:
     input:
       uri: '{{row.uri}}'
       parent_uri: '{{onto.uri}}'
-  - id: move
-    label: Move to the state
-    command: oxplow.work_item.transition
-    row: true
-    drag: true
-    input:
-      uri: '{{row.uri}}'
-      to: '{{group.value}}'
   - id: to-todo
     label: Mark To Do
     command: oxplow.work_item.transition

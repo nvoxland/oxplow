@@ -5,7 +5,7 @@
 // filters are the page's view params (`show`, `priority`, `q`): a change
 // goes into the tab's address, the page runs again and the frame hears the
 // rows; Back puts the filters back.
-import { boardColumns, cardMenu, choiceFields, dropAct, filtersOf, moreRef, records, type Act, type Filters, type MenuEntry, type Rec, type Rows } from "./model.js";
+import { boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, filtersOf, moreLabel, moreRef, priorityOf, records, type Act, type Filters, type MenuEntry, type Rec, type Rows } from "./model.js";
 
 interface Component {
   data: Record<string, Rows>;
@@ -18,6 +18,7 @@ interface Component {
   setActions(actions: { id: string; label: string; primary?: boolean; prominent?: boolean; icon?: string }[]): Promise<null>;
   onAction(fn: (id: string) => void): () => void;
   setViewParams(params: Record<string, string | null>): Promise<null>;
+  pageMemory: { get(key: string): Promise<unknown>; set(key: string, value: unknown): Promise<null> };
   onViewParams(fn: (params: Record<string, string>) => void): () => void;
   applyTheme(): void;
 }
@@ -34,6 +35,18 @@ function start(c: Component) {
   let params = c.params;
   let view = c.viewParams;
   let dragging: Rec | null = null;
+  // The epics folded in To Do: the person's, in every tab of the board.
+  let folded = new Set<string>();
+  c.pageMemory.get("folded-epics").then((v) => {
+    if (Array.isArray(v)) folded = new Set(v.map(String));
+    render();
+  }, () => {});
+  const fold = (uri: string) => {
+    if (folded.has(uri)) folded.delete(uri);
+    else folded.add(uri);
+    void c.pageMemory.set("folded-epics", [...folded]).catch(() => {});
+    render();
+  };
 
   c.setTitle("Tasks");
   c.setActions([{ id: "new", label: "New Task…", prominent: true, icon: "plus" }]);
@@ -102,10 +115,16 @@ function start(c: Component) {
         const head = el("div", { class: "column-head" });
         head.append(el("h2", { class: "ox-heading" }, col.label), el("span", { class: "ox-faint ox-small count" }, String(col.total)));
         const list = el("ul", { class: "cards" });
-        list.append(...col.cards.map((card) => cardEl(card, fields)));
+        if (col.state === "todo") {
+          // To Do under its epics, each foldable; the loose cards last.
+          for (const g of epicGroups(col.cards, cards)) {
+            if (g.uri === null) list.append(...g.cards.map((card) => cardEl(card, fields)));
+            else list.append(groupEl(g.uri, g.title, g.epic, g.cards, fields));
+          }
+        } else list.append(...col.cards.map((card) => cardEl(card, fields)));
         section.append(head, list);
         if (col.more > 0) {
-          const more = el("button", { type: "button", class: "ox-link more" }, `${col.more} more…`);
+          const more = el("button", { type: "button", class: "ox-link more" }, moreLabel(col));
           more.addEventListener("click", () => void c.navigate(moreRef(filters())));
           section.append(more);
         }
@@ -115,14 +134,21 @@ function start(c: Component) {
     );
   }
 
-  function cardEl(card: Rec, fields: ReturnType<typeof choiceFields>): HTMLElement {
+  // A compact card: its title and its description's first sentence, two
+  // lines each at most; an urgent or high priority a coloured edge; the rest
+  // on hover.
+  function cardEl(card: Rec, fields: ReturnType<typeof choiceFields>, nested = false): HTMLElement {
     const live = card.uri == null;
-    const li = el("li", { class: live ? "ox-card live" : "ox-card ox-drag", "data-uri": live ? "" : String(card.uri) });
+    const prio = priorityOf(card);
+    const li = el("li", {
+      class: ["ox-card", live ? "live" : "ox-drag", nested ? "nested" : "", prio ? `prio-${prio}` : ""].filter(Boolean).join(" "),
+      "data-uri": live ? "" : String(card.uri),
+      title: cardHint(card),
+    });
     const title = el(live ? "span" : "a", { class: live ? "card-title" : "card-title ox-link", ...(live ? {} : { role: "link", tabindex: "0" }) }, String(card.title ?? ""));
     li.append(title);
-    for (const line of [card.parent_title ? `in ${card.parent_title}` : null, card.fields, card.thread_shown, comments(card.comments)]) {
-      if (line) li.append(el("span", { class: "card-meta" }, String(line)));
-    }
+    const desc = card.summary == null ? null : String(card.summary);
+    if (desc) li.append(el("span", { class: "card-desc" }, desc));
     if (live) return li;
     const open = () => void c.navigate(String(card.uri));
     title.addEventListener("click", open);
@@ -155,6 +181,37 @@ function start(c: Component) {
     return li;
   }
 
+  // An epic in To Do: one block, a line down its left side, its heading (a
+  // fold toggle, its title — a link — and how many of its items are here;
+  // its own card's menu when it is in To Do) over its items.
+  function groupEl(uri: string, title: string | null, epic: Rec | null, items: Rec[], fields: ReturnType<typeof choiceFields>): HTMLElement {
+    const open = !folded.has(uri);
+    const group = el("li", { class: "epic-group ox-nest", "data-epic": uri });
+    const li = el("div", { class: "epic", ...(epic ? { "data-uri": uri } : {}) });
+    const toggle = el("button", { type: "button", class: "epic-toggle", "aria-expanded": String(open), "aria-label": `${open ? "Fold" : "Unfold"} ${title ?? "epic"}` }, open ? "▾" : "▸");
+    toggle.addEventListener("click", () => fold(uri));
+    const name = el("a", { class: "epic-title ox-link", role: "link", tabindex: "0", title: title ?? "" }, title ?? "Epic");
+    name.addEventListener("click", () => void c.navigate(uri));
+    name.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") void c.navigate(uri);
+    });
+    li.append(toggle, name, el("span", { class: "ox-faint ox-small" }, String(items.length)));
+    if (epic) {
+      const menu = cardMenu(epic, fields);
+      li.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        openMenu(menu, e.clientX, e.clientY);
+      });
+    }
+    group.append(li);
+    if (open) {
+      const under = el("ul", { class: "epic-cards" });
+      under.append(...items.map((card) => cardEl(card, fields, true)));
+      group.append(under);
+    }
+    return group;
+  }
+
   function dropZone(section: HTMLElement, list: HTMLElement, state: string) {
     const beforeAt = (y: number): HTMLElement | null =>
       [...list.querySelectorAll<HTMLElement>(".ox-card:not(.live)")].find((li) => {
@@ -183,7 +240,7 @@ function start(c: Component) {
       if (!act) return;
       // Drawn where it lands at once; the re-run redraws it, a refusal puts it back.
       const li = document.querySelector<HTMLElement>(`.ox-card[data-uri="${CSS.escape(String(card.uri))}"]`);
-      if (li) list.insertBefore(li, beforeLi);
+      if (li) (beforeLi?.parentElement ?? list).insertBefore(li, beforeLi);
       void run(act);
     });
   }
@@ -247,11 +304,6 @@ function start(c: Component) {
 
   sync();
   render();
-}
-
-function comments(n: unknown): string | null {
-  const k = Number(n) || 0;
-  return k === 0 ? null : k === 1 ? "1 comment" : `${k} comments`;
 }
 
 function say(text: string | null) {

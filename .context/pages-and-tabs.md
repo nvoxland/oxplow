@@ -861,8 +861,10 @@ margin; an embed or a slot takes its title from the page it shows):
   `priority`, `q`; `thread_id`, `stream_id`): a custom page, its `board`
   component node (the `work_item.board` replaceable) drawing its own
   toolbar, a column per state and each card's menu; no rail. `task-list`
-  (filters `show`, `state`, `priority`, `q`): a state-grouped `list` (the
-  `work_item.list` replaceable; drag to reorder, nest or move; marked rows
+  (filters `show`, with the backlog, `state`, one at a time, To Do by
+  default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
+  `oxplow.work_item.create` (a title, filed where the list shows), its view a
+  `list` (the `work_item.list` replaceable; drag to reorder or nest; marked rows
   get bulk state, priority, Send to backlog, Bring to this thread and
   Delete; `r` `i` `b` `d` set states) and New Task… in the nav bar. Both
   read bundled's `work-items` query. `comments` (params `stream_id`, `days`,
@@ -1411,8 +1413,9 @@ launcher (type, then assert `page-<kind>` on the body).
 **The task pages** (oxplow-bundled; extensions-bundled.md "The task
 screens"). **Tasks** is the board, a custom page whose component draws
 its filters, so it takes the whole width with no rail; the Work panel's
-header opens it. **Task List** is the same work as a list by state, for
-finding, sorting and what was finished. Both read `v_work_item` and offer
+header opens it. **Task List** is one state's items at a time, the
+backlog's too, with a quick add in its rail, for triage, finding and what was
+finished. Both read `v_work_item` and offer
 only what the active list can do (`v_capability_provider`): reordering
 with `ordering`, Send to backlog and Bring to this thread with `lists`,
 epics with `hierarchy`, Delete with `delete`. There's no Archived page:

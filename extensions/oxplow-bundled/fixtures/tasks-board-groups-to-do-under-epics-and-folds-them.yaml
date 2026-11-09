@@ -1,0 +1,21 @@
+# To Do on the board: an epic's items under its heading in one block (the
+# epic's own card is the heading), the loose ones after; a heading folds its items
+# away; a card shows its description's first sentence under its title.
+given:
+  - { command: oxplow.work_item.create, input: { title: An epic, thread: thr1 }, bind: epic }
+  - { command: oxplow.work_item.create, input: { title: Its child, thread: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
+  - { command: oxplow.work_item.create, input: { title: Loose item, thread: thr1, native: { priority: low }, body: "## Why\n\nIt breaks the build. Then more." } }
+when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+steps:
+  - ui:
+      - expect:
+          count: { '[data-testid="column-todo"] .epic': 1, '[data-testid="column-todo"] .ox-card.nested': 1, '[data-testid="column-todo"] .epic-group .ox-card': 1, '[data-testid="column-todo"] .ox-card': 2 }
+          text:
+            '[data-testid="column-todo"] .epic-title': An epic
+            '[data-testid="column-todo"] .ox-card.nested.prio-urgent .card-title': Its child
+            '[data-testid="column-todo"] .ox-card.prio-low .card-title': Loose item
+            '[data-testid="column-todo"] .ox-card.prio-low .card-desc': It breaks the build.
+      - click: '[data-testid="column-todo"] .epic-toggle'
+      - expect: { count: { '[data-testid="column-todo"] .ox-card.nested': 0, '[data-testid="column-todo"] .ox-card': 1 } }
+      - click: '[data-testid="column-todo"] .epic-title'
+      - expect: { navigated: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"] }

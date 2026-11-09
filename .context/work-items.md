@@ -183,14 +183,20 @@ extension may be gone" — that still unlinks. `BacklinkEdge.resolved` (the
 IPC's `ref_resolver::resolve_ref`) says which.
 
 The **Tasks** board (oxplow-bundled's `tasks` page, its `board`
-component) shows items as cards in one column per canonical state, the
-latest ten done in Done. Drag a card to a column to transition it, within
+component) shows items as compact cards (the title and the description's
+first sentence, two lines each at most; an urgent or high priority a
+coloured edge; the rest on hover) in one column per canonical state. To
+Do groups its cards under their epics, each heading folding its items
+(remembered per person); Done holds what finished in the last three days,
+twenty at most, and links to the rest in the Task List. Each column
+scrolls on its own. Drag a card to a column to transition it, within
 its column to reorder it (with `ordering`), or use its menu: the states,
 the list's editable choice fields, Make top-level, Send to backlog or
 Bring to this thread, Delete. Its scope (this thread, its stream,
-everywhere, the backlog), priority and search are its toolbar, the tab's
-view. The **Task List** (`task-list`) is the same work as a list by state,
-the closed items latest first. **New Item** files on the active
+everywhere), priority and search are its toolbar, the tab's view. The
+**Task List** (`task-list`) is the items in one state (To Do unless asked),
+closed ones latest first, on a thread, its stream, everywhere or the
+backlog, with a quick add in its rail that files a title there. **New Item** files on the active
 list: title, body, a canonical starting state (todo or blocked), the
 list's editable fields and — with `hierarchy` — a parent.
 
