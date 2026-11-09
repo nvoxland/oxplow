@@ -491,7 +491,8 @@ ends the component and its table shows.
 named in every bundle's CSP `style-src`) is a few `ox-` classes in
 oxplow's look — text, card, badge, buttons, forms (`ox-form`, `ox-field`,
 `ox-label`, `ox-input`/`ox-select`/`ox-textarea` with the accent focus
-ring, `ox-error`), a menu (`ox-menu`, `ox-menu-item`, `ox-menu-separator`,
+ring, `ox-error`), a nesting panel (`ox-nest`: a parent and its children,
+as a `depth` list draws them), a menu (`ox-menu`, `ox-menu-item`, `ox-menu-separator`,
 `ox-menu-heading`, `ox-danger`), drag and drop (`ox-drag`, `ox-dragging`,
 `ox-drop-target`, the Work board's dashed accent drop look), table,
 states, chart series. They read only the theme's tokens (`kitSheet.test.ts`:

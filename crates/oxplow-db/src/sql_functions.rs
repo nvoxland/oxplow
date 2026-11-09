@@ -7,6 +7,11 @@
 //!   key)` reads one param back, `uri_resource(uri)` its resource and
 //!   `uri_key(uri)` the param that names it (`thr3`; anything that isn't a
 //!   URI as it was). A NULL value leaves its param out.
+//! - `first_sentence(markdown)` is a description's opening for a card or a
+//!   list row: the first line that isn't a heading, its list, quote,
+//!   emphasis (`*`, `__`) and code marks dropped (a lone `_` is an
+//!   identifier's), up to the first `.`, `!` or `?` that ends a sentence;
+//!   NULL when there's no such line.
 
 use rusqlite::functions::{Context, FunctionFlags};
 use rusqlite::types::ValueRef;
@@ -20,6 +25,9 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("uri_resource", 1, flags, uri_resource)?;
     c.create_scalar_function("uri_key", 1, flags, uri_key)?;
     c.create_scalar_function("uri_view", -1, flags, uri_view)?;
+    c.create_scalar_function("first_sentence", 1, flags, |ctx| {
+        Ok(text(ctx, 0)?.and_then(|t| first_sentence(&t)))
+    })?;
     c.create_scalar_function("read_measure", 1, flags, read_measure)
 }
 
@@ -191,6 +199,51 @@ fn uri_key(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
     Ok(Some(key.unwrap_or(t)))
 }
 
+/// The first sentence of a markdown description (the module's doc).
+fn first_sentence(body: &str) -> Option<String> {
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))?;
+    let mut rest = line;
+    // List, numbered-list and quote marks, however many lead the line.
+    loop {
+        let before = rest;
+        for mark in ["- ", "* ", "+ "] {
+            if let Some(r) = rest.strip_prefix(mark) {
+                rest = r.trim_start();
+            }
+        }
+        if let Some(r) = rest.strip_prefix('>') {
+            rest = r.trim_start();
+        }
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits > 0 {
+            let after = &rest[digits..];
+            if let Some(r) = after
+                .strip_prefix(". ")
+                .or_else(|| after.strip_prefix(") "))
+            {
+                rest = r.trim_start();
+            }
+        }
+        if rest == before {
+            break;
+        }
+    }
+    let text = rest.replace("__", "").replace(['*', '`'], "");
+    let text = text.trim();
+    let chars: Vec<char> = text.chars().collect();
+    let end = chars.iter().enumerate().position(|(i, c)| {
+        matches!(c, '.' | '!' | '?') && chars.get(i + 1).is_none_or(|n| n.is_whitespace())
+    });
+    let sentence: String = match end {
+        Some(i) => chars[..=i].iter().collect(),
+        None => text.to_string(),
+    };
+    (!sentence.is_empty()).then_some(sentence)
+}
+
 fn text(ctx: &Context<'_>, i: usize) -> rusqlite::Result<Option<String>> {
     Ok(match ctx.get_raw(i) {
         ValueRef::Null => None,
@@ -308,5 +361,45 @@ mod tests {
             assert_eq!(run(sql).unwrap().as_deref(), want, "{sql}");
         }
         assert_eq!(run("SELECT uri_key(NULL)").unwrap(), None);
+    }
+
+    /// A description's first sentence, for a card or a list row: past
+    /// headings, list, quote, emphasis and code marks, to the first `.`,
+    /// `!` or `?` that ends a sentence.
+    #[test]
+    fn first_sentence_reads_a_descriptions_opening() {
+        let first = |body: &str| {
+            let c = Connection::open_in_memory().unwrap();
+            register(&c).unwrap();
+            c.query_row("SELECT first_sentence(?1)", [body], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .unwrap()
+        };
+        for (body, says) in [
+            (
+                "Signing in from /settings bounces back. The `next` param is stale.",
+                Some("Signing in from /settings bounces back."),
+            ),
+            (
+                "## Context\n\n- **The panel** times out after 5s\nmore",
+                Some("The panel times out after 5s"),
+            ),
+            (
+                "> Quoted first: yes! Then more.",
+                Some("Quoted first: yes!"),
+            ),
+            ("See `v_effort.title`. Done.", Some("See v_effort.title.")),
+            (
+                "Version 1.2 ships soon. Next.",
+                Some("Version 1.2 ships soon."),
+            ),
+            ("1. Number one. Two.", Some("Number one.")),
+            ("", None),
+            ("# Only a heading", None),
+        ] {
+            assert_eq!(first(body).as_deref(), says, "{body:?}");
+        }
+        assert_eq!(run("SELECT first_sentence(NULL)").unwrap(), None);
     }
 }

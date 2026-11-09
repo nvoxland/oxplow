@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -803,4 +803,13 @@ describe("columnWrap", () => {
   test("an empty column is words", () => {
     expect(columnWrap(null, false, [])).toBe("words");
   });
+});
+
+// A `depth` list nests: a row followed by deeper rows is their parent, and
+// they sit in its panel until a row as shallow as it comes.
+test("nestRows makes each parent hold the deeper rows after it", () => {
+  const rows = [["Epic", 0], ["Child", 1], ["Grandchild", 2], ["Child 2", 1], ["Loose", 0], ["Orphan", 1]].map((r, i) => [r as unknown[], i] as const);
+  const shape = (ns: ReturnType<typeof nestRows>): unknown[] => ns.map((n) => (n.kids.length ? [n.i, shape(n.kids)] : n.i));
+  expect(shape(nestRows(rows as never, (r) => r[1] as number))).toEqual([[0, [[1, [2]], 3]], [4, [5]]]);
+  expect(shape(nestRows([], () => 0))).toEqual([]);
 });

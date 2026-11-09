@@ -4,6 +4,7 @@
  * entries for loaded viz nodes. React-free so it's unit-tested directly.
  * See `.context/extensions-pages.md`.
  */
+import { toneColor } from "./vizIcons.js";
 import { humanize } from "../kit/humanize.js";
 import type { FormSource } from "./formSource.js";
 import type { VizActionRunner } from "./vizActionRunner.js";
@@ -191,6 +192,39 @@ export function rowEmphasized(viz: VizConfig, columns: string[], row: SqlCell[])
 
 /** How far the row is indented: its `depth` cell as a whole number
  *  (0–8), else 0. */
+/** The colour of a row's left edge (`edge`: a column of tones),
+ *  `transparent` where it has none (the edge keeps its width, so rows line
+ *  up, and draws nothing that would box the row in); null when the viz has
+ *  no `edge`. */
+export function rowEdge(viz: VizConfig, columns: string[], row: SqlCell[]): string | null {
+  if (!viz.edge) return null;
+  return toneColor(cellOf(columns, row, viz.edge)) ?? "transparent";
+}
+
+/** A row and the deeper rows under it, in order. */
+export interface RowNest {
+  row: SqlCell[];
+  /** Its index in the result (its test id). */
+  i: number;
+  depth: number;
+  kids: RowNest[];
+}
+
+/** A `depth` list's rows as parents and children: a row followed by
+ *  deeper rows holds them, until a row as shallow as it comes. A row
+ *  deeper than the one before it with no parent shown sits where it is. */
+export function nestRows(rows: readonly (readonly [SqlCell[], number])[], depthOf: (row: SqlCell[]) => number): RowNest[] {
+  const roots: RowNest[] = [];
+  const open: RowNest[] = [];
+  for (const [row, i] of rows) {
+    const n: RowNest = { row, i, depth: depthOf(row), kids: [] };
+    while (open.length > 0 && open[open.length - 1]!.depth >= n.depth) open.pop();
+    (open.length > 0 ? open[open.length - 1]!.kids : roots).push(n);
+    open.push(n);
+  }
+  return roots;
+}
+
 export function rowDepth(viz: VizConfig, columns: string[], row: SqlCell[]): number {
   const v = cellOf(columns, row, viz.depth);
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : 0;

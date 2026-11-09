@@ -22,7 +22,6 @@ test("the star offers to move a bookmark made at another filter value", async ({
   expect(before).not.toContain("mode=by-commit");
 
   // Another value of the page's filter: the star is off, but says why.
-  await shown(page).getByTestId("page-param-mode-value").click();
   await shown(page).getByTestId("page-param-mode-edit").selectOption("by-commit");
   await expect(star).toHaveText("☆");
   await expect(star).toHaveAttribute("title", "Bookmarked at other values");

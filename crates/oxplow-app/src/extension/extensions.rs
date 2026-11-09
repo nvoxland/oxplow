@@ -3402,7 +3402,7 @@ fn highlight_problem(cfg: &VizConfig) -> Option<String> {
 }
 
 /// Row styling on a viz that doesn't draw rows that way: `group` and
-/// `depth` are for `list` / `table`, `emphasis` also for `tree`.
+/// `depth` and `edge` are for `list` / `table`, `emphasis` also for `tree`.
 fn row_style_problem(cfg: &VizConfig) -> Option<String> {
     let rows = matches!(cfg.viz, Viz::List | Viz::Table);
     let viz = format!("{:?}", cfg.viz).to_lowercase();
@@ -3424,6 +3424,11 @@ fn row_style_problem(cfg: &VizConfig) -> Option<String> {
     if cfg.depth.is_some() && !rows {
         return Some(format!(
             "`depth` is only for `list` and `table`, not `{viz}`"
+        ));
+    }
+    if cfg.edge.is_some() && !rows {
+        return Some(format!(
+            "`edge` is only for `list` and `table`, not `{viz}`"
         ));
     }
     if cfg.emphasis.is_some() && !rows && cfg.viz != Viz::Tree {
@@ -9143,7 +9148,7 @@ commands:
                     &viz_page(
                         "params: [{ name: stream_id, default: '' }]\n",
                         "SELECT 1 AS id, 'Ready' AS bucket, 'oxplow:oxplow/page?page=tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue",
-                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\nedge: hue\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
                     ),
                 ),
                 ("t", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_", "viz: tree\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n")),
@@ -9155,6 +9160,8 @@ commands:
                 ("g", &viz_page("", "SELECT 1 AS x, 2 AS y", "viz: bar\nchart: { x: x, y: y }\nemphasis: x\n")),
                 // A group's row caps draw a "+N more" only a list has.
                 ("h", &viz_page("", "SELECT 1 AS g", "viz: table\ngroup: { by: g, compact: { Ready: 2 } }\n")),
+                // A coloured edge is a list's or a table's row.
+                ("i", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l", "viz: tree\ntree: { id: id, parent: p, label: l }\nedge: l\n")),
             ],
             "",
         );
@@ -9178,6 +9185,7 @@ commands:
         );
         assert_eq!(a.emphasis.as_deref(), Some("current"));
         assert_eq!(a.depth.as_deref(), Some("indent"));
+        assert_eq!(a.edge.as_deref(), Some("hue"));
         assert_eq!(a.columns[0].icon.as_deref(), Some("glyph"));
         assert_eq!(a.columns[0].tone.as_deref(), Some("hue"));
         assert_eq!(a.actions[0].group.as_deref(), Some("Ready"));
@@ -9190,6 +9198,7 @@ commands:
             ("f", "a group action isn't a row action"),
             ("g", "`emphasis` is only for `list`, `table` and `tree`"),
             ("h", "`group.compact` and `group.grown` are only for `list`"),
+            ("i", "`edge` is only for `list` and `table`"),
         ] {
             assert!(page_of(&ext, slug).is_none(), "{slug} should fail");
             assert!(
@@ -9212,7 +9221,7 @@ commands:
                 &viz_page(
                     "",
                     "SELECT 1 AS id",
-                    "viz: table\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
+                    "viz: table\ngroup: { by: g1, link: { kind: page, from: g2 } }\nemphasis: e1\ndepth: d1\nedge: x1\ncolumns:\n  - { key: id, icon: i1, tone: t1 }\n",
                 ),
             )],
             "",
@@ -9221,7 +9230,7 @@ commands:
             .await
             .unwrap();
         let errs = shown_errors(&v);
-        for k in ["g1", "g2", "e1", "d1", "i1", "t1"] {
+        for k in ["g1", "g2", "e1", "d1", "x1", "i1", "t1"] {
             assert!(errs.contains(&format!("`{k}`")), "{k}: {errs}");
         }
     }

@@ -6739,6 +6739,12 @@ export type VizConfig_Deserialize = {
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
 	/**
+	 *  For `list` / `table`: a column whose value is a tone (`danger`,
+	 *  `warning`, …) drawn as a coloured bar down the row's left edge; a row
+	 *  with none has a quiet one, so every row lines up.
+	 */
+	edge: string | null,
+	/**
 	 *  It takes its page's whole height: its viz does
 	 *  ([`Viz::fills`]), or it is a document whose last section's viz
 	 *  fills, so that section takes the height left (set once the catalog
@@ -6804,6 +6810,12 @@ export type VizConfig_Serialize = {
 	emphasis: string | null,
 	/**  For `list` / `table`: a column whose integer value indents the row. */
 	depth: string | null,
+	/**
+	 *  For `list` / `table`: a column whose value is a tone (`danger`,
+	 *  `warning`, …) drawn as a coloured bar down the row's left edge; a row
+	 *  with none has a quiet one, so every row lines up.
+	 */
+	edge: string | null,
 	/**
 	 *  It takes its page's whole height: its viz does
 	 *  ([`Viz::fills`]), or it is a document whose last section's viz

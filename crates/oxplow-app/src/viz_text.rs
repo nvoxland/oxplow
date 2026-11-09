@@ -1351,6 +1351,7 @@ mod tests {
                 group: None,
                 emphasis: None,
                 depth: None,
+                edge: None,
                 fills: false,
                 actions: Vec::new(),
                 origin: Default::default(),

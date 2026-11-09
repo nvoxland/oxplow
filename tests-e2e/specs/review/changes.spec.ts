@@ -30,7 +30,6 @@ test("an effort's page opens from its URI, and the pickers turn it into a range"
   await expect(effort).toContainText("Open");
   await expect(page.locator('[data-node="header"]')).toContainText("working tree");
   // Picking an end leaves the effort for a plain comparison.
-  await shown(page).getByTestId("page-param-end-value").click();
   await shown(page).getByTestId("page-param-end-edit").selectOption("working");
   // The effort part stays a node of the page, showing no effort and none of
   // its actions (they act on the effort's row).

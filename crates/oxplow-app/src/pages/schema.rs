@@ -731,6 +731,8 @@ struct VizFile {
     #[serde(default)]
     depth: Option<String>,
     #[serde(default)]
+    edge: Option<String>,
+    #[serde(default)]
     actions: Vec<serde_yaml::Value>,
 }
 
@@ -1792,6 +1794,7 @@ fn leaf_viz(
         group: f.group,
         emphasis: f.emphasis,
         depth: f.depth,
+        edge: f.edge,
         fills: f.viz.fills(),
         actions,
         origin: ctx.origin.clone(),

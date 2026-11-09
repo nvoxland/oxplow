@@ -529,6 +529,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - **A `rail:` tree** draws first in the page's rail, under its root's
   `title` as a group (bare without one): what the page is about, such as
   the branch a history is of. A row it picks sets the page's view param.
+  A tree that is a form (a quick add) draws last instead, under the
+  filters and the links.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
 `tone`, `width`, `format`, `highlight`, `select`, `expand`, `when`.
@@ -606,7 +608,16 @@ group not named shows every row, and a list that caps its groups isn't cut
 at the panel's row cap. A page and an agent's read show every row
 (`capGroups`, `VizView.rows.test.tsx`); `emphasis` (`list` / `table` /
 `tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
-a whole number 0–8 that indents. They are never shown as cells.
+a whole number 0–8 that nests: in a full-width `list` a row followed by
+deeper rows is their parent, and the two are one raised panel (the kit's
+`ox-nest`, as the Tasks board's epics: the parent row its top line, with
+its link, menu and fold; its bottom edge where the children end; panels
+nest; `nestRows` in `vizModel.ts`), while a compact list (a rail panel) and
+a `table` indent instead; `edge` (`list` / `table`) is a tone
+(`danger`, `warning`, … as a column's `tone`) drawn as a bar down the row's
+left side, an invisible one of the same width where it has none, so rows
+line up without being boxed in (`rowEdge`; Task
+List's urgent and high items). They are never shown as cells.
 
 Every `list`, `table` or `tree` row's menu has Ask the Assistant and Add
 to Context (the first page it links to, else the row as text); a row drags

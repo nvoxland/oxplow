@@ -378,3 +378,26 @@ test("a custom page another extension replaces draws the replacement, not its ow
   expect(view.queryByTestId("custom-component-fallback")).toBeNull();
   expect(view.queryByTestId("custom-component-loading")).toBeNull();
 });
+
+// The rail's own tree is what the page is about, so it leads the rail; a
+// tree that is a form (Task List's New item) is something to do, so it
+// comes last, under the filters and the links.
+test("a rail tree that is a form draws at the rail's bottom; any other leads it", async () => {
+  const base = tablePage({ params: [{ name: "q", label: "Query", role: "filter", type: "text", default: null }] });
+  const withRail = (rail: ReturnType<typeof node.viz>) => {
+    const run = { ...base, page: { ...base.page, rail }, seeAlso: [{ title: "Other", uri: "oxplow:oxplow/page?page=acme/other", description: null }] };
+    return { ...run, rail: { id: rail.id, children: [], embed: null, error: null, replacedBy: null } as unknown as typeof base.tree };
+  };
+  const follows = (a: HTMLElement, b: HTMLElement) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  const form = render(<PageHost pageKey={key} runs={fakePageRuns(withRail(node.viz("add", null, { viz: "form" }))).runs} />);
+  const filters = await form.findByTestId("page-rail-filters");
+  const tree = form.getByTestId("page-rail-tree");
+  expect(follows(filters, tree)).toBe(true);
+  expect(follows(form.getByTestId("page-rail-see-also"), tree)).toBe(true);
+  cleanup();
+
+  const about = render(<PageHost pageKey={key} runs={fakePageRuns(withRail(node.viz("about", "items", { viz: "list" }))).runs} />);
+  const filters2 = await about.findByTestId("page-rail-filters");
+  expect(follows(about.getByTestId("page-rail-tree"), filters2)).toBe(true);
+});

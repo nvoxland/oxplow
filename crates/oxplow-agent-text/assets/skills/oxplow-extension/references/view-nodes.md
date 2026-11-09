@@ -242,7 +242,11 @@ under a heading per value. On a `list` in a rail panel, `compact: { Ready: 2 }`
 shows that many of a group's rows, then "+N more" (it grows the panel), and
 `grown: { Ready: 10 }` does the same in the grown panel (there "+N more"
 opens the panel's page); a group not named shows all, and a page shows all; `emphasis: <column>` highlights rows whose value
-is truthy; `depth: <column>` indents.
+is truthy; `depth: <column>` nests (a full-width list draws a parent and
+the deeper rows after it as one panel; a rail panel's list and a table
+indent); `edge: <column>` (a tone: `danger`,
+`warning`, `success`, `accent`, `muted`) draws a coloured bar down the row's
+left side.
 
 ## Actions
 

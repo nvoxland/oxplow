@@ -22,6 +22,30 @@
   background: transparent;
 }
 
+/* A parent and its children (a `depth` list's rows, the Tasks board's
+   epics): one raised panel, the parent its top line, its bottom edge where
+   the children end. Panels nest. */
+.ox-nest {
+  list-style: none;
+  margin: var(--space-2) 0;
+  padding: 0 var(--space-3);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
+/* Scrollbars: thin and quiet, as the app's own (index.html), from the
+   theme's tokens, so a frame that scrolls doesn't draw WebKit's bar. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); background-clip: padding-box; }
+
 /* Text */
 .ox-muted { color: var(--text-secondary); }
 .ox-faint { color: var(--text-muted); }
@@ -320,6 +344,9 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
+/* A value you type (text, search) is a text box at rest: no caret. */
+.ox-param-value.ox-param-typed { cursor: text; padding-right: var(--space-2); }
+.ox-param-value.ox-param-typed::after { content: none; }
 .ox-param-value:hover,
 .ox-param-value:focus-visible { background: var(--surface-app); border-color: var(--border-strong); outline: none; }
 .ox-param-edit { display: flex; min-width: 0; }

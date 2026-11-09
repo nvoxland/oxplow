@@ -61,6 +61,8 @@ Carry URIs; never assemble or dissect them:
   `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
   payload field named for one resource holds a bare id); to read a param back,
   `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'eff' || id` or `substr(uri, …)`.
+- **A description's opening line** for a row or a card is
+  `first_sentence(body)`: the first sentence past headings and markdown marks.
 - **A page of one measure's facts** filters `v_fact` with `f.measure_key =
   read_measure(<key>)`: the page then re-runs only when facts land for that
   measure, not for every measure. Use it on every `v_fact`/`v_capture` read

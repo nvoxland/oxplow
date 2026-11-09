@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { boardColumns, cardMenu, choiceFields, dropAct, filtersOf, moreRef, records } from "../../../../extensions/oxplow-bundled/src/board/model.js";
+import { boardColumns, cardHint, cardMenu, choiceFields, dropAct, epicGroups, filtersOf, moreLabel, moreRef, priorityOf, records } from "../../../../extensions/oxplow-bundled/src/board/model.js";
 
 // oxplow-bundled's Tasks board (a custom component, `src/board/`): the pure
 // half its frame draws from — the columns from the page's rows, a card's
@@ -79,3 +79,44 @@ test("the filters are the tab's view, else what the page ran with, else the defa
 test("Done's more opens Task List at the closed items of the same scope", () => {
   expect(moreRef({ show: "stream", priority: "any", q: "" })).toBe("oxplow:oxplow/page?page=task-list#show=stream&state=done");
 });
+
+const EPIC = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow";
+const OTHER_EPIC = "oxplow:oxplow/work_item?id=tsk9&provider=oxplow";
+const ref = (n: number) => `oxplow:oxplow/work_item?id=tsk${n}&provider=oxplow`;
+
+test("To Do groups its cards under their epics, in order, the loose ones last; an epic in the column is its group's heading", () => {
+  const all = [
+    item({ uri: ref(2), title: "Loose", parent_uri: null }),
+    item({ uri: EPIC, title: "An epic", parent_uri: null }),
+    item({ uri: ref(3), title: "Child", parent_uri: EPIC, parent_title: "An epic" }),
+    item({ uri: ref(4), title: "Other child", parent_uri: OTHER_EPIC, parent_title: "In progress epic" }),
+    item({ uri: ref(5), title: "Child 2", parent_uri: EPIC, parent_title: "An epic" }),
+    item({ uri: OTHER_EPIC, title: "In progress epic", state: "in_progress" }),
+  ];
+  const todo = all.filter((r) => r.state === "todo");
+  const groups = epicGroups(todo, all);
+  expect(groups.map((g) => [g.uri, g.title, g.epic?.title ?? null, g.cards.map((c) => c.title)])).toEqual([
+    [EPIC, "An epic", "An epic", ["Child", "Child 2"]],
+    [OTHER_EPIC, "In progress epic", null, ["Other child"]],
+    [null, null, null, ["Loose"]],
+  ]);
+  // No epics at all: one group of every card, no heading.
+  expect(epicGroups([item({ title: "A" })], [item({ title: "A" })]).map((g) => [g.uri, g.cards.length])).toEqual([[null, 1]]);
+});
+
+test("a compact card says the rest on hover: its epic, fields, thread and comments", () => {
+  expect(cardHint(item({ title: "Fix it", parent_title: "An epic", fields: "high · user", thread_shown: "Main", comments: 2 }))).toBe("Fix it\nin An epic\nhigh · user\nMain\n2 comments");
+  expect(cardHint(item({ title: "Fix it", fields: null, comments: 0 }))).toBe("Fix it");
+});
+
+test("a card's priority is its list's priority field, for its coloured edge", () => {
+  expect(priorityOf(item({ native: '{"priority":"urgent"}' }))).toBe("urgent");
+  expect(priorityOf(item({ native: "{}" }))).toBeNull();
+  expect(priorityOf(item({ native: '{"priority":"weird value"}' }))).toBeNull();
+});
+
+test("Done ends in a link to all of them in the Task List; another column with more says how many", () => {
+  expect(moreLabel({ state: "done", label: "Done", cards: [], total: 465, more: 455 })).toBe("All 465 in Task List");
+  expect(moreLabel({ state: "todo", label: "To Do", cards: [], total: 12, more: 2 })).toBe("2 more…");
+});
+

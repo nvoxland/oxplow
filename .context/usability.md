@@ -1359,7 +1359,10 @@ as the branch a history is of, under its root's `title` as a group; bare
 without one), then **Filters** (its filter params) and **Selection** (what
 a row click picked). A fact about the page as a whole goes in the `rail:`
 tree, never in a section of the view: a section is a heading in Contents
-and a block above the body, which a one-line fact is not. **The rail is drawn only when something is in it.** A page has a
+and a block above the body, which a one-line fact is not. A `rail:` tree
+that is a form (Task List's New item) is something to do, not what the
+page is about: it draws last, under Filters, Selection and See also
+(`railTreeLast` in `pages/PageRail.tsx`). **The rail is drawn only when something is in it.** A page has a
 "Details" card when it has a switch, a `filter` param, a `selection`
 param, a `rail:` node, the save-a-view form open, or a Contents of its
 own; with none, no card is drawn (a document page keeps its reading
@@ -1385,15 +1388,18 @@ revision. A viz that is the whole page shows no inline link to its own
 resource (the code viz's Open file); one in a snippet does.
 
 A param is a **row**, drawn by the kit's `ParamRow`
-(`src/kit/ParamControls.tsx`): its label beside its value. At rest the
-value is a button ("Any" when it has none; a dot before the label when it
-isn't the default). The value has a border and a caret, so it reads as a
-control, not a label; a long label wraps, never cut off. Clicking it, or Enter/Space on it, edits:
-- **in place**, the control takes the value's place: text (Enter or blur
-  applies), search (applies after a 250 ms pause, at once on Enter),
-  choice, branch, the id pickers, a date_range's presets. A select applies
-  what is picked and closes. **Escape closes and keeps the value from
-  before the edit** (a search puts it back). Focus returns to the value.
+(`src/kit/ParamControls.tsx`): its label beside its value (a dot before
+the label when it isn't the default); a long label wraps, never cut off.
+- **A value picked from a list** (a choice, a branch, an id picker, a
+  date_range's presets) **is its select, at rest too**: one click opens it.
+  A value button swapped for a select on click only focused it (the first
+  click), and a webview won't open a select from script. Picking applies.
+- **A value you type** (text, search) is a button at rest that reads as a
+  text box: a border and no caret ("Any" when empty; a search "Search…").
+  Clicking it, or Enter/Space on it, edits it in place: text applies on
+  Enter or blur, a search after a 250 ms pause (at once on Enter).
+  **Escape closes and keeps the value from before the edit** (a search puts
+  it back). Focus returns to the value.
 - **in a popover** (`kit/Popover.tsx`) when the control doesn't fit a
   320 px row: a date_range's Custom… opens its two dates over the page,
   beside the row. Escape or a click outside closes it; focus returns.

@@ -52,6 +52,7 @@ const base: VizConfig = {
   group: null,
   emphasis: null,
   depth: null,
+  edge: null,
   parts: [],
   launcherCategory: null,
   hidden: false,
@@ -195,6 +196,50 @@ test("cells draw their icon and tone; rows their emphasis and depth", () => {
   expect(child.getAttribute("data-emphasis")).toBe("true");
   expect(view.getByTestId("viz-row-0").getAttribute("data-emphasis")).toBeNull();
   expect(child.style.paddingLeft).not.toBe(view.getByTestId("viz-row-0").style.paddingLeft);
+});
+
+// `edge` names a column of tones: a row's coloured bar down its left side
+// (Task List's urgent and high items), an invisible one where it has none,
+// so every row lines up; no `edge`, no bar.
+test("a list's or a table's `edge` draws each row's tone as a bar down its left side", () => {
+  for (const viz of ["list", "table"] as const) {
+    const view = render(<VizView run={runOf({ ...grouped, viz, group: null, edge: "hue" })} onOpenPage={() => {}} />);
+    const edgeOf = (i: number) => {
+      const row = view.getByTestId(`viz-row-${i}`);
+      return (viz === "list" ? row : (row.querySelector("td") as HTMLElement)).style.borderLeft;
+    };
+    expect(edgeOf(1)).toContain("var(--status-waiting)");
+    // No tone: an edge as wide, drawn in nothing, so rows line up unboxed.
+    expect(edgeOf(0)).toContain("transparent");
+    view.unmount();
+  }
+  const plain = render(<VizView run={runOf({ ...grouped, group: null })} onOpenPage={() => {}} />);
+  expect(plain.getByTestId("viz-row-1").style.borderLeft).toBe("");
+});
+
+// A `depth` list draws a parent and its children as one panel (the kit's
+// `ox-nest`, as the board's epics): the parent row its top line, its
+// children inside, the panel's edge where they end. A compact list (a rail
+// panel) and a table keep the indent.
+test("a list nests a parent's children in its panel; compact and table rows only indent", () => {
+  const view = render(<VizView run={runOf({ ...grouped, group: null })} onOpenPage={() => {}} />);
+  const nest = view.getByTestId("viz-nest-0");
+  expect(nest.className).toContain("ox-nest");
+  expect(nest.contains(view.getByTestId("viz-row-0"))).toBe(true);
+  expect(nest.contains(view.getByTestId("viz-row-1"))).toBe(true);
+  expect(nest.contains(view.getByTestId("viz-row-2"))).toBe(false);
+  // Its fold is a bare arrow, not a filled button.
+  const fold = view.getByTestId("viz-row-fold-0");
+  expect(fold.style.background).toBe("transparent");
+  expect(fold.style.border).toContain("none");
+  // In its panel, a child isn't indented as well.
+  expect(view.getByTestId("viz-row-1").style.paddingLeft).toBe(view.getByTestId("viz-row-0").style.paddingLeft);
+  view.unmount();
+  for (const props of [{ compact: true }, {}] as const) {
+    const other = render(<VizView run={runOf({ ...grouped, group: null, ...(Object.keys(props).length ? {} : { viz: "table" }) })} {...props} onOpenPage={() => {}} />);
+    expect(other.queryByTestId("viz-nest-0")).toBeNull();
+    other.unmount();
+  }
 });
 
 test("a grouped table puts heading rows between its rows", () => {

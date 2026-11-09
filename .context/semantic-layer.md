@@ -182,7 +182,10 @@ so a dataset or page links to another page
 or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
-(`oxplow/work_item`). Other URIs are selected from their owning dataset's
+(`oxplow/work_item`). **`first_sentence(markdown)`** is a description's
+opening for a card or a list row: past headings and list, quote, emphasis
+and code marks, to the first `.`, `!` or `?` that ends a sentence (bundled's
+`work-items` query reads an item's this way). Other URIs are selected from their owning dataset's
 `uri` column (`.context/resources.md` "Using URIs").
 
 **`read_measure(key)`** returns `key` and records that the query reads the

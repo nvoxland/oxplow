@@ -48,6 +48,9 @@ import {
   rowAssistantContext,
   rowContext,
   rowDepth,
+  rowEdge,
+  nestRows,
+  type RowNest,
   foldedAway,
   rowEmphasized,
   rowGroups,
@@ -887,6 +890,7 @@ function RowsBody({
       },
       emphasized,
       indent: rowDepth(viz, result.columns, row) * DEPTH_INDENT,
+      edge: rowEdge(viz, result.columns, row),
       fold: folding.parents.has(row) ? { open: !rowsClosed.has(rowId(row)), toggle: () => rowsClosed.toggle(rowId(row)) } : null,
       picks: picks !== null,
       selected: picks?.selected(row) ?? false,
@@ -990,6 +994,8 @@ interface RowLookOut {
   emphasized: boolean;
   /** Extra left padding, px. */
   indent: number;
+  /** Its left edge's colour (`edge`), or none. */
+  edge: string | null;
   /** A parent row folds its children away. */
   fold: { open: boolean; toggle(): void } | null;
   /** Clicking it sets a param; `selected`: it holds that param's value. */
@@ -1670,7 +1676,7 @@ function MoreRow({ count, onMore, testId = "viz-more" }: { count: number; onMore
 
 /** A row that is no row of the result (a path tree's made folder): it
  *  looks plain and offers nothing. */
-const NO_LOOK: RowLookOut = { props: {}, emphasized: false, indent: 0, fold: null, picks: false, selected: false };
+const NO_LOOK: RowLookOut = { props: {}, emphasized: false, indent: 0, edge: null, fold: null, picks: false, selected: false };
 
 function TreeItem({ node, path, closed, lazyOpen, shown, ...rest }: TreeVizProps & { node: TreeNode; path: string; closed: CollapsedSet; lazyOpen: CollapsedSet | null; shown: ReadonlySet<string> | null }) {
   const { label, cell, rowMenu, rowLook } = rest;
@@ -2058,66 +2064,90 @@ function sections(rows: SqlCell[][], view: RowsView | undefined): { group: RowGr
   return groups.map((g) => ({ group: g, rows: view.folded(g) ? [] : g.rows.map((r) => [r, index.get(r) ?? 0]) }));
 }
 
-const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, fold: null, picks: false, selected: false };
+const noLook: RowLookOut = { props: {}, emphasized: false, indent: 0, edge: null, fold: null, picks: false, selected: false };
 
 /** `dense` (a compact view, a rail panel): each row one tight line, its
  *  other columns small beside the headline, no divider. */
 function ListViz({ rows, cols, cell, rowMenu, view, dense = false }: RowsVizProps & { dense?: boolean }) {
   const [head, ...rest] = cols;
+  // One row; `nested` (inside its parent's panel): the panel insets it, so
+  // it isn't indented too; `last` in a panel: no rule under it.
+  const rowEl = (row: SqlCell[], i: number, nested = false, last = false) => {
+    const look = view?.rowLook(row) ?? noLook;
+    const indent = nested ? 0 : look.indent;
+    return (
+      <li
+        key={i}
+        data-testid={`viz-row-${i}`}
+        data-dense={dense ? "true" : undefined}
+        data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
+        className={look.picks ? "ox-clickable" : undefined}
+        onMouseEnter={() => view?.cursor.point(row)}
+        style={{
+          ...(dense ? denseRowStyle : listRowStyle),
+          ...(last ? { borderBottom: "none" } : {}),
+          ...(look.emphasized || look.selected ? emphasisStyle : {}),
+          ...(indent ? { paddingLeft: indent } : {}),
+          ...(look.edge ? { borderLeft: `3px solid ${look.edge}`, paddingLeft: Math.max(indent, 8) } : {}),
+        }}
+        {...rowMenu(row)}
+        {...look.props}
+      >
+        <div style={dense ? denseHeadStyle : undefined}>
+          {look.fold ? (
+            <button
+              type="button"
+              data-testid={`viz-row-fold-${i}`}
+              aria-expanded={look.fold.open}
+              aria-label={look.fold.open ? "Fold its children away" : "Show its children"}
+              className="ox-link"
+              style={foldStyle}
+              onClick={look.fold.toggle}
+            >
+              <DisclosureGlyph open={look.fold.open} />
+            </button>
+          ) : null}
+          {head ? cell(row, head) : null}
+        </div>
+        {/* A cell with no value is left out, not drawn as "—". */}
+        {rest.some((c) => row[c.index] !== null && row[c.index] !== undefined) ? (
+          <div style={dense ? denseRestStyle : { color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
+            {rest.filter((c) => row[c.index] !== null && row[c.index] !== undefined).map((c, j) => (
+              <span key={c.key}>
+                {j > 0 ? " · " : null}
+                {cell(row, c)}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {view?.detail(row, i)}
+      </li>
+    );
+  };
+  // A full-width `depth` list draws a parent and its children as one panel
+  // (the kit's `ox-nest`; panels nest); a folded parent is its panel's top
+  // line alone. A compact list (a rail panel) indents instead.
+  const nests = !dense && rows.some((r) => (view?.rowLook(r) ?? noLook).indent > 0 || (view?.rowLook(r) ?? noLook).fold);
+  const nodeEl = (n: RowNest, nested: boolean, last: boolean): React.ReactElement => {
+    const parent = n.kids.length > 0 || !!(view?.rowLook(n.row) ?? noLook).fold;
+    if (!parent) return rowEl(n.row, n.i, nested, last);
+    return (
+      <li key={`nest-${n.i}`} data-testid={`viz-nest-${n.i}`} className="ox-nest">
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {rowEl(n.row, n.i, true, n.kids.length === 0)}
+          {n.kids.map((k, j) => nodeEl(k, true, j === n.kids.length - 1))}
+        </ul>
+      </li>
+    );
+  };
+  const depthOf = (r: SqlCell[]) => Math.round((view?.rowLook(r) ?? noLook).indent / DEPTH_INDENT);
   return (
     <>
       <ul data-testid="viz-list" style={{ listStyle: "none", padding: 0, margin: 0 }} {...(view?.cursor.listProps as React.HTMLAttributes<HTMLUListElement>)}>
         {sections(rows, view).map(({ group, rows: inGroup }) => (
           <Fragment key={group?.key ?? ""}>
             {group && view ? <li style={{ listStyle: "none" }}>{view.heading(group)}</li> : null}
-            {inGroup.map(([row, i]) => {
-              const look = view?.rowLook(row) ?? noLook;
-              return (
-                <li
-                  key={i}
-                  data-testid={`viz-row-${i}`}
-                  data-dense={dense ? "true" : undefined}
-                  data-cursor={view?.cursor.isCursor(row) ? "true" : undefined}
-                  className={look.picks ? "ox-clickable" : undefined}
-                  onMouseEnter={() => view?.cursor.point(row)}
-                  style={{
-                    ...(dense ? denseRowStyle : listRowStyle),
-                    ...(look.emphasized || look.selected ? emphasisStyle : {}),
-                    ...(look.indent ? { paddingLeft: look.indent } : {}),
-                  }}
-                  {...rowMenu(row)}
-                  {...look.props}
-                >
-                  <div style={dense ? denseHeadStyle : undefined}>
-                    {look.fold ? (
-                      <button
-                        type="button"
-                        data-testid={`viz-row-fold-${i}`}
-                        aria-expanded={look.fold.open}
-                        aria-label={look.fold.open ? "Fold its children away" : "Show its children"}
-                        className="ox-link"
-                        onClick={look.fold.toggle}
-                      >
-                        <DisclosureGlyph open={look.fold.open} />
-                      </button>
-                    ) : null}
-                    {head ? cell(row, head) : null}
-                  </div>
-                  {/* A cell with no value is left out, not drawn as "—". */}
-                  {rest.some((c) => row[c.index] !== null && row[c.index] !== undefined) ? (
-                    <div style={dense ? denseRestStyle : { color: "var(--text-secondary)", fontSize: "var(--text-sm)" }}>
-                      {rest.filter((c) => row[c.index] !== null && row[c.index] !== undefined).map((c, j) => (
-                        <span key={c.key}>
-                          {j > 0 ? " · " : null}
-                          {cell(row, c)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                  {view?.detail(row, i)}
-                </li>
-              );
-            })}
+            {nests ? nestRows(inGroup, depthOf).map((n) => nodeEl(n, false, false)) : inGroup.map(([row, i]) => rowEl(row, i))}
             {group && !view?.folded(group) && group.total > group.rows.length ? (
               <li>
                 <MoreRow count={group.total - group.rows.length} onMore={view?.onMore} testId={`viz-group-more-${group.key}`} />
@@ -2220,8 +2250,12 @@ function TableViz({ rows, cols, cell, rowMenu, view, header }: RowsVizProps) {
         };
       }}
       cellStyle={([row], _c, j) => {
-        const indent = j === 0 ? (view?.rowLook(row) ?? noLook).indent : 0;
-        return indent ? { paddingLeft: `calc(var(--space-2) + ${indent}px)` } : undefined;
+        const look = j === 0 ? (view?.rowLook(row) ?? noLook) : noLook;
+        const style = {
+          ...(look.indent ? { paddingLeft: `calc(var(--space-2) + ${look.indent}px)` } : {}),
+          ...(look.edge ? { borderLeft: `3px solid ${look.edge}` } : {}),
+        };
+        return Object.keys(style).length > 0 ? style : undefined;
       }}
     />
   );
@@ -2243,6 +2277,8 @@ const disclosureStyle: CSSProperties = {
 };
 /** A list's rows stand apart: room above and below each, and a rule between
  *  them, so two long rows never read as one block. */
+/** A parent row's fold: a bare arrow before its title, not a button. */
+const foldStyle: CSSProperties = { background: "transparent", border: "none", padding: 0, marginRight: 6, color: "var(--text-secondary)", cursor: "pointer", font: "inherit" };
 const listRowStyle: CSSProperties = { padding: "12px 0", borderBottom: "1px solid var(--border-subtle)" };
 /** A compact list's row: one line, headline left, the rest right. */
 const denseRowStyle: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "3px 0", minHeight: 22 };

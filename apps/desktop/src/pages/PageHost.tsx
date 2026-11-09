@@ -34,7 +34,7 @@ import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageParam, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { PageRail, switchSections } from "./PageRail.js";
+import { PageRail, PageRailTree, railTreeLast, switchSections } from "./PageRail.js";
 import { contentsHas, railHas, viewFills } from "./railHas.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../viz/ComponentFrame.js";
@@ -258,6 +258,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
             {contentsHas(run, fills) ? <Contents root={body} /> : null}
             {fills ? null : <RailSeeAlso run={run} onOpenPage={onOpenPage} openWith={openWith} />}
+            {railTreeLast(run) ? <PageRailTree run={run} runId={runId} onApply={apply} streamId={streamId} onOpenPage={onOpenPage} /> : null}
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
           </>
         ) : undefined

@@ -87,6 +87,10 @@ export function ParamRow({ param, value, onApply, query = querySql, values = {},
   };
   const said = summary(param, type, shown, options, listed);
   const editor = { name, label, value: shown, onApply: apply, onDone: done };
+  // Picked from a list (a choice, a branch, a date range, an id): its
+  // select is always drawn; there is no edit to end.
+  const picks = type === "choice" || type === "branch" || type === "date_range" || kind !== null;
+  const atRest = { ...editor, onDone: () => {}, atRest: true };
 
   return (
     <div
@@ -109,33 +113,37 @@ export function ParamRow({ param, value, onApply, query = querySql, values = {},
           checked={truthy(shown)}
           onChange={(e) => apply(e.target.checked)}
         />
-      ) : editing ? (
+      ) : picks ? (
+        // A value picked from a list is its select, at rest too: one click
+        // opens it (a value button swapped for a select on click only
+        // focused it, and a webview won't open a select from script).
         <span className="ox-param-edit">
           {type === "choice" ? (
-            <SelectEditor {...editor} options={param.options_from ? listed : (param.options ?? []).map((o) => ({ value: o.value, label: o.label }))} />
+            <SelectEditor {...atRest} options={param.options_from ? listed : (param.options ?? []).map((o) => ({ value: o.value, label: o.label }))} />
           ) : type === "branch" ? (
-            <BranchEditor {...editor} query={query} />
-          ) : type === "search" ? (
-            <SearchEditor {...editor} />
+            <BranchEditor {...atRest} query={query} />
           ) : type === "date_range" ? (
-            <RangeEditor {...editor} presets={param.presets && param.presets.length > 0 ? param.presets : DEFAULT_RANGE_PRESETS} />
-          ) : kind ? (
-            <PickerEditor {...editor} options={options} />
+            <RangeEditor {...atRest} presets={param.presets && param.presets.length > 0 ? param.presets : DEFAULT_RANGE_PRESETS} />
           ) : (
-            <TextEditor {...editor} />
+            <PickerEditor {...atRest} options={options} />
           )}
         </span>
+      ) : editing ? (
+        // Typed (text, search): edited in place, its value shown at rest.
+        <span className="ox-param-edit">{type === "search" ? <SearchEditor {...editor} /> : <TextEditor {...editor} />}</span>
       ) : (
         <button
           ref={valueButton}
           type="button"
-          className="ox-param-value"
+          // A value you type reads as a text box (no caret); one you pick
+          // keeps its caret.
+          className={type === "text" || type === "search" ? "ox-param-value ox-param-typed" : "ox-param-value"}
           data-testid={`page-param-${name}-value`}
           aria-describedby={labelId}
           title={said ?? undefined}
           onClick={() => setEditing(true)}
         >
-          {said ?? <span className="ox-faint">Any</span>}
+          {said ?? <span className="ox-faint">{type === "search" ? "Search…" : "Any"}</span>}
         </button>
       )}
     </div>
@@ -240,6 +248,8 @@ function usePickerOptions(kind: ParamKind | null, query: Query): ParamOption[] {
 }
 
 interface EditorProps {
+  /** A select drawn at rest (the row's value itself): not focused on mount. */
+  atRest?: boolean;
   name: string;
   label: string;
   value: SqlCell;
@@ -387,7 +397,7 @@ function listedOptions(result: SqlQueryResult): Option[] {
 
 /** A select that applies the option picked and closes; Escape closes.
  *  Options with a `group` sit in an `<optgroup>`, after the ungrouped. */
-function SelectEditor({ name, label, value, onApply, onDone, options, empty }: EditorProps & { options: Option[]; empty?: Option }) {
+function SelectEditor({ name, label, value, onApply, onDone, options, empty, atRest = false }: EditorProps & { options: Option[]; empty?: Option }) {
   const current = text(value);
   const groups: string[] = [];
   for (const o of options) if (o.group && !groups.includes(o.group)) groups.push(o.group);
@@ -398,8 +408,8 @@ function SelectEditor({ name, label, value, onApply, onDone, options, empty }: E
   );
   return (
     <select
-      autoFocus
-      className="ox-select"
+      autoFocus={!atRest}
+      className={atRest ? "ox-select ox-param-select" : "ox-select"}
       data-testid={`page-param-${name}-edit`}
       aria-label={label}
       value={current}
@@ -443,12 +453,12 @@ function BranchEditor(props: EditorProps & { query: Query }) {
 }
 
 /** One of oxplow's id params: pick what it names, by title. */
-function PickerEditor({ name, label, value, onApply, onDone, options }: EditorProps & { options: ParamOption[] }) {
+function PickerEditor({ name, label, value, onApply, onDone, options, atRest = false }: EditorProps & { options: ParamOption[] }) {
   const at = options.findIndex((o) => o.value === value);
   return (
     <select
-      autoFocus
-      className="ox-select"
+      autoFocus={!atRest}
+      className={atRest ? "ox-select ox-param-select" : "ox-select"}
       data-testid={`page-param-${name}-edit`}
       aria-label={label}
       value={at === -1 ? "" : String(at)}
@@ -475,10 +485,11 @@ const CUSTOM = "__custom__";
 
 /** Its presets in place; Custom… opens two dates in a popover, which
  *  apply as they change. */
-function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorProps & { presets: string[] }) {
+function RangeEditor({ name, label, value, onApply, onDone, presets, atRest = false }: EditorProps & { presets: string[] }) {
   const current = text(value);
   const ends = splitRange(current);
-  const [custom, setCustom] = useState(ends !== null);
+  // Custom… opens the popover; a custom range picked shows as its own option.
+  const [open, setOpen] = useState(!atRest && ends !== null);
   const anchor = useRef<HTMLSelectElement>(null);
   // A date input holds a date; a brushed end keeps its time until edited.
   const [from, to] = (ends ?? ["", ""]).map((e) => e.slice(0, 10));
@@ -486,13 +497,13 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
     <>
       <select
         ref={anchor}
-        autoFocus
-        className="ox-select"
+        autoFocus={!atRest}
+        className={atRest ? "ox-select ox-param-select" : "ox-select"}
         data-testid={`page-param-${name}-edit`}
         aria-label={label}
-        value={custom ? CUSTOM : current}
+        value={open ? CUSTOM : current}
         onChange={(e) => {
-          if (e.target.value === CUSTOM) setCustom(true);
+          if (e.target.value === CUSTOM) setOpen(true);
           else {
             onApply(e.target.value);
             onDone();
@@ -502,7 +513,9 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
           if (e.key === "Escape") onDone();
         }}
       >
-        {!custom && current !== "" && !presets.includes(current) ? <option value={current}>{rangePresetLabel(current)}</option> : null}
+        {!open && current !== "" && !presets.includes(current) ? (
+          <option value={current}>{ends ? `${rangeEnd(ends[0])} – ${rangeEnd(ends[1])}` : rangePresetLabel(current)}</option>
+        ) : null}
         {presets.map((p) => (
           <option key={p} value={p}>
             {rangePresetLabel(p)}
@@ -510,8 +523,17 @@ function RangeEditor({ name, label, value, onApply, onDone, presets }: EditorPro
         ))}
         <option value={CUSTOM}>Custom…</option>
       </select>
-      {custom ? (
-        <Popover anchor={anchor} label={`${label}: custom range`} onClose={onDone} testId={`page-param-${name}-custom`}>
+      {open ? (
+        <Popover
+          anchor={anchor}
+          label={`${label}: custom range`}
+          onClose={() => {
+            setOpen(false);
+            onDone();
+            if (atRest) anchor.current?.focus();
+          }}
+          testId={`page-param-${name}-custom`}
+        >
           <div className="ox-form">
             <label className="ox-field">
               <span className="ox-label">From</span>

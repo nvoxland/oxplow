@@ -2019,6 +2019,10 @@ pub struct VizConfig {
     pub emphasis: Option<String>,
     /// For `list` / `table`: a column whose integer value indents the row.
     pub depth: Option<String>,
+    /// For `list` / `table`: a column whose value is a tone (`danger`,
+    /// `warning`, …) drawn as a coloured bar down the row's left edge; a row
+    /// with none has an invisible one, so every row lines up.
+    pub edge: Option<String>,
     /// It takes its page's whole height: its viz does
     /// ([`Viz::fills`]), or it is a document whose last section's viz
     /// fills, so that section takes the height left (set once the catalog
@@ -2180,6 +2184,7 @@ impl VizConfig {
         }
         out.extend(self.emphasis.iter().map(|k| ("emphasis", k)));
         out.extend(self.depth.iter().map(|k| ("depth", k)));
+        out.extend(self.edge.iter().map(|k| ("edge", k)));
         out
     }
 }
