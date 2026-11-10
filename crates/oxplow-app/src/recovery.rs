@@ -38,11 +38,7 @@ impl RecoveryService {
         let mut closed_turns = 0usize;
         for turn in self.turns.list_all_open().await? {
             self.turns
-                .close(
-                    &turn.id,
-                    Some("interrupted_by_restart".into()),
-                    oxplow_domain::hook::TurnOutcome::Restart,
-                )
+                .close(&turn.id, None, oxplow_domain::hook::TurnOutcome::Restart)
                 .await?;
             closed_turns += 1;
         }

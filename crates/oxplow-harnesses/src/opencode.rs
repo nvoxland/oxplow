@@ -153,6 +153,7 @@ impl AgentHarness for Opencode {
             input + count("cache/read").unwrap_or(0) + count("cache/write").unwrap_or(0)
         });
         (model.is_some() || effort.is_some() || context_tokens.is_some()).then_some(TurnRun {
+            left_running: None,
             model,
             effort,
             context_tokens,
@@ -581,6 +582,7 @@ console.log(JSON.stringify(posts));
                 effort: Some("high".into()),
                 context_tokens: Some(4150),
                 context_window: None,
+                left_running: None,
             })
         );
         // A message with neither (the bridge couldn't read it) says nothing.

@@ -19,12 +19,12 @@
 //!   status Idle / AwaitingUser / Stopped; then the turn-end snapshot.
 //! - `SessionStart` (a harness process starting or resuming a session —
 //!   Claude's command hook, Codex's hook, the ACP client; not a `compact`):
-//!   closes the turns the previous process left open (interrupted), logs
+//!   closes the turns the previous process left open (`session_restarted`), logs
 //!   `agent.session.started`, status Idle.
 //! - A session id seen for the first time on a thread (on any kind)
 //!   becomes its resume id and logs `agent.session.started` once.
-//! - `SessionEnd`: closes the turns that session left open (interrupted,
-//!   "session ended" — an exit mid-turn sends no Stop, tsk449) with its
+//! - `SessionEnd`: closes the turns that session left open
+//!   (`session_ended` — an exit mid-turn sends no Stop) with its
 //!   transcript, so their tokens are theirs (tsk924), status
 //!   Stopped when it closed one; `agent.session.ended`; `reason: clear` of
 //!   the resume session clears the resume id.
@@ -542,10 +542,7 @@ fn record_tx(
     if starts {
         // The process that owned any open turn is gone: they end
         // interrupted, before the session start that resets the thread.
-        let end = TurnEnd {
-            answer: Some("session restarted"),
-            ..TurnEnd::new(now, TurnOutcome::Interrupted)
-        };
+        let end = TurnEnd::new(now, TurnOutcome::SessionRestarted);
         // A resumed session's own turns keep its transcript (tsk924): it
         // is the file their tokens are in. Another session's file isn't.
         if let Some(sid) = session {
@@ -791,7 +788,7 @@ fn record_tx(
                     .filter(|s| !s.trim().is_empty());
                 (said, TurnOutcome::Completed)
             } else {
-                (Some("interrupted"), TurnOutcome::Interrupted)
+                (None, TurnOutcome::Interrupted)
             };
             let end = TurnEnd {
                 answer,
@@ -804,6 +801,10 @@ fn record_tx(
                 effort: env.turn_run.as_ref().and_then(|r| r.effort.as_deref()),
                 context_tokens: env.turn_run.as_ref().and_then(|r| r.context_tokens),
                 context_window: env.turn_run.as_ref().and_then(|r| r.context_window),
+                left_running: env
+                    .turn_run
+                    .as_ref()
+                    .and_then(|r| r.left_running.as_deref()),
                 ..TurnEnd::new(now, outcome)
             };
             applied.closed_turn = close_open_turns_tx(conn, ev, thread, slot, &end)?;
@@ -828,9 +829,8 @@ fn record_tx(
                 // leaves no one to close its turn.
                 // Its transcript, so the turn's tokens are its own.
                 let end = TurnEnd {
-                    answer: Some("session ended"),
                     transcript_path,
-                    ..TurnEnd::new(now, TurnOutcome::Interrupted)
+                    ..TurnEnd::new(now, TurnOutcome::SessionEnded)
                 };
                 let open = match session {
                     Some(sid) => open_harness_turn_ids_tx(conn, thread, sid)?,
@@ -2432,7 +2432,7 @@ mod tests {
     }
 
     /// tsk449: a session that ends without a Stop (an exit mid-turn) closes
-    /// its own open turn — interrupted, "session ended" — so the turn
+    /// its own open turn — `session_ended` — so the turn
     /// doesn't hold the quiet-period trigger open forever. Another
     /// session's end leaves it alone.
     #[tokio::test]
@@ -2476,7 +2476,7 @@ mod tests {
         let events = logged(&svc).await;
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].envelope.payload["outcome"], "interrupted");
+        assert_eq!(ended[0].envelope.payload["outcome"], "session_ended");
         let status = of_type(&events, "agent.status.changed");
         assert_eq!(status.last().unwrap().envelope.payload["state"], "stopped");
     }
@@ -2585,7 +2585,7 @@ mod tests {
         assert_eq!(states, vec!["running", "idle"]);
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].envelope.v, 3);
+        assert_eq!(ended[0].envelope.v, 4);
         assert_eq!(ended[0].envelope.payload["transcript_path"], "/t.jsonl");
     }
 
@@ -2686,6 +2686,7 @@ mod tests {
             effort: Some("high".into()),
             context_tokens: Some(52_000),
             context_window: Some(200_000),
+            left_running: None,
         };
         svc.ingest(envelope(HookKind::Stop, None, Some(run)))
             .await
@@ -3535,5 +3536,97 @@ mod tests {
         let started = of_type(&events, "agent.turn.started");
         assert_eq!(started[1].envelope.payload["source"], "background_job");
         assert_eq!(started[1].envelope.payload["cause_turn"], "trn1");
+    }
+
+    /// A turn stores how it ended — the agent stopped, the person
+    /// interrupted it, its session ended or restarted with it open — and
+    /// `answer` is only ever what the agent said. A Stop's report of what
+    /// it left running is kept.
+    #[tokio::test]
+    async fn a_turn_records_how_it_ended_and_what_it_left_running() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let left = vec![oxplow_domain::hook::RunningWork {
+            id: "a105c".into(),
+            kind: Some("subagent".into()),
+            description: Some("Map desktop".into()),
+        }];
+        svc.ingest(prompt("one")).await.unwrap();
+        svc.ingest(HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(left.clone()),
+                ..TurnRun::default()
+            }),
+            ..hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "started it"}),
+            )
+        })
+        .await
+        .unwrap();
+        svc.ingest(prompt("two")).await.unwrap();
+        svc.ingest(hook(HookKind::Interrupt, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        svc.ingest(prompt("three")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionStart,
+            tid,
+            Some("h1"),
+            json!({"source": "resume"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(prompt("four")).await.unwrap();
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("h1"),
+            json!({"reason": "prompt_input_exit"}),
+        ))
+        .await
+        .unwrap();
+        type Row = (String, Option<String>, Option<String>, Option<String>);
+        let rows: Vec<Row> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT prompt, outcome, answer, left_running FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let left_json = serde_json::to_string(&left).unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "one".into(),
+                    Some("completed".into()),
+                    Some("started it".into()),
+                    Some(left_json)
+                ),
+                ("two".into(), Some("interrupted".into()), None, None),
+                ("three".into(), Some("session_restarted".into()), None, None),
+                ("four".into(), Some("session_ended".into()), None, None),
+            ]
+        );
+        let events = logged(&svc).await;
+        let ended = of_type(&events, "agent.turn.ended");
+        assert_eq!(ended[0].envelope.payload["left_running"][0]["id"], "a105c");
     }
 }

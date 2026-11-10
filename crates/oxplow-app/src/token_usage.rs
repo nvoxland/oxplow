@@ -652,7 +652,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
         let (Some(thread), Some(turn_id)) = (env.anchors.thread_id, env.anchors.turn_id) else {
             return Ok(());
         };
-        let payload: oxplow_domain::events::schema::AgentTurnEndedV3 =
+        let payload: oxplow_domain::events::schema::AgentTurnEndedV4 =
             serde_json::from_value(env.payload.clone())
                 .map_err(|e| DomainError::Invalid(format!("agent.turn.ended: {e}")))?;
         let turn = self

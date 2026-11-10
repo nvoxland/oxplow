@@ -39,7 +39,7 @@ use oxplow_domain::agent::observe::{
 use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::agent::tool::{Subagent, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
-use oxplow_domain::hook::TurnRun;
+use oxplow_domain::hook::{RunningWork, TurnRun};
 
 use super::shared::{
     claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, setting,
@@ -281,11 +281,13 @@ impl AgentHarness for Claude {
             None => None,
         };
         let (model, context_tokens) = last.unzip();
-        (model.is_some() || effort.is_some()).then_some(TurnRun {
+        let left_running = left_running(body);
+        (model.is_some() || effort.is_some() || left_running.is_some()).then_some(TurnRun {
             model,
             effort,
             context_tokens,
             context_window: None,
+            left_running,
         })
     }
 
@@ -305,6 +307,32 @@ fn handback_from(text: &str) -> Option<&str> {
     rest.split_once('"')
         .map(|(id, _)| id)
         .filter(|id| !id.is_empty())
+}
+
+/// What a Stop's turn left running: its `background_tasks`, the ones not
+/// reported as finished (`status` other than `running` is left out). `None`
+/// when the body has no list.
+fn left_running(body: &serde_json::Value) -> Option<Vec<RunningWork>> {
+    let tasks = body.get("background_tasks")?.as_array()?;
+    let text = |t: &serde_json::Value, key: &str| {
+        t.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(
+        tasks
+            .iter()
+            .filter(|t| text(t, "status").is_none_or(|s| s == "running"))
+            .filter_map(|t| {
+                Some(RunningWork {
+                    id: text(t, "id")?,
+                    kind: text(t, "type"),
+                    description: text(t, "description"),
+                })
+            })
+            .collect(),
+    )
 }
 
 /// Who sent a cross-session message.
@@ -989,6 +1017,40 @@ mod tests {
             crate::test_launch::block(h.prompt(&quoted)),
             Some(Prompt::Person { .. })
         ));
+    }
+
+    /// A Stop names the work it left running (`background_tasks`, the
+    /// shape in the recorded `claude/subagent.jsonl`): the running ones,
+    /// by the id their report back names; an empty list is none, a body
+    /// with no list says nothing.
+    #[test]
+    fn a_stop_names_the_work_it_left_running() {
+        let h = harness("oxplow:claude-code", "claude");
+        let body = serde_json::json!({
+            "effort": {"level": "high"},
+            "background_tasks": [
+                {"id": "afd849d5d475e378d", "type": "subagent", "status": "running",
+                 "description": "count lines", "agent_type": "general-purpose"},
+                {"id": "b2", "type": "shell", "status": "completed"}
+            ]
+        });
+        let run = crate::test_launch::block(h.turn_run(&body)).unwrap();
+        assert_eq!(
+            run.left_running,
+            Some(vec![oxplow_domain::hook::RunningWork {
+                id: "afd849d5d475e378d".into(),
+                kind: Some("subagent".into()),
+                description: Some("count lines".into()),
+            }])
+        );
+        let none =
+            crate::test_launch::block(h.turn_run(&serde_json::json!({"background_tasks": []})))
+                .unwrap();
+        assert_eq!(none.left_running, Some(vec![]));
+        let silent =
+            crate::test_launch::block(h.turn_run(&serde_json::json!({"effort": {"level": "low"}})))
+                .unwrap();
+        assert_eq!(silent.left_running, None);
     }
 
     /// A background job's notice arrives as a `<task-notification>` prompt
