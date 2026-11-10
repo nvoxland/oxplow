@@ -1594,12 +1594,15 @@ fn log_tool_tx(
         if !sent.text.trim().is_empty() {
             agent_message_store::record_sent_tx(
                 conn,
-                thread,
-                row.session,
-                turn,
-                &sent.to,
-                &sent.text,
-                Timestamp::now(),
+                &agent_message_store::Sent {
+                    thread,
+                    session: row.session,
+                    turn,
+                    call: tool.call_id.as_deref(),
+                    recipient: &sent.to,
+                    text: &sent.text,
+                    at: Timestamp::now(),
+                },
             )?;
         }
     }
@@ -4728,6 +4731,81 @@ mod tests {
                 ),
                 (None, None, req(2)),
                 (None, None, req(3)),
+            ]
+        );
+    }
+
+    /// The match does not stop at a thread: a message a session of one
+    /// thread sent is received in another thread, and the received turn
+    /// joins the sender's request.
+    #[tokio::test]
+    async fn a_message_is_matched_across_threads() {
+        let (svc, tid) = fixture().await;
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                     SELECT 2, stream_id, 'other', created_at, updated_at FROM threads WHERE id = 1",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let other = ThreadId::new(2);
+        let sender = first_session();
+        let receiver = open_session(&svc, other).await;
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "tell the other thread"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook_in(
+            HookKind::PreToolUse,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"tool_name": "SendMessage", "tool_use_id": "t1",
+                   "tool_input": {"to": "other", "message": "over to you"}}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: "first".into(),
+                socket: None,
+                message: Some("over to you".into()),
+                text: "<cross-session-message from-name=\"first\">\nover to you\n</cross-session-message>".into(),
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, other, receiver, Some("r1"), json!({}))
+        })
+        .await
+        .unwrap();
+        let rows: Vec<(i64, Option<String>, Option<String>)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT thread_id, cause_turn, request FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let req = Some("oxplow:oxplow/request?id=req1".to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (1, None, req.clone()),
+                (2, Some("oxplow:oxplow/turn?id=trn1".into()), req),
             ]
         );
     }

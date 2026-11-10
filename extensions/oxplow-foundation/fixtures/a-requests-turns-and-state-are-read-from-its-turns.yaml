@@ -1,0 +1,15 @@
+# A request is the turn that started something and the turns that followed:
+# each turn reads its request (a URI the `request` resource resolves), and
+# the request reads its first turn, state and turn count.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe: { turn: { session: $ses.id, prompt: first ask, answer: one } }
+  - observe: { turn: { session: $ses.id, prompt: second ask, answer: two } }
+when: { sql: "SELECT r.uri, r.prompt, r.state, r.turns, t.request = r.uri AS own FROM v_request r JOIN v_agent_turn t ON t.uri = r.first_turn ORDER BY r.id" }
+expect:
+  rows:
+    - { uri: "oxplow:oxplow/request?id=req1", prompt: first ask, state: finished, turns: 1, own: 1 }
+    - { uri: "oxplow:oxplow/request?id=req2", prompt: second ask, state: finished, turns: 1, own: 1 }
+steps:
+  - when: { sql: "SELECT count(*) AS n FROM v_agent_turn WHERE request IS NOT NULL" }
+    expect: { rows: [{ n: 2 }] }
