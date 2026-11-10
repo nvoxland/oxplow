@@ -401,11 +401,7 @@ stream) — `request_analysis` with its span and a signature of what it read
 (its turns' runs, their files, its end), `request_metric_delta`,
 `request_observation` (V22; `v_request_metric_delta`,
 `v_request_observation`) — by the `request_analysis` asset over the cube,
-`turn_file`, `metric_spec` and `agent_turn`. Due: a request with a turn
-running, one whose stored signature differs from its inputs now (a run
-reported late, a file captured after the turn closed), or one that ended
-in the last day with none stored; older requests are analyzed when asked
-for. An effort's evidence (`v_effort_metric_delta`,
+`turn_file`, `metric_spec` and `agent_turn`. Due: of the requests with a turn running or ended in the last day, one with none stored or whose stored signature differs from its inputs now (a run reported late, a file captured after the turn closed, its end take landing); older requests keep what they have and are analyzed when asked for. A finished request's file gauges are read at its snapshots: a scan that names its snapshot is placed by it (the baseline at or before the start take, the current at or before the end take, whose scan lands after the last turn ended). An effort's evidence (`v_effort_metric_delta`,
 `v_effort_observation`) is the same computation over the effort's window
 until efforts go.
 

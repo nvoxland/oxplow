@@ -3040,19 +3040,29 @@ impl CollectionService {
                 loaded
             }
         };
-        // Oldest first, as the store returns them.
+        // Oldest first, as the store returns them. A scan that names its
+        // snapshot is placed by it: the baseline is the latest at or before
+        // the window's start take, the current the latest at or before its
+        // end take (whose scan lands after its last turn ended). One that
+        // names none is placed by its time.
         let baseline_cap = all_caps
             .iter()
             .rev()
-            .find(|c| c.captured_at < window.started_at)
+            .find(|c| match (c.snapshot_id, window.start_snapshot_id) {
+                (Some(at), Some(start)) => at <= start,
+                _ => c.captured_at < window.started_at,
+            })
             .map(|c| c.id);
         let current_cap = all_caps
             .iter()
             .rev()
-            .find(|c| match window.ended_at {
-                Some(end) => c.captured_at <= end || window.members.holds(c),
-                None => true,
-            })
+            .find(
+                |c| match (window.ended_at, c.snapshot_id, window.end_snapshot_id) {
+                    (None, _, _) => true,
+                    (Some(_), Some(at), Some(end)) => at <= end,
+                    (Some(end), _, _) => c.captured_at <= end || window.members.holds(c),
+                },
+            )
             .map(|c| c.id);
         // A closed effort with no capture in (or stamped into) its window has
         // nothing attributable — never fabricate a drop-to-zero against a
@@ -6265,6 +6275,58 @@ mod tests {
                 .unwrap();
             h.service.effort_metric_deltas(&h.effort_id).await;
             assert_eq!(h.service.reads(), (0, 0));
+        }
+
+        /// A finished window's file gauges read the scan of its end take,
+        /// which lands after its last turn ended: baseline and current are
+        /// the captures at or before its start and end snapshots, by
+        /// snapshot when a capture names one.
+        #[tokio::test]
+        async fn a_windows_gauges_read_the_scan_of_its_end_take() {
+            let h = build(None).await;
+            let (m, facts) =
+                seed_file_gauge(&h, "oxplow.rust.unsafe_blocks", "lower-better", None).await;
+            let t0 = Timestamp::from_unix_ms(1_800_000_000_000);
+            let at = |s: i64| Timestamp::from_unix_ms(t0.unix_ms() + s * 1000);
+            let scan = |when: i64, snapshot: i64, value: f64| {
+                let facts = facts.clone();
+                async move {
+                    let mut cap = oxplow_db::NewMetricCapture::done(1, "test.gauge", "test");
+                    cap.captured_at = Some(at(when));
+                    cap.snapshot_id = Some(snapshot);
+                    facts
+                        .record_facts(
+                            cap,
+                            vec![oxplow_db::NewFact {
+                                subject: Some(oxplow_domain::uri::build::file_uri("src/a.rs")),
+                                path: Some("src/a.rs".into()),
+                                ..oxplow_db::NewFact::new(m, value)
+                            }],
+                        )
+                        .await
+                        .unwrap();
+                }
+            };
+            scan(0, 10, 1.0).await;
+            // Mid-window, and the end take's scan just after the window closed.
+            scan(30, 15, 2.0).await;
+            scan(62, 20, 4.0).await;
+            let window = Window {
+                key: "a window".into(),
+                stream: Some(1),
+                started_at: at(5),
+                ended_at: Some(at(60)),
+                start_snapshot_id: Some(10),
+                end_snapshot_id: Some(20),
+                files: vec!["src/a.rs".into()],
+                members: oxplow_db::Members::Turns(vec![]),
+            };
+            let deltas = h.service.metric_deltas(&window).await;
+            let d = deltas
+                .iter()
+                .find(|d| d.key == "oxplow.rust.unsafe_blocks")
+                .expect("the gauge moved");
+            assert_eq!((d.baseline, d.current), (Some(1.0), 4.0));
         }
 
         #[tokio::test]

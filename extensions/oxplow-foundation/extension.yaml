@@ -465,11 +465,10 @@ implementations:
   - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" }, description: "Models that run in a local llama.cpp server." }
   - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" }, description: "A model service that only answers typed questions." }
 collectors:
-  # What an effort's test runs came to, recorded when it finishes: the
-  # quality gate, the worst run, the tests it broke, the red runs and the time
-  # to the first green (`oxplow.tests.*`, `effort.time_to_green_ms`). Its
-  # input is the effort's measured runs (`tests` captures) with their failed
-  # cases, oldest first.
+  # What an effort's test runs came to, recorded when it finishes (until
+  # efforts go; the metrics read the request's, `oxplow.request_outcome`).
+  # Its input is the effort's measured runs (`tests` captures) with their
+  # failed cases, oldest first.
   - id: oxplow.effort_test_outcome
     doc: How an effort's tests went, recorded when it finishes.
     runtime: starlark

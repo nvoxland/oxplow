@@ -5,9 +5,10 @@
 //! — which pages can't compute. An **asset** over the tables it reads
 //! ([`RequestAnalysis`]): a turn opening or ending, a take's files, a run
 //! landing recompute the requests that are due once their inputs go quiet.
-//! Due is a request with a turn running, one whose stored analysis is
-//! stale (its signature moved: a run reported late, a file captured after
-//! the turn closed), or one that ended in the last day with none stored.
+//! Due: of the requests with a turn running or ended in the last day, one
+//! with none stored or whose stored analysis is stale (its signature moved:
+//! a run reported late, a file captured after the turn closed, its end take
+//! landing).
 //! `.context/collection.md` "A request's analysis".
 
 use std::sync::{Arc, Weak};

@@ -1959,12 +1959,14 @@ mod tests {
             .unwrap();
         conn.execute_batch(
             "PRAGMA foreign_keys = OFF;
-             INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1), (3, 1), (4, 2);
-             INSERT INTO agent_turn (id, thread_id, prompt, started_at, request_id) VALUES
-               (1, 1, 'p', '2026-01-01T00:10:00Z', 1),
-               (2, 1, 'p', '2026-01-01T00:50:00Z', 2),
-               (3, 1, 'p', '2026-01-01T02:00:00Z', 3),
-               (4, 2, 'p', '2026-01-01T00:20:00Z', 4);
+             INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1), (3, 1), (4, 2), (5, 1);
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, request_id) VALUES
+               (1, 1, 'p', '2026-01-01T00:10:00Z', '2026-01-01T00:11:00Z', 1),
+               (2, 1, 'p', '2026-01-01T00:50:00Z', '2026-01-01T00:51:00Z', 2),
+               (3, 1, 'p', '2026-01-01T02:00:00Z', '2026-01-01T02:01:00Z', 3),
+               (4, 2, 'p', '2026-01-01T00:20:00Z', '2026-01-01T00:21:00Z', 4),
+               -- Already running when the effort opened (efforts open mid-turn).
+               (5, 1, 'p', '2025-12-31T23:59:00Z', '2026-01-01T00:05:00Z', 5);
              INSERT INTO effort (id, thread_id, started_at, ended_at, task) VALUES
                (1, 1, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', 'oxplow:oxplow/task?id=tsk1&provider=oxtask'),
                (2, 2, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', NULL);",
@@ -1983,7 +1985,8 @@ mod tests {
             rows,
             vec![
                 (1, task.clone(), "assigned".to_string()),
-                (2, task, "assigned".to_string())
+                (2, task.clone(), "assigned".to_string()),
+                (5, task, "assigned".to_string())
             ]
         );
     }

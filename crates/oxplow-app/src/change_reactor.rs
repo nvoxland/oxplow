@@ -5,8 +5,8 @@
 //! On a `snapshot.taken` that recorded files (not `unchanged`) or a
 //! `vcs.head.moved`, it first lists the changed files of the event's
 //! stream's `working` change, each open effort's change on it and each
-//! live request's (a turn of it running there, or ended since the
-//! stream's previous take: [`live_requests`]) (stage
+//! live request's (a turn of it running there, or one ended whose change
+//! isn't at its end yet: [`live_requests`]) (stage
 //! one, [`change_analysis::refresh_files`](crate::change_analysis::refresh_files):
 //! cheap, so the lists are current before anything slow runs), then
 //! recomputes their deep analysis
@@ -411,31 +411,35 @@ impl AsyncEventConsumer for ChangeReactor {
     }
 }
 
-/// The requests a move of `stream` can change: those with a turn on it
-/// still running, or one that ended since the stream's take before the
-/// latest (the latest is the move's own; a request's end take lands just
-/// after its last turn ended). With `thread`, a take its turn made, only
-/// that thread's requests; with none (the person's edits, a head move),
-/// all of them. One that began before the stream's first take has no
-/// change.
+/// The requests a move of `stream` can change, by state rather than by
+/// which event came when: one with a turn on it still running (with
+/// `thread`, a take its turn made, only that thread's; with none — the
+/// person's edits, a head move — all of them), and one that ended there in
+/// the last day whose stored change isn't yet at the end its turns name now
+/// (`end_take`: its own end take can be logged after a later writer's take,
+/// whatever thread made the move). One that began before the stream's first
+/// take has no change.
 async fn live_requests(
     svc: &Services,
     stream: oxplow_domain::StreamId,
     thread: Option<oxplow_domain::ThreadId>,
 ) -> Result<Vec<i64>, DomainError> {
     let (stream, thread) = (stream.value(), thread.map(|t| t.value()));
+    let since = oxplow_db::ts_to_string(oxplow_domain::Timestamp(
+        oxplow_domain::Timestamp::now().0 - time::Duration::days(1),
+    ));
     svc.db
         .read(move |c| {
             let mut stmt = c
                 .prepare(
-                    "SELECT DISTINCT t.request_id
+                    "SELECT t.request_id, max(t.ended_at IS NULL),
+                            max(t.ended_at IS NULL AND (?2 IS NULL OR t.thread_id = ?2)),
+                            (SELECT ch.head_revision FROM change ch
+                              WHERE ch.stream_id = ?1 AND ch.kind = 'request'
+                                AND ch.target = CAST(t.request_id AS TEXT))
                        FROM agent_turn t JOIN threads th ON th.id = t.thread_id
                       WHERE th.stream_id = ?1 AND t.request_id IS NOT NULL
-                        AND (?2 IS NULL OR t.thread_id = ?2)
-                        AND (t.ended_at IS NULL
-                             OR t.ended_at >= coalesce(
-                                  (SELECT created_at FROM snapshot WHERE stream_id = ?1
-                                    ORDER BY created_at DESC, id DESC LIMIT 1 OFFSET 1), ''))
+                        AND (t.ended_at IS NULL OR t.ended_at >= ?3)
                         -- One that began before the stream's first take has
                         -- nothing to diff from.
                         AND EXISTS (SELECT 1 FROM snapshot s
@@ -445,15 +449,33 @@ async fn live_requests(
                                            JOIN threads th2 ON th2.id = t2.thread_id
                                           WHERE t2.request_id = t.request_id
                                             AND th2.stream_id = ?1))
+                      GROUP BY t.request_id
                       ORDER BY t.request_id",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
-            let ids = stmt
-                .query_map(rusqlite::params![stream, thread], |r| r.get(0))
+            let rows: Vec<(i64, bool, bool, Option<String>)> = stmt
+                .query_map(rusqlite::params![stream, thread, since], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+                })
                 .map_err(oxplow_db::map_sql_err)?
                 .collect::<Result<_, _>>()
                 .map_err(oxplow_db::map_sql_err)?;
-            Ok(ids)
+            let mut live = Vec::new();
+            for (request, running, mine, head) in rows {
+                if running {
+                    if mine {
+                        live.push(request);
+                    }
+                    continue;
+                }
+                let end = crate::change_analysis::request_span(c, request, Some(stream))?
+                    .and_then(|span| span.end)
+                    .map(|end| oxplow_domain::vcs::Revision::Snapshot(end).to_string());
+                if head.is_none() || head != end {
+                    live.push(request);
+                }
+            }
+            Ok(live)
         })
         .await
 }
@@ -677,6 +699,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(analyzed().await, serde_json::json!([["1"], ["2"]]));
+    }
+
+    /// A request that ended is refreshed by any move until its change is at
+    /// the end its turns name — whichever thread's take came first — and
+    /// then left alone.
+    #[tokio::test]
+    async fn an_ended_request_is_refreshed_until_its_change_is_at_its_end() {
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        f.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (7, 1, 'other',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+                     INSERT INTO request (id, thread_id) VALUES (1, 1);
+                     INSERT INTO agent_turn (thread_id, prompt, request_id, started_at, ended_at)
+                       VALUES (1, 'mine', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let stream = StreamId::new(1);
+        let other = Some(oxplow_domain::ThreadId::new(7));
+        assert_eq!(live_requests(&f.svc, stream, other).await.unwrap(), vec![1]);
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let mut theirs = log(&f.svc, taken(false, 1)).await;
+        theirs.envelope.anchors.thread_id = other;
+        reactor.handle(&theirs).await.unwrap();
+        assert_eq!(
+            live_requests(&f.svc, stream, other).await.unwrap(),
+            Vec::<i64>::new(),
+            "its change is at its end"
+        );
     }
 
     /// A move lists the working tree's files first, on their own:

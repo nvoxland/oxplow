@@ -12,21 +12,27 @@ use crate::effort_evidence_store::EffortObservation;
 use crate::fact_store::EffortMetricDelta;
 
 /// What a request's analysis on a stream is computed from, as a signature:
-/// its turns' runs (how many, and the newest), its files (how many) and its
-/// end (when its last turn there ended, or that one runs). Bound `?1`
-/// request and `?2` stream.
+/// its turns' runs (how many, and the newest), its files (how many), its
+/// end (when its last turn there ended, or that one runs) and its turns'
+/// end takes (the snapshot a gauge's current value is read at). Driven from
+/// the request's turns, so it reads only theirs. Bound `?1` request and `?2`
+/// stream.
 const SIG: &str = "SELECT (SELECT count(*) || '|' || coalesce(max(c.id), '')
-                             FROM metric_capture c
-                            WHERE c.trigger = 'on-report'
-                              AND c.turn_id IN (SELECT t.id FROM agent_turn t
-                                                  JOIN threads th ON th.id = t.thread_id
-                                                 WHERE t.request_id = ?1 AND th.stream_id = ?2))
-                       || '|' || (SELECT count(*) FROM turn_file f
-                                   JOIN agent_turn t ON t.id = f.turn_id
+                             FROM agent_turn t
+                             JOIN threads th ON th.id = t.thread_id
+                             JOIN metric_capture c INDEXED BY idx_metric_capture_turn
+                               ON c.turn_id = t.id
+                            WHERE t.request_id = ?1 AND th.stream_id = ?2
+                              AND c.trigger = 'on-report')
+                       || '|' || (SELECT count(*) FROM agent_turn t
+                                   JOIN turn_file f ON f.turn_id = t.id
                                   WHERE t.request_id = ?1 AND f.stream_id = ?2)
                        || '|' || (SELECT coalesce(max(t.ended_at), '') || '|' || max(t.ended_at IS NULL)
                                     FROM agent_turn t JOIN threads th ON th.id = t.thread_id
-                                   WHERE t.request_id = ?1 AND th.stream_id = ?2)";
+                                   WHERE t.request_id = ?1 AND th.stream_id = ?2)
+                       || '|' || (SELECT coalesce(max(o.snapshot_id), '') FROM agent_turn t
+                                   JOIN snapshot_op o ON o.turn_id = t.id AND o.trigger = 'turn_end'
+                                  WHERE t.request_id = ?1 AND o.stream_id = ?2)";
 
 fn sig_tx(c: &Connection, request: i64, stream: i64) -> Result<String, DomainError> {
     c.query_row(SIG, params![request, stream], |r| r.get(0))
@@ -59,10 +65,10 @@ impl SqliteRequestAnalysisStore {
         self.db.read(move |c| sig_tx(c, request, stream)).await
     }
 
-    /// The (request, stream) pairs to compute: each with a turn running on
-    /// the stream, each whose stored analysis is stale, and each with a turn
-    /// that ended there since `since` and none stored yet. Older requests
-    /// are analyzed when asked for.
+    /// The (request, stream) pairs to compute: of the requests with a turn
+    /// on the stream running or ended since `since`, each with none stored
+    /// or whose stored analysis is stale. Older requests keep what they
+    /// have, and are analyzed when asked for.
     pub async fn due(&self, since: String) -> Result<Vec<(i64, i64)>, DomainError> {
         self.db
             .read(move |c| {
@@ -71,10 +77,11 @@ impl SqliteRequestAnalysisStore {
                         "WITH candidate AS (
                            SELECT DISTINCT t.request_id AS request_id, th.stream_id AS stream_id
                              FROM agent_turn t JOIN threads th ON th.id = t.thread_id
-                            WHERE t.request_id IS NOT NULL
-                              AND (t.ended_at IS NULL OR t.ended_at >= ?1)
+                            WHERE t.request_id IS NOT NULL AND t.ended_at IS NULL
                            UNION
-                           SELECT request_id, stream_id FROM request_analysis
+                           SELECT t.request_id, th.stream_id
+                             FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+                            WHERE t.request_id IS NOT NULL AND t.ended_at >= ?1
                          )
                          SELECT k.request_id, k.stream_id FROM candidate k
                            LEFT JOIN request_analysis a
