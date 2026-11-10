@@ -308,7 +308,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
 mod tests {
     use super::*;
     use crate::client_reports::{ReportedTab, TabReport, ThreadTabs};
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
 
     fn tab(id: &str, kind: &str) -> ReportedTab {
         ReportedTab {
@@ -326,7 +326,7 @@ mod tests {
     /// where its tab's history leads — so an agent never parses a tab id.
     #[tokio::test]
     async fn the_open_page_says_its_page_its_view_and_its_history() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let actor = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -410,7 +410,7 @@ mod tests {
     /// non-thread id is refused at its field.
     #[tokio::test]
     async fn the_open_page_reads_through_the_bus() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let actor = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -480,7 +480,7 @@ mod tests {
     /// project on request; a thread no window reported is named as such.
     #[tokio::test]
     async fn tabs_are_listed_by_scope() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let actor = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

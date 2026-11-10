@@ -103,7 +103,7 @@ mod tests {
     use oxplow_domain::stores::AgentTurnStore;
 
     use crate::hook_ingest::HookEnvelope;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
 
     fn envelope(kind: HookKind, thread: ThreadId) -> HookEnvelope {
         HookEnvelope {
@@ -128,7 +128,7 @@ mod tests {
     /// at a snapshot too, as one a Stop closes does.
     #[tokio::test]
     async fn a_turn_a_session_end_closes_ends_at_a_snapshot() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
@@ -176,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_turn_ends_at_a_snapshot_and_its_diff_runs_from_where_it_started() {
-        let f = services_with_effort().await;
+        let f = crate::test_fixtures::services_with_effort().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         let capture = svc.snapshot_captures.get(&stream).unwrap();
@@ -268,7 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_slow_take_does_not_hold_the_hook_past_its_budget() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let svc = &f.svc;
         let stream = svc.streams.list_streams().await.unwrap()[0].id;
         svc.config.write().unwrap().snapshot_turn_budget_ms = 100;

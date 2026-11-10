@@ -1522,7 +1522,7 @@ mod tests {
     /// one, and nothing is ever a switch.
     #[tokio::test]
     async fn a_many_capability_marks_every_row_active_and_never_switches() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let c = config(&[], &[]);
         svc.capabilities.set_declared(vec![
@@ -1607,7 +1607,7 @@ mod tests {
     /// resolves to none, and filing is a sink rather than a refusal.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
@@ -1657,7 +1657,7 @@ mod tests {
     /// available is listed as such.
     #[tokio::test]
     async fn the_rows_say_what_is_active_and_why() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let c = config(&[("task_tracker", "issues")], &[("effort_policy", "none")]);
         fx.svc.capabilities.publish(&c, &fx.svc.db).await.unwrap();
         let out = fx
@@ -1688,7 +1688,7 @@ mod tests {
     /// one.
     #[tokio::test]
     async fn a_change_of_the_active_one_is_logged() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let default = config(&[], &[]);
         let off = config(&[("effort_policy", "none")], &[]);
@@ -1745,7 +1745,7 @@ mod tests {
     #[tokio::test]
     async fn with_no_task_tracker_the_interface_is_a_sink() {
         use serde_json::json;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let agent = oxplow_domain::Actor::Agent {
             session_id: None,
@@ -1896,7 +1896,7 @@ mod tests {
     /// tracker is active (oxtask for `/next-task`).
     #[tokio::test]
     async fn the_runtimes_skills_follow_what_is_offered() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let plugin = svc.layout.project_dir.join(".oxplow/runtime/claude-plugin");
         let (skills, commands) = (plugin.join("skills"), plugin.join("commands"));
@@ -1945,7 +1945,7 @@ mod tests {
     /// row: oxtask have a priority, none has none.
     #[tokio::test]
     async fn an_implementations_fields_are_published() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let out = fx
             .svc
             .sql
@@ -1993,7 +1993,7 @@ mod tests {
     /// `tsk<n>`, nothing for none.
     #[tokio::test]
     async fn a_task_trackers_id_pattern_is_published() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let out = fx
             .svc
             .sql
@@ -2015,7 +2015,7 @@ mod tests {
     /// declares them: `tsk42` with oxtask, nothing with none.
     #[tokio::test]
     async fn the_vocabulary_reads_the_active_lists_ids() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let found = || {
             oxplow_domain::uri::extract(
@@ -2048,7 +2048,7 @@ mod contribution_tests {
     /// `v_contribution`, a disabled one's taken out.
     #[tokio::test]
     async fn a_refresh_publishes_the_contributions() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
         std::fs::write(

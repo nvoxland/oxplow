@@ -6,13 +6,13 @@
 use oxplow_domain::Actor;
 use serde_json::json;
 
-use crate::test_fixtures::services_with_effort;
+use crate::test_fixtures::services_with_thread;
 
 const SECRET: &str = "sk-oxplow-secret-value-7731";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_secret_set_by_anyone_is_never_read_back() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let svc = &fx.svc;
     let agent = Actor::Agent {
         session_id: None,
@@ -110,7 +110,7 @@ async fn a_credential_or_secret_set_by_anyone_is_never_read_back() {
         "#!/bin/sh\necho '{\"entities\":{\"row\":[]}}'\n",
     )
     .unwrap();
-    let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+    let fx = crate::test_fixtures::services_with_thread_in(dir).await;
     crate::test_fixtures::activate(&fx.svc).await;
     let svc = &fx.svc;
     let agent = Actor::Agent {

@@ -70,7 +70,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::{Actor, CommandError};
     use serde_json::json;
 
@@ -79,7 +79,7 @@ mod tests {
     /// its field.
     #[tokio::test]
     async fn search_finds_a_task_through_the_bus() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc
             .search_store
             .upsert("task", "tsk1", None, "Reconcile quokka ledger", "")

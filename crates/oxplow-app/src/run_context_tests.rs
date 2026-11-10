@@ -96,7 +96,7 @@ async fn rows(svc: &Services, sql: &str) -> Vec<Vec<Value>> {
 /// rows that already recorded it name it.
 #[tokio::test(flavor = "multi_thread")]
 async fn every_run_is_recorded_once_as_itself() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_task().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     let task = oxplow_oxtask::task_ref(fx.task);
@@ -248,7 +248,7 @@ async fn every_run_is_recorded_once_as_itself() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_run_records_what_its_grant_decided() {
     use std::os::unix::fs::PermissionsExt;
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_task().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     write(

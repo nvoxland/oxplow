@@ -869,9 +869,9 @@ export type AdapterSpec = {
 
 /**
  *  Guidance an extension gives the coding agent: a query over the semantic
- *  layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`
- *  and `:effort_id` bound (`:effort_id` NULL when the thread has no
- *  effort, `:turn_id` NULL at a prompt). Each result row's `message`
+ *  layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`,
+ *  `:request_id` (the request of the turn the trigger belongs to) and
+ *  `:effort_id` bound (`:effort_id` NULL when the thread has no effort). Each result row's `message`
  *  column is a line of guidance.
  */
 export type Advisory = {
@@ -914,7 +914,16 @@ export type AdvisoryOn =
 
 /**  How often the same advisory may reach the agent. */
 export type AdvisoryOncePer =
-/**  Once per effort, the first time the query returns rows. */
+/**
+ *  Once per request on the thread, the first time the query returns
+ *  rows (the request of the turn the trigger belongs to): the next
+ *  request is fresh. The default.
+ */
+"request" |
+/**
+ *  Once per effort, the first time the query returns rows. Efforts go
+ *  away; use `request`.
+ */
 "effort" |
 /**
  *  Once per thread per `key` value: each row's `key` column fires

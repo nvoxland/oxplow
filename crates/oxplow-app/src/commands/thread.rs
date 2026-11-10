@@ -495,7 +495,7 @@ pub fn ops(processes: crate::agent_sessions::SessionProcesses) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Actor;
 
@@ -503,7 +503,7 @@ mod tests {
     #[tokio::test]
     async fn closing_a_thread_closes_its_effort() {
         use oxplow_db::EffortStore as _;
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_effort().await;
         fx.svc
             .commands
             .run(
@@ -525,7 +525,7 @@ mod tests {
         assert_eq!(effort.closed_by.as_deref(), Some("system"));
     }
 
-    fn agent(fx: &EffortFixture) -> Actor {
+    fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -534,7 +534,7 @@ mod tests {
     }
 
     async fn run(
-        fx: &EffortFixture,
+        fx: &ThreadFixture,
         actor: &Actor,
         name: &str,
         input: serde_json::Value,
@@ -542,11 +542,11 @@ mod tests {
         fx.svc.commands.run(actor, name, input, false).await
     }
 
-    async fn thread(fx: &EffortFixture, id: ThreadId) -> Thread {
+    async fn thread(fx: &ThreadFixture, id: ThreadId) -> Thread {
         fx.svc.thread_store.get(&id).await.unwrap().unwrap()
     }
 
-    async fn create(fx: &EffortFixture, title: &str) -> ThreadId {
+    async fn create(fx: &ThreadFixture, title: &str) -> ThreadId {
         let stream = thread(fx, fx.thread).await.stream_id;
         let out = run(
             fx,
@@ -564,7 +564,7 @@ mod tests {
     #[tokio::test]
     async fn a_new_thread_opens_last_and_a_fork_copies_no_session() {
         use oxplow_domain::stores::AgentSessionStore as _;
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         // Only a stream that's there takes a thread.
         for stream in ["oxplow:oxplow/stream?id=str99"] {
             let err = run(
@@ -608,7 +608,7 @@ mod tests {
     /// A thread names no agent: its sessions do.
     #[tokio::test]
     async fn a_thread_names_no_agent() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = stream_uri(thread(&fx, fx.thread).await.stream_id);
         let err = run(
             &fx,
@@ -625,7 +625,7 @@ mod tests {
     /// undone to what it was. An agent may mark too.
     #[tokio::test]
     async fn a_mark_undoes_to_what_it_was() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let r = fx.thread.to_string();
         assert_eq!(thread(&fx, fx.thread).await.mark, None);
         run(
@@ -679,7 +679,7 @@ mod tests {
     /// threads share it — and a closed thread's may not, until it reopens.
     #[tokio::test]
     async fn an_open_threads_agent_writes_and_a_closed_ones_is_refused() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let second = create(&fx, "second").await;
         let as_second = Actor::Agent {
             session_id: None,
@@ -714,7 +714,7 @@ mod tests {
     /// no record — no audit row, nothing to undo — like any such call.
     #[tokio::test]
     async fn a_move_to_the_state_a_thread_is_in_leaves_no_record() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let second = create(&fx, "second").await;
         let open = json!({ "thread": second.to_string() });
         // An open thread reopened, an unmarked one unmarked.
@@ -732,7 +732,7 @@ mod tests {
     /// thread; close and reopen undo each other.
     #[tokio::test]
     async fn an_agent_stays_on_its_own_stream_and_closes_and_reopens_only_its_own_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let second = create(&fx, "second").await;
         let err = run(
             &fx,
@@ -794,7 +794,7 @@ mod tests {
     /// Rename and prompt undo to what they were; an agent may set a prompt.
     #[tokio::test]
     async fn rename_and_prompt_undo_to_what_they_were() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let r = fx.thread.to_string();
         let out = run(
             &fx,

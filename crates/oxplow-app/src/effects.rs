@@ -650,7 +650,7 @@ effects:
     /// happened before. A later deploy of it keeps where it started.
     #[tokio::test]
     async fn an_effect_reacts_only_to_events_after_its_deployment() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write_acme(&root, MANIFEST, SCRIPT);

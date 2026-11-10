@@ -4,10 +4,10 @@
 use oxplow_domain::HookKind;
 use serde_json::json;
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::ThreadFixture;
 use crate::{HookEnvelope, ToolDecision};
 
-fn envelope(fx: &EffortFixture, kind: HookKind, body: serde_json::Value) -> HookEnvelope {
+fn envelope(fx: &ThreadFixture, kind: HookKind, body: serde_json::Value) -> HookEnvelope {
     HookEnvelope {
         session_title: None,
         turn_run: None,
@@ -30,7 +30,7 @@ fn envelope(fx: &EffortFixture, kind: HookKind, body: serde_json::Value) -> Hook
 /// file; the row's event is the plan's ref.
 #[tokio::test]
 async fn a_proposed_plan_is_a_row_with_its_effort_and_turn() {
-    let fx = services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_effort().await;
     let ingest = |e: HookEnvelope| {
         let svc = fx.svc.clone();
         async move { svc.hook_ingest.ingest(e).await.unwrap() }

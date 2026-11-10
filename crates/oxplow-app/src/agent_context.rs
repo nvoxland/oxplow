@@ -636,7 +636,7 @@ mod tests {
     /// process is gone, one with no process, or itself.
     #[tokio::test]
     async fn an_agent_is_told_who_else_is_live_in_its_worktree() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &*fx.svc;
         let stream = svc
             .thread_store
@@ -692,7 +692,7 @@ mod tests {
     #[tokio::test]
     async fn a_context_that_was_not_delivered_takes_nothing() {
         use oxplow_domain::Actor;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &*fx.svc;
         let to =
             crate::test_fixtures::new_thread(svc, oxplow_domain::StreamId::new(1), "them").await;
@@ -755,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn a_handoff_tells_the_context_watchers() {
         use oxplow_domain::Actor;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &*fx.svc;
         let to =
             crate::test_fixtures::new_thread(svc, oxplow_domain::StreamId::new(1), "them").await;
@@ -785,7 +785,7 @@ mod tests {
     #[tokio::test]
     async fn the_context_basket_reaches_the_next_prompt_once() {
         use oxplow_domain::Actor;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &*fx.svc;
         let session = crate::test_fixtures::open_session(svc, fx.thread).await;
         for input in [
@@ -846,7 +846,7 @@ mod tests {
     #[tokio::test]
     async fn a_handoff_reaches_the_recipients_next_prompt_once() {
         use oxplow_domain::Actor;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &*fx.svc;
         let to =
             crate::test_fixtures::new_thread(svc, oxplow_domain::StreamId::new(1), "them").await;
@@ -920,7 +920,7 @@ mod tests {
     /// Alone in the worktree, the context has no such line.
     #[tokio::test]
     async fn the_calling_session_is_not_listed() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         set_pid(&fx.svc, fx.session, std::process::id()).await;
         let ctx = AgentContext::default()
             .refreshed_session_context(&fx.svc, &fx.thread, Some("s1"), Some(fx.session))

@@ -189,7 +189,7 @@ mod tests {
     /// the running registry lists it.
     #[tokio::test]
     async fn the_built_in_agents_ship_a_logo() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let listed = listing(&fx.svc.harnesses, &fx.svc.capabilities, &[]);
         for id in ["claude", "codex", "opencode"] {
             let icon = listed

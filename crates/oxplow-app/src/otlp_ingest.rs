@@ -215,7 +215,7 @@ mod tests {
     /// one (`X-Oxplow-Session`) is that session's turn's.
     #[tokio::test]
     async fn an_export_goes_to_its_own_sessions_turn() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let a = svc
             .agent_session_store
@@ -292,7 +292,7 @@ mod tests {
     /// with no token counts logs nothing.
     #[tokio::test]
     async fn a_retransmit_logs_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let body = encoded_claude_export("claude-opus-4-8", 100, 20);
         assert!(svc
@@ -317,7 +317,7 @@ mod tests {
     /// never) logs nothing, as a hook for one does.
     #[tokio::test]
     async fn an_export_for_an_unknown_thread_logs_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let body = encoded_claude_export("claude-opus-4-8", 100, 20);
         assert!(!svc
@@ -354,7 +354,7 @@ mod tests {
     /// turn's — and no effort's.
     #[tokio::test]
     async fn an_export_before_the_first_turn_is_no_turns() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let before = Timestamp::from_unix_ms(Timestamp::now().unix_ms() - 60_000);
         svc.hook_ingest
@@ -376,7 +376,7 @@ mod tests {
     /// next begun: it is that turn's, by its own time window.
     #[tokio::test]
     async fn an_export_after_stop_lands_on_the_turn_it_measured() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         svc.hook_ingest
             .ingest(hook(fx.thread, HookKind::UserPromptSubmit))

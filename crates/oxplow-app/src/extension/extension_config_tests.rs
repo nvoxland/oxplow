@@ -14,9 +14,9 @@ use crate::extension::extension_private_state_tests::{
     declare, reconcile, run, write, CONFIGURATION,
 };
 use crate::test_fixtures::lifecycle::CONFIGURATION_V2;
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
-async fn store_layer(fx: &EffortFixture, scope: Scope, version: u32, values: Value) {
+async fn store_layer(fx: &ThreadFixture, scope: Scope, version: u32, values: Value) {
     let namespace = ConfigNamespace::new("alpha".into(), scope).unwrap();
     SqliteExtensionConfigStore::new(fx.svc.db.clone())
         .compare_exchange(namespace, None, version, values)
@@ -24,13 +24,13 @@ async fn store_layer(fx: &EffortFixture, scope: Scope, version: u32, values: Val
         .unwrap();
 }
 
-async fn stamp_of(fx: &EffortFixture, which: &str) -> Value {
+async fn stamp_of(fx: &ThreadFixture, which: &str) -> Value {
     run(fx, "alpha.config.inspect", json!({})).await.unwrap()[which].clone()
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_again() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     store_layer(&fx, Scope::Project, 1, json!({"max": 20})).await;
@@ -72,7 +72,7 @@ async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_agai
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
     reconcile(&fx).await;
     // A row from before the schema moved (a restored backup, say).
@@ -140,7 +140,7 @@ async fn a_layer_behind_the_declared_version_fails_closed_and_says_so() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_explicit_migration_writes_both_layers_in_one_commit() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
     reconcile(&fx).await;
     store_layer(&fx, Scope::Project, 1, json!({"max": 5})).await;
@@ -183,7 +183,7 @@ async fn an_explicit_migration_writes_both_layers_in_one_commit() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_operation_refuses_input_of_the_wrong_shape() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
 
@@ -234,7 +234,7 @@ async fn every_operation_refuses_input_of_the_wrong_shape() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn an_oversized_or_too_deep_value_is_refused_over_the_bus() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     let huge = "x".repeat(2 * 1024 * 1024);
@@ -261,7 +261,7 @@ async fn an_oversized_or_too_deep_value_is_refused_over_the_bus() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn racing_writers_to_one_layer_win_exactly_once() {
-    let fx = Arc::new(services_with_effort().await);
+    let fx = Arc::new(services_with_thread().await);
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     let mut tasks = Vec::new();
@@ -295,7 +295,7 @@ async fn racing_writers_to_one_layer_win_exactly_once() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn writes_racing_a_disable_and_a_generation_change_leave_a_consistent_layer() {
-    let fx = Arc::new(services_with_effort().await);
+    let fx = Arc::new(services_with_thread().await);
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     let writer = {
@@ -359,14 +359,14 @@ async fn writes_racing_a_disable_and_a_generation_change_leave_a_consistent_laye
 
 // ---- host denials with a hand-built run --------------------------------
 
-fn host(fx: &EffortFixture) -> ConfigurationHost {
+fn host(fx: &ThreadFixture) -> ConfigurationHost {
     ConfigurationHost::new(
         fx.svc.extension_catalog.clone(),
         fx.svc.layout.project_dir.clone(),
     )
 }
 
-fn owner(fx: &EffortFixture, generation: Option<String>) -> ContributionRef {
+fn owner(fx: &ThreadFixture, generation: Option<String>) -> ContributionRef {
     let root = &fx.svc.layout.project_dir;
     let snapshot = fx.svc.extension_catalog.live_snapshot(root);
     let ext = snapshot
@@ -408,7 +408,7 @@ fn declaring(scope: &str, run: RunContext) -> RunContext {
     })
 }
 
-async fn denied_snapshot(fx: &EffortFixture, run: RunContext) -> String {
+async fn denied_snapshot(fx: &ThreadFixture, run: RunContext) -> String {
     let host = host(fx);
     let refused = fx
         .svc
@@ -428,7 +428,7 @@ async fn denied_snapshot(fx: &EffortFixture, run: RunContext) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn the_host_refuses_runs_that_do_not_own_the_service() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     let read = || {
@@ -479,7 +479,7 @@ async fn the_host_refuses_runs_that_do_not_own_the_service() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_write_needs_a_transaction_a_cause_and_a_run_that_may_write() {
     use crate::commands::TxCtx;
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     let input: crate::extension::extension_configuration::WriteInput =
@@ -530,7 +530,7 @@ async fn a_write_needs_a_transaction_a_cause_and_a_run_that_may_write() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_reads_its_own_configuration() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     run(
@@ -558,7 +558,7 @@ async fn a_script_reads_its_own_configuration() {
 /// deployments; putting it back starts from the defaults.
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_an_extension_forgets_its_stored_layers() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     run(

@@ -282,11 +282,11 @@ mod tests {
 
     use super::*;
     use crate::snapshot_capture::SnapshotCaptureService;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
     /// The fixture's stream with a capture service whose gates are off, so
     /// a mark sees what was just written.
-    fn stream_of(f: &EffortFixture) -> (StreamId, Arc<SnapshotCaptureService>) {
+    fn stream_of(f: &ThreadFixture) -> (StreamId, Arc<SnapshotCaptureService>) {
         let stream = StreamId::new(1);
         let svc = Arc::new(
             SnapshotCaptureService::new(
@@ -305,14 +305,14 @@ mod tests {
         (stream, svc)
     }
 
-    fn write(f: &EffortFixture, svc: &SnapshotCaptureService, path: &str, body: &str) {
+    fn write(f: &ThreadFixture, svc: &SnapshotCaptureService, path: &str, body: &str) {
         let full = f.svc.layout.project_dir.join(path);
         std::fs::write(&full, body).unwrap();
         svc.mark_dirty(full, WatchEventKind::Other);
     }
 
     /// `id` as the project's snapshot implementation, its switch applied.
-    async fn choose(f: &EffortFixture, id: &str) {
+    async fn choose(f: &ThreadFixture, id: &str) {
         f.svc
             .config
             .write()
@@ -326,7 +326,7 @@ mod tests {
             .await;
     }
 
-    async fn mark(f: &EffortFixture, stream: StreamId) -> i64 {
+    async fn mark(f: &ThreadFixture, stream: StreamId) -> i64 {
         f.svc
             .snapshots
             .active()
@@ -368,7 +368,7 @@ mod tests {
                 Err(SnapshotError::NotFound("nothing".into()))
             }
         }
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let (_, svc) = stream_of(&f);
         let chosen = Arc::new(std::sync::Mutex::new("elsewhere".to_string()));
         let registry = SnapshotRegistry::new({
@@ -397,7 +397,7 @@ mod tests {
     /// the next take's bytes. Both are offered, core's own always.
     #[tokio::test]
     async fn tracking_changes_only_keeps_no_bytes_until_switched_back() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ids = f.svc.snapshots.ids();
         assert!(
             ids.contains(&"oxplow".to_string()) && ids.contains(&"hashes".to_string()),

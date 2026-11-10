@@ -143,8 +143,8 @@ fn status_of(
 mod tests {
     use oxplow_db::CollectorRun;
 
-    async fn fixture() -> crate::test_fixtures::EffortFixture {
-        let fx = crate::test_fixtures::services_with_effort().await;
+    async fn fixture() -> crate::test_fixtures::ThreadFixture {
+        let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/my-gh");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(

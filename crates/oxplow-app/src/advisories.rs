@@ -785,7 +785,7 @@ mod tests {
     /// not its own copy's.
     #[tokio::test]
     async fn a_worktree_threads_advisories_come_from_the_main_worktree() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         approved(
             &f.svc,
             "guide",
@@ -932,7 +932,7 @@ mod tests {
         serde_json::to_value(&out.rows).unwrap()
     }
 
-    async fn prompt(f: &crate::test_fixtures::EffortFixture) -> String {
+    async fn prompt(f: &crate::test_fixtures::ThreadFixture) -> String {
         f.svc
             .agent_context
             .prompt_context(&f.svc, &f.thread, Some("s"), None, None)
@@ -945,7 +945,7 @@ mod tests {
     /// counts say so.
     #[tokio::test]
     async fn a_hint_that_keeps_firing_is_muted_and_raised_to_the_person() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         approved(
             &f.svc,
             "guide",
@@ -984,7 +984,7 @@ mod tests {
     /// until someone dismisses it (`oxplow.hint.dismiss`); an agent may too.
     #[tokio::test]
     async fn a_person_hint_waits_for_the_person() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         approved(
             &f.svc,
             "guide",

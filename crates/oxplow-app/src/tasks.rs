@@ -569,7 +569,7 @@ mod tests {
         use crate::commands::task as w;
         use oxplow_domain::Actor;
         use serde_json::json;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let task = oxplow_oxtask::task_ref(fx.task);
         let run = |name: &'static str, input: serde_json::Value| {
@@ -706,7 +706,7 @@ mod tests {
     /// refused (dead-lettered) — those rows are the task cores'.
     #[tokio::test]
     async fn a_providers_records_are_projected_by_ref() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         list_fake(svc).await;
         let r = "oxplow:oxplow/task?id=W-1&provider=fake";
@@ -779,7 +779,7 @@ mod tests {
     /// already there keeps when it was made; one the record drops goes.
     #[tokio::test]
     async fn a_restated_link_keeps_when_it_was_made() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         list_fake(svc).await;
         let r = "oxplow:oxplow/task?id=W-1&provider=fake";
@@ -861,7 +861,7 @@ mod tests {
     /// there) and renumbers that queue; an item recorded done has none.
     #[tokio::test]
     async fn an_assignment_places_an_item_in_its_queue_and_a_close_releases_it() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         list_fake(svc).await;
         let (a, b, c) = (

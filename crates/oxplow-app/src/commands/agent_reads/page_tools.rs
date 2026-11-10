@@ -1959,15 +1959,15 @@ mod describe_tests {
     use oxplow_domain::Actor;
     use serde_json::{json, Value};
 
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
     const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: test\n";
     const PAGE: &str = "# authored with its own comment\ntitle: 'Release'\nloaders:\n  numbers: { sql: 'SELECT 7 AS n' }\nview:\n  id: layout\n  stack:\n    - { id: total, title: Total, viz: number, from: numbers }\n    - { id: note, title: Note, markdown: 'A preserved note.' }\n";
     const OLD: &str = "title: 'Old release'\nloaders:\n  numbers: { sql: 'SELECT 1 AS n' }\nview: { id: only, viz: number, from: numbers }\n";
 
     /// A project whose extension `acme` is deployed with page `pr`.
-    async fn deployed() -> (EffortFixture, String) {
-        let fx = services_with_effort().await;
+    async fn deployed() -> (ThreadFixture, String) {
+        let fx = services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("pages")).unwrap();
         std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
@@ -1984,7 +1984,7 @@ mod describe_tests {
         (fx, hash)
     }
 
-    async fn describe(fx: &EffortFixture, input: Value) -> Value {
+    async fn describe(fx: &ThreadFixture, input: Value) -> Value {
         fx.svc
             .commands
             .run(&Actor::Human, "oxplow.page.describe", input.clone(), false)
@@ -2104,7 +2104,7 @@ mod describe_tests {
 
     #[tokio::test]
     async fn a_temp_file_is_a_view_that_only_reads() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc.temp.put("v1.yaml", PAGE.as_bytes()).await.unwrap();
         let def = describe(&fx, json!({ "uri": uri(TEMP, "v1.yaml", None) })).await;
         assert_eq!(def["page"], json!("temp/v1"), "{def}");
@@ -2139,7 +2139,7 @@ mod describe_tests {
     #[tokio::test]
     async fn a_nodes_settings_are_what_its_yaml_set() {
         const SPEC: &str = "title: Set\nparams: [{ name: area, role: filter, default: one }]\nloaders:\n  items: { sql: \"SELECT 'a' AS id, NULL AS parent\" }\nview:\n  switch:\n    param: area\n    children:\n      - { id: one, title: One, viz: tree, from: items, tree: { id: id, parent: parent, label: id }, columns: [{ key: id, label: Item }], empty: None yet. }\n      - { id: two, title: Two, markdown: 'Hi.' }\n";
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc.temp.put("set.yaml", SPEC.as_bytes()).await.unwrap();
         let out = describe(&fx, json!({ "uri": uri(TEMP, "set.yaml", None) })).await;
         let nodes = out["nodes"].as_array().unwrap();
@@ -2218,7 +2218,7 @@ mod describe_tests {
     /// page, or no YAML, is zero rows, never an error.
     #[tokio::test]
     async fn a_file_that_is_no_page_describes_nothing() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let local = |text: &str| json!({ "uri": uri(LOCAL, "extensions/acme/pages/x.yaml", None), "text": text });
         for text in [
             "name: ci\non: [push]\njobs: {}\n",
@@ -2262,7 +2262,7 @@ mod describe_tests {
     /// The tool no longer takes the old inputs: `spec` and the old name are gone.
     #[tokio::test]
     async fn the_old_definition_command_and_its_spec_input_are_gone() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         assert!(fx.svc.commands.spec("oxplow.page.definition").is_none());
         let err = fx
             .svc

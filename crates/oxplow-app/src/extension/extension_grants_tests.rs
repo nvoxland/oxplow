@@ -8,7 +8,7 @@ use std::path::Path;
 use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 
-use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
+use crate::test_fixtures::{services_with_task, TaskFixture};
 
 fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
@@ -29,7 +29,7 @@ fn script(sql: &str) -> String {
     )
 }
 
-async fn run(fx: &TaskEffortFixture, name: &str) -> Result<Value, CommandError> {
+async fn run(fx: &TaskFixture, name: &str) -> Result<Value, CommandError> {
     fx.svc
         .commands
         .run(&Actor::Human, name, json!({}), false)
@@ -39,7 +39,7 @@ async fn run(fx: &TaskEffortFixture, name: &str) -> Result<Value, CommandError> 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     let commands = [
         ("items", "sql.read:v_task", "SELECT uri FROM v_task"),
@@ -171,14 +171,14 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     );
 }
 
-async fn errors_of(fx: &TaskEffortFixture, extension: &str) -> String {
+async fn errors_of(fx: &TaskFixture, extension: &str) -> String {
     crate::test_fixtures::load_errors(&fx.svc, extension).await
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_service_the_script_did_not_declare_is_refused() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
@@ -268,7 +268,7 @@ mod program_collectors {
     }
 
     async fn go(
-        fx: &TaskEffortFixture,
+        fx: &TaskFixture,
     ) -> Result<crate::collector_runner::CollectorRunReport, RunCollectorError> {
         let root = fx.svc.layout.project_dir.clone();
         // What was written (or edited) since is published first.
@@ -289,7 +289,7 @@ mod program_collectors {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn disabling_the_extension_stops_its_next_command_and_collector_run() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
@@ -341,7 +341,7 @@ mod program_collectors {
     }
 
     async fn spec_of(
-        fx: &TaskEffortFixture,
+        fx: &TaskFixture,
     ) -> (std::path::PathBuf, oxplow_config::collectors::CollectorSpec) {
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let root = fx.svc.layout.project_dir.clone();
@@ -381,7 +381,7 @@ mod program_collectors {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn a_program_gets_a_scrubbed_environment() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         write(
             &root,
@@ -446,7 +446,7 @@ mod program_collectors {
     #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread")]
     async fn a_timeout_reaps_the_program_and_what_it_started() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         write(&root, ".oxplow/extensions/acme/extension.yaml", MANIFEST);
         let pidfile = root.join("child.pid");
@@ -486,7 +486,7 @@ mod program_collectors {
 /// may do with the person's rights is what was approved at deploy.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_permission() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     let item = oxplow_oxtask::task_ref(fx.task);
     let manifest = |permissions: &str| {

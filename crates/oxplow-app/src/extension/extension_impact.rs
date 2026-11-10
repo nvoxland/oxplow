@@ -2390,7 +2390,7 @@ mod tests {
 
     #[tokio::test]
     async fn downstream_datasets_come_from_the_lineage() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let readers = downstream_of(&fx.svc.sql, "v_knowledge_pin").await;
         assert!(
             readers.contains(&"v_knowledge_page".to_string()),

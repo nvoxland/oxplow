@@ -532,7 +532,7 @@ mod tests {
     /// and one git doesn't know reads no rows and no error.
     #[tokio::test]
     async fn a_commit_a_query_names_is_indexed_on_demand() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "a\n").unwrap();
@@ -596,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_stream_head_is_indexed_and_history_reads_from_its_head() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "a\n").unwrap();
@@ -855,7 +855,7 @@ mod tests {
     /// and `v_branch.upstream / ahead / behind`, a detached HEAD included.
     #[tokio::test]
     async fn the_refs_scan_says_where_each_stream_is_and_how_far_its_branch_has_parted() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f._dir.path().to_path_buf();
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")

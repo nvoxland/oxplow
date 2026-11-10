@@ -403,7 +403,7 @@ mod tests {
     /// while the rows already logged still read.
     #[tokio::test]
     async fn a_declared_type_registers_keeps_its_contract_and_outlives_its_extension() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let log = SqliteEventLogStore::new(svc.db.clone(), svc.vocabulary.clone());
@@ -491,7 +491,7 @@ mod tests {
     /// and stays after the extension is removed.
     #[tokio::test]
     async fn a_declared_retention_window_outlives_its_extension() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(
@@ -538,7 +538,7 @@ mod tests {
     /// it from; a kind no dataset holds has none.
     #[tokio::test]
     async fn core_kinds_are_listed_with_their_dataset_and_search_feed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let rows = f
             .svc
@@ -574,7 +574,7 @@ mod tests {
     // `v_resource`.
     #[tokio::test]
     async fn every_resource_is_an_extensions_and_is_listed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         crate::test_fixtures::activate_with_problems(&f.svc).await;
         let rows = f
             .svc
@@ -660,7 +660,7 @@ resources:
 
     #[tokio::test]
     async fn a_declared_resource_links_while_its_extension_is_installed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let link = || {
@@ -685,7 +685,7 @@ resources:
     /// the second, and the refused extension reports it.
     #[tokio::test]
     async fn a_shared_wikilink_prefix_is_refused_to_the_second() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write_ext(&root, "acme", ACME);
@@ -713,7 +713,7 @@ resources:
     /// `acme-pr`) doesn't take the declaring one's retention window away.
     #[tokio::test]
     async fn a_namesake_that_declares_nothing_keeps_the_others_window() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(
@@ -819,7 +819,7 @@ resources:
     /// at its name, so one namespace never has two owners.
     #[tokio::test]
     async fn a_name_that_would_share_a_namespace_is_refused_at_the_name() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(&root, ".oxplow/extensions/acme-pr/extension.yaml", MANIFEST);
@@ -882,7 +882,7 @@ resources:
     /// installed, back if the owner's declaration is refused.
     #[tokio::test]
     async fn a_subscription_to_another_extensions_type_resolves_when_its_owner_registers_it() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write(&root, ".oxplow/extensions/beta/extension.yaml", SUBSCRIBER);

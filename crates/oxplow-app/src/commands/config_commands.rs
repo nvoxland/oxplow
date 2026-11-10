@@ -1021,7 +1021,7 @@ mod tests {
     /// nothing marked removes the key.
     #[tokio::test(flavor = "multi_thread")]
     async fn marking_a_path_generated_edits_the_exclude_list() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let run = |input: Value| {
             let svc = svc.clone();
@@ -1052,7 +1052,7 @@ mod tests {
     /// goes back to the default, and the last one removes the key.
     #[tokio::test(flavor = "multi_thread")]
     async fn choosing_a_provider_edits_that_capabilitys_entry_in_its_layer() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let run = |input: Value| {
             let svc = svc.clone();

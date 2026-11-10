@@ -80,7 +80,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::CommandError;
     use serde_json::json;
 
@@ -88,7 +88,7 @@ mod tests {
     /// leaving no record; a bad `stream` is refused at its field.
     #[tokio::test]
     async fn a_ref_reads_through_the_bus_for_the_calling_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         std::fs::write(fx._dir.path().join("who.txt"), "mine").unwrap();
         let actor = Actor::Agent {
             session_id: None,

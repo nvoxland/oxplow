@@ -5,9 +5,9 @@
 
 use serde_json::{json, Value};
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
-async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
+async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
     let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
     serde_json::to_value(&out.rows)
         .unwrap()
@@ -31,7 +31,7 @@ fn provider(id: &str) -> oxplow_ai::config::ProviderConfig {
 /// next one, though no event announced it, and the key itself is nowhere.
 #[tokio::test]
 async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let roles = "SELECT role, provider, model, key_set FROM v_ai_role WHERE role IN ('main', 'decide') ORDER BY role";
     assert_eq!(
         rows(&fx, roles).await,
@@ -81,7 +81,7 @@ async fn ai_roles_and_providers_are_read_live_and_never_show_a_key() {
 /// A configured language server is a row, with whether its binary exists.
 #[tokio::test]
 async fn language_servers_are_read_live() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     assert!(rows(&fx, "SELECT language_id FROM v_lsp_server")
         .await
         .is_empty());
@@ -121,7 +121,7 @@ const MANIFEST: &str = "manifest: 2\nname: acme\nintent:\n  purpose: Pull.\nperm
 /// value) are read live.
 #[tokio::test]
 async fn collector_state_and_credentials_are_read_live() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
@@ -177,7 +177,7 @@ async fn collector_state_and_credentials_are_read_live() {
 /// built on one (it would read the stub).
 #[tokio::test]
 async fn a_live_dataset_is_never_answered_empty_by_mistake() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let bare = crate::sql_gateway::SqlGateway::new(fx.svc.db.clone());
     let err = bare
         .query_sql("SELECT role FROM v_ai_role", vec![], None)
@@ -223,7 +223,7 @@ fn every_live_dataset_reads_the_columns_it_declares() {
 /// the worktree, shows in the next query with no event announcing either.
 #[tokio::test]
 async fn zones_show_what_each_rule_matches_in_the_worktree() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let zone =
         "SELECT position, zone, patterns, files FROM v_zone ORDER BY position IS NULL, position";
     // No table declared: everything is `other`.
@@ -287,7 +287,7 @@ async fn zones_show_what_each_rule_matches_in_the_worktree() {
 /// `needs` can name.
 #[tokio::test]
 async fn scopes_list_what_a_command_may_need() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let got = rows(
         &fx,
         "SELECT id, access, host FROM v_scope WHERE id IN ('records.read', 'task_tracker.write', 'tabs.write') ORDER BY id",
@@ -311,7 +311,7 @@ async fn scopes_list_what_a_command_may_need() {
 /// test call that checks a provider.
 #[tokio::test]
 async fn the_scope_that_spends_the_persons_key_says_so() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let got = rows(
         &fx,
         "SELECT id, spends FROM v_scope WHERE spends = 1 ORDER BY id",
@@ -327,7 +327,7 @@ async fn the_scope_that_spends_the_persons_key_says_so() {
 }
 
 /// Rows of `sql` run as a page for stream `stream` would (its row id).
-async fn rows_in(fx: &EffortFixture, sql: &str, stream: i64) -> Vec<Vec<Value>> {
+async fn rows_in(fx: &ThreadFixture, sql: &str, stream: i64) -> Vec<Vec<Value>> {
     let out = fx
         .svc
         .sql
@@ -345,7 +345,7 @@ async fn rows_in(fx: &EffortFixture, sql: &str, stream: i64) -> Vec<Vec<Value>> 
 
 /// A second stream, working in a new git worktree of the project on branch
 /// `branch`: its row id and its worktree.
-async fn worktree_stream(fx: &EffortFixture, branch: &str) -> (i64, std::path::PathBuf) {
+async fn worktree_stream(fx: &ThreadFixture, branch: &str) -> (i64, std::path::PathBuf) {
     use oxplow_domain::stores::StreamStore as _;
     let project = fx._dir.path();
     std::fs::write(project.join("seed.txt"), "seed").unwrap();
@@ -381,7 +381,7 @@ async fn worktree_stream(fx: &EffortFixture, branch: &str) -> (i64, std::path::P
 /// a value set in project.yaml after the last query shows, as `project`.
 #[tokio::test]
 async fn config_values_are_read_live_with_where_each_comes_from() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let key = "SELECT origin FROM v_config_value WHERE key = 'snapshotRetentionDays'";
     assert_eq!(rows(&fx, key).await, vec![vec![json!("default")]]);
     std::fs::write(
@@ -416,7 +416,7 @@ async fn config_values_are_read_live_with_where_each_comes_from() {
 /// are rows too, so a directory listing is `WHERE parent = ?`.
 #[tokio::test]
 async fn files_are_the_streams_worktrees() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let (stream, wt) = worktree_stream(&fx, "side").await;
     std::fs::create_dir_all(fx._dir.path().join("src")).unwrap();
     std::fs::write(fx._dir.path().join("src/a.rs"), "a").unwrap();
@@ -468,7 +468,7 @@ async fn files_are_the_streams_worktrees() {
 #[tokio::test]
 async fn a_folder_listing_reads_that_folder_alone() {
     use std::os::unix::fs::PermissionsExt;
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx._dir.path();
     std::fs::create_dir_all(root.join("src/deep")).unwrap();
     std::fs::create_dir_all(root.join("src/empty")).unwrap();
@@ -521,7 +521,7 @@ async fn a_folder_listing_reads_that_folder_alone() {
 /// local).
 #[tokio::test]
 async fn v_file_lists_local_by_default_and_fills_size_for_one_level() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     std::fs::create_dir_all(fx._dir.path().join("src")).unwrap();
     std::fs::write(fx._dir.path().join("src/a.rs"), "hello").unwrap();
 
@@ -572,7 +572,7 @@ async fn v_file_lists_local_by_default_and_fills_size_for_one_level() {
 /// lists the files committed there, not the files on disk now.
 #[tokio::test]
 async fn v_file_lists_a_local_git_revision() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx._dir.path();
     std::fs::write(root.join("old.txt"), "old").unwrap();
     let sha = crate::test_fixtures::commit_all(root, "add old");
@@ -609,7 +609,7 @@ async fn v_file_lists_a_local_git_revision() {
 /// files below, at the deployment the `rev` names.
 #[tokio::test]
 async fn v_file_lists_the_extensions_filesystem() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let hash = "0123456789abcdef";
     let dir = crate::extension::extension_store::deployment_dir(fx._dir.path(), "acme", hash);
     std::fs::create_dir_all(dir.join("pages")).unwrap();
@@ -654,7 +654,7 @@ async fn v_file_lists_the_extensions_filesystem() {
 /// `oxplow:temp` is flat: its files are at the root, with sizes.
 #[tokio::test]
 async fn v_file_lists_the_temp_filesystem() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     fx.svc.temp.put("scratch.yaml", b"abc").await.unwrap();
     let temp = rows(
         &fx,
@@ -674,7 +674,7 @@ async fn v_file_lists_the_temp_filesystem() {
 /// A filesystem nobody registered is refused, naming the ones that are.
 #[tokio::test]
 async fn v_file_refuses_an_unknown_filesystem() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let err = fx
         .svc
         .sql
@@ -692,7 +692,7 @@ async fn v_file_refuses_an_unknown_filesystem() {
 /// stream uses is what "adopt a worktree" offers.
 #[tokio::test]
 async fn vcs_workspaces_say_which_stream_uses_each() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let (stream, _) = worktree_stream(&fx, "used").await;
     let project = fx._dir.path();
     let loose = project.join(format!(
@@ -740,7 +740,7 @@ async fn vcs_workspaces_say_which_stream_uses_each() {
 /// can't resolve gives no row.
 #[tokio::test]
 async fn branch_divergence_and_the_commits_between_are_read_live() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let (_, wt) = worktree_stream(&fx, "feature").await;
     let project = fx._dir.path();
     let split = fx.svc.vcs.resolve(project, "HEAD").await.unwrap();
@@ -832,7 +832,7 @@ async fn branch_divergence_and_the_commits_between_are_read_live() {
 /// harness that can't list now is a row saying why, not a failed query.
 #[tokio::test]
 async fn agent_conversations_are_each_harness_saved_ones() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     fx.svc
         .harnesses
         .register(crate::test_fixtures::listing_harness(
@@ -867,7 +867,7 @@ async fn agent_conversations_are_each_harness_saved_ones() {
 /// page re-runs on.
 #[tokio::test]
 async fn a_query_over_a_live_dataset_reads_it() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let out = fx
         .svc
         .sql
@@ -923,7 +923,7 @@ fn a_change_names_the_live_datasets_that_follow_it() {
 /// it: what New Session's agent choice lists.
 #[tokio::test]
 async fn agent_harnesses_are_the_registered_ones_enabled_ones_first() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     fx.svc
         .harnesses
         .register(crate::test_fixtures::listing_harness("zeta", vec![]));
@@ -960,7 +960,7 @@ async fn agent_harnesses_are_the_registered_ones_enabled_ones_first() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_collector_is_a_v_collector_row_with_its_standing() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("extension.yaml"), MANIFEST).unwrap();
@@ -1022,7 +1022,7 @@ async fn a_collector_is_a_v_collector_row_with_its_standing() {
 /// holds for the ones an extension declares.
 #[tokio::test]
 async fn commands_are_listed_with_their_summary_and_confirmation() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let got = rows(
         &fx,
         "SELECT id, uri, summary <> '', confirms FROM v_command WHERE id = 'oxplow.extension.remove'",
@@ -1049,7 +1049,7 @@ async fn commands_are_listed_with_their_summary_and_confirmation() {
 /// under their `v_contribution` URIs, each with a sentence saying what it is.
 #[tokio::test]
 async fn skills_slots_and_components_are_described() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let skills = rows(
         &fx,
         "SELECT count(*), sum(s.description = '') FROM v_skill s JOIN v_contribution k ON k.uri = s.uri",
@@ -1076,7 +1076,7 @@ async fn skills_slots_and_components_are_described() {
 /// on `v_contribution` too, so a page can show any kind the same way.
 #[tokio::test]
 async fn shipped_declarations_describe_themselves() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     for (name, sql) in [
         (
             "resources",
@@ -1124,7 +1124,7 @@ async fn shipped_declarations_describe_themselves() {
 /// a contribution's page links "Declared in" to it.
 #[tokio::test]
 async fn shipped_contributions_say_where_they_are_declared() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let lined = rows(
         &fx,
         "SELECT count(*) FROM v_contribution WHERE file = 'extension.yaml' AND line IS NOT NULL",

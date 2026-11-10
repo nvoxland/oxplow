@@ -884,7 +884,7 @@ mod tests {
     /// run).
     #[tokio::test]
     async fn oxplow_oxtask_are_a_conforming_provider() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let provider = fx.svc.tasks.get("oxtask").unwrap();
         let actor = Actor::Agent {
             session_id: None,

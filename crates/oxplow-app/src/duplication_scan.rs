@@ -187,7 +187,7 @@ mod tests {
         \x20   total * 2 + 1\n\
         }\n";
 
-    async fn scan(f: &crate::test_fixtures::EffortFixture) -> Vec<CodeQualityFinding> {
+    async fn scan(f: &crate::test_fixtures::ThreadFixture) -> Vec<CodeQualityFinding> {
         DuplicationRecorder::new(&f.svc)
             .record(
                 f.svc.layout.project_dir.clone(),
@@ -204,7 +204,7 @@ mod tests {
     /// an edit is seen: its file has a new content id.
     #[tokio::test]
     async fn a_second_scan_reuses_the_cache_and_an_edit_is_seen() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::write(root.join("a.rs"), BODY).unwrap();
         std::fs::write(root.join("b.rs"), BODY).unwrap();
@@ -225,7 +225,7 @@ mod tests {
     /// the change's files, so it can't restate the tree (tsk365).
     #[tokio::test]
     async fn a_scan_records_its_findings_and_no_facts() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::write(root.join("a.rs"), BODY).unwrap();
         std::fs::write(root.join("b.rs"), BODY).unwrap();
@@ -260,7 +260,7 @@ mod tests {
     #[tokio::test]
     async fn a_scan_reads_the_revision_it_names() {
         use oxplow_domain::stores::StreamStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.rs"), BODY).unwrap();

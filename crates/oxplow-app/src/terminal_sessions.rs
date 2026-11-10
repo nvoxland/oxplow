@@ -1000,7 +1000,7 @@ mod tests {
     /// `SessionEnd` for its agent session (Codex posts none of its own).
     #[tokio::test]
     async fn an_agent_panes_exit_ends_its_session() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let session = svc
             .agent_session_store
@@ -1066,7 +1066,7 @@ mod tests {
     #[tokio::test]
     async fn an_agent_panes_pid_is_recorded_on_its_session() {
         use oxplow_domain::stores::AgentSessionStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let session = svc
             .agent_session_store

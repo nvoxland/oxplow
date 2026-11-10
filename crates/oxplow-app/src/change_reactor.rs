@@ -742,7 +742,7 @@ mod tests {
     /// defers, `Busy`), the file list is current.
     #[tokio::test]
     async fn a_move_lists_the_files_even_while_the_analysis_runs() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let ev = log(&f.svc, taken(false, 1)).await;
@@ -775,7 +775,7 @@ mod tests {
     /// and a deep analysis of them keeps that; an effort's say neither.
     #[tokio::test]
     async fn the_working_files_say_which_are_staged_and_which_untracked() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
         std::fs::write(root.join("src/staged.rs"), "fn s() {}\n").unwrap();
@@ -844,7 +844,7 @@ mod tests {
     #[tokio::test]
     async fn a_relist_of_some_paths_gives_what_a_full_relist_gives() {
         use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
@@ -961,7 +961,7 @@ mod tests {
     #[tokio::test]
     async fn a_merge_in_progress_or_a_moved_head_takes_the_full_relist() {
         use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
@@ -1000,7 +1000,7 @@ mod tests {
     #[tokio::test]
     async fn a_range_headed_at_the_working_tree_follows_by_paths() {
         use crate::change_analysis::{refresh_files, refresh_paths, ChangeTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         repo(&root);
@@ -1038,7 +1038,7 @@ mod tests {
     /// is quiet, which finds what no watch reports: `git add` from a terminal.
     #[tokio::test]
     async fn a_relist_by_paths_is_reconciled_once_the_stream_is_quiet() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
         std::fs::write(root.join("heard.txt"), "1\n").unwrap();
@@ -1094,7 +1094,7 @@ mod tests {
     /// is edited, and a stage moves its staged flag with no snapshot.
     #[tokio::test]
     async fn the_working_files_follow_the_index_and_exist_from_boot() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         repo(&root);
         std::fs::write(root.join("src/new.rs"), "fn n() {}\n").unwrap();
@@ -1155,7 +1155,7 @@ mod tests {
     /// it runs once settled, stamping what its inputs had seen.
     #[tokio::test]
     async fn a_snapshot_lists_files_and_paces_the_deep_analysis() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let ev = log(&f.svc, taken(false, 1)).await;
@@ -1200,7 +1200,7 @@ mod tests {
     /// anything changed.
     #[tokio::test]
     async fn a_turn_end_take_analyzes_at_once() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         assert!(!reactor.handles("agent.turn.ended"));
@@ -1234,7 +1234,7 @@ mod tests {
     /// An unchanged take moves nothing.
     #[tokio::test]
     async fn an_unchanged_take_does_nothing() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         reactor
@@ -1247,7 +1247,7 @@ mod tests {
     /// A burst analyzes once: an event a newer one supersedes is skipped.
     #[tokio::test]
     async fn a_burst_computes_once() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let first = log(&f.svc, taken(false, 1)).await;
@@ -1477,7 +1477,7 @@ mod tests {
     /// dead letter).
     #[tokio::test]
     async fn a_failed_analysis_names_the_stream() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         std::fs::remove_dir_all(f.svc.layout.project_dir.join(".git")).unwrap();
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         let err = reactor
@@ -1493,7 +1493,7 @@ mod tests {
     /// One between two fixed revisions is left as computed.
     #[tokio::test]
     async fn a_head_move_refreshes_the_ranges_headed_at_the_working_tree() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -1543,7 +1543,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_head_move_recomputes_the_working_change() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         repo(&f.svc.layout.project_dir);
         let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
         reactor

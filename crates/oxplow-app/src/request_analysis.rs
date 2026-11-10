@@ -148,7 +148,7 @@ mod tests {
     /// reported later makes it due.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_requests_analysis_holds_its_turns_runs_and_is_recomputed_only_when_they_move() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let turn: i64 = f
             .svc
             .db

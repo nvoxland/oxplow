@@ -6,7 +6,7 @@
 use oxplow_db::SqlCell;
 use serde_json::json;
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
 const REFERENCE: &str = include_str!(
     "../../oxplow-agent-text/assets/skills/oxplow-extension/references/reading-data.md"
@@ -22,7 +22,7 @@ fn example(title: &str) -> String {
     sql.trim().to_string()
 }
 
-async fn rows(fx: &EffortFixture, title: &str) -> Vec<Vec<SqlCell>> {
+async fn rows(fx: &ThreadFixture, title: &str) -> Vec<Vec<SqlCell>> {
     let out = fx
         .svc
         .sql
@@ -52,7 +52,7 @@ fn text(c: &SqlCell) -> String {
 /// weekly points, in order, each the value reported that week.
 #[tokio::test]
 async fn coverage_trend_by_week() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     for value in [70.0, 80.0, 90.0] {
         fx.svc
             .commands
@@ -96,7 +96,7 @@ async fn coverage_trend_by_week() {
 /// one that went red and green again is flaky, a steady green is neither.
 #[tokio::test]
 async fn failing_or_flaky_tests() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     fx.svc
         .db
         .transaction(|tx| {
@@ -134,7 +134,7 @@ async fn failing_or_flaky_tests() {
 /// none stays as a row of zeros.
 #[tokio::test]
 async fn efforts_per_thread() {
-    let fx = services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_effort().await;
     let stream = oxplow_domain::StreamId::new(1);
     let second = crate::test_fixtures::new_thread(&fx.svc, stream, "Second").await;
     let third = crate::test_fixtures::new_thread(&fx.svc, stream, "Third").await;
@@ -189,7 +189,7 @@ async fn efforts_per_thread() {
 /// Usage reports sum per thread and agent, cache reads apart.
 #[tokio::test]
 async fn token_usage_per_thread_and_agent() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let stream = oxplow_domain::StreamId::new(1);
     let second = crate::test_fixtures::new_thread(&fx.svc, stream, "Second").await;
     let usage = |thread: oxplow_domain::ThreadId, kind: &str, input, output, cache_read| {

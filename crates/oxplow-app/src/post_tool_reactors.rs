@@ -240,7 +240,7 @@ mod tests {
     /// `v_capture` expose it.
     #[tokio::test]
     async fn a_run_capture_carries_the_tools_turn() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.hook_ingest
             .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))

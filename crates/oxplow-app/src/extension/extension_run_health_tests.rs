@@ -13,7 +13,7 @@ use oxplow_domain::Actor;
 use serde_json::{json, Value};
 
 use crate::collector_runner::{run_collector, Collectors, RunTrigger};
-use crate::test_fixtures::{services_with_task_effort, TaskEffortFixture};
+use crate::test_fixtures::{services_with_task, TaskFixture};
 
 const SECRET: &str = "s3cr3t-token-value";
 
@@ -43,7 +43,7 @@ fn write(root: &std::path::Path, rel: &str, body: &str) {
 
 /// Install `acme` with the program `body` and set its credential.
 #[cfg(unix)]
-async fn install(fx: &TaskEffortFixture, body: &str) {
+async fn install(fx: &TaskFixture, body: &str) {
     let root = fx.svc.layout.project_dir.clone();
     write(&root, "extension.yaml", MANIFEST);
     write(&root, "sync.sh", body);
@@ -57,7 +57,7 @@ async fn install(fx: &TaskEffortFixture, body: &str) {
     crate::collector_runner::set_credential(&collectors, "acme", "GH_TOKEN", Some(SECRET)).unwrap();
 }
 
-async fn run(fx: &TaskEffortFixture, parent: &RunContext) -> Result<(), String> {
+async fn run(fx: &TaskFixture, parent: &RunContext) -> Result<(), String> {
     let root = fx.svc.layout.project_dir.clone();
     run_collector(
         &Collectors::of(&fx.svc, &root),
@@ -75,7 +75,7 @@ fn person() -> RunContext {
     RunContext::core(Actor::Human, Mode::External)
 }
 
-async fn rows(fx: &TaskEffortFixture, sql: &str) -> Vec<Vec<Value>> {
+async fn rows(fx: &TaskFixture, sql: &str) -> Vec<Vec<Value>> {
     let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
     serde_json::to_value(&out.rows)
         .unwrap()
@@ -87,7 +87,7 @@ async fn rows(fx: &TaskEffortFixture, sql: &str) -> Vec<Vec<Value>> {
 }
 
 /// Whether the collector's data is current, and its state.
-async fn fresh(fx: &TaskEffortFixture) -> Vec<Vec<Value>> {
+async fn fresh(fx: &TaskFixture) -> Vec<Vec<Value>> {
     rows(
         fx,
         "SELECT fresh, state FROM v_contribution_health WHERE uri = 'oxplow:oxplow/collector?collector=acme/sync'",
@@ -106,7 +106,7 @@ const RUNS: &str = "SELECT outcome, error, version, generation, actor, latest, m
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let failing = "#!/bin/sh\necho \"cannot reach host with token $GH_TOKEN\" >&2\nexit 3\n";
     install(&fx, failing).await;
     let failure = run(&fx, &person()).await.expect_err("it fails");
@@ -165,7 +165,7 @@ async fn a_failed_run_and_its_retry_are_two_rows_and_neither_leaks_a_credential(
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     let started = root.join("started");
     install(
@@ -227,7 +227,7 @@ async fn a_cancelled_run_is_recorded_as_cancelled_and_publishes_nothing() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_caller_is_a_denied_run_not_a_failure() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     install(&fx, "#!/bin/sh\necho '{}'\n").await;
     let job = Actor::Job {
         job_id: "acme/sync".into(),
@@ -259,7 +259,7 @@ async fn a_refused_caller_is_a_denied_run_not_a_failure() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn disabling_an_extension_stops_a_collector_script_that_is_computing() {
-    let fx = services_with_task_effort().await;
+    let fx = services_with_task().await;
     let root = fx.svc.layout.project_dir.clone();
     write(
         &root,
