@@ -46,7 +46,6 @@ pub fn declarations(contents: bool) -> InitializeResult {
                     "trigger": { "type": "string" },
                     "thread": { "type": "string" },
                     "turn": { "type": "integer" },
-                    "effort": { "type": "string" },
                     "budget_ms": { "type": "integer" },
                     "parent": handle,
                 },

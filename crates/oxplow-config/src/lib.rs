@@ -546,7 +546,7 @@ pub struct TestingConfig {
     pub command: Option<String>,
     /// The coverage-free counterpart to `command`, for the red/green loop
     /// (tsk171). It still writes a test report (JUnit), so the
-    /// progression lands in the effort's Tests panel, but skips coverage
+    /// progression lands in the Tests panel, but skips coverage
     /// and should accept a filter.
     ///
     /// This exists because the alternative is worse. When the only
@@ -677,8 +677,7 @@ pub struct OxplowConfig {
     #[serde(rename = "snapshotRetentionDays")]
     pub snapshot_retention_days: u32,
     /// Metric-capture retention window in days: captures older than the
-    /// cutoff are pruned (facts cascade) — EXCEPT effort-stamped ones
-    /// (attribution history), each producer's newest capture, and any capture
+    /// cutoff are pruned (facts cascade) — EXCEPT each producer's newest capture, and any capture
     /// still contributing a current value to the fold. **0 (the default)
     /// keeps everything** (tsk93); pruning trades away per-test drill-down /
     /// flakiness horizon for bounded growth, so it is strictly opt-in.
@@ -691,7 +690,7 @@ pub struct OxplowConfig {
     /// This is the knob that bounds a BUSY project: the payload is ~0.5 MB per
     /// coverage run, so age alone never catches up with a repo that runs tests
     /// dozens of times a day (tsk211). Compaction never changes a metric value
-    /// — only the effort Tests/Coverage panel's detail for old runs is lost.
+    /// — only the Tests/Coverage panel's detail for old runs is lost.
     #[serde(rename = "metricDetailMaxPerProducer")]
     pub metric_detail_max_per_producer: u32,
     /// Compact `detail_json` older than this many days. `0` disables it.
@@ -762,7 +761,7 @@ pub struct OxplowConfig {
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
     /// The project's choice of implementation per choosable capability
-    /// (`activeProviders: { task_tracker: issues, effort_policy: none }`); a
+    /// (`activeProviders: { task_tracker: issues, snapshots: hashes }`); a
     /// capability absent here keeps its default.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
@@ -3898,7 +3897,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             oxplow.join("personal.yaml"),
-            "activeProviders: { effort_policy: none }\n",
+            "activeProviders: { snapshots: hashes }\n",
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
@@ -3909,13 +3908,13 @@ mod tests {
                 .map(String::as_str),
             Some("issues")
         );
-        assert_eq!(config.active_providers.get("effort_policy"), None);
+        assert_eq!(config.active_providers.get("snapshots"), None);
         assert_eq!(
             config
                 .personal_active_providers
-                .get("effort_policy")
+                .get("snapshots")
                 .map(String::as_str),
-            Some("none")
+            Some("hashes")
         );
         std::fs::write(oxplow.join("personal.yaml"), "zones: []\n").unwrap();
         let err = load_project_config(dir.path()).unwrap_err().to_string();
@@ -3940,16 +3939,16 @@ mod tests {
         write_personal_key(
             dir.path(),
             "activeProviders",
-            Some(&serde_json::json!({ "effort_policy": "none" })),
+            Some(&serde_json::json!({ "snapshots": "hashes" })),
         )
         .unwrap();
         let config = load_project_config(dir.path()).unwrap();
         assert_eq!(
             config
                 .personal_active_providers
-                .get("effort_policy")
+                .get("snapshots")
                 .map(String::as_str),
-            Some("none")
+            Some("hashes")
         );
         assert!(!config_path(dir.path()).exists(), "project.yaml untouched");
         write_personal_key(dir.path(), "activeProviders", None).unwrap();
@@ -3969,7 +3968,7 @@ mod tests {
         write_personal_key(
             dir.path(),
             "activeProviders",
-            Some(&serde_json::json!({ "effort_policy": "none" })),
+            Some(&serde_json::json!({ "snapshots": "hashes" })),
         )
         .unwrap();
         write_personal_key(

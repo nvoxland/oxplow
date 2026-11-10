@@ -2,7 +2,7 @@ manifest: 2
 name: stale-work
 description: Open tasks nobody has touched for a week
 intent:
-  purpose: "Answer: which open tasks has nobody touched for a week? A task counts as touched when it is edited, commented on, or worked on in an effort."
+  purpose: "Answer: which open tasks has nobody touched for a week? A task counts as touched when it is edited or commented on."
   origin: null
   examples:
     - name: basic
@@ -18,8 +18,8 @@ intent:
       expect: no rows before the collector has synced
 collectors:
   # Open tasks with the last moment anyone touched them: the task's own
-  # update, the latest activity on a comment about it, or the latest effort
-  # on it. The script keeps the ones idle for a week or more.
+  # update or the latest activity on a comment about it. The script keeps the
+  # ones idle for a week or more.
   - id: stale_tasks
     runtime: starlark
     entry: collectors/stale_tasks.star
@@ -31,9 +31,7 @@ collectors:
                th.id AS thread_id, th.stream_id,
                max(w.updated_at,
                    coalesce((SELECT max(c.created_at) FROM v_task_comment c
-                             WHERE c.uri = w.uri), ''),
-                   coalesce((SELECT max(coalesce(e.ended_at, e.started_at)) FROM v_effort e
-                             WHERE e.task = w.uri), '')) AS last_touched_at
+                             WHERE c.uri = w.uri), '')) AS last_touched_at
         FROM v_task w
         LEFT JOIN v_thread th ON th.uri = w.assignee
         WHERE w.state IN ('todo', 'in_progress', 'blocked')
@@ -57,7 +55,7 @@ datasets:
   # v_stale_work_stale_tasks: the collected stale tasks, longest idle first.
   - name: stale_tasks
     version: 1
-    description: "Open tasks (ready, in progress or blocked) that nobody has edited, commented on or worked on for at least a week, as of the collector's last sync. Longest idle first."
+    description: "Open tasks (ready, in progress or blocked) that nobody has edited or commented on for at least a week, as of the collector's last sync. Longest idle first."
     fields:
       - { name: id, type: INTEGER, doc: The task id. }
       - { name: title, type: TEXT, doc: The task's title. }

@@ -12,7 +12,7 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
   project).
 - **What it built** (`produced/stale-work/`): a Starlark collector whose
   `input` query computes each open task's last touch (its edit, comment
-  activity, efforts) and whole days idle in SQL; the script keeps those
+  activity) and whole days idle in SQL; the script keeps those
   idle a week or more. A dataset over the entity with `not_null`/`unique`
   tests, and a page over the dataset with an alert and a Sync action.
 - **What the skill carried:** the sandbox has no clock, so the age is
@@ -35,3 +35,6 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
   `pages/stale-tasks.yaml` (its query a `stale_tasks` loader, the same
   columns, alert and Sync action), and the empty-project example reads
   the page's loader. Re-record it with the current skill.
+- **Patched after recording (2026-11-10):** efforts are gone, so the
+  collector's `input` no longer counts an effort as a touch (edit and
+  comment activity only). Re-record it with the current skill.

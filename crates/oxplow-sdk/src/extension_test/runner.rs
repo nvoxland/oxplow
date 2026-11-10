@@ -208,14 +208,11 @@ pub(super) async fn dispatch(
         component_example(host, ext, ex, id, report).await;
     } else if ex.when.get("event").is_some()
         && ex.when.get("effect").is_none()
-        && ex.when.get("implementation").is_none()
         && ex.when.get("collector").is_none()
     {
         event_example(host, ext, ex, report).await;
     } else if let Some(id) = ex.when.get("effect").and_then(Value::as_str) {
         effect_example(host, ext, ex, id, report).await;
-    } else if let Some(id) = ex.when.get("implementation").and_then(Value::as_str) {
-        policy_example(host, ext, ex, id, report).await;
     } else if let Some(t) = ex.when.get("event_type").and_then(Value::as_str) {
         event_type_example(ext, ex, t, report);
     } else if let Some(id) = ex.when.get("advisory").and_then(Value::as_str) {
@@ -309,11 +306,6 @@ pub(super) const KINDS: &[Kind] = &[
         expect: "{ commands } | { skip } | { reacts: false }",
     },
     Kind {
-        key: "implementation",
-        when: "{ implementation: <id>, event, answers? } (a dry run)",
-        expect: "{ commands } | { skip }",
-    },
-    Kind {
         key: "event_type",
         when: "{ event_type, v?, payload }",
         expect: "{ valid, upcast? }",
@@ -373,7 +365,7 @@ pub(super) fn kinds_table() -> String {
 
 /// Whether example `ex` changes its oxplow's data (and what reacts to
 /// that): it has steps or rows, or runs a job, logs an event or files a
-/// component's items. A dry run (a command's, an effect's, a policy's) or a
+/// component's items. A dry run (a command's, an effect's) or a
 /// collector run that stores nothing doesn't.
 pub(super) fn makes_data(ex: &Example<'_>) -> bool {
     let input = &ex.when;
@@ -385,7 +377,7 @@ pub(super) fn makes_data(ex: &Example<'_>) -> bool {
         || has("job")
         || has("component")
         || has("advisory")
-        || (has("event") && !has("effect") && !has("implementation") && !has("collector"))
+        || (has("event") && !has("effect") && !has("collector"))
 }
 
 /// Why an example's target isn't here: the page, form, job, component,

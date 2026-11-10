@@ -61,7 +61,7 @@ pub struct Reaches {
     pub sql: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
-    /// An agent tool by its offered name (`oxplow_effort_files`).
+    /// An agent tool by its offered name (`oxplow_turn_files`).
     #[serde(default)]
     pub tool: Option<String>,
     #[serde(default)]
@@ -292,7 +292,7 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
             if let Some(why) = oxplow_app::extension::extension_resources::resource_problem(about) {
                 out.errors.push(
                     at.error("answer.about_unknown", format!("`about: {about}`: {why}"))
-                        .fix("`oxplow/file`, `oxplow/commit`, `oxplow/effort`, `oxplow/task`, …"),
+                        .fix("`oxplow/file`, `oxplow/commit`, `oxplow/request`, `oxplow/task`, …"),
                 );
             }
         }
@@ -766,7 +766,7 @@ mod tests {
             .flat_map(|e| e.page_files.iter().flat_map(|p| p.answers.iter()))
             .collect();
         assert!(answers.len() >= 40, "{}", answers.len());
-        for kind in ["oxplow/file", "oxplow/commit", "oxplow/effort"] {
+        for kind in ["oxplow/file", "oxplow/commit", "oxplow/task"] {
             assert!(
                 answers.iter().any(|a| a.about.as_deref() == Some(kind)),
                 "no answer about `{kind}`"
@@ -812,14 +812,14 @@ mod tests {
 
         let unnamed = extension(
             "params: { state: open }, skill: acme-skill",
-            "SELECT uri FROM v_effort",
+            "SELECT uri FROM v_agent_turn",
         );
         let checked = check_pages(&[unnamed], &skill, Some(&svc)).await;
         assert!(
             checked
                 .error_lines()
                 .iter()
-                .any(|e| e.contains("never names `v_effort`")),
+                .any(|e| e.contains("never names `v_agent_turn`")),
             "{:?}",
             checked.errors
         );
@@ -898,14 +898,14 @@ mod tests {
     /// the input fits its schema.
     #[tokio::test]
     async fn a_question_can_reach_a_tool() {
-        let skill = |_: &str| Some("Use oxplow_effort_files for an effort's files.".to_string());
+        let skill = |_: &str| Some("Use oxplow_turn_files for a turn's files.".to_string());
         let command = |_: &str| None;
         let schema = serde_json::json!({
             "type": "object",
-            "properties": { "effort": { "type": "string" } },
+            "properties": { "turn": { "type": "string" } },
             "additionalProperties": false
         });
-        let tool = |name: &str| (name == "oxplow_effort_files").then(|| schema.clone());
+        let tool = |name: &str| (name == "oxplow_turn_files").then(|| schema.clone());
         let checker = Checker {
             skill_text: &skill,
             sql: None,
@@ -914,15 +914,15 @@ mod tests {
         };
         let ask = |tool: &str, input: &str| {
             parse(&format!(
-                "- question: Which files did this effort touch?\n  skill: s\n  reaches: {{ tool: {tool}, input: {input} }}\n"
+                "- question: Which files did this turn touch?\n  skill: s\n  reaches: {{ tool: {tool}, input: {input} }}\n"
             ))
             .unwrap()
         };
         let ok = check(
             "q.yaml",
             &ask(
-                "oxplow_effort_files",
-                "{ effort: 'oxplow:oxplow/effort?id=eff1' }",
+                "oxplow_turn_files",
+                "{ turn: 'oxplow:oxplow/turn?id=trn1' }",
             ),
             &checker,
         )
@@ -945,12 +945,7 @@ mod tests {
             "{:?}",
             unknown.errors
         );
-        let bad = check(
-            "q.yaml",
-            &ask("oxplow_effort_files", "{ nope: 1 }"),
-            &checker,
-        )
-        .await;
+        let bad = check("q.yaml", &ask("oxplow_turn_files", "{ nope: 1 }"), &checker).await;
         assert!(
             bad.error_lines().iter().any(|e| e.contains("doesn't fit")),
             "{:?}",

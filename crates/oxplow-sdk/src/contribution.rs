@@ -320,7 +320,7 @@ pub(crate) fn build(
              \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
              \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
              \x20 # Alerts instead). Each row's `message` is what it hears; `once_per` says how\n\
-             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :request_id, :effort_id. A shared\n\
+             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :request_id. A shared\n\
              \x20 # extension's advisories run once a person approves them.\n\
              \x20 - id: {id}\n\
              \x20   on: turn-end\n\

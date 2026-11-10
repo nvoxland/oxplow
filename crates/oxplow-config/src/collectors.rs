@@ -125,7 +125,7 @@ pub enum Trigger {
 ///   agent event) for that long.
 ///
 /// An event type in `force` runs at once, past them all: a moment that
-/// needs the result fresh (an effort finishing, a commit).
+/// needs the result fresh (a commit).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Pacing {
@@ -412,7 +412,7 @@ pub struct CollectorSpec {
     pub after: Vec<String>,
     /// A script's input query: read-only SQL over the semantic layer,
     /// handed over as `input.rows`. `:stream_id`, `:snapshot_id`,
-    /// `:effort_id`, `:thread_id` and `:turn_id` bind the triggering
+    /// `:thread_id` and `:turn_id` bind the triggering
     /// event's anchors, `:event_id` its id and `:event_seq` its seq (NULL
     /// otherwise).
     pub input: Option<CollectorInput>,
@@ -1563,7 +1563,7 @@ mod tests {
     use super::*;
 
     fn knows(t: &str) -> bool {
-        matches!(t, "snapshot.taken" | "effort.finished" | "vcs.head.moved")
+        matches!(t, "snapshot.taken" | "vcs.head.moved")
     }
 
     fn parse(yaml: &str) -> (Vec<CollectorSpec>, Vec<String>) {
@@ -1654,22 +1654,22 @@ mod tests {
         // Pacing — settle, at most, idle, and the events that run
         // at once past them.
         assert_eq!(
-            with("on: [snapshot.taken, effort.finished]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [effort.finished]")
+            with("on: [snapshot.taken, vcs.head.moved]\n  settle: 30s\n  at_most: 5m\n  idle: 2m\n  force: [vcs.head.moved]")
                 .0[0]
                 .trigger,
             Trigger::On {
-                events: vec!["snapshot.taken".into(), "effort.finished".into()],
+                events: vec!["snapshot.taken".into(), "vcs.head.moved".into()],
                 filter: Default::default(),
                 pacing: Pacing {
                     settle_secs: Some(30),
                     at_most_secs: Some(300),
                     idle_secs: Some(120),
-                    force: vec!["effort.finished".into()],
+                    force: vec!["vcs.head.moved".into()],
                 },
             }
         );
         assert_eq!(
-            with("on: effort.finished\n  after: [change.analyze]").0[0].after,
+            with("on: vcs.head.moved\n  after: [change.analyze]").0[0].after,
             vec!["change.analyze"]
         );
         for (t, needle) in [
@@ -1688,8 +1688,8 @@ mod tests {
                 "`force` needs",
             ),
             (
-                "on: [snapshot.taken]\n  settle: 30s\n  force: [effort.finished]",
-                "`force` names `effort.finished`, which isn't in `on`",
+                "on: [snapshot.taken]\n  settle: 30s\n  force: [vcs.head.moved]",
+                "`force` names `vcs.head.moved`, which isn't in `on`",
             ),
             ("on: [nope.happened]", "isn't a registered event type"),
             (

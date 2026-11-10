@@ -212,12 +212,12 @@ pub struct InvokeContext {
     /// The run's id in oxplow's records.
     pub run: String,
     /// Who it runs as: `human`, `agent:thr3`, `system`,
-    /// `effect:<extension>/<id>`, `effect:effort_policy:<id>`.
+    /// `effect:<extension>/<id>`.
     pub actor: String,
     /// The id of the event that caused it, when one did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
-    /// Where it sits — `stream_id`, `thread_id`, `effort_id`, `turn_id`,
+    /// Where it sits — `stream_id`, `thread_id`, `request_id`, `turn_id`,
     /// `agent_session_id`, `snapshot_id` — as the event envelope has them,
     /// `null` where the run has none.
     pub anchors: Value,

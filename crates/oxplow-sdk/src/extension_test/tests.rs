@@ -601,30 +601,8 @@ expect:
     assert!(report.ok, "{:?}", report.errors);
 }
 
-/// `observe: { change }` of an effort's change takes the effort's id.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_given_observes_an_efforts_change() {
-    let dir = tempfile::tempdir().unwrap();
-    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
-    write(
-            dir.path(),
-            ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe: { change: { kind: effort, target: eff1, files: [{ path: src/a.rs, additions: 10, deletions: 4 }] } }
-when:
-  sql: SELECT c.kind, c.target, f.deletions FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-expect:
-  rows:
-    - { kind: effort, target: '1', deletions: 4 }
-",
-        );
-    let report = test_extension(dir.path(), "notes", false).await.unwrap();
-    assert!(report.ok, "{:?}", report.errors);
-}
-
 /// `observe: { test_run }` records a run's cases as a run recorder does:
-/// a capture of the effort with a fact per case.
+/// a capture of the turn with a fact per case.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_given_observes_a_test_run() {
     let dir = tempfile::tempdir().unwrap();
@@ -633,9 +611,9 @@ async fn a_given_observes_a_test_run() {
             dir.path(),
             ".oxplow/extensions/notes/fixtures/basic.yaml",
             "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:00:00Z\", cases: [{ name: a, status: passed }, { name: b, status: failed }] } }
-  - observe: { test_run: { effort: eff1, at: \"2026-01-01T00:01:00Z\", asserted_failed: 2 } }
+  - observe: { turn: { prompt: run the tests } }
+  - observe: { test_run: { turn: 1, at: \"2026-01-01T00:00:00Z\", cases: [{ name: a, status: passed }, { name: b, status: failed }] } }
+  - observe: { test_run: { turn: 1, at: \"2026-01-01T00:01:00Z\", asserted_failed: 2 } }
 when:
   sql: SELECT dims_json, count(*) AS n FROM v_fact WHERE measure_key = 'oxplow.test_case' GROUP BY dims_json ORDER BY n
 expect:
@@ -1005,149 +983,6 @@ expect:
     assert!(report.ok, "{:?}", report.errors);
 }
 
-/// `observe: { evidence }` sets the observations an effort's page
-/// reads.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_given_observes_an_efforts_evidence() {
-    let dir = tempfile::tempdir().unwrap();
-    crate::scaffold(dir.path(), crate::Kind::Command, "notes", None).unwrap();
-    write(
-            dir.path(),
-            ".oxplow/extensions/notes/fixtures/basic.yaml",
-            "requires: [oxplow-bundled]\ngiven:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe:
-      evidence:
-        effort: eff1
-        observations:
-          - { kind: test-run, payload: { passed: 4, failed: 1 } }
-          - { kind: diff-coverage, metric_value: 79.5, payload: { summaryPct: 79.5 } }
-when:
-  sql: SELECT kind, metric_value, provenance FROM v_effort_observation WHERE effort_id = 1 ORDER BY seq
-expect:
-  rows:
-    - { kind: test-run, metric_value: null, provenance: observed }
-    - { kind: diff-coverage, metric_value: 79.5 }
-",
-        );
-    let report = test_extension(dir.path(), "notes", false).await.unwrap();
-    assert!(report.ok, "{:?}", report.errors);
-}
-
-/// A policy that opens an item's effort when it starts on a thread,
-/// and closes its open efforts (read through `scope`) when it ends.
-const TIDY: &str = r#"
-def transform(x):
-    e = x["event"]
-    if e["type"] != "task.state_changed":
-        return {"skip": "not an item's move"}
-    item = e["payload"]["task"]
-    to = e["payload"]["to"]
-    thread = e["anchors"].get("thread_id")
-    if to == "in_progress" and thread != None:
-        return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": thread, "task": item}}]}
-    if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE task = :w AND ended_at IS NULL",
-                                  "params": {"w": item}})
-        return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}}
-                             for r in rows]}
-    return {"skip": "a move that changes no effort"}
-"#;
-
-/// The acme extension: `script` as the effort policy `tidy`, with an
-/// example per reaction — a checkpoint (`basic`, expecting
-/// `basic_expect`), a start on a thread, a finish whose read is
-/// answered.
-fn policy(root: &Path, script: &str, basic_expect: &str) {
-    write(
-            root,
-            ".oxplow/extensions/acme/extension.yaml",
-            "manifest: 2
-name: acme
-intent:
-  purpose: Open and close efforts as items start and finish.
-  examples:
-    - { name: basic, expect: nothing to do }
-    - { name: start, expect: its effort opens }
-    - { name: finish, expect: its effort closes }
-permissions: [sql.read, commands:oxplow.effort.*]
-implementations:
-  - { capability: effort_policy, id: tidy, title: Tidy, entry: policies/tidy.star, needs: [sql.read] }
-",
-        );
-    write(root, ".oxplow/extensions/acme/policies/tidy.star", script);
-    write(
-            root,
-            ".oxplow/extensions/acme/fixtures/basic.yaml",
-            &format!(
-                "when: {{ implementation: tidy, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }} }} }}\nexpect: {basic_expect}\n"
-            ),
-        );
-    write(
-            root,
-            ".oxplow/extensions/acme/fixtures/start.yaml",
-            "requires: [oxplow-bundled]\nwhen: { implementation: tidy, event: { type: task.state_changed, payload: { task: \"task:oxplow:tsk1\", to: in_progress }, anchors: { thread_id: thr1 } } }\nexpect: { commands: [oxplow.effort.open] }\n",
-        );
-    write(
-            root,
-            ".oxplow/extensions/acme/fixtures/finish.yaml",
-            "requires: [oxplow-bundled]\nwhen: { implementation: tidy, event: { type: task.state_changed, payload: { task: \"task:oxplow:tsk1\", to: done } }, answers: { sql.read: [[{ uri: \"oxplow:oxplow/effort?id=eff3\" }]] } }\nexpect: { commands: [oxplow.effort.close] }\n",
-        );
-}
-
-/// A scripted effort policy's examples dry-run its script (a read
-/// answered by the fixture), and the effort-policy suite runs over it
-/// in a throwaway host.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_policy_script_runs_its_examples_and_the_suite() {
-    let dir = tempfile::tempdir().unwrap();
-    policy(dir.path(), TIDY, "{ skip: $any }");
-    let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    assert!(report.ok, "{:?}", report.errors);
-    for ran in [
-        "example basic",
-        "example start",
-        "example finish",
-        "effort_policy suite",
-    ] {
-        assert!(
-            report.ran.iter().any(|r| r == ran),
-            "{ran}: {:?}",
-            report.ran
-        );
-    }
-}
-
-/// A policy example that doesn't match what the script answers is a
-/// finding at its fixture; one naming no policy of the extension names
-/// what it named.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_policy_example_that_doesnt_match_names_its_fixture() {
-    let dir = tempfile::tempdir().unwrap();
-    policy(dir.path(), TIDY, "{ commands: [oxplow.effort.open] }");
-    let finish = dir
-        .path()
-        .join(".oxplow/extensions/acme/fixtures/finish.yaml");
-    let text = std::fs::read_to_string(&finish).unwrap();
-    std::fs::write(
-        &finish,
-        text.replace("implementation: tidy", "implementation: nope"),
-    )
-    .unwrap();
-    let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    let errors = report.error_lines().join("\n");
-    assert!(
-        errors.contains("acme/fixtures/basic.yaml:2: effort policy `tidy` skipped"),
-        "{errors}"
-    );
-    assert!(
-        errors.contains("acme/fixtures/finish.yaml: example `finish` names effort policy `nope`"),
-        "{errors}"
-    );
-}
-
 /// An example's event is the event envelope the runtime would hand
 /// over: what the fixture doesn't give is `null` (no made-up id or
 /// seq), `source` is `fixture`; and a fixture that couldn't happen —
@@ -1158,22 +993,25 @@ async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why()
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let shape = "def transform(x):\n    e = x[\"event\"]\n    return {\"skip\": \"%s %s %s %s %s\" % (e[\"v\"], e[\"source\"], e[\"id\"], e[\"seq\"], e[\"anchors\"][\"turn_id\"])}\n";
-    policy(root, shape, "{ skip: \"2 fixture None None None\" }");
-    // `start` and `finish` aren't this script's; only `basic` stays.
-    for gone in ["start", "finish"] {
-        std::fs::remove_file(root.join(format!(".oxplow/extensions/acme/fixtures/{gone}.yaml")))
-            .unwrap();
-    }
-    let manifest = root.join(".oxplow/extensions/acme/extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-            &manifest,
-            text.replace(
-                "    - { name: start, expect: its effort opens }\n    - { name: finish, expect: its effort closes }\n",
-                "",
-            ),
-        )
-        .unwrap();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Show the envelope an effect hears.
+  examples:
+    - { name: basic, expect: the envelope's fields }
+effects:
+  - { id: tidy, summary: Show the envelope., on: [thread.checkpoint], entry: tidy.star }
+",
+    );
+    write(root, ".oxplow/extensions/acme/tidy.star", shape);
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/basic.yaml",
+        "when: { effect: tidy, event: { type: thread.checkpoint, payload: { thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 } } }\nexpect: { skip: \"2 fixture None None None\" }\n",
+    );
     let report = test_extension(root, "acme", false).await.unwrap();
     let errors = report.error_lines().join("\n");
     assert!(!errors.contains("fixtures/basic.yaml"), "{errors}");
@@ -1199,9 +1037,7 @@ async fn an_example_event_is_the_envelope_and_one_that_couldnt_happen_says_why()
         write(
             root,
             ".oxplow/extensions/acme/fixtures/basic.yaml",
-            &format!(
-                "when: {{ implementation: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"
-            ),
+            &format!("when: {{ effect: tidy, event: {event} }}\nexpect: {{ skip: $any }}\n"),
         );
         let report = test_extension(root, "acme", false).await.unwrap();
         let errors = report.error_lines().join("\n");
@@ -1268,23 +1104,6 @@ effects:
         report.ran.iter().any(|r| r == "example old"),
         "{:?}",
         report.ran
-    );
-}
-
-/// A policy that opens efforts and never closes one fails the suite,
-/// at the manifest.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_policy_script_that_never_closes_fails_the_suite() {
-    let dir = tempfile::tempdir().unwrap();
-    let opens_only = TIDY.replace(r#"if to == "done" or to == "canceled":"#, "if False:");
-    policy(dir.path(), &opens_only, "{ skip: $any }");
-    let report = test_extension(dir.path(), "acme", false).await.unwrap();
-    let errors = report.error_lines().join("\n");
-    assert!(
-        errors.contains(
-            "acme/extension.yaml: effort_policy conformance `a_finished_item_closes_its_effort`"
-        ),
-        "{errors}"
     );
 }
 

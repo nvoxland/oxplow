@@ -14,11 +14,11 @@ use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|policy|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
-      (--origin = the effort/thread ref that asked for it), one example
+      (--origin = the request/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
-      provider of --capability (task_tracker, the default, effort_policy,
+      provider of --capability (task_tracker, the default,
       agent_harness, snapshots, knowledge or filesystem)
       with its contract's declarations, a stub program and test config; a Starlark
       collector with a dataset and a page over it; a code metric (--language,
@@ -27,7 +27,7 @@ usage:
       limit, its area dimension, the metric and a page linking to the file
       and line; a command composing core
       commands; an effect reacting to an event; a custom component with
-      its page and bundle; an effort policy script; an advisory; a skill;
+      its page and bundle; an advisory; a skill;
       a panel over a page; a job (a cancellable model call, with its
       commands, page and an effect that publishes the reply); a query (rows
       other pages read, as a choice's options). Each checks clean
@@ -553,7 +553,7 @@ mod tests {
             "page",
             "demo",
             "--origin",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "--root",
             root,
         ]);
@@ -585,7 +585,7 @@ mod tests {
             "page",
             "demo",
             "--origin",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "--root",
             root,
         ]);
@@ -698,7 +698,7 @@ mod tests {
         let (code, out, err) = cli(&["new", "--list-examples"]);
         assert_eq!(code, 0, "{err}");
         assert!(
-            out.contains("triage") && out.contains("effort-review"),
+            out.contains("triage") && out.contains("schema-review"),
             "{out}"
         );
         let (code, _, err) = cli(&["new", "--from", "nope", "--root", root]);
@@ -743,7 +743,7 @@ mod tests {
             "provider",
             "steward",
             "--capability",
-            "effort_policy",
+            "agent_harness",
             "--root",
             root,
         ]);
@@ -752,7 +752,7 @@ mod tests {
             std::fs::read_to_string(dir.path().join(".oxplow/extensions/steward/extension.yaml"))
                 .unwrap();
         assert!(
-            manifest.contains("capability: effort_policy\n"),
+            manifest.contains("capability: agent_harness\n"),
             "{manifest}"
         );
         let (code, _, err) = cli(&[
@@ -771,7 +771,7 @@ mod tests {
             "page",
             "demo",
             "--capability",
-            "effort_policy",
+            "agent_harness",
             "--root",
             root,
         ]);
@@ -879,73 +879,6 @@ mod tests {
             }
         }
         cli(args)
-    }
-
-    /// `extension test` on a provider that is an effort policy: the kit
-    /// runs the effort-policy suite against it, made the project's policy
-    /// in a throwaway host — the fake in policy mode passes once blessed.
-    #[cfg(unix)]
-    #[test]
-    fn extension_test_runs_the_effort_policy_suite_against_a_policy_provider() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_str().unwrap();
-        let ext = dir.path().join(".oxplow/extensions/steward");
-        std::fs::create_dir_all(ext.join("bin")).unwrap();
-        std::fs::create_dir_all(ext.join("fixtures")).unwrap();
-        std::fs::write(
-            ext.join("extension.yaml"),
-            "manifest: 2\nname: steward\ndescription: An effort policy.\n\
-             intent:\n  purpose: Open and close efforts as items start and finish.\n  examples:\n\
-             \x20   - name: basic\n      input: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\n\
-             \x20     expect: nothing to do\n\
-             permissions: [sql.read, process.run, commands:oxplow.effort.*]\n\
-             providers:\n  - id: steward\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("fixtures/basic.yaml"),
-            "when: { command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }\nexpect: { skip: $any }\n",
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("fixtures/provider-steward.yaml"),
-            "config: { team: core }\n",
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("provider.json"),
-            serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
-        )
-        .unwrap();
-        std::fs::write(
-            ext.join("bin/provider"),
-            format!(
-                "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=effort_policy OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
-                dir.path().join(".oxplow").display(),
-                fake_bin().display()
-            ),
-        )
-        .unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(
-                ext.join("bin/provider"),
-                std::fs::Permissions::from_mode(0o755),
-            )
-            .unwrap();
-        }
-        let (code, out, err) = cli(&["check", "steward", "--root", root]);
-        assert_eq!(code, 0, "{out}{err}");
-        let (code, out, err) =
-            test_on_a_fresh_service(dir.path(), &["test", "steward", "--bless", "--root", root]);
-        assert_eq!(code, 0, "{out}{err}");
-        assert!(
-            out.contains("ran check, provider steward, effort_policy suite"),
-            "{out}"
-        );
-        let (code, out, _) =
-            test_on_a_fresh_service(dir.path(), &["test", "steward", "--root", root]);
-        assert_eq!(code, 0, "a blessed transcript matches: {out}");
     }
 
     /// P5.D5's red: `extension test` on a scaffolded provider — the stub

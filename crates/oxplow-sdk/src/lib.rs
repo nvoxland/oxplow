@@ -74,10 +74,6 @@ pub enum Kind {
     /// sandboxed frame, fed the page's loaders through the served client
     /// library.
     Component,
-    /// An effort policy written as a script: an `implementations:` entry
-    /// whose script opens an item's effort when it starts on a thread and
-    /// closes it when it ends, run under the extension's permissions.
-    Policy,
     /// Guidance for the coding agent: a query run at a moment, whose rows
     /// reach the agent.
     Advisory,
@@ -94,7 +90,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `policy`, `advisory`, `skill`, `panel`, `job` or `query`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `advisory`, `skill`, `panel`, `job` or `query`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -107,7 +103,6 @@ impl Kind {
             "command" => Some(Kind::Command),
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
-            "policy" => Some(Kind::Policy),
             "advisory" => Some(Kind::Advisory),
             "skill" => Some(Kind::Skill),
             "page" => Some(Kind::Page),
@@ -151,7 +146,7 @@ pub struct Scaffolded {
 }
 
 /// Create `.oxplow/extensions/<name>/` with a v2 manifest carrying an
-/// `intent` (its `origin` = the thread/effort ref that asked for it), one
+/// `intent` (its `origin` = the thread/request ref that asked for it), one
 /// example and a matching fixture, and — for a page — one starter page the
 /// example names. Refuses an existing folder, a bad name, or a non-ref
 /// origin; `check` passes on what it writes.
@@ -246,7 +241,7 @@ pub fn scaffold_with(
     if let Some(o) = origin {
         oxplow_domain::uri::OxplowUri::parse(o).map_err(|e| {
             SdkError::Invalid(format!(
-                "--origin `{o}` is not a canonical ref (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`): {}",
+                "--origin `{o}` is not a canonical ref (`oxplow:oxplow/request?id=req42`, `oxplow:oxplow/thread?id=thr3`): {}",
                 e.reason()
             ))
         })?;
@@ -312,13 +307,6 @@ pub fn scaffold_with(
         Kind::Extension | Kind::Advisory | Kind::Skill => {
             ("{}".to_string(), "TODO: what a run should show", None)
         }
-        Kind::Policy => (
-            format!(
-                "{{ implementation: {provider_id}, event: {{ type: thread.checkpoint, payload: {{ thread: thr1, turn: trn1, reason: turn_end, snapshot: 1, changed: false, writing_tools: 0 }}, anchors: {{ thread_id: thr1, turn_id: 1 }} }} }}"
-            ),
-            "nothing to do: a checkpoint opens or closes no effort",
-            Some("{ skip: $any }".to_string()),
-        ),
         Kind::Provider { capability } => {
             let starter = provider_starter(capability);
             (starter.input, starter.expect, Some(starter.fixture))
@@ -390,10 +378,6 @@ pub fn scaffold_with(
             {
                 manifest.push_str(", sql.read");
             }
-            if capability == "effort_policy" {
-                // The efforts it opens, closes and links are core commands.
-                manifest.push_str(", commands:oxplow.effort.*");
-            }
             manifest.push_str("]\n");
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
@@ -438,22 +422,6 @@ pub fn scaffold_with(
                 manifest.push_str(&format!("{block}:\n{entry}"));
             }
         }
-        Kind::Policy => manifest.push_str(&format!(
-            "# Its script reads oxplow with its own SQL (`needs: [sql.read]`) and\n\
-             # runs the core commands that open and close efforts.\n\
-             permissions: [sql.read, commands:oxplow.effort.*]\n\
-             implementations:\n\
-             \x20 # The project's effort policy, once chosen in Settings → Capabilities: its\n\
-             \x20 # script hears core's events and composes the commands that open, close\n\
-             \x20 # and link efforts. It runs under this extension's permissions, and\n\
-             \x20 # reads oxplow only through the scopes it `needs`.\n\
-             \x20 - capability: effort_policy\n\
-             \x20   id: {provider_id}\n\
-             \x20   title: {title}\n\
-             \x20   entry: policies/{name}.star\n\
-             \x20   needs: [sql.read]\n",
-            title = title_case(name)
-        )),
         Kind::Panel => manifest.push_str(&format!(
             "panels:\n\
              \x20 # A {panel} in the left nav: its `body` page, compact. `scope` says what it\n\
@@ -767,33 +735,6 @@ pub fn scaffold_with(
                 title = title_case(name)
             ),
         )?,
-        Kind::Policy => write(
-            &format!("{rel_dir}/policies/{name}.star"),
-            r#"# Gets {"event": {id, type, v, seq, at, source, subject, anchors, payload, cause}}
-# — the event envelope of one of core's events a policy hears — and returns
-# the commands to run, as the policy, or {"skip": "why"}. No I/O but its
-# `needs` (`scope("sql.read", …)`).
-def transform(x):
-    e = x["event"]
-    if e["type"] != "task.state_changed":
-        return {"skip": "not an item's move"}
-    item = e["payload"]["task"]
-    to = e["payload"]["to"]
-    # The thread an agent moved it on, when one did.
-    thread = e["anchors"].get("thread_id")
-    if to == "in_progress" and thread != None:
-        return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": thread, "task": item}}]}
-    if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT id FROM v_effort WHERE task = :w AND ended_at IS NULL",
-                                  "params": {"w": item}})
-        return {"commands": [{"name": "oxplow.effort.close",
-                              "input": {"effort": "eff" + str(r["id"]), "reason": "switch"}}
-                             for r in rows]}
-    return {"skip": "a move that changes no effort"}
-"#
-            .to_string(),
-        )?,
         Kind::Extension | Kind::Metric => {}
         // Their files are the starter's, written above.
         Kind::Page | Kind::Command | Kind::Effect | Kind::Component | Kind::Advisory | Kind::Skill => {}
@@ -824,19 +765,6 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             expect: "the new item's URI",
             fixture: "{ uri: $any }".to_string(),
             needs: None,
-            data: serde_json::Value::Null,
-        },
-        "effort_policy" => ProviderStarter {
-            input: "{ command: react, input: { event: { id: e1, type: thread.checkpoint, v: 1, seq: 1, source: system, subject: [], payload: {}, anchors: {} } } }"
-                .to_string(),
-            expect: "nothing to do: a checkpoint opens or closes no effort here",
-            fixture: "{ skip: $any }".to_string(),
-            // It hears events only: what it closes, it reads of oxplow.
-            needs: Some(
-                "    # A policy hears events only; it reads oxplow (`host/call`) for the rest,\n\
-                 \x20   # such as the open efforts of an item that finished.\n\
-                 \x20   needs: [sql.read]\n",
-            ),
             data: serde_json::Value::Null,
         },
         "agent_harness" => ProviderStarter {
@@ -955,7 +883,7 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                     "additionalProperties": false,
                     "properties": { "stream": str_prop, "worktree": str_prop, "trigger": str_prop,
                                     "thread": str_prop, "turn": { "type": "integer" },
-                                    "effort": str_prop, "budget_ms": { "type": "integer" },
+                                    "budget_ms": { "type": "integer" },
                                     "parent": { "type": ["string", "null"] } } }),
         ),
         ("snapshots", "changed") => (
@@ -1022,11 +950,6 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
             json!({ "type": "object", "required": ["page", "target"],
                     "additionalProperties": false,
                     "properties": { "page": str_prop, "target": str_prop } }),
-        ),
-        ("effort_policy", "react") => (
-            "Compose the commands an event calls for: { commands } to run, or { skip }.".into(),
-            json!({ "type": "object", "required": ["event"],
-                    "properties": { "event": { "type": "object" } } }),
         ),
         _ => (
             format!("TODO: what `{verb}` does."),
@@ -1273,7 +1196,7 @@ pub async fn check(
 
 /// What going from git revision `against` (`HEAD`, a branch, a sha) to the
 /// working tree changes for extension `name` — the review an
-/// install or an effort shows, on the CLI: pages, datasets and their rows,
+/// install or a request shows, on the CLI: pages, datasets and their rows,
 /// collectors and their outputs, providers, config. It reads through
 /// `layer` and writes nothing: each side's datasets are temp views.
 async fn impact_against(
@@ -1578,7 +1501,6 @@ mod tests {
         for kind in [
             Kind::Extension,
             Kind::provider("task_tracker").unwrap(),
-            Kind::provider("effort_policy").unwrap(),
             Kind::provider("agent_harness").unwrap(),
             Kind::provider("snapshots").unwrap(),
             Kind::provider("knowledge").unwrap(),
@@ -1588,7 +1510,6 @@ mod tests {
             Kind::Command,
             Kind::Effect,
             Kind::Component,
-            Kind::Policy,
             Kind::Advisory,
             Kind::Skill,
             Kind::Page,
@@ -1662,7 +1583,7 @@ mod tests {
             assert!(
                 err.contains(&format!("`{no_contract}`"))
                     && err.contains("task_tracker")
-                    && err.contains("effort_policy"),
+                    && err.contains("agent_harness"),
                 "{err}"
             );
         }
@@ -1692,50 +1613,8 @@ mod tests {
             vocabulary.schema("task.recorded", 3)
         );
         assert_eq!(d["collectors"][0]["entity"], "task");
-
-        let dir = tempfile::tempdir().unwrap();
-        let made = scaffold(
-            dir.path(),
-            Kind::provider("effort_policy").unwrap(),
-            "steward",
-            None,
-        )
-        .unwrap();
-        let manifest =
-            std::fs::read_to_string(dir.path().join(format!("{}/extension.yaml", made.dir)))
-                .unwrap();
-        assert!(
-            manifest.contains("capability: effort_policy\n"),
-            "{manifest}"
-        );
-        let d = declarations(dir.path(), "steward");
-        assert_eq!(d["capabilities"][0]["capability"], "effort_policy");
-        assert_eq!(d["commands"].as_array().unwrap().len(), 1);
-        assert_eq!(d["commands"][0]["name"], "react");
-        assert_eq!(d["commands"][0]["confirm"], "never");
-        assert_eq!(d["commands"][0]["access"], "record");
-        assert_eq!(d["event_types"], serde_json::json!([]));
-        assert_eq!(d["collectors"], serde_json::json!([]));
-        let fixture =
-            std::fs::read_to_string(dir.path().join(format!("{}/fixtures/basic.yaml", made.dir)))
-                .unwrap();
-        assert!(
-            fixture.contains("command: react") && fixture.contains("expect: { skip: $any }"),
-            "{fixture}"
-        );
-        let report = check(
-            dir.path(),
-            "steward",
-            &ExtensionCatalog::new(),
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        assert!(report.ok, "{}", render_findings(&report, Format::Text));
-        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
+
     /// The feature-gated harness verbs have real descriptions to declare
     /// them with, not a TODO.
     #[test]
@@ -1823,7 +1702,7 @@ mod tests {
             dir.path(),
             Kind::Page,
             "demo",
-            Some("oxplow:oxplow/effort?id=eff42"),
+            Some("oxplow:oxplow/request?id=req42"),
         )
         .unwrap();
         assert_eq!(made.dir, ".oxplow/extensions/demo");
@@ -1850,7 +1729,7 @@ mod tests {
         assert_eq!(report.extension.manifest_version, 2);
         assert_eq!(
             report.extension.intent.as_ref().unwrap().origin.as_deref(),
-            Some("oxplow:oxplow/effort?id=eff42")
+            Some("oxplow:oxplow/request?id=req42")
         );
         assert_eq!(report.extension.page_files.len(), 1);
         assert_eq!(report.extension.page_files[0].title, "Demo");

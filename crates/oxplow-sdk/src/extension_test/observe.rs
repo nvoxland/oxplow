@@ -5,15 +5,11 @@ use super::*;
 ///
 /// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
 ///   and delivered, the extension's effects reacting.
-/// - `evidence: { effort, observations?: [..], metric_deltas?: [..] }`: an
-///   effort's evidence (a metric delta is `{ key, current, baseline?, warn_at?,
-///   fail_at?, crossing?, kind?, direction?, .. }`).
 /// - `commit: { sha, at, subject, files?, .. }`: a commit the indexer read.
 /// - `change: { kind?, target, files?, functions? }`: a change's analysis,
-///   as the change analysis stores it (`kind` is `commit` by default; an
-///   effort's `target` is its id, like `eff1`).
-/// - `test_run: { effort, at?, cases?: [{ name, status }], asserted_failed? }`:
-///   a test run an effort recorded, as a run recorder writes it.
+///   as the change analysis stores it (`kind` is `commit` by default).
+/// - `test_run: { turn, at?, cases?: [{ name, status }], asserted_failed? }`:
+///   a test run a turn made, as a run recorder writes it.
 /// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }` (a `turn_end` take is the latest turn's):
 ///   one take in the stream's snapshot log.
 /// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
@@ -24,11 +20,11 @@ use super::*;
 ///   a finished run of an extension's code, as the host records it.
 /// - `health: { namespace, contribution, kind?, disable }`: a contribution
 ///   disabled after failures, with the reason.
-/// - `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
+/// - `token_usage: { thread?, session?, model?, prompt?, input_tokens?,
 ///   output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?, turn? }`:
 ///   the tokens a turn spent.
 /// - `hint: { hint, evaluated?, thread? }`: a hint's query ran that many times.
-/// - `nudge: { kind, message, thread?, effort?, audience?, delivered? }`: a
+/// - `nudge: { kind, message, thread?, audience?, delivered? }`: a
 ///   nudge a hint raised.
 /// - `analyze: { kind: working | commit | …, sha?, streamId? }`: a change
 ///   analyzed now (`change_analysis::ensure_change`), so its files and
@@ -41,8 +37,6 @@ use super::*;
 ///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
 ///   from now: payloads past their keep are expired, envelopes stay.
-/// - `collect: { effort, collectors?: [key] }`: the fact collectors an
-///   effort's end triggers, run over what the effort recorded.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer?, compactions?: n,
 ///   context?: { tokens, window? }, thread?, session?, subagent?, peer? }`:
@@ -58,13 +52,11 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
     let (kind, body) = map.iter().next().expect("one key");
     match kind.as_str() {
         "turn" => observe_turn(host, body).await,
-        "evidence" => observe_evidence(host, body).await,
         "event" => observe_event(host, ext, body).await,
         "commit" => observe_commit(host, body).await,
         "change" => observe_change(host, body).await,
         "test_run" => observe_test_run(host, body).await,
         "snapshot" => observe_snapshot(host, body).await,
-        "collect" => observe_collect(host, body).await,
         "diagnostics" => observe_diagnostics(host, body).await,
         "symbols" => observe_symbols(host, body).await,
         "retention" => observe_retention(host, body).await,
@@ -80,7 +72,7 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "conversation" => observe_conversation(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `evidence`, `event`, `commit`, `change`, `test_run`, `snapshot`, `collect`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
+                "`{other}` isn't a kind — fix: `turn`, `event`, `commit`, `change`, `test_run`, `snapshot`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
             ))
         }
     }?;
@@ -141,7 +133,7 @@ pub(super) async fn first_stream(host: &Host) -> Result<oxplow_domain::StreamId,
 /// container?, signature_changed?, body_changed?, start_line?, visibility?,
 /// is_test?, length?, params_before?, params_after?, complexity?, complexity_delta? }] }`:
 /// what the change analysis stored for a change (`SqliteChangeStore::
-/// store_results`). A `working` or `effort` change's head is the working
+/// store_results`). A `working` change's head is the working
 /// tree; a `commit`'s is the commit `target`.
 pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_db::{ChangeFileRow, ChangeFunctionRow, ChangeResults};
@@ -149,12 +141,8 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
     let text = |v: &Value, key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
     let kind = text(body, "kind").unwrap_or_else(|| "commit".into());
     let target = text(body, "target").ok_or("`change.target` names what the change is of")?;
-    let target = match (kind.as_str(), target.strip_prefix("eff")) {
-        ("effort", Some(n)) if n.parse::<i64>().is_ok() => n.to_string(),
-        _ => target,
-    };
     let head = match kind.as_str() {
-        "working" | "effort" => Revision::Working,
+        "working" => Revision::Working,
         _ => Revision::git(target.clone()),
     };
     let int = |v: &Value, key: &str| v.get(key).and_then(Value::as_i64);
@@ -215,38 +203,40 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 
-/// `test_run: { effort, at?, producer?, branch?, cases?: [{ name, status }],
-/// asserted_failed? }`: a run an effort recorded, as a run recorder writes
-/// it: a `tests` capture with its detail and an `oxplow.test_case` fact
-/// per case (or per failure asserted as a count with no report), through
-/// the fact store. A `producer` other than `tests` is a record without
+/// `test_run: { turn, at?, producer?, branch?, cases?: [{ name, status }],
+/// asserted_failed? }`: a run a turn made, as a run recorder writes it:
+/// a `tests` capture with its detail and an `oxplow.test_case` fact per
+/// case (or per failure asserted as a count with no report), through the
+/// fact store. A `producer` other than `tests` is a record without
 /// measurements.
 pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), String> {
-    use oxplow_db::effort_store::EffortStore as _;
-    use oxplow_domain::EffortId;
-    let effort = body
-        .get("effort")
-        .and_then(Value::as_str)
-        .and_then(|e| e.strip_prefix("eff"))
-        .and_then(|n| n.parse::<i64>().ok())
-        .ok_or("`test_run.effort` is an effort's id, like `eff1`")?;
-    let found = host
+    let turn = body
+        .get("turn")
+        .and_then(Value::as_i64)
+        .ok_or("`test_run.turn` is a turn's id, like `1`")?;
+    let rows = host
         .svc
-        .effort_store
-        .get_effort(&EffortId::new(effort))
+        .sql
+        .query_sql(
+            &format!("SELECT thread_id FROM v_agent_turn WHERE id = {turn}"),
+            vec![],
+            None,
+        )
         .await
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no effort eff{effort}"))?;
-    record_test_run(host, body, found.thread_id.value(), Some(effort), None).await
+        .rows;
+    let Some([oxplow_db::SqlCell::Int(thread)]) = rows.first().map(Vec::as_slice) else {
+        return Err(format!("no turn {turn}"));
+    };
+    record_test_run(host, body, *thread, Some(turn)).await
 }
 
-/// One test run, as a run recorder writes it, owned by `thread` and by an
-/// effort or the turn it ran in.
+/// One test run, as a run recorder writes it, owned by `thread` and the
+/// turn it ran in.
 async fn record_test_run(
     host: &Host,
     body: &Value,
     thread: i64,
-    effort: Option<i64>,
     turn: Option<i64>,
 ) -> Result<(), String> {
     use oxplow_domain::Timestamp;
@@ -300,7 +290,6 @@ async fn record_test_run(
     let stream = first_stream(host).await?;
     let mut capture = oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook");
     capture.thread_id = Some(thread);
-    capture.effort_id = effort;
     capture.turn_id = turn;
     capture.branch = Some(branch.to_string());
     capture.captured_at = Some(at);
@@ -543,7 +532,7 @@ pub(super) fn thread_text(body: &Value) -> String {
         .to_string()
 }
 
-/// `token_usage: { thread?, effort?, session?, model?, prompt?, input_tokens?,
+/// `token_usage: { thread?, session?, model?, prompt?, input_tokens?,
 /// output_tokens?, cache_creation_input_tokens?, cache_read_input_tokens?,
 /// turn? }`: the tokens a turn spent (`SqliteTokenUsageStore::record`).
 pub(super) async fn observe_token_usage(host: &Host, body: &Value) -> Result<(), String> {
@@ -555,7 +544,7 @@ pub(super) async fn observe_token_usage(host: &Host, body: &Value) -> Result<(),
         .record(oxplow_db::NewAgentTokenUsage {
             stream_id: stream.to_string(),
             thread_id: thread_text(body),
-            effort_id: text("effort"),
+            effort_id: None,
             session_id: text("session").unwrap_or_else(|| "s".into()),
             agent_kind: text("agent").unwrap_or_else(|| "claude".into()),
             model: text("model").or_else(|| Some("m".into())),
@@ -595,7 +584,7 @@ pub(super) async fn observe_hint(host: &Host, body: &Value) -> Result<(), String
     Ok(())
 }
 
-/// `nudge: { kind, message, thread?, effort?, audience?, delivered? }`: a
+/// `nudge: { kind, message, thread?, audience?, delivered? }`: a
 /// nudge a hint raised (`SqliteAgentNudgeStore::record`), delivered or not.
 pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_db::agent_nudge_store::{Audience, NewAgentNudge};
@@ -605,7 +594,7 @@ pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), Strin
         .nudge_store
         .record(NewAgentNudge {
             thread_id: thread_text(body),
-            effort_id: text("effort"),
+            effort_id: None,
             kind: text("kind").ok_or("`nudge.kind`")?,
             message: text("message").unwrap_or_default(),
             trigger: None,
@@ -863,40 +852,6 @@ pub(super) async fn observe_retention(host: &Host, body: &Value) -> Result<(), S
         .map_err(|e| e.to_string())
 }
 
-/// `collect: { effort, collectors?: [key] }`: the fact collectors an
-/// `effort.finished` triggers (`MetricsService::run_effort_collectors`),
-/// run for the effort now; `collectors` names the ones to run (by key),
-/// else every one runs.
-pub(super) async fn observe_collect(host: &Host, body: &Value) -> Result<(), String> {
-    use oxplow_db::effort_store::EffortStore as _;
-    use oxplow_domain::EffortId;
-    let effort = body
-        .get("effort")
-        .and_then(Value::as_str)
-        .and_then(|e| e.strip_prefix("eff"))
-        .and_then(|n| n.parse::<i64>().ok())
-        .ok_or("`collect.effort` is an effort's id, like `eff1`")?;
-    let found = host
-        .svc
-        .effort_store
-        .get_effort(&EffortId::new(effort))
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no effort eff{effort}"))?;
-    let wanted: Option<Vec<String>> = body.get("collectors").and_then(Value::as_array).map(|l| {
-        l.iter()
-            .filter_map(|k| k.as_str().map(str::to_string))
-            .collect()
-    });
-    host.svc
-        .metrics
-        .run_effort_collectors(&found.thread_id, &found.id, None, &|c| {
-            wanted.as_ref().is_none_or(|w| w.contains(&c.key))
-        })
-        .await;
-    Ok(())
-}
-
 /// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
@@ -1041,85 +996,6 @@ pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), Stri
                 .collect(),
             files,
         })
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// `evidence: { effort, observations: [{ kind, metric_value?, payload?,
-/// provenance?, source? }] }`: what an effort's evidence holds — its
-/// `test-run`s and `diff-coverage` — as the evidence store keeps it
-/// (`EffortEvidenceStore::replace`, what an effort's refresh calls); the
-/// observations are the effort's whole set.
-pub(super) async fn observe_evidence(host: &Host, body: &Value) -> Result<(), String> {
-    let effort = body
-        .get("effort")
-        .and_then(Value::as_str)
-        .and_then(|e| e.strip_prefix("eff"))
-        .and_then(|n| n.parse::<i64>().ok())
-        .ok_or("`evidence.effort` is an effort's id, like `eff1`")?;
-    let mut observations = Vec::new();
-    for o in body
-        .get("observations")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let text = |key: &str, default: &str| {
-            o.get(key)
-                .and_then(Value::as_str)
-                .unwrap_or(default)
-                .to_string()
-        };
-        observations.push(oxplow_db::EffortObservation {
-            kind: o
-                .get("kind")
-                .and_then(Value::as_str)
-                .ok_or("an observation names its `kind`")?
-                .to_string(),
-            provenance: text("provenance", "observed"),
-            source: text("source", "fixture"),
-            metric_value: o.get("metric_value").and_then(Value::as_f64),
-            payload_json: o.get("payload").map(Value::to_string),
-            local_snapshot_id: None,
-            created_at: oxplow_domain::Timestamp::now(),
-        });
-    }
-    let mut deltas = Vec::new();
-    for d in body
-        .get("metric_deltas")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let text = |key: &str| d.get(key).and_then(Value::as_str).map(str::to_string);
-        let num = |key: &str| d.get(key).and_then(Value::as_f64);
-        let key = text("key").ok_or("a metric delta names its `key`")?;
-        let current = num("current").ok_or("a metric delta names its `current`")?;
-        deltas.push(oxplow_db::EffortMetricDelta {
-            title: text("title").unwrap_or_else(|| key.clone()),
-            key,
-            unit: text("unit"),
-            direction: text("direction").unwrap_or_else(|| "lower-better".into()),
-            kind: text("kind").unwrap_or_else(|| "gauge".into()),
-            category: text("category"),
-            language: text("language"),
-            agg: text("agg").unwrap_or_else(|| "files".into()),
-            baseline: num("baseline"),
-            current,
-            delta: num("delta").or_else(|| num("baseline").map(|b| current - b)),
-            changed: d.get("changed").and_then(Value::as_bool).unwrap_or(true),
-            attributed_files: d.get("attributed_files").and_then(Value::as_i64),
-            sample_count: d.get("sample_count").and_then(Value::as_i64).unwrap_or(1),
-            target: num("target"),
-            warn_at: num("warn_at"),
-            fail_at: num("fail_at"),
-            crossing: text("crossing"),
-            latest_capture_id: None,
-        });
-    }
-    host.svc
-        .effort_evidence_store
-        .replace(effort, deltas, observations, String::new())
         .await
         .map_err(|e| e.to_string())
 }
@@ -1315,7 +1191,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             _ => return Err("`turn.runs`: the turn isn't open".into()),
         };
         for run in &runs {
-            record_test_run(host, run, thread.value(), None, Some(turn)).await?;
+            record_test_run(host, run, thread.value(), Some(turn)).await?;
         }
     }
     for tool in body

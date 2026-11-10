@@ -97,7 +97,6 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
 | event | `{ event: { type, v?, payload, subject?, anchors? } }` | `{ effects?: [{ id, state }], commands?: [names] }` |
 | effect | `{ effect: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip } \| { reacts: false }` |
-| implementation | `{ implementation: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip }` |
 | event_type | `{ event_type, v?, payload }` | `{ valid, upcast? }` |
 | advisory | `{ advisory: <id>, thread? }` | `{ lines: [text] }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |

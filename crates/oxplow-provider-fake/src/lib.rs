@@ -24,11 +24,6 @@
 //! so it outlives the process as a real service's does; without, it lives
 //! in memory.
 //!
-//! With `OXPLOW_FAKE_CAPABILITY=effort_policy` it is an **effort policy**
-//! instead (`policy`): it declares [`policy_declarations`], keeps no items,
-//! and answers `react { event }` with the commands to run; the `react`s it
-//! answered are counted in its state (`reacts`).
-//!
 //! With `OXPLOW_FAKE_CAPABILITY=snapshots` it is a **snapshots provider**
 //! (`snapshots`): it declares [`snapshots_declarations`] (`read_at` only
 //! with `OXPLOW_FAKE_FEATURES=contents`), marks a worktree and answers what
@@ -65,8 +60,6 @@
 //! - `shutdown-file:<path>` — a `shutdown` writes `<path>` before it
 //!   answers; `ignore-shutdown` — a `shutdown` is answered and it keeps
 //!   running;
-//! - `bogus-react` — as an effort policy, `react` composes a command that
-//!   doesn't exist;
 //! - `checkpoint-at-end` — a read sends one `$/state`, after its last
 //!   record;
 //! - `bad-declarations` — `initialize` declares an extra command the
@@ -128,25 +121,22 @@ use tokio::sync::{oneshot, Mutex};
 mod filesystem;
 mod harness;
 mod knowledge;
-mod policy;
 mod snapshots;
 
 pub use filesystem::declarations as filesystem_declarations;
 pub use harness::declarations as harness_declarations;
 pub use knowledge::declarations as knowledge_declarations;
-pub use policy::declarations as policy_declarations;
 pub use snapshots::declarations as snapshots_declarations;
 
 pub const PROVIDER: &str = "fake";
 
 /// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): a task tracker,
-/// the default, an effort policy ([`policy_declarations`]) or an agent
-/// harness ([`harness_declarations`]).
+/// the default, or an agent harness
+/// ([`harness_declarations`]), snapshots, knowledge or filesystem provider.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Capability {
     #[default]
     Tasks,
-    EffortPolicy,
     AgentHarness,
     /// A snapshots provider; `contents` is its feature of that name
     /// (`OXPLOW_FAKE_FEATURES`, see [`Capability::with_features`]).
@@ -164,17 +154,16 @@ pub enum Capability {
 
 impl Capability {
     /// The capability `name` names (`task_tracker` — also when unset —,
-    /// `effort_policy` or `agent_harness`).
+    /// `agent_harness`, …).
     pub fn named(name: Option<&str>) -> Result<Self, String> {
         match name.unwrap_or("task_tracker") {
             "task_tracker" => Ok(Capability::Tasks),
-            "effort_policy" => Ok(Capability::EffortPolicy),
             "agent_harness" => Ok(Capability::AgentHarness),
             "snapshots" => Ok(Capability::Snapshots { contents: false }),
             "knowledge" => Ok(Capability::Knowledge),
             "filesystem" => Ok(Capability::FileSystem { writable: false }),
             other => Err(format!(
-                "the fake implements tasks, effort_policy, agent_harness, snapshots, knowledge or filesystem, not `{other}`"
+                "the fake implements tasks, agent_harness, snapshots, knowledge or filesystem, not `{other}`"
             )),
         }
     }
@@ -280,9 +269,6 @@ pub struct Hooks {
     /// `checkpoint-at-end`: a read sends one `$/state`, after its last
     /// record, rather than one per record.
     pub checkpoint_at_end: bool,
-    /// `bogus-react`: an effort policy's `react` composes a command that
-    /// doesn't exist.
-    pub bogus_react: bool,
 }
 
 impl Hooks {
@@ -335,7 +321,6 @@ impl Hooks {
                 None if part == "config-read" => self.config_read = true,
                 None if part == "ignore-shutdown" => self.ignore_shutdown = true,
                 None if part == "checkpoint-at-end" => self.checkpoint_at_end = true,
-                None if part == "bogus-react" => self.bogus_react = true,
                 _ => {}
             }
         }
@@ -516,9 +501,6 @@ struct World {
     /// The instance it is: its refs' provider segment.
     id: String,
     capability: Capability,
-    /// How many `react`s it answered (an effort policy's), kept with its
-    /// state so a test can tell whether it was asked.
-    reacts: u64,
     /// How many `mark`s it answered (a snapshots provider's), kept with
     /// its state; what it marked stays in memory.
     marks: u64,
@@ -552,8 +534,6 @@ struct Saved {
     rev: u64,
     answered: HashMap<String, (String, Value, Value)>,
     #[serde(default)]
-    reacts: u64,
-    #[serde(default)]
     marks: u64,
     #[serde(default)]
     pages: knowledge::Pages,
@@ -572,7 +552,6 @@ impl World {
             next: self.next,
             rev: self.rev,
             answered: self.answered.clone(),
-            reacts: self.reacts,
             marks: self.marks,
             pages: self.pages.clone(),
             last_context: self.last_context.clone(),
@@ -600,7 +579,6 @@ impl World {
         self.next = saved.next;
         self.rev = saved.rev;
         self.answered = saved.answered;
-        self.reacts = saved.reacts;
         self.marks = saved.marks;
         self.pages = saved.pages;
         self.last_context = saved.last_context;
@@ -801,9 +779,7 @@ async fn handle(
                 let w = world.lock().await;
                 (w.hooks.clone(), w.capability)
             };
-            let declared = if capability == Capability::EffortPolicy {
-                policy_declarations()
-            } else if capability == Capability::AgentHarness {
+            let declared = if capability == Capability::AgentHarness {
                 harness_declarations()
             } else if capability == Capability::Knowledge {
                 knowledge_declarations()
@@ -864,7 +840,7 @@ async fn handle(
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
             // A task tracker reads its items, a knowledge store its pages;
-            // a policy or a harness reads nothing.
+            // a harness reads nothing.
             let (name, description) = match world.lock().await.capability {
                 Capability::Tasks => ("task", "A task as the fake has it."),
                 Capability::Knowledge => ("knowledge_page", "A page as the fake keeps it."),
@@ -931,8 +907,7 @@ async fn handle(
                 None
             };
             let capability = world.lock().await.capability;
-            let policy = capability == Capability::EffortPolicy;
-            let mut answer = match (policy, p.command.as_str()) {
+            let mut answer = match p.command.as_str() {
                 _ if capability == Capability::AgentHarness => {
                     json!({ "result": harness::answer(&p.command, &p.input)?, "events": [] })
                 }
@@ -968,23 +943,7 @@ async fn handle(
                     }
                     json!({ "result": result, "events": [] })
                 }
-                (true, "react") if hooks.bogus_react => {
-                    world.lock().await.reacts += 1;
-                    json!({ "result": { "commands": [{ "name": "oxplow.nope.never", "input": {} }] },
-                            "events": [] })
-                }
-                (true, "react") => {
-                    let result = policy::react(peer, sent_key.clone(), &p.input).await?;
-                    world.lock().await.reacts += 1;
-                    json!({ "result": result, "events": [] })
-                }
-                (true, other) => {
-                    return Err(ProtocolError::InvalidInput {
-                        field: "/command".into(),
-                        message: format!("an effort policy answers `react`, not `{other}`"),
-                    })
-                }
-                (false, _) => invoke(world, &p.command, p.input.clone()).await?,
+                _ => invoke(world, &p.command, p.input.clone()).await?,
             };
             if let Some(read) = read {
                 answer["result"]["read"] = read;

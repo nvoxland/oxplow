@@ -521,7 +521,7 @@ pub(super) async fn command_run(
 
 /// Run advisory `id` for a thread (`when: { advisory, thread? }`, the
 /// primary thread when none) as the app does on its `on:` — over that
-/// thread's open effort — and check what the agent is told, line by line:
+/// thread — and check what the agent is told, line by line:
 /// `expect: { lines: [..] }` (none: `[]`).
 pub(super) async fn advisory_example(
     host: &Host,
@@ -806,63 +806,6 @@ pub(super) fn example_event(
             );
             None
         }
-    }
-}
-
-/// Dry-run the extension's effort policy script `id` on the fixture's
-/// event (`when: { implementation, event: { type, payload, subject?,
-/// anchors? }, answers? }`, the answers standing in for its scope calls'):
-/// what it composes, checked against the throwaway's registry, against
-/// `expect` as an effect's is. A policy emits nothing. Nothing runs.
-pub(super) async fn policy_example(
-    host: &Host,
-    ext: &Extension,
-    ex: &Example<'_>,
-    id: &str,
-    report: &mut TestReport,
-) {
-    use oxplow_app::effects::{run_over, Reaction};
-    let (shown, example) = (ex.shown, ex.name);
-    let Some((decl, script)) = ext
-        .implementations
-        .iter()
-        .filter(|d| d.id == id && d.capability == EFFORT_POLICY)
-        .find_map(|d| d.script.as_deref().map(|s| (d, s)))
-    else {
-        report.errors.push(error(shown, None, "fixture.unknown", format!("example `{example}` names effort policy `{id}`, which `{}` doesn't declare as a script", ext.name)).fix(format!("an `implementations:` entry with `capability: effort_policy`, `id: {id}` and a `.star` entry")));
-        return;
-    };
-    let Some(event) = example_event(host, ex, report) else {
-        return;
-    };
-    let event = event.to_json();
-    let Some(answers) = answers(ex, &format!("effort policy `{id}`"), report) else {
-        return;
-    };
-    let run = oxplow_app::run_context::for_dry_run();
-    let decided = run_over(
-        &host.svc.sql,
-        &run,
-        &decl.needs,
-        script,
-        event,
-        Some(&answers),
-        &oxplow_app::services::Sources::default(),
-    )
-    .await
-    .and_then(|reaction| match &reaction {
-        Reaction::Run { events, .. } if !events.is_empty() => {
-            Err("it appends events, and a policy emits nothing".to_string())
-        }
-        Reaction::Run { calls, .. } => oxplow_app::extension::extension_commands::check_calls(
-            host.svc.commands.as_ref(),
-            calls,
-        )
-        .map(|()| reaction),
-        Reaction::Skip(_) => Ok(reaction),
-    });
-    if let Some(p) = reaction_problem(&ex.expect, decided) {
-        report.errors.push(error(shown, ex.line("expect"), "example.effort_policy", format!("effort policy `{id}` {p}")).fix("its script, or the example's `expect` (`{ commands: [names] }` or `{ skip: <part of the reason> | $any }`)"));
     }
 }
 

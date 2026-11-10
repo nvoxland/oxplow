@@ -9,11 +9,11 @@
       "description": "The run an `invoke` is part of.",
       "properties": {
         "actor": {
-          "description": "Who it runs as: `human`, `agent:thr3`, `system`,\n`effect:<extension>/<id>`, `effect:effort_policy:<id>`.",
+          "description": "Who it runs as: `human`, `agent:thr3`, `system`,\n`effect:<extension>/<id>`.",
           "type": "string"
         },
         "anchors": {
-          "description": "Where it sits — `stream_id`, `thread_id`, `effort_id`, `turn_id`,\n`agent_session_id`, `snapshot_id` — as the event envelope has them,\n`null` where the run has none."
+          "description": "Where it sits — `stream_id`, `thread_id`, `request_id`, `turn_id`,\n`agent_session_id`, `snapshot_id` — as the event envelope has them,\n`null` where the run has none."
         },
         "cause": {
           "description": "The id of the event that caused it, when one did.",

@@ -58,18 +58,11 @@ async fn project() -> tempfile::TempDir {
 }
 
 /// `extension new --from <example>` copies each example oxplow ships, and
-/// the copy checks and tests clean as it stands (an example that builds on
-/// another comes with it).
+/// the copy checks and tests clean as it stands.
 async fn scaffolds_checks_and_tests_clean(example: &'static Example) {
     let _watch = HangWatch::on(example.name);
     let dir = project().await;
-    let needs: &[&str] = match example.name {
-        "review-badges" => &["effort-review"],
-        _ => &[],
-    };
-    for name in needs.iter().copied().chain([example.name]) {
-        oxplow_sdk::scaffold_example(dir.path(), name, None).unwrap();
-    }
+    oxplow_sdk::scaffold_example(dir.path(), example.name, None).unwrap();
     let report = check(
         dir.path(),
         example.name,
@@ -129,10 +122,6 @@ async fn renames_and_tests_clean(example: &'static Example) {
     let mut failures = Vec::new();
     let _watch = HangWatch::on(example.name);
     let dir = project().await;
-    // An example that builds on another comes with it, under its name.
-    if example.name == "review-badges" {
-        oxplow_sdk::scaffold_example(dir.path(), "effort-review", None).unwrap();
-    }
     let name = format!("renamed-{}", example.name);
     let made = oxplow_sdk::scaffold_example(dir.path(), example.name, Some(&name)).unwrap();
     assert_eq!(made.name, name);
@@ -183,7 +172,7 @@ fn on_runtime(run: impl std::future::Future<Output = ()>) {
 
 fn main() {
     let all = oxplow_sdk::examples::all();
-    let enough = all.len() >= 9;
+    let enough = all.len() >= 6;
     let mut trials = vec![Trial::test("the_examples_are_compiled_in", move || {
         if enough {
             Ok(())

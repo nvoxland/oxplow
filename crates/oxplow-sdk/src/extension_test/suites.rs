@@ -583,91 +583,6 @@ pub(super) async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Resul
         .map_err(|e| format!("{e:?}"))
 }
 
-/// An oxplow like `host` with a task tracker on, for a conformance suite that
-/// files work: the first extension in the checkout (by name) that declares a
-/// `task_tracker` implementation or provider. None is an error the suite
-/// reports.
-pub(super) async fn with_task_tracker(host: &Host, ext: &Extension) -> Result<Host, String> {
-    let mut lists: Vec<String> = oxplow_app::extension::extensions::load_extensions(&host.checkout)
-        .into_iter()
-        .filter(|e| {
-            e.implementations
-                .iter()
-                .any(|d| d.capability == "task_tracker")
-                || e.providers.iter().any(|p| p.capability == "task_tracker")
-        })
-        .map(|e| e.name)
-        .collect();
-    lists.sort();
-    let Some(list) = lists.into_iter().next() else {
-        return Err(
-            "its suite files work, and no extension in the checkout declares a `task_tracker` \
-             implementation or provider — fix: add one to the checkout"
-                .into(),
-        );
-    };
-    let started = Host::start(
-        &host.checkout,
-        &ext.name,
-        &[list],
-        host.env.clone(),
-        host.builds,
-    )
-    .await?;
-    started.start_runtime()?;
-    Ok(started)
-}
-
-/// The effort-policy suite over the extension's policy script `decl`, on
-/// a fork of `host`: the script chosen as the project's policy. A finding
-/// is an error at the manifest.
-pub(super) async fn policy_suite(
-    host: &Host,
-    ext: &Extension,
-    decl: &oxplow_app::extension::extensions::implementations::ImplementationDecl,
-    report: &mut TestReport,
-) {
-    report.ran.push(format!("{EFFORT_POLICY} suite"));
-    let run = async {
-        // The suite files work, so it runs on an oxplow with a task tracker.
-        let with_list = with_task_tracker(host, ext).await?;
-        let fork = with_list.fork().await?;
-        let svc = &fork.svc;
-        svc.config
-            .write()
-            .map_err(|e| e.to_string())?
-            .active_providers
-            .insert(EFFORT_POLICY.into(), decl.id.clone());
-        publish_generation(svc).await?;
-        Ok::<_, String>(oxplow_app::effort_policy_conformance::suite(svc, &decl.id).await)
-    };
-    match run.await {
-        Ok(run) => {
-            report.left.extend(run.left);
-            for f in run.findings {
-                report.errors.push(
-                    error(
-                        "extension.yaml",
-                        None,
-                        "suite.conformance",
-                        format!("{EFFORT_POLICY} conformance `{}`: {}", f.check, f.message),
-                    )
-                    .fix(format!("the policy script's `{}` handling", f.check)),
-                );
-            }
-        }
-        Err(e) => report.errors.push(
-            error(
-                "extension.yaml",
-                None,
-                "suite.host_failed",
-                format!("effort policy `{}` couldn't run under a host: {e}", decl.id),
-            )
-            .fix("see the message"),
-        ),
-    }
-}
-
 pub(super) async fn suite(
     host: &Host,
     ext: &Extension,
@@ -678,17 +593,8 @@ pub(super) async fn suite(
 ) {
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
-        // On an oxplow of its own: what the suite files, no example sees. An
-        // effort policy's suite files work, and oxplow's own task tracker is
-        // bundled's: its oxplow has it on.
-        let with_list;
-        let base = if spec.capability == providers::effort_policy::EffortPolicyHost::CAPABILITY {
-            with_list = with_task_tracker(host, ext).await?;
-            &with_list
-        } else {
-            host
-        };
-        let fork = base.fork().await?;
+        // On an oxplow of its own: what the suite files, no example sees.
+        let fork = host.fork().await?;
         let svc = fork.svc.clone();
         let project = oxplow_app::collector_runner::project_key(&fork.root);
         for (name, value) in env_credentials(spec, env) {
@@ -753,16 +659,6 @@ pub(super) async fn suite(
                     &Actor::Human,
                 )
                 .await
-            }
-            providers::effort_policy::EffortPolicyHost::CAPABILITY => {
-                // The instance under test is the project's effort policy.
-                svc.config
-                    .write()
-                    .map_err(|e| e.to_string())?
-                    .active_providers
-                    .insert(spec.capability.clone(), spec.id.clone());
-                publish_generation(&svc).await?;
-                oxplow_app::effort_policy_conformance::suite(&svc, &spec.id).await
             }
             providers::agent_harness::HarnessHost::CAPABILITY => {
                 // Its launch looks for programs where the kit's

@@ -75,9 +75,6 @@ use runner::*;
 use steps::*;
 use suites::*;
 
-/// The capability a policy script implements.
-const EFFORT_POLICY: &str = providers::effort_policy::EffortPolicyHost::CAPABILITY;
-
 /// Run every test of extension `name` under `root`. `bless` writes the
 /// golden transcripts instead of comparing them. A provider's credentials
 /// and declared `env` come from this process's environment, as for a
@@ -241,15 +238,6 @@ async fn run(
             report.ran.push(format!("provider {}", spec.id));
             test_provider(&host, root, &ext, spec, bless, &env, &mut report).await;
             report.finish_case(format!("provider {}", spec.id), mark);
-        }
-        for decl in ext
-            .implementations
-            .iter()
-            .filter(|d| d.capability == EFFORT_POLICY && d.script.is_some())
-        {
-            let mark = report.mark();
-            policy_suite(&host, &ext, decl, &mut report).await;
-            report.finish_case(format!("policy {}", decl.id), mark);
         }
         page_answers(&host, &ext, &mut report).await;
         let mark = report.mark();

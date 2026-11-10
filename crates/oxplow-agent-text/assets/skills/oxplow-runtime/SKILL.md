@@ -19,6 +19,13 @@ finish.
   the person, the rest) and its compactions. A request (`v_request`) is a
   prompt and every turn it caused, with its live state; the tasks it
   worked on are `v_request_task`.
+- **Session history.** In SQL the history of your conversations is
+  `v_agent_session` (the slots opened on a thread), `v_agent_session_status`
+  (each open session's last status), `v_agent_turn` (each prompt and
+  answer), `v_tool_call` and `v_subagent`; the tasks a session's requests
+  worked on are `v_request_task` joined to `v_task`. A session that lost its
+  conversation is brought back with `oxplow.agent_session.reopen { session }`;
+  the transcript page offers it.
 - **Standing instructions.** What the person set for every session of
   your stream and of your thread is `v_stream.prompt` and `v_thread.prompt`
   (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =
