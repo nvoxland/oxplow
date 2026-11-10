@@ -131,6 +131,24 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: commit_request
+  version: 1
+  description: "The requests a commit's changes came from, per path: the requests on the commit's stream that changed the path since the previous commit that held it, where the file as the work left it is the commit's content (compared by git blob id, reading no bytes). A commit made outside oxplow, or of a file edited again since, has no rows. A commit's requests: `WHERE sha = <sha>`; a request's commits: `WHERE request = <uri>`; join `v_request_task` for the tasks."
+  relationships: [{ from: request, to: request.uri }]
+  fields:
+    - { name: "sha", type: "TEXT", doc: "The commit." }
+    - { name: "commit_uri", type: "TEXT", doc: "The commit's URI (`oxplow:oxplow/commit?sha=…`)." }
+    - { name: "path", type: "TEXT", doc: "The path the commit changed, as git stores it." }
+    - { name: "request", type: "TEXT", doc: "The request that changed it (`v_request.uri`)." }
+    - { name: "basis", type: "TEXT", doc: "`named` (an edit call of one of the request's turns named the path), `reported` (the harness said a shell call changed it) or `observed` (it changed while the request ran and nothing else says)." }
+    - { name: "confidence", type: "TEXT", doc: "`sole` (one request changed the path since the previous commit that held it) or `shared` (several did)." }
+    - { name: "turn", type: "TEXT", doc: "The turn of the request that gave the basis (`v_agent_turn.uri`)." }
+    - { name: "at", type: "TEXT", doc: "When the link was recorded (RFC 3339)." }
+  tests:
+    - { not_null: sha }
+    - { not_null: request }
+    - { accepted_values: { column: basis, values: [named, reported, observed] } }
+    - { accepted_values: { column: confidence, values: [sole, shared] } }
 - name: request_task
   version: 2
   description: "The tasks each request worked on, observed, each link with the evidence it rests on: a person's prompt named the task, the agent ran a task command on it in a turn, or it was in progress and assigned to the thread when a turn of the request ended. Nothing here opens, closes or moves a task. One row per (request, task, basis); a request may link several tasks and a task several requests. A task's requests: `WHERE task = <task uri>`."
@@ -535,8 +553,8 @@
     - { name: "additions", type: "INTEGER", doc: "Lines added." }
     - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
 - name: commit_task
-  version: 3
-  description: "The active task tracker's items each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by the list's id pattern), the ones that declared it as an impact, and the ones whose effort's work it holds (its version of every file they share is the effort's end version)."
+  version: 4
+  description: "The active task tracker's items each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by the list's id pattern), the ones that declared it as an impact, and the ones a request that worked on them made it (`v_commit_request` joined to `v_request_task`: the requests whose files it holds, per path)."
   fields:
     - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
     - { name: "task", type: "TEXT", doc: "The task (v_task.uri)." }

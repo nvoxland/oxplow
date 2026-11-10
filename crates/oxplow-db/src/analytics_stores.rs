@@ -1249,6 +1249,19 @@ fn record_take_tx(
                 .map_err(map_sql_err)?;
             }
         }
+        for row in &rows {
+            let oid = match row.storage {
+                SnapshotStorage::Git => row.blob_hash.as_ref(),
+                _ => take.git_oids.get(&row.path),
+            };
+            if let Some(oid) = oid {
+                tx.execute(
+                    "UPDATE file_snapshot SET git_oid = ?3 WHERE snapshot_id = ?1 AND path = ?2",
+                    params![sid, row.path, oid],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
         // The tree read before the lock holds when no take landed since;
         // otherwise it is read here.
         let tree = match read_before {
@@ -1478,6 +1491,11 @@ pub struct TakeRecord {
     /// the previous take, by path. A row absent from it (the startup sweep,
     /// a file with no watcher event) has no change time.
     pub changed_at: std::collections::HashMap<String, (Timestamp, Timestamp)>,
+    /// The git blob id of the bytes each oxplow-stored row captured, by
+    /// path, so a row is comparable with a commit's blob without reading
+    /// bytes. A git-backed row's address is its own; a row absent from the
+    /// map (hashes-only, deleted, oversize) has none.
+    pub git_oids: std::collections::HashMap<String, String>,
 }
 
 /// What a take recorded.
@@ -3311,6 +3329,7 @@ mod tests {
             contents: true,
             handle: None,
             changed_at: Default::default(),
+            git_oids: Default::default(),
         }
     }
 
