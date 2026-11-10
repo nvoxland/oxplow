@@ -492,12 +492,15 @@ collectors:
     facts: [oxplow.effort_test_outcome, oxplow.effort_time_to_green]
   # A request's outcome, recorded each time one of its turns ends (a request
   # has no finished moment; each measure keeps a request's latest): its
-  # tokens, its cycle time, and what its turns' test runs came to.
+  # tokens, its cycle time, and what its turns' test runs came to. After
+  # `token_usage.turns`, which records the turn's tokens from its transcript
+  # once it ends: before it, most of a turn's tokens aren't counted yet.
   - id: oxplow.request_outcome
     doc: How a request went — its tokens, its cycle time and its tests — recorded when a turn of it ends.
     runtime: starlark
     entry: collectors/request/outcome.star
     on: [agent.turn.ended]
+    after: [token_usage.turns]
     input: |
       WITH req AS (
         SELECT t.request_id AS id FROM v_agent_turn t
