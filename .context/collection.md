@@ -231,11 +231,6 @@ hook + MCP wiring):
   judges the run's own coverage, tsk506) and then returns the thread's
   **undelivered** nudges; one that
   lands later goes out on the thread's next tool call.
-  **Landed commits also feed the wasted-token leg (tsk77):** any detected
-  commit — including `git revert`, which needs its own `detect_git_revert`
-  since the command never says "commit" — has HEAD's `This reverts commit`
-  trailers read; a reverted commit attributable to exactly one CLOSED effort
-  emits that effort's spend onto `oxplow.token_waste` (see metrics.md).
   **The legs are isolated and coverage retries (tsk79):** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
   failure can't kill the legs after it), and the coverage leg retries once
@@ -465,10 +460,9 @@ Nudge persistence below.
 
 ## Commits get no nudge of their own
 
-`on_shell_run` detects a `git commit` (`detect_git_commit` — token-aware,
-so `git -c user.email=… commit` and `git commit --amend` match, `git add` /
-`git log --grep commit` don't) only to drive the revert/token-waste leg and to
-return early. There is **no commit-hygiene guard** (removed in tsk250): a
+`on_shell_run` looks only for test and analysis runs: a `git commit` is
+neither, so it returns at once (the revert/token-waste leg went with
+efforts, 2026-11-10). There is **no commit-hygiene guard** (removed in tsk250): a
 post-commit "these files aren't part of this effort's changed set" advisory
 used to fire here.
 

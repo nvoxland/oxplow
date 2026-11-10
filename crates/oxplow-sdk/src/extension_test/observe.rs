@@ -223,7 +223,7 @@ pub(super) async fn observe_change(host: &Host, body: &Value) -> Result<(), Stri
 /// measurements.
 pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), String> {
     use oxplow_db::effort_store::EffortStore as _;
-    use oxplow_domain::{EffortId, Timestamp};
+    use oxplow_domain::EffortId;
     let effort = body
         .get("effort")
         .and_then(Value::as_str)
@@ -237,6 +237,19 @@ pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), St
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no effort eff{effort}"))?;
+    record_test_run(host, body, found.thread_id.value(), Some(effort), None).await
+}
+
+/// One test run, as a run recorder writes it, owned by `thread` and by an
+/// effort or the turn it ran in.
+async fn record_test_run(
+    host: &Host,
+    body: &Value,
+    thread: i64,
+    effort: Option<i64>,
+    turn: Option<i64>,
+) -> Result<(), String> {
+    use oxplow_domain::Timestamp;
     let at = match body.get("at").and_then(Value::as_str) {
         Some(at) => Timestamp::parse(at).map_err(|e| format!("`test_run.at`: {e}"))?,
         None => Timestamp::now(),
@@ -286,8 +299,9 @@ pub(super) async fn observe_test_run(host: &Host, body: &Value) -> Result<(), St
         .ok_or("no `oxplow.test_case` measure")?;
     let stream = first_stream(host).await?;
     let mut capture = oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook");
-    capture.thread_id = Some(found.thread_id.value());
-    capture.effort_id = Some(effort);
+    capture.thread_id = Some(thread);
+    capture.effort_id = effort;
+    capture.turn_id = turn;
     capture.branch = Some(branch.to_string());
     capture.captured_at = Some(at);
     capture.detail_json = Some(
@@ -1117,6 +1131,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         if ![
             "prompt",
             "during",
+            "runs",
             "tools",
             "write",
             "answer",
@@ -1131,7 +1146,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         .contains(&key.as_str())
         {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer` or `conversation`"
+                "`turn.{key}` — fix: `prompt`, `during`, `runs`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer` or `conversation`"
             ));
         }
     }
@@ -1275,6 +1290,33 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             )
             .await
             .map_err(|e| format!("`turn.during` `{command}` failed: {e}"))?;
+    }
+    // The test runs the turn made, recorded while it's open: each is the
+    // turn's (its capture names the turn), as a run a tool call caused is.
+    let runs: Vec<Value> = body
+        .get("runs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !runs.is_empty() {
+        let open = svc
+            .sql
+            .query_sql(
+                "SELECT id FROM v_agent_turn WHERE thread_id = ?1 AND ended_at IS NULL
+                  ORDER BY id DESC LIMIT 1",
+                vec![oxplow_db::SqlCell::Int(thread.value())],
+                None,
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .rows;
+        let turn = match open.first().map(Vec::as_slice) {
+            Some([oxplow_db::SqlCell::Int(t)]) => *t,
+            _ => return Err("`turn.runs`: the turn isn't open".into()),
+        };
+        for run in &runs {
+            record_test_run(host, run, thread.value(), None, Some(turn)).await?;
+        }
     }
     for tool in body
         .get("tools")

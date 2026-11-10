@@ -6219,7 +6219,7 @@ def transform(input):
             ("oxplow.analysis.errors", "gauge", "static-quality"),
             ("agent.tokens.total", "gauge", "operational"),
             ("agent.nudges.fired", "event", "operational"),
-            ("effort.cycle_time_ms", "gauge", "operational"),
+            ("request.cycle_time_ms", "gauge", "operational"),
         ] {
             let e = by_key
                 .get(key)

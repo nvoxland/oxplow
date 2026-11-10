@@ -491,6 +491,41 @@ collectors:
       WHERE cap.producer = 'tests' AND cap.effort_id = :effort_id
       ORDER BY cap.captured_at, r.id
     facts: [oxplow.effort_test_outcome, oxplow.effort_time_to_green]
+  # A request's outcome, recorded each time one of its turns ends (a request
+  # has no finished moment; each measure keeps a request's latest): its
+  # tokens, its cycle time, and what its turns' test runs came to.
+  - id: oxplow.request_outcome
+    doc: How a request went — its tokens, its cycle time and its tests — recorded when a turn of it ends.
+    runtime: starlark
+    entry: collectors/request/outcome.star
+    on: [agent.turn.ended]
+    input: |
+      WITH req AS (
+        SELECT t.request_id AS id FROM v_agent_turn t
+         WHERE t.id = :turn_id AND t.request_id IS NOT NULL
+      )
+      SELECT NULL AS run, NULL AS failed, NULL AS cases, NULL AS at_ms, NULL AS "case",
+             r.uri AS request, r.input_tokens + r.output_tokens AS tokens,
+             CAST(round((julianday(r.last_activity_at) - julianday(r.started_at)) * 86400000) AS INTEGER) AS cycle_ms
+      FROM v_request r JOIN req ON r.id = req.id
+      UNION ALL
+      SELECT * FROM (
+        SELECT tr.id AS run,
+               COALESCE(tr.failed, 0) AS failed,
+               (SELECT count(*) FROM v_test_case a WHERE a.run_id = tr.id) AS cases,
+               CAST(strftime('%s', cap.captured_at) AS INTEGER) * 1000
+                 + CAST(substr(cap.captured_at, 21, 3) AS INTEGER) AS at_ms,
+               CASE WHEN c.name IS NULL THEN NULL
+                    ELSE uri('oxplow/test', 'class', c.classname, 'name', c.name) END AS "case",
+               NULL AS request, NULL AS tokens, NULL AS cycle_ms
+        FROM v_capture cap
+        JOIN v_test_run tr ON tr.id = cap.id
+        LEFT JOIN v_test_case c ON c.run_id = tr.id AND c.status = 'failed'
+        WHERE cap.producer = 'tests'
+          AND cap.turn_id IN (SELECT t.id FROM v_agent_turn t JOIN req ON t.request_id = req.id)
+        ORDER BY cap.captured_at, tr.id
+      )
+    facts: [oxplow.request_tokens, oxplow.request_cycle_time, oxplow.request_test_outcome, oxplow.request_time_to_green]
 metrics:
   # what oxplow records itself
   - {"key":"agent.tokens.input","title":"Input tokens","measure": "oxplow.tokens", "expression": "SUM(value) FILTER (WHERE dim('oxplow.token_kind') = 'input')", "unit":"tokens","direction":"neutral","displayKind":"gauge","category":"operational","description":"Input tokens consumed by the agent.","sliceableDims":["oxplow.model"]}
@@ -499,24 +534,20 @@ metrics:
   - {"key":"agent.tokens.cache_read","title":"Cache-read tokens","measure": "oxplow.cache_tokens", "expression": "SUM(value) FILTER (WHERE dim('oxplow.token_kind') = 'cache_read')", "unit":"tokens","direction":"neutral","displayKind":"gauge","category":"operational","description":"Prompt tokens served from cache instead of re-processed.","sliceableDims":["oxplow.model"]}
   - {"key":"agent.tokens.cache_creation","title":"Cache-write tokens","measure": "oxplow.cache_tokens", "expression": "SUM(value) FILTER (WHERE dim('oxplow.token_kind') = 'cache_creation')", "unit":"tokens","direction":"neutral","displayKind":"gauge","category":"operational","description":"Prompt tokens written into the cache (the cache-warming cost).","sliceableDims":["oxplow.model"]}
   - {"key":"agent.tokens.cache_hit_pct","title":"Cache hit ratio","measure": "oxplow.cache_usage", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"Prompt-side cache hit ratio: cache-read / (input + cache-read + cache-write).","sliceableDims":["oxplow.model"]}
-  - {"key":"effort.tokens","title":"Tokens per effort","measure": "oxplow.effort_tokens", "expression": "AVG(value)", "unit":"tokens","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Avg tokens (all kinds) a closed effort spent — the cost of a unit of work, in tokens.","sliceableDims":["oxplow.branch","oxplow.effort"]}
+  - {"key":"request.tokens","title":"Tokens per request","measure": "oxplow.request_tokens", "expression": "AVG(value)", "unit":"tokens","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Avg tokens (input + output) a request spent over all its turns — the cost of a unit of work, in tokens.","sliceableDims":["oxplow.branch"]}
   - {"key":"agent.turns","title":"Agent turns","measure": "oxplow.turn", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"Number of agent turns.","sliceableDims":["oxplow.model"]}
-  - {"key":"effort.cycle_time_ms","title":"Effort cycle time","measure": "oxplow.cycle_time", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"operational","description":"How long an effort stayed open (close minus start).","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"task.efforts","title":"Efforts per task","measure": "oxplow.task_effort", "expression": "AVG(value)", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Number of efforts spent on a task (the redo-rate signal).","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"effort.tokens.wasted","title":"Wasted tokens","measure": "oxplow.token_waste", "expression": "SUM(value)", "unit":"tokens","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Tokens spent in closed efforts whose commits were later reverted.","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"effort.tokens.wasted_pct","title":"Wasted-token ratio","measure": "oxplow.token_waste", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Share of effort token spend that was later reverted — wasted ÷ all metered spend, across closed efforts.","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"effort.steering","title":"Steering per effort","measure": "oxplow.effort_steering", "expression": "AVG(value)", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"operational","description":"Avg steering events per closed effort (user prompts + Stop-hook nudges + review comments) — the autonomy number; lower means more autonomous.","sliceableDims":["oxplow.branch","oxplow.effort"]}
-  - {"key":"effort.time_to_green_ms","title":"Time to green","measure": "oxplow.effort_time_to_green", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Avg wall-clock from an effort's first red test run to its first green — only efforts that went red and recovered count.","sliceableDims":["oxplow.branch","oxplow.effort"]}
+  - {"key":"request.cycle_time_ms","title":"Request cycle time","measure": "oxplow.request_cycle_time", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"operational","description":"How long a request ran, from its first prompt to its last activity.","sliceableDims":["oxplow.branch"]}
+  - {"key":"request.time_to_green_ms","title":"Time to green","measure": "oxplow.request_time_to_green", "expression": "AVG(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Avg wall-clock from a request's first red test run to its first green — only requests that went red and recovered count.","sliceableDims":["oxplow.branch"]}
   - {"key":"agent.nudges.fired","title":"Nudges fired","measure": "oxplow.nudge", "expression": "SUM(value)", "unit":"count","direction":"lower-better","displayKind":"event","category":"operational","description":"Count of nudges fired to the agent.","sliceableDims":["subject","oxplow.branch","oxplow.thread"]}
   - {"key":"oxplow.tests.passed","title":"Tests passed","measure": "oxplow.test_case", "expression": "COUNT(*) FILTER (WHERE dim('oxplow.status') = 'passed')", "unit":"count","direction":"higher-better","displayKind":"gauge","category":"testing","description":"Known tests currently passing — each test's latest recorded status, unioned across runners.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.failed","title":"Tests failed","measure": "oxplow.test_case", "expression": "COUNT(*) FILTER (WHERE dim('oxplow.status') = 'failed')", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Known tests currently failing — each test's latest recorded status, unioned across runners.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.total","title":"Tests total","measure": "oxplow.test_case", "expression": "COUNT(*)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"testing","description":"All known tests — union across runners, each counted at its latest recorded status.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.duration_ms","title":"Test suite duration","measure": "oxplow.test_duration", "expression": "SUM(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Total wall-clock time of the known test suite.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.tests.slowest_ms","title":"Slowest test","measure": "oxplow.test_duration", "expression": "MAX(value)", "unit":"ms","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Wall-clock time of the slowest single test.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.failed_at_close","title":"Tests failed at close","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'at_close')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Failing tests in the effort's final run, averaged across closed efforts — did work close green.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.peak_failed","title":"Peak tests failed","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'peak')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Most tests failing in any single run during an effort, averaged across closed efforts.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.distinct_failed","title":"Distinct tests failed","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'distinct_failed')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Distinct tests that went red at least once during an effort, averaged across closed efforts.","sliceableDims":["oxplow.branch"]}
-  - {"key":"oxplow.tests.red_runs","title":"Red test runs","measure": "oxplow.effort_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'red_runs')", "unit":"per effort","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Test runs with at least one failure during an effort, averaged across closed efforts.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.failed_at_close","title":"Tests failed at the end","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'at_close')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Failing tests in a request's latest run, averaged across requests — did the work end green.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.peak_failed","title":"Peak tests failed","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'peak')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Most tests failing in any single run of a request, averaged across requests.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.distinct_failed","title":"Distinct tests failed","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'distinct_failed')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Distinct tests that went red at least once during a request, averaged across requests.","sliceableDims":["oxplow.branch"]}
+  - {"key":"oxplow.tests.red_runs","title":"Red test runs","measure": "oxplow.request_test_outcome", "expression": "AVG(value) FILTER (WHERE dim('oxplow.tests_stat') = 'red_runs')", "unit":"per request","direction":"lower-better","displayKind":"gauge","category":"testing","description":"Test runs with at least one failure during a request, averaged across requests.","sliceableDims":["oxplow.branch"]}
   - {"key":"oxplow.coverage.abs_pct","title":"Coverage","measure": "oxplow.coverage", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"coverage","category":"coverage","description":"Whole-report coverage %.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"],"target":80.0,"warnAt":80.0,"failAt":50.0}
   - {"key":"oxplow.coverage.branch_pct","title":"Branch coverage","measure": "oxplow.coverage.branch", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"coverage","category":"coverage","description":"Whole-report branch coverage %.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.coverage.function_pct","title":"Function coverage","measure": "oxplow.coverage.function", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"coverage","category":"coverage","description":"Whole-report function/method coverage %.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
@@ -1960,6 +1991,10 @@ measures:
   - {"key": "oxplow.effort_steering", "title": "Effort steering events", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Times a person steered an agent during an effort."}
   - {"key": "oxplow.effort_time_to_green", "title": "Effort time to green", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's first red test run to its first green one."}
   - {"key": "oxplow.token_waste", "title": "Reverted-effort token waste", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens spent on an effort that was later reverted."}
+  - {"key": "oxplow.request_tokens", "title": "Request token spend", "unit": "count", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Tokens (input + output) a request spent over all its turns, as of its latest turn."}
+  - {"key": "oxplow.request_cycle_time", "title": "Request cycle time", "unit": "ms", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time from a request's first prompt to its last activity, as of its latest turn."}
+  - {"key": "oxplow.request_test_outcome", "title": "Request test outcome", "unit": "count", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "A figure of how a request's tests went, such as runs or failures, as of its latest turn."}
+  - {"key": "oxplow.request_time_to_green", "title": "Request time to green", "unit": "ms", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time from a request's first red test run to its first green one."}
   - {"key": "oxplow.coverage.branch", "title": "Branch coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's branches that tests ran."}
   - {"key": "oxplow.coverage.function", "title": "Function coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's functions that tests ran."}
 dimensions:

@@ -561,8 +561,8 @@ branch status (the Git page has those).
 ### Commits are not policed (tsk250)
 
 Neither hook comments on a commit. The Stop hook emits no commit
-directives, and the PostToolUse Bash hook watches `git commit` only to run
-the revert/token-waste leg — the **commit-hygiene nudge** that used to flag
+directives, and the PostToolUse Bash hook doesn't look for `git commit` at
+all — the **commit-hygiene nudge** that used to flag
 committed files outside the open effort's changed set was removed. It
 second-guessed a decision the committing actor had already made (nothing to
 disentangle: one commit, one actor), and it hardcoded a `docs/` warning

@@ -335,8 +335,7 @@ or operational limits, not a view of what good work is:
 - Function metrics, clone detection and its `min_lines` / `min_nodes`
   floors, diff-coverage math, zone matching, `threshold_state`.
 - Advisory muting after three deliveries, stall detection (15 / 5
-  minutes), contribution disabling after three failures, steering and
-  token-waste attribution.
+  minutes), contribution disabling after three failures.
 
 **Knobs.** An extension's SQL reads its own configuration
 (`config('/pointer')`, `.context/extensions-manifest.md` "Configuration in SQL"),

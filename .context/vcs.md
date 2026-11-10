@@ -384,8 +384,6 @@ commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
   provider, so they live in `oxplow-app` (`stream_service_tests.rs`).
 - **Branch stamps** on facts and captures (collection, metrics, the
   effort-lifecycle metrics) read `Vcs::head`.
-- **Revert detection** (token waste) reads the head and the reverted
-  commits with `Vcs::head` / `Vcs::revision`.
 - **Workspace context** asks `detect` and the default branch from
   `branches()`.
 - **Text search** is `WorkspaceFiles::search_text`, no longer `git grep`.
