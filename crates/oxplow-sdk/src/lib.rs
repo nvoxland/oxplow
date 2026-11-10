@@ -521,6 +521,10 @@ pub fn scaffold_with(
         }
         Kind::Page | Kind::Query | Kind::Extension | Kind::Metric => {}
     }
+    if matches!(kind, Kind::Command | Kind::Job) {
+        // The fixture files a task first, and oxtask is oxplow-bundled's.
+        manifest.push_str("requires: [oxplow-bundled]\n");
+    }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
         // A command runs for real on the test's oxplow: the item it notes

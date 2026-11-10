@@ -107,7 +107,7 @@ logs the run, its canonical events and the records. The store's own
 async writes (tests) reach the interface only when restated
 (`test_fixtures::restate_task`).
 
-**A built-in list registers by declaration.** `oxplow-foundation` declares
+**A built-in list registers by declaration.** `oxplow-bundled` declares
 `implementations: [{ capability: task_tracker, id: oxplow, entry:
 "oxplow:oxtask" }]`; `tasks::register_built_ins` registers the
 provider each declared built-in names (`built_in_provider`, the factory:
@@ -294,7 +294,7 @@ The agent reads tasks through the interface too, with no tool of
 its own: `oxplow_query_sql` over `v_task` for a queue in order
 (`WHERE assignee = … ORDER BY rank IS NULL, rank, created_at`),
 `oxplow_read` on a task's URI for one item with its `links` and
-`comments`, the foundation page `oxplow/thread-tasks` (`oxplow_thread_tasks`:
+`comments`, the bundled page `oxplow/thread-tasks` (`oxplow_thread_tasks`:
 what is assigned to a thread and what its efforts finished), and
 `oxplow/next-task` (the tool `oxplow_next_task`, param `thread: "thr3"`)
 for what to pick up next: the ready items assigned to the thread (an epic
@@ -442,7 +442,7 @@ itself; the effort policy reacts to `state_changed`
 implementations, restated whole by the app's `CapabilityRegistry`
 (`crates/oxplow-app/src/capabilities.rs`) whenever what it holds or the
 choices change. oxtask is the `oxplow:oxtask` built-in, which
-`oxplow-foundation` declares (`implementations:`), with its features from
+`oxplow-bundled` declares (`implementations:`), with its features from
 core's built-in table; an external provider's row is there while its
 instance runs (`ProviderRegistry::publish`, a task tracker's
 features as `ExternalTaskTracker` reads them). **`active`** is the
@@ -511,7 +511,7 @@ the desktop decides — decorators (`ref-chip` / `row-badge`, `title="from
 <ext>"`), extension commands in the ☰, panels in the rail — is the spec's:
 it opens Git History, a commit and Uncommitted changes and asserts each
 page's core content and no marker of another extension. The task tracker
-itself (the `oxplow:oxtask` implementation) is foundation's, but its pages
+itself (the `oxplow:oxtask` implementation) is bundled's, and so are its pages
 (Board, Tasks, Backlog, a task) are `oxplow-bundled`'s: with only
 foundation they are not offered, and the spec asserts that. Their
 fixtures live in oxplow-bundled and cover them with the list. Another provider's item with every flag off gets

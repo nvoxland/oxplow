@@ -2,7 +2,7 @@
 when:
   page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow/task_tracker.oxtask"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow"
 expect:
   see_also:
     contains:

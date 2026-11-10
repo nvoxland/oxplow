@@ -3,8 +3,8 @@
 when:
   page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow/task_tracker.oxtask"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow"
 expect:
   nodes:
     - { id: about, kind: viz, viz: detail }
-  text: { contains: ["## About [node about]\n\nThe task tracker that oxplow keeps itself."] }
+  text: { contains: ["## About [node about]\n\nThe wiki that oxplow keeps in the project."] }

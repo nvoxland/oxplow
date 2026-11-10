@@ -268,6 +268,41 @@ mod tests {
         assert!(work.input_schema["properties"]["thread"].is_object());
     }
 
+    /// With only oxplow-foundation's declarations there is no task tracker
+    /// (oxtask is oxplow-bundled's), so the agent is offered neither
+    /// `oxplow_next_task` nor `oxplow_thread_tasks`; its other tools stay.
+    #[tokio::test]
+    async fn without_bundled_the_agent_has_no_task_tools() {
+        let fx = services_with_task_effort().await;
+        let svc = &fx.svc;
+        svc.config.write().unwrap().extensions = Vec::new();
+        std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
+        std::fs::write(
+            oxplow_config::config_path(&svc.layout.project_dir),
+            "extensions: []\n",
+        )
+        .unwrap();
+        svc.extension_catalog.changed();
+        activate_with_problems(svc).await;
+        let config = crate::config_service::read_config(&svc.config);
+        assert_eq!(svc.capabilities.active(&config, "task_tracker"), "none");
+        let names: Vec<String> = offered(svc, &agent(&fx))
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert!(names.contains(&"oxplow_query_sql".to_string()), "{names:?}");
+        assert!(
+            !names.contains(&"oxplow_next_task".to_string()),
+            "{names:?}"
+        );
+        assert!(
+            !names.contains(&"oxplow_thread_tasks".to_string()),
+            "{names:?}"
+        );
+    }
+
     /// A tool that spends the person's money asks before it runs: a model
     /// call changes no record, but its hint isn't read-only. The reads that
     /// cost nothing keep theirs.

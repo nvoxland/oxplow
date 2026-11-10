@@ -68,10 +68,14 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 ## The rule: data in foundation, person-facing screens here
 
 oxplow-foundation holds the data of the task tracker and the wiki: their
-datasets, the `task` and `wiki` resources, the `oxplow:oxtask` and
-`oxplow:wiki` implementations, the bus commands (with no `ui:`), skills,
-metrics and the agent's tool pages (`next-task`, `thread-tasks`). It has
-no page that a person uses to read or edit them.
+datasets, the `task` and `wiki` resources, the `oxplow:wiki`
+implementation, the bus commands (with no `ui:`), skills and metrics. It has
+no page that a person uses to read or edit them. The task tracker's
+commands (`oxplow.task.*`) and the generic `tasks` skill (`needs:
+[task_tracker]`) are foundation's, serving any tracker; **oxtask itself is
+oxplow-bundled's**: the `oxplow:oxtask` implementation, its `/next-task`
+skill and the agent's tool pages `next-task` and `thread-tasks`. With only
+foundation running there is no task tracker.
 
 oxplow-bundled holds that UI: the pages above and the menu commands.
 With oxplow-bundled off, a task or wiki link opens core's generic
