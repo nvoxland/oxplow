@@ -1499,6 +1499,11 @@ on with at once, with no projection lag:
   by one `tool_key`), else the job's record does; `cause_turn_id` and
   `cause_basis` are the job's start and its basis. Its `cause_ref` is the
   job's id.
+- **A subagent's stop ends its job** (its `SubagentStop`; a background
+  one's hand-back may come after and fills the report's turn). **Its tool
+  calls are the work of the turn that started it** (their turn anchor is
+  the job's started turn), also when they land after that turn ended or
+  while another turn runs.
 - **Lost** (`lost_at`, oxplow's own fact, not the harness's status) when
   its agent session ends, restarts or is closed before it reported: its
   process is gone. A tool call still running then is `abandoned` too (by

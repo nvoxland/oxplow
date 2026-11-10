@@ -3,10 +3,12 @@
 -- read whole. Every figure is read through the turn's own indexes.
 --
 -- Where its time went, once it ended: tool_ms is the union of its tool
--- calls' intervals (calls run in parallel), wait_ms the time its waits on
--- the person ran (a status `awaiting_user` until the next status change,
--- cut at the turn's end), other_ms the rest — the turn less the union of
--- both, so a permission wait inside a call is not counted twice.
+-- calls' intervals, each cut to the turn's span (calls run in parallel; a
+-- call can finish after an interrupt ended its turn), wait_ms the time its
+-- waits on the person ran (a status `awaiting_user` until the next status
+-- change, cut at the turn's end; a permission wait lasts until its tool
+-- finishes), other_ms the rest — the turn less the union of both, so
+-- nothing is counted twice.
 SELECT t.id AS turn_id, t.thread_id,
        CAST(uri('oxplow/turn', 'id', 'trn' || t.id) AS TEXT) AS turn,
        CAST((SELECT count(*) FROM source('event_log') e
@@ -29,16 +31,22 @@ SELECT t.id AS turn_id, t.thread_id,
                      FROM (SELECT c.s, c.e,
                                   max(c.e) OVER (ORDER BY c.s ROWS BETWEEN UNBOUNDED PRECEDING
                                                                    AND 1 PRECEDING) AS pe
-                             FROM (SELECT julianday(c.started_at) AS s,
-                                          julianday(coalesce(c.ended_at, t.ended_at)) AS e
+                             FROM (SELECT max(julianday(c.started_at), julianday(t.started_at)) AS s,
+                                          min(julianday(coalesce(c.ended_at, t.ended_at)),
+                                              julianday(t.ended_at)) AS e
                                      FROM source('agent_tool_call') c
-                                    WHERE c.turn_id = t.id AND c.state <> 'denied') c) u
+                                    WHERE c.turn_id = t.id AND c.state <> 'denied') c
+                            WHERE c.e > c.s) u
                  ) * 86400000), 0) END AS INTEGER) AS tool_ms,
+       -- A wait is entered once, however often its detail changes.
        CAST(CASE WHEN t.ended_at IS NULL THEN NULL ELSE (
-         SELECT count(*) FROM source('event_log') e
-          WHERE e.turn_id = t.id AND e.type = 'agent.status.changed'
-            AND json_extract(e.payload, '$.state') = 'awaiting_user'
-            AND julianday(e.at) < julianday(t.ended_at)) END AS INTEGER) AS waits,
+         SELECT count(*)
+           FROM (SELECT julianday(e.at) AS a, json_extract(e.payload, '$.state') AS st,
+                        lag(json_extract(e.payload, '$.state')) OVER (ORDER BY e.seq) AS prev
+                   FROM source('event_log') e
+                  WHERE e.turn_id = t.id AND e.type = 'agent.status.changed') w
+          WHERE w.st = 'awaiting_user' AND coalesce(w.prev, '') <> 'awaiting_user'
+            AND w.a < julianday(t.ended_at)) END AS INTEGER) AS waits,
        CAST(CASE WHEN t.ended_at IS NULL THEN NULL ELSE coalesce(round((
          SELECT sum(min(coalesce(w.nxt, w.fin), w.fin) - w.a)
            FROM (SELECT julianday(e.at) AS a, json_extract(e.payload, '$.state') AS st,
@@ -58,8 +66,9 @@ SELECT t.id AS turn_id, t.thread_id,
                      FROM (SELECT b.s, b.e,
                                   max(b.e) OVER (ORDER BY b.s ROWS BETWEEN UNBOUNDED PRECEDING
                                                                    AND 1 PRECEDING) AS pe
-                             FROM (SELECT julianday(c.started_at) AS s,
-                                          julianday(coalesce(c.ended_at, t.ended_at)) AS e
+                             FROM (SELECT max(julianday(c.started_at), julianday(t.started_at)) AS s,
+                                          min(julianday(coalesce(c.ended_at, t.ended_at)),
+                                              julianday(t.ended_at)) AS e
                                      FROM source('agent_tool_call') c
                                     WHERE c.turn_id = t.id AND c.state <> 'denied'
                                    UNION ALL
@@ -71,6 +80,7 @@ SELECT t.id AS turn_id, t.thread_id,
                                              FROM source('event_log') e
                                             WHERE e.turn_id = t.id
                                               AND e.type = 'agent.status.changed') w
-                                    WHERE w.st = 'awaiting_user' AND w.a < w.fin) b) u
+                                    WHERE w.st = 'awaiting_user' AND w.a < w.fin) b
+                            WHERE b.e > b.s) u
                  ) * 86400000), 0)) END AS INTEGER) AS other_ms
   FROM source('agent_turn') t
