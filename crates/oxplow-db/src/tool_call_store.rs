@@ -199,20 +199,33 @@ pub fn record_finish_tx(
     Ok(n == 1)
 }
 
-/// Turn `turn` ended at `at` with calls still running: they are
-/// `abandoned`, ended then.
+/// What owned the calls left running: the turn that ended, or the agent
+/// session that ended (a call made with no turn open, a background
+/// subagent's after the Stop, has only its session).
+#[derive(Debug, Clone, Copy)]
+pub enum CallOwner {
+    Turn(i64),
+    Session(i64),
+}
+
+/// `owner` ended at `at` with calls still running: they are `abandoned`,
+/// ended then, with no duration (they never finished).
 pub fn abandon_running_tx(
     conn: &rusqlite::Connection,
-    turn: i64,
+    owner: CallOwner,
     at: oxplow_domain::Timestamp,
 ) -> Result<usize, DomainError> {
     let at = crate::database::ts_to_string(at);
+    let (column, id) = match owner {
+        CallOwner::Turn(t) => ("turn_id", t),
+        CallOwner::Session(s) => ("agent_session_id", s),
+    };
     conn.execute(
-        "UPDATE agent_tool_call
-            SET state = 'abandoned', ended_at = ?2,
-                duration_ms = CAST(round((julianday(?2) - julianday(started_at)) * 86400000) AS INTEGER)
-          WHERE turn_id = ?1 AND state = 'running'",
-        rusqlite::params![turn, at],
+        &format!(
+            "UPDATE agent_tool_call SET state = 'abandoned', ended_at = ?2
+              WHERE {column} = ?1 AND state = 'running'"
+        ),
+        rusqlite::params![id, at],
     )
     .map_err(crate::database::map_sql_err)
 }

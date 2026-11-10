@@ -1856,9 +1856,13 @@ mod tests {
             )
             .unwrap();
         }
-        conn.execute(
-            "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (7, 1, 'p', 'a')",
-            [],
+        // An end no event recorded: told by its text, else unknown.
+        conn.execute_batch(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (7, 1, 'p', 'a');
+             INSERT INTO agent_turn (id, thread_id, prompt, answer, started_at, ended_at)
+               VALUES (8, 1, 'p', 'session ended', 'a', 'b');
+             INSERT INTO agent_turn (id, thread_id, prompt, answer, started_at, ended_at)
+               VALUES (9, 1, 'p', 'all done', 'a', 'b');",
         )
         .unwrap();
         embedded::migrations::runner().run(&mut conn).unwrap();
@@ -1880,6 +1884,8 @@ mod tests {
                 (5, outcome("session_closed"), None),
                 (6, outcome("restart"), None),
                 (7, None, None),
+                (8, outcome("session_ended"), None),
+                (9, outcome("unknown"), Some("all done".into())),
             ]
         );
         let events: Vec<(i64, String)> = conn

@@ -84,8 +84,31 @@
     - { not_null: id }
     - { unique: id }
     - { relationships: { column: agent_session_id, to: agent_session, field: id } }
+- name: agent_job
+  version: 2
+  description: "Background jobs an agent started — a background shell or subagent that runs on after the call that started it — from the hook that first showed it to its report. A job is `running` until its report (Claude Code's task notification, or a subagent's hand-back) comes, or `lost` when its session ended or restarted first. A subagent resumed under the same id after it reported is a new row."
+  fields:
+    - { name: "id", type: "INTEGER", doc: "Row id." }
+    - { name: "thread_id", type: "INTEGER", doc: "The thread (v_thread.id)." }
+    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that started it (v_agent_session.id); NULL when not known." }
+    - { name: "harness_job_id", type: "TEXT", doc: "The harness's own id for it (Claude Code's task id, a subagent's agent id): the one its report and a Stop's running work name." }
+    - { name: "kind", type: "TEXT", doc: "What it is, in the harness's word (`subagent`, `shell`, …); NULL when not said." }
+    - { name: "description", type: "TEXT", doc: "What it does, as the harness described it." }
+    - { name: "start_call_id", type: "TEXT", doc: "The harness's id of the tool call that started it (v_tool_call.call_id); NULL when no hook named it." }
+    - { name: "started_turn", type: "TEXT", doc: "The turn it was started in (its `uri`), as far as known: the turn of the call that started it, of a subagent's start, or whose Stop listed it running." }
+    - { name: "start_basis", type: "TEXT", doc: "How `started_turn` is known: `reported` (a hook named the call that started it, or the subagent's start) or `matched` (oxplow's guess: the turn whose Stop listed it running). NULL with no started turn. (v2)" }
+    - { name: "seen_at", type: "TEXT", doc: "When a hook first showed it (RFC 3339)." }
+    - { name: "report_turn", type: "TEXT", doc: "The turn its report opened or was delivered into (its `uri`); NULL while running." }
+    - { name: "reported_at", type: "TEXT", doc: "When it reported back; NULL while running." }
+    - { name: "status", type: "TEXT", doc: "How it ended, in the harness's word (`completed`, `failed`, `killed`, …); NULL while running or when not said." }
+    - { name: "summary", type: "TEXT", doc: "The harness's one-line summary of how it ended." }
+    - { name: "lost_at", type: "TEXT", doc: "When its agent session ended or restarted before it reported: oxplow's own fact, not the harness's status. NULL otherwise. (v2)" }
+    - { name: "state", type: "TEXT", doc: "`running` (no report yet), `reported`, or `lost` (its session ended or restarted first). (v2: `lost`)" }
+  tests:
+    - { not_null: id }
+    - { unique: id }
 - name: agent_turn
-  version: 14
+  version: 15
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   fields:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -110,9 +133,8 @@
     - { name: "cause_ref", type: "TEXT", doc: "The harness's own name for the cause: the tool call id that started the job, the subagent's id, the sender's socket. NULL when it gave none. (v12)" }
     - { name: "cause_basis", type: "TEXT", doc: "How `cause_turn` is known: `reported` (the harness named it) or `matched` (oxplow matched it from what it saw). NULL with no cause turn. Best effort either way. (v12)" }
     - { name: "sender", type: "TEXT", doc: "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)" }
-    - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery). NULL while running. (v13)" }
-    - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v14)" }
-    - { name: "left_running", type: "TEXT", doc: "JSON array of the jobs and subagents still running when the turn ended (`{id, kind?, description?}`, the id the report back names), as its harness reported (Claude Code's Stop `background_tasks`); `[]` for none; NULL when the harness said nothing or while running. (v13)" }
+    - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery), `unknown` (an old turn whose end left no trace). NULL while running. (v13; v14: `unknown`, no `left_running`: a Stop's running work is on its `agent.turn.ended` and in v_agent_job)" }
+    - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v15)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -1901,7 +1923,7 @@
     - { unique: id }
     - { relationships: { column: thread_id, to: thread, field: id } }
 - name: tool_call
-  version: 5
+  version: 6
   description: "Every tool call the agent made — reads, edits, commands — from its request to its finish: running, finished, denied by the policy, or abandoned when its turn ended with it open."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -1919,10 +1941,10 @@
     - { name: "subagent_id", type: "TEXT", doc: "The subagent it ran inside, when the harness or the Task call bracketing it says so; NULL for the session's own. (v4)" }
     - { name: "subagent_kind", type: "TEXT", doc: "That subagent's kind (`Explore`, `task`, …). (v4)" }
     - { name: "call_id", type: "TEXT", doc: "The harness's id for the call (Claude Code's `tool_use_id`); NULL when it gave none or for a call recorded before. (v5)" }
-    - { name: "state", type: "TEXT", doc: "`running` (requested, not finished), `finished`, `denied` (the policy refused it; it never ran) or `abandoned` (its turn ended with it running). (v5)" }
+    - { name: "state", type: "TEXT", doc: "`running` (requested, not finished), `finished`, `denied` (the policy refused it; it never ran) or `abandoned` (its turn, or its agent session, ended with it running). (v5)" }
     - { name: "started_at", type: "TEXT", doc: "When it was requested (RFC 3339); NULL when no request was seen (a harness that reports only the finish). (v5)" }
     - { name: "ended_at", type: "TEXT", doc: "When it finished, was denied, or was abandoned; NULL while running. (v5)" }
-    - { name: "duration_ms", type: "INTEGER", doc: "How long it ran, in milliseconds: the harness's own timing when it gave one (Claude Code's `duration_ms`), else `ended_at - started_at`; NULL while running or with no start. (v5)" }
+    - { name: "duration_ms", type: "INTEGER", doc: "How long it ran, in milliseconds: the harness's own timing when it gave one (Claude Code's `duration_ms`), else `ended_at - started_at`; NULL while running, with no start, and when it never finished (denied, abandoned). (v5; v6: none for an abandoned call)" }
   tests:
     - { not_null: id }
     - { unique: id }

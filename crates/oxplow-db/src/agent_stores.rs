@@ -318,12 +318,12 @@ impl<'a> TurnOpening<'a> {
         }
     }
 
-    /// The same, going on with `cause`, the turn its harness named
-    /// (`reported`); unchanged with none.
-    pub fn caused_by(self, cause: Option<AgentTurnId>) -> Self {
+    /// The same, going on with `cause`, known as `basis`; unchanged with
+    /// no cause.
+    pub fn caused_by(self, cause: Option<AgentTurnId>, basis: CauseBasis) -> Self {
         TurnOpening {
             cause_turn: cause,
-            cause_basis: cause.map(|_| CauseBasis::Reported),
+            cause_basis: cause.map(|_| basis),
             ..self
         }
     }
@@ -408,7 +408,8 @@ pub struct TurnEnd<'a> {
     pub context_tokens: Option<i64>,
     /// The size of that context's window, when its harness said.
     pub context_window: Option<i64>,
-    /// The work still running when it ended, when its harness said.
+    /// The work still running when it ended, when its harness said: on
+    /// the event only (`agent_job` is the record of each job).
     pub left_running: Option<&'a [oxplow_domain::hook::RunningWork]>,
     /// The harness's own words for an error that ended it.
     pub error: Option<&'a str>,
@@ -441,16 +442,11 @@ pub fn close_turn_tx(
     id: AgentTurnId,
     end: &TurnEnd<'_>,
 ) -> Result<Option<ThreadId>, DomainError> {
-    let left_running = end
-        .left_running
-        .map(serde_json::to_string)
-        .transpose()
-        .map_err(|e| DomainError::Storage(e.to_string()))?;
     let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
                     model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7,
-                    outcome = ?8, left_running = ?9, error = ?10
+                    outcome = ?8, error = ?9
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
             params![
@@ -462,7 +458,6 @@ pub fn close_turn_tx(
                 end.context_tokens,
                 end.context_window,
                 end.outcome.as_str(),
-                left_running,
                 end.error
             ],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -624,6 +619,8 @@ pub fn close_session_tx(
         return Ok(false);
     }
     let end = TurnEnd::new(now, TurnOutcome::SessionClosed);
+    // Its jobs will never report.
+    crate::agent_job_store::lose_unreported_tx(conn, row.thread_id, Some(session), now)?;
     let mut closed = None;
     for id in open_turn_ids_in_tx(conn, row.thread_id, Some(session))? {
         if close_turn_tx(conn, ev, id, &end)?.is_some() && closed.is_none() {
