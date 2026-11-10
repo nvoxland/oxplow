@@ -226,8 +226,8 @@ native messaging"): taking one moves its item.
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
 - Nothing the agent must call to close work. `oxplow.effort.report {thread?,
-  summary?, impacts?, claims?}` is optional and only annotates the thread's open
-  (else latest) effort (claims it states land in `v_claim` as `recorded`); `v_effort.summary` defaults to the effort's last
+  summary?, impacts?}` is optional and only annotates the thread's open
+  (else latest) effort; `v_effort.summary` defaults to the effort's last
   turn's final message.
 - "Waiting on you" is derived (a pending question or plan approval, the
   Notification hook's permission prompt, a final message ending in a
@@ -257,12 +257,12 @@ datasets, a trigger, pacing, and an audience.
 Core collects and analyzes; whether the result is good enough is a
 review policy's, and a policy is an extension. Core owns the evidence
 (test runs and cases with their provenance, coverage and diff coverage,
-the change analysis, metric facts, claims and what they cite), its
+the change analysis, metric facts), its
 attribution to efforts, its freshness, schema validation and the safe
 operations that write it. A policy reads that evidence through the `v_*`
 datasets, adds facts of its own (collectors, measures, dimensions), and
 says what it concluded through public contributions: a dataset, a page, a
-decorator, the `effort.verdict` replacement, commands.
+decorator, commands.
 
 oxplow-bundled and oxplow-foundation are the default policy. Another
 replaces them piece by piece: `examples/extensions/schema-review` is a
@@ -270,14 +270,11 @@ whole alternative review built that way.
 
 | Judgement | Where it lives | Knob |
 |---|---|---|
-| An effort's verdict (tests, diff coverage, claims, decisions) | oxplow-bundled `effort-verdict`, the `effort.verdict` replacement; core shows none | `oxplow.coverage.abs_pct` `warnAt`; replace the target |
-| A claim is backed (a person verified it, it cites evidence, or a latest green run backs `tests pass`); a dismissed claim counts for nothing | oxplow-bundled `claim_status`; core `v_claim` keeps only what it cites and its `review` (NULL, `verified`, `dismissed`) | fork the model |
 | Struggle (a file edited 5+ times, 3+ failed shell commands) | oxplow-bundled `struggle` | `struggle.repeatedEdits`, `struggle.failedCommands` |
 | Per-effort test outcome and time to green | oxplow-foundation collector `oxplow.effort_test_outcome` | metric specs over its facts |
 | Look here first, co-change surprise, deviation, tests weakened | oxplow-bundled datasets and pages | `changeInterest.*`, `coChange.*`; the rest fork |
 | Metric thresholds (coverage 80/50, complexity > 10, length > 60) | oxplow-foundation metric specs | `metrics: [{ use: …, target, warnAt, failAt }]` |
 | Advisories (15-file uncommitted, threshold crossed, landed in progress, two threads on one file) | oxplow-bundled advisories | `largeUncommitted.files`, `sharedFiles.windowMinutes`; the rest fork |
-| Accept / request changes and their verdict events | oxplow-bundled commands | another extension's commands |
 
 **What stays in core, and why.** These are collection's own mechanics
 or operational limits, not a view of what good work is:
@@ -305,10 +302,8 @@ window, per-commit file cap, dormant days) and `struggle.*`, set with
 `oxplow.advisory_policy.write`. All default to today's values. A metric's `target` / `warnAt` / `failAt` stay
 tunable from `project.yaml`.
 
-**Gaps.** The complexity and length cut-offs of the metric specs, the
-"look here first" reason threshold (a factor of 1.2) and the verdict's
-rules are still fixed in the extension; the verdict is replaced by another
-extension, not tuned.
+**Gaps.** The complexity and length cut-offs of the metric specs and the
+"look here first" reason threshold (a factor of 1.2) are still fixed in the extension.
 
 ## Capabilities
 
@@ -448,6 +443,6 @@ The four in progress:
   declares its id pattern, and a loose id in a command (`tsk12`) is the
   active list's item.
   The app's test fixture opens an effort with no task; only tests about
-  tasks make one (which found a claim on an unlinked effort failing).
+  tasks make one.
 - Next: "none" as a task tracker end to end, then the other three
   capabilities in the table (the effort policy, snapshots, knowledge).

@@ -1094,7 +1094,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
     bus.register_namespace(
         "oxplow",
         "oxplow:oxplow/extension?name=oxplow-bundled",
-        vec![cmd("oxplow.review.accept")],
+        vec![cmd("oxplow.tasks.clear_finished")],
     )
     .unwrap();
     assert_eq!(bus.namespace_owner("oxplow").as_deref(), Some("oxplow"));
@@ -1102,7 +1102,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
     // Unregistering a source takes only its commands.
     assert_eq!(
         bus.unregister_source("oxplow:oxplow/extension?name=oxplow-bundled"),
-        vec!["oxplow.review.accept".to_string()]
+        vec!["oxplow.tasks.clear_finished".to_string()]
     );
     assert!(bus.input_schema("oxplow.kv.set").is_some());
     assert_eq!(

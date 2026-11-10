@@ -4,7 +4,7 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: What comes with oxplow and hasn't been cleaned up yet; contributions move to oxplow-bundled one piece at a time, and this goes away when none are left. The effort review packet and its verdicts, metric and coverage guidance for the agent, and the usage, quality and change analysis pages.
+description: What comes with oxplow and hasn't been cleaned up yet; contributions move to oxplow-bundled one piece at a time, and this goes away when none are left. The effort review, metric and coverage guidance for the agent, and the usage, quality and change analysis pages.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
 # their own SQL, its jobs and effects ask models, its churn collector reads
@@ -16,17 +16,13 @@ permissions: [sql.read, files.read, ai.compute, agent.write]
 build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
-    Show what a reviewer must check before accepting an agent's work — the
-    decisions it made, the claims it didn't verify, where it deviated or
-    struggled, the tests it weakened — and how the effort moved the code:
+    Show what a reviewer must check in an agent's work — where it deviated
+    or struggled, the tests it weakened — and how the effort moved the code:
     coverage and tests, metric deltas and thresholds, churn, duplication and
     co-change. Steer the agent toward tests and thresholds while the effort
     is open, and show what is waiting on the person.
   origin: null
   examples:
-    - name: an effort that claimed passing tests without a run
-      input: { part: unverified-claims, params: { effort_id: 1 } }
-      expect: the claim listed with no verifying test run
     - name: settings-lists-a-replaced-component-and-choosing-one-is-a-config-write
       input: { page: oxplow/settings, params: { area: integrations } }
       expect: the history graph's replacement can be chosen
@@ -57,36 +53,6 @@ intent:
     - name: repair-skips-without-a-task-tracker
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
       expect: nothing filed when no task tracker is running
-    - name: verify-unchecked-files-an-item
-      input: { effect: verify-unchecked, event: { type: oxplow.review.accepted, v: 1 } }
-      expect: an acceptance that left a claim unverified files one follow-up about the effort
-    - name: infer-reasoning-asks
-      input: { effect: infer-reasoning, event: { type: effort.finished } }
-      expect: a finished effort's decisions and claims are asked about when a model serves the reasoning profile
-    - name: infer-reasoning-skips-unbound
-      input: { effect: infer-reasoning, event: { type: effort.finished } }
-      expect: no model bound, nothing is asked and the skip says where to bind one
-    - name: infer-reasoning-request
-      input: { command: oxplow.effort.infer_reasoning }
-      expect: the effort's conversation (each turn's final answer included), tool calls and recorded decisions become one reasoning job keyed by the effort
-    - name: infer-reasoning-nothing-to-read
-      input: { command: oxplow.effort.infer_reasoning }
-      expect: an effort with no turns or tool calls asks nothing
-    - name: reasoning-asked
-      input: { job: reasoning }
-      expect: the model's JSON proposals (decisions and claims) are the job's answer
-    - name: reasoning-stored
-      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
-      expect: the job's proposals replace the effort's inferred decisions and its unreviewed claims
-    - name: reasoning-not-json
-      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
-      expect: a reply in prose is skipped, saying so
-    - name: reasoning-only-claims
-      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
-      expect: a reply with one list still runs both writers, clearing the other's stale proposals
-    - name: reasoning-no-lists
-      input: { effect: store-reasoning, event: { type: contribution.job.completed } }
-      expect: a JSON object with neither list is skipped, saying so
     - name: waiting-on-me-lists-handoffs-no-agent-is-there-for
       input: { page: oxplow/waiting-on-me }
       expect: a handoff to a thread with no agent session, gone once an agent session is open there
@@ -114,57 +80,9 @@ intent:
     - name: struggle-needs-five-edits-or-three-failures
       input: { sql: v_oxplow_struggle }
       expect: one fewer of each is no struggle
-    - name: a-claim-is-backed-by-evidence-or-its-efforts-latest-clean-run
-      input: { sql: v_oxplow_claim_status }
-      expect: a claim is backed by cited evidence, or by its effort's latest clean run
-    - name: claim-status-counts-verified-claims-and-leaves-out-dismissed-ones
-      input: { sql: v_oxplow_claim_status }
-      expect: a verified claim is backed; a dismissed one is not counted
-    - name: the-effort-verdict-says-what-a-reviewer-needs-first
-      input: { part: effort-verdict }
-      expect: the verdict says whether it tested, how much ran and what is left to check
-    - name: accept-refuses-unreviewed-work-unless-forced
-      input: { command: review.accept }
-      expect: accept-refuses-unreviewed-work-unless-forced
-    - name: accept-after-review-needs-no-force
-      input: { command: review.accept }
-      expect: accept-after-review-needs-no-force
-    - name: a-dismissed-claim-does-not-hold-up-accept-until-reopened
-      input: { command: review.accept }
-      expect: a-dismissed-claim-does-not-hold-up-accept-until-reopened
-    - name: an-agent-accepts-a-review-through-a-page-unasked
-      input: { command: review.accept }
-      expect: an-agent-accepts-a-review-through-a-page-unasked
-    - name: accept-asks-a-person-first
-      input: { command: review.accept }
-      expect: unconfirmed, accept runs nothing
     - name: a-disabled-contribution-files-a-repair-item-and-a-repeat-comments
       input: { event: contribution.disabled }
       expect: one repair item while open, a comment on a repeat, a new item once closed
-    - name: a-claim-statement-stays-one-checklist-line
-      input: { command: review.accept }
-      expect: a claim cannot add items to the follow-up
-    - name: a-clean-acceptance-files-nothing
-      input: { command: review.accept }
-      expect: a clean acceptance files nothing
-    - name: request-changes-lists-what-to-fix-and-reopens-the-item
-      input: { command: review.request_changes }
-      expect: a checklist of what to fix, and the item back to ready
-    - name: the-accept-comment-holds-a-claim-as-inert-text
-      input: { command: review.accept }
-      expect: a claim is inert text in the review comment
-    - name: the-request-changes-comment-holds-a-claim-as-inert-text
-      input: { command: review.request_changes }
-      expect: a claim is inert text in the checklist
-    - name: the-review-pages-declare-their-row-actions
-      input: { part: unverified-claims }
-      expect: Mark Verified, Dismiss and Reopen on a claim row
-    - name: inferred-decisions-offer-confirm-and-dismiss
-      input: { part: inferred-decisions }
-      expect: Confirm and Dismiss on an inferred decision
-    - name: the-review-verbs-log-a-typed-verdict
-      input: { command: review.request_changes }
-      expect: each review verb logs its typed verdict, a refused one none
     - name: the-interest-dataset-scores-a-change-like-the-old-formula
       input: { sql: v_oxplow_change_interest }
       expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
@@ -174,9 +92,6 @@ intent:
     - name: co-change-surprises-come-from-the-commit-index
       input: { sql: v_oxplow_change_co_change }
       expect: a file whose usual partners are missing, or that was dormant 90 days, is a surprise
-    - name: a-verdict-decorates-its-effort
-      input: { sql: v_oxplow_verdict }
-      expect: "the latest verdict is the effort's label and color — changes requested is red, a forced acceptance orange"
     - name: the-history-graph-draws-lanes-filters-and-opens-a-commit
       input: { page: oxplow/git-history }
       expect: a row per commit, a lane for a merge's second parent, a filter that dims, a row that opens its commit
@@ -192,21 +107,12 @@ intent:
     - name: settings-data-area-lists-bundled-effects
       input: { page: oxplow/settings, params: { area: data } }
       expect: Settings → Data lists bundled's four effects
-    - name: settings-ai-area-lists-bundleds-role
-      input: { page: oxplow/settings, params: { area: ai } }
-      expect: Settings → AI lists bundled's reasoning role, bound to nothing
     - name: waiting-on-me-lists-a-question-the-agent-asked
       input: { page: waiting-on-me }
       expect: a question the agent's last message asked is waiting on the person until a prompt moves it on
     - name: what-deviated-lists-files-outside-the-tasks-stated-area
       input: { part: what-deviated, params: { effort_id: 1 } }
       expect: files outside the area the task names; none when it names no area
-    - name: review-prompt-names-the-task-and-what-changed
-      input: { part: review-prompt, params: { effort_id: 1 } }
-      expect: the prompt names the task, its files and claims; a foreign task is named
-    - name: review-starters-read-the-viewers-streams-decisions-and-claims
-      input: { page: recent-decisions }
-      expect: the stream's decisions and unbacked claims, for the viewer's stream only
     - name: thread-activity-lists-turns-by-effort
       input: { page: thread-activity, params: { thread_id: 1 } }
       expect: each turn under its effort; turns outside any effort under their own heading
@@ -219,9 +125,6 @@ intent:
     - name: waiting-on-me-alerts-while-anything-waits
       input: { page: waiting-on-me }
       expect: the alert fires, with a count, while anything waits on the person
-    - name: a-forced-acceptance-files-one-verify-follow-up
-      input: { command: oxplow.review.accept, input: { effort: eff1, force: true } }
-      expect: a forced acceptance files one verify checklist item; a second files nothing
     - name: tests-weakened-reports-deleted-tests-fewer-assertions-and-skips
       input: { part: tests-weakened }
       expect: deleted tests, fewer assertions and new skips in a change
@@ -329,9 +232,6 @@ ui:
     - { page: effort-nudges, at: oxplow/diff-view.sections }
     - { page: effort-plan, at: oxplow/diff-view.sections }
     - { page: file-co-change, at: oxplow/diff.file-header }
-    - { page: decisions, at: oxplow/diff-view.sections }
-    - { page: inferred-decisions, at: oxplow/diff-view.sections }
-    - { page: unverified-claims, at: oxplow/diff-view.sections }
     - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: tests-weakened, at: oxplow/diff-view.sections }
     - { page: tests-weakened, at: oxplow/commit.sections }
@@ -339,14 +239,10 @@ ui:
     - { page: struggled, at: oxplow/diff-view.sections }
     - { page: session-files, at: oxplow/diff-view.sections }
     - { page: context-read, at: oxplow/diff-view.sections }
-    - { page: review-prompt, at: oxplow/diff-view.sections }
     # Git History's commits drawn as a graph, in place of oxplow's plain
     # list (`vcs.history.graph`, a target no provider binds). It only shows
     # and opens commits, so it isn't a program to approve.
     - { page: history-graph, at: vcs.history.graph, version: 2 }
-    # The effort's verdict on its page (`effort.verdict`): core has none;
-    # this is oxplow's default review policy's, and another may replace it.
-    - { page: effort-verdict, at: effort.verdict, version: 1 }
 custom_components:
   # Explore Data: an SQL box and a viz picker over the datasets; oxplow draws
   # the result under it with its own components (`showView`: an inline page).
@@ -605,50 +501,15 @@ configuration:
   defaults:
     largeUncommitted: { files: 15 }
     sharedFiles: { windowMinutes: 60 }
-# Inferred reasoning: when an effort finishes, a model reads what the agent
-# did, in one call, and proposes the forks it resolved without recording
-# them and the claims its answers made about its work. They land as the
-# effort's inferred decisions and claims (core's
-# `oxplow.effort.replace_inferred_decisions` and `…replace_inferred_claims`),
-# for a person to confirm, verify or dismiss on the review page; the agent
-# never sees them. The model is the person's `oxplow/reasoning`
-# binding, else their Main model.
-ai_profiles:
-  - id: reasoning
-    description: Finds the forks a coding agent resolved without recording them and the claims its answers made about its work.
-    fallback: main
-jobs:
-  - id: reasoning
-    description: Read what the agent did during one effort and propose the decisions it made without recording them and the claims its answers made.
-    version: 1
-    operation: ai.complete_typed
-    needs: [ai.compute]
-    timeout: 120
 # Effects are programs: a person approves each before it reacts, bundled
 # or not. `repair-disabled` files nothing until it is approved (and stops
-# when the approval is taken back); `verify-unchecked` likewise.
+# when the approval is taken back).
 effects:
-  - id: verify-unchecked
-    summary: After an acceptance that left claims unverified or decisions inferred, file one item to verify them.
-    on: [oxplow.review.accepted]
-    entry: effects/verify_unchecked.star
-    needs: [sql.read]
   - id: repair-disabled
     summary: When an extension's contribution is disabled after repeated failures, file one repair item on the active task tracker (comment on it while it is open).
     on: [contribution.disabled]
     entry: effects/repair_disabled.star
     needs: [sql.read]
-  - id: infer-reasoning
-    summary: When an effort finishes, ask a model which decisions the agent made without recording them and which claims its answers made (skipped while no model serves the reasoning profile).
-    on: [effort.finished]
-    entry: effects/infer_reasoning.star
-    needs: [ai.discover]
-  - id: store-reasoning
-    summary: When a reasoning job ends, its proposals replace the effort's inferred decisions and its unreviewed claims.
-    on: [contribution.job.completed]
-    where: { job: "oxplow/reasoning" }
-    entry: effects/store_reasoning.star
-    needs: [jobs.read]
 commands:
   - name: advisory_policy.read
     summary: The advisories' effective settings, where each came from, and the stamps a write needs.
@@ -660,35 +521,6 @@ commands:
     scope: extension_config.write
     op: compare_exchange
     example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"largeUncommitted": {"files": 20}}}, "personal": null}
-  # The reasoning job's lifecycle, through the host's jobs scope.
-  - name: reasoning.ask
-    summary: Ask a model for one effort's unrecorded decisions and the claims its answers made; returns the job. The intent key `reasoning:<effort id>` makes it one job per effort.
-    scope: jobs.write
-    op: enqueue
-    example: {"job": "reasoning", "intentKey": "reasoning:eff3", "request": {"schemaVersion": 1, "role": "reasoning", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Task: Add CSV export"}]}]}}
-  - name: reasoning.status
-    summary: A reasoning job's state and, once it ends, its answer.
-    scope: jobs.read
-    op: snapshot
-    example: {"job_run": "7c1d2a9e-3b4f-4e6a-9d10-5f8a2b6c7e31"}
-  - name: reasoning.cancel
-    summary: Stop a reasoning job.
-    scope: jobs.write
-    op: cancel
-    example: {"job_run": "7c1d2a9e-3b4f-4e6a-9d10-5f8a2b6c7e31"}
-  - name: effort.infer_reasoning
-    summary: Ask a model which decisions the agent made during one effort without recording them, and which claims its answers made about its work; they appear under Decisions Oxplow Noticed and the effort's claims for review. One job per effort, unless `again`.
-    entry: handlers/infer_reasoning.star
-    needs: [sql.read]
-    access: record
-    input_schema:
-      type: object
-      required: [effort]
-      additionalProperties: false
-      properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        again: { type: boolean, description: "Ask a new job even though one was asked for this effort (a changed binding or new activity answers afresh)." }
-    example: {"effort": "eff3"}
   # The person's menu entries for foundation's wiki, handoff and effort
   # commands. Foundation keeps the commands (an agent runs them);
   # these add the labels, shortcuts and forms a person uses.

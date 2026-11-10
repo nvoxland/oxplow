@@ -1705,42 +1705,8 @@ mod core_tests {
         );
     }
 
-    /// A decision is found by its question and by the choice, why or
-    /// alternatives it holds.
-    #[tokio::test]
-    async fn a_decision_is_found_by_what_it_decided() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
-        change_loop(&svc);
-        let t = thread.id.value();
-        svc.db
-            .transaction(move |tx| {
-                tx.execute(
-                    "INSERT INTO decision (thread_id, question, choice, alternatives_json, confidence, why, created_at)
-                     VALUES (?1, 'Which cache eviction', 'use the clock sweep', '[\"lru\",\"fifo\"]', 'high',
-                             'because of the pangolin workload', '2026-10-01T00:00:00.000000Z')",
-                    [t],
-                )
-                .map_err(oxplow_db::map_sql_err)?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        eventually("found by the question", || {
-            found(&svc, "eviction", Some(stream.id), "oxplow/decision")
-        })
-        .await;
-        for word in ["pangolin", "sweep", "fifo"] {
-            assert!(
-                found(&svc, word, Some(stream.id), "oxplow/decision").await,
-                "{word}"
-            );
-        }
-    }
-
     /// A feed whose rows only appear is read on from the highest `seq` it
-    /// indexed when the inputs saw inserts only: one new decision is one row
+    /// indexed when the inputs saw inserts only: one new turn is one row
     /// read, and the index is what a whole restate makes. A rewrite (`full`)
     /// reads the whole feed again.
     #[tokio::test]
@@ -1751,15 +1717,15 @@ mod core_tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let t = thread.id.value();
-        let decide = |question: &'static str| {
+        let decide = |prompt: &'static str| {
             let svc = svc.clone();
             async move {
                 svc.db
                     .transaction(move |tx| {
                         tx.execute(
-                            "INSERT INTO decision (thread_id, question, choice, alternatives_json, confidence, why, created_at)
-                             VALUES (?1, ?2, 'a choice', '[]', 'high', 'a reason', '2026-10-01T00:00:00.000000Z')",
-                            rusqlite::params![t, question],
+                            "INSERT INTO agent_turn (thread_id, prompt, answer, started_at, ended_at)
+                             VALUES (?1, ?2, 'an answer', '2026-10-01T00:00:00.000000Z', '2026-10-01T00:05:00.000000Z')",
+                            rusqlite::params![t, prompt],
                         )
                         .map_err(oxplow_db::map_sql_err)?;
                         Ok(())
@@ -1771,7 +1737,7 @@ mod core_tests {
         for q in ["First question", "Second question", "Third question"] {
             decide(q).await;
         }
-        let index = index_of(&svc, "oxplow/decision").await;
+        let index = index_of(&svc, "oxplow/turn").await;
         index.recompute(true).await.unwrap();
         assert_eq!(index.rows_read.load(Ordering::SeqCst), 3, "a whole read");
 
@@ -1782,7 +1748,7 @@ mod core_tests {
             1,
             "one new row, one row read"
         );
-        let incremental = entries(&svc, "oxplow/decision").await;
+        let incremental = entries(&svc, "oxplow/turn").await;
         assert_eq!(incremental.len(), 4);
 
         // The index is what a whole restate makes, and a recompute with
@@ -1791,7 +1757,7 @@ mod core_tests {
         assert_eq!(index.rows_read.load(Ordering::SeqCst), 0);
         index.recompute(true).await.unwrap();
         assert_eq!(index.rows_read.load(Ordering::SeqCst), 4);
-        assert_eq!(entries(&svc, "oxplow/decision").await, incremental);
+        assert_eq!(entries(&svc, "oxplow/turn").await, incremental);
     }
 
     /// A commit is found by its subject, its message, its author and a

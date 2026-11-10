@@ -1,18 +1,4 @@
-# What an agent should be able to answer about an effort's review packet.
-- question: Which of this effort's claims does nothing back up?
-  about: oxplow/effort
-  skill: README.md
-  reaches:
-    sql: SELECT c.id, c.statement, c.kind FROM v_claim c JOIN v_oxplow_claim_status s ON s.uri = c.uri WHERE c.effort_id = 1 AND s.verified = 0
-  shape: { columns: [id, statement, kind] }
-- question: Which decisions did oxplow infer for this effort that nobody has reviewed?
-  about: oxplow/effort
-  skill: README.md
-  reaches:
-    sql: >-
-      SELECT id, question, choice FROM v_decision
-      WHERE effort_id = 1 AND provenance = 'inferred'
-  shape: { columns: [id, question, choice] }
+# What an agent should be able to answer about an effort's review.
 - question: Which files did this effort change outside its task's area?
   about: oxplow/effort
   skill: README.md

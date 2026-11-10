@@ -4529,7 +4529,7 @@ mod tests {
         assert_eq!(subscribes("acme", &[], "acme.closed"), Subscribes::Unknown);
         assert_eq!(subscribes("acme", &[], "other.closed"), Subscribes::Foreign);
         assert_eq!(
-            subscribes("oxplow", &[], "oxplow.review.accepted"),
+            subscribes("oxplow", &[], "oxplow.tasks.finished_cleared"),
             Subscribes::Foreign
         );
         assert_eq!(subscribes("oxplow", &[], "task.nope"), Subscribes::Unknown);
@@ -6481,8 +6481,6 @@ commands:
             [
                 "oxplow.review_policy.read",
                 "oxplow.review_policy.write",
-                "oxplow.review.accept",
-                "oxplow.review.request_changes",
                 "oxplow.tasks.clear_finished",
                 "oxplow.effort.link_to_task",
                 "oxplow.task.new"
@@ -6495,14 +6493,11 @@ commands:
             [
                 "change_co_change",
                 "change_interest",
-                "claim_status",
                 "co_change_pair",
                 "deviation",
                 "finished_cleared",
                 "struggle",
-                "thread_tasks",
-                "verdict",
-                "verdicts"
+                "thread_tasks"
             ]
         );
         // Every shipped page's SQL and advisory runs against a real schema

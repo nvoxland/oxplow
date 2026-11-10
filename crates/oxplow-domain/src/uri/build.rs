@@ -150,7 +150,7 @@ pub fn id_of(text: &str, resource: &str) -> Result<String, NotA> {
 }
 
 /// The key of a `resource` URI, parsed as `T` (`oxplow:oxplow/effort?id=eff12`
-/// → `EffortId(12)`, a decision's → `3`).
+/// → `EffortId(12)`, a proposal's → `3`).
 pub fn parse_as<T: FromStr>(text: &str, resource: &str) -> Result<T, NotA> {
     id_of(text, resource)?
         .parse()
@@ -431,16 +431,6 @@ pub fn proposal_uri(id: i64) -> String {
     keyed(r::PROPOSAL, &id.to_string())
 }
 
-/// A claim an agent made about its work (`claim.id`).
-pub fn claim_uri(id: i64) -> String {
-    keyed(r::CLAIM, &id.to_string())
-}
-
-/// A decision an agent recorded or oxplow inferred (`decision.id`).
-pub fn decision_uri(id: i64) -> String {
-    keyed(r::DECISION, &id.to_string())
-}
-
 /// A collector, by its owner and id (`collector_run.owner`/`id`).
 pub fn collector_uri(owner: &str, id: &str) -> String {
     keyed(r::COLLECTOR, &format!("{owner}/{id}"))
@@ -645,15 +635,15 @@ mod tests {
     #[test]
     fn a_uri_reads_back_through_the_grammar() {
         assert_eq!(id_of(&wiki_uri("a b"), r::WIKI).unwrap(), "a b");
-        assert_eq!(parse_as::<i64>(&decision_uri(3), r::DECISION).unwrap(), 3);
+        assert_eq!(parse_as::<i64>(&proposal_uri(3), r::PROPOSAL).unwrap(), 3);
         assert_eq!(
             parse_as::<ThreadId>(&thread_uri(ThreadId::new(3)), r::THREAD).unwrap(),
             ThreadId::new(3)
         );
-        let e = parse_as::<i64>(&claim_uri(3), r::DECISION).unwrap_err();
+        let e = parse_as::<i64>(&proposal_uri(3), r::RUN).unwrap_err();
         assert_eq!(
             e.to_string(),
-            "`oxplow:oxplow/claim?id=3` isn't an oxplow/decision URI (oxplow:oxplow/decision?…)"
+            "`oxplow:oxplow/proposal?id=3` isn't an oxplow/run URI (oxplow:oxplow/run?…)"
         );
         assert!(
             id_of(&file_uri("a.rs"), r::FILE).is_err(),

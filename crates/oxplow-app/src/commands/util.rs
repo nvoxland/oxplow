@@ -109,7 +109,7 @@ mod tests {
             StreamId::new(1)
         );
         assert_eq!(
-            bare_id::<i64>("7", oxplow_domain::uri::resources::CLAIM, "/claim").unwrap(),
+            bare_id::<i64>("7", oxplow_domain::uri::resources::PROPOSAL, "/proposal").unwrap(),
             7
         );
         for raw in ["str1", "", "3", "thread:thr3", "nope"] {

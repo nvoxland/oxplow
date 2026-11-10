@@ -32,7 +32,7 @@ its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
 for a kind whose names are already global (`ContributionKind::global_name`:
 command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
-`oxplow:oxplow/command?command=oxplow.review.accept`,
+`oxplow:oxplow/command?command=oxplow.tasks.clear_finished`,
 `oxplow:oxplow/metric?metric=acme.todos`.
 Storage (`v_contribution.uri`, `v_extension_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
@@ -80,7 +80,7 @@ namespace), `effect_state`/`effect_run`, jobs, `panel_layout`, settings
 (`extension_config.namespace`), private state (`extension_state.namespace`),
 collector and instance credentials and extension secrets (keychain
 accounts). Everything oxplow ships is in `oxplow`, so a user sees
-`v_oxplow_verdict`, `oxplow.review.accepted` and `oxplow/collectors`
+`v_oxplow_struggle` and `oxplow/collectors`
 whichever shipped extension declares them, and a piece moves between
 foundation, bundled and the holder without a stored or shown name
 changing. `oxplow` is the only namespace extensions share

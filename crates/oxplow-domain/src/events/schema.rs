@@ -187,14 +187,6 @@ impl EventSchemaRegistry {
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortLinked>().expect("core type registers");
         r.register::<EffortRetitled>().expect("core type registers");
-        r.register::<EffortClaimDismissed>()
-            .expect("core type registers");
-        r.register::<EffortClaimVerified>()
-            .expect("core type registers");
-        r.register::<EffortDecisionReviewed>()
-            .expect("core type registers");
-        r.register::<EffortDecisionsInferred>()
-            .expect("core type registers");
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
@@ -1560,94 +1552,6 @@ impl EventType for EffortOpened {
     type Payload = EffortOpenedV3;
 }
 
-/// `effort.claim_verified@2` (P7.C4): a reviewer verified one of an
-/// effort's claims (`oxplow.effort.verify_claim`), naming what backs it — or
-/// took that back (`oxplow.effort.unverify_claim`, `evidence` absent).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClaimVerifiedV2 {
-    /// The claim's id.
-    pub claim: i64,
-    /// The effort it's on (`eff12`), when on one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// What backs it now (`reviewer`, `oxplow:oxplow/run?id=12`); absent once unverified.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub evidence: Option<String>,
-}
-
-pub struct EffortClaimVerified;
-impl EventType for EffortClaimVerified {
-    const TYPE: &'static str = "effort.claim_verified";
-    const V: u32 = 2;
-    type Payload = EffortClaimVerifiedV2;
-}
-
-/// `effort.claim_dismissed@2`: a reviewer dismissed one of an effort's
-/// claims (`oxplow.effort.dismiss_claim`: the agent didn't claim it, or
-/// didn't mean it) — or took that back (`oxplow.effort.reopen_claim`,
-/// `dismissed: false`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClaimDismissedV2 {
-    /// The claim's id.
-    pub claim: i64,
-    /// The effort it's on (`eff12`), when on one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// Dismissed now; `false` once reopened.
-    pub dismissed: bool,
-}
-
-pub struct EffortClaimDismissed;
-impl EventType for EffortClaimDismissed {
-    const TYPE: &'static str = "effort.claim_dismissed";
-    const V: u32 = 2;
-    type Payload = EffortClaimDismissedV2;
-}
-
-/// `effort.decision_reviewed@2` (P7.C4): a reviewer confirmed or
-/// dismissed an inferred decision, or reopened one they had reviewed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortDecisionReviewedV2 {
-    /// The decision's id.
-    pub decision: i64,
-    /// The effort it's on (`eff12`), when on one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effort: Option<String>,
-    /// `confirmed`, `dismissed` or `inferred` (reopened).
-    pub outcome: String,
-}
-
-pub struct EffortDecisionReviewed;
-impl EventType for EffortDecisionReviewed {
-    const TYPE: &'static str = "effort.decision_reviewed";
-    const V: u32 = 2;
-    type Payload = EffortDecisionReviewedV2;
-}
-
-/// `effort.decisions_inferred@2`: a model's proposals replaced an
-/// effort's inferred decisions (`oxplow.effort.replace_inferred_decisions`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortDecisionsInferredV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The effort's task, when it has one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-    /// How many inferred decisions it holds now.
-    pub count: u32,
-}
-
-pub struct EffortDecisionsInferred;
-impl EventType for EffortDecisionsInferred {
-    const TYPE: &'static str = "effort.decisions_inferred";
-    const V: u32 = 2;
-    type Payload = EffortDecisionsInferredV2;
-}
-
 /// `collector.synced@2` (P7.B3): a collector ran — by hand
 /// (`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger
 /// names (then the envelope's `cause` is that event). Logged in the
@@ -2337,8 +2241,7 @@ impl EventType for KnowledgeCommentDeleted {
 /// pinned and its lifecycle metrics projected. Logged once per effort by the
 /// effort-lifecycle consumer (dedupe key `effort.finished:<effort>`),
 /// caused by the `effort.closed` it handled; what the effort reactors
-/// (evidence, inferred decisions) and the `effort.finished` collectors
-/// consume.
+/// (evidence) and the `effort.finished` collectors consume.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortFinishedV3 {
@@ -2425,11 +2328,7 @@ mod tests {
                 ("contribution.enabled", 1),
                 ("contribution.job.completed", 2),
                 ("effect.result", 5),
-                ("effort.claim_dismissed", 2),
-                ("effort.claim_verified", 2),
                 ("effort.closed", 3),
-                ("effort.decision_reviewed", 2),
-                ("effort.decisions_inferred", 2),
                 ("effort.finished", 3),
                 ("effort.landed", 2),
                 ("effort.linked", 2),

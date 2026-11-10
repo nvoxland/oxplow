@@ -332,11 +332,6 @@ mod tests {
         );
         write(
             d.path(),
-            ".oxplow/extensions/tracker/pages/verdict.yaml",
-            "title: Verdict\nparams: [{ name: effort_id }]\nloaders:\n  rows: { sql: \"SELECT :effort_id AS effort_id\" }\nview: { viz: table, from: rows }\n",
-        );
-        write(
-            d.path(),
             ".oxplow/extensions/tracker/pages/board-page.yaml",
             "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT uri, title, state FROM v_task\" }\nview: { viz: table, from: items }\n",
         );
@@ -407,7 +402,7 @@ mod tests {
         for (entry, says) in [
             (
                 "{ page: board, at: vcs.conflict.resolver }",
-                "nor a replaceable component (task.board, task.list, task.detail, task.detail.state, vcs.history.graph, effort.verdict)",
+                "nor a replaceable component (task.board, task.list, task.detail, task.detail.state, vcs.history.graph)",
             ),
             (
                 "{ page: board, at: task.board, version: 1 }",
@@ -452,32 +447,6 @@ mod tests {
         );
         let ext = load(PROVIDER, "    - { page: board, at: task.detail.state }\n");
         assert!(said(&ext).contains("must declare `uri`"), "{}", said(&ext));
-    }
-
-    /// An effort's verdict is a review policy's: any extension may bring
-    /// one, with no provider, and its page takes the effort's `effort_id`.
-    #[test]
-    fn an_effort_verdict_replacement_takes_effort_id_and_needs_no_provider() {
-        let ext = load("", "    - { page: verdict, at: effort.verdict }\n");
-        assert_eq!(said(&ext), "");
-        assert_eq!(
-            ext.ui
-                .replacements
-                .iter()
-                .map(|r| (
-                    r.target.as_str(),
-                    r.capability.as_str(),
-                    r.bound_to_provider
-                ))
-                .collect::<Vec<_>>(),
-            vec![("effort.verdict", "effort_policy", false)]
-        );
-        let ext = load("", "    - { page: state, at: effort.verdict }\n");
-        assert!(
-            said(&ext).contains("must declare `effort_id`"),
-            "{}",
-            said(&ext)
-        );
     }
 
     /// Every replaceable target has a name a person reads (Settings →

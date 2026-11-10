@@ -1803,6 +1803,91 @@
         }
       ],
       "key": []
+    },
+    "8": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "Role used (`main`, `summarize`, `decide`)."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "Provider id from ai.yaml."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "Model id."
+        },
+        {
+          "name": "caller",
+          "type": "TEXT",
+          "doc": "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, …"
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "doc": "Input tokens."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "doc": "Output tokens."
+        },
+        {
+          "name": "latency_ms",
+          "type": "INTEGER",
+          "doc": "Round-trip time."
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed."
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Error message when it failed."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "input_hash",
+          "type": "TEXT",
+          "doc": "For a recorded computation (`v_ai_result`), the hash of its input; NULL for other calls."
+        },
+        {
+          "name": "request_hash",
+          "type": "TEXT",
+          "doc": "Content hash of what the model was asked (`{ system, prompt, json }` or `{ state, questions }`), its body kept for the `ai` retention window (`read_ai_call`); NULL for a call made before requests were kept."
+        },
+        {
+          "name": "response_hash",
+          "type": "TEXT",
+          "doc": "Content hash of what the model answered (`{ text }` or `{ answers }`), kept like the request; NULL when the call failed."
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The extension run that made the call (`v_extension_run.run_id`); NULL for oxplow's own calls. (v3)"
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/ai_call?id=<id>`: its URI. `oxplow_read` gives its row and, with `#request` / `#response`, its bodies. (v4)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_result": {
@@ -1987,6 +2072,76 @@
           "name": "caller",
           "type": "TEXT",
           "doc": "What first asked, e.g. `inferred-decisions`, `oxplow:oxplow/collector?collector=<owner>/<id>`."
+        },
+        {
+          "name": "output_json",
+          "type": "TEXT",
+          "doc": "The result as JSON."
+        },
+        {
+          "name": "input_tokens",
+          "type": "INTEGER",
+          "doc": "Input tokens of the call that computed it."
+        },
+        {
+          "name": "output_tokens",
+          "type": "INTEGER",
+          "doc": "Output tokens of that call."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When it was computed (RFC 3339)."
+        },
+        {
+          "name": "ai_call_id",
+          "type": "INTEGER",
+          "doc": "The call that computed it (v_ai_call.id)."
+        }
+      ],
+      "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "input_hash",
+          "type": "TEXT",
+          "doc": "sha256 of the canonical `{ op, args }`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The provider that served the model (`ai_*` settings id); another provider of the same model name is another result."
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model that computed it."
+        },
+        {
+          "name": "request_hash",
+          "type": "TEXT",
+          "doc": "Content hash of the exact request the model was sent (`v_ai_call.request_hash`); a changed prompt is a new result."
+        },
+        {
+          "name": "op",
+          "type": "TEXT",
+          "doc": "`classify`, `score`, `decide`, `summarize` or `extract`."
+        },
+        {
+          "name": "role",
+          "type": "TEXT",
+          "doc": "The role it ran on: a built-in (`decide`, `summarize`, `main`) or an extension's AI profile (`acme/review`)."
+        },
+        {
+          "name": "caller",
+          "type": "TEXT",
+          "doc": "What first asked, e.g. `oxplow:oxplow/collector?collector=<owner>/<id>`."
         },
         {
           "name": "output_json",
@@ -10625,6 +10780,96 @@
         }
       ],
       "key": []
+    },
+    "4": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Run id; `oxplow:oxplow/run?id=<id>` is how a run is cited."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "Stream it ran in (v_stream.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread whose agent ran it, if known."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort it belongs to: the one the tool call that ran it was in (or the thread's open one)."
+        },
+        {
+          "name": "command",
+          "type": "",
+          "doc": "The command that was run."
+        },
+        {
+          "name": "exit_code",
+          "type": "",
+          "doc": "Its exit code, if known."
+        },
+        {
+          "name": "passed",
+          "type": "",
+          "doc": "Tests passed (NULL when not reported)."
+        },
+        {
+          "name": "failed",
+          "type": "",
+          "doc": "Tests failed (NULL when not reported)."
+        },
+        {
+          "name": "skipped",
+          "type": "",
+          "doc": "Tests skipped (NULL when not reported)."
+        },
+        {
+          "name": "total",
+          "type": "",
+          "doc": "Tests run in total (NULL when not reported)."
+        },
+        {
+          "name": "duration_ms",
+          "type": "",
+          "doc": "Wall-clock duration, if known."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow parsed a report) or `asserted` (an agent reported counts)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What recorded it (`hook`, `mcp`, …)."
+        },
+        {
+          "name": "branch",
+          "type": "TEXT",
+          "doc": "Branch checked out when it ran."
+        },
+        {
+          "name": "closest_vcs_rev",
+          "type": "TEXT",
+          "doc": "The VCS revision (a git sha) the tested tree was at or nearest to."
+        },
+        {
+          "name": "captured_at",
+          "type": "TEXT",
+          "doc": "When it was recorded (RFC 3339)."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran in (v_agent_turn.id), if it ran in one."
+        }
+      ],
+      "key": []
     }
   },
   "thread": {
@@ -18427,6 +18672,93 @@
       "key": [
         "uri"
       ]
+    },
+    "12": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "Its ref: `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`. (v3, was `id`)"
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that declares it."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace it is named in (its extension's `namespace:`): the first part of a local kind's id, kept when it moves to another extension in the namespace."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
+        },
+        {
+          "name": "local",
+          "type": "TEXT",
+          "doc": "Its id within the extension, or its global name (a command's bus id, a metric's key)."
+        },
+        {
+          "name": "origin",
+          "type": "TEXT",
+          "doc": "`project` or `bundled`."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's `version:` (a bundled one's is oxplow's); NULL when it declares none."
+        },
+        {
+          "name": "contract_version",
+          "type": "INTEGER",
+          "doc": "The contract's own version (a dataset's, an event type's), when it has one."
+        },
+        {
+          "name": "runs_on",
+          "type": "TEXT",
+          "doc": "How it comes to run, as JSON: `{on: events, types}`, `{on: schedule, every}`, `{on: run}`, `{on: call}`, `{on: query}`, `{on: mount}`, `{on: agent}`, `{on: declared}`."
+        },
+        {
+          "name": "needs",
+          "type": "TEXT",
+          "doc": "What it requires (capabilities, features, scopes), as a JSON array. Never what a person granted."
+        },
+        {
+          "name": "after",
+          "type": "TEXT",
+          "doc": "What an effect or a collector runs after when one event reaches it and them (JSON array of refs: `effect:<ext>/<id>`, `oxplow:oxplow/collector?collector=<ext>/<id>`, `oxplow:oxplow/consumer?name=<name>`), as the catalog resolved its `after:`."
+        },
+        {
+          "name": "order_level",
+          "type": "INTEGER",
+          "doc": "Where an effect or a collector runs among what one event reaches: 0 first, each after every contribution it names. NULL for a kind that isn't ordered."
+        },
+        {
+          "name": "global_name",
+          "type": "TEXT",
+          "doc": "The name it holds in a space every extension shares (a metric key, a skill name, `<capability>/<id>`); NULL when none."
+        },
+        {
+          "name": "file",
+          "type": "TEXT",
+          "doc": "The file it's declared in, inside its extension: `extension.yaml`, a page's `pages/<slug>.yaml`, a dataset's SQL. Join it to the extension (`v_extension`) for where that runs; never a machine path."
+        },
+        {
+          "name": "line",
+          "type": "INTEGER",
+          "doc": "Its entry's line there; NULL for a contribution that is a whole file (a page, a dataset's SQL)."
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what it is, a collector's `doc:`, or the `description:` of a resource, a dimension or an implementation (the same text as on `v_collector`, `v_resource`, `v_dimension` and `v_capability_provider`); NULL for a kind whose declaration has none."
+        }
+      ],
+      "key": [
+        "uri"
+      ]
     }
   },
   "extension_run": {
@@ -19333,6 +19665,153 @@
           "name": "contribution",
           "type": "TEXT",
           "doc": "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The extension's declared `version:` when it ran; NULL when it declares none."
+        },
+        {
+          "name": "generation",
+          "type": "TEXT",
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "doc": "`human`, `agent`, `page`, `system` or `effect`."
+        },
+        {
+          "name": "actor",
+          "type": "TEXT",
+          "doc": "Who, as an event source: `human`, `agent:thr3`, `system`, `effect:<ext>/<id>`, `effect:effort_policy:<id>`."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream it ran for; NULL when none."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it ran for; NULL when none."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "The effort it ran for; NULL when none."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The agent turn it ran for; NULL when none."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran for; NULL when none."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "The snapshot it ran over; NULL when none."
+        },
+        {
+          "name": "cause_event_id",
+          "type": "TEXT",
+          "doc": "The event that caused it (`v_event.id`); NULL for a run a person or schedule started."
+        },
+        {
+          "name": "mode",
+          "type": "TEXT",
+          "doc": "`pure` (no I/O but scope reads), `transactional` or `external` (may call out)."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it began (RFC 3339)."
+        },
+        {
+          "name": "finished_at",
+          "type": "TEXT",
+          "doc": "When it ended (RFC 3339)."
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "`ok`, `skipped`, `failed`, `denied` (its grant refused something), or `cancelled` (stopped: a person's cancel, or its approval or extension revoked, disabled or changed under it). (v3)"
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "Why it failed, was denied or stopped."
+        },
+        {
+          "name": "wall_ms",
+          "type": "INTEGER",
+          "doc": "How long it ran."
+        },
+        {
+          "name": "cpu_ms",
+          "type": "INTEGER",
+          "doc": "Its scripts' CPU time, summed (0 for a run that ran no script)."
+        },
+        {
+          "name": "peak_bytes",
+          "type": "INTEGER",
+          "doc": "The most any one of its scripts held live at once."
+        },
+        {
+          "name": "ai_calls",
+          "type": "INTEGER",
+          "doc": "The model calls it made."
+        },
+        {
+          "name": "scopes",
+          "type": "TEXT",
+          "doc": "The scopes it called, counted, as JSON (`{\"sql.read\": 2}`)."
+        },
+        {
+          "name": "decisions",
+          "type": "TEXT",
+          "doc": "What its grant decided for what it asked, as a JSON array of `{ need, decision, reason? }` (`allowed`, `denied`, `unenforced`)."
+        },
+        {
+          "name": "latest",
+          "type": "",
+          "doc": "1 on its contribution's most recent run."
+        }
+      ],
+      "key": [
+        "run_id"
+      ]
+    },
+    "8": {
+      "columns": [
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "doc": "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`."
+        },
+        {
+          "name": "parent_run_id",
+          "type": "TEXT",
+          "doc": "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension it belongs to."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=effort_review/review`."
         },
         {
           "name": "kind",
@@ -25756,6 +26235,44 @@
   },
   "replacement": {
     "1": {
+      "columns": [
+        {
+          "name": "target",
+          "type": "TEXT",
+          "doc": "The core sub-component, `<area>.<name>`."
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "doc": "What a person calls it (`board`)."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension that replaces it."
+        },
+        {
+          "name": "bound_to_provider",
+          "type": "INT",
+          "doc": "1 when it renders only while that extension's provider decides, so the person chooses only between the default and oxplow's own."
+        },
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "The capability the target belongs to."
+        },
+        {
+          "name": "chosen",
+          "type": "TEXT",
+          "doc": "The person's choice for the target: an extension, or `oxplow`; NULL for the default."
+        }
+      ],
+      "key": [
+        "target",
+        "extension"
+      ]
+    },
+    "2": {
       "columns": [
         {
           "name": "target",

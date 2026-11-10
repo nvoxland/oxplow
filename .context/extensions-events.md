@@ -85,46 +85,17 @@ event_types:
       upcast: event_types/merged.star      # required past v1: transform({from_v, payload}) → the v2 payload
 ```
 
-**Promoted to stable (P9.D6)** on the evidence rule every kind is held to
-— a first-party, shared extension depending on it: oxplow-bundled's
-`oxplow.review.accepted@1 { effort, task, unverified, inferred,
-deviated }` and `oxplow.review.changes_requested@1 { effort, task,
-unverified, inferred, deviated, note? }` (`effort` is the bare id, `eff12`), which `accept.star` and `request_changes.star` return in
-`events:` (subjects: the effort, its task and, for an acceptance, the
-claims and decisions it took unchecked; caused by the run's
-`command.executed`). They replaced a single `verdict@1` type, whose
-verdict lived in an expiring payload.
-Before them, a verdict lived only in a comment's text; now the effort's
-timeline carries who decided what, and another extension can react to it
-("Reacting to another extension's types"). What makes the kind safe to
+**Every kind is stable.** What makes an event kind safe to
 promise is already built: a published `type@v` is a contract
 (`event_type_contract` refuses a changed schema — stronger than a
 dataset's drift warning), a new shape is a new version with an upcast, and
-a removed type's rows stay readable. It was promoted to a stable kind
-on that evidence; every kind is stable now (`ui.decorators` and
+a removed type's rows stay readable (`ui.decorators` and
 `ref_kinds` (now `resources`) in P10, extensions-slots.md "Decorators" and "Resources"; `effects` and
 `custom_components` in P11, below and extensions-components.md "Custom components";
 a `ui.mounts` replacement with oxplow-bundled's history graph; `providers` once
 the provider host was), so a kind carries no stability.
 
-**`effects` is stable** (P11), on the evidence rule: a bundled
-extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
-`oxplow.review.accepted`: its script takes the effort and its item from the event's payload
-(`effort`, `task`) and the claims and decisions accepted unchecked from
-its envelope (`event["subject"]`), links the item it files `about` the
-effort, and reads (`scope("sql.read")`) only what the event
-can't say: which of those are still unverified or inferred now, and its
-own earlier reactions. It is empty when
-the effect already filed (or proposed) a follow-up for an earlier
-acceptance of the same effort (its `v_effect_run` reaction to that event
-is `ok` or `proposed`; an earlier acceptance from before it
-started, or whose reaction skipped or failed, doesn't count). With
-nothing unchecked it skips; otherwise it files **one** item on the
-active tracker, like every new item — "Verify what the review of <effort> accepted
-unchecked", a checklist naming each claim and decision. Each line is
-text, not markdown (`md_text`: whitespace becomes one space, markdown's
-punctuation is escaped and a long one is cut at 300 characters), and the list stops
-at 50 items, saying how many more the review has. A bundled effect
+**`effects` is stable** (P11): a bundled extension acts with one. A bundled effect
 starts like any (K1), when the generation that first runs it publishes.
 A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
@@ -354,7 +325,7 @@ and body of the changed rows only.
   commands, skills, collectors, jobs, AI profiles, advisories, effects,
   panels, providers, implementations, event types, resources and
   settings. Not searchable: records that pile up (events, job runs, AI
-  calls, test runs, subagents, nudges, terminals, proposals, claims,
+  calls, test runs, subagents, nudges, terminals, proposals,
   snapshots, extension deployments), code-level items (symbols, tests,
   findings, files and blocks), streams, the project, and the parts of an
   extension a person reaches through the extension (slots, decorators,
@@ -398,8 +369,7 @@ and body of the changed rows only.
   it indexed, adds or changes those entries and removes none. The mark is
   in memory: a deploy, a vocabulary change (the asset is registered anew), a
   restart and every rewrite read whole. Only a feed whose existing rows no
-  insert can change or remove may declare `seq`: today `search_decision` and
-  `search_turn` (a turn's start is an insert; its end is an update, so a
+  insert can change or remove may declare `seq`: today `search_turn` (a turn's start is an insert; its end is an update, so a
   whole read). Every other kind reads whole: its text follows rows an
   insert elsewhere changes (a task's comments, a wiki body), or it is
   a window (`search_commit`'s last 500: a new commit pushes one out), or it

@@ -12,9 +12,7 @@ and agents query.
 >   documented in [metrics.md](./metrics.md).
 > - **Current (tsk289):** extension `exec` sources that bring external
 >   entities in (see "User and extension sources").
-> - **Current:** decisions and claims (`v_decision`, `v_claim`, MCP
->   `oxplow.effort.record_decision`; claims read from the agent's answers by
->   `oxplow.effort.replace_inferred_claims`), the agent-activity views, stored
+> - **Current:** the agent-activity views, stored
 >   change analysis (`v_change*`), and extension-declared measures,
 >   metrics and fact collectors (tsk311, see extensions.md).
 > - **Current (tsk277):** git, LSP-diagnostic and test-run views
@@ -121,7 +119,7 @@ What core publishes, by where it comes from. Each row names its datasets
 
 | Source | Datasets | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
+| work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `effort`, `effort_file`, `context_read` | cycle time, steering, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
 | knowledge | `wiki_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
@@ -138,9 +136,9 @@ What core publishes, by where it comes from. Each row names its datasets
 
 Live-only for now — read over LSP or git when asked, not stored, so no
 dataset: blame lines, and LSP references. A collector that
-stores them would add their datasets. Decisions, claims, context reads and
+stores them would add their datasets. Context reads and
 struggle signals (the bundled review policy's `v_oxplow_struggle`, over `v_tool_call`) are what a person reviewing agent work needs most —
-**exceptions and decisions**, not trends and totals.
+**exceptions**, not trends and totals.
 
 ## Datasets (P4.2)
 
@@ -824,8 +822,6 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_event_content` | large event bodies (tool input/output, prompts) by content hash, without the bytes (V102) |
 | `v_event_dead_letter` | events a consumer failed on, parked with the error; `pending` ones need `oxplow.delivery.retry` / `oxplow.delivery.discard` (V94) |
 | `v_event_checkpoint` | how far each event consumer has read (V94) |
-| `v_decision` | forks the agent resolved (question, choice, alternatives, confidence, why). `provenance`: `recorded` via the `oxplow.effort.record_decision` command (V76; P8.A7), or `inferred` when the effort closed (V79) — a recorded `extract` computation on the `main` role (`AiCompute`, so an unchanged effort doesn't call again) — and a reviewer's verdict on an inferred one: `confirmed` or `dismissed` (V132, `oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`; a re-inference replaces only the still-`inferred` ones) |
-| `v_claim` | claims the agent made in its answers ("tests pass"), as a model read them when the effort finished (`oxplow.effort.replace_inferred_claims`), what each cites (`evidence`; `reviewer` when a person verified it by looking) and a reviewer's verdict (`review`: `verified` or `dismissed`, V75). Whether anything else backs a claim is a review policy's: oxplow-bundled's `v_oxplow_claim_status` counts a `tests_pass` claim backed when its effort's **latest** `v_test_run` has `failed = 0 AND total > 0` |
 | `v_tool_call` | every agent tool call: the `tool_call.project` pump consumer's projection of `agent.tool.finished` (one row per event; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
 | `v_oxplow_struggle` | oxplow-bundled's dataset (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |

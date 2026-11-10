@@ -174,10 +174,6 @@ mod tests {
             replaceable("task.detail.state").map(|r| r.bound_to_provider),
             Some(true)
         );
-        assert_eq!(
-            replaceable("effort.verdict").map(|r| (r.bound_to_provider, r.props)),
-            Some((false, &["effort_id"][..]))
-        );
         assert!(replaceable("vcs.conflict.resolver").is_none());
     }
 

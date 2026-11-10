@@ -154,13 +154,11 @@ pub struct EffortAtSnapshot {
 /// their thread and time columns: what an effort adopts when it opens late,
 /// and releases when it closes as of a past point. The event log keeps the
 /// anchors its events were written with; it's history, not a projection.
-const EFFORT_STAMPED: [(&str, &str); 6] = [
+const EFFORT_STAMPED: [(&str, &str); 4] = [
     ("agent_tool_call", "at"),
     ("agent_token_usage", "recorded_at"),
     ("metric_capture", "captured_at"),
     ("agent_nudge", "created_at"),
-    ("claim", "created_at"),
-    ("decision", "created_at"),
 ];
 
 /// How an effort opens ([`start_tx`]).
@@ -751,15 +749,13 @@ pub trait EffortStore: Send + Sync {
     /// Overwrite the summary on an already-finished effort. Used
     /// when `record_effort` runs after the lifecycle finish has
     /// already closed the row.
-    /// Record a report on effort `id` — its summary, its impacts and the
-    /// claims the agent stated (replacing its earlier unreviewed ones), each
-    /// when given — in one transaction: all land or none does.
+    /// Record a report on effort `id` — its summary and its impacts, each
+    /// when given — in one transaction: both land or neither does.
     async fn record_report(
         &self,
         id: &EffortId,
         summary: Option<String>,
         impacts: Option<Vec<EffortImpact>>,
-        claims: Option<Vec<crate::NewClaim>>,
     ) -> Result<(), DomainError>;
     async fn list_files(&self, id: &EffortId) -> Result<Vec<EffortFile>, DomainError>;
     async fn list_impacts(&self, id: &EffortId) -> Result<Vec<EffortImpact>, DomainError>;
@@ -1245,7 +1241,6 @@ impl EffortStore for SqliteEffortStore {
         id: &EffortId,
         summary: Option<String>,
         impacts: Option<Vec<EffortImpact>>,
-        claims: Option<Vec<crate::NewClaim>>,
     ) -> Result<(), DomainError> {
         let id_for_sql = *id;
         let impacts_json = match impacts {
@@ -1262,14 +1257,6 @@ impl EffortStore for SqliteEffortStore {
                 }
                 if let Some(json) = &impacts_json {
                     set_impacts_json_tx(tx, id_for_sql, json.as_deref()).map_err(map_sql_err)?;
-                }
-                if let Some(claims) = &claims {
-                    crate::replace_claims_tx(
-                        tx,
-                        id_for_sql.value(),
-                        crate::ClaimProvenance::Recorded,
-                        claims,
-                    )?;
                 }
                 Ok(())
             })
@@ -2461,14 +2448,14 @@ mod tests {
             action: Some("created".into()),
         }];
         store
-            .record_report(&eff.id, Some("Done.".into()), Some(impacts.clone()), None)
+            .record_report(&eff.id, Some("Done.".into()), Some(impacts.clone()))
             .await
             .unwrap();
         let after = store.get_effort(&eff.id).await.unwrap().unwrap();
         assert_eq!(after.summary.as_deref(), Some("Done."));
         assert_eq!(store.list_impacts(&eff.id).await.unwrap(), impacts);
         store
-            .record_report(&eff.id, Some("Done, again.".into()), None, None)
+            .record_report(&eff.id, Some("Done, again.".into()), None)
             .await
             .unwrap();
         assert_eq!(store.list_impacts(&eff.id).await.unwrap(), impacts);

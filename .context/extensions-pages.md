@@ -28,14 +28,7 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   over every row it shows (`all: true`: a Clear, a Retry all) is offered
   only while there are rows (`offeredWholePage`). Those buttons close the
   section, under its rows, never over them (`PartButtons`).
-  The effort page opens with its
-  **verdict** above the slots: the `effort.verdict` replacement target
-  (extensions-slots.md "Replacements"), which core leaves empty — what counts as tested,
-  covered or backed is a review policy's. oxplow-bundled's
-  `effort-verdict` page is the default (the last test run, diff coverage
-  against the `oxplow.coverage.abs_pct` metric's `warnAt`, unverified
-  claims, decisions to confirm); another extension may bring its own and
-  the person chooses. The task page links to the effort page as
+  The task page links to the effort page as
   **Review**: on each effort's activity card, and in the details rail for
   the newest effort.
 
@@ -82,8 +75,7 @@ a typo is an error at the line):
   query take a subset: "Three kinds, by folder" above).
   A page's `description` says what the page is (what it shows, for
   what, over which scope and order), not what you can do on it. A page
-  whose purpose is an action (a form to file an item, hand off work or
-  verify a claim) may name that action; never list UI mechanics ("drag
+  whose purpose is an action (a form to file an item, or hand off work) may name that action; never list UI mechanics ("drag
   to reorder", "right-click for the rest") or the actions on offer.
 - **`loaders:`**: named loaders ("Loaders" below).
 - **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").

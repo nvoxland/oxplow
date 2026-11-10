@@ -29,7 +29,6 @@ import {
   type LucideIcon,
   MessageSquareText,
   MessagesSquare,
-  Scale,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
 import { iconFor } from "./icons.js";
@@ -88,8 +87,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return Forward;
     case "comment":
       return MessageSquareText;
-    case "decision":
-      return Scale;
 
     case "metric":
       return Gauge;

@@ -55,7 +55,7 @@ Everything in oxplow has one identity, its URI (`oxplow:oxplow/effort?id=eff12`,
 Carry URIs; never assemble or dissect them:
 
 - **In SQL**, select the dataset's `uri` column (`v_effort.uri`,
-  `v_decision.uri`, `v_thread.uri`, `v_task.uri`, …) — each an
+  `v_thread.uri`, `v_task.uri`, …) — each an
   oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
   `WHERE uri = :uri`. To build one, `uri(resource, key1, value1, …)`:
   `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
@@ -70,7 +70,7 @@ Carry URIs; never assemble or dissect them:
   measure, not for every measure. Use it on every `v_fact`/`v_capture` read
   of the query.
 - **A field named for one resource is a bare id, not a URI**: a command
-  input `thread` is `thr3`, `effort` is `eff12`, `claim` is the integer `7`.
+  input `thread` is `thr3`, `effort` is `eff12`, `comment` is the integer `7`.
   Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
   same in an action's input. A URI goes only where a field can name anything
   (`uri`, `target`, `subject`) and for tasks.

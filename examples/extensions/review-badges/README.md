@@ -6,7 +6,7 @@ It reads effort-review's exported `reviews` dataset and writes nothing.
 
 | | |
 |---|---|
-| **Review Verdicts** (Work) | One row per task: its latest review's effort, how it ended, when, and the first 120 characters. The task links to its page. |
+| **Latest Reviews** (Work) | One row per task: its latest review's effort, how it ended, when, and the first 120 characters. The task links to its page. |
 
 ```yaml
 imports:

@@ -808,7 +808,6 @@ pub async fn run_as_page_in(
         ("oxplow/thread-settings-prompt", "thread-settings", "prompt"),
         ("oxplow/changes-header", "diff-view", "header"),
         ("oxplow/changes-description", "diff-view", "description"),
-        ("oxplow/changes-verdict", "diff-view", "verdict"),
         ("oxplow/changes-concurrent", "diff-view", "concurrent"),
         ("oxplow/changes-files", "diff-view", "files"),
         ("oxplow/changes-extensions", "diff-view", "extensions"),

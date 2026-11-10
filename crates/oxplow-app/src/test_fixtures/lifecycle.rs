@@ -101,21 +101,20 @@ pub(crate) async fn page(
     }
 }
 
-/// Log an `effort.claim_verified` for `effort` with `evidence` and return
-/// it as stored: an event an `on:` collector or effect can react to.
-pub(crate) async fn log_claim(
+/// Log an `effort.retitled` for `effort` titled `title` and return it as
+/// stored: an event an `on:` collector or effect can react to.
+pub(crate) async fn log_retitle(
     svc: &crate::Services,
     effort: oxplow_domain::EffortId,
-    evidence: &str,
+    title: &str,
 ) -> oxplow_domain::StoredEvent {
     use oxplow_domain::events::Anchors;
     use oxplow_domain::Envelope;
-    let env = Envelope::typed::<oxplow_domain::events::schema::EffortClaimVerified>(
+    let env = Envelope::typed::<oxplow_domain::events::schema::EffortRetitled>(
         "human",
-        &oxplow_domain::events::schema::EffortClaimVerifiedV2 {
-            claim: 1,
-            effort: None,
-            evidence: Some(evidence.into()),
+        &oxplow_domain::events::schema::EffortRetitledV2 {
+            effort: effort.to_string(),
+            title: Some(title.into()),
         },
     )
     .with_anchors(Anchors {

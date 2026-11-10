@@ -132,12 +132,6 @@ loaders:
     params:
       task:
         from: row.task
-  verdict:
-    sql: |
-      SELECT 1 AS verdict WHERE 0
-    params:
-      effort_id:
-        from: row.effort_id
   concurrent:
     sql: |
       WITH r AS (
@@ -224,15 +218,6 @@ view:
     markdown:
       text: body
     empty: No description.
-  - id: verdict
-    title: Verdict
-    hide_title: true
-    replaceable: effort.verdict
-    from: verdict
-    viz: table
-    columns:
-    - key: verdict
-    empty: ''
   - id: concurrent
     title: Concurrent Efforts
     from: concurrent

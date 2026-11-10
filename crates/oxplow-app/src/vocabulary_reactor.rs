@@ -562,11 +562,6 @@ mod tests {
                     text("v_comment"),
                     text("v_search_comment")
                 ],
-                vec![
-                    text("oxplow/decision"),
-                    text("v_decision"),
-                    text("v_search_decision")
-                ],
                 vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
                 vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
                 vec![text("oxplow/task"), text("v_task"), text("v_search_task")],

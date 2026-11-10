@@ -240,7 +240,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Open, update, link and close efforts; record and review their claims and decisions.",
+        summary: "Open, update, link and close efforts.",
     },
     Scope {
         id: "extension_config.read",

@@ -2,7 +2,7 @@
 //! P3.8): the `<session-context>` block (deduped per session — it names
 //! the other live agents in the worktree, so it changes as they come and
 //! go), the open handoffs to the thread no agent was given yet, prompt
-//! advisories and the open effort's decisions on a prompt; the
+//! advisories on a prompt; the
 //! thread's undelivered nudges after a tool call. What an agent *did* is
 //! recorded elsewhere — the hook ingest logs `agent.*` events and pump
 //! reactors record from them (`tool_call_reactors`, `post_tool_reactors`,
@@ -26,18 +26,13 @@ use crate::Services;
 /// The last context block per agent session.
 #[derive(Default)]
 struct ContextState {
-    /// Last context block returned per session (and per `…#decisions`
-    /// key). The launch prompt already carries this data, so a
+    /// Last context block returned per session. The launch prompt already carries this data, so a
     /// byte-identical repeat adds noise without new information.
     last_context_by_session_id: HashMap<String, String>,
 }
 
 /// How long a tool call's hook waits for the reactors that write nudges.
 const POST_TOOL_SETTLE: std::time::Duration = std::time::Duration::from_millis(2500);
-
-/// Dedupe key suffix for the decisions block, beside the session-context
-/// block's plain session-id key.
-const DECISIONS_KEY_SUFFIX: &str = "#decisions";
 
 /// Recording and context shared by every agent transport
 /// (`Services.agent_context`).
@@ -53,11 +48,10 @@ impl AgentContext {
         let Some(session_id) = session_id else {
             return;
         };
-        let mut state = self.state.lock();
-        state.last_context_by_session_id.remove(session_id);
-        state
+        self.state
+            .lock()
             .last_context_by_session_id
-            .remove(&format!("{session_id}{DECISIONS_KEY_SUFFIX}"));
+            .remove(session_id);
     }
 
     /// What the agent hears after a tool call: the thread's undelivered
@@ -115,9 +109,8 @@ impl AgentContext {
     /// What a prompt in the session would carry, built and **not yet
     /// taken**: the `<session-context>` block (only when it differs from
     /// what the session was last sent), the thread's undelivered handoffs,
-    /// nudges (prompt advisories, and the hints its last turn's end left)
-    /// and the open effort's decisions (once per session, and when they
-    /// change). Nothing changes until [`Self::commit`] — the delivery can
+    /// nudges (prompt advisories, and the hints its last turn's end left).
+    /// Nothing changes until [`Self::commit`] — the delivery can
     /// fail, and then the next build carries it all again.
     pub async fn build_context(
         &self,
@@ -165,20 +158,11 @@ impl AgentContext {
         if let Some((_, ids)) = &advisory_block {
             pending.nudges = ids.clone();
         }
-        let decisions_block = self
-            .refreshed_decisions_context(svc, thread_id, session_id)
-            .await;
-        if let (Some(key), Some(block)) = (session_id, &decisions_block) {
-            pending
-                .baselines
-                .push((format!("{key}{DECISIONS_KEY_SUFFIX}"), block.clone()));
-        }
         let combined: String = [
             ctx_block,
             handoffs_block.map(|(text, _)| text),
             basket_block.map(|(text, _)| text),
             advisory_block.map(|(text, _)| text),
-            decisions_block,
         ]
         .into_iter()
         .flatten()
@@ -253,26 +237,6 @@ impl AgentContext {
         let around = surroundings(svc, stream.id, thread.id, agent_session).await;
         let block = build_session_context_block(&stream, Some(&thread), &around);
         self.would_emit(session_id, &block).then_some(block)
-    }
-
-    /// The open effort's recorded decisions, on the first prompt of a
-    /// session and whenever they change.
-    async fn refreshed_decisions_context(
-        &self,
-        svc: &Services,
-        thread_id: &ThreadId,
-        session_id: Option<&str>,
-    ) -> Option<String> {
-        use crate::EffortStore as _;
-        let effort = svc
-            .effort_store
-            .find_open_for_thread(thread_id)
-            .await
-            .ok()
-            .flatten()?;
-        let block = crate::reasoning::effort_decisions_block(&svc.sql, effort.id.value()).await?;
-        let key = session_id.map(|s| format!("{s}{DECISIONS_KEY_SUFFIX}"));
-        self.would_emit(key.as_deref(), &block).then_some(block)
     }
 
     /// Whether `block` is new for `session_id`: it differs from what the
