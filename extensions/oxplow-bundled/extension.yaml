@@ -1,18 +1,16 @@
 manifest: 2
 name: oxplow-bundled
 namespace: oxplow
-description: What comes with oxplow beyond its foundation, cleaned up. Holds the review datasets, event types and commands so far; the rest moves here from oxplow-bundled-todo one piece at a time.
+description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
-# Its commands read the review datasets with their own SQL.
-permissions: [sql.read]
 # Its Work board is a custom component in TypeScript (src/board/), built
 # into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
 build: { run: "bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
     Hold the optional features oxplow ships once each has been cleaned up. So
-    far that is the review and analysis datasets, their settings and the
-    verdict decorators, event types and commands. Their names come from the
+    far that is the review and analysis datasets, their settings, the Work
+    panel and board, and their event types and commands. Their names come from the
     `oxplow` namespace, so they stay when a piece moves between extensions.
   origin: null
 datasets:
@@ -59,33 +57,6 @@ datasets:
       - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
-  - name: claim_status
-    version: 3
-    key: [uri]
-    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
-    fields:
-      - { name: uri, type: TEXT, doc: "The claim (`v_claim.uri`)." }
-      - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
-      - { name: verified, type: INT, doc: "1 when something backs it, else 0." }
-      - { name: backed_by, type: TEXT, doc: "`evidence` (it cites some) or `latest run` (a passing latest test run backs `tests pass`); NULL when nothing does." }
-  - name: verdicts
-    version: 3
-    key: [seq]
-    materialize: { incremental: seq }
-    description: "Every verdict a reviewer gave (`oxplow.review.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
-    fields:
-      - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
-      - { name: uri, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
-      - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed (the event names them)." }
-  - name: verdict
-    version: 2
-    key: [uri]
-    description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a page row links to it."
-    fields:
-      - { name: uri, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
-      - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
   - name: finished_cleared
     version: 2
     key: [thread_id]
@@ -108,14 +79,6 @@ datasets:
       - { name: active, type: INT, doc: "1 for the open effort's line: its item, or the effort itself." }
 event_types:
   types:
-    - type: oxplow.review.accepted
-      v: 1
-      schema: event_types/accepted.json
-      summary: A person accepted an effort's work. Subject — the effort, its task and any claim or decision accepted unchecked.
-    - type: oxplow.review.changes_requested
-      v: 1
-      schema: event_types/changes_requested.json
-      summary: A person sent an effort's work back with changes requested. Subject — the effort and its task.
     - type: oxplow.tasks.finished_cleared
       v: 1
       schema: event_types/finished_cleared.json
@@ -126,10 +89,6 @@ ui:
   mounts:
     - { page: task-tokens, at: oxplow/task-detail.sections }
     - { page: item-shared-work, at: oxplow/task-detail.sections }
-  # The verdict where the effort is shown: it shows; it never acts.
-  decorators:
-    - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
-    - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
 configuration:
   version: 1
   schema:
@@ -179,70 +138,6 @@ commands:
     scope: extension_config.write
     op: compare_exchange
     example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"struggle": {"repeatedEdits": 4}}}, "personal": null}
-  - name: review.accept
-    summary: Accept an effort's work — comment the review on its task and mark it done. Refuses while a claim is unverified (a dismissed one doesn't count) or an inferred decision unreviewed, unless forced.
-    input_schema:
-      type: object
-      required: [effort]
-      properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        force: { type: boolean, description: "Accept even with unverified claims or unreviewed decisions; they're listed in the comment." }
-      additionalProperties: false
-    entry: handlers/accept.star
-    needs: [sql.read]
-    confirm: always
-    ui: { label: Accept Review, group: Review, about: oxplow/effort, about_when: task, input: { effort: "{{uri.id}}" } }
-    examples:
-      - name: reviewed
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.task.comment, oxplow.task.transition]
-      - name: an unverified claim
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        refused: 1 unverified claim
-      - name: forced
-        input: { effort: "eff1", force: true }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.task.comment, oxplow.task.transition]
-      - name: another provider's item
-        input: { effort: "eff2" }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.task.comment, oxplow.task.transition]
-      - name: no task
-        input: { effort: "eff3" }
-        answers: { sql.read: [[{ task: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: has no task
-  - name: review.request_changes
-    summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its task's area (and your note) on the item, and move it back to todo.
-    input_schema:
-      type: object
-      required: [effort]
-      properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        note: { type: string, description: "What else to change." }
-      additionalProperties: false
-    entry: handlers/request_changes.star
-    needs: [sql.read]
-    confirm: always
-    ui: { label: Request Changes, group: Review, about: oxplow/effort, about_when: task, input: { effort: "{{uri.id}}" } }
-    examples:
-      - name: a file outside the area
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", unverified: "[]", inferred: "[]", deviated: '["src/db/store.py"]' }]] }
-        expect_commands: [oxplow.task.comment, oxplow.task.transition]
-      - name: nothing to ask for
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=tsk1&provider=oxtask", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: nothing to ask for
-      - name: another provider's item
-        input: { effort: "eff2", note: "Add the migration." }
-        answers: { sql.read: [[{ task: "oxplow:oxplow/task?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.task.comment, oxplow.task.transition]
-      - name: no task
-        input: { effort: "eff3", note: "x" }
-        answers: { sql.read: [[{ task: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: has no task
   - name: tasks.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
     input_schema:

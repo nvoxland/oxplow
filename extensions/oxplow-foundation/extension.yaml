@@ -726,21 +726,6 @@ resources:
     resolve: command_proposal
     title: command
     icon: bell
-  - name: claim
-    description: "A statement an agent made about its work, which can be checked."
-    label: Claim
-    params: { id: { required: true, pattern: '^[0-9]+$' } }
-    resolve: claim
-    title: statement
-    icon: circle-dot
-  - name: decision
-    description: "A choice that an agent or a person made, with its reason."
-    label: Decision
-    params: { id: { required: true, pattern: '^[0-9]+$' } }
-    resolve: decision
-    title: question
-    searchable: search_decision
-    icon: circle-dot
   - name: job_run
     description: "One run of a durable job."
     label: Job run
@@ -1186,21 +1171,6 @@ commands:
     scope: efforts.write
     op: close
     example: {"effort": "eff12", "summary": "Fixed the login redirect loop."}
-  - name: effort.confirm_decision
-    summary: "Confirm a decision oxplow inferred from an effort (`<id>`): it was made, as stated."
-    scope: efforts.write
-    op: confirm_decision
-    example: {"decision": 3}
-  - name: effort.dismiss_claim
-    summary: "Dismiss a claim oxplow read in an effort's answers (`<id>`): the agent didn't claim it, or didn't mean it. It stays dismissed when the effort is read again."
-    scope: efforts.write
-    op: dismiss_claim
-    example: {"claim": 7}
-  - name: effort.dismiss_decision
-    summary: "Dismiss a decision oxplow inferred from an effort (`<id>`): it wasn't made, or not like that."
-    scope: efforts.write
-    op: dismiss_decision
-    example: {"decision": 3}
   - name: effort.link
     summary: "Link an effort (by id, or a thread's open one) to a task, or unlink it with `task: null`."
     scope: efforts.write
@@ -1211,70 +1181,35 @@ commands:
     scope: efforts.write
     op: open
     example: {"thread": "thr3", "task": "oxplow:oxplow/task?id=tsk42&provider=oxtask"}
-  - name: effort.record_decision
-    summary: "Record a DECISION you made while working: a fork where you picked one approach over others without asking (where to put something, which library, what to leave out, how to read an ambiguous ask). People review these first, so record the non-obvious ones as you make them — not trivia. Attaches to `task`'s open effort, else your thread's. Returns `{ id, effort }`."
-    scope: efforts.write
-    op: record_decision
-    example: {"question": "Where should the redirect target be validated?", "choice": "In the callback handler", "alternatives": ["In the login page", "In a middleware"], "why": "It is the only place that sees both the session and the requested path.", "confidence": "medium"}
-  - name: effort.reopen_claim
-    summary: "Take back a claim's dismissal (`<id>`): it's unreviewed again."
-    scope: efforts.write
-    op: reopen_claim
-    example: {"claim": 7}
-  - name: effort.reopen_decision
-    summary: "Take back a review of an inferred decision (`<id>`): it is unconfirmed again."
-    scope: efforts.write
-    op: reopen_decision
-    example: {"decision": 3}
-  - name: effort.replace_inferred_decisions
-    summary: "Replace an effort's inferred decisions (`eff<id>`) with a model's proposals — at most 8 forks the agent seems to have resolved without recording them. Its recorded and reviewed decisions stay. They wait for a person's review and are never shown to the agent. Returns `{ effort, count }`."
-    scope: efforts.write
-    op: replace_inferred_decisions
-    example: {"effort": "eff12", "decisions": [{"question": "Which CSV library?", "choice": "csv crate", "alternatives": ["hand-rolled writer"], "why": "Quoting rules are easy to get wrong.", "confidence": "medium"}]}
-  - name: effort.replace_inferred_claims
-    summary: "Replace an effort's claims (`eff<id>`) with the ones a model read in its answers — at most 8 statements like \"tests pass\" or \"no behavior change\", each with its kind and what it cites. Claims a reviewer dismissed or verified stay. Returns `{ effort, count }`."
-    scope: efforts.write
-    op: replace_inferred_claims
-    example: {"effort": "eff12", "claims": [{"statement": "The parser tests pass.", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=42"}]}
   - name: effort.report
     summary: "Optional: describe the thread's current (else latest) effort. It takes a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a task, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
     scope: efforts.write
     op: report
-    example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "task", "id": "oxplow:oxplow/task?id=tsk42&provider=oxtask", "action": "completed"}], "claims": [{"statement": "the auth tests pass", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=12"}]}
-  - name: effort.unverify_claim
-    summary: "Take back a claim's verification (`<id>`): it's unreviewed again, citing `evidence` (what it cited before) or nothing."
-    scope: efforts.write
-    op: unverify_claim
-    example: {"claim": 7, "evidence": "oxplow:oxplow/run?id=12"}
+    example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "task", "id": "oxplow:oxplow/task?id=tsk42&provider=oxtask", "action": "completed"}]}
   - name: effort.update
     summary: "Set an effort's own title, or clear it back to its default with `title: null`."
     scope: efforts.write
     op: update
     example: {"effort": "eff12", "title": "Fix the login redirect loop"}
-  - name: effort.verify_claim
-    summary: "Verify a claim oxplow read in an agent's answers (`<id>`), citing what backs it (what it already cites, else `reviewer` when you checked it yourself)."
-    scope: efforts.write
-    op: verify_claim
-    example: {"claim": 7, "evidence": "oxplow:oxplow/run?id=12"}
   # effects.read
   - name: effect.backfill_plan
     summary: "How many events an `oxplow.effect.backfill` would have an effect react to: the matching ones it never reacted to, the log positions they span (pass `to_seq` to the backfill to run on just these), and how many one run reacts to (`batch`)."
     scope: effects.read
     op: backfill_plan
-    example: {"effect": "review/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
+    example: {"effect": "review/notify", "since": "2026-10-01T00:00:00Z"}
   # effects.run
   - name: effect.backfill
     summary: "Have an effect react to the matching events it never reacted to — those logged before its approval, or while it waited to be approved again — oldest first, once each. The effect may call outside oxplow for every one of them. It runs as it is now; `oxplow.effect.backfill_plan` says how many events that is."
     scope: effects.run
     op: backfill
     confirm: always
-    example: {"effect": "review/infer-reasoning", "since": "2026-10-01T00:00:00Z"}
+    example: {"effect": "review/notify", "since": "2026-10-01T00:00:00Z"}
   - name: effect.retry
     summary: "Have an effect react again to an event its reaction to failed, as its next attempt. If the failed attempt was interrupted with a step outside oxplow under way, that step may already have run: retrying sends it again. It runs the effect as it is now, composing afresh from the event."
     scope: effects.run
     op: retry
     confirm: always
-    example: {"effect": "review/infer-reasoning", "event": "ev1042"}
+    example: {"effect": "review/notify", "event": "ev1042"}
   - name: effect.retry_all
     summary: "Have every effect whose latest reaction failed react again to that event, one by one, as `effect.retry` does one. A reaction that can't run (its effect disabled, its event gone) is reported as refused and the rest still run. Says how many came out right."
     scope: effects.run
@@ -1353,7 +1288,7 @@ commands:
     scope: extensions.enable
     op: enable
     lifecycle: experimental
-    example: {"namespace": "review", "kind": "effect", "contribution": "infer-reasoning"}
+    example: {"namespace": "review", "kind": "effect", "contribution": "notify"}
   - name: contribution.enable_all
     summary: "Enable every extension contribution that stopped after repeated failures on this machine again — one namespace's (`namespace`) or all — each as `oxplow.contribution.enable` does it. Returns the rows it enabled."
     scope: extensions.enable

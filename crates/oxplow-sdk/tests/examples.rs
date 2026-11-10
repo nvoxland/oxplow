@@ -103,14 +103,14 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         tested.imports,
         ["`reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available"]
     );
-    let id = "oxplow:oxplow/page?page=review_badges/review-verdicts";
+    let id = "oxplow:oxplow/page?page=review_badges/latest-reviews";
     assert!(
         tested.contributes.iter().any(|c| c == id),
         "{id}: {:?}",
         tested.contributes
     );
     assert!(
-        tested.ran.contains(&"example review-verdicts".to_string()),
+        tested.ran.contains(&"example latest-reviews".to_string()),
         "{:?}",
         tested.ran
     );
@@ -140,7 +140,7 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
         ),
         "{warning}"
     );
-    let id = "`oxplow:oxplow/page?page=review_badges/review-verdicts`";
+    let id = "`oxplow:oxplow/page?page=review_badges/latest-reviews`";
     assert!(warning.contains(id), "{id}: {warning}");
     assert!(
         !tested
@@ -153,8 +153,8 @@ async fn the_review_badges_example_consumes_effort_reviews_and_degrades_without_
     assert_eq!(tested.error_lines(), Vec::<String>::new());
     assert!(
         tested.skipped_lines().iter().any(|w| w.contains(
-            "fixtures/review-verdicts.yaml: example `review-verdicts` isn't run: \
-             `oxplow:oxplow/page?page=review_badges/review-verdicts` is withheld because import `reviews` is \
+            "fixtures/latest-reviews.yaml: example `latest-reviews` isn't run: \
+             `oxplow:oxplow/page?page=review_badges/latest-reviews` is withheld because import `reviews` is \
              unavailable (effort_review or its contribution isn't here)"
         )),
         "{:?}",

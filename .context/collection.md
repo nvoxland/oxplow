@@ -612,7 +612,7 @@ can call the layer-1 helpers directly as globals —
 `parse_xml`/`parse_json`/`lcov_records`/`lines`/`regex_find`/`xpath` — so it can
 self-parse raw text (set `input: text` and parse inside `transform`).
 `md_text(value, limit = 300)` goes the other way: text someone else wrote
-(an agent's claim, a decision) as one line of markdown that renders as
+(an agent's answer) as one line of markdown that renders as
 itself — whitespace runs one space, markdown's punctuation escaped, cut
 with an ellipsis at `limit` characters — for splicing into a comment or
 checklist an effect or command handler writes. These are

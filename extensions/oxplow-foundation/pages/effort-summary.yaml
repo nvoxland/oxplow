@@ -1,5 +1,5 @@
 title: Effort summary
-description: One effort at a glance — its title and summary, its task, the files it changed, the test runs, the claims and the decisions recorded in it.
+description: One effort at a glance — its title and summary, its task, the files it changed, and the test runs.
 tool: effort_summary
 params:
 - name: effort
@@ -21,12 +21,6 @@ loaders:
       SELECT 3, 'run', coalesce(json_extract(o.payload_json, '$.command'), ''),
              json_extract(o.payload_json, '$.passed') || ' passed, ' || json_extract(o.payload_json, '$.failed') || ' failed'
       FROM v_effort_observation o WHERE o.effort_id = (SELECT id FROM e) AND o.kind = 'test-run'
-      UNION ALL
-      SELECT 4, 'claim', c.statement, c.kind || ' ' || coalesce(c.review, 'unreviewed')
-      FROM v_claim c WHERE c.effort_id = (SELECT id FROM e)
-      UNION ALL
-      SELECT 5, 'decision', d.question, d.choice
-      FROM v_decision d WHERE d.effort_id = (SELECT id FROM e)
       ORDER BY 1
 view:
   from: effort_summary

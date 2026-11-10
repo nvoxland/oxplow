@@ -29,7 +29,7 @@
   list `sql.read` in `needs`) and returns `{ commands: [{ name, input }],
   result? }`
   — or `{ refuse: "why" }` to decline (the caller sees the reason).
-  Splice text an agent wrote (a claim, a decision) into a comment or
+  Splice text an agent wrote into a comment or
   body with `md_text(text)`: one inert line, so it can't add headings,
   links or items;
   those core commands run as the caller, each one's own policy and

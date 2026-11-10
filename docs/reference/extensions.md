@@ -394,10 +394,10 @@ the page's own actions, sorted by label.
   `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` and
   read a param with `uri_param(uri, 'id')`. Don't concatenate
   `'oxplow:oxplow/effort?id=' || id` or slice a URI. A field named for one
-  resource (a command input `thread`, `effort`, `session`, `claim`, an event
+  resource (a command input `thread`, `effort`, `session`, an event
   payload field) carries that resource's bare id, not a URI: a page or form
   that feeds one selects `uri_param(x.uri, 'id')` (or the dataset's integer
-  `id` for a claim or decision), and a script builds a URI with
+  `id` for a proposal), and a script builds a URI with
   `uri.build("oxplow/effort", id = e)` only where it becomes a link target
   or is compared with a `uri`. A URI can outlive what it names, so store it even when
   the thing may go.
@@ -604,7 +604,6 @@ The same table is the `v_replaceable` dataset.
 | `task.detail` | description editor | no | 1 | `uri` | — |
 | `task.detail.state` | state control | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
-| `effort.verdict` | effort verdict | no | 1 | `effort_id` | — |
 <!-- replaceables:end -->
 
 A view of tasks reads `v_task` and changes items only through

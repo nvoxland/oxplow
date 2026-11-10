@@ -215,9 +215,9 @@ mod tests {
             json!({ "kind": "collector", "namespace": "work", "id": "hot" })
         );
         assert_eq!(
-            run(r#"uri.contribution("oxplow:oxplow/command?command=oxplow.review.accept")"#)
+            run(r#"uri.contribution("oxplow:oxplow/command?command=oxplow.task.comment")"#)
                 .unwrap(),
-            json!({ "kind": "command", "namespace": null, "id": "oxplow.review.accept" })
+            json!({ "kind": "command", "namespace": null, "id": "oxplow.task.comment" })
         );
         assert!(run(r#"uri.contribution("oxplow:oxplow/effort?id=eff1")"#).is_err());
         // A guard for an optional value: `uri.is_uri` never fails.

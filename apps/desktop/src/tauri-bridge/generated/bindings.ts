@@ -1810,7 +1810,7 @@ export type Confirm = "never" | "always" |
  *  kind it is, and its id there (for a [`ContributionKind::global_name`]
  *  kind, its global name). Its only public name is its ref
  *  ([`ContributionId::reference`], also its `Display`):
- *  `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/command?command=oxplow.review.accept`. Storage,
+ *  `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`. Storage,
  *  events, manifests and the desktop all carry that ref
  *  (`.context/resources.md` "Using refs").
  */

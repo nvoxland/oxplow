@@ -94,8 +94,7 @@ error) — and may expect a refusal with `refused: <part of the reason>` instead
 **namespace** is the manifest's `namespace:`, else the extension's name with
 `-` → `_` (`command_namespace`; `check_namespace`: one snake_case segment,
 and `oxplow` only for an extension that ships with oxplow — the bundled one
-declares it, so its commands are `oxplow.review.accept`,
-`oxplow.review.request_changes`, `oxplow.tasks.clear_finished`). Its event
+declares it, so its commands include `oxplow.tasks.clear_finished`). Its event
 types are declared by full name and unaffected. Who holds a namespace is the
 bus's to say (`CommandBus::namespace_owner`: `oxplow`, or the one source —
 `extension:<name>` / `provider:<instance>` — holding it) — there is no
@@ -463,8 +462,8 @@ tool: open_work              # offered as <namespace>_open_work
   { dataset? }` (every dataset with its columns), `thread_tasks { thread }` (the
   thread's items by state, with their efforts), `next_task { thread }` (what
   to pick up next; the bundled `/next-task` command calls it) and
-  `effort_summary { effort }` (title and summary, item, files, test runs,
-  claims, decisions as sections). Params take bare ids (`thr3`, `eff9`).
+  `effort_summary { effort }` (title and summary, item, files and test runs
+  as sections). Params take bare ids (`thr3`, `eff9`).
   Each reads published `v_*` datasets only, so it works with the bundled
   extension off. For history, `oxplow_vcs_log` and `oxplow_diff` are
   commands, not pages.

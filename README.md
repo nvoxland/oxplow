@@ -35,9 +35,8 @@ limits documented in the [extension reference](docs/reference/extensions.md).
 ## What it provides today
 
 - **Connected evidence.** Turns, tool calls, changes, snapshots, test
-  runs, metrics, claims, decisions, and knowledge can be read through
-  published SQL models. Observations, claims, and AI inference retain
-  their provenance.
+  runs, metrics, and knowledge can be read through published SQL
+  models. Observations and AI inference retain their provenance.
 - **Collectors, metrics, and dimensions.** Collect raw data, derive new
   entities and facts, aggregate measures, and compare them across the
   dimensions relevant to your system and development process.

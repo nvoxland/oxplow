@@ -104,7 +104,7 @@ pub struct ProviderKindInfo {
 #[derive(Debug, Clone, Copy)]
 pub struct CallSite<'a> {
     /// What asked (`oxplow:oxplow/thread?id=<id>` for an agent's MCP call,
-    /// `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …).
+    /// `oxplow:oxplow/collector?collector=<owner>/<id>`, …).
     pub caller: &'a str,
     /// For a recorded computation (`ai_compute`), the hash of its input.
     pub input_hash: Option<&'a str>,

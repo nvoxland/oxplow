@@ -11,8 +11,8 @@ intent:
     Settings → Extensions.
   origin: null
   examples:
-    - name: review-verdicts
-      input: { page: review-verdicts }
+    - name: latest-reviews
+      input: { page: latest-reviews }
       expect: no rows until effort-review has reviewed an effort
 # Optional: with effort-review missing, disabled or exporting another
 # version, the page below is withheld (a warning in Settings →

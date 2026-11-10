@@ -358,10 +358,8 @@ list.
 `assign` and `reorder` aren't a list's verbs: they are core's
 ("Assignment"). A Rust client, **`tasks::Tasks`**
 (`Services::tasks_client()`), types the calls; the conformance
-suite uses it. Extension commands compose the same verbs:
-oxplow-bundled's Accept Review / Request Changes (P7.C5) comment on and
-transition an effort's task whatever its provider
-([extensions-bundled.md](./extensions-bundled.md) "The review packet").
+suite uses it. Extension commands compose the same verbs (comment on
+and transition a task whatever its provider).
 
 **The contract is the `v_task` columns**, one shape for every
 provider (a provider's verb receives the same input, less `create`'s

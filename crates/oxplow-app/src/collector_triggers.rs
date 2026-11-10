@@ -335,7 +335,7 @@ impl CollectorTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::lifecycle::log_claim as log;
+    use crate::test_fixtures::lifecycle::log_retitle as log;
     use oxplow_domain::Envelope;
     use serde_json::json;
 
@@ -362,9 +362,9 @@ mod tests {
 
     const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
 
-    fn on_claims(filter: &str) -> String {
+    fn on_retitles(filter: &str) -> String {
         format!(
-            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [effort.claim_verified]{filter}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
+            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [effort.retitled]{filter}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
         )
     }
 
@@ -421,7 +421,7 @@ mod tests {
     #[tokio::test]
     async fn an_on_collector_runs_once_per_event_with_its_anchors() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        extension(&fx.svc, &on_claims(""), &[("seen.star", SEEN)]).await;
+        extension(&fx.svc, &on_retitles(""), &[("seen.star", SEEN)]).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         let ev = log(&fx.svc, fx.effort, "reviewer").await;
         assert!(consumer.handles(&ev.envelope.event_type));
@@ -435,7 +435,7 @@ mod tests {
                 ev.seq,
                 ev.envelope.id.to_string(),
                 fx.effort.value(),
-                "effort.claim_verified"
+                "effort.retitled"
             ]])
         );
         assert_eq!(
@@ -460,7 +460,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         extension(
             &fx.svc,
-            &on_claims("\n    settle: 30s"),
+            &on_retitles("\n    settle: 30s"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -504,7 +504,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         extension(
             &fx.svc,
-            &on_claims("\n    idle: 2m"),
+            &on_retitles("\n    idle: 2m"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -555,7 +555,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         extension(
             &fx.svc,
-            &on_claims("\n    where: { evidence: reviewer }"),
+            &on_retitles("\n    where: { title: reviewer }"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -579,13 +579,13 @@ mod tests {
     #[tokio::test]
     async fn a_failing_collector_is_recorded_not_dead_lettered() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let broken = on_claims("")
+        let broken = on_retitles("")
             .replace("id: seen", "id: broken")
             .replace("entry: seen.star", "entry: broken.star")
             .replace("name: seen", "name: broken");
         extension(
             &fx.svc,
-            &format!("{broken}{}", on_claims("")),
+            &format!("{broken}{}", on_retitles("")),
             &[
                 ("seen.star", SEEN),
                 ("broken.star", "def transform(input):\n    return 1 // 0\n"),
@@ -618,13 +618,13 @@ mod tests {
         crate::test_fixtures::install_code_metrics(&fx.svc.layout.project_dir);
         extension(
             &fx.svc,
-            &on_claims("").replace("    input:", "    after: [effort.evidence]\n    input:"),
+            &on_retitles("").replace("    input:", "    after: [effort.evidence]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         assert_eq!(
-            consumer.after_for("effort.claim_verified"),
+            consumer.after_for("effort.retitled"),
             vec!["effort.evidence".to_string()]
         );
         // tsk711: predecessors follow the event's own collectors — an event
@@ -635,7 +635,7 @@ mod tests {
             vec!["effort.evidence".to_string()],
             "every predecessor, for ordering"
         );
-        assert!(consumer.handles("effort.claim_verified"));
+        assert!(consumer.handles("effort.retitled"));
         // The default-on code gauges (the test extension's) handle `snapshot.taken`; an
         // event no collector names isn't handled.
         assert!(consumer.handles("snapshot.taken"));
@@ -649,7 +649,7 @@ mod tests {
     async fn collectors_run_after_the_collectors_they_name() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let one = |id: &str, after: &str| {
-            on_claims("")
+            on_retitles("")
                 .replace("  - id: seen\n", &format!("  - id: {id}\n"))
                 .replace("name: seen,", &format!("name: {id},"))
                 .replace("entry: seen.star", &format!("entry: {id}.star"))
@@ -686,7 +686,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_effort().await;
         let held = extension(
             &fx.svc,
-            &on_claims("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
+            &on_retitles("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;

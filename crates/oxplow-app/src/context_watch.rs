@@ -17,16 +17,12 @@ use crate::event_pump::AsyncEventConsumer;
 
 pub const NAME: &str = "agent.context_changes";
 
-/// The commands whose runs change what the context lists: a decision
-/// recorded, and an item put in the thread's context basket.
-const CHANGING_COMMANDS: &[&str] = &[
-    "oxplow.effort.record_decision",
-    crate::commands::context_basket::ADD,
-];
+/// The commands whose runs change what the context lists: an item put in
+/// the thread's context basket.
+const CHANGING_COMMANDS: &[&str] = &[crate::commands::context_basket::ADD];
 
 /// The event types whose facts the context reads: the handoffs and their
-/// count, the agents open in a worktree, and the open effort and its
-/// decisions.
+/// count, the agents open in a worktree, and the open effort.
 pub fn changes_context(event_type: &str) -> bool {
     matches!(
         event_type,
@@ -39,8 +35,6 @@ pub fn changes_context(event_type: &str) -> bool {
             | "effort.finished"
             | "effort.linked"
             | "effort.retitled"
-            | "effort.decision_reviewed"
-            | "effort.decisions_inferred"
             | "command.executed"
     )
 }

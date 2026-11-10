@@ -56,7 +56,7 @@ months later, nobody knows whether the weird-looking thing in
 
 **Oxplow primitive: efforts and notes.** Activity, references and snapshots preserve evidence of the work.
 Optional effort policies group that activity and can link it to tasks;
-an effort is not a mandatory task attempt. Descriptions and decisions
+an effort is not a mandatory task attempt. Descriptions and summaries
 can connect the observed change to its rationale.
 
 ## Failure mode 5: no rollback

@@ -46,7 +46,6 @@ pub mod page_ref_store;
 pub mod panel_layout_store;
 pub mod proposal_store;
 pub mod provider_collector_store;
-pub mod reasoning_store;
 pub mod replaceable_store;
 pub mod resource_store;
 pub mod search_store;
@@ -119,10 +118,6 @@ pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefSt
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
-pub use reasoning_store::{
-    insert_claim_tx, record_decision_tx, replace_claims_tx, replace_inferred_tx, ClaimProvenance,
-    NewClaim, NewDecision, SqliteReasoningStore,
-};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     DatasetFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult,

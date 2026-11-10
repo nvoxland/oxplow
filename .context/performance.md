@@ -671,10 +671,10 @@ find the few rows that differ. `KindSearchIndex::recompute(full)` now reads,
 for a core kind whose view has a `seq` column, only the rows past the highest
 `seq` it indexed when the inputs saw inserts only; `full` (any UPDATE or
 DELETE, the first build, a deploy or vocabulary change) and a fresh process
-read whole. `search_decision` and `search_turn` declare `seq` (their row
+read whole. `search_turn` declares `seq` (its row
 id); the others cannot say that no insert changes or removes an existing row
 (see `extensions-events.md`). Pinned by
-`an_insert_only_recompute_reads_only_the_new_rows`: three decisions, a whole
+`an_insert_only_recompute_reads_only_the_new_rows`: three rows, a whole
 read of 3; one more, a read of 1; nothing new, a read of 0; a whole read of
 4 leaves the same entries. The saving is bounded by the kinds that qualify
 and by `full` (a turn's end is an update): this is not measured on the live

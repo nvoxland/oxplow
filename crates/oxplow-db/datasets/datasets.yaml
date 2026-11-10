@@ -114,14 +114,14 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_call
-  version: 7
+  version: 8
   description: "Every model call oxplow itself made (not the coding agent's): role, provider, model, tokens, latency and whether it succeeded."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
     - { name: "role", type: "TEXT", doc: "Role used (`main`, `summarize`, `decide`)." }
     - { name: "provider", type: "TEXT", doc: "Provider id from ai.yaml." }
     - { name: "model", type: "TEXT", doc: "Model id." }
-    - { name: "caller", type: "TEXT", doc: "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …" }
+    - { name: "caller", type: "TEXT", doc: "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, …" }
     - { name: "input_tokens", type: "INTEGER", doc: "Input tokens." }
     - { name: "output_tokens", type: "INTEGER", doc: "Output tokens." }
     - { name: "latency_ms", type: "INTEGER", doc: "Round-trip time." }
@@ -137,7 +137,7 @@
     - { not_null: id }
     - { unique: id }
 - name: ai_result
-  version: 3
+  version: 4
   description: "Recorded AI computations: a classify / score / decide / summarize / extract result kept by the hash of its input, the provider, the model and the request the model was sent, so asking again reads it instead of calling, and a changed prompt computes afresh. Tokens only; no cost."
   fields:
     - { name: "id", type: "INTEGER", doc: "Row id." }
@@ -147,7 +147,7 @@
     - { name: "request_hash", type: "TEXT", doc: "Content hash of the exact request the model was sent (`v_ai_call.request_hash`); a changed prompt is a new result." }
     - { name: "op", type: "TEXT", doc: "`classify`, `score`, `decide`, `summarize` or `extract`." }
     - { name: "role", type: "TEXT", doc: "The role it ran on: a built-in (`decide`, `summarize`, `main`) or an extension's AI profile (`acme/review`)." }
-    - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `inferred-decisions`, `oxplow:oxplow/collector?collector=<owner>/<id>`." }
+    - { name: "caller", type: "TEXT", doc: "What first asked, e.g. `oxplow:oxplow/collector?collector=<owner>/<id>`." }
     - { name: "output_json", type: "TEXT", doc: "The result as JSON." }
     - { name: "input_tokens", type: "INTEGER", doc: "Input tokens of the call that computed it." }
     - { name: "output_tokens", type: "INTEGER", doc: "Output tokens of that call." }
@@ -331,23 +331,6 @@
     - { name: "assertions_after", type: "INTEGER", doc: "Assertion calls on the head side." }
     - { name: "skips_before", type: "INTEGER", doc: "Skip markers on the base side." }
     - { name: "skips_after", type: "INTEGER", doc: "Skip markers on the head side." }
-- name: claim
-  version: 10
-  description: "Claims the agent made about its work (\"tests pass\", \"no behavior change\") and what each cites: the ones it stated in `oxplow.effort.report` and the ones a model read in its answers when the effort finished. (v8: both sources, `provenance`.)"
-  fields:
-    - { name: "id", type: "INTEGER", doc: "Claim id." }
-    - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
-    - { name: "task", type: "TEXT", doc: "The task it was made on (`oxplow:oxplow/task?id=<id>&provider=<provider>`), if any." }
-    - { name: "effort_id", type: "INTEGER", doc: "Effort, if one was open." }
-    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
-    - { name: "agent_session_id", type: "INTEGER", doc: "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)" }
-    - { name: "statement", type: "TEXT", doc: "The claim in words." }
-    - { name: "kind", type: "TEXT", doc: "`tests_pass`, `no_behavior_change`, `handles_case` or `other`." }
-    - { name: "evidence", type: "TEXT", doc: "What it cites (`oxplow:oxplow/run?id=<id>`, a test, a file, or `reviewer` when a person verified it with `oxplow.effort.verify_claim`); NULL if nothing was cited. Whether anything else backs it is a review policy's call (oxplow-bundled's `v_oxplow_claim_status`). (v6)" }
-    - { name: "review", type: "TEXT", doc: "A reviewer's verdict: `verified` (`oxplow.effort.verify_claim`, with what backs it in `evidence`) or `dismissed` (the agent didn't claim it, or didn't mean it: `oxplow.effort.dismiss_claim`); NULL while unreviewed. Reading the effort again, or reporting again, replaces only that source's unreviewed claims. (v7)" }
-    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent stated it in `oxplow.effort.report`'s `claims`) or `inferred` (a model read it in the effort's answers). The review treats both alike. (v8)" }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/claim?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v5)" }
 - name: code_quality_finding
   version: 1
   description: "Findings from code-quality scans, e.g. duplicated blocks, each with its scan's tool and time."
@@ -465,28 +448,6 @@
     - { name: "effort_id", type: "INTEGER", doc: "Effort, if one was open." }
     - { name: "path", type: "TEXT", doc: "Doc path, e.g. `.context/usability.md`." }
     - { name: "at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { not_null: id }
-    - { unique: id }
-- name: decision
-  version: 7
-  description: "Decisions: forks the agent resolved while working (what it chose, what it didn't, why), recorded by the agent or inferred by oxplow. What a reviewer most wants to check."
-  fields:
-    - { name: "id", type: "INTEGER", doc: "Decision id." }
-    - { name: "thread_id", type: "INTEGER", doc: "Thread it was made in." }
-    - { name: "task", type: "TEXT", doc: "The task being worked on (`oxplow:oxplow/task?id=<id>&provider=<provider>`), if any." }
-    - { name: "effort_id", type: "INTEGER", doc: "Effort it was made during, if one was open." }
-    - { name: "turn_id", type: "INTEGER", doc: "Turn it happened in (v_agent_turn.id), when known." }
-    - { name: "question", type: "TEXT", doc: "What had to be decided." }
-    - { name: "choice", type: "TEXT", doc: "What was chosen." }
-    - { name: "alternatives", type: "TEXT", doc: "Options not taken, as a JSON array of strings." }
-    - { name: "confidence", type: "TEXT", doc: "`low`, `medium` or `high`." }
-    - { name: "why", type: "TEXT", doc: "The reasoning." }
-    - { name: "provenance", type: "TEXT", doc: "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)" }
-    - { name: "effort_uri", type: "TEXT", doc: "Its effort's URI (`oxplow:oxplow/effort?id=eff<n>`), when it was made during one: where a decision opens. (v5)" }
-    - { name: "thread_uri", type: "TEXT", doc: "Its thread's URI (`oxplow:oxplow/thread?id=thr<n>`): where a decision opens when it has no effort. (v5)" }
   tests:
     - { not_null: id }
     - { unique: id }
@@ -759,19 +720,6 @@
     - { name: "body", type: "TEXT", doc: "The message body, the author, and the paths it changed (up to 300)." }
     - { name: "stream_id", type: "TEXT", doc: "Always NULL: commits belong to the project." }
     - { name: "version", type: "TEXT", doc: "The sha: a commit never changes." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
-- name: search_decision
-  version: 4
-  description: "What site search indexes for each decision: the `decision` kind's index is restated from these rows when they change. Decisions on archived threads are included."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/decision?id=<n>`: what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "The question." }
-    - { name: "body", type: "TEXT", doc: "The choice, why, and the alternatives, a line each." }
-    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`)." }
-    - { name: "version", type: "TEXT", doc: "When it was made: a decision never changes." }
-    - { name: "seq", type: "INTEGER", doc: "The row id, unique and only growing: an insert-only recompute of the index reads on from the highest one it indexed." }
   tests:
     - { not_null: uri }
     - { unique: uri }
@@ -1101,14 +1049,14 @@
   tests:
     - { not_null: effect }
 - name: extension_run
-  version: 7
+  version: 8
   key: [run_id]
   description: "Each finished run of extension code, one row each: which contribution at which version and catalog generation, who ran it and on whose behalf, what caused it and where it sat, how it ended, what it cost and which scopes it called. What an extension actually did, never what it read or wrote: no input, result, credential value or prompt is kept. Kept 90 days, like a collector's events."
   fields:
     - { name: "run_id", type: "TEXT", doc: "The run (a UUIDv7). `v_command_audit`-style records name it in their `run_id`." }
     - { name: "parent_run_id", type: "TEXT", doc: "The run it was nested in (a person's `oxplow.collector.sync`, an effect's composing script); NULL for a top-level run." }
     - { name: "extension", type: "TEXT", doc: "The extension it belongs to." }
-    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`." }
+    - { name: "contribution", type: "TEXT", doc: "The contribution's URI (`v_contribution.uri`): `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=effort_review/review`." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `implementation`, …" }
     - { name: "version", type: "TEXT", doc: "The extension's declared `version:` when it ran; NULL when it declares none." }
     - { name: "generation", type: "TEXT", doc: "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)" }
@@ -1409,10 +1357,10 @@
     - { name: "time_ms", type: "", doc: "Its duration, when the report gave one." }
     - { name: "message", type: "", doc: "What a failed case's report said went wrong: its failure message, then its body (the assertion and where it happened). NULL for a case that didn't fail, one whose report said nothing, and a failure past the per-run cap (64 KB of messages per run, 4 KB each, a cut one ending in `…`)." }
 - name: test_run
-  version: 3
+  version: 4
   description: "Every test run oxplow saw (hook-observed or reported by an agent), with its counts."
   fields:
-    - { name: "id", type: "INTEGER", doc: "Run id; `oxplow:oxplow/run?id=<id>` is how claims and decisions cite it." }
+    - { name: "id", type: "INTEGER", doc: "Run id; `oxplow:oxplow/run?id=<id>` is how a run is cited." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream it ran in (v_stream.id)." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread whose agent ran it, if known." }
     - { name: "effort_id", type: "INTEGER", doc: "Effort it belongs to: the one the tool call that ran it was in (or the thread's open one)." }
@@ -1564,11 +1512,11 @@
     - { name: "since", type: "TEXT", doc: "When its run was first deferred (RFC 3339)." }
     - { name: "touched", type: "TEXT", doc: "When a triggering event last arrived for it (RFC 3339): what `settle` counts from." }
 - name: contribution
-  version: 11
+  version: 12
   key: [uri]
   description: "Every enabled extension's contributions, one row each, as their descriptors say: its URI (`<kind>:<extension>/<id>`, or `<kind>:<name>` for a command, metric, measure, dimension, event type or ref kind — the dataset that owns every contribution kind's URI), who contributed it and at what version, how it runs, what it needs, and the shared name it holds. What `list_extensions` counts and the reference documents. Kinds move onto descriptors one by one; a kind not yet listed here keeps its own listing."
   fields:
-    - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.review.accept`. (v3, was `id`)" }
+    - { name: "uri", type: "TEXT", doc: "Its ref: `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/collector?collector=triage/todos`, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`. (v3, was `id`)" }
     - { name: "extension", type: "TEXT", doc: "The extension that declares it." }
     - { name: "namespace", type: "TEXT", doc: "The namespace it is named in (its extension's `namespace:`): the first part of a local kind's id, kept when it moves to another extension in the namespace." }
     - { name: "kind", type: "TEXT", doc: "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …" }
@@ -2395,9 +2343,9 @@
     - { name: "commands", type: "TEXT", doc: "The commands it may invoke, as a JSON array." }
     - { name: "sql", type: "TEXT", doc: "`read` when it runs its own read-only SQL over the datasets; NULL otherwise." }
 - name: replacement
-  version: 1
+  version: 2
   key: [target, extension]
-  description: "The core sub-components extensions replace (`task.board`, `effort.verdict`), one row per candidate extension, read live from the enabled extensions and the config. `chosen` is the extension the person picked for the target (`oxplow` for oxplow's own), NULL for the default: the only extension replacing it, or oxplow's own where several do, or the item's provider's extension for a `bound_to_provider` target."
+  description: "The core sub-components extensions replace (`task.board`, `task.list`), one row per candidate extension, read live from the enabled extensions and the config. `chosen` is the extension the person picked for the target (`oxplow` for oxplow's own), NULL for the default: the only extension replacing it, or oxplow's own where several do, or the item's provider's extension for a `bound_to_provider` target."
   fields:
     - { name: "target", type: "TEXT", doc: "The core sub-component, `<area>.<name>`." }
     - { name: "label", type: "TEXT", doc: "What a person calls it (`board`)." }

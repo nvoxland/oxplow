@@ -112,7 +112,6 @@ harness only delivers them.
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
 | Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
 | Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
-| Decisions | The open effort's recorded ones | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
 | Server instructions | What oxplow knows, writes are commands, answer with `oxplow_find_page` / `oxplow_show_page` | MCP `get_info` ("The agent's tools") |
 
@@ -148,12 +147,10 @@ history between turns ("Codex: its TUI on a thread oxplow observes",
 "Context between turns"), since its TUI owns the prompt.
 
 **Once, then on change.** On every prompt, `prompt_context` builds the
-`<session-context>` block and the decisions block and sends each only
+`<session-context>` block and sends it only
 when it differs from what that agent session was last sent (`should_emit`,
-keyed by the harness's session id; the decisions under
-`<session_id>#decisions`, at most `MAX_DECISIONS_IN_CONTEXT` (15),
-recorded ones only — inferred decisions are the reviewer's). The first
-prompt of a session always carries both, which is why the launch prompt
+keyed by the harness's session id). The first
+prompt of a session always carries it, which is why the launch prompt
 leaves the session context out for a harness with `prompt_context`.
 Between them rides the thread's undelivered nudges, prompt advisories
 included. `injectSessionContext: false` in `.oxplow/project.yaml` turns
@@ -162,7 +159,7 @@ the session-context block off.
 **Compaction.** A compaction or a fresh start forgets what was sent
 (`AgentContext::reset_session`): on `PreCompact` (Claude Code's; its HTTP
 `SessionStart` never arrives) and on `SessionStart`, so the next
-prompt carries the session context and the decisions again. The baselines
+prompt carries the session context again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
 A compaction is also logged, by every harness, as `agent.context.compacted@2`
@@ -775,7 +772,7 @@ the only way to make a `HumanPrompt`, and `Connection::prompt` takes
 nothing else. The session calls it only for `Command::Prompt`, which only
 `ChatManager::submit_human_prompt` sends; a second prompt while a turn runs
 is `TurnInFlight`, never queued. The Codex connection refuses a prompt (the person
-types in Codex's own TUI). The session context, advisories, decisions and
+types in Codex's own TUI). The session context, advisories and
 waiting nudges ride the person's prompt as a visible leading block
 (behind a disclosure on the user item). `chat/guard_tests.rs` scans the
 source: no production code starts a Codex turn (`"turn/start"`), context
@@ -942,7 +939,7 @@ developer-role message to the thread's history. Checked live on the
 
 The session actor (`chat/session.rs`, `inject_context`) therefore builds
 the context with `AgentContext::build_context` — the same "once, then on
-change" baselines, the `<handoffs>` block, nudges and decisions a prompt
+change" baselines, the `<handoffs>` block and nudges a prompt
 carries — and injects it (`Connection::inject`), only when the connection
 says it can (`Connection::can_inject`: the thread runs no turn, read from
 `turn/started` / `turn/completed`; and the daemon knows the method, else
@@ -954,8 +951,7 @@ a turn waits for that turn's end), and **on a change**: the
 `Services::context_changes` when the log records a fact the context
 reads — `handoff.sent` / `handoff.settled`, `agent.session.started` /
 `.ended` (who else is in the worktree), `effort.opened` / `.closed` /
-`.finished` / `.linked` / `.retitled` and the decision reviews, and the
-`oxplow.effort.record_decision` command — and each session watching it
+`.finished` / `.linked` / `.retitled` — and each session watching it
 builds again. A build that changes nothing is `None` (the baselines), so
 a no-op event injects nothing; a change during a turn waits for its end.
 No polling. The launch prompt's `developerInstructions` leave the session
@@ -1825,14 +1821,7 @@ recorded as the work happens, never declared.
   couldn't parse.
 
 Claims and observations carry the agent session where one is known
-([work-tracking.md](./work-tracking.md) "Efforts"). Claims an agent makes
-about its work are a different thing: it states the ones it can back in
-`oxplow.effort.report`'s `claims` (`v_claim.provenance = 'recorded'`),
-and the bundled `infer-reasoning` effect asks a model, when an effort
-finishes, for the decisions the agent made without recording them and the
-claims its answers made (`inferred`; the `reasoning` job, skipped while no
-model serves the `reasoning` profile). Decisions an agent records itself
-are `oxplow.effort.record_decision`.
+([work-tracking.md](./work-tracking.md) "Efforts").
 
 ### Token usage capture
 

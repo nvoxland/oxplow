@@ -85,7 +85,7 @@ examples.
   `keywords` or `badge`: see "Renderers".)
 - `description` says what the page is: what it shows, for what, over which
   scope, in which order. A page whose purpose is an action (a form that
-  files an item, hands off work or verifies a claim) may name it. Never
+  files an item or hands off work) may name it. Never
   list UI mechanics or the actions on offer: the page shows its own
   controls, and Definition in About this page lists them. Good: "The stream's closed
   threads, newest first, with the work each finished." Bad: "...

@@ -3,7 +3,7 @@
 oxplow's own effort policy opens an effort when a turn first changes files
 and keeps it open across prompts until a commit lands its changes or its
 task finishes. This one gives **every prompt that changes files an
-effort of its own**, so an effort's review packet, files, test runs and
+effort of its own**, so an effort's review, files, test runs and
 tokens are exactly that prompt's.
 
 It's a script (`policies/prompt_efforts.star`): an effort policy hears

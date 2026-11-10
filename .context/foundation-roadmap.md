@@ -621,20 +621,6 @@ Prerequisites: Add AI capability discovery and typed request/response parts; Pro
 
 Move optional opinions out of core while retaining common evidence, analysis mechanisms, safe operations, and host guarantees.
 
-#### Extract inferred-decision policy into a bundled extension
-
-Status: planned.
-
-Scope: Move the fixed effort-close inference prompt and scheduling policy out of the unconditional Rust reactor into a replaceable bundled contribution using public jobs, AI profiles, event inputs and recorded outputs. Retain safe decision storage/review mechanisms and separation of inferred versus confirmed evidence.
-
-Acceptance: Default behavior remains available when selected and configured; disable/replace/customize needs no core patch. Missing models and rejected calls are diagnosable. Inferred decisions are not silently confirmed or fed back as agent truth. Extraction uses only services available to non-bundled extensions.
-
-Validation: Run the current inference fixtures through the public extension path; test disabled/unconfigured/replaced policy, duplicate close events, cancellation and confirm/dismiss behavior.
-
-Starting points: `crates/oxplow-app/src/inferred_decisions.rs`, `crates/oxplow-app/src/effort_reactors.rs`, `crates/oxplow-app/src/commands/review.rs`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`.
-
-Prerequisites: Provide durable cancellable extension jobs outside database transactions; Add extension AI profiles with compatible high-level helpers; Use one versioned event envelope across runtime and authoring.
-
 #### Extract task repair response from core contribution health
 
 Status: done. Core keeps detection and the health report; the bundled
@@ -659,9 +645,7 @@ Prerequisites: Use one versioned event envelope across runtime and authoring; Co
 #### Separate reusable analysis evidence from default review policy
 
 Status: done. Core keeps evidence; the judgements it still made moved to
-the default extensions: an effort's verdict is the `effort.verdict`
-replacement (oxplow-bundled's page; core shows none), claim backing is
-oxplow-bundled's `claim_status`, struggle its `struggle`, and per-effort
+the default extensions: struggle is oxplow-bundled's `struggle`, and per-effort
 test outcome an oxplow-foundation collector. A value at a metric
 threshold hasn't crossed it, on the server and the Metrics page alike.
 `examples/extensions/schema-review` is the alternative review. The
@@ -791,4 +775,4 @@ Validation: Run SDK/conformance and focused application tests for end-to-end tri
 
 Starting points: `examples/extensions`, `crates/oxplow-sdk/src/conformance.rs`, `crates/oxplow-agent-text/assets/skills/oxplow-extension/SKILL.md`, `docs/reference/extensions.md`.
 
-Prerequisites: Give bundled and project custom components the same public runtime; Provide provider-independent custom views, forms and workflow UI; Preview all contribution kinds in a consistent development host; Expose cancellable AI streams and tool lifecycles through jobs; Extract inferred-decision policy into a bundled extension; Declare versioned public imports and cross-extension contracts; Test agent-authored collection, metrics and dimensions end to end.
+Prerequisites: Give bundled and project custom components the same public runtime; Provide provider-independent custom views, forms and workflow UI; Preview all contribution kinds in a consistent development host; Expose cancellable AI streams and tool lifecycles through jobs; Declare versioned public imports and cross-extension contracts; Test agent-authored collection, metrics and dimensions end to end.

@@ -22,7 +22,7 @@ use crate::extension::extension_private_state_tests::{declare, write, write_stat
 use crate::test_fixtures::lifecycle::write_extension;
 use crate::test_fixtures::lifecycle::EXT;
 use crate::test_fixtures::lifecycle::{
-    booted, log_claim, page, problem, readable, CONFIGURATION_V2,
+    booted, log_retitle, page, problem, readable, CONFIGURATION_V2,
 };
 use crate::test_fixtures::EffortFixture;
 
@@ -120,19 +120,19 @@ impl Alpha {
   - id: seen
     runtime: starlark
     entry: collectors/seen.star
-    on: [effort.claim_verified]{settle}
+    on: [effort.retitled]{settle}
     input: \"SELECT :event_seq AS ev\"
     sync: upsert
     entities:
       - {{ name: seen, key: ev, columns: {{ ev: int, who: text }} }}
 effects:
   - id: note
-    summary: Note a verified claim.
-    on: [effort.claim_verified]
+    summary: Note a retitled effort.
+    on: [effort.retitled]
     entry: effects/note.star
 event_types:
   types:
-    - {{ type: alpha.noted, v: 1, schema: noted.json, summary: A claim was noted. }}
+    - {{ type: alpha.noted, v: 1, schema: noted.json, summary: A title was noted. }}
 "
         );
         std::fs::write(&manifest, text).unwrap();
@@ -235,10 +235,10 @@ fn page_title(fx: &EffortFixture) -> Option<String> {
         .map(|l| l.title)
 }
 
-/// A claim is verified: the collector and the effect react to it, as the
+/// An effort is retitled: the collector and the effect react to it, as the
 /// event pump runs them.
 async fn verified(fx: &EffortFixture) {
-    log_claim(&fx.svc, fx.effort, "reviewer").await;
+    log_retitle(&fx.svc, fx.effort, "reviewer").await;
     assert!(
         fx.svc.event_pump.settle_all(Duration::from_secs(10)).await,
         "the consumers handled it"

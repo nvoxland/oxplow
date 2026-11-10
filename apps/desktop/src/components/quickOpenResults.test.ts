@@ -179,7 +179,7 @@ describe("buildQuickOpenResults", () => {
     expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("meeting") } });
   });
 
-  // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims
+  // tsk1031: "todo" ranked Planning and two other pages
   // first — t…o…d…o appears in order somewhere in their long descriptions.
   // A keyword matches at a word's start; a title match ranks first.
   test("a title match ranks first, and keywords match whole words", () => {

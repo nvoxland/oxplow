@@ -1,4 +1,4 @@
-//! `ui.decorators` (P6b.C5; stable since P10, on oxplow-bundled's verdict):
+//! `ui.decorators` (P6b.C5; stable since P10):
 //! labels from one of the extension's datasets shown on core refs — a chip
 //! on a page whose ref the dataset lists (`ref-chip`), a badge after a page
 //! cell that links to one (`row-badge`). Additive: a page is complete

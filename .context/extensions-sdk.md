@@ -373,7 +373,7 @@ own (an unknown name is a finding). The default extensions are not on:
 oxplow's own pages run complete without them. oxtask,
 effort policy and wiki are foundation's (always on), so a fixture that makes
 tasks, efforts or wiki pages needs nothing extra (`requires:
-[oxplow-bundled]` only for what bundled adds: its review pages, verdict and
+[oxplow-bundled]` only for what bundled adds: its review pages and
 replacements), and an effort policy's conformance suite, which files work,
 runs on an oxplow of its own — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or

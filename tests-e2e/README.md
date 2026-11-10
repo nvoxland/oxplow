@@ -164,7 +164,7 @@ an extension's resource; `code/` a commit's diff (file watching over a real daem
 Programs approval and the settings pages; `integrations/` the fake tracker's
 Integrations frame (the config form, Check, Enable, the task-tracker choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
-`review/` the effort page and its verdict chip; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
+`review/` the effort page; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
 filters, navigation, approval-gated `invoke`, and a self-navigation off
 this machine sending no request) and the triage example (a decision
 surviving a reload of the board; what the board draws and the collector's sort

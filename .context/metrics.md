@@ -2152,8 +2152,7 @@ hand-authored in the four blocks of `.oxplow/extensions/project/extension.yaml`.
 A definition's `target` / `warn_at` / `fail_at` (interpreted via `direction`) are
 the single source of red/green — no hardcoded UI ramps. The coverage cut-offs
 are the foundation's `oxplow.coverage.abs_pct` spec (`target: 80`, `warnAt:
-80`, `failAt: 50`), which a project tunes with `metrics: [{ use: … }]`;
-oxplow-bundled's effort verdict judges diff coverage against its `warnAt`.
+80`, `failAt: 50`), which a project tunes with `metrics: [{ use: … }]`.
 
 **One rule for crossing.** A value *past* a threshold has crossed it; a value
 *at* it has not (`target: 80, warnAt: 80` means 80 is fine). The server's

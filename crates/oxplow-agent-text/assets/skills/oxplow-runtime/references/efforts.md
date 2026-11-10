@@ -27,7 +27,7 @@ Efforts are `v_effort` (`id`, `task`, `thread_id`, `title`,
 `started_at`, `ended_at`, `closed_by`, `summary`), their files
 `v_effort_file`. For one effort, `oxplow_run_page { page: effort-files, params: { effort } }`
 lists its files and `oxplow_effort_summary { effort }` gives its title, item, files,
-runs, claims and decisions in one call.
+and runs in one call.
 
 ## Sessions and what they did
 
@@ -42,7 +42,6 @@ runs, claims and decisions in one call.
 In SQL the same history is `v_agent_session` (the slots opened on a
 thread), `v_agent_session_status` (each open session's last status),
 `v_agent_turn` (each prompt and answer), `v_tool_call` and `v_subagent`.
-An effort's evidence is `v_effort_observation`, its claims `v_claim`, its decisions
-`v_decision`, and its task a `v_task` row.
+An effort's evidence is `v_effort_observation`, and its task a `v_task` row.
 A session whose process ended is opened again with
 `oxplow.agent_session.reopen { session }`; the transcript page offers it.

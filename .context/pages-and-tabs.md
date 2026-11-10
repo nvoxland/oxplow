@@ -838,7 +838,7 @@ margin; an embed or a slot takes its title from the page it shows):
   params `uri`, `start`, `end`, `stream_id`; each of `start` / `end` is
   `''`, `none`, `working`, `snap:<id>` or `git:<rev>`; a picked point is a
   pushed view change): an `embed` of `changes-effort`, a `detail` of
-  the range, the description, the `effort.verdict` replaceable, a `list`
+  the range, the description, a `list`
   of concurrent work, a `tree` of files and a `table` of extensions,
   then the `sections` slot.
   `task` (`for: oxplow/task`) has the `task.detail` and
@@ -1393,7 +1393,7 @@ The launcher does everything in one box:
   bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over every
   searchable kind and file contents: tasks with their comments,
   wiki pages, comments, thread notes, threads, agent sessions, turns,
-  efforts, decisions, commits, pages (dashboards among them); the thread-shaped kinds
+  efforts, commits, pages (dashboards among them); the thread-shaped kinds
   include archived work); each row shows its kind's icon and name
   (`pageKindIconComponent` / `pageKindLabel`); a hit is a ref, opened through the
   ref opener (`openSearchHit` → `openRef` → `tabs/refOpener.ts`),

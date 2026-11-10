@@ -131,7 +131,6 @@ pub mod providers;
 mod reading_data_tests;
 #[cfg(test)]
 mod real_watch_tests;
-pub mod reasoning;
 pub mod recovery;
 pub mod ref_moves;
 pub mod ref_read;
@@ -634,8 +633,6 @@ pub struct Services {
     pub panel_layout_store: oxplow_db::SqlitePanelLayoutStore,
     /// The person's page memory and app preferences (`ui_preference`).
     pub ui_preference_store: oxplow_db::SqliteUiPreferenceStore,
-    /// Agent decisions and claims (`v_decision`, `v_claim`).
-    pub reasoning_store: Arc<oxplow_db::SqliteReasoningStore>,
     /// Persisted agent tool calls (`v_tool_call` and derived views).
     pub tool_call_store: Arc<oxplow_db::SqliteToolCallStore>,
     /// Git history and branches (`v_commit`, `v_branch`, …).
@@ -1057,7 +1054,6 @@ impl Services {
         let nudge_store = Arc::new(SqliteAgentNudgeStore::new(db.clone()));
         let terminal_store = Arc::new(oxplow_db::SqliteTerminalStore::new(db.clone()));
         let collector_store = Arc::new(oxplow_db::SqliteCollectorStore::new(db.clone()));
-        let reasoning_store = Arc::new(oxplow_db::SqliteReasoningStore::new(db.clone()));
         let tool_call_store = Arc::new(oxplow_db::SqliteToolCallStore::new(db.clone()));
         let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
         let diagnostic_store = Arc::new(oxplow_db::SqliteDiagnosticStore::new(db.clone()));
@@ -1525,7 +1521,6 @@ impl Services {
             commands::task::delete_op(tasks.clone()),
         ]
         .into_iter()
-        .chain(commands::review::ops())
         .chain(commands::thread::ops(session_processes.clone()))
         .chain(commands::agent_session::ops(
             config_target.clone(),
@@ -1542,7 +1537,6 @@ impl Services {
             terminal_sessions.clone(),
         ))
         .chain(commands::comment::ops())
-        .chain(commands::reasoning::ops())
         .chain(commands::ui::ops())
         .chain(commands::op_error::ops())
         .chain(commands::effort_report::ops(
@@ -1926,7 +1920,6 @@ impl Services {
             collector_runner,
             panel_layout_store,
             ui_preference_store,
-            reasoning_store,
             tool_call_store,
             git_store,
             diagnostic_store,
@@ -2411,8 +2404,6 @@ mod tests {
                 // calls per input.
                 // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
-                "oxplow.review.accept",
-                "oxplow.review.request_changes",
                 "oxplow.tasks.clear_finished",
             ]
         );

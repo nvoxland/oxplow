@@ -698,7 +698,7 @@ same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 the per-thread capture pad of `oxplow.knowledge.add_note`) are gone: V112
 dropped the table with its `page_ref` edges and search rows, and with the
 commands, `v_thread_note`, `v_search_thread_note` and the `oxplow/thread_note`
-resource. What an agent leaves for the next one is an effort, a decision or
+resource. What an agent leaves for the next one is an effort or
 a handoff.
 
 ### Old UI units, answers and database dashboards (gone, V113)
@@ -767,7 +767,7 @@ start an effort in the past (`adopt_since`, clamped to the thread's
 previous effort's end): it then stamps itself onto the thread's
 un-efforted rows since then in the derived tables that carry an effort
 (`EFFORT_STAMPED`: `agent_tool_call`, `agent_token_usage`,
-`metric_capture`, `agent_nudge`, `claim`, `decision`).
+`metric_capture`, `agent_nudge`).
 `finish_tx` at a past point releases the rows after it. The event log is
 not restamped: an event keeps the anchors it was written with.
 `effort_at_tx(thread, at)` names the effort whose span covers a moment.
@@ -790,13 +790,8 @@ reader joins `v_task` on it, so it sees the active list's item and
 nothing with none). An effort goes with its thread (`thread_id … ON
 DELETE CASCADE`), not its task: an effort another stream's thread
 linked to a deleted item survives as history — readers LEFT JOIN
-`v_task`. Claims and decisions name the item they were made on the
-same way (`claim.task`, `decision.task`, V22, which rebuilt
-both tables from their old `task_id` foreign keys); so do metric facts'
-spine dimension `oxplow.task`. A claim carries a reviewer's verdict
-in `claim.review` (`verified` or `dismissed`, NULL while unreviewed; V75):
-claims are read from the agent's answers, and reading an effort again
-replaces only its unreviewed ones.
+`v_task`. Metric facts'
+spine dimension `oxplow.task` names the item the same way.
 
 In Rust the row is `Effort { task, … }`; `EffortStore` (was `TaskEffortStore`)
 is keyed by the ref — `start(task, …)` refuses anything that isn't
@@ -858,9 +853,7 @@ agent_session_id` (from the finished event's anchor), `subagent_id` and
 `subagent_kind` (from the event's optional `subagent {id, kind}`);
 `effort_file.agent_session_id` (a claimed row: the session whose edit
 named the file) and `shared` (`NOT NULL DEFAULT 0`: an observed file more
-than one session's turns could have changed) — set by `observe_files_tx` from `agent_stores::sessions_active_tx` (one session active in the window: the row carries it; more: `shared = 1`, no session; a path two sessions observe becomes shared; a claimed row is never touched); `claim.agent_session_id`
-(the acting session — a reasoning claim lands on *that session's* open
-turn, not the thread's newest). `v_tool_call`, `v_effort_file`, `v_claim`
+than one session's turns could have changed) — set by `observe_files_tx` from `agent_stores::sessions_active_tx` (one session active in the window: the row carries it; more: `shared = 1`, no session; a path two sessions observe becomes shared; a claimed row is never touched). `v_tool_call` and `v_effort_file`
 expose them (oxplow-bundled's `v_oxplow_struggle` groups tool calls by session too).
 See agent-model.md's "Per-effort write log" for the flow. Consumed by `get_effort_files`
 (`crates/oxplow-tauri-ipc/src/commands/effort.rs`) over the
@@ -1408,7 +1401,7 @@ as itself; the pages that render it declare `for`), and `v_resource` is
 at v4 without that column.
 `V101__uri_names.sql` then renamed the columns that held a URI under the
 name `ref` (`task.uri` / `parent_uri`, `task_link.from_uri` /
-`to_uri`, `search_entry.uri`, `claim.evidence`, …) and moved
+`to_uri`, `search_entry.uri`, …) and moved
 `task.recorded` to v3 and `knowledge.page.recorded` to v2; see
 "The rename (V101)" there.
 
@@ -1637,9 +1630,8 @@ as "(details expired)" from the field, not from an empty payload.
 **Projections of agent events (V102).** `agent_tool_call` gained `turn_id`
 and `event_id` (`UNIQUE WHERE NOT NULL`): a row is the projection of one
 `agent.tool.finished`, written with `tool_call_store::record_tx` (`ON
-CONFLICT DO NOTHING` — a redelivered event writes nothing). `decision` and
-`claim` gained `turn_id`. Every view over these (`v_tool_call`,
-`v_token_usage`, `v_agent_nudge`, `v_decision`, `v_claim`) exposes
+CONFLICT DO NOTHING` — a redelivered event writes nothing). Every view over these (`v_tool_call`,
+`v_token_usage`, `v_agent_nudge`) exposes
 `turn_id`.
 
 **The contract is `append_tx(&Connection, &Vocabulary, &Envelope)
@@ -1756,9 +1748,7 @@ metrics stop when the effort already has its `effort-lifecycle` capture,
 
 **Effort reactors** (`crates/oxplow-app/src/effort_reactors.rs`, P2.6b)
 consume `effort.finished`, each its own async consumer registered at boot:
-`effort.evidence` (rebuild evidence rows) and `effort.commits`. Inferred
-decisions are oxplow-bundled's effects, not a reactor (ai-providers.md
-"Inferred decisions"). (`effort.gauges` is gone:
+`effort.evidence` (rebuild evidence rows) and `effort.commits`. (`effort.gauges` is gone:
 `{ on: [effort.finished] }` fact collectors run from `collector.triggers`.)
 They hold `Services` weakly (the pump is part
 of it).
@@ -2254,7 +2244,7 @@ See [extensions-events.md](./extensions-events.md) "Effects".
 V48. One row per finished run of extension code (`oxplow_domain::run`,
 [extensions-permissions.md](./extensions-permissions.md) "The run context"): `run_id` (a
 UUIDv7), `parent_run_id`, `extension`, `contribution`
-(its URI, `oxplow:oxplow/command?command=oxplow.review.accept`, `oxplow:oxplow/job?job=effort_review/review`), `kind`, `version`, `generation`, `actor_kind` /
+(its URI, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`, `oxplow:oxplow/job?job=effort_review/review`), `kind`, `version`, `generation`, `actor_kind` /
 `actor`, the anchors (`stream_id`, `thread_id`, `effort_id`, `turn_id`,
 `agent_session_id`, `snapshot_id`, as integers), `cause_event_id`,
 `mode`, `started_at` / `finished_at`, `outcome` (`ok` / `skipped` /
@@ -2497,7 +2487,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   `searchable` (oxplow's `oxplow/task`, `oxplow/comment`,
   `oxplow/wiki`, `oxplow/thread`,
   `oxplow/agent_session`, `oxplow/turn`, `oxplow/effort`,
-  `oxplow/decision`, `oxplow/commit`, `oxplow/page`; an
+  `oxplow/commit`, `oxplow/page`; an
   extension's, P9.D3), or
   `oxplow/file`; `uri` is the thing's URI, and a hit is that URI.
   Every resource but `oxplow/file` is derived from a model by an asset per kind

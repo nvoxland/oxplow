@@ -53,7 +53,7 @@ test("what can't be reached is refused", async () => {
 test("a ref goes where the opener says", async () => {
   const note = await planNavigation({ uri: "oxplow:oxplow/handoff?id=hnd3" }, states, "str1", async () => ({ thread: "thr5" }));
   expect(note).toMatchObject({ streamId: "str2", threadId: "thr5", selectThread: true, page: null });
-  const page = await planNavigation({ uri: "oxplow:oxplow/decision?id=4" }, states, "str1", async () => ({ tab: wikiPageRef("overview") }));
+  const page = await planNavigation({ uri: "oxplow:oxplow/proposal?id=4" }, states, "str1", async () => ({ tab: wikiPageRef("overview") }));
   expect(page.page?.id).toBe("oxplow:oxplow/wiki?slug=overview");
   await expect(planNavigation({ uri: "oxplow:oxplow/event?id=x" }, states, "str1", async () => ({ unopenable: "no page" }))).rejects.toThrow(/no page/);
 });

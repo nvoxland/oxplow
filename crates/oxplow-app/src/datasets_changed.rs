@@ -394,10 +394,6 @@ mod tests {
         // Transitive: a dataset reading `v_test_run` changes with its inputs.
         let through = lineage.affected(&["metric_capture".to_string()]);
         assert!(through.contains(&"v_test_run".to_string()));
-        assert!(
-            through.contains(&"v_oxplow_claim_status".to_string()),
-            "oxplow-bundled's claim status reads v_test_run"
-        );
 
         // End to end: a task edit is announced for v_task, with a watermark.
         let watermarks = Arc::new(DatasetWatermarks::default());

@@ -37,21 +37,6 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 - **The review packet** (in `oxplow-bundled`). Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`:
-  - Decisions Made (`v_decision`, `provenance = 'recorded'`)
-  - Decisions Oxplow Noticed (`v_decision`, `provenance = 'inferred'`)
-  - Unverified Claims (`v_claim` whose `v_oxplow_claim_status`
-    says `verified = 0`: it cites nothing and no person verified it, and
-    for a `tests_pass` claim its effort's latest test run didn't pass
-    with at least one test — the bundled policy's rule; core keeps only
-    what a claim cites and its `review`; a dataset reads the claims from
-    the agent's answers, nothing records them), plus the dismissed ones
-    (which count for nothing, shown so they can be reopened), each row
-    with its review state and **Mark Verified**
-    (`oxplow.effort.verify_claim`), **Dismiss**
-    (`oxplow.effort.dismiss_claim`) and **Reopen**
-    (`oxplow.effort.reopen_claim`)
-  - Decisions Oxplow Noticed's rows carry **Confirm** / **Dismiss**
-    (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)
   - What Deviated (its own dataset `v_oxplow_deviation`: each
     effort's files against its task's title and body — a file is in
     the area when the text names it or one of its directories at least
@@ -62,39 +47,9 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `oxplow/commit.sections` and `oxplow/uncommitted.sections` slots)
   - Struggled Here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per effort)
-  - Review Prompt (a copyable markdown prompt for reviewing the effort
-    with a second harness: the task, the agent's summary, the files it
-    changed, its claims and recorded decisions, and what to report; an
-    effort's item comes from the active task tracker (`v_task`), and an
-    effort on no item names itself instead.
-    What Deviated stays silent there: with no task text, no area is
-    stated)
   - Context Read (`v_context_read`)
-  - Verify a Claim With Evidence (no category, `viz: form` over
-    `oxplow.effort.verify_claim`, `claim` a param)
 
-  **Its verdicts (P7.C5, the first bundled `commands:`)**, on an
-  effort's page under **Commands** (their `ui.about: effort`, offered while the effort has a task,
-  `about_when: task`):
-  `oxplow.review.accept { effort, force? }` comments the review on the
-  effort's task then transitions it to `done`, refusing (`{ refuse }`)
-  while a claim is unverified (a dismissed one doesn't count) or an
-  inferred decision unreviewed unless
-  `force` (then it lists them in the comment);
-  `oxplow.review.request_changes { effort, note? }` comments a checklist —
-  each unverified claim, inferred decision, file outside the area, and
-  the note — then transitions to `todo`. A claim, decision or path is
-  spliced in through `md_text` (one inert line: an agent's claim can't
-  add headings, links or items to the reviewer's comment); the note is
-  the reviewer's own markdown. Both read one `input` query
-  (`v_effort` + `json_group_array`s over `v_claim` and its
-  `v_oxplow_claim_status`, `v_decision`,
-  `v_oxplow_deviation`), compose `oxplow.task.comment` and
-  `oxplow.task.transition` — as steps, every list's verbs running
-  outside the transaction (not undoable; [commands.md](./commands.md) →
-  "Composition") — refuse an
-  effort without a task by name, are `confirm: always`, and are a person's or
-  a page's — never an agent's. `questions.yaml` + `README.md` (its skill)
+  `questions.yaml` + `README.md` (its skill)
   say what an agent can read of the packet; a bundled extension's
   questions are checked against a running registry by
   `the_bundled_extensions_answer_their_questions` (oxplow-sdk).
@@ -104,13 +59,11 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   `awaiting_user`: a question or plan they put to you, a permission
   prompt, a final message ending in a question), blocked tasks, and open
   notes. Each empty state says what's *good*, e.g.
-  "Every claim for this effort is backed by evidence."
+  "Nothing is waiting on you."
 
   The slot pages above need `effort_id` / `change_id`, so they're
   parts, not in the launcher (opened there they'd show NULL-param empty
-  states). The launcher gets stream-level starters instead, under Work:
-  **Recent Decisions** and **Unbacked Claims**, scoped by the implicit
-  `stream_id`.
+  states).
 
 ## The rule: data in foundation, person-facing screens here
 
@@ -142,12 +95,10 @@ Each loads clean (`documented_examples_load_without_errors`):
   from `v_agent_turn`, mounted at `new-session.sections` after `start`.
   `the_session_history_example_adds_a_section_to_the_new_session_page`
   checks the example and proves the mounted loader reads a recorded prompt.
-- **`schema-review`** — a review policy of its own: a fact collector
-  counting DDL per migration file (its own measure and dimension), a
-  dataset joining those facts with core's evidence (`v_effort_file`,
-  `v_test_run` and its provenance, `v_effort_observation`'s diff
-  coverage, `v_change_function`) into a verdict, and a page
-  (`effort-verdict`) replacing `effort.verdict` with it — no core change.
+- **`schema-review`** — a fact collector counting DDL per migration
+  file (its own measure and dimension), and a slot page (Schema Changes)
+  joining those facts with core's `v_effort_file` to list the migration
+  files an effort changed — no core change.
   `the_schema_review_example_joins_its_facts_with_core_evidence` runs it
   over a real effort.
 
@@ -357,11 +308,6 @@ screens and the holder's add the review and analysis:
   board (`src/board/model.ts`; a card's description is the query's
   `summary`, `first_sentence(body)`) is tested from the desktop suite
   (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.
-- **Effort reasoning.** The AI profile `reasoning` (fallback `main`), the
-  job `reasoning`, the command `oxplow.effort.infer_reasoning` and the
-  effects `infer-reasoning` / `store-reasoning`, writing through core's
-  `oxplow.effort.replace_inferred_decisions` and
-  `oxplow.effort.replace_inferred_claims`.
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is
@@ -405,14 +351,10 @@ pages:
 
 - Waiting on me
 - What deviated (files outside the task's stated area)
-- Unverified claims
-- Decisions made
 - Tests weakened (deleted/skipped tests, removed assertions)
 - Missing co-change (files that historically change with these but didn't)
 - Read this first (risk-ranked hunks with evidence badges)
 - Struggled here
-- Copy review prompt (for reviewing with a second harness; the human
-  pastes it)
 
 **Done when** core boots and is usable with `oxplow-bundled` disabled,
 and enabling it restores the review and analysis pages.

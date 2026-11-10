@@ -65,7 +65,7 @@ loaders' first rows and params are what a mount can take):
 
 | Slot | Host page | Params a mount may take |
 |---|---|---|
-| `oxplow/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `verdict`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
+| `oxplow/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
 | `oxplow/task-detail.sections` | the Task page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
 | `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |
@@ -119,7 +119,6 @@ than handing it props it does not know.
 | `task.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | `task_tracker` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
 | `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `task_tracker` | no | `uri` (the item) | — |
 | `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `task_tracker` | yes | `uri` (the item) | — |
-| `effort.verdict` | an effort's verdict, the first line of its page (the `verdict` node of the `diff-view` page). Core has **none of its own**: with no replacement, or `oxplow` chosen, the page shows nothing. oxplow-bundled's `effort-verdict` is the default | `effort_policy` | no | `effort_id` (the effort's row id) | — |
 | `vcs.history.graph` | Git History's commits (a node of the `git-history` page): oxplow's own is a plain list | `vcs` | no | `head_sha` (the stream's head), `reveal_sha` (a commit to scroll to and mark, or null), `limit` | `q`, `author`, `branch` (Git History's filters; v2) |
 
 **Who places a target.** A page node marked `replaceable: <target>`
@@ -324,17 +323,4 @@ color is used only when it is a plain one (`#rgb…` or a CSS color name,
 `safeColor`). Decorations are additive: a decorator whose query fails
 shows nothing.
 
-**Promoted to stable** on its first-party use: oxplow-bundled shows each
-effort's latest verdict on the effort — a `ref-chip` on its page and a
-`row-badge` where a row links to it. Its dataset `verdict` (`Accepted`,
-`Accepted (forced)` or `Changes requested`; green, orange, red) reads
-`verdicts`, which keeps every verdict event (`materialize: {
-incremental: seq }`, appended as each lands; a rewrite of the log —
-retention's payload expiry, a restart's refill — refills it whole). It
-reads only the events' **envelopes**: the type says the verdict
-(`oxplow.review.accepted` / `.changes_requested`) and the subject what
-it was about — the effort first, then its task, then each claim and
-decision an acceptance took unchecked (any makes it forced). Retention
-keeps envelopes and an extension's payloads go after 30 days at most, so
-a verdict a decorator shows must not live in its payload. It shows; it
-never acts.
+A decorator shows; it never acts.

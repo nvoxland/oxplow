@@ -60,7 +60,7 @@ saying the id it names.
 | Field | Bare id |
 |---|---|
 | `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `ses2`, `not3`, `hnd1`, `cmt5` |
-| `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `claim`, `decision`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
+| `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
 | `commit`, vcs.head.moved `from` / `to` | the sha |
@@ -269,7 +269,7 @@ graph writer and the link checker never drift. The desktop's
   A hit is `{ resource, uri, stream_id, title, snippet, score }`.
 - **Everything else** stores the URI string where it stored the old ref:
   every dataset's `uri` column, `task.uri` / `parent_uri`, links,
-  efforts' `task`, claims, decisions, handoffs, bookmarks, page
+  efforts' `task`, handoffs, bookmarks, page
   visits, ui-preference scopes, fact subjects, event subjects and payload
   fields, command inverses and pending proposals.
 
@@ -289,8 +289,7 @@ they were.
 `uri`. Tables: `task.uri` / `parent_uri`, `task_comment.uri`,
 `task_link.from_uri` / `to_uri`, `oxtask_link.to_uri`,
 `fact_subject.uri`, `search_entry.uri` (was `ref_id`), `bookmark.uri`,
-`symbol.uri`, `change_function.uri`, `claim.evidence` (was
-`evidence_ref`; it can be the word `reviewer`, so it is no `*_uri`).
+`symbol.uri`, `change_function.uri`.
 `wiki_page.file_refs_json` / `dir_refs_json` became `files_json` /
 `dirs_json`: a wiki citation is a file path, so its names say `files`
 (`verify_refs` is now `oxplow.knowledge.verify_files`, with `files`,

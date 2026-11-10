@@ -70,17 +70,5 @@
     ],
     "label": "history graph",
     "about": "The commit history's graph (`GitHistoryPage`, the Git dashboard): `head_sha` the stream's head, `reveal_sha` a commit to scroll to and mark (or null), `limit` how many commits. Its view is Git History's filters (`q`, `author`, `branch`; v2), which core's own list reads too. Core's own is a plain list; the graph is oxplow-bundled's component."
-  },
-  {
-    "target": "effort.verdict",
-    "capability": "effort_policy",
-    "bound_to_provider": false,
-    "version": 1,
-    "props": [
-      "effort_id"
-    ],
-    "view": [],
-    "label": "effort verdict",
-    "about": "An effort's verdict, the first line of its review page (`DiffViewPage`): `effort_id` is the effort's row id. Core has no verdict of its own: what counts as tested, covered or backed is a review policy's, so with no replacement (or `oxplow` chosen) the page shows none. oxplow-bundled's is the default."
   }
 ]

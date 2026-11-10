@@ -34,19 +34,19 @@ test("lineage splits what a dataset reads from what reads it", () => {
   const rows = result(
     ["view", "input", "kind"],
     [
-      ["v_claim", "v_test_run", "ref"],
-      ["v_claim", "claim", "source"],
-      ["v_effort_claim", "v_claim", "ref"],
-      ["v_claim_digest", "v_claim", "ref"],
+      ["v_effort_file", "v_test_run", "ref"],
+      ["v_effort_file", "effort_file", "source"],
+      ["v_effort_file_a", "v_effort_file", "ref"],
+      ["v_effort_file_summary", "v_effort_file", "ref"],
     ],
   );
   expect(LINEAGE_SQL).toContain("FROM v_dataset_lineage WHERE view = ?1 OR input = ?1");
-  expect(lineage("v_claim", rows)).toEqual({
+  expect(lineage("v_effort_file", rows)).toEqual({
     reads: [
-      { name: "claim", kind: "source" },
+      { name: "effort_file", kind: "source" },
       { name: "v_test_run", kind: "ref" },
     ],
-    readBy: ["v_claim_digest", "v_effort_claim"],
+    readBy: ["v_effort_file_a", "v_effort_file_summary"],
   });
   expect(lineage("v_task", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
 });

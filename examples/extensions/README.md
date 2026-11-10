@@ -14,7 +14,7 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 | [task-views](task_views/) | Replacing core views: the Board, the Tasks list and the task editor, for any task tracker provider. |
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
 | [effort-review](effort_review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the task and exported as a model. |
-| [schema-review](schema_review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
+| [schema-review](schema_review/) | A collector's facts about schema migrations (DDL per file, by its own dimension) and a page on an effort's diff that lists the migration files it changed. |
 | [session-history](session_history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit_history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
 | [review-badges](review_badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list, withheld with a warning when effort-review isn't there. |
@@ -42,15 +42,12 @@ that run through public commands and the SDK only:
   is disabled, missing or exports another version.
   Tests: the review-badges test in `examples.rs` (available, disabled, missing and another version).
 
-A fourth proves a review isn't oxplow's to decide:
+A fourth shows facts of your own beside core's evidence:
 
-- **An alternative review policy** (schema-review). Its collector's facts
-  (DDL per migration file, by its own dimension) join core's evidence —
-  the effort's files, its latest test run and its provenance, its diff
-  coverage, the functions its change added — in its own dataset, and its
-  page replaces the effort's verdict. A migration that starts dropping a
-  table flips it. Test:
-  `the_schema_review_example_joins_its_facts_with_core_evidence`.
+- **A collector of your own facts** (schema-review). Its collector counts
+  DDL per migration file, by its own dimension, and a page mounted on an
+  effort's diff joins those facts to the effort's files: the migration
+  files it changed and what each creates, alters and drops.
 
 None of them needs a machine credential: models are reached through the
 person's own AI provider by role, and the only credential (github's) is

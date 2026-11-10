@@ -14,7 +14,6 @@ const notNow = new Set<string>();
 const KINDS: Record<string, string[]> = {
   "oxplow:oxplow/task": ["tracker.item.estimate"],
   "oxplow:oxplow/commit": ["tracker.commit.sync"],
-  "oxplow:oxplow/effort": ["oxplow.review.accept", "oxplow.review.request_changes"],
   "oxplow:oxplow/agent_session": ["oxplow.agent_session.reopen"],
 };
 
@@ -25,8 +24,6 @@ mock.module("../api.js", () => ({
   listPersonCommands: async () => [
     personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "oxplow/task", input: { uri: "{{uri}}", points: 3 } }),
     personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit", input: { sha: "{{uri.id}}" } }),
-    personSpec("oxplow.review.accept", { label: "Accept Review", group: "Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
-    personSpec("oxplow.review.request_changes", { label: "Request Changes", group: "Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
     personSpec("oxplow.agent_session.reopen", {
       label: "Reopen Session",
       group: "Tasks",
@@ -84,15 +81,6 @@ test("no commands for the page's kind: the menu has Ask and no commands", async 
   const view = await openMenu("oxplow:oxplow/wiki?slug=notes");
   expect(view.getByTestId("menu-item-page-ask-assistant")).toBeTruthy();
   expect(view.container.querySelector('[data-testid^="menu-item-ref-command-"]')).toBeNull();
-});
-
-// An effort's page (its diff, `oxplow:oxplow/effort?id=effN`) offers oxplow-bundled's
-// verdicts, each run on that effort.
-test("an effort's page offers Accept Review and Request Changes", async () => {
-  const view = await openMenu("oxplow:oxplow/effort?id=eff3");
-  expect(view.getByTestId("menu-item-ref-command-oxplow.review.request_changes")).toBeTruthy();
-  fireEvent.click(view.getByTestId("menu-item-ref-command-oxplow.review.accept"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { uri: "oxplow:oxplow/effort?id=eff3" }]]));
 });
 
 // Ask the Assistant: the dock's Assistant panel opens, about the page.

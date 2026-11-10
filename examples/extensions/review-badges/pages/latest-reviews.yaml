@@ -1,8 +1,8 @@
-title: Review Verdicts
+title: Latest Reviews
 description: The latest model review of each task — the effort reviewed, how the review ended, when, and how it opens.
 category: Work
 loaders:
-  review_verdicts:
+  latest_reviews:
     sql: |
       WITH latest AS (
         SELECT r.task, r.effort, r.state, r.reviewed_at, r.review,
@@ -15,7 +15,7 @@ loaders:
       WHERE n = 1
       ORDER BY reviewed_at DESC
 view:
-  from: review_verdicts
+  from: latest_reviews
   viz: table
   columns:
   - key: task
