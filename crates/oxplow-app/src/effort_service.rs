@@ -855,7 +855,6 @@ mod tests {
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
                 generated: Default::default(),
-                open_turn_probe: None,
             },
         );
         // Drop the default-built service; tests need overridden
@@ -1510,7 +1509,6 @@ mod tests {
                 blobs: blobs.clone(),
                 max_file_bytes: 1_000_000,
                 generated: Default::default(),
-                open_turn_probe: None,
             },
         );
         // Register both streams the same way Services::boot does, then

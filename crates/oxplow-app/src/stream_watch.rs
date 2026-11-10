@@ -354,7 +354,6 @@ mod tests {
                 blobs: crate::blob_store::BlobStore::new(project.join(".oxplow/snapshots")),
                 max_file_bytes: 1_000_000,
                 generated: Default::default(),
-                open_turn_probe: None,
             },
         );
         let bus = EventBus::new();

@@ -1276,23 +1276,32 @@ fn record_take_tx(
             }
         }
     };
-    let op_seq = insert_op_tx(
-        tx,
-        take.stream_id,
-        snapshot_id,
-        parent,
-        take.trigger,
-        (take.thread_id, take.turn_id, take.effort_id),
-        take.elapsed_ms,
-        take.budget_ms,
-        file_count,
-        (
-            take.provider.as_deref(),
-            take.contents,
-            take.handle.as_deref(),
-        ),
-    )
-    .map_err(map_sql_err)?;
+    // An operation is a take that captured files. A request that found
+    // nothing answers the current snapshot and logs none; a provider's mark
+    // is the exception, since its handle names the state it marked.
+    let op_seq = if unchanged && take.handle.is_none() {
+        None
+    } else {
+        Some(
+            insert_op_tx(
+                tx,
+                take.stream_id,
+                snapshot_id,
+                parent,
+                take.trigger,
+                (take.thread_id, take.turn_id, take.effort_id),
+                take.elapsed_ms,
+                take.budget_ms,
+                file_count,
+                (
+                    take.provider.as_deref(),
+                    take.contents,
+                    take.handle.as_deref(),
+                ),
+            )
+            .map_err(map_sql_err)?,
+        )
+    };
     if let Some(turn) = take.turn_id {
         // The turn ended at this snapshot (P2.3).
         tx.execute(
@@ -1302,6 +1311,20 @@ fn record_take_tx(
         .map_err(map_sql_err)?;
     }
     let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
+    // Whoever asked for a take waits on its event (a turn's checkpoint, an
+    // effort's bracket). A request nobody is anchored to that found nothing
+    // is not a fact about the worktree.
+    let waited_on = take.thread_id.is_some() || take.turn_id.is_some() || take.effort_id.is_some();
+    if unchanged && op_seq.is_none() && !waited_on {
+        return Ok(Some(TakeOutcome {
+            op_seq,
+            snapshot_id,
+            parent_snapshot_id: parent,
+            unchanged,
+            file_count,
+            over_budget,
+        }));
+    }
     let stream = stream_uri(take.stream_id);
     let env = Envelope::typed::<SnapshotTaken>(
         take.source.clone(),
@@ -1398,7 +1421,7 @@ fn record_head_moved_tx(
     ]);
     append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {
-        op_seq,
+        op_seq: Some(op_seq),
         snapshot_id: sid,
         parent_snapshot_id: Some(sid),
         unchanged: true,
@@ -1471,8 +1494,9 @@ pub struct TakeRecord {
 /// What a take recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakeOutcome {
-    /// The `snapshot_op.seq` of this take.
-    pub op_seq: i64,
+    /// The `snapshot_op.seq` of this take; `None` for a request that found
+    /// nothing, which logs no operation.
+    pub op_seq: Option<i64>,
     /// The snapshot the worktree is at after the take.
     pub snapshot_id: i64,
     pub parent_snapshot_id: Option<i64>,
@@ -3481,8 +3505,8 @@ mod tests {
         slow.budget_ms = Some(1);
         slow.elapsed_ms = 50;
         let second = store.record_take(slow).await.unwrap().unwrap();
-        // A later empty take lands on the second snapshot; its creating op
-        // is still the turn-end one.
+        // A later empty take lands on the second snapshot and logs no op;
+        // the snapshot's creating op is still the turn-end one.
         store
             .record_take(take(1, vec![], SnapshotTrigger::Quiet))
             .await
@@ -3504,16 +3528,18 @@ mod tests {
             (Some(first.snapshot_id), SnapshotTrigger::TurnEnd, true)
         );
 
-        let ops = store.list_ops(StreamId::new(1), 2).await.unwrap();
+        let ops = store.list_ops(StreamId::new(1), 3).await.unwrap();
         let triggers: Vec<SnapshotTrigger> = ops.iter().map(|o| o.trigger).collect();
         assert_eq!(
             triggers,
-            vec![SnapshotTrigger::Quiet, SnapshotTrigger::TurnEnd]
+            vec![SnapshotTrigger::TurnEnd, SnapshotTrigger::Startup]
         );
     }
 
+    /// A request that finds nothing answers the stream's current snapshot and
+    /// logs no operation: an operation is a take that captured files.
     #[tokio::test]
-    async fn an_empty_or_identical_take_records_an_op_on_the_parent() {
+    async fn an_empty_or_identical_take_answers_the_current_snapshot_and_logs_no_op() {
         let db = Database::in_memory();
         seed_stream(&db, 1);
         let store = SqliteSnapshotStore::new(db.clone());
@@ -3531,6 +3557,7 @@ mod tests {
         assert!(empty.unchanged);
         assert_eq!(empty.snapshot_id, base.snapshot_id);
         assert_eq!(empty.parent_snapshot_id, Some(base.snapshot_id));
+        assert_eq!(empty.op_seq, None);
         // Rows that net out to the same tree (a change and its revert).
         let same = store
             .record_take(take(1, vec![("a.txt", "a1")], SnapshotTrigger::Quiet))
@@ -3541,9 +3568,31 @@ mod tests {
         assert_eq!(same.snapshot_id, base.snapshot_id);
         assert_eq!(count(&db, "SELECT count(*) FROM snapshot"), 1);
         assert_eq!(count(&db, "SELECT count(*) FROM file_snapshot"), 1);
-        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 3);
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
+        // Nobody waits on these requests: no event either.
+        assert_eq!(events(&db, "snapshot.taken").len(), 1);
+    }
+
+    /// A request that names a turn, a thread or an effort is waited on (the
+    /// checkpoint, an effort's bracket): it logs `snapshot.taken` as
+    /// unchanged, though no operation.
+    #[tokio::test]
+    async fn an_unchanged_request_that_someone_waits_on_still_logs_its_event() {
+        let db = Database::in_memory();
+        seed_stream(&db, 1);
+        let store = SqliteSnapshotStore::new(db.clone());
+        let base = store
+            .record_take(take(1, vec![("a.txt", "a1")], SnapshotTrigger::Startup))
+            .await
+            .unwrap()
+            .unwrap();
+        let mut end = take(1, vec![], SnapshotTrigger::TurnEnd);
+        end.turn_id = Some(7);
+        let out = store.record_take(end).await.unwrap().unwrap();
+        assert_eq!((out.unchanged, out.snapshot_id), (true, base.snapshot_id));
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
         let taken = events(&db, "snapshot.taken");
-        assert_eq!(taken.len(), 3);
+        assert_eq!(taken.len(), 2);
         assert_eq!(taken[1]["unchanged"], true);
         assert_eq!(taken[1]["file_count"], 0);
     }

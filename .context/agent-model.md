@@ -1775,12 +1775,11 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
 - **Turn events.** `agent.turn.started@2` / `agent.turn.ended@3 {
   outcome: completed | interrupted | restart }`, in the same transaction
   as the `agent_turn` row.
-- **Quiet period.** Human edits between turns get their own snapshot: a
+- **Quiet period.** The worktree's snapshots do not depend on turns: a
   watcher change arms a deadline (`DEFAULT_QUIET_PERIOD`, 3 s, debounced);
-  when it fires with paths dirty and no turn open on any of the stream's
-  threads (`stream_has_open_turn`, the registry's `OpenTurnProbe`), a
-  `quiet` take records them. While a turn is open it yields to the turn's
-  own take.
+  when it fires with paths dirty, a `quiet` take records them, whoever
+  changed them and whatever turns are open. A take another request made
+  meanwhile has emptied the set, and the firing does nothing.
 - **Effort brackets.** An effort's open takes an `effort_start` snapshot
   (`effort.start_snapshot_id`), its close an `effort_end` one
   (`end_snapshot_id`); an unchanged tree records an op on the current

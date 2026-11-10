@@ -4632,7 +4632,6 @@ mod tests {
                     blobs: blobs.clone(),
                     max_file_bytes: 1_000_000,
                     generated: Default::default(),
-                    open_turn_probe: None,
                 },
             );
             captures.insert_for_test(stream.id, capture.clone());
