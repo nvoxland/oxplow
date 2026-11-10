@@ -18,6 +18,7 @@ pub const THREAD: &str = "oxplow/thread";
 pub const PERSON: &str = "oxplow/person";
 pub const EFFORT: &str = "oxplow/effort";
 pub const TURN: &str = "oxplow/turn";
+pub const REQUEST: &str = "oxplow/request";
 pub const SNAPSHOT: &str = "oxplow/snapshot";
 pub const COMMIT: &str = "oxplow/commit";
 pub const BRANCH: &str = "oxplow/branch";

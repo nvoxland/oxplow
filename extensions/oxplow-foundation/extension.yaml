@@ -567,6 +567,13 @@ resources:
     title: prompt
     searchable: search_turn
     icon: activity
+  - name: request
+    description: "A request: the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back). It has no page of its own yet; other records link to it."
+    label: Request
+    params: { id: { required: true, pattern: '^req[0-9]+$' } }
+    resolve: request
+    title: prompt
+    icon: activity
   - name: snapshot
     description: "A saved copy of the project's files at one moment."
     label: Snapshot

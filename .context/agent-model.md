@@ -1526,7 +1526,10 @@ opens (`open_turn_tx` → `join_request_tx`): its cause turn's request, else
 a request it starts (`request.first_turn_id`; who started it is that
 turn's `source`). The cause always opened first, so membership is known at
 once and never changes after. Every new turn has one; a re-prompt opens no
-turn and joins nothing.
+turn and joins nothing. A request's address is
+`oxplow:oxplow/request?id=req<n>` (foundation's `request` resource,
+resolving to `v_request`: who started it, with what, when); a turn's
+`v_agent_turn.request` is that URI. It has no page of its own yet.
 
 **Identity and membership are stored; everything that adds up or changes
 is derived.** Work recorded against a turn — tool calls (a subagent's are
