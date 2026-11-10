@@ -28839,5 +28839,42 @@
       ],
       "key": []
     }
+  },
+  "turn_activity": {
+    "1": {
+      "columns": [
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn (v_agent_turn.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Its thread (v_thread.id)."
+        },
+        {
+          "name": "turn",
+          "type": "TEXT",
+          "doc": "The turn's URI (`oxplow:oxplow/turn?id=trn<id>`)."
+        },
+        {
+          "name": "compactions",
+          "type": "INT",
+          "doc": "How often the agent's context was summarized during the turn (`agent.context.compacted`): its context size and token figures jump there, and the agent works from a summary after it. A compaction between turns belongs to none."
+        },
+        {
+          "name": "deliveries",
+          "type": "INT",
+          "doc": "Prompts delivered to the agent in the turn (`agent.prompt.submitted`): the one that opened it and any that landed in it while it ran, whoever they came from."
+        },
+        {
+          "name": "person_prompts",
+          "type": "INT",
+          "doc": "How many of those a person typed (`source = person`): a turn a job's report opened may still hold a person's prompt. 0 for an old turn whose deliveries' source is unknown."
+        }
+      ],
+      "key": []
+    }
   }
 }

@@ -171,7 +171,7 @@ read as `event:<id>#summary`), Codex's finished `contextCompaction` item
 that is done for opencode, whose bridge posts no `PreCompact`. Codex's
 compaction also resets the session's baselines (`ChatHost::compacted`),
 and the context is injected again once no turn runs. Thread Activity
-counts a turn's compactions.
+counts a turn's compactions. `v_turn_activity.compactions` counts them per turn (a compaction between turns belongs to none), beside the turn's `deliveries` and `person_prompts`.
 
 **Who else is in the worktree.** A stream's threads share its worktree,
 and any number of agents may work there at once — in one thread or
