@@ -28939,5 +28939,102 @@
       ],
       "key": []
     }
+  },
+  "turn_activity": {
+    "1": {
+      "columns": [
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn (v_agent_turn.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Its thread (v_thread.id)."
+        },
+        {
+          "name": "turn",
+          "type": "TEXT",
+          "doc": "The turn's URI (`oxplow:oxplow/turn?id=trn<id>`)."
+        },
+        {
+          "name": "compactions",
+          "type": "INT",
+          "doc": "How often the agent's context was summarized during the turn (`agent.context.compacted`): its context size and token figures jump there, and the agent works from a summary after it. A compaction between turns belongs to none."
+        },
+        {
+          "name": "deliveries",
+          "type": "INT",
+          "doc": "Prompts delivered to the agent in the turn (`agent.prompt.submitted`): the one that opened it and any that landed in it while it ran, whoever they came from."
+        },
+        {
+          "name": "person_prompts",
+          "type": "INT",
+          "doc": "How many of those a person typed (`source = person`): a turn a job's report opened may still hold a person's prompt. 0 for an old turn whose deliveries' source is unknown."
+        }
+      ],
+      "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn (v_agent_turn.id)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Its thread (v_thread.id)."
+        },
+        {
+          "name": "turn",
+          "type": "TEXT",
+          "doc": "The turn's URI (`oxplow:oxplow/turn?id=trn<id>`)."
+        },
+        {
+          "name": "compactions",
+          "type": "INT",
+          "doc": "How often the agent's context was summarized during the turn (`agent.context.compacted`): its context size and token figures jump there, and the agent works from a summary after it. A compaction between turns belongs to none."
+        },
+        {
+          "name": "deliveries",
+          "type": "INT",
+          "doc": "Prompts delivered to the agent in the turn (`agent.prompt.submitted`): the one that opened it and any that landed in it while it ran, whoever they came from."
+        },
+        {
+          "name": "person_prompts",
+          "type": "INT",
+          "doc": "How many of those a person typed (`source = person`): a turn a job's report opened may still hold a person's prompt. 0 for an old turn whose deliveries' source is unknown."
+        },
+        {
+          "name": "duration_ms",
+          "type": "INT",
+          "doc": "How long the turn ran, start to end; NULL while running. (v2)"
+        },
+        {
+          "name": "tool_ms",
+          "type": "INT",
+          "doc": "Time inside its tool calls: the union of their intervals (calls run in parallel), denied calls left out, an abandoned call to its end. NULL while running, and when a call has no start (the harness gives no tool times). (v2)"
+        },
+        {
+          "name": "waits",
+          "type": "INT",
+          "doc": "How often it waited on the person (a question, a plan, a permission prompt: a status `awaiting_user` before the turn ended); NULL while running. (v2)"
+        },
+        {
+          "name": "wait_ms",
+          "type": "INT",
+          "doc": "Time those waits ran: each to the next status change, cut at the turn's end. A permission wait falls inside a call's interval, so tool_ms and wait_ms may overlap. NULL while running. (v2)"
+        },
+        {
+          "name": "other_ms",
+          "type": "INT",
+          "doc": "The rest of the turn: its duration less the union of its tool calls and its waits, so nothing is counted twice — mostly the model's own time. NULL where tool_ms is. (v2)"
+        }
+      ],
+      "key": []
+    }
   }
 }

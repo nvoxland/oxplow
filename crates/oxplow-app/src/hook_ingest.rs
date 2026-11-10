@@ -4265,4 +4265,61 @@ mod tests {
             vec![Some("Should I also update the docs?".into()), None, None]
         );
     }
+
+    /// A turn's activity counts its compactions, the prompts delivered in
+    /// it and how many a person typed: a job's report opens a turn the
+    /// person then prompts into.
+    #[tokio::test]
+    async fn a_turns_activity_counts_its_compactions_and_prompts() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: None,
+                job: Some("bsh".into()),
+                status: None,
+                summary: None,
+                text: "<task-notification>bsh</task-notification>".into(),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "also fix the test"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::PostCompact,
+            tid,
+            Some("h1"),
+            json!({"trigger": "auto"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook(
+            HookKind::Stop,
+            tid,
+            Some("h1"),
+            json!({"last_assistant_message": "ok"}),
+        ))
+        .await
+        .unwrap();
+        let row: (i64, i64, i64) = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT compactions, deliveries, person_prompts FROM v_turn_activity",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(row, (1, 2, 1));
+    }
 }

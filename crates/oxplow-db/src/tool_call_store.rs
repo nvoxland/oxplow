@@ -355,4 +355,71 @@ mod tests {
         );
         assert_eq!(rows("SELECT count(*) FROM v_tool_call").await, json!([[2]]));
     }
+
+    /// A turn's time splits into its tool calls (the union of their
+    /// intervals: two calls overlap), its waits on the person (each to the
+    /// next status, the last cut at the turn's end) and the rest, with no
+    /// time counted twice; a denied call never ran.
+    #[tokio::test]
+    async fn a_turns_time_splits_into_tools_waits_and_the_rest() {
+        let db = Database::in_memory();
+        let at = |s: u32| format!("2026-01-01T00:00:{s:02}.000000Z");
+        let mut seed = format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{a}', '{a}');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+               VALUES (1, 1, 't', '{a}', '{a}');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at)
+               VALUES (1, 1, 'go', '{a}', '2026-01-01T00:01:00.000000Z');",
+            a = at(0)
+        );
+        for (state, start, end) in [
+            ("finished", 10, 30),
+            ("finished", 20, 40),
+            ("denied", 45, 45),
+        ] {
+            seed += &format!(
+                "INSERT INTO agent_tool_call (thread_id, turn_id, tool, at, kind, state, started_at, ended_at)
+                   VALUES (1, 1, 'Bash', '{e}', 'shell', '{state}', '{s}', '{e}');",
+                s = at(start),
+                e = at(end)
+            );
+        }
+        for (i, (state, when)) in [
+            ("running", 0),
+            ("awaiting_user", 42),
+            ("running", 50),
+            ("awaiting_user", 55),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            seed += &format!(
+                "INSERT INTO event_log (id, type, v, at, source, turn_id, subject, payload)
+                   VALUES ('s{i}', 'agent.status.changed', 2, '{t}', 'test', 1, '[]',
+                           '{{\"state\":\"{state}\"}}');",
+                t = at(when)
+            );
+        }
+        db.transaction(move |tx| {
+            tx.execute_batch(&seed)
+                .map_err(crate::database::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let row: (i64, i64, i64, i64, i64) = db
+            .read(|c| {
+                c.query_row(
+                    "SELECT duration_ms, tool_ms, waits, wait_ms, other_ms FROM v_turn_activity",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .map_err(crate::database::map_sql_err)
+            })
+            .await
+            .unwrap();
+        // Tools 10–40 (30 s); waits 42–50 and 55–60 (13 s); the rest is
+        // 60 less the 43 s either covered.
+        assert_eq!(row, (60_000, 30_000, 2, 13_000, 17_000));
+    }
 }
