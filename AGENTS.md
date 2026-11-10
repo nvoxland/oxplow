@@ -28,9 +28,10 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Tasks while the task tracker is none.** The task tracker ships in
-  `oxplow-foundation`, so it runs even with `oxplow-bundled` off. With no task tracker
-  chosen (Settings → Capabilities) or oxplow not running, file and update
+- **Tasks while the task tracker is none.** oxtask, oxplow's own task
+  tracker, ships in `oxplow-bundled`: with only `oxplow-foundation` running
+  there is no task tracker. With no task tracker (bundled off, or none
+  chosen in Settings → Capabilities) or oxplow not running, file and update
   tasks with `cargo run -q -p oxplow-dev -- task …`
   (`.context/working-in-this-repo.md` "oxplow-dev"). How oxplow tracks work and how to ask the person a
   question come from oxplow itself, in every session's prompt.

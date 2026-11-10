@@ -2,6 +2,8 @@ manifest: 2
 name: effort-review
 description: A model reviews each finished effort from its evidence — tests, coverage, what changed, findings — and comments the review on its task.
 engine: ">=0.7"
+# Its fixtures file tasks, and oxtask is oxplow-bundled's.
+requires: [oxplow-bundled]
 version: 0.1.0
 intent:
   purpose: >-

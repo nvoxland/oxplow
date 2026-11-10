@@ -1,9 +1,9 @@
 # An implementation page says which capability it implements, whether it is in use and what it can do.
-when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/task_tracker.oxtask" } }
+when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow" } }
 expect:
-  label: oxtask
+  label: oxplow's wiki
   loaders:
     about:
-      rows: [{ name: "oxtask", extension: oxplow-foundation }]
+      rows: [{ name: "oxplow's wiki", extension: oxplow-foundation }]
     facts:
-      rows: [{ capability: Task tracker, in_use: "Yes, this one is in use" }]
+      rows: [{ capability: Knowledge, in_use: "Yes, this one is in use" }]

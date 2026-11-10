@@ -29,12 +29,6 @@ intent:
     - name: definition-is-not-offered-for-a-yaml-that-is-not-a-page
       input: { command: oxplow.page.renderers, input: { uri: 'oxplow:oxplow/file?path=notes.yaml&filesystem=oxplow:temp' } }
       expect: the Text view alone, for YAML that holds no page or does not parse
-    - name: closed-threads-lists-closed-threads-with-their-work
-      input: { page: closed-threads, params: { stream_id: 1 } }
-      expect: the stream's closed threads only, each with a Reopen action
-    - name: next-task-offers-the-ready-items-or-the-first-epic-with-its-children
-      input: { page: next-task, params: { thread: thr1 } }
-      expect: ready items in list order, a blocked one held until its blocker closes, a ready epic with its ready descendants
     - name: catalog-lists-prompts-and-config-keys
       input: { page: catalog }
       expect: the questions grouped by who offers them with Ask on each, and the config keys
@@ -95,9 +89,6 @@ intent:
     - name: settings-data-area-lists-entities-collectors-and-effects
       input: { page: settings, params: { area: data } }
       expect: the entities, the collectors and the declared effects
-    - name: data-entity-rows-counts-an-open-entitys-rows
-      input: { part: data-entity-rows, params: { name: v_task } }
-      expect: the rows an open entity holds
     - name: data-effect-backfill-says-what-it-would-do
       input: { part: data-effect-backfill, params: { effect: review/store-reasoning } }
       expect: a backfill plan for an enabled effect, none for one nothing declares
@@ -129,7 +120,7 @@ intent:
       input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow/commit" } }
       expect: a resource kind's URI form and the pages that draw it
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
-      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/task_tracker.oxtask" } }
+      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow" } }
       expect: an implementation's capability, whether it is in use and what it can do
     - name: a-command-row-of-an-extension-links-to-the-commands-page
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
@@ -137,9 +128,6 @@ intent:
     - name: effort-files-lists-what-an-effort-claimed
       input: { page: effort-files }
       expect: the files an effort claimed, by path
-    - name: thread-tasks-lists-a-threads-items
-      input: { page: thread-tasks }
-      expect: a thread's items by state
     - name: effort-summary-reads-an-effort-at-a-glance
       input: { page: effort-summary }
       expect: one effort at a glance
@@ -258,7 +246,7 @@ intent:
       input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow/commit' } }
       expect: its see-also links name the extension that declares it
     - name: the-implementation-page-links-to-its-extension
-      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/task_tracker.oxtask' } }
+      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow' } }
       expect: its see-also links name the extension that declares it
     - name: the-measure-page-links-to-its-extension
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
@@ -309,7 +297,7 @@ intent:
       input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow/integrations"} }
       expect: its description is a paragraph above the facts
     - name: the-implementation-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/task_tracker.oxtask"} }
+      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow"} }
       expect: its description is a paragraph above the facts
     - name: the-measure-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: measure, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
@@ -386,9 +374,6 @@ intent:
     - name: a-configured-language-server-is-listed-and-not-suggested-again
       input: { page: settings, params: { area: lsp } }
       expect: a language server of project.yaml is listed, can't be removed, and isn't suggested again
-    - name: dataset-data-shows-a-datasets-rows-sorted-and-filtered
-      input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=task" } }
-      expect: a dataset's rows as they are, sorted and narrowed by its params
     - name: dataset-data-says-when-the-dataset-is-not-known
       input: { page: dataset-data, params: { uri: "oxplow:oxplow/dataset?dataset=nothing_like_it" } }
       expect: no query is built and the page says it is not a dataset
@@ -449,17 +434,15 @@ panels:
   # branch stands (the header picks); its header opens Git Status, which
   # acts on both. Collapsed, one line of counts; counted by files.
   - { id: git, title: Git, icon: git-branch, scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
-# What the coding agent reads about the task tracker: its commands (with no
-# list they're a sink), and oxtask' ready queue while they are it.
+# What the coding agent reads about the task tracker: its commands, while
+# there is one (oxtask's ready-queue skill is oxplow-bundled's).
 skills:
-  - { name: tasks, file: skills/tasks/SKILL.md }
-  - { name: next-task, kind: command, file: commands/next-task.md }
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
 # What oxplow runs by default: the task tracker, the effort policy, snapshots
 # and the wiki (a project chooses another provider in Settings), and the agent
 # harnesses and AI providers — core's built-ins, many of each at once (every
 # one of those declared here is active).
 implementations:
-  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task], description: "The task tracker that oxplow keeps itself." }
   - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch", description: "Ends an effort when its work is committed or the agent switches to other work." }
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
   - { capability: knowledge, id: oxplow, entry: "oxplow:wiki", description: "The wiki that oxplow keeps in the project." }

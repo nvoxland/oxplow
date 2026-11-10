@@ -2,6 +2,8 @@ manifest: 2
 name: github
 description: Pull requests from this repo's GitHub, joined to tasks and streams.
 engine: ">=0.7"
+# Its fixtures file tasks, and oxtask is oxplow-bundled's.
+requires: [oxplow-bundled]
 version: 0.1.0
 intent:
   purpose: >-

@@ -2,6 +2,8 @@ manifest: 2
 name: task-views
 description: Another way to see the task tracker — swimlanes for the Board, a compact list and a plain editor — over whichever task tracker provider is active.
 engine: ">=0.7"
+# Its fixtures file tasks, and oxtask is oxplow-bundled's.
+requires: [oxplow-bundled]
 version: 0.1.0
 intent:
   purpose: >-

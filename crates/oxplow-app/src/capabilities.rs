@@ -9,8 +9,9 @@
 //!   capability, [`NONE`] — nothing implements it;
 //! - **extensions**: `implementations:` naming a built-in in core's
 //!   standard library ([`BUILT_INS`], `entry: oxplow:oxtask`), the way a
-//!   collector names `oxplow:junit`. `oxplow-bundled` declares the
-//!   defaults; disabling it takes them away;
+//!   collector names `oxplow:junit`. `oxplow-bundled` declares oxtask,
+//!   the task tracker, and `oxplow-foundation` the other defaults;
+//!   disabling bundled leaves no task tracker;
 //! - **provider instances** while they run.
 //!
 //! [`CapabilityRegistry::resolve`] picks the active one: a person's own
@@ -1600,9 +1601,10 @@ mod tests {
         );
     }
 
-    /// With `oxplow-bundled` disabled, the defaults still run: the
-    /// task tracker, the effort policy and snapshots are `oxplow-foundation`'s
-    /// (core's own snapshots default is the active row); filing works.
+    /// With `oxplow-bundled` disabled, the defaults still run: the effort
+    /// policy and snapshots are `oxplow-foundation`'s (core's own snapshots
+    /// default is the active row). oxtask is bundled's, so the task tracker
+    /// resolves to none, and filing is a sink rather than a refusal.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1617,7 +1619,7 @@ mod tests {
         svc.extension_catalog.changed();
         crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
-        assert_eq!(svc.capabilities.active(&config, "task_tracker"), "oxtask");
+        assert_eq!(svc.capabilities.active(&config, "task_tracker"), "none");
         assert_eq!(svc.capabilities.active(&config, "effort_policy"), "oxplow");
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
@@ -1638,7 +1640,8 @@ mod tests {
             serde_json::to_value(&rows.rows).unwrap(),
             serde_json::json!([["hashes", 0, 1, "builtin"], ["oxplow", 1, 1, "builtin"]])
         );
-        svc.commands
+        let filed = svc
+            .commands
             .run(
                 &oxplow_domain::Actor::Human,
                 crate::commands::task::CREATE,
@@ -1646,7 +1649,8 @@ mod tests {
                 false,
             )
             .await
-            .expect("the task tracker runs with bundled off");
+            .expect("filing is a sink with no task tracker, not a refusal");
+        assert_eq!(filed.result["tracked"], false, "{}", filed.result);
     }
 
     /// The rows say which is active and why, and a choice that isn't
@@ -1888,8 +1892,8 @@ mod tests {
 
     /// A runtime already on disk gets what's offered (boot refreshes it
     /// for an agent that outlived an upgrade, tsk376): core's skills, the
-    /// task tracker skill (any list, none included), and oxtask' own
-    /// `/next-task` only while they're the list.
+    /// task tracker skill and oxtask's `/next-task` only while a task
+    /// tracker is active (oxtask for `/next-task`).
     #[tokio::test]
     async fn the_runtimes_skills_follow_what_is_offered() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1929,7 +1933,10 @@ mod tests {
             .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         refresh_agent_text(svc).await;
-        assert!(skills.join("tasks/SKILL.md").is_file());
+        assert!(
+            !skills.join("tasks/SKILL.md").exists(),
+            "no tracker, no skill"
+        );
         assert!(!commands.join("next-task.md").exists());
         assert!(commands.join("configure.md").is_file());
     }

@@ -160,10 +160,11 @@ mod tests {
         assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 
-    /// The default task tracker, effort policy, snapshots and wiki are
-    /// oxplow-foundation's: with oxplow-bundled off they still run.
+    /// oxtask is oxplow-bundled's, the wiki is foundation's: with
+    /// oxplow-bundled off there is no task tracker (`task.*` is a sink that
+    /// tracks nothing) and the wiki still runs.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_task_tracker_and_wiki_run_with_bundled_off() {
+    async fn the_wiki_runs_and_tasks_are_a_sink_with_bundled_off() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -188,8 +189,8 @@ mod tests {
                 true,
             )
             .await
-            .expect("the task tracker runs with bundled off");
-        assert!(item.result["uri"].is_string(), "{}", item.result);
+            .expect("filing is a sink with bundled off, not a refusal");
+        assert_eq!(item.result["tracked"], false, "{}", item.result);
         svc.commands
             .run(
                 &human,

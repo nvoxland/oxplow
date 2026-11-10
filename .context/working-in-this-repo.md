@@ -94,11 +94,14 @@ peer message UUIDs individually. A file does not wake an idle session.
 
 ### oxplow-dev: tasks and the wiki while the task tracker is none
 
-The task tracker, effort policy, snapshots and wiki are `oxplow-foundation`'s
-defaults, so disabling `oxplow-bundled` (`disableExtensions: [oxplow-bundled]`
-in `.oxplow/personal.yaml`, never committed) no longer removes them. A
-project that chose no task tracker (Settings → Capabilities) has none:
-`task.*` is refused and the task tools are hidden. The
+The effort policy, snapshots and wiki are `oxplow-foundation`'s defaults, but
+oxtask, oxplow's own task tracker, is `oxplow-bundled`'s: disabling it
+(`disableExtensions: [oxplow-bundled]` in `.oxplow/personal.yaml`, never
+committed) leaves no task tracker, as does a project that chose none
+(Settings → Capabilities). With no tracker `task.*` succeeds as a sink
+(`{ tracked: false }`: nothing is recorded) and the task tools
+(`oxplow_next_task`, `oxplow_thread_tasks`) and the `tasks` skill are not
+offered. The
 development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
 bundled) keeps oxtask usable meanwhile:
 
