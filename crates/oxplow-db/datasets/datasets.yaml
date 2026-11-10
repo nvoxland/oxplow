@@ -132,7 +132,7 @@
     - { not_null: id }
     - { unique: id }
 - name: request_task
-  version: 1
+  version: 2
   description: "The tasks each request worked on, observed, each link with the evidence it rests on: a person's prompt named the task, the agent ran a task command on it in a turn, or it was in progress and assigned to the thread when a turn of the request ended. Nothing here opens, closes or moves a task. One row per (request, task, basis); a request may link several tasks and a task several requests. A task's requests: `WHERE task = <task uri>`."
   relationships: [{ from: request, to: request.uri }]
   fields:
@@ -140,6 +140,7 @@
     - { name: "task", type: "TEXT", doc: "The task's URI; it may dangle if its tracker dropped it." }
     - { name: "basis", type: "TEXT", doc: "`prompt` (a person's prompt in the request named the task), `command` (the agent ran a task command on it in a turn), `assigned` (in progress and assigned to the thread when a turn of the request ended: the weakest)." }
     - { name: "turn", type: "TEXT", doc: "The turn the evidence was recorded in (`v_agent_turn.uri`)." }
+    - { name: "thread_id", type: "INT", doc: "That turn's thread (`v_thread.id`): a thread's tasks by request, `WHERE thread_id = <id>`. NULL when no turn was named." }
     - { name: "at", type: "TEXT", doc: "When the link was recorded (RFC 3339)." }
     - { name: "turns", type: "INT", doc: "How many turns the request has so far." }
     - { name: "started_at", type: "TEXT", doc: "When the request's first turn started." }

@@ -1,33 +1,36 @@
-# The rail's Work panel body: what the thread is working on — its open
-# effort, the items assigned to it next, and what its efforts finished —
-# under headings; clearing hides what finished before it. An effort no
-# item names shows by its own title, in progress while open, then
-# finished (a new effort closes the thread's open one). An item done with
-# no effort here isn't the thread's work.
+# The rail's Work panel body: the thread's tasks — the ones in progress
+# and assigned to it, the ones assigned to it next, and the done ones a
+# request on the thread worked on — under headings; clearing hides what
+# finished before it. A task done with no request here isn't the thread's
+# work, and an in-progress task no request runs is idle.
 given:
-  - { command: oxplow.task.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
-  - { command: oxplow.effort.open, input: { thread: thr1, task: $shipped.uri } }
-  - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done } }
+  - { command: oxplow.task.create, input: { title: Shipped, stage: todo, assignee: thr1 }, bind: shipped }
+  - { command: oxplow.task.create, input: { title: Doing it, stage: todo, assignee: thr1 }, bind: doing }
   - { command: oxplow.task.create, input: { title: Done elsewhere, stage: done } }
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
   - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
+  - observe:
+      turn:
+        prompt: Ship it, then start the next one
+        during:
+          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $doing.uri, to: in_progress }, as: agent }
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:
     work:
       rows:
-        # The effort, linked to nothing, by its own title.
-        - { grp: In progress, title: Untitled effort }
+        - { grp: In progress, title: Doing it, now: "" }
         - { grp: Up next, title: Next up }
         - { grp: Finished, title: Shipped }
 steps:
   - given: [{ command: oxplow.tasks.clear_finished, input: { thread_id: 1 } }]
   - expect:
-      loaders: { work: { rows: [{ grp: In progress, title: Untitled effort }, { grp: Up next, title: Next up }] } }
+      loaders: { work: { rows: [{ grp: In progress, title: Doing it }, { grp: Up next, title: Next up }] } }
   - given:
-      - { command: oxplow.effort.open, input: { thread: thr1, title: Tidy the shell scripts }, bind: tidy }
+      - observe:
+          turn:
+            prompt: Finish it
+            during: [{ command: oxplow.task.transition, input: { uri: $doing.uri, to: done }, as: agent }]
   - expect:
-      loaders: { work: { rows: [{ grp: In progress, title: Tidy the shell scripts }, { grp: Up next, title: Next up }, { grp: Finished, title: Untitled effort }] } }
-  - given: [{ command: oxplow.effort.close, input: { effort: $tidy.effort } }]
-  - expect:
-      loaders: { work: { rows: [{ grp: Up next, title: Next up }, { grp: Finished, title: Tidy the shell scripts }, { grp: Finished, title: Untitled effort }] } }
+      loaders: { work: { rows: [{ grp: Up next, title: Next up }, { grp: Finished, title: Doing it }] } }

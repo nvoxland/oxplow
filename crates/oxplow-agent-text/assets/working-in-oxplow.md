@@ -1,8 +1,10 @@
 ## Working in oxplow
 
-- oxplow tracks your work from what it observes: there's nothing to file
-  before you edit and nothing to close before you stop. For efforts,
-  handoffs and the command bus, read the `oxplow-runtime` skill.
+- oxplow records your turns from what it observes: there's nothing to
+  report about them. Whether you track your work as tasks is the task
+  tracker's business: when one is active, its skill says how, and you
+  follow it. For handoffs and the command bus, read the `oxplow-runtime`
+  skill.
 - When your reply needs the person's answer, end it with the question
   itself: oxplow shows your thread as waiting on them.
 - When the person mentions an error they saw in the app (a red toast, a row

@@ -18,10 +18,8 @@
 //! Rule 1, linking and task switch:
 //! - an item moved to `in_progress` links the thread's open effort, opening
 //!   one if none is open. The thread is the mover's (an agent's), else the
-//!   thread the item is assigned to. An agent that starts an item not
-//!   assigned to its thread takes it: the item is assigned there first
-//!   (`oxplow.task.assign`); a person starting one assigns nothing.
-//!   A descendant of the linked item refines the link; an ancestor
+//!   thread the item is assigned to (an agent that starts an item has
+//!   taken it: `oxplow.task.transition` assigns it). A descendant of the linked item refines the link; an ancestor
 //!   leaves it; an unrelated item closes the effort (`switch`) and opens
 //!   the next;
 //! - an item moved to `done` or `canceled` closes the efforts linked to it;
@@ -196,18 +194,6 @@ impl CommitOrSwitch {
         let Some(thread) = thread else {
             return Ok(Vec::new());
         };
-        // An agent that starts an item takes it: it's assigned to the
-        // agent's thread before its work links to it.
-        let mover_is_agent = event.source.starts_with("agent:");
-        let take = (mover_is_agent && assigned != Some(thread)).then(|| {
-            call(
-                crate::commands::task::ASSIGN,
-                json!({
-                    "uri": item_ref,
-                    "to": oxplow_domain::uri::build::thread_uri(thread),
-                }),
-            )
-        });
         let open_new = || {
             call(
                 crate::commands::effort::OPEN,
@@ -215,7 +201,7 @@ impl CommitOrSwitch {
             )
         };
         let Some(open) = self.open_on(thread).await? else {
-            return Ok(take.into_iter().chain([open_new()]).collect());
+            return Ok(vec![open_new()]);
         };
         let effort = match open.task.as_deref() {
             Some(linked) if linked == item_ref => Vec::new(),
@@ -232,7 +218,7 @@ impl CommitOrSwitch {
                 json!({ "effort": open.id.to_string(), "task": item_ref }),
             )],
         };
-        Ok(take.into_iter().chain(effort).collect())
+        Ok(effort)
     }
 
     async fn finished(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {

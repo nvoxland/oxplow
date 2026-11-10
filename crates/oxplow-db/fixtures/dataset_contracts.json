@@ -29709,6 +29709,56 @@
         }
       ],
       "key": []
+    },
+    "2": {
+      "columns": [
+        {
+          "name": "request",
+          "type": "TEXT",
+          "doc": "The request (`v_request.uri`)."
+        },
+        {
+          "name": "task",
+          "type": "TEXT",
+          "doc": "The task's URI; it may dangle if its tracker dropped it."
+        },
+        {
+          "name": "basis",
+          "type": "TEXT",
+          "doc": "`prompt` (a person's prompt in the request named the task), `command` (the agent ran a task command on it in a turn), `assigned` (in progress and assigned to the thread when a turn of the request ended: the weakest)."
+        },
+        {
+          "name": "turn",
+          "type": "TEXT",
+          "doc": "The turn the evidence was recorded in (`v_agent_turn.uri`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INT",
+          "doc": "That turn's thread (`v_thread.id`): a thread's tasks by request, `WHERE thread_id = <id>`. NULL when no turn was named."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When the link was recorded (RFC 3339)."
+        },
+        {
+          "name": "turns",
+          "type": "INT",
+          "doc": "How many turns the request has so far."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When the request's first turn started."
+        },
+        {
+          "name": "last_ended_at",
+          "type": "TEXT",
+          "doc": "When its latest turn ended; NULL while one runs."
+        }
+      ],
+      "key": []
     }
   },
   "turn_file": {

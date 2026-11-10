@@ -163,8 +163,9 @@ transaction (`commands/task.rs`):
 - A verb that closes an assigned item logs `task.assigned` to nobody.
 - `oxplow.thread.close` and `oxplow.stream.archive` release their threads'
   items to nobody.
-- The effort policy: an agent that starts an item not assigned to its
-  thread takes it (`.context/work-tracking.md` rule 1).
+- `transition` to an in-progress stage by an agent takes the item: it's
+  assigned to the agent's thread, from whoever had it (`dispatching`,
+  every tracker). A person's start assigns nothing.
 - Taking a handoff assigns its item to the recipient thread
   (`.context/agent-model.md` "Handoffs").
 

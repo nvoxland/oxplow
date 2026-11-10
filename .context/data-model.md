@@ -2394,10 +2394,10 @@ Insert publishes `page-visit.changed` for renderer-side invalidation.
 ### The rail's Finished section
 
 The Work panel's "Finished" group is the bundled extension's
-`thread_tasks` model: the thread's done tasks (`v_task.closed_at`,
-whichever list is active), the knowledge pages it wrote
-(`v_knowledge_touch`, over `wiki_page_thread_update`) and its closed
-unlinked efforts, newest first. "Clear" runs
+`thread_tasks` model: the done tasks a request on the thread worked on
+(`v_request_task.thread_id`, `v_task.closed_at`, whichever list is
+active) and the knowledge pages it wrote (`v_knowledge_touch`, over
+`wiki_page_thread_update`), newest first. "Clear" runs
 `oxplow.tasks.clear_finished`, which logs an event the
 `finished_cleared` model reads, so entries closed before it are hidden
 until something newer lands.

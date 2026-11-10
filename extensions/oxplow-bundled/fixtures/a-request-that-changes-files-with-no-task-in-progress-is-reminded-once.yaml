@@ -1,0 +1,14 @@
+# oxtask's opinion: an agent tracks what it works on as tasks. A request
+# that changed files while its thread had no task in progress gets one
+# reminder, heard at the agent's next prompt; the same request is not
+# reminded again.
+given:
+  - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }
+  - observe: { snapshot: { files: [{ path: greeting.txt, hash: a }] } }
+when: { advisory: untracked-work }
+expect:
+  lines:
+    - "This request changed files, and no task is in progress on this thread. If it is work the person will want to see on the Work panel, take or file its task and move it to in progress (the `track-work` skill); a small fix needs none."
+steps:
+  - when: { advisory: untracked-work }
+    expect: { lines: [] }

@@ -448,10 +448,20 @@ fn dispatching(
                 if let (Some(to), false) = (assignee, closed) {
                     events.push(assigned(&source, &item, None, Some(to), None));
                 }
-                // Closed: who worked on it is its efforts, so it's
+                // Closed: who worked on it is its requests, so it's
                 // nobody's to work on now.
-                if let (Some(from), true) = (prior.assignee, closed && verb != "create") {
-                    events.push(assigned(&source, &item, Some(from), None, None));
+                if let (Some(from), true) = (&prior.assignee, closed && verb != "create") {
+                    events.push(assigned(&source, &item, Some(from.clone()), None, None));
+                }
+                // An agent that starts a task takes it: it's assigned to the
+                // agent's thread, from whoever had it. A person's start
+                // assigns nothing.
+                let started = moved == Some(Bucket::InProgress) && verb != "create";
+                if let (true, Some(thread)) = (started, agent_thread(&invocation)) {
+                    let mine = oxplow_domain::uri::build::thread_uri(thread);
+                    if prior.assignee.as_deref() != Some(mine.as_str()) {
+                        events.push(assigned(&source, &item, prior.assignee, Some(mine), None));
+                    }
                 }
             }
             Ok(HandlerOutput {
@@ -470,6 +480,15 @@ fn dispatching(
         shape.undoable,
         Handler::External(external),
     )
+}
+
+/// The thread of the agent running `invocation`; none for a person or a
+/// page.
+fn agent_thread(invocation: &Invocation) -> Option<oxplow_domain::ThreadId> {
+    let actor = invocation.actor();
+    (actor.kind() == oxplow_domain::events::schema::ActorKind::Agent)
+        .then(|| actor.thread_id())
+        .flatten()
 }
 
 /// What an item was before a verb: its stage, its bucket and who it's
@@ -1602,6 +1621,58 @@ mod tests {
                 "{input}: {err:?}"
             );
         }
+    }
+
+    /// An agent that starts a task takes it: the start assigns it to the
+    /// agent's thread, from whoever had it. A person starting one assigns
+    /// nothing, and an agent's other moves leave the assignee alone.
+    #[tokio::test]
+    async fn an_agent_that_starts_a_task_takes_it() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+        };
+        let run = |actor: Actor, name: &'static str, input: Value| {
+            let commands = fx.svc.commands.clone();
+            async move { commands.run(&actor, name, input, false).await.unwrap() }
+        };
+        let mine = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let pooled = run(Actor::Human, CREATE, json!({ "title": "pooled" })).await;
+        let item = pooled.result["uri"].as_str().unwrap().to_string();
+        run(agent.clone(), NAME, json!({ "uri": item, "to": "todo" })).await;
+        assert_eq!(assignee(&fx, &pooled.result).await, None);
+        run(
+            agent.clone(),
+            NAME,
+            json!({ "uri": item, "to": "in_progress" }),
+        )
+        .await;
+        assert_eq!(assignee(&fx, &pooled.result).await, Some(mine.clone()));
+        let persons = run(
+            Actor::Human,
+            CREATE,
+            json!({ "title": "the person's", "assignee": "oxplow:oxplow/person" }),
+        )
+        .await;
+        let item = persons.result["uri"].as_str().unwrap().to_string();
+        run(
+            Actor::Human,
+            NAME,
+            json!({ "uri": item, "to": "in_progress" }),
+        )
+        .await;
+        assert_eq!(
+            assignee(&fx, &persons.result).await.as_deref(),
+            Some("oxplow:oxplow/person")
+        );
+        run(agent, NAME, json!({ "uri": item, "to": "todo" })).await;
+        run(Actor::Human, NAME, json!({ "uri": item, "to": "todo" })).await;
+        assert_eq!(
+            assignee(&fx, &persons.result).await.as_deref(),
+            Some("oxplow:oxplow/person")
+        );
     }
 
     /// Who the item a run's result names is assigned to.

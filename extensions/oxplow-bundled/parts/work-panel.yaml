@@ -1,12 +1,16 @@
 title: Work (panel)
-description: What the thread is working on — its open effort (with its epic), the items assigned to it next, and what it finished.
+description: What the thread is working on — its tasks in progress (with their epic) and what each one's request is doing now, the tasks assigned to it next, and the ones it finished.
 params:
 - name: thread_id
   label: Thread
 loaders:
   work:
     sql: |
-      SELECT grp, title, icon, uri, depth, active
+      SELECT grp, title, icon, uri, depth, active,
+             CASE activity WHEN 'running' THEN 'working'
+                           WHEN 'waiting_on_person' THEN 'waiting on you'
+                           WHEN 'waiting_on_work' THEN 'waiting on its jobs'
+                           ELSE '' END AS now
       FROM v_oxplow_thread_tasks
       WHERE thread_id = :thread_id
       ORDER BY g, ord

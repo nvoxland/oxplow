@@ -106,7 +106,7 @@ harness only delivers them.
 
 | Piece | What | Where it comes from |
 |---|---|---|
-| Preamble | How to work in oxplow: nothing to file, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <task uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
+| Preamble | How to work in oxplow: turns are observed and tracking work as tasks is the active tracker's skill's business, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <task uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |

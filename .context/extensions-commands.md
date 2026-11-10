@@ -377,24 +377,20 @@ advisories:
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-bundled ships hints on outcomes: `large-uncommitted` (turn-end,
-  once per effort: an open effort holding 15 or more files — a commit
-  landing its work would have closed it) and `landed-in-progress`
-  (turn-end, to the person, once per item: an item still in progress
-  though a commit landed its work and nothing is open on it); the two
-  shared-files hints (turn-end: two open efforts on different threads
-  changed one file within `sharedFiles.windowMinutes`; the Alert to the
-  person once per pair, and a note to each agent, once per thread; see
-  work-tracking.md "Cross-thread ownership"); and two
-  metric ones, `metric-deltas` and `threshold-crossed` (see
-  [metrics.md](./metrics.md)). **Bundled advisories set no coding
+- oxplow-bundled ships one hint, oxtask's: `untracked-work` (turn-end,
+  `once_per: row` keyed on the request, while oxtask is the active
+  tracker: the thread's latest request changed files and the thread has no
+  task in progress; the `track-work` skill says what to do). The earlier
+  outcome hints (`large-uncommitted`, `landed-in-progress`, the two
+  shared-files hints, `metric-deltas`, `threshold-crossed`) are in the
+  parked `oxplow-bundled-todo` project extension (see
+  [metrics.md](./metrics.md) for the metric ones). **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never
   how a project should code — no coverage target, no "add tests" — and
   a project that wants one writes its own advisory (the `coverage-target`
   nudge was removed for this).
-  Each bundled hint has a fixture in `advisories.rs` that makes it fire
-  and cases that keep it quiet (`every_bundled_hint_has_a_fixture_that_fires_it`
-  fails when a hint ships without one). A count of `fired = 0` in
+  Each bundled hint has an extension fixture that makes it fire and one
+  that keeps it quiet (`when: { advisory: <id> }`). A count of `fired = 0` in
   `v_hint_stat` is therefore the project's state, not a broken query:
   `threshold-crossed` needs a metric with a `warnAt`/`failAt` that an effort
   moves past (only the coverage metric ships thresholds, and efforts

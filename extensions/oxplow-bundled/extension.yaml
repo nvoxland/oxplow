@@ -67,8 +67,8 @@ datasets:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_tasks
-    version: 6
-    description: "Each thread's Work panel, one row per line in display order: what the thread is working on, from its efforts (`v_effort`) and the work assigned to it (`v_task.assignee`). In progress is its open effort, as its linked item (under its epic with the epic's other children) or its own title; Up next is the ready and blocked items assigned to the thread, in its queue's order; Finished is its last 20 closed efforts (each item once) and wiki pages touched since the list was cleared."
+    version: 7
+    description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children), each with what its latest request is doing now; Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the wiki pages it touched, since the list was cleared."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: grp, type: TEXT, doc: "`In progress`, `Up next` or `Finished`." }
@@ -76,9 +76,10 @@ datasets:
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
       - { name: icon, type: TEXT, doc: "A viz icon name: a task state (`todo`, `blocked`, `in_progress`, `done`, …), `epic` or `wiki`." }
-      - { name: uri, type: TEXT, doc: "What the line opens (`task:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
+      - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, `oxplow:oxplow/wiki?slug=<slug>`)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
-      - { name: active, type: INT, doc: "1 for the open effort's line: its item, or the effort itself." }
+      - { name: active, type: INT, doc: "1 for a task in progress." }
+      - { name: activity, type: TEXT, doc: "On a task in progress, what its latest request is doing now (v_request_task, v_request.state): `running`, `waiting_on_person`, `waiting_on_work` or `idle` (none runs, or no request worked on it yet). NULL on any other line. (v7)" }
 event_types:
   types:
     - type: oxplow.tasks.finished_cleared
@@ -185,5 +186,34 @@ panels:
 # ready queue (`/oxplow:next-task`).
 skills:
   - { name: next-task, kind: command, file: commands/next-task.md }
+  # oxtask's opinion: an agent tracks what it works on as tasks.
+  - { name: track-work, file: skills/track-work/SKILL.md }
 implementations:
-  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task], description: "The task tracker that oxplow keeps itself." }
+  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work], description: "The task tracker that oxplow keeps itself." }
+advisories:
+  # oxtask's opinion (the `track-work` skill): an agent tracks what it works
+  # on as tasks. A request on the thread that changed files (an edit or a
+  # shell call claimed them, or only its turn ran) while the thread has no
+  # task in progress is reminded once, at a turn's end, heard at the next
+  # prompt. Only while oxtask is the active task tracker.
+  - id: untracked-work
+    on: turn-end
+    once_per: row
+    query: |
+      WITH last AS (
+        SELECT request FROM v_agent_turn
+        WHERE thread_id = :thread_id AND request IS NOT NULL
+        ORDER BY id DESC LIMIT 1
+      )
+      SELECT last.request AS key,
+             'This request changed files, and no task is in progress on this thread. If it is '
+             || 'work the person will want to see on the Work panel, take or file its task and '
+             || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
+      FROM last
+      WHERE EXISTS (SELECT 1 FROM v_capability_provider
+                     WHERE capability = 'task_tracker' AND provider = 'oxtask' AND active = 1)
+        AND EXISTS (SELECT 1 FROM v_agent_turn t JOIN v_turn_file f ON f.turn_id = t.id
+                     WHERE t.thread_id = :thread_id AND t.request = last.request
+                       AND f.confidence IN ('claimed', 'sole'))
+        AND NOT EXISTS (SELECT 1 FROM v_task w JOIN v_thread th ON th.uri = w.assignee
+                         WHERE th.id = :thread_id AND w.state = 'in_progress')

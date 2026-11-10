@@ -248,12 +248,18 @@ screens and the holder's add the review and analysis:
   host page's own nodes' actions, not an embedded page's, so the part's
   buttons are tested on the part. Each has a `panel:` fixture:
   the panel run whole, as the rail shows it. Work (`work-panel`, collapsed
-  `work-line`, no count; its header opens the Work board) is what the
-  thread is working on, from its efforts, not a view of task states: In
-  progress is its open effort (its item under its epic, or the effort's
-  title), Up next the ready and blocked items assigned to the thread in
-  its queue's order, Finished its closed efforts (each item once) and
-  wiki pages touched. It is `oxplow-bundled`'s, beside its
+  `work-line`, no count; its header opens the Work board) is the
+  thread's tasks, a project-manager view (never turns or requests): In
+  progress is the tasks in progress assigned to it (under their epic),
+  each with what its latest request is doing now (`v_request_task`,
+  `v_request.state`: the Now column); Up next the ready and blocked tasks
+  assigned to the thread in its queue's order; Finished the done tasks a
+  request on the thread worked on (each once) and wiki pages touched.
+  oxtask's opinion that an agent tracks its work as tasks is its
+  `track-work` skill (offered only while oxtask is the active tracker)
+  and its `untracked-work` advisory: a request that changed files (a
+  claimed or sole `v_turn_file`) while the thread had no task in
+  progress is reminded once per request. It is `oxplow-bundled`'s, beside its
   `thread_tasks` dataset and `tasks.clear_finished` command, with a `panel:`
   fixture. Still in the holder: Waiting on You (`waiting-on-me`, a badge)
   and Comments (`comments-panel`). Each moves the same way: its parts, a

@@ -574,7 +574,8 @@ or `fail` in the new spot; events publish automatically.
 ## Work panel in_progress bucket is task-only
 
 The Work panel's in_progress bucket is driven purely by `task`
-rows (`status = 'in_progress'` for the selected thread). There are no
+rows (`state = 'in_progress'`, assigned to the selected thread), each
+with its latest request's state as its activity. There are no
 synthesized turn rows, no live-prompt overlay, and no IPC for
 listing open turns — `listAgentTurns`, `listOpenTurns`,
 `listRecentInactiveTurns`, `archiveAgentTurn`, and
