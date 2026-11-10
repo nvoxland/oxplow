@@ -25,11 +25,19 @@ loaders:
                t.ended_at AS ended_at,
                t.prompt AS prompt,
                coalesce(t.answer, '') AS answer,
-               (SELECT count(*) FROM v_tool_call c WHERE c.turn_id = t.id) AS tool_calls
+               (SELECT count(*) FROM v_tool_call c WHERE c.turn_id = t.id) AS tool_calls,
+               -- Where its time went: in tools, waiting on the person, the rest.
+               (SELECT CASE WHEN a.duration_ms IS NULL THEN NULL
+                            ELSE (a.duration_ms / 1000) || 's'
+                                 || CASE WHEN a.tool_ms IS NULL THEN ''
+                                         ELSE ' — tools ' || (a.tool_ms / 1000) || 's, waiting '
+                                              || (a.wait_ms / 1000) || 's, the rest '
+                                              || (a.other_ms / 1000) || 's' END END
+                  FROM v_turn_activity a WHERE a.turn_id = t.id) AS time
         FROM v_agent_turn t
         WHERE t.agent_session_id = (SELECT id FROM s)
       )
-      SELECT i.uri, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls,
+      SELECT i.uri, i.at, i.kind, i.ended_at, i.prompt, i.answer, i.tool_calls, i.time,
              s.thread_id AS thread_id, s.harness AS harness, s.resume_session_id AS conversation,
              (SELECT uri_param(th.uri, 'id') FROM v_thread th WHERE th.id = s.thread_id) AS thread_id_bare
       FROM items i, s
@@ -52,6 +60,8 @@ view:
     label: Answer
   - key: tool_calls
     label: Tool calls
+  - key: time
+    label: Time
   empty: No turns are recorded for this session.
   actions:
   - id: resume
