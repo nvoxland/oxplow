@@ -168,8 +168,6 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<AgentSubagentFinished>()
             .expect("core type registers");
-        r.register::<AgentPeerMessageReceived>()
-            .expect("core type registers");
         r.register::<AgentContextCompacted>()
             .expect("core type registers");
         r.register::<AgentStatusChanged>()
@@ -1236,30 +1234,41 @@ impl EventType for AgentTokensReported {
     type Payload = AgentTokensReportedV2;
 }
 
-/// `agent.prompt.submitted@2`: a person sent the agent a prompt. Every
-/// prompt logs one; only a prompt with no turn open also opens a turn
-/// (`reprompt` says it landed inside an open one).
+/// `agent.prompt.submitted@3`: a prompt reached the agent — a person's,
+/// a background job's report, a subagent's hand-back, another session's
+/// message (`source`). Every delivery logs one; one with no turn open also
+/// opens a turn (`reprompt` says it landed inside an open one).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentPromptSubmittedV2 {
+pub struct AgentPromptSubmittedV3 {
     /// The thread (`thr3`).
     pub thread: String,
-    /// The turn it opened (`trn12`).
+    /// The turn it opened, or the one it was delivered into (`trn12`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
     pub reprompt: bool,
-    /// The text the person submitted, stored in `event_content`.
+    /// Who it came from. Rows logged before sources were read `unknown`.
+    pub source: crate::hook::TurnSource,
+    /// The text the harness delivered, stored in `event_content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<ContentRef>,
+    /// On another session's message: the sender's own name for its
+    /// session (its socket when it has no name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    /// On a background job's report or a subagent's hand-back: the
+    /// harness's id for the job (the subagent's id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job: Option<String>,
 }
 
 pub struct AgentPromptSubmitted;
 impl EventType for AgentPromptSubmitted {
     const TYPE: &'static str = "agent.prompt.submitted";
-    const V: u32 = 2;
-    type Payload = AgentPromptSubmittedV2;
+    const V: u32 = 3;
+    type Payload = AgentPromptSubmittedV3;
 }
 
 /// What oxplow's agent policy said about a tool call.
@@ -1402,29 +1411,6 @@ impl EventType for AgentSubagentFinished {
     const TYPE: &'static str = "agent.subagent.finished";
     const V: u32 = 2;
     type Payload = AgentSubagentFinishedV2;
-}
-
-/// `agent.peer_message.received@2`: another agent session's message
-/// reached the thread's agent as a prompt (Claude Code's cross-session
-/// message). Observed only: oxplow never sends one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AgentPeerMessageReceivedV2 {
-    /// The thread (`thr3`).
-    pub thread: String,
-    /// The turn it opened, or the one it arrived in (`trn12`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn: Option<String>,
-    /// The sender's own name for its session (its socket when it has no
-    /// name).
-    pub from: String,
-}
-
-pub struct AgentPeerMessageReceived;
-impl EventType for AgentPeerMessageReceived {
-    const TYPE: &'static str = "agent.peer_message.received";
-    const V: u32 = 2;
-    type Payload = AgentPeerMessageReceivedV2;
 }
 
 /// `agent.context.compacted@2`: the agent's context was summarized to make
@@ -2326,9 +2312,8 @@ mod tests {
             versions,
             vec![
                 ("agent.context.compacted", 2),
-                ("agent.peer_message.received", 2),
                 ("agent.plan.proposed", 2),
-                ("agent.prompt.submitted", 2),
+                ("agent.prompt.submitted", 3),
                 ("agent.session.ended", 2),
                 ("agent.session.started", 3),
                 ("agent.status.changed", 2),

@@ -241,7 +241,12 @@ async fn a_session_that_never_waited_fails_the_permission_check() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_claude_code_subagent_is_attributed() {
     let r = replayed("claude/subagent.jsonl", "claude").await;
-    assert_eq!(events_of(&r, "agent.prompt.submitted").await.len(), 1);
+    let sources: Vec<_> = events_of(&r, "agent.prompt.submitted")
+        .await
+        .iter()
+        .map(|p| p["source"].clone())
+        .collect();
+    assert_eq!(sources, ["person", "subagent"]);
     assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 1);
     assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 1);
     let bash: Vec<_> = events_of(&r, "agent.tool.finished")
@@ -299,10 +304,10 @@ async fn a_recorded_claude_code_subagent_is_attributed() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_claude_code_peer_message_opens_a_turn_of_its_own() {
     let r = replayed("claude/peer_message.jsonl", "claude").await;
-    assert!(events_of(&r, "agent.prompt.submitted").await.is_empty());
-    let received = events_of(&r, "agent.peer_message.received").await;
+    let received = events_of(&r, "agent.prompt.submitted").await;
     assert_eq!(received.len(), 1);
-    assert_eq!(received[0]["from"], "oxplow-main");
+    assert_eq!(received[0]["source"], "peer");
+    assert_eq!(received[0]["sender"], "oxplow-main");
     let turns = r
         .svc
         .agent_turn_store

@@ -1957,6 +1957,45 @@ mod tests {
         assert_eq!(versions, vec![4, 4]);
     }
 
+    /// V8 makes every logged prompt and peer message one delivery event at
+    /// @3: an old prompt's source is unknown, a peer's message keeps its
+    /// sender.
+    #[test]
+    fn v8_folds_peer_messages_into_prompt_deliveries() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(7))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            r#"INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                 VALUES ('p', 'agent.prompt.submitted', 2, 'a', 's', '[]',
+                         '{"thread":"thr1","turn":"trn1","reprompt":false}');
+               INSERT INTO event_log (id, type, v, at, source, subject, payload)
+                 VALUES ('m', 'agent.peer_message.received', 2, 'b', 's', '[]',
+                         '{"thread":"thr1","turn":"trn2","from":"oxplow-main"}');"#,
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(String, i64, String)> = conn
+            .prepare("SELECT type, v, payload FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let payload = |i: usize| serde_json::from_str::<serde_json::Value>(&rows[i].2).unwrap();
+        assert!(rows
+            .iter()
+            .all(|(t, v, _)| t == "agent.prompt.submitted" && *v == 3));
+        assert_eq!(payload(0)["source"], "unknown");
+        assert_eq!(
+            payload(1),
+            serde_json::json!({"thread": "thr1", "turn": "trn2", "reprompt": false,
+                               "source": "peer", "sender": "oxplow-main"})
+        );
+    }
+
     /// A database restored from the migrated template is exactly what
     /// migrating from scratch makes: same tables, views, indexes and
     /// triggers, same migration history.
