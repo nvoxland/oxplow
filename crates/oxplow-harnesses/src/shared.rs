@@ -278,6 +278,8 @@ pub fn claude_shaped_reading(body: &serde_json::Value) -> oxplow_domain::hook::H
             Some("permission_prompt" | "elicitation_dialog" | "agent_needs_input")
         ),
         notice: text("message"),
+        compact_summary: text("compact_summary"),
+        compact_trigger: text("trigger"),
         compaction: body.get("source").and_then(|s| s.as_str()) == Some("compact"),
         clears_conversation: end_reason.as_deref() == Some("clear"),
         end_reason,
@@ -378,6 +380,8 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         question,
         plan,
         subagent: subagent_of(body),
+        input: body.get("tool_input").filter(|v| !v.is_null()).cloned(),
+        output: body.get("tool_response").filter(|v| !v.is_null()).cloned(),
     })
 }
 

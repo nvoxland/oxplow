@@ -601,6 +601,16 @@ fn record_tx(
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
     // A prompt delivered while a turn runs opens none (a re-prompt).
     let reprompt = applied.turn.is_some();
+    // The turn a prompt delivered to a session with none open starts: the
+    // one open path of the four prompt arms (a person's, a hand-back, a
+    // peer's message, a background job's report).
+    let open_if_none = |applied: &mut Applied, opening: &TurnOpening<'_>| {
+        if applied.turn.is_none() {
+            applied.turn = Some(open_turn_tx(conn, ev, thread, slot, opening, session, now)?);
+            applied.opened_turn = true;
+        }
+        Ok::<(), DomainError>(())
+    };
     match env.kind {
         // A subagent handing its report back: the agent goes on working on
         // it — a turn, if none is open, that goes on with the one the
@@ -622,18 +632,13 @@ fn record_tx(
                 },
                 now,
             )?;
-            if applied.turn.is_none() {
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    cause_ref: Some(subagent.id.as_str()),
-                    ..TurnOpening::new(TurnSource::Subagent, text)
-                        .caused_by(job.started_turn, job.basis.unwrap_or(CauseBasis::Reported))
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: Some(subagent.id.as_str()),
+                ..TurnOpening::new(TurnSource::Subagent, text)
+                    .caused_by(job.started_turn, job.basis.unwrap_or(CauseBasis::Reported))
+            };
+            open_if_none(&mut applied, &opening)?;
             agent_job_store::reported_tx(conn, job.id, applied.turn, now, None, None)?;
             log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
             status = Some((AgentStatusState::Running, None));
@@ -656,19 +661,14 @@ fn record_tx(
                 Some(message) => agent_message_store::find_sent_tx(conn, message, now)?,
                 None => None,
             };
-            if applied.turn.is_none() {
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    cause_ref: socket.as_deref(),
-                    sender: Some(from.as_str()),
-                    ..TurnOpening::new(TurnSource::Peer, text)
-                        .caused_by(sent.map(|(_, turn)| turn), CauseBasis::Matched)
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: socket.as_deref(),
+                sender: Some(from.as_str()),
+                ..TurnOpening::new(TurnSource::Peer, text)
+                    .caused_by(sent.map(|(_, turn)| turn), CauseBasis::Matched)
+            };
+            open_if_none(&mut applied, &opening)?;
             if let (Some((row, _)), Some(turn)) = (sent, applied.turn) {
                 agent_message_store::mark_received_tx(conn, row, turn)?;
             }
@@ -717,18 +717,12 @@ fn record_tx(
                 Some(job) => (job.started_turn, job.basis.unwrap_or(CauseBasis::Reported)),
                 None => (by_call, CauseBasis::Reported),
             };
-            if applied.turn.is_none() {
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    cause_ref: name,
-                    ..TurnOpening::new(TurnSource::BackgroundJob, text)
-                        .caused_by(started_turn, basis)
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: name,
+                ..TurnOpening::new(TurnSource::BackgroundJob, text).caused_by(started_turn, basis)
+            };
+            open_if_none(&mut applied, &opening)?;
             if let Some(job) = recorded {
                 agent_job_store::reported_tx(
                     conn,
@@ -791,20 +785,15 @@ fn record_tx(
         HookKind::UserPromptSubmit => {
             // A person's prompt, or one the harness said nothing of.
             let said = env.prompt.as_ref().map(Prompt::text);
-            if !reprompt {
-                let source = env
-                    .prompt
-                    .as_ref()
-                    .map_or(TurnSource::Unknown, Prompt::source);
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    ..TurnOpening::new(source, said.unwrap_or_default())
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let source = env
+                .prompt
+                .as_ref()
+                .map_or(TurnSource::Unknown, Prompt::source);
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                ..TurnOpening::new(source, said.unwrap_or_default())
+            };
+            open_if_none(&mut applied, &opening)?;
             status = Some((AgentStatusState::Running, None));
         }
         // A plan outside any tool call: recorded, and nothing waits on it.
@@ -820,7 +809,7 @@ fn record_tx(
             let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
-                log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
+                log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
                 // A plan put to the person: on the record before the dialog
                 // answers (a refused call proposes nothing).
                 let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
@@ -987,9 +976,10 @@ fn record_tx(
         HookKind::PostCompact => {
             let turn_id = applied.turn.map(|t| t.to_string());
             let turn = applied.turn.map(turn_uri);
-            let summary = body
-                .get("compact_summary")
-                .and_then(|v| v.as_str())
+            let summary = env
+                .reading
+                .compact_summary
+                .as_deref()
                 .filter(|s| !s.trim().is_empty())
                 .map(|text| event_content_store::put_text_tx(conn, "agent", text))
                 .transpose()?;
@@ -997,10 +987,7 @@ fn record_tx(
                 .typed::<AgentContextCompacted>(&AgentContextCompactedV2 {
                     thread: thread.to_string(),
                     turn: turn_id,
-                    trigger: body
-                        .get("trigger")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
+                    trigger: env.reading.compact_trigger.clone(),
                     summary,
                 })
                 .with_anchors(activity_anchors_tx(conn, thread, slot)?)
@@ -1494,12 +1481,11 @@ fn log_tool_tx(
     row: &ThreadRow,
     env: &HookEnvelope,
     tool: &ToolUse,
-    body: &serde_json::Value,
     session: Option<&str>,
 ) -> Result<(), DomainError> {
     let recorded = crate::tool_calls::recorded(tool, &row.worktree);
-    let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
-        match body.get(key) {
+    let content = |value: &Option<serde_json::Value>| -> Result<Option<ContentRef>, DomainError> {
+        match value {
             Some(v) if !v.is_null() => event_content_store::put_json_tx(conn, "agent", v).map(Some),
             _ => Ok(None),
         }
@@ -1547,7 +1533,7 @@ fn log_tool_tx(
             call: tool.call_id.clone(),
             paths: recorded.paths,
             detail: recorded.detail,
-            input: content("tool_input")?,
+            input: content(&tool.input)?,
             decision: if decision.allowed {
                 Decision::Allowed
             } else {
@@ -1569,8 +1555,8 @@ fn log_tool_tx(
                 command: tool.command.clone(),
                 ok: tool.ok,
                 exit_code: tool.exit_code,
-                input: content("tool_input")?,
-                output: content("tool_response")?,
+                input: content(&tool.input)?,
+                output: content(&tool.output)?,
                 subagent,
             })
             .with_dedupe_key_opt(dedupe("finished"));
@@ -1597,12 +1583,15 @@ fn log_tool_tx(
         if !sent.text.trim().is_empty() {
             agent_message_store::record_sent_tx(
                 conn,
-                thread,
-                row.session,
-                turn,
-                &sent.to,
-                &sent.text,
-                Timestamp::now(),
+                &agent_message_store::Sent {
+                    thread,
+                    session: row.session,
+                    turn,
+                    call: tool.call_id.as_deref(),
+                    recipient: &sent.to,
+                    text: &sent.text,
+                    at: Timestamp::now(),
+                },
             )?;
         }
     }
@@ -4731,6 +4720,81 @@ mod tests {
                 ),
                 (None, None, req(2)),
                 (None, None, req(3)),
+            ]
+        );
+    }
+
+    /// The match does not stop at a thread: a message a session of one
+    /// thread sent is received in another thread, and the received turn
+    /// joins the sender's request.
+    #[tokio::test]
+    async fn a_message_is_matched_across_threads() {
+        let (svc, tid) = fixture().await;
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                     SELECT 2, stream_id, 'other', created_at, updated_at FROM threads WHERE id = 1",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let other = ThreadId::new(2);
+        let sender = first_session();
+        let receiver = open_session(&svc, other).await;
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "tell the other thread"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(hook_in(
+            HookKind::PreToolUse,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"tool_name": "SendMessage", "tool_use_id": "t1",
+                   "tool_input": {"to": "other", "message": "over to you"}}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: "first".into(),
+                socket: None,
+                message: Some("over to you".into()),
+                text: "<cross-session-message from-name=\"first\">\nover to you\n</cross-session-message>".into(),
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, other, receiver, Some("r1"), json!({}))
+        })
+        .await
+        .unwrap();
+        let rows: Vec<(i64, Option<String>, Option<String>)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT thread_id, cause_turn, request FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let req = Some("oxplow:oxplow/request?id=req1".to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (1, None, req.clone()),
+                (2, Some("oxplow:oxplow/turn?id=trn1".into()), req),
             ]
         );
     }

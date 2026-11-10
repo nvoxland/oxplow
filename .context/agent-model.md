@@ -1149,10 +1149,13 @@ a harness that says nothing leaves the default) fills
 | `final_message` | a Stop's `answer`, a SubagentStop's result | `last_assistant_message` |
 | `waits_on_person`, `notice` | a Notification that parks the thread on the person, and its text | `notification_type` (`permission_prompt`, `elicitation_dialog`, `agent_needs_input`), `message` |
 | `compaction` | a SessionStart that is a mid-turn compaction, not a new process | `source: compact` |
+| `compact_summary`, `compact_trigger` | a PostCompact's summary and trigger | `compact_summary`, `trigger` |
 | `end_reason`, `clears_conversation` | a SessionEnd's reason; whether it clears the conversation | `reason`, `reason: clear` |
 
-An external provider harness has no verb for it yet, so reads none of
-these.
+A tool call's content comes the same way: `ToolUse.input` / `.output`
+(Claude's `tool_input` / `tool_response`), stored by hash with the call.
+An external provider harness has no verb for the reading yet, so reads none
+of these.
 
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared with OTLP exports), in order: the session the sender is (the
@@ -1787,15 +1790,15 @@ a `SendMessage` call's recipient and text (`ToolUse.sent`), recorded with
 its turn when the call is requested; on receipt the adapter gives the
 message without its wrapping (`Prompt::PeerMessage.message`), and the one
 unmatched send of the same text (content hash) in the last ten minutes —
-recorded once per call, only when the policy let it run and only with text
-— is
-the cause (`cause_basis` `matched`): the receiving turn joins the sender's
+recorded once per call (with the call's id, V17), only when the policy let it
+run and only with text, and not a send whose tool-call row says it was denied,
+abandoned or failed — is the cause (`cause_basis` `matched`): the receiving turn joins the sender's
 request, across threads. No send, or two of the same text, links nothing,
 and the turn starts its own request. Known limits: a message read by a busy
 session between tool calls opens no turn (no hook was seen to fire for it);
 a held message expires after five minutes unacknowledged, so a send does
 not prove a receipt; a sender outside oxplow is known by its name and
-socket only. Pinned by `a_peers_message_is_matched_to_the_turn_that_sent_it`. Pinned by
+socket only. Pinned by `a_peers_message_is_matched_to_the_turn_that_sent_it`, `a_message_is_matched_across_threads` and `a_send_that_never_ran_is_not_a_candidate`. Pinned by
 `a_peers_message_opens_a_turn_of_its_own_with_its_text`, `a_peers_message_is_not_a_persons_prompt`
 and the recorded `claude/peer_message.jsonl`
 (`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's

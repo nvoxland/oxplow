@@ -126,6 +126,11 @@ pub struct HookReading {
     /// A `SessionStart` that is a context compaction posted mid-turn: the
     /// same process and turn go on.
     pub compaction: bool,
+    /// A `PostCompact`'s summary of the context, when the harness gives one.
+    pub compact_summary: Option<String>,
+    /// What triggered a `PostCompact` (`auto`, `manual`), as the harness
+    /// names it.
+    pub compact_trigger: Option<String>,
     /// A `SessionEnd`'s reason, as the harness names it.
     pub end_reason: Option<String>,
     /// A `SessionEnd` that clears the conversation: the next session starts

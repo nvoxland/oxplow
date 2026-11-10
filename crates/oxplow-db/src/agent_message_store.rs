@@ -18,25 +18,38 @@ pub fn text_hash(text: &str) -> String {
     crate::event_content_store::hash(text.trim().as_bytes())
 }
 
-/// A call in `turn` of agent session `session` on `thread` sent `text` to
-/// `recipient` at `at`.
-pub fn record_sent_tx(
-    conn: &Connection,
-    thread: ThreadId,
-    session: Option<AgentSessionId>,
-    turn: Option<AgentTurnId>,
-    recipient: &str,
-    text: &str,
-    at: Timestamp,
-) -> Result<(), DomainError> {
+/// A send: a call in `turn` of agent session `session` on `thread` sent
+/// `text` to `recipient` at `at`, by tool call `call`.
+pub struct Sent<'a> {
+    pub thread: ThreadId,
+    pub session: Option<AgentSessionId>,
+    pub turn: Option<AgentTurnId>,
+    pub call: Option<&'a str>,
+    pub recipient: &'a str,
+    pub text: &'a str,
+    pub at: Timestamp,
+}
+
+/// Record a send.
+pub fn record_sent_tx(conn: &Connection, sent: &Sent<'_>) -> Result<(), DomainError> {
+    let Sent {
+        thread,
+        session,
+        turn,
+        call,
+        recipient,
+        text,
+        at,
+    } = *sent;
     conn.execute(
-        "INSERT INTO agent_message (thread_id, agent_session_id, turn_id, recipient, text_hash,
-                                    sent_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO agent_message (thread_id, agent_session_id, turn_id, call_id, recipient,
+                                    text_hash, sent_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             thread.value(),
             session.map(|s| s.value()),
             turn.map(|t| t.value()),
+            call,
             recipient,
             text_hash(text),
             ts_to_string(at)
@@ -48,8 +61,11 @@ pub fn record_sent_tx(
 
 /// The send a message received at `at` with `text` matches: the one
 /// unmatched send of the same text within [`MATCH_WINDOW_SECONDS`] before
-/// it, as `(its row, the turn that sent it)`. None when no send matches, or
-/// more than one does (the match must be unambiguous).
+/// it, as `(its row, the turn that sent it)`. A send whose call is known
+/// (its row in `agent_tool_call`) to have been denied, abandoned or failed
+/// never reached anyone, and is no candidate; one whose call is not
+/// projected yet or still runs is. None when no send matches, or more than
+/// one does (the match must be unambiguous).
 pub fn find_sent_tx(
     conn: &Connection,
     text: &str,
@@ -57,10 +73,14 @@ pub fn find_sent_tx(
 ) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, turn_id FROM agent_message
-              WHERE text_hash = ?1 AND received_turn_id IS NULL AND turn_id IS NOT NULL
-                AND julianday(sent_at) <= julianday(?2)
-                AND julianday(sent_at) >= julianday(?2) - ?3 / 86400.0
+            "SELECT m.id, m.turn_id FROM agent_message m
+              WHERE m.text_hash = ?1 AND m.received_turn_id IS NULL AND m.turn_id IS NOT NULL
+                AND julianday(m.sent_at) <= julianday(?2)
+                AND julianday(m.sent_at) >= julianday(?2) - ?3 / 86400.0
+                AND NOT EXISTS (
+                      SELECT 1 FROM agent_tool_call c
+                       WHERE c.call_id = m.call_id AND c.agent_session_id IS m.agent_session_id
+                         AND (c.state IN ('denied', 'abandoned') OR c.ok = 0))
               LIMIT 2",
         )
         .map_err(map_sql_err)?;
@@ -90,4 +110,56 @@ pub fn mark_received_tx(
     )
     .map_err(map_sql_err)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Database;
+
+    /// A send whose call was denied, abandoned or failed never reached the
+    /// receiver: it is no candidate, and a second send of the same text
+    /// that did run then matches alone.
+    #[tokio::test]
+    async fn a_send_that_never_ran_is_not_a_candidate() {
+        let db = Database::in_memory();
+        let at = Timestamp::from_unix_ms(1_000_000);
+        let found = db
+            .transaction(move |tx| {
+                tx.execute_batch(
+                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                       VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/p', 'a', 'a');
+                     INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 'T', 'a', 'a');
+                     INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (1, 1, 'p', 'a');
+                     INSERT INTO agent_tool_call (thread_id, turn_id, tool, at, call_id, state)
+                       VALUES (1, 1, 'SendMessage', 'a', 'denied-call', 'denied');",
+                )
+                .map_err(map_sql_err)?;
+                let send = |call: &str| {
+                    record_sent_tx(
+                        tx,
+                        &Sent {
+                            thread: ThreadId::new(1),
+                            session: None,
+                            turn: Some(AgentTurnId::new(1)),
+                            call: Some(call),
+                            recipient: "main",
+                            text: "hello",
+                            at: Timestamp::from_unix_ms(999_000),
+                        },
+                    )
+                };
+                send("denied-call")?;
+                let alone = find_sent_tx(tx, "hello", at)?;
+                // A second send of the same text, not (yet) projected: the
+                // only candidate, so the match is unambiguous.
+                send("ran-call")?;
+                let after = find_sent_tx(tx, "hello", at)?;
+                Ok((alone, after))
+            })
+            .await
+            .unwrap();
+        assert_eq!(found.0, None, "the denied send alone is no match");
+        assert!(found.1.is_some(), "the send that ran matches alone");
+    }
 }

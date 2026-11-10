@@ -136,6 +136,14 @@ pub struct ToolUse {
     pub question: Option<String>,
     /// What a `Plan` call proposes: its text, and the file it was saved in.
     pub plan: Option<Plan>,
+    /// The call's input as the harness gave it, recorded by hash with the
+    /// call (Claude's `tool_input`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+    /// What the call returned once it finished, recorded by hash (Claude's
+    /// `tool_response`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<serde_json::Value>,
     /// The subagent that made the call, when it wasn't the session's own
     /// agent (the harness says, or core brackets it by the open subagent
     /// call).
