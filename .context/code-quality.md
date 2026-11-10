@@ -189,7 +189,7 @@ in the background. `DuplicationRecorder::record`
   untouched file's duplicates (tsk365). `oxplow.duplicate_lines` is
   oxplow-bundled's whole-tree collector's: the
   `duplicate_blocks(min_lines)` Starlark builtin over the whole tree after
-  ref moves (`snapshot.taken`, `trigger: git_refs`) — paced, so a burst
+  moves of the stream's HEAD (`snapshot.taken`, `trigger: git_refs`) — paced, so a burst
   of them (a commit, a rebase, a restart's catch-up) is one scan of the
   latest tree once they settle for 60 s, at most every 15 min — an empty capture
   clearing the metric after a refactor (tsk44); those restates are history,

@@ -2098,8 +2098,9 @@ metrics:                              # the read SPEC (the chartable metric)
       `oxplow_code_dup::detect_duplicates`) and one fact per side of each
       block (value = its line count, subject `block:<path>:<start>-<end>`);
       the spec is a `sum`. It runs on `snapshot.taken` with
-      `where: { trigger: git_refs }` — every ref move logs one, an unchanged
-      tree included — paced (the collector's trigger: `settle: 60s`,
+      `where: { trigger: git_refs }` — each move of the stream's HEAD logs one, an
+      unchanged tree included (a ref moved elsewhere in the repository does
+      not) — paced (the collector's trigger: `settle: 60s`,
       `at_most: 15m`), so a burst of moves is one scan of the latest tree; and
       its collector is `whole_tree: true`: it always reads the
       reconstructed tree (`build_full_file_map`, `scan_kind = full`), and it

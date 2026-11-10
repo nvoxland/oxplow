@@ -1113,8 +1113,9 @@ seeders for tests.
   holds the take lock from its drain through the stamp — with the new
   `revision` (and flips every
   exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@2`,
-  in one transaction. The git-refs listener runs a `git_refs` take first
-  (draining anything dirty), then this.
+  in one transaction. The git-refs listener — only when this worktree's own HEAD moved — runs a `git_refs`
+  take first (draining anything dirty; it logs `snapshot.taken` even when it
+  found nothing, as a signal that HEAD moved, but no op), then this.
 - Takes are **serialized** per stream (`take_lock`) and each caller
   records its own op, so two threads ending turns on one worktree give
   two ops, usually on the same snapshot (§4.3: a snapshot taken for one
