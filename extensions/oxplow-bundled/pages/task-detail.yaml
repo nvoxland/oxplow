@@ -77,6 +77,13 @@ loaders:
       ORDER BY CASE c.state WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'todo' THEN 2
                             WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END,
                c.rank IS NULL, c.rank, c.created_at
+  # The turns whose prompt named it: what the person pointed at it with.
+  prompted:
+    sql: |
+      SELECT t.uri, t.started_at, first_sentence(t.prompt) AS prompt
+      FROM v_page_ref r JOIN v_agent_turn t ON t.uri = r.source_uri
+      WHERE r.target_uri = :uri AND r.ref_type = 'prompt_mention'
+      ORDER BY t.id DESC
   # Where it is listed (the board of the thread it's for, else the Task
   # List at its stage) and its parent epic.
   related:
@@ -228,6 +235,21 @@ view:
     - key: assigned_to
       label: Assigned to
     empty: Nothing is filed under it.
+  # The turns whose prompt pointed at it.
+  - id: prompted
+    title: Named in prompts
+    from: prompted
+    viz: list
+    columns:
+    - key: prompt
+      label: Prompt
+      link:
+        kind: page
+        from: uri
+    - key: started_at
+      label: Asked
+      format: relative
+    empty: No prompt has named it.
   # Its efforts: what has been done on it.
   - id: activity
     title: Activity

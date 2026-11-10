@@ -259,7 +259,9 @@ graph writer and the link checker never drift. The desktop's
   identity (no view); a file edge's version pin rides in its columns, not
   its URI. The writers are `page_ref_projections` (wiki pages, notes,
   handoffs, tasks' bodies, comments and links, efforts' touched files,
-  summaries and impacts, findings, commits) — each owns its source's slice.
+  summaries and impacts, findings, commits, and agent turns: a person's
+  prompt's references, `ref_type = prompt_mention`, written when the
+  prompt is delivered) — each owns its source's slice.
 - **`comment`** (V99): `target_uri` (and `target_resource`), a
   `context_chain_json` and `referenced_json` of URIs;
   `knowledge.comment.written@2` / `deleted@2` carry `{ comment, target }`.

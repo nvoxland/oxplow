@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
 import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
@@ -760,6 +762,13 @@ describe("foldedAway", () => {
     const flat = foldedAway({ depth: null } as never, columns, rows, new Set(["a"]), id);
     expect(flat.hidden.size + flat.parents.size).toBe(0);
   });
+});
+
+test("a row mention is the text the Rust reader (uri::prompt_refs) pins", () => {
+  const fx = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../../../crates/oxplow-domain/tests/fixtures/prompt_refs.json"), "utf8"),
+  ).row_mention;
+  expect(rowMention(fx.page, fx.columns, fx.row)).toBe(fx.text);
 });
 
 test("a row that links nowhere is a mention of its page node's row", () => {

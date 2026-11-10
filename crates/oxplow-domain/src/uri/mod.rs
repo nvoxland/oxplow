@@ -31,6 +31,7 @@
 
 pub mod build;
 pub mod oxplow_uri;
+pub mod prompt_refs;
 pub mod resources;
 
 pub use oxplow_uri::{AnyUri, OxplowUri, ResourceName, UriParseError};
