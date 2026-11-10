@@ -1420,6 +1420,22 @@ pinned by synthetic notifications, not recordings):
 | Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
 | Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
 
+**Prompt references.** A person's prompt can carry references oxplow
+inserted or the agent's picker wrote: `@<path>`, `[oxplow uri <uri>]`,
+`[oxplow <uri>: "<title>" (<state>)]`, `[oxplow page <id> row: …]`. They
+stay as text in `agent_turn.prompt` and are also **links from the turn**:
+when the delivery is logged (`log_prompt_tx`, a reprompt's too), each
+reference is read by `uri::prompt_refs::parse` — the one definition that
+also spells the Rust writers (`uri_mention`, `item_mention`,
+`page_row_mention`; the context basket uses them) — and stored as a
+`page_ref` edge from `oxplow:oxplow/turn?id=trn<n>` to the target URI with
+ref type `prompt_mention`. A turn fits `page_ref` as a source: an identity
+URI, written once in the delivery's transaction, never restated. The
+desktop's row mention is TypeScript; `tests/fixtures/prompt_refs.json`
+pins its text in both languages. A task's page lists the turns that named
+it (`v_page_ref.target_uri`, `ref_type = 'prompt_mention'`); only a
+person's prompt is read.
+
 **`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,
 subagent id)` and counts `v_tool_call.subagent_id` calls: `state` is

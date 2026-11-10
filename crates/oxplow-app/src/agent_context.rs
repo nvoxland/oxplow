@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 
 use oxplow_domain::stores::{StreamStore, ThreadStore};
+use oxplow_domain::uri::prompt_refs;
 use oxplow_domain::{AgentSessionId, HandoffId, StreamId, ThreadId};
 use parking_lot::Mutex;
 use tracing::warn;
@@ -393,12 +394,12 @@ pub fn basket_block(items: &[oxplow_db::thread_context_store::ContextItem]) -> S
             .unwrap_or_default();
         match (item.kind, &item.source_uri, &item.text) {
             (ContextKind::Page, Some(uri), _) => {
-                s.push_str(&format!("- [oxplow uri {uri}]{label}\n"));
+                s.push_str(&format!("- {}{label}\n", prompt_refs::uri_mention(uri)));
             }
             (_, source, Some(text)) => {
                 let from = source
                     .as_deref()
-                    .map(|u| format!(" from [oxplow uri {u}]"))
+                    .map(|u| format!(" from {}", prompt_refs::uri_mention(u)))
                     .unwrap_or_default();
                 let mut text = text.clone();
                 if text.len() > BASKET_TEXT_IN_CONTEXT {

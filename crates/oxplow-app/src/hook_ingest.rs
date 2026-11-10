@@ -1264,6 +1264,23 @@ fn log_prompt_tx(
         .with_anchors(activity_anchors_tx(conn, thread, slot)?)
         .with_subject([turn.map(turn_uri).unwrap_or_else(|| thread_uri(thread))]);
     ev.append(conn, &env)?;
+    // What a person's prompt pointed at: links from its turn (a reprompt's
+    // are the turn's too), read by the grammar that writes them.
+    if let (Some(turn), Some(Prompt::Person { .. }), Some(text)) =
+        (turn, prompt, prompt.map(Prompt::text))
+    {
+        let source = turn_uri(turn);
+        for found in oxplow_domain::uri::prompt_refs::parse(text) {
+            oxplow_db::page_ref_store::upsert_edge_tx(
+                conn,
+                &oxplow_db::page_ref_store::PageRefEdge::new(
+                    &source,
+                    found.target,
+                    oxplow_db::page_ref_projections::RT_PROMPT_MENTION,
+                ),
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -4144,6 +4161,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(started.as_deref(), Some("oxplow:oxplow/turn?id=trn1"));
+    }
+
+    /// What a person's prompt pointed at is a link from its turn: a task, a
+    /// file and a URI make three; a prompt with none makes none; a
+    /// reprompt's belong to the turn it landed in.
+    #[tokio::test]
+    async fn a_prompt_links_its_turn_to_what_it_pointed_at() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({"prompt": text}),
+            )
+        };
+        svc.ingest(prompt("nothing to point at")).await.unwrap();
+        svc.ingest(hook(HookKind::Stop, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        let task = "oxplow:oxplow/task?id=tsk9&provider=oxtask";
+        let text = format!(
+            "fix {} in @src/a.rs, see [oxplow uri oxplow:oxplow/commit?sha=abc1234]",
+            oxplow_domain::uri::prompt_refs::item_mention(task, "Fix it", "todo")
+        );
+        svc.ingest(prompt(&text)).await.unwrap();
+        svc.ingest(prompt("and [oxplow uri oxplow:oxplow/commit?sha=def5678]"))
+            .await
+            .unwrap();
+        let rows: Vec<(String, String)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT source_uri, target_uri FROM page_ref
+                          WHERE ref_type = 'prompt_mention' ORDER BY source_uri, target_uri",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let second = "oxplow:oxplow/turn?id=trn2".to_string();
+        assert!(rows.iter().all(|(s, _)| *s == second), "{rows:?}");
+        let targets: Vec<&str> = rows.iter().map(|(_, t)| t.as_str()).collect();
+        assert_eq!(targets.len(), 4, "{targets:?}");
+        assert!(targets.contains(&task));
+        assert!(targets.iter().any(|t| t.contains("a.rs")));
+        assert!(targets.iter().any(|t| t.contains("abc1234")));
+        assert!(targets.iter().any(|t| t.contains("def5678")));
     }
 
     /// A turn stores the question its final message ended on, from the

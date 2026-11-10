@@ -1683,14 +1683,14 @@
     - { not_null: key }
     - { unique: key }
 - name: page_ref
-  version: 2
+  version: 3
   description: "The cross-reference graph between pages and records: one row per edge `source → target`, each end a URI — a wiki page naming a file, a commit touching a file or task, a note about a task. Ask \"what points at X\" with `WHERE target_uri = uri('oxplow/file', 'path', 'src/app.rs')` and \"what does X point at\" with `WHERE source_uri = uri('oxplow/wiki', 'slug', 'intro')`. (v2: URIs and their resources in place of refs and kinds.)"
   fields:
     - { name: "source_uri", type: "TEXT", doc: "The page or record the edge starts at (`oxplow:oxplow/wiki?slug=intro`, a commit's, a task's)." }
     - { name: "target_uri", type: "TEXT", doc: "What it points at (`oxplow:oxplow/file?path=src/app.rs`, a task's, another wiki page's)." }
     - { name: "source_resource", type: "TEXT", doc: "The source's resource (`oxplow/wiki`)." }
     - { name: "target_resource", type: "TEXT", doc: "The target's resource (`oxplow/file`)." }
-    - { name: "ref_type", type: "TEXT", doc: "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, …)." }
+    - { name: "ref_type", type: "TEXT", doc: "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, `prompt_mention`: a turn whose prompt pointed at the target, …)." }
     - { name: "source_extra", type: "TEXT", doc: "Edge-specific extras as JSON (a line anchor, a version pin, a link sub-type), when the writer recorded any." }
     - { name: "local_snapshot_id", type: "INTEGER", doc: "The snapshot the edge was recorded at, when there is one (v_snapshot.id)." }
     - { name: "closest_vcs_rev", type: "TEXT", doc: "The VCS revision nearest the edge when recorded." }

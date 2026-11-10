@@ -26,6 +26,10 @@ pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
 pub const RT_TOUCHED_FILE: &str = "touched_file";
 pub const RT_FINDING_PATH: &str = "finding_path";
+/// An agent turn → what its prompt pointed at (`@path`, `[oxplow uri …]`,
+/// `[oxplow page …]`): written by the hook ingest as the prompt is
+/// delivered, a reprompt adding to its turn's.
+pub const RT_PROMPT_MENTION: &str = "prompt_mention";
 
 // Ref-types written by the effort store from union of all
 // `effort.summary` bodies for a task. Distinct from
