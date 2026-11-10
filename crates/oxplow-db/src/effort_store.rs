@@ -1748,8 +1748,8 @@ mod tests {
         let (title, second) = db
             .transaction(move |tx| {
                 tx.execute(
-                    "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at)
-                     VALUES (?1, 'Fix the login page\nIt 500s.', 's', '2026-01-01T00:00:00Z')",
+                    "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at, source)
+                     VALUES (?1, 'Fix the login page\nIt 500s.', 's', '2026-01-01T00:00:00Z', 'person')",
                     params![thread.value()],
                 )
                 .map_err(map_sql_err)?;
@@ -1778,10 +1778,10 @@ mod tests {
         assert!(second, "opening another switches: one stays open");
     }
 
-    /// A turn no person typed doesn't title an effort: an empty prompt (a
-    /// resume, another session's message) and a harness's message, whose
-    /// first line is only a tag (`<task-notification>`). With no prompt
-    /// of a person's, the effort is "Untitled effort".
+    /// A turn no person opened doesn't title an effort (a background job's
+    /// report, another session's message, one the harness named nothing
+    /// of), nor a person's line that is only a tag (a slash command). With
+    /// no prompt of a person's, the effort is "Untitled effort".
     #[tokio::test]
     async fn an_effort_is_titled_by_the_first_prompt_a_person_typed() {
         let (_store, db, _tid, thread) = fixture_with_db().await;
@@ -1794,21 +1794,22 @@ mod tests {
                     tx.query_row("SELECT title FROM v_effort WHERE id = ?1", [id.value()], |r| r.get(0))
                         .map_err(map_sql_err)
                 };
-                for (prompt, at) in [
-                    ("", "2026-01-01T00:00:01Z"),
-                    ("<task-notification>\n<task-id>a1</task-id>", "2026-01-01T00:00:02Z"),
-                    ("<command-name>/clear</command-name>", "2026-01-01T00:00:03Z"),
+                for (prompt, at, source) in [
+                    ("", "2026-01-01T00:00:01Z", "unknown"),
+                    ("<task-notification>\n<task-id>a1</task-id>", "2026-01-01T00:00:02Z", "background_job"),
+                    ("Message from oxplow-main", "2026-01-01T00:00:02Z", "peer"),
+                    ("<command-name>/clear</command-name>", "2026-01-01T00:00:03Z", "person"),
                 ] {
                     tx.execute(
-                        "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at) VALUES (?1, ?2, 's', ?3)",
-                        params![thread.value(), prompt, at],
+                        "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at, source) VALUES (?1, ?2, 's', ?3, ?4)",
+                        params![thread.value(), prompt, at, source],
                     )
                     .map_err(map_sql_err)?;
                 }
                 let untitled = title(tx)?;
                 tx.execute(
-                    "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at)
-                     VALUES (?1, '  \nFix the login page\nIt 500s.', 's', '2026-01-01T00:00:04Z')",
+                    "INSERT INTO agent_turn (thread_id, prompt, session_id, started_at, source)
+                     VALUES (?1, '  \nFix the login page\nIt 500s.', 's', '2026-01-01T00:00:04Z', 'person')",
                     params![thread.value()],
                 )
                 .map_err(map_sql_err)?;
