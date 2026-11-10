@@ -623,21 +623,6 @@ impl SqliteAgentTurnStore {
     pub fn with_vocabulary(db: Database, vocabulary: VocabularyHandle) -> Self {
         Self { db, vocabulary }
     }
-
-    /// Whether any thread of `stream` has a turn open — the quiet-period
-    /// trigger's "is an agent working here?" probe.
-    pub async fn stream_has_open_turn(&self, stream: StreamId) -> Result<bool, DomainError> {
-        self.db
-            .call(move |conn| {
-                conn.query_row(
-                    "SELECT EXISTS (SELECT 1 FROM agent_turn t JOIN threads th ON th.id = t.thread_id
-                                     WHERE th.stream_id = ?1 AND t.ended_at IS NULL)",
-                    params![stream.value()],
-                    |r| r.get(0),
-                )
-            })
-            .await
-    }
 }
 
 #[async_trait]
@@ -1081,11 +1066,9 @@ mod tests {
         // The turn ran in its thread's session.
         assert_eq!(got.agent_session_id, Some(session));
 
-        let stream = StreamId::new(r_stream(&db, tid));
-        assert!(!store.stream_has_open_turn(stream).await.unwrap());
-
         // Both edges are in the log, anchored to the turn, thread, stream
         // and session.
+        let stream = r_stream(&db, tid);
         let conn = db.conn().unwrap();
         let mut stmt = conn
             .prepare(
@@ -1119,7 +1102,7 @@ mod tests {
             let [turn, thread, stream_anchor, session_anchor] = r.anchors;
             assert_eq!(turn, Some(id.value()));
             assert_eq!(thread, Some(tid.value()));
-            assert_eq!(stream_anchor, Some(stream.value()));
+            assert_eq!(stream_anchor, Some(stream));
             assert_eq!(session_anchor, Some(session.value()));
         }
     }
