@@ -210,6 +210,18 @@ pub async fn load_errors(svc: &Arc<crate::Services>, name: &str) -> String {
     format!("{live}\n{held}")
 }
 
+/// Services over a fresh repo with a primary stream, its first thread and
+/// that thread's agent session: what most tests want. No effort is open.
+pub struct ThreadFixture {
+    pub svc: Arc<crate::Services>,
+    /// Keep alive: the project directory.
+    pub _dir: tempfile::TempDir,
+    pub thread: ThreadId,
+    /// The thread's agent session (the project's default agent).
+    pub session: oxplow_domain::AgentSessionId,
+}
+
+/// [`ThreadFixture`] plus an open effort: for a test about efforts.
 pub struct EffortFixture {
     pub svc: Arc<crate::Services>,
     /// Keep alive: the project directory.
@@ -237,6 +249,30 @@ pub async fn open_session(
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
+/// thread and its session; no effort is open.
+pub async fn services_with_thread() -> ThreadFixture {
+    let dir = tempfile::tempdir().unwrap();
+    init_git_repo(dir.path());
+    services_with_thread_in(dir).await
+}
+
+/// [`services_with_thread`] over the project `dir`, already set up.
+pub async fn services_with_thread_in(dir: tempfile::TempDir) -> ThreadFixture {
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    with_thread(dir, svc).await
+}
+
+/// [`services_with_thread`] while developing oxplow: oxplow's own
+/// extensions run from their sources (`enableBundledExtensions: false`),
+/// each a copy of the repo's folder in the project's
+/// `.oxplow/extensions/`. Boot deploys nothing, so foundation is deployed
+/// once booted, as `oxplow-dev extension deploy` does for a checkout.
+pub async fn services_developing_oxplow() -> ThreadFixture {
+    let (dir, svc) = developing_oxplow().await;
+    with_thread(dir, svc).await
+}
+
+/// In-memory services over a fresh repo with a primary stream, its first
 /// thread and an open effort linked to nothing — an effort needs no
 /// task (`.context/work-tracking.md`), so a test that isn't about one
 /// doesn't make one.
@@ -246,12 +282,16 @@ pub async fn services_with_effort() -> EffortFixture {
     services_with_effort_in(dir).await
 }
 
-/// [`services_with_effort`] while developing oxplow: oxplow's own
-/// extensions run from their sources (`enableBundledExtensions: false`),
-/// each a copy of the repo's folder in the project's
-/// `.oxplow/extensions/`. Boot deploys nothing, so foundation is deployed
-/// once booted, as `oxplow-dev extension deploy` does for a checkout.
-pub async fn services_developing_oxplow() -> EffortFixture {
+/// [`services_with_effort`] while developing oxplow (see
+/// [`services_developing_oxplow`]).
+pub async fn services_developing_oxplow_with_effort() -> EffortFixture {
+    let (dir, svc) = developing_oxplow().await;
+    with_effort(dir, svc).await
+}
+
+/// A project dir and booted services with oxplow's own extensions running
+/// from their sources.
+async fn developing_oxplow() -> (tempfile::TempDir, Arc<crate::Services>) {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
     for b in crate::bundled_extensions::BUNDLED {
@@ -271,7 +311,7 @@ pub async fn services_developing_oxplow() -> EffortFixture {
     crate::extension::extension_deploy::deploy(&svc, "oxplow-foundation", true)
         .await
         .expect("foundation deploys from its source");
-    with_effort(dir, svc).await
+    (dir, svc)
 }
 
 /// [`services_with_effort`] over the project `dir`, already set up.
@@ -280,11 +320,11 @@ pub async fn services_with_effort_in(dir: tempfile::TempDir) -> EffortFixture {
     with_effort(dir, svc).await
 }
 
-/// A stream, a thread's session and an open effort over booted `svc`.
-async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> EffortFixture {
+/// A stream and a thread's session over booted `svc`.
+async fn with_thread(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> ThreadFixture {
     svc.streams.ensure_primary().await.unwrap();
     // Activation logged the capability choices; the policy has heard them
-    // (they close open efforts) before the fixture opens one.
+    // (they close open efforts) before a fixture opens one.
     svc.event_pump
         .settle(
             &[
@@ -296,6 +336,22 @@ async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> Effor
         .await;
     let thread = ThreadId::new(1);
     let session = open_session(&svc, thread).await;
+    ThreadFixture {
+        svc,
+        _dir: dir,
+        thread,
+        session,
+    }
+}
+
+/// A stream, a thread's session and an open effort over booted `svc`.
+async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> EffortFixture {
+    let ThreadFixture {
+        svc,
+        _dir,
+        thread,
+        session,
+    } = with_thread(dir, svc).await;
     let opened = svc
         .commands
         .run(
@@ -312,48 +368,41 @@ async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> Effor
         .expect("effort.open names the effort");
     EffortFixture {
         svc,
-        _dir: dir,
+        _dir,
         thread,
         session,
         effort,
     }
 }
 
-/// [`EffortFixture`] whose effort is linked to an in-progress oxplow task
-/// on the thread: for a test about tasks.
-pub struct TaskEffortFixture {
-    pub fx: EffortFixture,
+/// [`ThreadFixture`] with an in-progress oxplow task on the thread: for a
+/// test about tasks.
+pub struct TaskFixture {
+    pub fx: ThreadFixture,
     pub task: OxtaskId,
 }
 
-impl std::ops::Deref for TaskEffortFixture {
-    type Target = EffortFixture;
+impl std::ops::Deref for TaskFixture {
+    type Target = ThreadFixture;
 
-    fn deref(&self) -> &EffortFixture {
+    fn deref(&self) -> &ThreadFixture {
         &self.fx
     }
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
-/// thread, an in-progress task on it and an open effort linked to it.
-pub async fn services_with_task_effort() -> TaskEffortFixture {
+/// thread and an in-progress task assigned to it; no effort is open.
+pub async fn services_with_task() -> TaskFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
     let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-    svc.streams.ensure_primary().await.unwrap();
-    // Activation logged the capability choices; the policy has heard them
-    // (they close open efforts) before the fixture opens one.
-    svc.event_pump
-        .settle(
-            &[
-                crate::effort_policy::NAME,
-                crate::knowledge::KnowledgeSwitch::NAME,
-            ],
-            std::time::Duration::from_secs(5),
-        )
-        .await;
-    let thread = ThreadId::new(1);
-    let session = open_session(&svc, thread).await;
+    let fx = with_thread(dir, svc).await;
+    let task = in_progress_task(&fx.svc, fx.thread).await;
+    TaskFixture { fx, task }
+}
+
+/// An in-progress oxplow task assigned to `thread`.
+async fn in_progress_task(svc: &crate::Services, thread: ThreadId) -> OxtaskId {
     let now = oxplow_domain::Timestamp::now();
     let task = svc
         .task_store
@@ -374,20 +423,43 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
         })
         .await
         .unwrap();
-    restate_task(&svc, task).await;
-    assign_to(&svc, &task_ref(task), Some(thread)).await;
-    let effort = svc
+    restate_task(svc, task).await;
+    assign_to(svc, &task_ref(task), Some(thread)).await;
+    task
+}
+
+/// [`EffortFixture`] whose effort is linked to an in-progress oxplow task
+/// on the thread: for a test about tasks.
+pub struct TaskEffortFixture {
+    pub fx: EffortFixture,
+    pub task: OxtaskId,
+}
+
+impl std::ops::Deref for TaskEffortFixture {
+    type Target = EffortFixture;
+
+    fn deref(&self) -> &EffortFixture {
+        &self.fx
+    }
+}
+
+/// In-memory services over a fresh repo with a primary stream, its first
+/// thread, an in-progress task on it and an open effort linked to it.
+pub async fn services_with_task_effort() -> TaskEffortFixture {
+    let TaskFixture { fx, task } = services_with_task().await;
+    let effort = fx
+        .svc
         .effort_store
-        .start(&task_ref(task), &thread, None)
+        .start(&task_ref(task), &fx.thread, None)
         .await
         .unwrap()
         .id;
     TaskEffortFixture {
         fx: EffortFixture {
-            svc,
-            _dir: dir,
-            thread,
-            session,
+            svc: fx.svc,
+            _dir: fx._dir,
+            thread: fx.thread,
+            session: fx.session,
             effort,
         },
         task,
