@@ -1,14 +1,14 @@
 title: What Deviated
-description: Files the effort changed outside the area its task names. A file is in the area when the task's title or description names it, or names one of its directories at least two levels deep (`src/ui`). Silent when the task names no area.
+description: Files the request changed outside the area its task names. A file is in the area when the task's title or description names it, or names one of its directories at least two levels deep (`src/ui`). Silent when the task names no area.
 params:
-- name: effort_id
-  label: Effort
+- name: request_id
+  label: Request
 loaders:
   what_deviated:
     sql: |
-      SELECT path, change_kind
+      SELECT path
       FROM v_oxplow_deviation
-      WHERE effort_id = :effort_id
+      WHERE request_id = :request_id
       ORDER BY path
 view:
   from: what_deviated
@@ -18,6 +18,4 @@ view:
     label: File
     link:
       kind: file
-  - key: change_kind
-    label: Change
-  empty: Everything the effort changed is in the area its task names (or the task names no area).
+  empty: Everything the request changed is in the area its task names (or the task names no area).

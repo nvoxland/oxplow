@@ -1,8 +1,6 @@
 # Naming one dataset gives its fields' docs and key.
-given:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-when: { page: data-catalog, params: { dataset: effort } }
+when: { page: data-catalog, params: { dataset: request } }
 expect:
   loaders:
-    catalog: { rows: [{ view: v_effort }] }
+    catalog: { rows: [{ view: v_request }] }
   text: { contains: ["id INTEGER", "uri TEXT — "] }

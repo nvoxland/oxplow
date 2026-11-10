@@ -2,14 +2,14 @@
 # extension; a healthy one does not.
 when:
   page: oxplow/collector
-  params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome" }
+  params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome" }
 expect:
   see_also:
     contains:
       - { title: Collectors, uri: "oxplow:oxplow/page?page=collectors" }
 steps:
   - given:
-      - observe: { health: { namespace: oxplow, contribution: oxplow.effort_test_outcome, kind: collector, disable: failed three times } }
+      - observe: { health: { namespace: oxplow, contribution: oxplow.request_outcome, kind: collector, disable: failed three times } }
     expect:
       see_also:
         contains:

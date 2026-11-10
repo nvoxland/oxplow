@@ -1,6 +1,5 @@
 # One fewer of each, and nothing is struggle.
 given:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
   - observe:
       turn:
         prompt: Fix the parser

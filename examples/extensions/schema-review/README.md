@@ -1,11 +1,11 @@
 # schema-review
 
-Facts about a project's database migrations, and a page on an effort's diff
+Facts about a project's database migrations, and a page on a request's diff
 that lists the migration files it changed.
 
 | | |
 |---|---|
-| **Schema Changes** (an effort's page) | The migration files the effort changed, and how many tables each creates, alters and drops. |
+| **Schema Changes** (a request's page) | The migration files the request changed, and how many tables each creates, alters and drops. |
 
 ## How it's built
 
@@ -16,8 +16,8 @@ Only from oxplow's public contracts, so nothing in oxplow changed for it:
   every snapshot: a `schema_review.ddl` fact per file and kind, sliced by
   its own `schema_review.ddl_kind` dimension. It runs no program and asks
   no model, so it asks for nothing beyond `files: read`.
-- **oxplow's page.** A slot page mounted on the effort's diff joins those
-  facts to the effort's files (`v_effort_file`).
+- **oxplow's page.** A slot page mounted on the request's diff joins those
+  facts to the request's files (`v_turn_file`).
 
 ## Using it
 

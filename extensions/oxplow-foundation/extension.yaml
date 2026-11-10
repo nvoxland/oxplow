@@ -5,7 +5,7 @@ namespace: oxplow
 description: oxplow's own commands, declared like any extension's — each backed by an operation of a scope. Required; it can't be disabled.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its AI providers call models, its
-# effort collector reads the datasets with its own SQL.
+# request collector reads the datasets with its own SQL.
 permissions: [sql.read, files.read, ai.compute, agent.write]
 custom_components:
   # Settings → Integrations: hand-written, with no build step.
@@ -36,7 +36,7 @@ intent:
       input: { page: data-catalog, params: { dataset: "" } }
       expect: every dataset with its owner, what it holds and its fields
     - name: data-catalog-names-one-datasets-fields
-      input: { page: data-catalog, params: { dataset: effort } }
+      input: { page: data-catalog, params: { dataset: request } }
       expect: one dataset's fields with their docs and key
     - name: thread-settings-start-from-the-saved-prompt-and-list-open-sessions
       input: { page: thread-settings, params: { thread: thr1 } }
@@ -80,12 +80,6 @@ intent:
     - name: ai-provider-choices-list-the-configured-providers
       input: { query: 'settings#ai_provider_choices', params: { area: ai } }
       expect: the configured providers
-    - name: changes-frames-an-effort-and-a-picked-range
-      input: { page: diff-view, params: { uri: "oxplow:oxplow/effort?id=eff1", stream_id: 1 } }
-      expect: an effort's own bracket to the working tree, a picked end as a range, nothing without a URI
-    - name: changes-effort-names-the-effort-it-is-of
-      input: { part: changes-effort, params: { effort_id: 1, effort: eff1 } }
-      expect: the effort is open and named for Rename and Link to task
     - name: settings-data-area-lists-entities-collectors-and-effects
       input: { page: settings, params: { area: data } }
       expect: the entities, the collectors and the declared effects
@@ -108,7 +102,7 @@ intent:
       input: { page: custom-component, params: { uri: "oxplow:oxplow/custom_component?custom_component=oxplow/integrations" } }
       expect: a custom component's code, whether it reads data, and a link to each command it may run
     - name: the-collector-page-says-when-a-collector-runs-and-how-it-last-went
-      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome" } }
+      input: { page: collector, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome" } }
       expect: when a collector runs, whether it is enabled and its last run
     - name: the-measure-page-says-what-a-measure-counts-and-lists-its-metrics
       input: { page: measure, params: { uri: "oxplow:oxplow/measure?measure=oxplow.tokens" } }
@@ -125,21 +119,12 @@ intent:
     - name: a-command-row-of-an-extension-links-to-the-commands-page
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
       expect: each command row of the Extension page links to its own command page
-    - name: effort-files-lists-what-an-effort-claimed
-      input: { page: effort-files }
-      expect: the files an effort claimed, by path
-    - name: effort-summary-reads-an-effort-at-a-glance
-      input: { page: effort-summary }
-      expect: one effort at a glance
-    - name: the-test-outcome-says-how-an-efforts-tests-went
+    - name: the-test-outcome-says-how-a-requests-tests-went
       input: { sql: v_fact }
-      expect: four counts over an effort's runs, and the time from the first red to the next green
+      expect: four counts over a request's runs, and the time from the first red to the next green
     - name: asserted-failures-have-no-identity-so-distinct-falls-back-to-the-peak
       input: { sql: v_fact }
       expect: a run with only a failure count names no test, so distinct falls back to the peak
-    - name: a-project-with-no-test-runs-records-no-test-outcome
-      input: { sql: v_fact }
-      expect: an effort with no recorded test run makes no test outcome fact
     - name: a-single-green-run-is-all-zeros-with-no-time-to-green
       input: { sql: v_fact }
       expect: one passing run is four zeros and has no time to green
@@ -252,7 +237,7 @@ intent:
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
       expect: its see-also links name the extension that declares it
     - name: the-collector-page-links-to-its-extension-and-the-list-it-belongs-to
-      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome' } }
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome' } }
       expect: its see-also links name the extension that declares it and the list it belongs to
     - name: the-editor-links-to-the-files-history-and-its-folder
       input: { page: editor, params: { path: src/sub/c.rs } }
@@ -279,7 +264,7 @@ intent:
       input: { page: alerts }
       expect: its see-also links open the extension problems and the collectors
     - name: the-collector-page-links-to-its-extensions-problems-when-it-is-not-ok
-      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome' } }
+      input: { page: collector, params: { uri: 'oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome' } }
       expect: an unhealthy collector's see-also links open its extension's problems
     - name: the-extension-page-links-to-all-extensions-and-its-problems
       input: { page: extension, params: { uri: 'oxplow:oxplow/extension?name=oxplow-foundation', name: oxplow-foundation } }
@@ -288,7 +273,7 @@ intent:
       input: { page: commit, params: { uri: 'oxplow:oxplow/commit?sha=abc1234', sha: abc1234, stream_id: 1 } }
       expect: its see-also link is Git History
     - name: the-collector-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: collector, params: {uri:"oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"} }
+      input: { page: collector, params: {uri:"oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"} }
       expect: its description is a paragraph above the facts
     - name: the-command-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: command, params: {uri:"oxplow:oxplow/command?command=oxplow.agent.draft"} }
@@ -408,7 +393,7 @@ intent:
       input: { page: command-data, params: { uri: "oxplow:oxplow/command?command=oxplow.task.create" } }
       expect: a command's audited runs, newest first, narrowed by outcome, who and date
     - name: collector-data-lists-its-last-run-counts-and-the-facts-it-recorded
-      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome", range: all } }
+      input: { page: collector-data, params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome", range: all } }
       expect: the rows a collector's last run counted and the facts it recorded
     - name: resource-data-lists-the-instances-of-a-kind-that-a-dataset-holds
       input: { page: resource-data, params: { uri: "oxplow:oxplow/resource?resource=oxplow/stream" } }
@@ -438,12 +423,11 @@ panels:
 # there is one (oxtask's ready-queue skill is oxplow-bundled's).
 skills:
   - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
-# What oxplow runs by default: the task tracker, the effort policy, snapshots
+# What oxplow runs by default: the task tracker, snapshots
 # and the wiki (a project chooses another provider in Settings), and the agent
 # harnesses and AI providers — core's built-ins, many of each at once (every
 # one of those declared here is active).
 implementations:
-  - { capability: effort_policy, id: oxplow, entry: "oxplow:commit-or-switch", description: "Ends an effort when its work is committed or the agent switches to other work." }
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
   - { capability: knowledge, id: oxplow, entry: "oxplow:wiki", description: "The wiki that oxplow keeps in the project." }
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }
@@ -465,31 +449,6 @@ implementations:
   - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" }, description: "Models that run in a local llama.cpp server." }
   - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" }, description: "A model service that only answers typed questions." }
 collectors:
-  # What an effort's test runs came to, recorded when it finishes (until
-  # efforts go; the metrics read the request's, `oxplow.request_outcome`).
-  # Its input is the effort's measured runs (`tests` captures) with their
-  # failed cases, oldest first.
-  - id: oxplow.effort_test_outcome
-    doc: How an effort's tests went, recorded when it finishes.
-    runtime: starlark
-    entry: collectors/effort/test_outcome.star
-    on: [effort.finished]
-    input: |
-      SELECT r.id AS run,
-             COALESCE(r.failed, 0) AS failed,
-             (SELECT count(*) FROM v_test_case a WHERE a.run_id = r.id) AS cases,
-             CAST(strftime('%s', cap.captured_at) AS INTEGER) * 1000
-               + CAST(substr(cap.captured_at, 21, 3) AS INTEGER) AS at_ms,
-             CASE WHEN c.name IS NULL THEN NULL
-                  ELSE uri('oxplow/test', 'class', c.classname, 'name', c.name) END AS "case",
-             uri_param(e.uri, 'id') AS effort
-      FROM v_capture cap
-      JOIN v_test_run r ON r.id = cap.id
-      JOIN v_effort e ON e.id = cap.effort_id
-      LEFT JOIN v_test_case c ON c.run_id = r.id AND c.status = 'failed'
-      WHERE cap.producer = 'tests' AND cap.effort_id = :effort_id
-      ORDER BY cap.captured_at, r.id
-    facts: [oxplow.effort_test_outcome, oxplow.effort_time_to_green]
   # A request's outcome, recorded each time one of its turns ends (a request
   # has no finished moment; each measure keeps a request's latest): its
   # tokens, its cycle time, and what its turns' test runs came to. After
@@ -585,13 +544,6 @@ resources:
     label: Person
     params: { id: { pattern: '^[A-Za-z0-9._-]+$' } }
     icon: user
-  - name: effort
-    description: "A stretch of one thread's work that oxplow tracks from its start to its finish."
-    label: Effort
-    params: { id: { required: true, pattern: '^eff[0-9]+$' } }
-    resolve: effort
-    searchable: search_effort
-    icon: flag
   - name: turn
     description: "One turn of an agent's conversation: a prompt and the agent's reply."
     label: Agent turn
@@ -671,7 +623,7 @@ resources:
     searchable: search_comment
     icon: message-square
   - name: event
-    description: "A recorded event, such as an effort finishing."
+    description: "A recorded event, such as a request finishing."
     label: Event
     params: { id: { required: true, pattern: '^[0-9a-f-]{36}$' } }
     resolve: event
@@ -1052,7 +1004,7 @@ commands:
     example: {"thread": "thr1"}
   # changes.read
   - name: change.ensure
-    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, an effort (start → end), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and closed efforts are analyzed once. It fills a derived cache and changes no record."
+    summary: "Analyze a change and return its row (`v_change`). A commit vs its parent, a request or a turn (first take → last take), or a stream's uncommitted work vs HEAD. Then read the analysis with oxplow_query_sql: v_change_file (files, zones), v_oxplow_change_interest (look-here-first scores, when oxplow-bundled is on), v_change_function (added/deleted/modified functions, deltas, churn), v_change_import (cross-zone imports), v_oxplow_change_co_change (files whose usual partners are missing, or that were dormant; oxplow-bundled), v_change_duplicate (copied blocks; arrives a little later). Cached: commits and ended requests are analyzed once. It fills a derived cache and changes no record."
     scope: changes.read
     op: ensure
     tool: ensure_change
@@ -1110,7 +1062,7 @@ commands:
     op: mark_generated
     example: {"entry": "dist"}
   - name: capability.choose
-    summary: "Choose which implementation a capability uses (`task_tracker`, `effort_policy`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
+    summary: "Choose which implementation a capability uses (`task_tracker`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
     scope: config.write
     op: choose_provider
     example: {"capability": "snapshots", "provider": "oxplow/diffs"}
@@ -1188,32 +1140,6 @@ commands:
     op: save
     ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "pageDirty" }
     example: {"uri": "oxplow:oxplow/file?path=src/main.rs"}
-  # efforts.write
-  - name: effort.close
-    summary: "Close an effort (by id, or a thread's open one), optionally as of a past point and with a summary."
-    scope: efforts.write
-    op: close
-    example: {"effort": "eff12", "summary": "Fixed the login redirect loop."}
-  - name: effort.link
-    summary: "Link an effort (by id, or a thread's open one) to a task, or unlink it with `task: null`."
-    scope: efforts.write
-    op: link
-    example: {"effort": "eff12", "task": "oxplow:oxplow/task?id=tsk42&provider=oxtask"}
-  - name: effort.open
-    summary: "Open an effort — a span of a thread's work — on a thread (yours by default), optionally linked to a task. The thread's current effort closes first. oxplow opens efforts itself; this is for policies, people and corrections."
-    scope: efforts.write
-    op: open
-    example: {"thread": "thr3", "task": "oxplow:oxplow/task?id=tsk42&provider=oxtask"}
-  - name: effort.report
-    summary: "Optional: describe the thread's current (else latest) effort. It takes a `summary` of what shipped and any `impacts` beyond the edits (a wiki page, a task, a commit, a finding). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
-    scope: efforts.write
-    op: report
-    example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "task", "id": "oxplow:oxplow/task?id=tsk42&provider=oxtask", "action": "completed"}]}
-  - name: effort.update
-    summary: "Set an effort's own title, or clear it back to its default with `title: null`."
-    scope: efforts.write
-    op: update
-    example: {"effort": "eff12", "title": "Fix the login redirect loop"}
   # effects.read
   - name: effect.backfill_plan
     summary: "How many events an `oxplow.effect.backfill` would have an effect react to: the matching ones it never reacted to, the log positions they span (pass `to_seq` to the backfill to run on just these), and how many one run reacts to (`batch`)."
@@ -1650,7 +1576,7 @@ commands:
     example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
-    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a task's links and comments, a commit's or an effort's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`task:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/effort?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
+    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a task's links and comments, a commit's or a request's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`task:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/request?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
     tool: read
@@ -1715,13 +1641,13 @@ commands:
     example: {"terminal": "trm3"}
   # test_runs.write
   - name: test.record_run
-    summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run is the thread's open effort's. Returns `{ recorded, observationId }`."
+    summary: "Record a test run with pass/fail counts oxplow couldn't read from its output, marked `asserted`. oxplow records runs it sees in shell commands itself; this is for runs it couldn't parse. The run belongs to the thread's current turn. Returns `{ recorded, observationId }`."
     scope: test_runs.write
     op: record_run
     example: {"command": "pytest tests/app", "passed": 120, "failed": 0, "total": 120, "duration_ms": 41200}
   # threads.write
   - name: thread.close
-    summary: "Close a thread (`thr12`) — history, reopenable. Its open effort and its agent sessions close, and their processes stop. An agent closes only its own thread."
+    summary: "Close a thread (`thr12`) — history, reopenable. Its agent sessions close, and their processes stop. An agent closes only its own thread."
     scope: threads.write
     op: close
     example: {"thread": "thr12"}
@@ -1900,7 +1826,7 @@ commands:
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
     example: {}
   - name: window.navigate
-    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, effort, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}
@@ -1930,7 +1856,7 @@ commands:
     needs: [task_tracker.delete]
     example: {"uri": "oxplow:oxplow/task?id=tsk12&provider=oxtask"}
   - name: task.link
-    summary: "Link a task to another of the same provider, or to any uri it is about. The uri: (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by task.unlink."
+    summary: "Link a task to another of the same provider, or to any uri it is about. The uri: (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/request?id=req12`, `oxplow:oxplow/file?path=src/a.rs`), by a link type the provider names (oxplow: blocks, relates_to, discovered_from, duplicates, supersedes, replies_to, about). Only an item target must exist; a uri may name something since gone. Undone by task.unlink."
     scope: task_tracker.write
     op: link
     needs: [task_tracker.links]
@@ -1971,7 +1897,7 @@ commands:
     example: {"title": "Login fix", "source": "new", "new_branch": "login-fix", "start_point": "main"}
 
 # What oxplow records itself. The measures and dimensions its producers
-# (tokens, efforts, tests, coverage, analysis) and the code collectors write
+# (tokens, requests, tests, coverage, analysis) and the code collectors write
 # facts on, and the metrics over them; the producers' Rust only records the facts.
 measures:
   - {"key": "oxplow.complexity", "title": "Cyclomatic complexity", "unit": "count", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Cyclomatic complexity of a function."}
@@ -1981,18 +1907,11 @@ measures:
   - {"key": "oxplow.test_case", "title": "Test case", "unit": "count", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "A test case and how its last run went."}
   - {"key": "oxplow.lint_hit", "title": "Static-analysis hit", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "One finding of a static-analysis rule."}
   - {"key": "oxplow.tokens", "title": "Agent tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent used, by model."}
-  - {"key": "oxplow.cycle_time", "title": "Effort cycle time", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's start to its finish."}
   - {"key": "oxplow.turn", "title": "Agent turns", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Turns an agent took in a conversation."}
-  - {"key": "oxplow.task_effort", "title": "Efforts per task", "unit": "count", "subjectKind": "task", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Efforts spent on a task."}
   - {"key": "oxplow.nudge", "title": "Nudges fired", "unit": "count", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Nudges that oxplow sent to an agent."}
-  - {"key": "oxplow.effort_test_outcome", "title": "Effort test outcome", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "A figure of how an effort's tests went, such as runs or failures."}
   - {"key": "oxplow.test_duration", "title": "Test duration", "unit": "ms", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time a test run took."}
   - {"key": "oxplow.cache_tokens", "title": "Prompt-cache tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent read from or wrote to the model's prompt cache."}
   - {"key": "oxplow.cache_usage", "title": "Prompt-cache hit ratio", "unit": "%", "subjectKind": "model", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Share of an agent's prompt tokens that the cache served."}
-  - {"key": "oxplow.effort_tokens", "title": "Effort token spend", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent spent during an effort."}
-  - {"key": "oxplow.effort_steering", "title": "Effort steering events", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Times a person steered an agent during an effort."}
-  - {"key": "oxplow.effort_time_to_green", "title": "Effort time to green", "unit": "ms", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from an effort's first red test run to its first green one."}
-  - {"key": "oxplow.token_waste", "title": "Reverted-effort token waste", "unit": "count", "subjectKind": "effort", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens spent on an effort that was later reverted."}
   - {"key": "oxplow.request_tokens", "title": "Request token spend", "unit": "count", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Tokens (input + output) a request spent over all its turns, as of its latest turn."}
   - {"key": "oxplow.request_cycle_time", "title": "Request cycle time", "unit": "ms", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time from a request's first prompt to its last activity, as of its latest turn."}
   - {"key": "oxplow.request_test_outcome", "title": "Request test outcome", "unit": "count", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "A figure of how a request's tests went, such as runs or failures, as of its latest turn."}
@@ -2010,5 +1929,5 @@ dimensions:
   - {"key": "oxplow.test_suite", "label": "Test suite", "valueType": "categorical", "description": "The test suite a test belongs to."}
   - {"key": "oxplow.rule", "label": "Rule", "valueType": "categorical", "promote": true, "description": "The rule that raised a finding."}
   - {"key": "oxplow.token_kind", "label": "Token kind", "valueType": "categorical", "promote": true, "description": "The kind of token in source code, such as an identifier or a keyword."}
-  - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "effort", "promote": true, "description": "Which test figure of an effort a fact holds, such as passed or failed."}
+  - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "request", "promote": true, "description": "Which test figure of a request a fact holds, such as passed or failed."}
   - {"key": "work.priority", "label": "Priority", "entity": "v_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}

@@ -2,7 +2,7 @@
 # left in shipped code). Matches a call whose callee is a member access on
 # `console`, whether bare (`console.log(...)`) or namespaced
 # (`window.console.log(...)`, `globalThis.console.error(...)`). Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files.
 # A per-file `oxplow.ast_hit` FACT (rule="console_call") — the metric is the
 # SPEC Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).

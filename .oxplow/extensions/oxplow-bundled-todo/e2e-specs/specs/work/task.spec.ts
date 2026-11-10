@@ -4,7 +4,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // A task's page is the foundation's `task` document: a part each
 // for its state, title and fields, description, where it is, links,
-// comments and efforts.
+// comments and requests.
 async function openItem(page: import("@playwright/test").Page, title: string) {
   await page.goto("/");
   await openFromLauncher(page, "Board");

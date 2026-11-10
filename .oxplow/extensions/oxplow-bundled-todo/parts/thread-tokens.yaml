@@ -1,5 +1,5 @@
 title: Agent Tokens
-description: Every token this thread's agent used, across its efforts and effort-less turns.
+description: Every token this thread's agent used, across its requests.
 params:
 - name: thread_id
 loaders:

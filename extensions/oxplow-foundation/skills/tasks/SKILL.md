@@ -33,8 +33,7 @@ change has three or more steps a reviewer would inspect separately;
 otherwise file a single item.
 
 Starting an item (`oxplow.task.transition { uri, to: "in_progress" }`)
-assigns it to your thread and links your effort to it; starting an
-unrelated one begins a new effort.
+assigns it to your thread; the request you are on is linked to it.
 oxplow never marks an item done. If you're tracking one, move it to
 `done` when it ships.
 
@@ -87,7 +86,7 @@ Link types:
 - **supersedes**: replaces the target, which is stale.
 - **replies_to**: a threaded response to the target.
 - **about**: what the item is about — any uri, not only another item
-  (`oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/hot`). Find the
+  (`oxplow:oxplow/request?id=req12`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/hot`). Find the
   items about something with `v_task_link WHERE to_uri = :uri AND
   link_type = 'about'`, never by matching titles.
 
@@ -116,8 +115,3 @@ turn ended, the weakest), with the request's turn count and times. Join
 A request's turns are `v_agent_turn WHERE request_id = …`, and the files they
 changed `v_turn_file` over those turns (`confidence` `claimed` or `sole` is
 the turn's own; `shared` another turn could have made).
-
-The older record is its efforts, which the Item Efforts page still reads:
-`v_effort` where `task` is the item's uri (`started_at`, `ended_at`,
-`summary`); the files each effort changed are `v_effort_file` (`effort_id`
-is `v_effort.id`).

@@ -1,4 +1,4 @@
-# The Timeline draws the project's efforts, sessions and commits on a time
+# The Timeline draws the project's requests, sessions and commits on a time
 # axis, titles itself with its window and puts Today and Fit in the nav
 # bar. Fit writes the window it shows into the page's view params.
 given:

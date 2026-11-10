@@ -1,6 +1,6 @@
 manifest: 2
 name: schema-review
-description: Counts the DDL statements in an agent's schema migrations and shows the migration files an effort changed, with what each creates, alters and drops.
+description: Counts the DDL statements in an agent's schema migrations and shows the migration files a request changed, with what each creates, alters and drops.
 engine: ">=0.7"
 version: 0.1.0
 # Its collector reads the project's migration files.
@@ -9,7 +9,7 @@ intent:
   purpose: >-
     Know what a project's schema migrations do. It counts the DDL in each
     migration file (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`) as facts
-    sliced by statement kind, and an effort's page lists the migration
+    sliced by statement kind, and a request's page lists the migration
     files it changed and how many tables each creates, alters and drops.
   origin: null
   examples:

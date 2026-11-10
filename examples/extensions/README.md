@@ -5,30 +5,22 @@ extension services. Copy one to your project's `.oxplow/extensions/`,
 deploy it (`oxplow.extension.deploy { name }`) to use it, and run `oxplow extension test .oxplow/extensions/<name>` to run
 its examples on a throwaway oxplow. `every_example_scaffolds_checks_and_tests_clean`
 (`crates/oxplow-sdk/tests/just_works.rs`) copies each one with `oxplow extension new --from <example>`
-and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about two of them.
+and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about some of them.
 
 | Example | What it shows |
 |---|---|
 | [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a resource kind (`[[pr:12]]`), a page and a custom component. |
-| [prompt-efforts](prompt_efforts/) | Replacing a core policy: an effort policy script that opens one effort per prompt. |
 | [task-views](task_views/) | Replacing core views: the Board, the Tasks list and the task editor, for any task tracker provider. |
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
-| [effort-review](effort_review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the task and exported as a model. |
-| [schema-review](schema_review/) | A collector's facts about schema migrations (DDL per file, by its own dimension) and a page on an effort's diff that lists the migration files it changed. |
+| [schema-review](schema_review/) | A collector's facts about schema migrations (DDL per file, by its own dimension) and a page on a request's diff that lists the migration files it changed. |
 | [session-history](session_history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit_history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
-| [review-badges](review_badges/) | Building on another extension: an optional import of effort-review's exported dataset, shown as a list, withheld with a warning when effort-review isn't there. |
 
 ## What the trials prove
 
-Three of these are the extension foundation's trials, each with tests
+One of these is the extension foundation's trial, each with tests
 that run through public commands and the SDK only:
 
-- **AI review over evidence** (effort-review). An effect starts a job on
-  `effort.finished`; the job's tool reads the effort's evidence; the
-  answer streams into `v_job_run_output`; oxplow's Jobs command cancels it and
-  the partial review is kept; an effect comments it on the task.
-  Test: `the_effort_review_example_reviews_evidence_and_can_be_cancelled`.
 - **A durable workflow with its own UI** (triage). A decision survives a
   restart, a board whose extension is disabled and enabled again, and an
   edited bundle that has to be redeployed; a stale compare-exchange is
@@ -36,17 +28,12 @@ that run through public commands and the SDK only:
   Tests: `crates/oxplow-sdk/tests/trials.rs`; the browser spec
   `tests-e2e/specs/components/triage.spec.ts` checks that a decision survives
   a reload; the board and the page form are the example's fixtures'.
-- **Producer and consumer** (effort-review → review-badges). The import
-  resolves, reads real reviews, and degrades — pages and the task-page
-  slot withheld, the rest loaded, the reason printed — when the producer
-  is disabled, missing or exports another version.
-  Tests: the review-badges test in `examples.rs` (available, disabled, missing and another version).
 
-A fourth shows facts of your own beside core's evidence:
+Another shows facts of your own beside core's evidence:
 
 - **A collector of your own facts** (schema-review). Its collector counts
-  DDL per migration file, by its own dimension, and a page mounted on an
-  effort's diff joins those facts to the effort's files: the migration
+  DDL per migration file, by its own dimension, and a page mounted on a
+  request's diff joins those facts to the request's files: the migration
   files it changed and what each creates, alters and drops.
 
 None of them needs a machine credential: models are reached through the
@@ -58,7 +45,7 @@ declared by name and stored in the keychain, never in the folder.
 What building the trials ran into, as of October 2026. Some are fixed;
 the rest are open work.
 
-Fixed while building them:
+Fixed while building them (some of the trials have since been removed):
 
 - Nothing linked a job to what it was about: a job's intent key is now
   its subject, read back as the snapshot's `intentKey` and
@@ -84,8 +71,7 @@ Fixed while building them:
   warns for an unlisted fixture, and `extension test` for an example with
   no fixture, each naming the file and the fix.
 - Three fixed AI roles: a job asked for `main`, `summarize` or `decide`.
-  An extension now declares `ai_profiles:` (effort-review's `review`,
-  triage's `sort`); a person binds `<extension>/<id>` in Settings → AI,
+  An extension now declares `ai_profiles:` (triage's `sort`); a person binds `<extension>/<id>` in Settings → AI,
   else its fallback role's model is used.
 - A command script couldn't read `metric_grid()` / `metric_findings()`,
   so triage rebuilt the latest TODOs from `v_fact`; a command's script
@@ -97,19 +83,12 @@ Still open:
 - **No job starts on an event by itself.** An effect composes the
   extension's own enqueue command (which must admit `agent`), and the
   job runs under the extension's `permissions` once it is deployed.
-- **Event order matters and isn't obvious.** `effort.closed` comes before
-  the effort's evidence is refreshed; a reviewer must listen for
-  `effort.finished`.
 - **No diff text** in any `v_*` dataset: a review sees per-file and
   per-function statistics, not the hunks.
 - **Not all evidence can be made in a fixture**: `setup` reaches what
-  oxplow's commands make (tasks, efforts, test runs), not collected
+  oxplow's commands make (tasks, requests, test runs), not collected
   reports like diff coverage, so that still needs a Rust test.
 - **`extension test` needs the folder under `.oxplow/extensions/`.**
-- **Names:** an extension's command namespace is its name with `-` as `_`
-  (`effort_review.review.ask`), while its contribution ids and dataset
-  views keep or translate the dash differently
-  (`oxplow:oxplow/job?job=effort_review/review`, `v_effort_review_reviews`).
 - **The compare-exchange stamp isn't readable** through a public read, so
   a stale write can only be tested as `expected: null` against existing
   state.

@@ -1,5 +1,5 @@
 title: Thread Activity
-description: "What a thread's agent did, turn by turn, under the effort each turn fell in: prompt, session, model, context and compactions, files, test runs and tokens."
+description: "What a thread's agent did, turn by turn, under the request each turn belongs to: prompt, session, model, context and compactions, files, test runs and tokens."
 params:
 - name: thread_id
   label: Thread
@@ -18,16 +18,14 @@ loaders:
                trim(CASE WHEN instr(t.prompt, char(10)) > 0
                          THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
                          ELSE t.prompt END) AS prompt,
-               -- The latest effort the turn overlaps (one may open mid-turn).
-               (SELECT e.id FROM v_effort e
-                 WHERE e.thread_id = t.thread_id
-                   AND e.started_at <= coalesce(t.ended_at, t.started_at)
-                   AND (e.ended_at IS NULL OR e.ended_at >= t.started_at)
-                 ORDER BY e.started_at DESC LIMIT 1) AS effort_id
+               t.request_id
         FROM v_agent_turn t
         WHERE t.thread_id = :thread_id
       )
-      SELECT coalesce(e.title, CASE WHEN u.effort_id IS NULL THEN 'Between efforts' ELSE 'Work' END) AS section,
+      SELECT coalesce(nullif(trim(CASE WHEN instr(r.prompt, char(10)) > 0
+                                       THEN substr(r.prompt, 1, instr(r.prompt, char(10)) - 1)
+                                       ELSE r.prompt END), ''),
+                      'No request') AS section,
              coalesce(CASE WHEN u.source = 'peer' THEN 'Message from ' || coalesce(u.sender, 'another session') END,
                       nullif(u.prompt, ''),
                       '(no prompt)') AS prompt,
@@ -42,10 +40,9 @@ loaders:
                 FROM v_token_usage k WHERE k.turn_id = u.id) AS tokens,
              u.started_at AS at,
              u.uri AS turn_ref,
-             e.uri AS effort_uri,
-             uri_param(e.uri, 'id') AS effort
+             r.uri AS request_uri
       FROM turns u
-      LEFT JOIN v_effort e ON e.id = u.effort_id
+      LEFT JOIN v_request r ON r.id = u.request_id
       ORDER BY u.started_at DESC, u.id DESC
 view:
   from: thread_activity
@@ -54,7 +51,7 @@ view:
     by: section
     link:
       kind: page
-      from: effort_uri
+      from: request_uri
   columns:
   - key: prompt
     label: Turn
@@ -76,10 +73,3 @@ view:
   - key: at
     label: When
   empty: No turns on this thread yet.
-  actions:
-  - id: close
-    label: Close Effort
-    command: oxplow.effort.close
-    input:
-      effort: '{{row.effort}}'
-    row: true

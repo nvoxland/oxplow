@@ -1,7 +1,7 @@
-# What an agent should be able to answer about an effort's review.
-- question: Which files did this effort change outside its task's area?
-  about: oxplow/effort
+# What an agent should be able to answer about a request's review.
+- question: Which files did this request change outside its task's area?
+  about: oxplow/request
   skill: README.md
   reaches:
-    sql: SELECT path, change_kind FROM v_oxplow_deviation WHERE effort_id = 1
-  shape: { columns: [path, change_kind] }
+    sql: SELECT path FROM v_oxplow_deviation WHERE request_id = 1
+  shape: { columns: [path] }

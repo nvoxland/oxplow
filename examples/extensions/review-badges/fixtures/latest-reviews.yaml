@@ -1,6 +1,0 @@
-# Nothing has been reviewed in a fresh project.
-when:
-  page: latest-reviews
-expect:
-  loaders:
-    latest_reviews: { rows: 0, columns: [task, effort, state, reviewed_at, opening] }

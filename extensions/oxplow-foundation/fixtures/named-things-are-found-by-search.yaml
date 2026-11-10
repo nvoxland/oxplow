@@ -20,11 +20,11 @@ steps:
         - uri: "oxplow:oxplow/skill?skill=oxplow/tasks"
           title: tasks
   - when:
-      sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.effort_test_outcome'"
+      sql: "SELECT uri, title FROM v_search_collector WHERE uri LIKE '%oxplow.request_outcome'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome"
-          title: oxplow.effort_test_outcome
+        - uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome"
+          title: oxplow.request_outcome
   - when:
       sql: "SELECT count(*) AS n FROM v_search_dataset WHERE uri = 'oxplow:oxplow/dataset?dataset=task' AND title = 'v_task' AND body NOT LIKE '%SELECT%'"
     expect:
@@ -50,11 +50,11 @@ steps:
     expect:
       rows: [{ n: $any }]
   - when:
-      sql: "SELECT uri, title, stream_id FROM v_search_event_type WHERE title = 'effort.finished'"
+      sql: "SELECT uri, title, stream_id FROM v_search_event_type WHERE title = 'agent.turn.ended'"
     expect:
       rows:
-        - uri: "oxplow:oxplow/event_type?event_type=effort.finished"
-          title: effort.finished
+        - uri: "oxplow:oxplow/event_type?event_type=agent.turn.ended"
+          title: agent.turn.ended
           stream_id: null
   - when:
       sql: "SELECT uri, title FROM v_search_config WHERE title = 'zones'"

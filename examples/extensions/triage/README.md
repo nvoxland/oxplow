@@ -80,7 +80,7 @@ metric (`metric_findings('triage.todos')`).
 
 ## What it can't do
 
-A command's, an effect's or an effort policy's script composes commands
+A command's or an effect's script composes commands
 and may run more than once, so it never asks a model. Move the
 `ai_classify` call into one of those and the extension doesn't load:
 `check` names the call and why.

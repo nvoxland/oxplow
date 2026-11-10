@@ -4,11 +4,10 @@ name: oxplow-bundled-todo
 namespace: oxplow
 # The datasets and event types it reads are oxplow-bundled's.
 requires: [oxplow-bundled]
-description: What comes with oxplow and hasn't been cleaned up yet; contributions move to oxplow-bundled one piece at a time, and this goes away when none are left. The effort review, metric and coverage guidance for the agent, and the usage, quality and change analysis pages.
+description: What comes with oxplow and hasn't been cleaned up yet; contributions move to oxplow-bundled one piece at a time, and this goes away when none are left. The request review, and the usage, quality and change analysis pages.
 engine: ">=0.7"
 # What it reaches beyond the baseline: its effects and commands read with
-# their own SQL, its jobs and effects ask models, its churn collector reads
-# the project's files, and its advisories and skills speak to the agent.
+# their own SQL, its jobs and effects ask models, and its advisories and skills speak to the agent.
 permissions: [sql.read, files.read, ai.compute, agent.write]
 # Its Explore Data and Timeline components are TypeScript (src/), built into
 # dist/ when oxplow is built and on every deploy; dist/ and node_modules/
@@ -17,10 +16,8 @@ build: { run: "bun install --frozen-lockfile && bun run build", output: dist, ex
 intent:
   purpose: >-
     Show what a reviewer must check in an agent's work — where it deviated
-    or struggled, the tests it weakened — and how the effort moved the code:
-    coverage and tests, metric deltas and thresholds, churn, duplication and
-    co-change. Steer the agent toward tests and thresholds while the effort
-    is open, and show what is waiting on the person.
+    or struggled, the tests it weakened — and how the code moved:
+    duplication and co-change. Show what is waiting on the person.
   origin: null
   examples:
     - name: settings-lists-a-replaced-component-and-choosing-one-is-a-config-write
@@ -35,15 +32,9 @@ intent:
     - name: a stream with blocked tasks and open follow-ups
       input: { page: waiting-on-me }
       expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
-    - name: an effort whose changed lines are under-covered
-      input: { part: effort-tests, params: { effort_id: 1 } }
-      expect: the effort's test runs, its diff coverage and the uncovered changed lines
     - name: extension runs over the last week
       input: { page: runs, params: {} }
       expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
-    - name: a metric pushed past its warn threshold during an effort
-      input: { advisory: threshold-crossed }
-      expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
     - name: repair-files-an-item
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
       expect: one repair item filed on the active task tracker for the disabled contribution
@@ -61,13 +52,13 @@ intent:
       expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
     - name: tasks-panel-groups-a-threads-work
       input: { part: oxplow/work, params: { thread_id: 1 } }
-      expect: in progress, ready and finished under headings; clearing hides the finished; an effort no item names shows
+      expect: in progress, ready and finished under headings; clearing hides the finished
     - name: work-count-counts-the-active-item-and-the-ready-ones
       input: { part: oxplow/work-count, params: { thread_id: 1 } }
       expect: the active item and the ready ones, not the finished
     - name: work-shows-only-the-active-task-tracker
       input: { part: oxplow/work, params: { thread_id: 1 } }
-      expect: only the unlinked effort once the task tracker is none
+      expect: nothing once the task tracker is none
     - name: work-count-shows-only-the-active-task-tracker
       input: { part: oxplow/work-count, params: { thread_id: 1 } }
       expect: the count follows the active task tracker
@@ -86,9 +77,6 @@ intent:
     - name: the-interest-dataset-scores-a-change-like-the-old-formula
       input: { sql: v_oxplow_change_interest }
       expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
-    - name: an-efforts-churn-is-a-fact-from-its-change
-      input: { sql: v_fact }
-      expect: a finished effort's churn is the lines its change added and deleted
     - name: co-change-surprises-come-from-the-commit-index
       input: { sql: v_oxplow_change_co_change }
       expect: a file whose usual partners are missing, or that was dormant 90 days, is a surprise
@@ -111,11 +99,11 @@ intent:
       input: { page: waiting-on-me }
       expect: a question the agent's last message asked is waiting on the person until a prompt moves it on
     - name: what-deviated-lists-files-outside-the-tasks-stated-area
-      input: { part: what-deviated, params: { effort_id: 1 } }
+      input: { part: what-deviated, params: { request_id: 1 } }
       expect: files outside the area the task names; none when it names no area
-    - name: thread-activity-lists-turns-by-effort
+    - name: thread-activity-lists-turns-by-request
       input: { page: thread-activity, params: { thread_id: 1 } }
-      expect: each turn under its effort; turns outside any effort under their own heading
+      expect: each turn under its request, titled by the request's first prompt
     - name: thread-activity-shows-the-context-fill-and-compactions
       input: { page: thread-activity, params: { thread_id: 1 } }
       expect: a turn's context fill, of its window when known, and how often it compacted
@@ -135,14 +123,11 @@ intent:
       input: { part: thread-tokens }
       expect: a thread's turns summed, an idle thread nothing
     - name: the-plan-pages-show-the-proposed-plans
-      input: { part: effort-plan, params: { effort_id: 1 } }
-      expect: the plans an agent proposed, newest first, under an effort and a thread
+      input: { part: thread-plan, params: { thread_id: 1 } }
+      expect: the plans an agent proposed, newest first, under a thread
     - name: the-shared-work-pages-show-what-two-threads-hold
       input: { page: shared-work }
       expect: items, files and epics shared between threads; the thread and item variants keep their own
-    - name: session-files-group-an-efforts-files-by-session
-      input: { part: session-files, params: { effort_id: 1 } }
-      expect: an effort's files grouped by the session that changed them, shared ones apart
     - name: the-agent-interface-pages-count-tools-commands-and-hints
       input: { page: agent-interface }
       expect: tool calls by tool and harness, an agent's command runs and refusals, and the hints' counts
@@ -227,18 +212,12 @@ ui:
     - { page: change-review, at: oxplow/diff-view.sections }
     - { page: change-review, at: oxplow/commit.sections }
     - { page: change-review, at: oxplow/uncommitted-changes.sections }
-    - { page: effort-tests, at: oxplow/diff-view.sections }
-    - { page: effort-metric-deltas, at: oxplow/diff-view.sections }
-    - { page: effort-nudges, at: oxplow/diff-view.sections }
-    - { page: effort-plan, at: oxplow/diff-view.sections }
     - { page: file-co-change, at: oxplow/diff.file-header }
     - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: tests-weakened, at: oxplow/diff-view.sections }
     - { page: tests-weakened, at: oxplow/commit.sections }
     - { page: tests-weakened, at: oxplow/uncommitted-changes.sections }
     - { page: struggled, at: oxplow/diff-view.sections }
-    - { page: session-files, at: oxplow/diff-view.sections }
-    - { page: context-read, at: oxplow/diff-view.sections }
     # Git History's commits drawn as a graph, in place of oxplow's plain
     # list (`vcs.history.graph`, a target no provider binds). It only shows
     # and opens commits, so it isn't a program to approve.
@@ -248,92 +227,14 @@ custom_components:
   # the result under it with its own components (`showView`: an inline page).
   # Built from src/ into dist/ (bun build, no dependencies).
   - { id: explore-data, title: Explore Data, bundle: dist/explore-data, sql: read, commands: [oxplow.page.draft_with_agent], description: "An SQL box and a viz picker over the datasets, to try a query and see its result drawn." }
-  # Efforts, sessions, threads and commits on a zoomable time axis
+  # Requests, sessions, threads and commits on a zoomable time axis
   # (vis-timeline, which the kit has no viz for).
-  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Efforts, sessions, threads and commits on a zoomable time axis." }
+  - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Requests, sessions, threads and commits on a zoomable time axis." }
   - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
 panels:
   - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
   - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments-panel, open: 'oxplow:oxplow/page?page=comments' }
 advisories:
-  # Work grown large with nothing committed: an open effort holding many
-  # files (a commit landing its work would have closed it). Once per effort,
-  # raised at a turn's end and heard at the next prompt.
-  - id: large-uncommitted
-    on: turn-end
-    once_per: effort
-    query: |
-      SELECT printf(
-               'This effort has changed %d files and none of it is committed. If part of it '
-               || 'is done, committing that part makes it reviewable; oxplow closes the effort '
-               || 'when a commit lands its work.', count(DISTINCT f.path)) AS message
-      FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id
-      WHERE e.id = :effort_id AND e.ended_at IS NULL
-      HAVING count(DISTINCT f.path) >= config('/largeUncommitted/files')
-  # An item still in progress though a commit landed its work (closing its
-  # effort), with nothing open on it now: the person may want to mark it
-  # done. Once per item; oxplow never marks anything done itself.
-  - id: landed-in-progress
-    on: turn-end
-    audience: person
-    once_per: row
-    query: |
-      SELECT w.uri AS key,
-             '“' || w.title || '” is still in progress, but a commit landed its work. '
-             || 'Mark it done if it is.' AS message
-      FROM v_effort e JOIN v_task w ON w.uri = e.task
-      WHERE e.thread_id = :thread_id AND e.closed_by = 'commit' AND w.state = 'in_progress'
-        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.task = w.uri AND o.ended_at IS NULL)
-      GROUP BY w.uri
-  # How code metrics moved this effort, every prompt while any moved.
-  # Operational metrics (tokens, cycle time, …) grow every turn and aren't
-  # code-health signals, so they're left out.
-  - id: metric-deltas
-    on: prompt
-    once_per: turn
-    heading: "# Metric deltas (this effort)"
-    query: |
-      WITH d AS (
-        SELECT key,
-               '- ' || title || ': '
-               || (CASE WHEN coalesce(baseline, current) = CAST(coalesce(baseline, current) AS INTEGER)
-                        THEN printf('%d', CAST(coalesce(baseline, current) AS INTEGER))
-                        ELSE printf('%.1f', coalesce(baseline, current)) END)
-               || ' → '
-               || (CASE WHEN current = CAST(current AS INTEGER) THEN printf('%d', CAST(current AS INTEGER))
-                        ELSE printf('%.1f', current) END)
-               || (CASE WHEN unit IS NULL OR unit = '' THEN '' WHEN unit = '%' THEN '%' ELSE ' ' || unit END)
-               || (CASE WHEN delta IS NULL THEN ''
-                        ELSE ' (Δ ' || (CASE WHEN delta < 0 THEN '-' ELSE '+' END)
-                             || (CASE WHEN abs(delta) = CAST(abs(delta) AS INTEGER)
-                                      THEN printf('%d', CAST(abs(delta) AS INTEGER))
-                                      ELSE printf('%.1f', abs(delta)) END) || ')' END) AS line
-        FROM v_effort_metric_delta
-        WHERE effort_id = :effort_id AND changed = 1 AND kind <> 'event'
-          AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'effort.%'
-      )
-      SELECT message FROM (
-        SELECT 0 AS o, key, line AS message FROM d
-        UNION ALL
-        SELECT 1, '', '(Advisory — for awareness, not gating.)' WHERE EXISTS (SELECT 1 FROM d)
-      )
-      ORDER BY o, key
-  # A metric this effort pushed past its warn/fail threshold, once per metric.
-  - id: threshold-crossed
-    on: prompt
-    once_per: row
-    heading: "# Metric thresholds"
-    query: |
-      SELECT :effort_id || ':' || key AS key,
-             '⚠ ' || title || ' crossed its ' || crossing || ' threshold'
-             || coalesce(' (' || (CASE WHEN t = CAST(t AS INTEGER) THEN printf('%d', CAST(t AS INTEGER))
-                                       ELSE printf('%.1f', t) END) || ')', '')
-             AS message
-      FROM (SELECT *, CASE WHEN crossing = 'fail' THEN fail_at ELSE warn_at END AS t
-            FROM v_effort_metric_delta)
-      WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
-        AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'effort.%'
-      ORDER BY key
   # A hint that ran a hundred times and never once spoke is dead weight, or
   # watching for something that can't happen here. Once per hint; this one
   # is left out of its own count.
@@ -425,25 +326,11 @@ advisories:
       FROM (SELECT other, path FROM shared ORDER BY path)
       GROUP BY other
 measures:
-  - key: oxplow.effort_churn_lines
-    description: "Lines an effort added and removed."
-    unit: lines
-    subjectKind: effort
-    temporalSemantics: additive
-    fold: sum
   - {"key": "oxplow.todo", "title": "TODO markers", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A TODO or FIXME marker in a file."}
   - {"key": "oxplow.duplicate_lines", "title": "Duplicated lines", "unit": "lines", "subjectKind": "symbol", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Lines that the project's files repeat."}
   - {"key": "oxplow.ast_hit", "title": "AST idiom hits", "unit": "count", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "A match of a rule that looks for an idiom in code, such as an `unwrap` call."}
   - {"key": "oxplow.doc_coverage", "title": "Doc coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-path", "description": "Share of a file's items that have a doc comment."}
 metrics:
-  - key: oxplow.effort_churn_lines
-    title: Effort churn
-    measure: oxplow.effort_churn_lines
-    expression: "SUM(value)"
-    unit: lines
-    direction: neutral
-    displayKind: gauge
-    description: Lines each finished effort's change added and deleted.
   - { key: oxplow.todos, title: "TODO / FIXME markers", measure: oxplow.todo, expression: "COUNT(*)", unit: "count", direction: lower-better, displayKind: gauge, category: static-quality, description: "TODO/FIXME/HACK/XXX/BUG markers in comments, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.todos }
   - { key: oxplow.fn_count, title: "function count", measure: oxplow.parameter_count, expression: "COUNT(*)", unit: "count", direction: neutral, displayKind: gauge, category: static-quality, description: "Total functions / methods defined, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.fn_count }
   - { key: oxplow.high_complexity_fns, title: "high-complexity functions", measure: oxplow.complexity, expression: "COUNT(*) FILTER (WHERE value >= 11)", unit: "count", direction: lower-better, displayKind: gauge, category: static-quality, description: "Functions whose cyclomatic complexity exceeds the threshold, across all languages.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.high_complexity_fns }
@@ -461,17 +348,6 @@ metrics:
   - { key: oxplow.csharp.empty_catch, title: "empty catch blocks", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'empty_catch')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Empty `catch` blocks that swallow exceptions.", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.empty_catch, default: off }
   - { key: oxplow.csharp.blocking_async_calls, title: "blocking async calls (.Result / .Wait())", measure: oxplow.ast_hit, expression: "SUM(value) FILTER (WHERE dim('oxplow.rule') = 'blocking_async')", unit: count, direction: lower-better, displayKind: gauge, category: static-quality, language: csharp, description: "Blocking calls on async code (`.Result` / `.Wait()`).", sliceableDims: [oxplow.package, oxplow.language, oxplow.vcs_rev], collector: oxplow.csharp.blocking_async_calls, default: off }
 collectors:
-  - id: oxplow.effort_churn
-    doc: How many lines an effort added and removed in each file, recorded when it finishes.
-    runtime: starlark
-    entry: collectors/effort_churn.star
-    on: [effort.finished]
-    after: [change.analyze]
-    input: |
-      SELECT f.path, f.additions, f.deletions
-      FROM v_change c JOIN v_change_file f ON f.change_id = c.id
-      WHERE c.kind = 'effort' AND c.target = CAST(:effort_id AS TEXT)
-    facts: [oxplow.effort_churn_lines]
   # Scripts over the snapshot's tree, through the same public surface
   # (`source_files()`, `code_metrics()`, `ast_query()`) any collector has.
   # Each one's metrics name it, so it runs only while one is on.
@@ -506,14 +382,7 @@ configuration:
         description: The shared-files advisories.
         properties:
           windowMinutes: { type: integer, minimum: 1, description: How recent an edit is for two threads' work on the same file to count as overlapping. }
-      largeUncommitted:
-        type: object
-        additionalProperties: false
-        description: The large-uncommitted advisory.
-        properties:
-          files: { type: integer, minimum: 1, description: Files an open effort holds before the agent is told to commit. }
   defaults:
-    largeUncommitted: { files: 15 }
     sharedFiles: { windowMinutes: 60 }
 # Effects are programs: a person approves each before it reacts, bundled
 # or not. `repair-disabled` files nothing until it is approved (and stops
@@ -535,7 +404,7 @@ commands:
     scope: extension_config.write
     op: compare_exchange
     example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"largeUncommitted": {"files": 20}}}, "personal": null}
-  # The person's menu entries for foundation's wiki, handoff and effort
+  # The person's menu entries for foundation's wiki and handoff
   # commands. Foundation keeps the commands (an agent runs them);
   # these add the labels, shortcuts and forms a person uses.
   - name: knowledge.new_page

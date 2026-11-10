@@ -75,8 +75,8 @@ loaders:
                coalesce(r.names, substr(r.sha, 1, 7)) AS version,
                trim(coalesce('+' || nullif(r.added, 0), '') || ' ' || coalesce('~' || nullif(r.modified, 0), '') || ' ' || coalesce('−' || nullif(r.deleted, 0), '')) AS changes,
                CASE r.trigger
-                 WHEN 'turn_end' THEN 'turn end' WHEN 'quiet' THEN 'idle' WHEN 'effort_start' THEN 'effort start'
-                 WHEN 'effort_end' THEN 'effort end' WHEN 'head_moved' THEN 'HEAD moved' WHEN 'git_refs' THEN 'git'
+                 WHEN 'turn_end' THEN 'turn end' WHEN 'quiet' THEN 'idle'
+                 WHEN 'head_moved' THEN 'HEAD moved' WHEN 'git_refs' THEN 'git'
                  WHEN 'run_measured' THEN 'test or lint run' ELSE r.trigger
                END || CASE WHEN r.slow THEN ' (slow)' ELSE '' END AS why
         FROM rows r)
@@ -140,8 +140,8 @@ loaders:
                coalesce(r.names, substr(r.sha, 1, 7)) AS version,
                trim(coalesce('+' || nullif(r.added, 0), '') || ' ' || coalesce('~' || nullif(r.modified, 0), '') || ' ' || coalesce('−' || nullif(r.deleted, 0), '')) AS changes,
                CASE r.trigger
-                 WHEN 'turn_end' THEN 'turn end' WHEN 'quiet' THEN 'idle' WHEN 'effort_start' THEN 'effort start'
-                 WHEN 'effort_end' THEN 'effort end' WHEN 'head_moved' THEN 'HEAD moved' WHEN 'git_refs' THEN 'git'
+                 WHEN 'turn_end' THEN 'turn end' WHEN 'quiet' THEN 'idle'
+                 WHEN 'head_moved' THEN 'HEAD moved' WHEN 'git_refs' THEN 'git'
                  WHEN 'run_measured' THEN 'test or lint run' ELSE r.trigger
                END || CASE WHEN r.slow THEN ' (slow)' ELSE '' END AS why
         FROM rows r)

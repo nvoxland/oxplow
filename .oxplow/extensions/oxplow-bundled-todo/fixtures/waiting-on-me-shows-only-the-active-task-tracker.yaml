@@ -1,6 +1,5 @@
 # Waiting on Me lists blocked items from the active task tracker only.
 given:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
   - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
   - { command: oxplow.task.create, input: { title: Stuck, stage: blocked, assignee: thr1 } }
   - { command: oxplow.task.create, input: { title: Someday } }

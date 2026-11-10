@@ -1,14 +1,12 @@
 # The Collector data page shows what a collector recorded: the rows its last run
 # counted and, for a fact collector, the facts of the captures made under its id.
 given:
-  - { command: oxplow.effort.open, input: { thread: thr1 } }
-  - observe: { test_run: { effort: eff1, at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }, { name: b, status: passed }] } }
-  - observe: { collect: { effort: eff1, collectors: [oxplow.effort_test_outcome] } }
+  - observe: { turn: { prompt: Fix a, runs: [{ at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }, { name: b, status: passed }] }] } }
 when:
   page: oxplow/collector-data
-  params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.effort_test_outcome", range: all }
+  params: { uri: "oxplow:oxplow/collector?collector=oxplow/oxplow.request_outcome", range: all }
 expect:
-  label: oxplow.effort_test_outcome data
+  label: oxplow.request_outcome data
   loaders:
-    about: { rows: [{ name: oxplow.effort_test_outcome }] }
-    recorded: { rows: { contains: [{ measure_key: oxplow.effort_test_outcome }] } }
+    about: { rows: [{ name: oxplow.request_outcome }] }
+    recorded: { rows: { contains: [{ measure_key: oxplow.request_test_outcome }] } }
