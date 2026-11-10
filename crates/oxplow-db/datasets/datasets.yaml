@@ -108,7 +108,7 @@
     - { not_null: id }
     - { unique: id }
 - name: agent_turn
-  version: 15
+  version: 16
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   fields:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -135,6 +135,7 @@
     - { name: "sender", type: "TEXT", doc: "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)" }
     - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery), `unknown` (an old turn whose end left no trace). NULL while running. (v13; v14: `unknown`, no `left_running`: a Stop's running work is on its `agent.turn.ended` and in v_agent_job)" }
     - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v15)" }
+    - { name: "question", type: "TEXT", doc: "The question the turn's final message ended on (its last line, when the message ends in a question mark): what the thread waits on the person for. NULL when it ended on none, did not complete, or closed before this was recorded. (v16)" }
   tests:
     - { not_null: id }
     - { unique: id }

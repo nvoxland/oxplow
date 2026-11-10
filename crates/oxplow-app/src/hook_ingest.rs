@@ -864,6 +864,10 @@ fn record_tx(
                     .as_ref()
                     .and_then(|r| r.left_running.as_deref()),
                 error: env.turn_run.as_ref().and_then(|r| r.error.as_deref()),
+                // Only a turn that finished can have ended on a question.
+                question: (outcome == TurnOutcome::Completed)
+                    .then(|| ending_question(answer))
+                    .flatten(),
                 ..TurnEnd::new(now, outcome)
             };
             // What the turn left running are jobs: one no hook showed was
@@ -991,15 +995,21 @@ fn record_tx(
     Ok(applied)
 }
 
+/// The question a final message ended on: its last line, when the message
+/// ends in a question mark. The turn stores it (`agent_turn.question`) and
+/// the thread's status waits on it.
+fn ending_question(answer: Option<&str>) -> Option<&str> {
+    answer
+        .map(str::trim)
+        .filter(|a| a.ends_with('?'))
+        .and_then(|a| a.lines().map(str::trim).rfind(|l| !l.is_empty()))
+}
+
 /// A Stop parks the thread on the person when the agent's final message
 /// ends in a question — its last line is the detail — else it goes idle.
 /// The next prompt moves it on.
 fn stop_status(answer: Option<&str>) -> (AgentStatusState, Option<String>) {
-    let asked = answer
-        .map(str::trim)
-        .filter(|a| a.ends_with('?'))
-        .and_then(|a| a.lines().map(str::trim).rfind(|l| !l.is_empty()));
-    match asked {
+    match ending_question(answer) {
         Some(question) => (AgentStatusState::AwaitingUser, Some(question.to_string())),
         None => (AgentStatusState::Idle, None),
     }
@@ -4205,5 +4215,54 @@ mod tests {
         assert!(targets.iter().any(|t| t.contains("a.rs")));
         assert!(targets.iter().any(|t| t.contains("abc1234")));
         assert!(targets.iter().any(|t| t.contains("def5678")));
+    }
+
+    /// A turn stores the question its final message ended on, from the
+    /// same reading that parks the thread on the person: a finished turn
+    /// ending in a question keeps its last line; one that doesn't, or an
+    /// interrupted one, keeps none.
+    #[tokio::test]
+    async fn a_turn_records_the_question_it_ended_on() {
+        let (svc, tid) = fixture().await;
+        for (end, said) in [
+            (HookKind::Stop, "Done.\nShould I also update the docs?"),
+            (HookKind::Stop, "All done."),
+            (HookKind::Interrupt, ""),
+        ] {
+            svc.ingest(hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({"prompt": "go"}),
+            ))
+            .await
+            .unwrap();
+            svc.ingest(hook(
+                end,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": said}),
+            ))
+            .await
+            .unwrap();
+        }
+        let questions: Vec<Option<String>> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT question FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            questions,
+            vec![Some("Should I also update the docs?".into()), None, None]
+        );
     }
 }
