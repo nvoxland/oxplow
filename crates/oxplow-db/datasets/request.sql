@@ -4,11 +4,13 @@
 -- turns (agent_turn.request_id), never stored.
 --
 -- state, read live:
---   running            one of its turns is open;
+--   waiting_on_person  an agent session whose latest turn is the request's
+--                      waits on the person (v_agent_session_status
+--                      `awaiting_user`: a final question, a permission
+--                      prompt, a question tool);
+--   running            else, one of its turns is open;
 --   waiting_on_work    none is open, but a job one of its turns started
 --                      has not reported back (and its session is alive);
---   waiting_on_person  its last turn ended on a question, and no turn has
---                      started on that thread since;
 --   finished           none of these.
 SELECT r.id, r.thread_id,
        CAST(uri('oxplow/request', 'id', 'req' || r.id) AS TEXT) AS uri,
@@ -39,22 +41,20 @@ SELECT r.id, r.thread_id,
        CAST(EXISTS (SELECT 1 FROM source('agent_turn') t
                      WHERE t.request_id = r.id AND t.cause_basis = 'matched') AS INT) AS matched,
        CAST(CASE
+         -- An agent session whose latest turn is the request's waits on the
+         -- person (a question it ended on, a permission prompt, a question
+         -- tool): the status the rail shows, one mechanism.
+         WHEN EXISTS (SELECT 1 FROM ref('agent_session_status') st
+                       WHERE st.state = 'awaiting_user'
+                         AND (SELECT t.request_id FROM source('agent_turn') t
+                               WHERE t.agent_session_id = st.agent_session_id
+                               ORDER BY t.id DESC LIMIT 1) = r.id) THEN 'waiting_on_person'
          WHEN EXISTS (SELECT 1 FROM source('agent_turn') t
                        WHERE t.request_id = r.id AND t.ended_at IS NULL) THEN 'running'
          WHEN EXISTS (SELECT 1 FROM source('agent_turn') t
                        JOIN source('agent_job') j ON j.started_turn_id = t.id
                       WHERE t.request_id = r.id AND j.reported_at IS NULL
                         AND j.lost_at IS NULL) THEN 'waiting_on_work'
-         -- Its last turn asked, and nothing has started on that thread since
-         -- (the person's answer opens a turn, often a new request).
-         WHEN EXISTS (SELECT 1 FROM (SELECT t.thread_id, t.question, t.ended_at
-                                       FROM source('agent_turn') t WHERE t.request_id = r.id
-                                      ORDER BY t.started_at DESC, t.id DESC LIMIT 1) l
-                       WHERE l.question IS NOT NULL
-                         AND NOT EXISTS (SELECT 1 FROM source('agent_turn') n
-                                          WHERE n.thread_id = l.thread_id
-                                            AND n.started_at >= l.ended_at))
-           THEN 'waiting_on_person'
          ELSE 'finished' END AS TEXT) AS state
   FROM source('request') r
   LEFT JOIN source('agent_turn') f ON f.id = r.first_turn_id

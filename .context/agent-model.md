@@ -1565,9 +1565,10 @@ resolving to `v_request`: who started it, with what, when); a turn's
 
 **What a request holds and where it stands are read live** (`v_request`):
 its turns, threads, last activity, tool calls, tokens, running jobs, and
-`state` — `running` (a turn is open), `waiting_on_work` (a job it started
-has not reported, its session alive), `waiting_on_person` (its last turn
-ended on a question and nothing has started on that thread since),
+`state` — `waiting_on_person` (an agent session whose latest turn is the
+request's waits on the person, `v_agent_session_status` `awaiting_user`:
+the rail's own reading), else `running` (a turn is open),
+`waiting_on_work` (a job it started has not reported, its session alive),
 `finished`. Its time split sums `v_turn_activity` over its turns; its files
 come with the turns' changes. Pinned by
 `a_requests_state_and_totals_are_read_from_its_turns`.
@@ -1576,8 +1577,9 @@ come with the turns' changes. Pinned by
 is derived.** Work recorded against a turn — tool calls (a subagent's are
 its starting turn's), tokens, test runs, jobs — is its request's through
 `agent_turn.request_id`: no event anchor or other row repeats it. A
-cross-session message starts its own request until it is matched to the
-turn that sent it. Pinned by `a_turn_joins_its_request_when_it_opens`.
+cross-session message joins the sender's request when it is matched to the
+turn that sent it, at the moment it opens a turn; unmatched, it starts its
+own, and membership never changes after. Pinned by `a_turn_joins_its_request_when_it_opens`.
 
 ### Native features: observed, set, left native
 
@@ -1784,7 +1786,9 @@ session running.
 a `SendMessage` call's recipient and text (`ToolUse.sent`), recorded with
 its turn when the call is requested; on receipt the adapter gives the
 message without its wrapping (`Prompt::PeerMessage.message`), and the one
-unmatched send of the same text (content hash) in the last ten minutes is
+unmatched send of the same text (content hash) in the last ten minutes —
+recorded once per call, only when the policy let it run and only with text
+— is
 the cause (`cause_basis` `matched`): the receiving turn joins the sender's
 request, across threads. No send, or two of the same text, links nothing,
 and the turn starts its own request. Known limits: a message read by a busy

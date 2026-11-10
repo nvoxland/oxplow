@@ -17,7 +17,8 @@ finish.
 - **Turns.** Each turn records what opened it (`v_agent_turn.source`: a
   person, a background job's report, a subagent, another session) and how
   it ended; `v_turn_activity` says where its time went (tools, waiting on
-  the person, the rest) and its compactions.
+  the person, the rest) and its compactions. A request (`v_request`) is a
+  prompt and every turn it caused, with its live state.
 - **Standing instructions.** What the person set for every session of
   your stream and of your thread is `v_stream.prompt` and `v_thread.prompt`
   (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =

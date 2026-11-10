@@ -38,3 +38,5 @@ CREATE TABLE agent_job (
 CREATE INDEX idx_agent_job_harness ON agent_job(thread_id, harness_job_id);
 CREATE INDEX idx_agent_job_running ON agent_job(agent_session_id)
     WHERE reported_at IS NULL AND lost_at IS NULL;
+CREATE INDEX idx_agent_job_started_turn ON agent_job(started_turn_id)
+    WHERE started_turn_id IS NOT NULL;

@@ -108,7 +108,7 @@
     - { not_null: id }
     - { unique: id }
 - name: request
-  version: 2
+  version: 3
   description: "Requests: the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when each turn opened. One row per request: who started it and when, what it holds (its turns' tool calls, tokens, jobs), and where it stands now (`state`, read live). Its turns are the v_agent_turn rows whose `request` is its `uri`; their time split sums v_turn_activity over them (heavier: read it for one request). Its files come with the turns' changes."
   fields:
     - { name: "id", type: "INTEGER", doc: "Request id (its URI is `oxplow:oxplow/request?id=req<id>`)." }
@@ -125,8 +125,8 @@
     - { name: "input_tokens", type: "INT", doc: "Tokens its turns read: input plus cache writes and reads. (v2)" }
     - { name: "output_tokens", type: "INT", doc: "Tokens its turns wrote. (v2)" }
     - { name: "jobs_running", type: "INT", doc: "Jobs its turns started that have not reported back, their session still alive (v_agent_job, state `running`). (v2)" }
-    - { name: "matched", type: "INT", doc: "1 when one of its links is oxplow's match (a cross-session message matched to its send), not the harness's word: best effort. (v2)" }
-    - { name: "state", type: "TEXT", doc: "Where it stands now, read live: `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `waiting_on_person` (its last turn ended on a question and no turn has started on that thread since: the person's answer moves it on), `finished`. (v2)" }
+    - { name: "matched", type: "INT", doc: "1 when one of its links is oxplow's match, not the harness's word (a cross-session message matched to its send, a job's start guessed from the Stop that listed it): best effort. (v2)" }
+    - { name: "state", type: "TEXT", doc: "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status)" }
   tests:
     - { not_null: id }
     - { unique: id }

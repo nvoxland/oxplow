@@ -17,3 +17,6 @@ CREATE TABLE request (
 ALTER TABLE agent_turn ADD COLUMN request_id INTEGER REFERENCES request(id) ON DELETE SET NULL;
 CREATE INDEX idx_agent_turn_request ON agent_turn(request_id) WHERE request_id IS NOT NULL;
 CREATE INDEX idx_request_thread ON request(thread_id);
+-- A request's totals read its turns' token usage.
+CREATE INDEX idx_agent_token_usage_turn ON agent_token_usage(turn_id)
+    WHERE turn_id IS NOT NULL;

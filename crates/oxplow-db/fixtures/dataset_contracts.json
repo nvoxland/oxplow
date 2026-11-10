@@ -29492,6 +29492,91 @@
         }
       ],
       "key": []
+    },
+    "3": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Request id (its URI is `oxplow:oxplow/request?id=req<id>`)."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread its first turn ran in (v_thread.id); a later turn may run on another thread."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it — select and join on this."
+        },
+        {
+          "name": "first_turn",
+          "type": "TEXT",
+          "doc": "The turn that started it (its `uri`)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, …)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The text that started it: the first turn's prompt."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it started: the first turn's start (RFC 3339)."
+        },
+        {
+          "name": "turns",
+          "type": "INT",
+          "doc": "How many turns it holds. (v2)"
+        },
+        {
+          "name": "threads",
+          "type": "INT",
+          "doc": "How many threads its turns ran on: more than one when another session's message joined it. (v2)"
+        },
+        {
+          "name": "last_activity_at",
+          "type": "TEXT",
+          "doc": "When its latest turn ended, or started while one runs (RFC 3339). (v2)"
+        },
+        {
+          "name": "tool_calls",
+          "type": "INT",
+          "doc": "Tool calls its turns made (a subagent's count with the turn that started it), denied calls left out. (v2)"
+        },
+        {
+          "name": "input_tokens",
+          "type": "INT",
+          "doc": "Tokens its turns read: input plus cache writes and reads. (v2)"
+        },
+        {
+          "name": "output_tokens",
+          "type": "INT",
+          "doc": "Tokens its turns wrote. (v2)"
+        },
+        {
+          "name": "jobs_running",
+          "type": "INT",
+          "doc": "Jobs its turns started that have not reported back, their session still alive (v_agent_job, state `running`). (v2)"
+        },
+        {
+          "name": "matched",
+          "type": "INT",
+          "doc": "1 when one of its links is oxplow's match, not the harness's word (a cross-session message matched to its send, a job's start guessed from the Stop that listed it): best effort. (v2)"
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status)"
+        }
+      ],
+      "key": []
     }
   }
 }

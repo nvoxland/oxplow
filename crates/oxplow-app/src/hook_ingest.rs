@@ -1529,19 +1529,6 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
-        // A message the call sends to another session, so its receipt can be
-        // matched to this turn.
-        if let (true, Some(sent)) = (decision.allowed, &tool.sent) {
-            agent_message_store::record_sent_tx(
-                conn,
-                thread,
-                row.session,
-                anchors.turn_id.map(AgentTurnId::new),
-                &sent.to,
-                &sent.text,
-                Timestamp::now(),
-            )?;
-        }
         ev.typed::<AgentToolRequested>(&AgentToolRequestedV4 {
             tool: tool.name.clone(),
             kind: tool.kind,
@@ -1586,8 +1573,27 @@ fn log_tool_tx(
             None => finished,
         }
     };
+    let turn = anchors.turn_id.map(AgentTurnId::new);
     let envelope = envelope.with_anchors(anchors).with_subject([subject]);
-    append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    let first = append_unique_tx(conn, ev.vocabulary, &envelope)?;
+    // A message the call sends to another session, so its receipt can be
+    // matched to this turn: once per call (a re-posted hook records
+    // nothing), only when the policy let it run, and only with something to
+    // match on.
+    let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
+    if let (true, true, HookKind::PreToolUse, Some(sent)) = (first, allowed, env.kind, &tool.sent) {
+        if !sent.text.trim().is_empty() {
+            agent_message_store::record_sent_tx(
+                conn,
+                thread,
+                row.session,
+                turn,
+                &sent.to,
+                &sent.text,
+                Timestamp::now(),
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -4620,13 +4626,13 @@ mod tests {
         let (svc, tid) = fixture().await;
         let sender = first_session();
         let receiver = open_session(&svc, tid).await;
-        let send = |text: &str| {
+        let send = |call: &str, text: &str| {
             hook_in(
                 HookKind::PreToolUse,
                 tid,
                 sender,
                 Some("s1"),
-                json!({"tool_name": "SendMessage", "tool_use_id": format!("t-{text}"),
+                json!({"tool_name": "SendMessage", "tool_use_id": call,
                        "tool_input": {"to": "oxplow-bugfixes", "message": text}}),
             )
         };
@@ -4660,8 +4666,14 @@ mod tests {
         ))
         .await
         .unwrap();
-        for text in ["merge main first", "twice", "twice"] {
-            svc.ingest(send(text)).await.unwrap();
+        // Two calls send the same text; a re-posted hook records nothing.
+        for (call, text) in [
+            ("t1", "merge main first"),
+            ("t1", "merge main first"),
+            ("t2", "twice"),
+            ("t3", "twice"),
+        ] {
+            svc.ingest(send(call, text)).await.unwrap();
         }
         svc.ingest(stop(sender, "s1")).await.unwrap();
         for text in ["merge main first", "twice", "from nowhere"] {
