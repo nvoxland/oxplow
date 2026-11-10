@@ -601,6 +601,16 @@ fn record_tx(
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
     // A prompt delivered while a turn runs opens none (a re-prompt).
     let reprompt = applied.turn.is_some();
+    // The turn a prompt delivered to a session with none open starts: the
+    // one open path of the four prompt arms (a person's, a hand-back, a
+    // peer's message, a background job's report).
+    let open_if_none = |applied: &mut Applied, opening: &TurnOpening<'_>| {
+        if applied.turn.is_none() {
+            applied.turn = Some(open_turn_tx(conn, ev, thread, slot, opening, session, now)?);
+            applied.opened_turn = true;
+        }
+        Ok::<(), DomainError>(())
+    };
     match env.kind {
         // A subagent handing its report back: the agent goes on working on
         // it — a turn, if none is open, that goes on with the one the
@@ -622,18 +632,13 @@ fn record_tx(
                 },
                 now,
             )?;
-            if applied.turn.is_none() {
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    cause_ref: Some(subagent.id.as_str()),
-                    ..TurnOpening::new(TurnSource::Subagent, text)
-                        .caused_by(job.started_turn, job.basis.unwrap_or(CauseBasis::Reported))
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: Some(subagent.id.as_str()),
+                ..TurnOpening::new(TurnSource::Subagent, text)
+                    .caused_by(job.started_turn, job.basis.unwrap_or(CauseBasis::Reported))
+            };
+            open_if_none(&mut applied, &opening)?;
             agent_job_store::reported_tx(conn, job.id, applied.turn, now, None, None)?;
             log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
             status = Some((AgentStatusState::Running, None));
@@ -656,19 +661,14 @@ fn record_tx(
                 Some(message) => agent_message_store::find_sent_tx(conn, message, now)?,
                 None => None,
             };
-            if applied.turn.is_none() {
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    cause_ref: socket.as_deref(),
-                    sender: Some(from.as_str()),
-                    ..TurnOpening::new(TurnSource::Peer, text)
-                        .caused_by(sent.map(|(_, turn)| turn), CauseBasis::Matched)
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: socket.as_deref(),
+                sender: Some(from.as_str()),
+                ..TurnOpening::new(TurnSource::Peer, text)
+                    .caused_by(sent.map(|(_, turn)| turn), CauseBasis::Matched)
+            };
+            open_if_none(&mut applied, &opening)?;
             if let (Some((row, _)), Some(turn)) = (sent, applied.turn) {
                 agent_message_store::mark_received_tx(conn, row, turn)?;
             }
@@ -717,18 +717,12 @@ fn record_tx(
                 Some(job) => (job.started_turn, job.basis.unwrap_or(CauseBasis::Reported)),
                 None => (by_call, CauseBasis::Reported),
             };
-            if applied.turn.is_none() {
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    cause_ref: name,
-                    ..TurnOpening::new(TurnSource::BackgroundJob, text)
-                        .caused_by(started_turn, basis)
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                cause_ref: name,
+                ..TurnOpening::new(TurnSource::BackgroundJob, text).caused_by(started_turn, basis)
+            };
+            open_if_none(&mut applied, &opening)?;
             if let Some(job) = recorded {
                 agent_job_store::reported_tx(
                     conn,
@@ -791,20 +785,15 @@ fn record_tx(
         HookKind::UserPromptSubmit => {
             // A person's prompt, or one the harness said nothing of.
             let said = env.prompt.as_ref().map(Prompt::text);
-            if !reprompt {
-                let source = env
-                    .prompt
-                    .as_ref()
-                    .map_or(TurnSource::Unknown, Prompt::source);
-                let opening = TurnOpening {
-                    harness_turn: env.harness_turn.as_deref(),
-                    ..TurnOpening::new(source, said.unwrap_or_default())
-                };
-                applied.turn = Some(open_turn_tx(
-                    conn, ev, thread, slot, &opening, session, now,
-                )?);
-                applied.opened_turn = true;
-            }
+            let source = env
+                .prompt
+                .as_ref()
+                .map_or(TurnSource::Unknown, Prompt::source);
+            let opening = TurnOpening {
+                harness_turn: env.harness_turn.as_deref(),
+                ..TurnOpening::new(source, said.unwrap_or_default())
+            };
+            open_if_none(&mut applied, &opening)?;
             status = Some((AgentStatusState::Running, None));
         }
         // A plan outside any tool call: recorded, and nothing waits on it.
