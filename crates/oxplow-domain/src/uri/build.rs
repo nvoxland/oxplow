@@ -16,7 +16,9 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use crate::ids::{AgentSessionId, AgentTurnId, CommentId, EffortId, HandoffId, StreamId, ThreadId};
+use crate::ids::{
+    AgentSessionId, AgentTurnId, CommentId, EffortId, HandoffId, RequestId, StreamId, ThreadId,
+};
 use crate::uri::oxplow_uri::{OxplowUri, ResourceName};
 use crate::uri::resources as r;
 
@@ -213,6 +215,11 @@ pub fn effort_of_uri(text: &str) -> Option<EffortId> {
 
 pub fn turn_uri(id: AgentTurnId) -> String {
     keyed(r::TURN, &id.to_string())
+}
+
+/// A request: a prompt and every turn it caused (`request.id`).
+pub fn request_uri(id: RequestId) -> String {
+    keyed(r::REQUEST, &id.to_string())
 }
 
 /// A snapshot (`snapshot.id`).

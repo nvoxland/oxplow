@@ -155,3 +155,27 @@ async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
     let body: serde_json::Value = serde_json::from_str(read.content.as_deref().unwrap()).unwrap();
     assert_eq!(body["text"], "the leak is in the gasket");
 }
+
+/// A request has an address: its URI is built and parsed by the one
+/// builder, and reading it answers its row (who started it, with what).
+#[tokio::test]
+async fn a_requests_uri_reads_its_row() {
+    let fx = services_with_effort().await;
+    fx.svc
+        .hook_ingest
+        .ingest(HookEnvelope {
+            prompt: Some("fix the login page".into()),
+            ..envelope(&fx, HookKind::UserPromptSubmit, json!({}), None)
+        })
+        .await
+        .unwrap();
+    let uri = oxplow_domain::uri::build::request_uri(oxplow_domain::RequestId::new(1));
+    assert_eq!(uri, "oxplow:oxplow/request?id=req1");
+    let read = crate::ref_read::read(&fx.svc, &uri, &Default::default(), None)
+        .await
+        .unwrap();
+    let row = read.row.expect("v_request holds it");
+    assert_eq!(row["prompt"], "fix the login page");
+    assert_eq!(row["source"], "person");
+    assert_eq!(row["first_turn"], "oxplow:oxplow/turn?id=trn1");
+}

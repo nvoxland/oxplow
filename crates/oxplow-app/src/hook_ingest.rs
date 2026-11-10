@@ -4571,7 +4571,7 @@ mod tests {
             }
         };
         assert_eq!(
-            read("SELECT request_id FROM v_agent_turn ORDER BY id").await,
+            read("SELECT CAST(substr(request, instr(request, 'id=req') + 6) AS INTEGER) FROM v_agent_turn ORDER BY id").await,
             [1, 2, 1, 1, 3, 3, 4].map(Some).to_vec()
         );
         assert_eq!(

@@ -1001,7 +1001,7 @@ table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_t
 the row change; **background jobs** (V7, `agent_job`) are written beside
 them by the hook ingest ([agent-model.md](./agent-model.md) "Background
 jobs");
-`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V91 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does. `effort_file.claim_basis` (V90) says `named` or `reported`; `handoff` and `thread_context_item` have `delivered_turn_id` (V92), the turn a delivery landed in.
+`event_log` has a `turn_id` index. A turn's `harness_turn_id` (the harness's own id; V13 indexes it with the thread) is set at the open or, for a harness that names the turn later, when it does. `effort_file.claim_basis` (V12) says `named` or `reported`; `handoff` and `thread_context_item` have `delivered_turn_id` (V14), the turn a delivery landed in.
 
 **Turns record the model and effort they ran on (V82).** Nullable TEXT
 `agent_turn.model` and `agent_turn.effort`, set by `close_turn_tx` from

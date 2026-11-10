@@ -59,7 +59,7 @@ saying the id it names.
 
 | Field | Bare id |
 |---|---|
-| `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `ses2`, `not3`, `hnd1`, `cmt5` |
+| `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `req2`, `ses2`, `not3`, `hnd1`, `cmt5` |
 | `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
