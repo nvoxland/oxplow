@@ -1171,11 +1171,13 @@ zone grouping); each appears only when it has content:
    task interface (`v_task`): whichever list is active, nothing
    with none. Its header opens the `work` page, the same list in a tab,
    every row. The body part `work-panel` groups the lines (`group`): "In
-   progress" (the active item; under its epic, with the epic's other
-   children indented beside it, when it has one, plus an open effort no
-   item names; no row is highlighted: its state icon says which is active), "Ready" (every one, by `rank` then
-   `created_at`) and "Finished" (the last 20 done items, wiki pages and
-   unlinked efforts, newest first; `oxplow.tasks.clear_finished` records an
+   progress" (the thread's in-progress tasks: each epic's header followed
+   by its children (a child in progress on another thread is shown, not
+   active), then the stand-alone tasks; each task says what the thread's
+   latest request is doing now), "Up next" (the ready and blocked tasks
+   assigned to the thread, in its queue's order) and "Finished" (the last
+   20 done tasks the thread worked, `v_request_task` basis assigned or
+   transition, and wiki pages it touched, newest first; `oxplow.tasks.clear_finished` records an
    event and the `finished_cleared` dataset hides what finished before
    it, though the panel has no button for it). The headings have no
    arrow and no buttons. In the rail, In progress shows whole and Ready

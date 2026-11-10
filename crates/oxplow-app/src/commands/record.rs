@@ -379,7 +379,11 @@ pub(super) fn record_tx(
                         tx,
                         oxplow_domain::AgentTurnId::new(turn),
                         task,
-                        oxplow_db::request_links::BASIS_COMMAND,
+                        if spec.id == "oxplow.task.transition" {
+                            oxplow_db::request_links::BASIS_TRANSITION
+                        } else {
+                            oxplow_db::request_links::BASIS_COMMAND
+                        },
                         oxplow_domain::Timestamp::now(),
                     )?;
                 }

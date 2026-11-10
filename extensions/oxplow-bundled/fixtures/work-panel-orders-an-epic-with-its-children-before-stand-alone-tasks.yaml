@@ -1,0 +1,21 @@
+# In progress puts each epic's header right before its children, then the
+# stand-alone tasks, whatever their place in the queue; a sibling in
+# progress on another thread is shown but is not this thread's active task
+# and says nothing of what it is doing.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
+  - { command: oxplow.task.create, input: { title: Standalone first, stage: in_progress, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: The epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.task.create, input: { title: Mine, stage: in_progress, assignee: thr1, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Theirs, stage: in_progress, assignee: $beta.id, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Standalone last, stage: in_progress, assignee: thr1 } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: In progress, title: The epic, icon: epic, depth: 0, active: 0 }
+        - { grp: In progress, title: Mine, depth: 1, active: 1 }
+        - { grp: In progress, title: Theirs, depth: 1, active: 0, now: "" }
+        - { grp: In progress, title: Standalone first, depth: 0, active: 1 }
+        - { grp: In progress, title: Standalone last, depth: 0, active: 1 }

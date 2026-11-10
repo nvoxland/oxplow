@@ -1946,6 +1946,48 @@ mod tests {
         );
     }
 
+    /// V90 carries what efforts knew into `request_task`: a request whose
+    /// turn started inside an effort's window, on its thread, links to the
+    /// effort's task; a turn outside the window, or an effort with no task,
+    /// links nothing.
+    #[test]
+    fn v90_backfills_request_tasks_from_efforts() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(89))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1), (3, 1), (4, 2);
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, request_id) VALUES
+               (1, 1, 'p', '2026-01-01T00:10:00Z', 1),
+               (2, 1, 'p', '2026-01-01T00:50:00Z', 2),
+               (3, 1, 'p', '2026-01-01T02:00:00Z', 3),
+               (4, 2, 'p', '2026-01-01T00:20:00Z', 4);
+             INSERT INTO effort (id, thread_id, started_at, ended_at, task) VALUES
+               (1, 1, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', 'oxplow:oxplow/task?id=tsk1&provider=oxtask'),
+               (2, 2, '2026-01-01T00:00:00Z', '2026-01-01T01:00:00Z', NULL);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, String, String)> = conn
+            .prepare("SELECT request_id, task_uri, basis FROM request_task ORDER BY request_id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let task = "oxplow:oxplow/task?id=tsk1&provider=oxtask".to_string();
+        assert_eq!(
+            rows,
+            vec![
+                (1, task.clone(), "assigned".to_string()),
+                (2, task, "assigned".to_string())
+            ]
+        );
+    }
+
     /// V6 gives each recorded call (a finished one) its request — its finish
     /// event's cause — the time it was requested and how long it ran, and
     /// moves the tool events to @4.

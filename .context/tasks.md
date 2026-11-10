@@ -139,8 +139,8 @@ threads before it is ready. An unassigned `todo` item is **the pool**:
 what any thread may pull when it has nothing of its own
 (`oxplow/next-task`). Each assignee — nobody included — has a queue,
 the open items assigned to it in `rank` order. **A done or canceled item
-is nobody's**: who worked on it is its efforts (`v_effort.task`,
-`thread_id`), the same for every list. Filing assigns nobody unless the
+is nobody's**: who worked on it is its requests (`v_request_task`), the
+same for every list. Filing assigns nobody unless the
 create names an `assignee`; who filed it is the event's thread anchor.
 
 The record is `task_assignment` (V7: `uri`, `assignee` NULL for
@@ -296,7 +296,7 @@ its own: `oxplow_query_sql` over `v_task` for a queue in order
 (`WHERE assignee = … ORDER BY rank IS NULL, rank, created_at`),
 `oxplow_read` on a task's URI for one item with its `links` and
 `comments`, the bundled page `oxplow/thread-tasks` (`oxplow_thread_tasks`:
-what is assigned to a thread and what its efforts finished), and
+what is assigned to a thread and what it finished, with the requests that worked on each), and
 `oxplow/next-task` (the tool `oxplow_next_task`, param `thread: "thr3"`)
 for what to pick up next: the ready items assigned to the thread (an epic
 with its ready descendants, or every ready non-epic item; open `blocks`
@@ -587,12 +587,17 @@ them: what a task's state means is its tracker's opinion. The bases:
 
 - `prompt`: a person's prompt in the request named the task (`@`-less
   `[oxplow uri …]` references, `uri::prompt_refs`; `log_prompt_tx`).
-- `command`: the agent ran `oxplow.task.transition|create|update|comment` on
-  it in a turn. `command.executed` of an agent actor is anchored to the turn
+- `command`: the agent ran `oxplow.task.create|update|comment` on it in a
+  turn; `transition`: it ran `oxplow.task.transition` (moved it between
+  stages). The Work panel's Finished reads `assigned` and `transition`: a
+  thread that only filed, commented on or was prompted with a task did not
+  work it. `command.executed` of an agent actor is anchored to the turn
   open for its session (a person's or a page's command is in no turn and
   links nothing); `commands/record.rs`.
 - `assigned`: it was in progress and assigned to the thread when a turn of the
-  request ended (`close_turn_tx`) — the weakest.
+  request ended (`close_turn_tx`) — the weakest. V90 also carried what
+  efforts knew over once: the requests of a thread's turns that started inside
+  an effort's window link to its task on this basis.
 
 A commit linked to the request mentioning the task is not a basis yet: no
 request-to-commit link exists. With no task tracker active nothing is

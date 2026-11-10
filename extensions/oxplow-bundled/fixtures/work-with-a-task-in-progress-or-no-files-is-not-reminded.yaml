@@ -2,12 +2,12 @@
 # files, and while the thread has a task in progress.
 given:
   - observe: { turn: { prompt: What does this do? } }
-when: { advisory: untracked-work }
-expect: { lines: [] }
+when: { sql: "SELECT count(*) AS n FROM v_agent_nudge" }
+expect: { rows: [{ n: 0 }] }
 steps:
   - given:
       - { command: oxplow.task.create, input: { title: Doing it, stage: in_progress, assignee: thr1 } }
       - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }
       - observe: { snapshot: { files: [{ path: greeting.txt, hash: a }] } }
-  - when: { advisory: untracked-work }
-    expect: { lines: [] }
+  - when: { sql: "SELECT count(*) AS n FROM v_agent_nudge" }
+    expect: { rows: [{ n: 0 }] }
