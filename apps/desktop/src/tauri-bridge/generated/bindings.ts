@@ -3203,12 +3203,6 @@ export type HookEnvelope = {
 	/**  The harness's own session id. */
 	session_id: string | null,
 	payload_json: string,
-	/**
-	 *  UserPromptSubmit: the text the person submitted — stored with its
-	 *  `agent.prompt.submitted` (every prompt, a re-prompt too) and on the
-	 *  turn it opens.
-	 */
-	prompt: string | null,
 	/**  PreToolUse only: the policy's verdict (`None` reads as allowed). */
 	decision?: ToolDecision | null,
 };

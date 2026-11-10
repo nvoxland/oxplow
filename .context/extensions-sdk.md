@@ -529,7 +529,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `.oxplow/project.yaml`, then `reload_config_from_disk`), and a `turn` that
   also takes `thread`, `session`, `conversation` (what the hooks name and the
   session is bound to: default `fixture`, `null` for none), `prompt: null` +
-  `subagent` (a hand-back) and `pre: true` on a tool; none can set the time of a hook (a tool call
+  `subagent` (a hand-back), `peer` (another session's message, `prompt` its
+  text) and `pre: true` on a tool; none can set the time of a hook (a tool call
   or a turn is as old as the run), only a `run`'s `days_ago`,
   `analyze` (`change_analysis::ensure_change`: a working or commit change
   analyzed to the end, a working one's file list refreshed first

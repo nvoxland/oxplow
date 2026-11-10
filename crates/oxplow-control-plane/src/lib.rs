@@ -462,7 +462,7 @@ async fn handle_hook_inner(
             decision: None,
             tool,
             subagent,
-            peer: None,
+            harness_turn: None,
         };
         let harness = match ctx.services.hook_ingest.ingest(envelope).await {
             Ok(outcome) => outcome.harness,
@@ -488,22 +488,16 @@ async fn handle_hook_inner(
         }
     };
 
-    // What a prompt hook is, as the bearer's harness reads it: a person's
-    // prompt, or a subagent handing its report back (no prompt; the
-    // subagent).
-    let (prompt, handback, peer) = match (kind, body_value.as_ref()) {
+    // What a prompt hook is, as the bearer's harness reads it (who opened
+    // the turn, and its text), and the harness's own id of that turn.
+    let (prompt, harness_turn) = match (kind, body_value.as_ref()) {
         (HookKind::UserPromptSubmit, Some(body)) => {
             match ctx.services.harnesses.get(&principal.harness) {
-                Ok(h) => match h.prompt(body).await {
-                    Some(Prompt::Person { text }) => (Some(text), None, None),
-                    Some(Prompt::Handback { subagent }) => (None, Some(subagent), None),
-                    Some(Prompt::PeerMessage { from }) => (None, None, Some(from)),
-                    None => (None, None, None),
-                },
-                Err(_) => (None, None, None),
+                Ok(h) => (h.prompt(body).await, h.harness_turn_id(body)),
+                Err(_) => (None, None),
             }
         }
-        _ => (None, None, None),
+        _ => (None, None),
     };
 
     // The name the bearer's harness gives the session's conversation, when
@@ -560,7 +554,7 @@ async fn handle_hook_inner(
                 }),
                 tool: tool.clone(),
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             };
             let harness = match ctx.services.hook_ingest.ingest(envelope).await {
                 Ok(outcome) => outcome.harness,
@@ -593,8 +587,8 @@ async fn handle_hook_inner(
             reason: None,
         }),
         tool: tool.clone(),
-        subagent: handback.clone(),
-        peer,
+        subagent: None,
+        harness_turn,
     };
 
     let envelope_for_resume = envelope.clone();
@@ -639,7 +633,8 @@ async fn handle_hook_inner(
 
     // UserPromptSubmit: session context (when it changed), prompt
     // advisories and the effort's decisions ride additionalContext.
-    if kind == HookKind::UserPromptSubmit && handback.is_none() {
+    let handback = matches!(envelope_for_resume.prompt, Some(Prompt::Handback { .. }));
+    if kind == HookKind::UserPromptSubmit && !handback {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {
             if let Some(combined) = ctx
                 .services

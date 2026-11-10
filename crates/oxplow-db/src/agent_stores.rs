@@ -8,11 +8,11 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV3, AgentTurnStarted, AgentTurnStartedV2,
+    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV3, AgentTurnStarted, AgentTurnStartedV3,
     EventType,
 };
 use oxplow_domain::events::Anchors;
-use oxplow_domain::hook::TurnOutcome;
+use oxplow_domain::hook::{CauseBasis, TurnOutcome, TurnSource};
 use oxplow_domain::stores::{AgentStatusStore, AgentTurnStore};
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
@@ -53,6 +53,10 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
             .map_err(map_err_text)?,
         start_snapshot_id: row.get("start_snapshot_id")?,
         snapshot_id: row.get("snapshot_id")?,
+        source: row
+            .get::<_, Option<String>>("source")?
+            .as_deref()
+            .and_then(TurnSource::parse),
     })
 }
 
@@ -279,6 +283,52 @@ pub fn sessions_active_tx(
         .collect()
 }
 
+/// What opened a turn: who, the text delivered, and the turn whose work it
+/// goes on with, as far as the harness said.
+#[derive(Debug, Clone)]
+pub struct TurnOpening<'a> {
+    /// The text that opened it, as the harness delivered it.
+    pub prompt: &'a str,
+    pub source: TurnSource,
+    /// The harness's own id of the turn (Claude's `prompt_id`).
+    pub harness_turn: Option<&'a str>,
+    /// The turn whose tool call started the job, or in which the subagent
+    /// started.
+    pub cause_turn: Option<AgentTurnId>,
+    /// The harness's own name for the cause (a tool call id, a subagent
+    /// id, a sender's socket).
+    pub cause_ref: Option<&'a str>,
+    /// How `cause_turn` is known; `None` with no cause turn.
+    pub cause_basis: Option<CauseBasis>,
+    /// Another session's name for itself, on a peer's turn.
+    pub sender: Option<&'a str>,
+}
+
+impl<'a> TurnOpening<'a> {
+    /// A turn `source` opened with `prompt`, its cause unknown.
+    pub fn new(source: TurnSource, prompt: &'a str) -> Self {
+        TurnOpening {
+            prompt,
+            source,
+            harness_turn: None,
+            cause_turn: None,
+            cause_ref: None,
+            cause_basis: None,
+            sender: None,
+        }
+    }
+
+    /// The same, going on with `cause`, the turn its harness named
+    /// (`reported`); unchanged with none.
+    pub fn caused_by(self, cause: Option<AgentTurnId>) -> Self {
+        TurnOpening {
+            cause_turn: cause,
+            cause_basis: cause.map(|_| CauseBasis::Reported),
+            ..self
+        }
+    }
+}
+
 /// Open a turn in agent session `agent_session` on `thread` and log
 /// `agent.turn.started`, in the caller's transaction (`session` is the
 /// harness's own session id). The turn starts at its stream's current snapshot.
@@ -287,20 +337,28 @@ pub fn open_turn_tx(
     ev: &EventCtx<'_>,
     thread: ThreadId,
     agent_session: Option<AgentSessionId>,
-    prompt: &str,
+    opening: &TurnOpening<'_>,
     session: Option<&str>,
     started_at: Timestamp,
 ) -> Result<AgentTurnId, DomainError> {
     let anchors = activity_anchors_tx(conn, thread, agent_session)?;
     conn.execute(
-        "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, session_id, started_at,
+                                 source, harness_turn_id, cause_turn_id, cause_ref, cause_basis,
+                                 sender)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
             thread.value(),
             anchors.agent_session_id.map(|s| s.value()),
-            prompt,
+            opening.prompt,
             session,
-            ts_to_string(started_at)
+            ts_to_string(started_at),
+            opening.source.as_str(),
+            opening.harness_turn,
+            opening.cause_turn.map(|t| t.value()),
+            opening.cause_ref,
+            opening.cause_basis.map(CauseBasis::as_str),
+            opening.sender,
         ],
     )
     .map_err(map_sql_err)?;
@@ -316,10 +374,12 @@ pub fn open_turn_tx(
         .map_err(map_sql_err)?;
     }
     let env = ev
-        .typed::<AgentTurnStarted>(&AgentTurnStartedV2 {
+        .typed::<AgentTurnStarted>(&AgentTurnStartedV3 {
             turn: id.to_string(),
             thread: thread.to_string(),
             session: session.map(str::to_string),
+            source: opening.source,
+            cause_turn: opening.cause_turn.map(|t| t.to_string()),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
@@ -650,12 +710,13 @@ impl AgentTurnStore for SqliteAgentTurnStore {
                 if turn.id.is_placeholder() {
                     let vocabulary = vocabulary.current();
                     let ev = EventCtx::system(&vocabulary, "hook_ingest");
+                    let source = turn.source.unwrap_or(TurnSource::Unknown);
                     return open_turn_tx(
                         tx,
                         &ev,
                         turn.thread_id,
                         turn.agent_session_id,
-                        &turn.prompt,
+                        &TurnOpening::new(source, &turn.prompt),
                         turn.session_id.as_deref(),
                         turn.started_at,
                     );
@@ -1060,6 +1121,7 @@ mod tests {
             ended_at: None,
             start_snapshot_id: None,
             snapshot_id: None,
+            source: Some(oxplow_domain::hook::TurnSource::Person),
         };
         let id = store.open(&turn).await.unwrap();
         let open = store.list_open(&tid).await.unwrap();
@@ -1144,6 +1206,7 @@ mod tests {
                 ended_at: None,
                 start_snapshot_id: None,
                 snapshot_id: None,
+                source: Some(oxplow_domain::hook::TurnSource::Person),
             };
             ids.push(store.open(&turn).await.unwrap());
         }
@@ -1232,6 +1295,7 @@ mod tests {
                 ended_at: None,
                 start_snapshot_id: None,
                 snapshot_id: None,
+                source: Some(oxplow_domain::hook::TurnSource::Person),
             })
             .await
             .unwrap();

@@ -12,10 +12,10 @@ SELECT e.id, e.task,
            ORDER BY t.started_at DESC LIMIT 1)
        ) AS summary,
        -- Its own title, else its item's, else the first line of the first
-       -- prompt a person typed in it: a turn with an empty prompt (a resume,
-       -- another session's message) or a harness's message (its first line
-       -- only a tag: `<task-notification>`, `<command-name>/clear</…>`) is
-       -- skipped. With none, "Untitled effort".
+       -- prompt a person typed in it (`source = 'person'`): another source's
+       -- text never titles it, nor a person's line that is only a tag (a
+       -- slash command, `<command-name>/clear</…>`). With none,
+       -- "Untitled effort".
        coalesce(
          nullif(trim(e.title), ''),
          (SELECT w.title FROM source('task') w WHERE w.uri = e.task),
@@ -27,7 +27,7 @@ SELECT e.id, e.task,
               FROM (SELECT t.started_at,
                            ltrim(t.prompt, ' ' || char(9) || char(10) || char(13)) AS text
                       FROM source('agent_turn') t
-                     WHERE t.thread_id = e.thread_id
+                     WHERE t.thread_id = e.thread_id AND t.source = 'person'
                        AND (t.ended_at IS NULL OR t.ended_at >= e.started_at)
                        AND (e.ended_at IS NULL OR t.started_at <= e.ended_at)) p) l
            WHERE l.line <> '' AND NOT (l.line LIKE '<%>' AND instr(l.line, ' ') = 0)

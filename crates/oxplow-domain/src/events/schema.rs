@@ -1002,10 +1002,12 @@ impl EventType for VcsCommitIndexed {
     type Payload = VcsCommitIndexedV2;
 }
 
-/// `agent.turn.started@2`: a person's prompt opened a turn.
+/// `agent.turn.started@3`: a turn opened — by a person's prompt, a
+/// background job reporting back, a subagent's hand-back or another
+/// session's message (`source`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnStartedV2 {
+pub struct AgentTurnStartedV3 {
     /// The turn (`trn12`).
     pub turn: String,
     /// The thread (`thr3`).
@@ -1013,13 +1015,20 @@ pub struct AgentTurnStartedV2 {
     /// The harness session id, when it reported one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<String>,
+    /// What opened it. Turns logged before sources were read `unknown`.
+    pub source: crate::hook::TurnSource,
+    /// The turn whose work this one goes on with, when the harness named
+    /// it: the one whose tool call started the background job, or in
+    /// which the subagent started (`trn11`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause_turn: Option<String>,
 }
 
 pub struct AgentTurnStarted;
 impl EventType for AgentTurnStarted {
     const TYPE: &'static str = "agent.turn.started";
-    const V: u32 = 2;
-    type Payload = AgentTurnStartedV2;
+    const V: u32 = 3;
+    type Payload = AgentTurnStartedV3;
 }
 
 /// A turn's token counts, when the harness reported them with the turn
@@ -2398,7 +2407,7 @@ mod tests {
                 ("agent.tool.finished", 3),
                 ("agent.tool.requested", 3),
                 ("agent.turn.ended", 3),
-                ("agent.turn.started", 2),
+                ("agent.turn.started", 3),
                 ("capability.switched", 1),
                 ("code.diagnostics.changed", 2),
                 ("collector.synced", 2),

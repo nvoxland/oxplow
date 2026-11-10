@@ -191,22 +191,45 @@ impl AgentHarness for Claude {
         records.iter().flat_map(token_reading).collect()
     }
 
-    /// A background subagent hands its report back as a prompt starting
-    /// `<agent-message from="<agent_id>">`: not a person's words.
+    /// What a prompt is: a background subagent's report (a prompt starting
+    /// `<agent-message from="<agent_id>">`), another session's message
+    /// (`<cross-session-message …>`), a background job's notice
+    /// (`<task-notification>` naming the call that started it), else a
+    /// person's words. The text is kept as delivered.
     async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
         let text = body.get("prompt")?.as_str()?;
-        if let Some(from) = peer_message_from(text) {
-            return Some(Prompt::PeerMessage { from: from.into() });
+        if let Some(peer) = peer_message_from(text) {
+            return Some(Prompt::PeerMessage {
+                from: peer.from.into(),
+                socket: peer.socket.map(str::to_string),
+                text: text.into(),
+            });
         }
-        Some(match handback_from(text) {
-            Some(id) => Prompt::Handback {
+        if let Some(id) = handback_from(text) {
+            return Some(Prompt::Handback {
                 subagent: Subagent {
                     id: id.into(),
                     kind: None,
                 },
-            },
-            None => Prompt::Person { text: text.into() },
-        })
+                text: text.into(),
+            });
+        }
+        if let Some(call) = task_notification_call(text) {
+            return Some(Prompt::BackgroundJob {
+                call,
+                text: text.into(),
+            });
+        }
+        Some(Prompt::person(text))
+    }
+
+    /// Claude Code's `prompt_id`: one per prompt, carried by every hook of
+    /// the turn it opens.
+    fn harness_turn_id(&self, body: &serde_json::Value) -> Option<String> {
+        body.get("prompt_id")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
     }
 
     /// Its transcripts under the effective config dir, for the worktree
@@ -284,10 +307,17 @@ fn handback_from(text: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// Who sent a cross-session message.
+struct PeerFrom<'a> {
+    /// The sender's session name, else its socket.
+    from: &'a str,
+    /// The address it sent from (`uds:/tmp/cc-socks/<n>.sock`).
+    socket: Option<&'a str>,
+}
+
 /// Who sent a cross-session message: the prompt is one wrapped in
 /// `<cross-session-message from="<socket>" from-name="<session name>" …>`.
-/// The sender's session name, else its socket.
-fn peer_message_from(text: &str) -> Option<&str> {
+fn peer_message_from(text: &str) -> Option<PeerFrom<'_>> {
     let (tag, _) = text
         .strip_prefix("<cross-session-message")?
         .split_once('>')?;
@@ -297,7 +327,25 @@ fn peer_message_from(text: &str) -> Option<&str> {
             .map(|(value, _)| value)
             .filter(|value| !value.is_empty())
     };
-    attr("from-name").or_else(|| attr("from"))
+    let socket = attr("from");
+    Some(PeerFrom {
+        from: attr("from-name").or(socket)?,
+        socket,
+    })
+}
+
+/// A background job's notice: the prompt is a `<task-notification>`. The
+/// inner `Some` is the `<tool-use-id>` of the call that started the job,
+/// when it names one.
+fn task_notification_call(text: &str) -> Option<Option<String>> {
+    let body = text.trim_start().strip_prefix("<task-notification>")?;
+    let call = body
+        .split_once("<tool-use-id>")
+        .and_then(|(_, rest)| rest.split_once("</tool-use-id>"))
+        .map(|(id, _)| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(str::to_string);
+    Some(call)
 }
 
 /// Its `claude_code.token.usage` counter (delta temporality): the `type`
@@ -918,7 +966,9 @@ mod tests {
         assert_eq!(
             crate::test_launch::block(h.prompt(&named)),
             Some(Prompt::PeerMessage {
-                from: "oxplow-main".into()
+                from: "oxplow-main".into(),
+                socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                text: named["prompt"].as_str().unwrap().into(),
             })
         );
         let unnamed = serde_json::json!({
@@ -927,12 +977,50 @@ mod tests {
         assert_eq!(
             crate::test_launch::block(h.prompt(&unnamed)),
             Some(Prompt::PeerMessage {
-                from: "uds:/tmp/cc-socks/21663.sock".into()
+                from: "uds:/tmp/cc-socks/21663.sock".into(),
+                socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                text: unnamed["prompt"].as_str().unwrap().into(),
             })
         );
         // A person quoting one is still a person.
         let quoted =
             serde_json::json!({ "prompt": "what is a <cross-session-message from=\"x\">?" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&quoted)),
+            Some(Prompt::Person { .. })
+        ));
+    }
+
+    /// A background job's notice arrives as a `<task-notification>` prompt
+    /// (the shape Claude Code 2.1 delivers when a background shell or agent
+    /// finishes, taken from a recorded session's prompt): a background job,
+    /// naming the call that started it, not a person's words. Every prompt
+    /// hook carries the turn's `prompt_id`.
+    #[test]
+    fn a_background_jobs_notice_names_the_call_that_started_it() {
+        use oxplow_domain::agent::observe::Prompt;
+        let h = harness("oxplow:claude-code", "claude");
+        let text = "<task-notification>\n<task-id>a105c4271bd72a0cb</task-id>\n<tool-use-id>toolu_01NxscFzyLVJtKmaZxvCm57g</tool-use-id>\n<output-file>/tmp/tasks/a105c4271bd72a0cb.output</output-file>\n<status>completed</status>\n<summary>Agent \"Map desktop\" finished</summary>\n</task-notification>";
+        let body = serde_json::json!({ "prompt": text, "prompt_id": "7d3b8f1e" });
+        assert_eq!(
+            crate::test_launch::block(h.prompt(&body)),
+            Some(Prompt::BackgroundJob {
+                call: Some("toolu_01NxscFzyLVJtKmaZxvCm57g".into()),
+                text: text.into(),
+            })
+        );
+        assert_eq!(h.harness_turn_id(&body).as_deref(), Some("7d3b8f1e"));
+        let bare = serde_json::json!({ "prompt": "<task-notification>\n<status>completed</status>\n</task-notification>" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&bare)),
+            Some(Prompt::BackgroundJob { call: None, .. })
+        ));
+        assert_eq!(
+            h.harness_turn_id(&serde_json::json!({"prompt": "hi"})),
+            None
+        );
+        // A person quoting one is still a person.
+        let quoted = serde_json::json!({ "prompt": "what does <task-notification> mean?" });
         assert!(matches!(
             crate::test_launch::block(h.prompt(&quoted)),
             Some(Prompt::Person { .. })
@@ -980,7 +1068,8 @@ mod tests {
                 subagent: Subagent {
                     id: "afd849d5d475e378d".into(),
                     kind: None
-                }
+                },
+                text: handback["prompt"].as_str().unwrap().into(),
             })
         );
         assert_eq!(

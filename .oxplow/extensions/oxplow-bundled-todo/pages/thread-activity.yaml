@@ -14,7 +14,7 @@ loaders:
                     WHEN t.context_window IS NULL THEN (t.context_tokens / 1000) || 'k'
                     ELSE (t.context_tokens / 1000) || 'k of ' || (t.context_window / 1000) || 'k ('
                          || (100 * t.context_tokens / t.context_window) || '%)' END AS context,
-               t.from_peer,
+               t.source, t.sender,
                trim(CASE WHEN instr(t.prompt, char(10)) > 0
                          THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
                          ELSE t.prompt END) AS prompt,
@@ -29,7 +29,7 @@ loaders:
       )
       SELECT coalesce(e.title, CASE WHEN u.effort_id IS NULL THEN 'Between efforts' ELSE 'Work' END) AS section,
              coalesce(nullif(u.prompt, ''),
-                      CASE WHEN u.from_peer IS NOT NULL THEN 'Message from ' || u.from_peer END,
+                      CASE WHEN u.sender IS NOT NULL THEN 'Message from ' || u.sender END,
                       '(no prompt)') AS prompt,
              CASE WHEN u.agent_session_id IS NOT NULL THEN 'Session ' || u.agent_session_id END AS session,
              u.ran_on,

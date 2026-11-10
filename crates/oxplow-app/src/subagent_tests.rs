@@ -30,7 +30,7 @@ fn envelope(
             id: id.into(),
             kind: Some("Explore".into()),
         }),
-        peer: None,
+        harness_turn: None,
     }
 }
 

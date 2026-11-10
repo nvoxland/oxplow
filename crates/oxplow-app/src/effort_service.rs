@@ -496,9 +496,15 @@ impl EffortService {
                             use oxplow_domain::stores::AgentTurnStore;
                             match turns.list_for_thread(thread_id, STEERING_TURN_SCAN).await {
                                 Ok(rows) => {
+                                    // A person's prompts steer; a job's
+                                    // report or a hand-back doesn't.
                                     total +=
                                         rows.iter()
-                                            .filter(|t| in_window(t.started_at.unix_ms()))
+                                            .filter(|t| {
+                                                t.source
+                                                    == Some(oxplow_domain::hook::TurnSource::Person)
+                                                    && in_window(t.started_at.unix_ms())
+                                            })
                                             .count() as f64;
                                 }
                                 Err(e) => {
@@ -1276,6 +1282,7 @@ mod tests {
                     ended_at: None,
                     start_snapshot_id: None,
                     snapshot_id: None,
+                    source: Some(oxplow_domain::hook::TurnSource::Person),
                 })
                 .await
                 .unwrap();

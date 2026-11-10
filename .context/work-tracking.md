@@ -27,10 +27,17 @@ keeps firing is a sign oxplow should infer the thing itself.
 ## The record
 
 The **turn** (prompt to stop) is the unit of record; each **tool call** is
-the evidence inside it. Per turn oxplow keeps the prompt, the agent's
-final message, the start and end snapshots, the tool calls with their
-time windows, test runs and tokens. Nothing here depends on how many
-threads or agents share a stream.
+the evidence inside it. Per turn oxplow keeps what opened it (`source`: a
+person's prompt, a background job reporting back, a subagent's hand-back,
+another session's message, or unknown) with the text it was opened with,
+the turn it goes on with when the harness named one (`cause_turn_id`: the
+turn whose tool call started the job, or in which the subagent started),
+the harness's own turn id, the agent's final message, the start and end
+snapshots, the tool calls with their time windows, test runs and tokens
+([agent-model.md](./agent-model.md) "Hook ingest and recording"). Only a
+person's prompt is a person's words: since 2026-10-28, 41% of turns were
+opened by one, 41% by a background job's report, 13% by another session.
+Nothing here depends on how many threads or agents share a stream.
 
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent
 it, to that file, one JSON line each (`event`, `thread`, `at`, `payload`).
@@ -51,11 +58,10 @@ commit and needs no task.
 **Core owns** the entity and its invariants: spans on one thread never
 overlap and at most one is open per thread; the task link is
 optional and can be attached later; a title (default: the linked item's
-title, else the first line of the first prompt a person typed in it, else
-"Untitled effort" — never empty; `v_effort.title`). A turn with an empty
-prompt (a resume, another session's message) and a harness's message (its
-first line only a tag: `<task-notification>`, `<command-name>…`) don't
-title an effort; how it closed (`commit`, `switch`,
+title, else the first line of the first prompt a person typed in it
+(`source = 'person'`), else "Untitled effort" — never empty;
+`v_effort.title`). Another source's text never titles an effort, nor a
+person's line that is only a tag (a slash command, `<command-name>…`); how it closed (`commit`, `switch`,
 `person`, `agent`). Core's commands carry the boundary, not the call time,
 so a policy may react late: opening adopts the thread's activity back to
 its previous effort's end, and closing can cut the span at a past point.
