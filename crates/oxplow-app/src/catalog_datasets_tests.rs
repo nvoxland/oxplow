@@ -398,3 +398,29 @@ async fn questions_and_config_keys_are_datasets() {
     .await
     .is_empty());
 }
+
+/// A request is something the semantic layer can group by: a turn's and a
+/// request-task link's `request` point at `v_request.uri`.
+#[tokio::test]
+async fn a_turn_declares_how_it_points_at_its_request() {
+    let fx = services_with_effort().await;
+    for (dataset, from) in [("agent_turn", "request"), ("request_task", "request")] {
+        let found = rows(
+            &fx,
+            &format!("SELECT relationships FROM v_dataset WHERE name = '{dataset}'"),
+        )
+        .await;
+        let relationships: Value =
+            serde_json::from_str(found[0][0].as_str().expect("declared")).unwrap();
+        assert!(
+            relationships
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["from"] == from
+                    && r["to_view"] == "v_request"
+                    && r["to_field"] == "uri"),
+            "{dataset}: {relationships}"
+        );
+    }
+}

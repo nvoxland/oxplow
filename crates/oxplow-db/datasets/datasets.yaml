@@ -110,6 +110,7 @@
 - name: request
   version: 3
   description: "Requests: the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when each turn opened. One row per request: who started it and when, what it holds (its turns' tool calls, tokens, jobs), and where it stands now (`state`, read live). Its turns are the v_agent_turn rows whose `request` is its `uri`; their time split sums v_turn_activity over them (heavier: read it for one request). Its files come with the turns' changes."
+  relationships: [{ from: first_turn, to: agent_turn.uri }, { from: thread_id, to: thread.id }]
   fields:
     - { name: "id", type: "INTEGER", doc: "Request id (its URI is `oxplow:oxplow/request?id=req<id>`)." }
     - { name: "thread_id", type: "INTEGER", doc: "The thread its first turn ran in (v_thread.id); a later turn may run on another thread." }
@@ -133,6 +134,7 @@
 - name: request_task
   version: 1
   description: "The tasks each request worked on, observed, each link with the evidence it rests on: a person's prompt named the task, the agent ran a task command on it in a turn, or it was in progress and assigned to the thread when a turn of the request ended. Nothing here opens, closes or moves a task. One row per (request, task, basis); a request may link several tasks and a task several requests. A task's requests: `WHERE task = <task uri>`."
+  relationships: [{ from: request, to: request.uri }]
   fields:
     - { name: "request", type: "TEXT", doc: "The request (`v_request.uri`)." }
     - { name: "task", type: "TEXT", doc: "The task's URI; it may dangle if its tracker dropped it." }
@@ -167,6 +169,7 @@
 - name: agent_turn
   version: 18
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
+  relationships: [{ from: request, to: request.uri }]
   fields:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
     - { name: "thread_id", type: "INTEGER", doc: "Thread the turn ran in." }
