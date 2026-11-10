@@ -167,6 +167,50 @@
     - { not_null: request }
     - { not_null: task }
     - { accepted_values: { column: basis, values: [prompt, command, assigned] } }
+- name: request_metric_delta
+  version: 1
+  description: "How each metric moved during a request on one stream (before → after), computed by oxplow's metric engine over the request's window — the span of its turns there, the files they changed (claimed or sole) and the captures they made — and stored; refreshed while it runs and when what it reads moves. A request's: `WHERE request_id = <id>`."
+  relationships: [{ from: request, to: request.uri }]
+  fields:
+    - { name: "request_id", type: "INTEGER", doc: "The request (v_request.id)." }
+    - { name: "request", type: "TEXT", doc: "The request's URI." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream its window is on (a request can span streams)." }
+    - { name: "key", type: "TEXT", doc: "Metric key (v_metric_spec.key)." }
+    - { name: "title", type: "TEXT", doc: "Metric name." }
+    - { name: "unit", type: "TEXT", doc: "Unit, if any." }
+    - { name: "direction", type: "TEXT", doc: "`higher-better`, `lower-better` or `neutral`." }
+    - { name: "kind", type: "TEXT", doc: "`gauge`, `coverage`, `test`, `event`, …" }
+    - { name: "category", type: "TEXT", doc: "Metric category." }
+    - { name: "language", type: "TEXT", doc: "Language, if language-specific." }
+    - { name: "agg", type: "TEXT", doc: "How the delta was computed: `files` (over the request's files), `sum` (in-window total) or `level` (before→after)." }
+    - { name: "baseline", type: "REAL", doc: "Value as the request began; NULL for `sum`." }
+    - { name: "current", type: "REAL", doc: "Value at its end (or now, while it runs)." }
+    - { name: "delta", type: "REAL", doc: "current − baseline, or the total for `sum`." }
+    - { name: "changed", type: "INT", doc: "1 if the value moved during the request." }
+    - { name: "attributed_files", type: "INT", doc: "For `files`: how many of its files carry the metric." }
+    - { name: "sample_count", type: "INT", doc: "Samples considered." }
+    - { name: "target", type: "REAL", doc: "Metric target." }
+    - { name: "warn_at", type: "REAL", doc: "Warning threshold." }
+    - { name: "fail_at", type: "REAL", doc: "Failure threshold." }
+    - { name: "crossing", type: "TEXT", doc: "`warn` or `fail` when the current value sits past that threshold; else NULL." }
+    - { name: "latest_capture_id", type: "INT", doc: "The latest contributing capture (v_capture.id), for drill-in." }
+    - { name: "refreshed_at", type: "TEXT", doc: "When oxplow last recomputed the request's analysis (RFC 3339)." }
+- name: request_observation
+  version: 1
+  description: "The runs a request's turns made on one stream — test runs, diff coverage (over the lines the request changed, from where it started), static analysis — as its stored analysis computed them, oldest first. A request's: `WHERE request_id = <id>`."
+  relationships: [{ from: request, to: request.uri }]
+  fields:
+    - { name: "request_id", type: "INTEGER", doc: "The request (v_request.id)." }
+    - { name: "request", type: "TEXT", doc: "The request's URI." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream its window is on." }
+    - { name: "seq", type: "INT", doc: "Order within the request on the stream, oldest first: the highest is the latest." }
+    - { name: "kind", type: "TEXT", doc: "`test-run`, `diff-coverage`, `static-analysis`." }
+    - { name: "provenance", type: "TEXT", doc: "`observed` (oxplow saw it) or `asserted` (the agent reported it)." }
+    - { name: "source", type: "TEXT", doc: "Where it came from, e.g. `post-tool-bash`." }
+    - { name: "metric_value", type: "REAL", doc: "Headline number, e.g. coverage %." }
+    - { name: "payload_json", type: "TEXT", doc: "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)." }
+    - { name: "local_snapshot_id", type: "INT", doc: "Snapshot it was captured against." }
+    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
 - name: turn_file
   version: 1
   description: "The files that changed during each turn, joined by time between the turn and its stream's snapshot line (no snapshots the turn owns). Several writers can change one worktree at once, so it is best effort: each file says how sure it is. A file belongs to a turn when a take captured it after the turn started (and within a minute of its end) and the watcher saw it change inside the turn's window, or, with no change time, the capture alone says so. A file changed before the prompt is not the turn's, even when its end take captured it."

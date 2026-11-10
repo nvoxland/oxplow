@@ -1248,19 +1248,25 @@ fn end_take(
 }
 
 /// A request's span on one stream's snapshot line.
-struct RequestSpan {
-    stream: i64,
+pub(crate) struct RequestSpan {
+    pub stream: i64,
+    /// When its first turn there started (RFC 3339).
+    pub began: String,
+    /// When its last turn there ended; `None` while one runs.
+    pub ended: Option<String>,
+    /// Its turns there.
+    pub turns: Vec<i64>,
     /// The last take at or before its first turn there started.
-    start: Option<i64>,
+    pub start: Option<i64>,
     /// Where its turns there ended ([`end_take`]).
-    end: Option<i64>,
+    pub end: Option<i64>,
     /// One of its turns there is still running.
-    running: bool,
+    pub running: bool,
 }
 
 /// Where request `request` sits on `stream`'s snapshot line (the stream of
 /// its first turn when none is given); `None` when it has no turn there.
-fn request_span(
+pub(crate) fn request_span(
     c: &rusqlite::Connection,
     request: i64,
     stream: Option<i64>,
@@ -1309,11 +1315,14 @@ fn request_span(
             .map_err(map)?;
         ids
     };
-    let end = end_take(c, stream, &ended.unwrap_or_default(), &turn_ids)?;
+    let end = end_take(c, stream, ended.as_deref().unwrap_or_default(), &turn_ids)?;
     Ok(Some(RequestSpan {
         stream,
         start,
         end,
+        ended: ended.filter(|_| !running),
+        began,
+        turns: turn_ids,
         running,
     }))
 }
@@ -1348,7 +1357,7 @@ async fn own_files(
 /// joins them: the ones a call of the turn claimed, or that only its turn
 /// was running to change. A file another turn could as well have changed
 /// is not the request's.
-async fn request_files(
+pub(crate) async fn request_files(
     svc: &crate::Services,
     key: &str,
     stream: oxplow_domain::StreamId,

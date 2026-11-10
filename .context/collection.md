@@ -385,6 +385,35 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   their latest status, so a red→green loop reads plainly) and analyzer
   findings, all SQL over `v_effort_observation`'s payloads.
 
+## A request's analysis
+
+What the metric engine computes over a span of work is computed over a
+**window** (`collection::Window`): a stream, a start and an end (times and
+points on the snapshot line), the files it changed, and its own captures
+(`oxplow_db::Members`: the captures stamped with an effort, or the ones a
+set of turns made). `metric_deltas(&window)` and `observations(&window)`
+are the families an effort's evidence always had — file gauges summed over
+its files between the capture before its start and the last at its end,
+run and window measures over its own captures, diff coverage from its
+start snapshot to the snapshot each run measured, static analysis counts.
+
+A request's window on one stream (`request_analysis::window`): the span of
+its turns there (`change_analysis::request_span`: the take before the
+first began, the turn's own end take or the last take at or before the
+last ended), its files (`v_turn_file`, claimed or sole), and the captures
+its turns made (`metric_capture.turn_id`). It is stored per (request,
+stream) — `request_analysis` with its span and a signature of what it read
+(its turns' runs, their files, its end), `request_metric_delta`,
+`request_observation` (V22; `v_request_metric_delta`,
+`v_request_observation`) — by the `request_analysis` asset over the cube,
+`turn_file`, `metric_spec` and `agent_turn`. Due: a request with a turn
+running, one whose stored signature differs from its inputs now (a run
+reported late, a file captured after the turn closed), or one that ended
+in the last day with none stored; older requests are analyzed when asked
+for. An effort's evidence (`v_effort_metric_delta`,
+`v_effort_observation`) is the same computation over the effort's window
+until efforts go.
+
 ## Report-less-run nudge (PostToolUse)
 
 When the PostToolUse hook detects a test run but no configured report

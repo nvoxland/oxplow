@@ -232,6 +232,7 @@ pub async fn run_boot_orchestration(
     crate::providers::sync::spawn_sync_scheduler(state);
     // Open efforts' evidence, an asset over the tables it reads (P7.B6).
     crate::effort_evidence::register(state);
+    crate::request_analysis::register(state);
 
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate

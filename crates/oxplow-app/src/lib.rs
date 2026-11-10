@@ -135,6 +135,7 @@ pub mod recovery;
 pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
+pub mod request_analysis;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;
@@ -651,6 +652,7 @@ pub struct Services {
     pub advisories: Arc<advisories::AdvisoryRunner>,
     /// Per-effort metric deltas / observations for pages (see `effort_evidence`).
     pub effort_evidence_store: Arc<oxplow_db::SqliteEffortEvidenceStore>,
+    pub request_analysis_store: Arc<oxplow_db::SqliteRequestAnalysisStore>,
     /// Secrets store (the OS keychain in the app): AI provider keys and
     /// extension-source credentials. Values never go to the UI or agents.
     pub secrets: Arc<dyn oxplow_ai::secrets::SecretStore>,
@@ -1059,6 +1061,8 @@ impl Services {
         let diagnostic_store = Arc::new(oxplow_db::SqliteDiagnosticStore::new(db.clone()));
         let symbol_store = oxplow_db::SqliteSymbolStore::new(db.clone());
         let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
+        let request_analysis_store =
+            Arc::new(oxplow_db::SqliteRequestAnalysisStore::new(db.clone()));
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
         let wiki_page_thread_updates = Arc::new(SqliteWikiPageThreadUpdateStore::new(db.clone()));
 
@@ -1928,6 +1932,7 @@ impl Services {
             ai_compute,
             secrets: machine.secrets,
             effort_evidence_store,
+            request_analysis_store,
             advisories,
             change_store,
             change_analyzer: Arc::new(change_analysis::ChangeAnalyzer::default()),

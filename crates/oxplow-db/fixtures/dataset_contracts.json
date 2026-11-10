@@ -29874,5 +29874,189 @@
       ],
       "key": []
     }
+  },
+  "request_metric_delta": {
+    "1": {
+      "columns": [
+        {
+          "name": "request_id",
+          "type": "INTEGER",
+          "doc": "The request (v_request.id)."
+        },
+        {
+          "name": "request",
+          "type": "TEXT",
+          "doc": "The request's URI."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream its window is on (a request can span streams)."
+        },
+        {
+          "name": "key",
+          "type": "TEXT",
+          "doc": "Metric key (v_metric_spec.key)."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "Metric name."
+        },
+        {
+          "name": "unit",
+          "type": "TEXT",
+          "doc": "Unit, if any."
+        },
+        {
+          "name": "direction",
+          "type": "TEXT",
+          "doc": "`higher-better`, `lower-better` or `neutral`."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`gauge`, `coverage`, `test`, `event`, …"
+        },
+        {
+          "name": "category",
+          "type": "TEXT",
+          "doc": "Metric category."
+        },
+        {
+          "name": "language",
+          "type": "TEXT",
+          "doc": "Language, if language-specific."
+        },
+        {
+          "name": "agg",
+          "type": "TEXT",
+          "doc": "How the delta was computed: `files` (over the request's files), `sum` (in-window total) or `level` (before→after)."
+        },
+        {
+          "name": "baseline",
+          "type": "REAL",
+          "doc": "Value as the request began; NULL for `sum`."
+        },
+        {
+          "name": "current",
+          "type": "REAL",
+          "doc": "Value at its end (or now, while it runs)."
+        },
+        {
+          "name": "delta",
+          "type": "REAL",
+          "doc": "current − baseline, or the total for `sum`."
+        },
+        {
+          "name": "changed",
+          "type": "INT",
+          "doc": "1 if the value moved during the request."
+        },
+        {
+          "name": "attributed_files",
+          "type": "INT",
+          "doc": "For `files`: how many of its files carry the metric."
+        },
+        {
+          "name": "sample_count",
+          "type": "INT",
+          "doc": "Samples considered."
+        },
+        {
+          "name": "target",
+          "type": "REAL",
+          "doc": "Metric target."
+        },
+        {
+          "name": "warn_at",
+          "type": "REAL",
+          "doc": "Warning threshold."
+        },
+        {
+          "name": "fail_at",
+          "type": "REAL",
+          "doc": "Failure threshold."
+        },
+        {
+          "name": "crossing",
+          "type": "TEXT",
+          "doc": "`warn` or `fail` when the current value sits past that threshold; else NULL."
+        },
+        {
+          "name": "latest_capture_id",
+          "type": "INT",
+          "doc": "The latest contributing capture (v_capture.id), for drill-in."
+        },
+        {
+          "name": "refreshed_at",
+          "type": "TEXT",
+          "doc": "When oxplow last recomputed the request's analysis (RFC 3339)."
+        }
+      ],
+      "key": []
+    }
+  },
+  "request_observation": {
+    "1": {
+      "columns": [
+        {
+          "name": "request_id",
+          "type": "INTEGER",
+          "doc": "The request (v_request.id)."
+        },
+        {
+          "name": "request",
+          "type": "TEXT",
+          "doc": "The request's URI."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream its window is on."
+        },
+        {
+          "name": "seq",
+          "type": "INT",
+          "doc": "Order within the request on the stream, oldest first: the highest is the latest."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`test-run`, `diff-coverage`, `static-analysis`."
+        },
+        {
+          "name": "provenance",
+          "type": "TEXT",
+          "doc": "`observed` (oxplow saw it) or `asserted` (the agent reported it)."
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "Where it came from, e.g. `post-tool-bash`."
+        },
+        {
+          "name": "metric_value",
+          "type": "REAL",
+          "doc": "Headline number, e.g. coverage %."
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "doc": "Kind-specific detail, JSON (e.g. test cases, covered/uncovered lines)."
+        },
+        {
+          "name": "local_snapshot_id",
+          "type": "INT",
+          "doc": "Snapshot it was captured against."
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    }
   }
 }
