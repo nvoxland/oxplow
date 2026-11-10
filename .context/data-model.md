@@ -1108,13 +1108,20 @@ seeders for tests.
   analysis to the code it measured (see [collection.md](./collection.md)).
 - **HEAD moved on a clean tree** is its own op: `record_head_moved`
   re-stamps the snapshot the caller saw the clean tree at — refusing if a
-  take has moved the stream on since (tsk440), and the git-refs path
+  take has moved the stream on since, and the git-refs path
   holds the take lock from its drain through the stamp — with the new
-  `revision` (and flips every
-  exact-pin file ref on it) with a `head_moved` op and `vcs.head.moved@2`,
-  in one transaction. The git-refs listener — only when this worktree's own HEAD moved — runs a `git_refs`
-  take first (draining anything dirty; it logs `snapshot.taken` even when it
-  found nothing, as a signal that HEAD moved, but no op), then this.
+  `revision` (and flips every exact-pin file ref on it) with a
+  `head_moved` op, in one transaction.
+- **A HEAD move is its own event**, `vcs.head.moved@3 { stream, from, to,
+  snapshot? }`, logged by the git-refs listener once per move of this
+  worktree's own HEAD, dirty tree or not (`snapshot` only when the tree
+  was clean and the snapshot re-stamped). The listener reads its HEAD at
+  start (starting is not a move), runs a `git_refs` take (draining
+  anything dirty, then the re-stamp) and spends the move only once that
+  take returned a snapshot and the event is logged: a take that fails, or
+  finds no snapshot yet, leaves the move for the next ref event. Collectors
+  that follow commits run on this event; `snapshot.taken` with
+  `unchanged: true` is logged only for a request someone waits on.
 - Takes are **serialized** per stream (`take_lock`) and each caller
   records its own op, so two threads ending turns on one worktree give
   two ops, usually on the same snapshot (§4.3: a snapshot taken for one

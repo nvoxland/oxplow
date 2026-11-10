@@ -243,6 +243,9 @@ fn trigger_label(trigger: &Trigger) -> String {
 
 /// The event that runs snapshot-triggered fact collectors.
 const SNAPSHOT_TAKEN: &str = "snapshot.taken";
+/// A stream's HEAD moved: what a whole-tree collector that follows commits
+/// runs on.
+const HEAD_MOVED: &str = "vcs.head.moved";
 /// The event that runs effort-triggered fact collectors.
 const EFFORT_FINISHED: &str = "effort.finished";
 
@@ -1243,10 +1246,14 @@ impl MetricsService {
         // no delta: only the whole-tree collectors have the moved revision
         // to restate.
         let recorded = event.as_ref().is_none_or(|e| take_recorded(e));
+        let event_type = event
+            .as_ref()
+            .map_or(SNAPSHOT_TAKEN, |e| e.envelope.event_type.as_str())
+            .to_string();
         let collectors: Vec<FactCollector> = self
             .fact_collectors()
             .into_iter()
-            .filter(|g| g.runs_on(SNAPSHOT_TAKEN))
+            .filter(|g| g.runs_on(&event_type))
             .filter(|g| select(g))
             .filter(|g| recorded || g.whole_tree)
             .filter(|g| {
@@ -1513,7 +1520,7 @@ impl MetricsService {
         let only = |c: &FactCollector| c.owner == owner && c.key == key;
         let anchors = event.envelope.anchors.clone();
         match event.envelope.event_type.as_str() {
-            SNAPSHOT_TAKEN => {
+            SNAPSHOT_TAKEN | HEAD_MOVED => {
                 let Some(stream) = anchors.stream_id else {
                     return;
                 };
@@ -3317,6 +3324,27 @@ mod tests {
         snap
     }
 
+    /// Log a `vcs.head.moved` for stream 1 at `snap`.
+    async fn log_head_move(svc: &crate::Services, snap: i64) -> oxplow_domain::StoredEvent {
+        let env = oxplow_domain::Envelope::typed::<oxplow_domain::events::schema::VcsHeadMoved>(
+            "system",
+            &oxplow_domain::events::schema::VcsHeadMovedV3 {
+                stream: "str1".into(),
+                snapshot: Some(snap),
+                from: None,
+                to: Some("abc".into()),
+            },
+        )
+        .with_anchors(oxplow_domain::events::Anchors {
+            stream_id: Some(StreamId::new(1)),
+            snapshot_id: Some(snap),
+            ..Default::default()
+        });
+        let id = env.id.clone();
+        svc.event_log_store.append(env).await.unwrap();
+        svc.event_log_store.get(id).await.unwrap().unwrap()
+    }
+
     /// A burst of ref moves (a commit, a rebase, a restart's catch-up of
     /// missed ones) scans the tree once, over the latest snapshot, after
     /// the moves settle: never once per move.
@@ -3335,7 +3363,7 @@ mod tests {
             let snap =
                 snapshot_with_content(&svc, &[(path, Some(&*format!("fn f{i}() {{}}\n")))]).await;
             consumer
-                .handle(&log_take(&svc, snap, SnapshotTrigger::GitRefs, false, 1).await)
+                .handle(&log_head_move(&svc, snap).await)
                 .await
                 .unwrap();
             snaps.push(snap);
@@ -3455,7 +3483,7 @@ mod tests {
 
         // A ref move on the unchanged tree reads all of it, not the
         // second take's one file.
-        let moved = log_take(&svc, second, SnapshotTrigger::GitRefs, true, 0).await;
+        let moved = log_head_move(&svc, second).await;
         consumer.handle(&moved).await.unwrap();
         settle().await;
         let both = current().await;
@@ -3478,7 +3506,7 @@ mod tests {
             .unwrap();
         assert_eq!(current().await.len(), 2, "a save doesn't restate it");
         consumer
-            .handle(&log_take(&svc, third, SnapshotTrigger::GitRefs, true, 0).await)
+            .handle(&log_head_move(&svc, third).await)
             .await
             .unwrap();
         settle().await;
@@ -3504,7 +3532,7 @@ mod tests {
         let fourth =
             snapshot_with_content(&svc, &[("src/other.rs", Some("fn other() {}\n"))]).await;
         consumer
-            .handle(&log_take(&svc, fourth, SnapshotTrigger::GitRefs, true, 0).await)
+            .handle(&log_head_move(&svc, fourth).await)
             .await
             .unwrap();
         settle().await;
@@ -5967,8 +5995,8 @@ def transform(input):
             .find(|c| c.key == "code_metrics.duplicate_lines")
             .expect("used, so it runs");
         assert!(dup.whole_tree, "a slice of the tree can't restate it");
-        assert!(matches!(&dup.trigger, Trigger::On { filter, .. }
-            if filter.get("trigger").map(String::as_str) == Some("git_refs")));
+        assert!(matches!(&dup.trigger, Trigger::On { events, .. }
+            if events == &["vcs.head.moved".to_string()]));
         let spec = svc
             .fact_store
             .get_spec("code_metrics.duplicate_lines")

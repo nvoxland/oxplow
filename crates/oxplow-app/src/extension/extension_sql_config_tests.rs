@@ -267,7 +267,14 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     let assets = crate::assets::Assets::new(fx.svc.db.clone(), Duration::from_millis(50));
     assets.sync_datasets().await.unwrap();
     assets.quiesce().await;
-    assert_eq!(limit().await, json!([[7]]));
+    // The refill is the asset's own: wait until the dataset reads the value,
+    // not for the assets to look idle.
+    let want = json!([[7]]);
+    assert!(
+        crate::test_fixtures::until(Duration::from_secs(20), || async { limit().await == want })
+            .await,
+        "the dataset was not refilled with {want}"
+    );
 
     fx.svc
         .db
@@ -287,5 +294,12 @@ async fn a_materialized_dataset_is_refilled_when_its_setting_changes() {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assets.sync_datasets().await.unwrap();
     assets.quiesce().await;
-    assert_eq!(limit().await, json!([[9]]));
+    // The refill is the asset's own: wait until the dataset reads the value,
+    // not for the assets to look idle.
+    let want = json!([[9]]);
+    assert!(
+        crate::test_fixtures::until(Duration::from_secs(20), || async { limit().await == want })
+            .await,
+        "the dataset was not refilled with {want}"
+    );
 }

@@ -1803,7 +1803,7 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
 - **Boot and HEAD.** The primary stream's startup sweep
   (`enqueue_startup_diff`, then a `startup` take) records what changed
   while oxplow was down; a move of this worktree's HEAD (not a ref moving elsewhere in the repository) runs a `git_refs` take, then on
-  a clean tree a `head_moved` re-stamp (`vcs.head.moved@2`).
+  a clean tree a `head_moved` re-stamp, and logs `vcs.head.moved@3`.
 
 ### Per-effort write log
 

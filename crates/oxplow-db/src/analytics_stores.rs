@@ -19,7 +19,7 @@ use crate::database::{string_to_ts, ts_to_string};
 use crate::event_log_store::append_tx;
 use crate::page_ref_projections::finding_edges;
 use crate::snapshot_tree::{identities, manifest_hash, ContentHasher, SnapshotTree, TreeEntry};
-use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV2};
+use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV3};
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::uri::build::{commit_uri, snapshot_uri, stream_uri};
@@ -1324,13 +1324,7 @@ fn record_take_tx(
     // Whoever asked for a take waits on its event (a turn's checkpoint, an
     // effort's bracket). A request nobody is anchored to that found nothing
     // is not a fact about the worktree.
-    // The same for a `git_refs` take, which runs when this stream's HEAD
-    // moved: collectors that follow a HEAD move (`where: { trigger:
-    // git_refs }`) hear it, tree changed or not.
-    let waited_on = take.thread_id.is_some()
-        || take.turn_id.is_some()
-        || take.effort_id.is_some()
-        || take.trigger == SnapshotTrigger::GitRefs;
+    let waited_on = take.thread_id.is_some() || take.turn_id.is_some() || take.effort_id.is_some();
     if unchanged && op_seq.is_none() && !waited_on {
         return Ok(Some(TakeOutcome {
             op_seq,
@@ -1378,11 +1372,9 @@ fn record_take_tx(
 
 fn record_head_moved_tx(
     tx: &rusqlite::Connection,
-    vocabulary: &Vocabulary,
     stream_id: StreamId,
     expected: i64,
     revision: &Revision,
-    source: &str,
 ) -> Result<Option<TakeOutcome>, DomainError> {
     use crate::database::map_sql_err;
     let sid = expected;
@@ -1413,29 +1405,6 @@ fn record_head_moved_tx(
         (None, true, None),
     )
     .map_err(map_sql_err)?;
-    let stream = stream_uri(stream_id);
-    let env = Envelope::typed::<VcsHeadMoved>(
-        source.to_string(),
-        &VcsHeadMovedV2 {
-            stream: stream_id.to_string(),
-            snapshot: sid,
-            from: from
-                .and_then(|f| f.parse::<Revision>().ok())
-                .and_then(|f| f.vcs_rev().map(str::to_string)),
-            to: revision.vcs_rev().unwrap_or_default().to_string(),
-        },
-    )
-    .with_anchors(Anchors {
-        stream_id: Some(stream_id),
-        snapshot_id: Some(sid),
-        ..Anchors::default()
-    })
-    .with_subject([
-        stream,
-        snapshot_uri(sid),
-        commit_uri(revision.vcs_rev().unwrap_or_default()),
-    ]);
-    append_tx(tx, vocabulary, &env)?;
     Ok(Some(TakeOutcome {
         op_seq: Some(op_seq),
         snapshot_id: sid,
@@ -1614,29 +1583,61 @@ impl SqliteSnapshotStore {
 
     /// HEAD moved while the worktree was clean: re-stamp `snapshot_id` —
     /// the snapshot the caller saw the clean tree at — with `sha` (and
-    /// every exact-pin file ref on it), record a `head_moved` op and
-    /// `vcs.head.moved`, in one transaction. `Ok(None)` when the stream's
-    /// current snapshot is no longer `snapshot_id` (a take landed since:
-    /// stamping it would claim a dirty tree is the commit), or it already
-    /// points at `sha`.
+    /// every exact-pin file ref on it) and record a `head_moved` op, in one
+    /// transaction. `Ok(None)` when the stream's current snapshot is no
+    /// longer `snapshot_id` (a take landed since: stamping it would claim a
+    /// dirty tree is the commit), or it already points at `sha`. The move
+    /// itself is [`Self::log_head_moved`]'s.
     pub async fn record_head_moved(
         &self,
         stream_id: StreamId,
         snapshot_id: i64,
         revision: Revision,
-        source: String,
     ) -> Result<Option<TakeOutcome>, DomainError> {
+        self.db
+            .transaction(move |tx| record_head_moved_tx(tx, stream_id, snapshot_id, &revision))
+            .await
+    }
+
+    /// Log `vcs.head.moved`: `stream_id`'s HEAD moved from `from` to `to`
+    /// (commit shas), whether or not the tree was clean. `snapshot` is the
+    /// snapshot [`Self::record_head_moved`] re-stamped with it, when it did.
+    pub async fn log_head_moved(
+        &self,
+        stream_id: StreamId,
+        from: Option<String>,
+        to: Option<String>,
+        snapshot: Option<i64>,
+        source: String,
+    ) -> Result<(), DomainError> {
         let vocabulary = self.vocabulary.clone();
         self.db
             .transaction(move |tx| {
-                record_head_moved_tx(
-                    tx,
-                    &vocabulary.current(),
-                    stream_id,
-                    snapshot_id,
-                    &revision,
-                    &source,
+                let stream = stream_uri(stream_id);
+                let mut subject = vec![stream];
+                if let Some(snapshot) = snapshot {
+                    subject.push(snapshot_uri(snapshot));
+                }
+                if let Some(to) = &to {
+                    subject.push(commit_uri(to));
+                }
+                let env = Envelope::typed::<VcsHeadMoved>(
+                    source.clone(),
+                    &VcsHeadMovedV3 {
+                        stream: stream_id.to_string(),
+                        snapshot,
+                        from: from.clone(),
+                        to: to.clone(),
+                    },
                 )
+                .with_anchors(Anchors {
+                    stream_id: Some(stream_id),
+                    snapshot_id: snapshot,
+                    ..Anchors::default()
+                })
+                .with_subject(subject);
+                append_tx(tx, &vocabulary.current(), &env)?;
+                Ok(())
             })
             .await
     }
@@ -3592,8 +3593,8 @@ mod tests {
         assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
         // Nobody waits on these requests: no event either.
         assert_eq!(events(&db, "snapshot.taken").len(), 1);
-        // A `git_refs` take runs because this stream's HEAD moved: it logs
-        // its event (collectors follow HEAD moves by it), tree changed or not.
+        // Nor does a `git_refs` take that found nothing: a move of HEAD is
+        // `vcs.head.moved`'s.
         let moved = store
             .record_take(take(1, vec![], SnapshotTrigger::GitRefs))
             .await
@@ -3601,10 +3602,7 @@ mod tests {
             .unwrap();
         assert!(moved.unchanged);
         assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
-        let taken = events(&db, "snapshot.taken");
-        assert_eq!(taken.len(), 2);
-        assert_eq!(taken[1]["trigger"], "git_refs");
-        assert_eq!(taken[1]["unchanged"], true);
+        assert_eq!(events(&db, "snapshot.taken").len(), 1);
     }
 
     /// A request that names a turn, a thread or an effort is waited on (the
@@ -3661,7 +3659,7 @@ mod tests {
         let store = SqliteSnapshotStore::new(db.clone());
         assert_eq!(
             store
-                .record_head_moved(StreamId::new(1), 1, Revision::git("aaaaaaa"), "test".into())
+                .record_head_moved(StreamId::new(1), 1, Revision::git("aaaaaaa"))
                 .await
                 .unwrap(),
             None,
@@ -3683,23 +3681,13 @@ mod tests {
         // Same commit: nothing to record.
         assert_eq!(
             store
-                .record_head_moved(
-                    StreamId::new(1),
-                    base.snapshot_id,
-                    Revision::git("aaaaaaa"),
-                    "test".into()
-                )
+                .record_head_moved(StreamId::new(1), base.snapshot_id, Revision::git("aaaaaaa"))
                 .await
                 .unwrap(),
             None
         );
         let moved = store
-            .record_head_moved(
-                StreamId::new(1),
-                base.snapshot_id,
-                Revision::git("bbbbbbb"),
-                "test".into(),
-            )
+            .record_head_moved(StreamId::new(1), base.snapshot_id, Revision::git("bbbbbbb"))
             .await
             .unwrap()
             .unwrap();
@@ -3729,12 +3717,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store
-                .record_head_moved(
-                    StreamId::new(1),
-                    base.snapshot_id,
-                    Revision::git("ccccccc"),
-                    "test".into()
-                )
+                .record_head_moved(StreamId::new(1), base.snapshot_id, Revision::git("ccccccc"),)
                 .await
                 .unwrap(),
             None
@@ -3746,10 +3729,38 @@ mod tests {
                 .unwrap(),
             None
         );
+        // The re-stamp logs an op; the move is the listener's event.
+        assert_eq!(events(&db, "vcs.head.moved").len(), 0);
+        store
+            .log_head_moved(
+                StreamId::new(1),
+                Some("aaaaaaa".into()),
+                Some("bbbbbbb".into()),
+                Some(base.snapshot_id),
+                "test".into(),
+            )
+            .await
+            .unwrap();
+        store
+            .log_head_moved(
+                StreamId::new(1),
+                Some("bbbbbbb".into()),
+                Some("ccccccc".into()),
+                None,
+                "test".into(),
+            )
+            .await
+            .unwrap();
         let moved_events = events(&db, "vcs.head.moved");
-        assert_eq!(moved_events.len(), 1);
+        assert_eq!(moved_events.len(), 2);
         assert_eq!(moved_events[0]["from"], "aaaaaaa");
         assert_eq!(moved_events[0]["to"], "bbbbbbb");
+        assert_eq!(moved_events[0]["snapshot"], base.snapshot_id);
+        assert_eq!(moved_events[1]["to"], "ccccccc");
+        assert!(
+            moved_events[1].get("snapshot").is_none(),
+            "a dirty tree re-stamps none"
+        );
     }
 
     #[tokio::test]

@@ -47,6 +47,7 @@ disallowed-methods = [
   { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::capture_batch", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::create_snapshot", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::diff_snapshots", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::log_head_moved", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::record_head_moved", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::record_take", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::analytics_stores::SqliteSnapshotStore::resolve_for_compare", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

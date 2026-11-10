@@ -950,27 +950,42 @@ impl EventType for SnapshotTaken {
     type Payload = SnapshotTakenV3;
 }
 
-/// `vcs.head.moved@2`: HEAD moved while the worktree was clean, so the
-/// latest snapshot now also is that commit.
+/// `vcs.head.moved@3`: a stream's HEAD moved (a commit, checkout, merge,
+/// reset in its worktree), whether the tree was clean or not. Logged once
+/// per move, after the take that follows it. A ref moving elsewhere in the
+/// repository is not one. Collectors that follow commits (the
+/// `where`-less `on: [vcs.head.moved]`) run on it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct VcsHeadMovedV2 {
+pub struct VcsHeadMovedV3 {
     /// The stream (`str1`).
     pub stream: String,
-    /// The snapshot re-stamped with the new commit.
-    pub snapshot: i64,
-    /// The commit (its sha) the snapshot pointed at before, if any.
+    /// The snapshot re-stamped with the new commit; absent when the tree was
+    /// not clean, so the next take records the commit instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<i64>,
+    /// The commit (its sha) HEAD pointed at before, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
-    /// The commit (its sha) HEAD points at now.
-    pub to: String,
+    /// The commit (its sha) HEAD points at now; absent before the first commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
 }
 
 pub struct VcsHeadMoved;
 impl EventType for VcsHeadMoved {
     const TYPE: &'static str = "vcs.head.moved";
-    const V: u32 = 2;
-    type Payload = VcsHeadMovedV2;
+    const V: u32 = 3;
+    type Payload = VcsHeadMovedV3;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            // v2 is v3 with a snapshot and a commit always present.
+            2 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "vcs.head.moved@{from_v} has no upcast"
+            ))),
+        }
+    }
 }
 
 /// `vcs.commit.indexed@2`: the commit indexer stored a commit it hadn't
@@ -2376,7 +2391,7 @@ mod tests {
                 ("ui.op_error.seen", 1),
                 ("ui.op_failed", 2),
                 ("vcs.commit.indexed", 2),
-                ("vcs.head.moved", 2),
+                ("vcs.head.moved", 3),
             ]
         );
         assert_eq!(r.latest("task.created"), Some(2));

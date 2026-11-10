@@ -263,8 +263,8 @@ loading spinner) by:
 - The Directory page's loaders (`v_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
   the stream **only when this worktree's own HEAD moved** (branch or
-  commit differs from the one it last saw; the first ref change after
-  start counts), so every commit lands a snapshot row stamped with the new
+  commit differs from the one it last saw; the HEAD at start is the first
+  one seen) and logs `vcs.head.moved { from, to }` after the take, so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
   didn't change. Beyond Local History, those rows are the **anchor
   points for metric ancestry** (tsk97/tsk102): a dirty test run's code
@@ -659,7 +659,9 @@ desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
 the ref moves (`RefMoves`) of its stream. The channel fires for any change
 under the repository's `refs/` (a commit in another worktree, a fetch, a
 `packed-refs` rewrite, a lock file), so the listener reads the worktree's
-own HEAD and acts only when it differs from the one it last saw; the commit
+own HEAD and acts only when it differs from the one it last saw (the HEAD
+at start is the first one seen, so starting is not a move; a move whose take
+failed, or found no snapshot yet, is kept for the next ref event); the commit
 indexer, the branch reconciler and the branch list still hear every ref.
 When HEAD moved it drains
 any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
@@ -671,7 +673,9 @@ representation of disk; it just now also corresponds to a new commit
 (common after `git commit`, `git commit --amend`, or a fast-forward
 pull that moves HEAD without altering the working tree).
 
-After the re-stamp the service emits a 0-file
+When the take has landed the listener logs `vcs.head.moved@3 { stream,
+from, to, snapshot? }` (`snapshot` only when it re-stamped one), once per
+move. After the re-stamp the service emits a 0-file
 `FileSnapshotsBatchCreated` event so renderer subscribers (Local
 History dashboard, change analysis) refetch and pick up the new
 `revision`.
