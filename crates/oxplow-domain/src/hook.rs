@@ -123,6 +123,24 @@ pub struct TurnRun {
     pub context_tokens: Option<i64>,
     /// The model's context window, in tokens.
     pub context_window: Option<i64>,
+    /// The work the agent had started that was still running when the
+    /// turn ended (Claude Code's Stop `background_tasks`); `None` when the
+    /// harness says nothing, empty when it says none.
+    pub left_running: Option<Vec<RunningWork>>,
+}
+
+/// A job or subagent a turn left running, as its harness reported it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+pub struct RunningWork {
+    /// The harness's id for it: the one its report back names (Claude's
+    /// task id, a subagent's id).
+    pub id: String,
+    /// What it is, in the harness's word (`subagent`, `shell`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What it is doing, as the harness described it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// What opened a turn (`agent_turn.source`), as its harness read the
@@ -198,8 +216,30 @@ pub enum TurnOutcome {
     Completed,
     /// The person interrupted it.
     Interrupted,
+    /// Its harness session ended with the turn still open (an exit sends
+    /// no Stop).
+    SessionEnded,
+    /// A new harness process started with the turn still open: the one
+    /// that ran it is gone.
+    SessionRestarted,
+    /// oxplow closed the agent session with the turn still open.
+    SessionClosed,
     /// oxplow restarted with the turn still open; recovery closed it.
     Restart,
+}
+
+impl TurnOutcome {
+    /// Its stored spelling (`agent_turn.outcome`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TurnOutcome::Completed => "completed",
+            TurnOutcome::Interrupted => "interrupted",
+            TurnOutcome::SessionEnded => "session_ended",
+            TurnOutcome::SessionRestarted => "session_restarted",
+            TurnOutcome::SessionClosed => "session_closed",
+            TurnOutcome::Restart => "restart",
+        }
+    }
 }
 
 #[cfg(test)]

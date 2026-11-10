@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV3, AgentTurnStarted, AgentTurnStartedV3,
+    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV4, AgentTurnStarted, AgentTurnStartedV3,
     EventType,
 };
 use oxplow_domain::events::Anchors;
@@ -408,6 +408,8 @@ pub struct TurnEnd<'a> {
     pub context_tokens: Option<i64>,
     /// The size of that context's window, when its harness said.
     pub context_window: Option<i64>,
+    /// The work still running when it ended, when its harness said.
+    pub left_running: Option<&'a [oxplow_domain::hook::RunningWork]>,
 }
 
 impl TurnEnd<'_> {
@@ -422,6 +424,7 @@ impl TurnEnd<'_> {
             effort: None,
             context_tokens: None,
             context_window: None,
+            left_running: None,
         }
     }
 }
@@ -435,10 +438,16 @@ pub fn close_turn_tx(
     id: AgentTurnId,
     end: &TurnEnd<'_>,
 ) -> Result<Option<ThreadId>, DomainError> {
+    let left_running = end
+        .left_running
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| DomainError::Storage(e.to_string()))?;
     let closed: Option<(i64, Option<i64>)> = conn
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
-                    model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7
+                    model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7,
+                    outcome = ?8, left_running = ?9
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
             params![
@@ -448,7 +457,9 @@ pub fn close_turn_tx(
                 end.model,
                 end.effort,
                 end.context_tokens,
-                end.context_window
+                end.context_window,
+                end.outcome.as_str(),
+                left_running
             ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -459,12 +470,13 @@ pub fn close_turn_tx(
     };
     let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
     let env = ev
-        .typed::<AgentTurnEnded>(&AgentTurnEndedV3 {
+        .typed::<AgentTurnEnded>(&AgentTurnEndedV4 {
             turn: id.to_string(),
             thread: thread.to_string(),
             outcome: end.outcome,
             transcript_path: end.transcript_path.map(str::to_string),
             usage: end.usage.clone(),
+            left_running: end.left_running.map(<[_]>::to_vec),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),
@@ -590,7 +602,7 @@ pub fn log_status_tx(
 }
 
 /// Close agent session `session`'s slot (`reason`), in the caller's
-/// transaction: its open turns end interrupted ("session closed") and it
+/// transaction: its open turns end `session_closed` and it
 /// logs `stopped`. Its process is the caller's to stop once this commits.
 /// `false` when it was already closed (nothing done).
 pub fn close_session_tx(
@@ -606,10 +618,7 @@ pub fn close_session_tx(
     if !crate::agent_session_store::close_tx(conn, session, reason, now)? {
         return Ok(false);
     }
-    let end = TurnEnd {
-        answer: Some("session closed"),
-        ..TurnEnd::new(now, TurnOutcome::Interrupted)
-    };
+    let end = TurnEnd::new(now, TurnOutcome::SessionClosed);
     let mut closed = None;
     for id in open_turn_ids_in_tx(conn, row.thread_id, Some(session))? {
         if close_turn_tx(conn, ev, id, &end)?.is_some() && closed.is_none() {

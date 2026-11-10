@@ -1044,11 +1044,12 @@ pub struct TurnUsage {
     pub model: Option<String>,
 }
 
-/// `agent.turn.ended@3`: a turn closed, with what the token-usage reactor
-/// needs to count it — the transcript to read, or the counts themselves.
+/// `agent.turn.ended@4`: a turn closed — how (`outcome`), what it left
+/// running, and what the token-usage reactor needs to count it (the
+/// transcript to read, or the counts themselves).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnEndedV3 {
+pub struct AgentTurnEndedV4 {
     /// The turn (`trn12`).
     pub turn: String,
     /// The thread (`thr3`).
@@ -1060,13 +1061,17 @@ pub struct AgentTurnEndedV3 {
     /// Counts reported with the turn (ACP).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
+    /// The jobs and subagents still running when it ended, when the
+    /// harness said.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_running: Option<Vec<crate::hook::RunningWork>>,
 }
 
 pub struct AgentTurnEnded;
 impl EventType for AgentTurnEnded {
     const TYPE: &'static str = "agent.turn.ended";
-    const V: u32 = 3;
-    type Payload = AgentTurnEndedV3;
+    const V: u32 = 4;
+    type Payload = AgentTurnEndedV4;
 }
 
 /// Where a large or sensitive body lives: `event_content.hash` (xxh3-128
@@ -2406,7 +2411,7 @@ mod tests {
                 ("agent.tokens.reported", 2),
                 ("agent.tool.finished", 3),
                 ("agent.tool.requested", 3),
-                ("agent.turn.ended", 3),
+                ("agent.turn.ended", 4),
                 ("agent.turn.started", 3),
                 ("capability.switched", 1),
                 ("code.diagnostics.changed", 2),
@@ -2468,7 +2473,7 @@ mod tests {
             ]
         );
         assert_eq!(r.latest("task.created"), Some(2));
-        assert_eq!(r.latest("agent.turn.ended"), Some(3));
+        assert_eq!(r.latest("agent.turn.ended"), Some(4));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
 

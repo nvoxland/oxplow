@@ -1816,6 +1816,86 @@ mod tests {
         assert_eq!((count(&db).await, count(&copy).await), (1, 2));
     }
 
+    /// V4 gives each ended turn the outcome its `agent.turn.ended` logged,
+    /// tells the three ends logged `interrupted` apart by the text oxplow
+    /// wrote into the answer, clears that text, and rewrites the events to
+    /// @4 with the turn's outcome.
+    #[test]
+    fn v4_gives_old_turns_their_outcome_and_clears_made_up_answers() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(3))
+            .run(&mut conn)
+            .unwrap();
+        // The turns' thread is beside the point here.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        let ended = [
+            (1, "done", "completed"),
+            (2, "interrupted", "interrupted"),
+            (3, "session ended", "interrupted"),
+            (4, "session restarted", "interrupted"),
+            (5, "session closed", "interrupted"),
+            (6, "interrupted_by_restart", "restart"),
+        ];
+        for (id, answer, outcome) in ended {
+            conn.execute(
+                "INSERT INTO agent_turn (id, thread_id, prompt, answer, started_at, ended_at)
+                 VALUES (?1, 1, 'p', ?2, 'a', 'b')",
+                rusqlite::params![id, answer],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO event_log (id, type, v, at, source, turn_id, subject, payload)
+                 VALUES (?1, 'agent.turn.ended', 3, 'b', 'system:test', ?2, '[]', ?3)",
+                rusqlite::params![
+                    format!("e{id}"),
+                    id,
+                    serde_json::json!({"turn": format!("trn{id}"), "thread": "thr1", "outcome": outcome})
+                        .to_string()
+                ],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (7, 1, 'p', 'a')",
+            [],
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let rows: Vec<(i64, Option<String>, Option<String>)> = conn
+            .prepare("SELECT id, outcome, answer FROM agent_turn ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let outcome = |o: &str| Some(o.to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (1, outcome("completed"), Some("done".into())),
+                (2, outcome("interrupted"), None),
+                (3, outcome("session_ended"), None),
+                (4, outcome("session_restarted"), None),
+                (5, outcome("session_closed"), None),
+                (6, outcome("restart"), None),
+                (7, None, None),
+            ]
+        );
+        let events: Vec<(i64, String)> = conn
+            .prepare(
+                "SELECT v, json_extract(payload, '$.outcome') FROM event_log
+                  WHERE type = 'agent.turn.ended' ORDER BY turn_id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(events[2], (4, "session_ended".to_string()));
+        assert!(events.iter().all(|(v, _)| *v == 4));
+    }
+
     /// A database restored from the migrated template is exactly what
     /// migrating from scratch makes: same tables, views, indexes and
     /// triggers, same migration history.

@@ -1,7 +1,7 @@
 {
   "turn": "trn12",
   "thread": "thr3",
-  "outcome": "completed",
+  "outcome": "session_ended",
   "transcript_path": "/Users/me/.claude/projects/p/0f3c9a2e.jsonl",
   "usage": {
     "input": 1200,
@@ -9,5 +9,8 @@
     "cache_write": 0,
     "cache_read": 900,
     "model": "claude-fable-5-1"
-  }
+  },
+  "left_running": [
+    { "id": "a105c4271bd72a0cb", "kind": "subagent", "description": "Map desktop" }
+  ]
 }

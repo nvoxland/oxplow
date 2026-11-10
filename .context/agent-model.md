@@ -1187,8 +1187,18 @@ more than the stream would even when it's sometimes wrong.
   output go to `event_content` by hash. The harness's `tool_use_id` is
   the dedupe key, so a re-posted hook logs once.
 - **Stop / Interrupt** close the session's open turns
-  (`agent.turn.ended@3`, with Claude's `transcript_path`), then the
-  turn-end snapshot ("Snapshot tracking"). A Stop also sets the turn's
+  (`agent.turn.ended@4`, with Claude's `transcript_path`), then the
+  turn-end snapshot ("Snapshot tracking"). **A turn stores how it ended**
+  (`agent_turn.outcome`, the event's `outcome`): `completed` (a Stop),
+  `interrupted` (the person), `session_ended` (its harness session ended
+  with it open), `session_restarted` (a new harness process started with
+  it open), `session_closed` (oxplow closed the agent session), `restart`
+  (oxplow's recovery). `answer` is only ever the agent's own words: NULL
+  when it said nothing. A Stop also stores **what the turn left running**
+  (`agent_turn.left_running`, `TurnRun.left_running`: Claude Code's Stop
+  `background_tasks`, the running ones, `{ id, kind, description }` with
+  the id its report back names; `[]` for none, NULL when the harness says
+  nothing). A Stop also sets the turn's
   `model` and `effort` (`agent_turn`) from `HookEnvelope.turn_run`: the
   route asks the bearer's harness (`AgentHarness::turn_run(body)`: Claude's
   `effort.level` and the newest non-synthetic `message.model` among the
@@ -1218,12 +1228,12 @@ posts under its child's id. Claude Code drops HTTP hooks for
 `SessionStart` ("HTTP hooks are not supported for SessionStart" in
 `claude --debug-file`), so its id is adopted from the first prompt. **A
 `SessionStart` is a process start:** every one except `source: "compact"`
-closes the turns the previous process left open as interrupted, logs
+closes the turns the previous process left open (`session_restarted`), logs
 `agent.session.started` again (`resumed: true` for the resume id) and sets
 Idle, so a turn that died without a Stop reads idle after a restart, not
 stalled. The ACP client posts the same `SessionStart`. **`SessionEnd`**
-closes the turns that session left open as interrupted ("session ended";
-an exit mid-turn sends no Stop), status Stopped, and leaves other
+closes the turns that session left open (`session_ended`; an exit
+mid-turn sends no Stop), status Stopped, and leaves other
 sessions' turns alone; it logs `agent.session.ended`, and `reason: clear`
 of the resume id blanks it (`/clear` starts a fresh session with no HTTP
 hook). A close passes the body's `transcript_path` so an interrupted
@@ -1713,7 +1723,7 @@ documented hooks, not recorded).
   cancel. The terminal pane calls `onUserInterrupt` on a plain Escape and
   the session page records a synthetic `Interrupt` for the session
   (`recordUserInterrupt`, the `ingest_hook_event` RPC): the open turn
-  closes as interrupted and the status is Stopped, which clears open
+  closes `interrupted` and the status is Stopped, which clears open
   tools and subagents. Only while a turn is open: an Escape that closes a
   menu with no turn running changes nothing, so a thread waiting on the
   person still is. One during a turn can't be told from a cancel; the
@@ -1772,9 +1782,9 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
   2000, min 100; an agent may set it). A slower take is never aborted: it
   finishes in the background and its op and `snapshot.taken` record
   `over_budget`. The clock starts before the per-stream take lock.
-- **Turn events.** `agent.turn.started@2` / `agent.turn.ended@3 {
-  outcome: completed | interrupted | restart }`, in the same transaction
-  as the `agent_turn` row.
+- **Turn events.** `agent.turn.started@3 { source, cause_turn? }` /
+  `agent.turn.ended@4 { outcome, left_running? }` (outcome as above), in
+  the same transaction as the `agent_turn` row.
 - **Quiet period.** The worktree's snapshots do not depend on turns: a
   watcher change arms a deadline (`DEFAULT_QUIET_PERIOD`, 3 s, debounced);
   when it fires with paths dirty, a `quiet` take records them, whoever
@@ -1849,7 +1859,7 @@ app-server client"). Details: [metrics.md](./metrics.md)
 
 **Per-turn rows (the transcript).** For a harness with `transcript`
 (Claude Code), the `token_usage.turns` reactor (`TurnTokensConsumer`,
-`crates/oxplow-app/src/token_usage.rs`) reacts to `agent.turn.ended@3`
+`crates/oxplow-app/src/token_usage.rs`) reacts to `agent.turn.ended@4`
 with `TokenUsageService::on_stop`; nothing is parsed in the hook. It reads
 the per-session cursor (`agent_token_cursor`), takes only the complete
 lines past it, and the harness's `turns(tail)` splits them into one
