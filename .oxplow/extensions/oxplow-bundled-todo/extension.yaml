@@ -350,8 +350,8 @@ advisories:
       WHERE hint <> 'oxplow/hint-never-fires'
       GROUP BY hint
       HAVING sum(evaluated) >= 100 AND sum(fired) = 0
-  # Two open efforts on different threads that changed the same file within
-  # the window: duplicate or colliding work, shown to the person once per
+  # Requests on different threads, running or lately finished, that changed
+  # the same file within the window: duplicate or colliding work, shown to the person once per
   # pair of threads. Either thread's turn end can raise it; the Alert that
   # exists already (its text opens with the pair) silences the other. It
   # never refuses anything: an item stays with its thread.
@@ -361,11 +361,18 @@ advisories:
     once_per: row
     query: |
       WITH recent AS (
-        SELECT c.thread_id, c.path
-        FROM v_tool_call c JOIN v_effort e ON e.id = c.effort_id AND e.ended_at IS NULL
-        WHERE c.kind = 'edit' AND c.path IS NOT NULL
-          AND julianday(c.at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
-        GROUP BY c.thread_id, c.path
+        -- The files a thread's turns changed lately, in requests running or
+        -- recently finished; a file two concurrent turns could each have
+        -- changed (`shared`) is no evidence.
+        SELECT t.thread_id, f.path
+        FROM v_turn_file f
+        JOIN v_agent_turn t ON t.uri = f.turn
+        JOIN v_request r ON r.uri = t.request
+        WHERE f.confidence <> 'shared'
+          AND julianday(f.last_changed_at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
+          AND (r.state <> 'finished'
+               OR julianday(r.last_activity_at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0)
+        GROUP BY t.thread_id, f.path
       ), shared AS (
         SELECT min(a.thread_id, b.thread_id) AS lo, max(a.thread_id, b.thread_id) AS hi, a.path
         FROM recent a JOIN recent b ON b.path = a.path AND b.thread_id <> a.thread_id
@@ -393,17 +400,24 @@ advisories:
     once_per: thread
     query: |
       WITH recent AS (
-        SELECT c.thread_id, c.path
-        FROM v_tool_call c JOIN v_effort e ON e.id = c.effort_id AND e.ended_at IS NULL
-        WHERE c.kind = 'edit' AND c.path IS NOT NULL
-          AND julianday(c.at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
-        GROUP BY c.thread_id, c.path
+        -- The files a thread's turns changed lately, in requests running or
+        -- recently finished; a file two concurrent turns could each have
+        -- changed (`shared`) is no evidence.
+        SELECT t.thread_id, f.path
+        FROM v_turn_file f
+        JOIN v_agent_turn t ON t.uri = f.turn
+        JOIN v_request r ON r.uri = t.request
+        WHERE f.confidence <> 'shared'
+          AND julianday(f.last_changed_at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0
+          AND (r.state <> 'finished'
+               OR julianday(r.last_activity_at) >= julianday('now') - config('/sharedFiles/windowMinutes') / 1440.0)
+        GROUP BY t.thread_id, f.path
       ), shared AS (
         SELECT b.thread_id AS other, a.path
         FROM recent a JOIN recent b ON b.path = a.path AND b.thread_id <> a.thread_id
         WHERE a.thread_id = :thread_id
       )
-      SELECT 'Another thread’s open effort (“' || (SELECT title FROM v_thread WHERE id = other)
+      SELECT 'Another thread’s request (“' || (SELECT title FROM v_thread WHERE id = other)
              || '”) also changed ' || group_concat(path, ', ')
              || '. Read the handoffs to or from that thread (v_handoff, thread_id = ' || other
              || ') before duplicating its work. '

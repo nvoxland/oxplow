@@ -224,18 +224,22 @@ gates"). It is made visible, all of it bundled over existing datasets
 - The **Shared work** page (`shared-work` in the launcher under Work;
   `thread-shared-work` on the thread page, slot `thread.plan.header`;
   `item-shared-work` on a task, slot `oxplow/task-detail.sections`): items
-  with open efforts on two threads, files changed by two threads' efforts
-  (open, or closed in the last day, from `v_effort_file`), and epics whose
-  open children sit on different threads.
+  that requests on two threads worked on (`v_request_task`; requests
+  running, or finished in the last day), files two threads' turns changed
+  (`v_turn_file` over those requests' turns, only a `claimed` or `sole`
+  file: one two concurrent turns could each have changed is no evidence),
+  and epics whose open children sit on different threads. No query names an
+  effort.
 - The advisory **`shared-files`** (turn end, to the person, once per pair
-  of threads): two open efforts on different threads edited the same file
-  (`v_tool_call`, kind `edit`) within `sharedFiles.windowMinutes`
+  of threads): requests on different threads, running or lately finished,
+  changed the same file (`v_turn_file` of their turns, `claimed` or
+  `sole`) within `sharedFiles.windowMinutes`
   (default 60). It names both threads and the files. Either thread's turn
   end can raise it; an Alert already raised for the pair (its text opens
   with the pair, `v_agent_nudge`) silences the other, so a long overlap
   alerts once.
 - The advisory **`shared-files-agent`** (turn end, to the agent, once per
-  thread): another thread's open effort also changed the files, with a
+  thread): another thread's request also changed the files, with a
   pointer to the handoffs to or
   from that thread (`v_handoff`; `oxplow.handoff.send` hands the overlap over).
 

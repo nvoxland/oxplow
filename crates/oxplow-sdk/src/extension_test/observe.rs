@@ -1228,9 +1228,21 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             .get("command")
             .and_then(Value::as_str)
             .ok_or("`turn.during` steps are `{ command, input?, as? }`")?;
+        // An agent's command in the turn is that turn's agent's: its thread
+        // and session, not the fixture's first.
+        let actor = match step_actor(step)? {
+            oxplow_domain::commands::Actor::Agent { stream_id, .. } => {
+                oxplow_domain::commands::Actor::Agent {
+                    session_id: session,
+                    thread_id: Some(thread),
+                    stream_id,
+                }
+            }
+            other => other,
+        };
         svc.commands
             .run(
-                &step_actor(step)?,
+                &actor,
                 command,
                 step.get("input").cloned().unwrap_or_else(|| json!({})),
                 step.get("confirmed")

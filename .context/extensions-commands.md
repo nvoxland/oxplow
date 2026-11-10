@@ -382,7 +382,9 @@ advisories:
   tracker: the thread's latest request changed files and the thread has no
   task in progress; the `track-work` skill says what to do). The earlier
   outcome hints (`large-uncommitted`, `landed-in-progress`, the two
-  shared-files hints, `metric-deltas`, `threshold-crossed`) are in the
+  shared-files hints (requests on different threads changed one file
+  within `sharedFiles.windowMinutes`; see work-tracking.md "Cross-thread
+  ownership"), `metric-deltas`, `threshold-crossed`) are in the
   parked `oxplow-bundled-todo` project extension (see
   [metrics.md](./metrics.md) for the metric ones). **Bundled advisories set no coding
   requirements** (decided 2026-10-07): they say what oxplow observed, never
