@@ -78,6 +78,12 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
         command,
         detail,
         call_id: Some(t.id.clone()).filter(|id| !id.is_empty()),
+        // How long it ran, when the agent's output says (Codex's `durationMs`).
+        duration_ms: t.raw_output.as_ref().and_then(|o| {
+            ["duration_ms", "durationMs"]
+                .iter()
+                .find_map(|k| o.get(*k).and_then(|x| x.as_u64()))
+        }),
         ok,
         exit_code,
         question: None,

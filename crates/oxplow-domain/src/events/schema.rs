@@ -1289,9 +1289,12 @@ pub struct SubagentRef {
 /// as is (no subagent).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentToolRequestedV3 {
+pub struct AgentToolRequestedV4 {
     pub tool: String,
     pub kind: crate::agent::tool::ToolKind,
+    /// The harness's id for the call, the same on its finish.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
     /// The files it names, repo-relative inside the worktree.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
@@ -1311,18 +1314,23 @@ pub struct AgentToolRequestedV3 {
 pub struct AgentToolRequested;
 impl EventType for AgentToolRequested {
     const TYPE: &'static str = "agent.tool.requested";
-    const V: u32 = 3;
-    type Payload = AgentToolRequestedV3;
+    const V: u32 = 4;
+    type Payload = AgentToolRequestedV4;
 }
 
-/// `agent.tool.finished@3`: a tool call returned (PostToolUse). As
-/// `agent.tool.finished@2`, plus the subagent that made the call, when it
-/// wasn't the session's own agent. v2 upcasts as is (no subagent).
+/// `agent.tool.finished@4`: a tool call returned (PostToolUse), caused by
+/// its `agent.tool.requested` when one was logged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentToolFinishedV3 {
+pub struct AgentToolFinishedV4 {
     pub tool: String,
     pub kind: crate::agent::tool::ToolKind,
+    /// The harness's id for the call, the same on its request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<String>,
+    /// How long it ran, in milliseconds, as the harness timed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1349,8 +1357,8 @@ pub struct AgentToolFinishedV3 {
 pub struct AgentToolFinished;
 impl EventType for AgentToolFinished {
     const TYPE: &'static str = "agent.tool.finished";
-    const V: u32 = 3;
-    type Payload = AgentToolFinishedV3;
+    const V: u32 = 4;
+    type Payload = AgentToolFinishedV4;
 }
 
 /// `agent.subagent.started@2`: a subagent of the session started.
@@ -2327,8 +2335,8 @@ mod tests {
                 ("agent.subagent.finished", 2),
                 ("agent.subagent.started", 2),
                 ("agent.tokens.reported", 2),
-                ("agent.tool.finished", 3),
-                ("agent.tool.requested", 3),
+                ("agent.tool.finished", 4),
+                ("agent.tool.requested", 4),
                 ("agent.turn.ended", 4),
                 ("agent.turn.started", 3),
                 ("capability.switched", 1),

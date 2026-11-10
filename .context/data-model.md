@@ -1641,9 +1641,14 @@ refuses one; the sweep marks the pending dead letters of expired events
 as "(details expired)" from the field, not from an empty payload.
 
 **Projections of agent events (V102).** `agent_tool_call` gained `turn_id`
-and `event_id` (`UNIQUE WHERE NOT NULL`): a row is the projection of one
-`agent.tool.finished`, written with `tool_call_store::record_tx` (`ON
-CONFLICT DO NOTHING` — a redelivered event writes nothing). Every view over these (`v_tool_call`,
+and `event_id` (`UNIQUE WHERE NOT NULL`). Since V6 a row is the
+projection of one call: `tool_call_store::record_request_tx` opens it at
+the `agent.tool.requested` (`request_event_id`, unique; `state` `running` or
+`denied`), `record_finish_tx` closes it at the `agent.tool.finished` its
+request caused (else writes one with no start), and `abandon_running_tx`
+ends the turn's running calls at `agent.turn.ended`; a redelivered event
+writes nothing new. V6 gave the rows already recorded their request (the
+finish's cause), `started_at` and `duration_ms`. Every view over these (`v_tool_call`,
 `v_token_usage`, `v_agent_nudge`) exposes
 `turn_id`.
 
@@ -1684,7 +1689,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 | Consumer | Kind | On | Does | Registered |
 |---|---|---|---|---|
 | `page_ref.task` | sync | `task.created` / `edited` | re-projects a task's body-mention edges | boot |
-| `tool_call.project` | sync | `agent.tool.finished` | the `agent_tool_call` row (one per event) | boot |
+| `tool_call.project` | sync | `agent.tool.requested`, `agent.tool.finished`, `agent.turn.ended` | the `agent_tool_call` row (one per call: opened at the request, closed at the finish, abandoned at its turn's end; V6) | boot |
 | `wiki.attribution` | sync | `agent.tool.finished` | marks an edited, indexed wiki page touched by the thread | boot |
 | `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
 | `metrics.entity_states` | async | `task.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |

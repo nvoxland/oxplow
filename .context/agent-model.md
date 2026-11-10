@@ -1077,7 +1077,7 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   derivation (`subagent`, `ask`, `plan`), effort file claims (`edit`), test-run collection (`shell`, its `command`
   and `exit_code`), a turn's writing calls (`thread.checkpoint`, by
   `v_tool_call.kind`), the bundled struggle model, `v_context_read`, and
-  `agent.tool.requested@3` / `agent.tool.finished@3`, which carry `tool`,
+  `agent.tool.requested@4` / `agent.tool.finished@4`, which carry `tool`,
   `kind` and `paths`.
 
 ### Caller identity
@@ -1177,11 +1177,21 @@ more than the stream would even when it's sometimes wrong.
   subagent, a peer's message logs `agent.peer_message.received`. One of
   these arriving inside an open turn opens nothing. Pinned by
   `a_turn_records_what_opened_it_and_the_turn_it_goes_on_with`.
-- **PreToolUse** → `agent.tool.requested` with the policy's `decision`;
-  **PostToolUse** → `agent.tool.finished`. Paths, detail, `ok` and
-  `exit_code` are computed here against the thread's worktree; input and
-  output go to `event_content` by hash. The harness's `tool_use_id` is
-  the dedupe key, so a re-posted hook logs once.
+- **PreToolUse** → `agent.tool.requested@4` with the policy's `decision`;
+  **PostToolUse** → `agent.tool.finished@4`, caused by its request. Both
+  carry the harness's call id (`call`), the finish the harness's own
+  timing (`duration_ms`, Claude Code's PostToolUse field). Paths, detail,
+  `ok` and `exit_code` are computed here against the thread's worktree;
+  input and output go to `event_content` by hash. The harness's
+  `tool_use_id` is the dedupe key, so a re-posted hook logs once. **A
+  call's row follows its whole life** (`tool_call.project`): it opens at
+  the request, `running` (or `denied`, ended at once: it never ran),
+  closes `finished` at the finish its request caused (`duration_ms`: the
+  harness's timing, else since the request), and is `abandoned` when its
+  turn's `agent.turn.ended` comes with it still running. A finish with no
+  request seen (a harness that reports only the finish) still gets a row,
+  with no start. Readers that mean "a tool that ran" leave out `denied`
+  (`thread.checkpoint`'s `writing_tools`).
 - **Stop / Interrupt** close the session's open turns
   (`agent.turn.ended@4`, with Claude's `transcript_path`), then the
   turn-end snapshot ("Snapshot tracking"). **A turn stores how it ended**
@@ -1345,7 +1355,7 @@ keeping an `awaiting_user` the turn set — and acks `{}`. Without
 opencode child session, a Codex collab agent) is not a session: it has
 no bearer and no process oxplow knows. It is who made a call inside its
 parent's session: `ToolUse.subagent { id, kind? }`, on
-`agent.tool.requested@3` / `agent.tool.finished@3` and
+`agent.tool.requested@4` / `agent.tool.finished@4` and
 `v_tool_call.subagent_id`. The harness fills it when it can (Claude's
 `agent_id` / `agent_type`, `shared::subagent_of`); else the ingest
 **brackets** it: a call landing while the session's open turn has a

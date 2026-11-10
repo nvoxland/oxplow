@@ -112,6 +112,9 @@ pub struct ToolUse {
     pub detail: Option<String>,
     /// The harness's id for this call, the same on its start and finish.
     pub call_id: Option<String>,
+    /// How long it ran, in milliseconds, as the harness timed it (Claude
+    /// Code's PostToolUse `duration_ms`), on a finished call.
+    pub duration_ms: Option<u64>,
     /// Whether it succeeded, when the harness said (a finished call).
     pub ok: Option<bool>,
     /// A shell call's exit code, when the harness said.

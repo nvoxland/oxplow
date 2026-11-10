@@ -1,6 +1,9 @@
-//! Persisted agent tool calls (`agent_tool_call`), recorded from the
-//! PostToolUse hook. Read through `v_tool_call` and `v_context_read`; the
-//! bundled review policy derives its struggle signal from them. See `.context/semantic-layer.md`.
+//! Persisted agent tool calls (`agent_tool_call`), a projection of the
+//! tool events: a call's row opens at its `agent.tool.requested` (running,
+//! or denied), closes at its `agent.tool.finished`, and is abandoned when
+//! its turn ends with it open. Read through `v_tool_call` and
+//! `v_context_read`; the bundled review policy derives its struggle signal
+//! from them. See `.context/semantic-layer.md`.
 
 use oxplow_domain::DomainError;
 
@@ -29,6 +32,10 @@ pub struct NewToolCall {
     /// The subagent it ran inside, when one is known.
     pub subagent_id: Option<String>,
     pub subagent_kind: Option<String>,
+    /// The harness's id for the call.
+    pub call_id: Option<String>,
+    /// How long it ran, as the harness timed it (a finish).
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -77,6 +84,137 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
         )
         .map_err(crate::database::map_sql_err)?;
     Ok(n == 1)
+}
+
+/// A call was requested (`request_event`): its row opens, `running`, or
+/// `denied` (and ended) when the policy refused it. Nothing when the row
+/// already exists (a redelivered event).
+pub fn record_request_tx(
+    conn: &rusqlite::Connection,
+    call: &NewToolCall,
+    request_event: &str,
+    denied: bool,
+) -> Result<bool, DomainError> {
+    let at = crate::database::ts_to_string(call.at.unwrap_or_else(oxplow_domain::Timestamp::now));
+    let n = conn
+        .execute(
+            "INSERT INTO agent_tool_call
+               (thread_id, effort_id, turn_id, tool, path, detail, at, kind, agent_session_id,
+                subagent_id, subagent_kind, call_id, started_at, ended_at, state, request_event_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?7,
+                     CASE WHEN ?13 THEN ?7 END, CASE WHEN ?13 THEN 'denied' ELSE 'running' END, ?14)
+             ON CONFLICT (request_event_id) WHERE request_event_id IS NOT NULL DO NOTHING",
+            rusqlite::params![
+                call.thread_id,
+                call.effort_id,
+                call.turn_id,
+                call.tool,
+                call.path,
+                call.detail,
+                at,
+                call.kind,
+                call.agent_session_id,
+                call.subagent_id,
+                call.subagent_kind,
+                call.call_id,
+                denied,
+                request_event,
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
+}
+
+/// A call finished (`call.event_id`, the finish event): the row its
+/// `request_event` opened closes, `finished`, with what the finish
+/// reported and how long it ran (the harness's timing, else since its
+/// request). With no such row, one is written with no start.
+pub fn record_finish_tx(
+    conn: &rusqlite::Connection,
+    call: &NewToolCall,
+    request_event: Option<&str>,
+) -> Result<bool, DomainError> {
+    let at = crate::database::ts_to_string(call.at.unwrap_or_else(oxplow_domain::Timestamp::now));
+    if let Some(request) = request_event {
+        let n = conn
+            .execute(
+                "UPDATE agent_tool_call
+                    SET state = 'finished', event_id = ?2, at = ?3, ended_at = ?3, ok = ?4,
+                        tool = ?5, kind = ?6, path = ?7, detail = ?8,
+                        call_id = coalesce(?9, call_id),
+                        subagent_id = coalesce(?10, subagent_id),
+                        subagent_kind = coalesce(?11, subagent_kind),
+                        duration_ms = coalesce(?12, CAST(round((julianday(?3) - julianday(started_at))
+                                                               * 86400000) AS INTEGER))
+                  WHERE request_event_id = ?1",
+                rusqlite::params![
+                    request,
+                    call.event_id,
+                    at,
+                    call.ok.map(i64::from),
+                    call.tool,
+                    call.kind,
+                    call.path,
+                    call.detail,
+                    call.call_id,
+                    call.subagent_id,
+                    call.subagent_kind,
+                    call.duration_ms.map(|d| d as i64),
+                ],
+            )
+            .map_err(crate::database::map_sql_err)?;
+        if n > 0 {
+            return Ok(true);
+        }
+    }
+    let n = conn
+        .execute(
+            "INSERT INTO agent_tool_call
+               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind,
+                agent_session_id, subagent_id, subagent_kind, call_id, ended_at, duration_ms,
+                state, request_event_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?8, ?15,
+                     'finished', ?16)
+             ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
+            rusqlite::params![
+                call.thread_id,
+                call.effort_id,
+                call.turn_id,
+                call.tool,
+                call.path,
+                call.detail,
+                call.ok.map(i64::from),
+                at,
+                call.event_id,
+                call.kind,
+                call.agent_session_id,
+                call.subagent_id,
+                call.subagent_kind,
+                call.call_id,
+                call.duration_ms.map(|d| d as i64),
+                request_event,
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
+}
+
+/// Turn `turn` ended at `at` with calls still running: they are
+/// `abandoned`, ended then.
+pub fn abandon_running_tx(
+    conn: &rusqlite::Connection,
+    turn: i64,
+    at: oxplow_domain::Timestamp,
+) -> Result<usize, DomainError> {
+    let at = crate::database::ts_to_string(at);
+    conn.execute(
+        "UPDATE agent_tool_call
+            SET state = 'abandoned', ended_at = ?2,
+                duration_ms = CAST(round((julianday(?2) - julianday(started_at)) * 86400000) AS INTEGER)
+          WHERE turn_id = ?1 AND state = 'running'",
+        rusqlite::params![turn, at],
+    )
+    .map_err(crate::database::map_sql_err)
 }
 
 #[cfg(test)]

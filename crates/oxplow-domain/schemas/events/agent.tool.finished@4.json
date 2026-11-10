@@ -45,14 +45,6 @@
       ],
       "type": "object"
     },
-    "ToolDecision": {
-      "description": "What oxplow's agent policy said about a tool call.",
-      "enum": [
-        "allowed",
-        "denied"
-      ],
-      "type": "string"
-    },
     "ToolKind": {
       "description": "What a tool call does, as oxplow reads it.",
       "oneOf": [
@@ -111,15 +103,42 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`agent.tool.requested@3`: the agent asked to run a tool (PreToolUse),\nand whether the policy let it. As `agent.tool.requested@2`, plus the\nsubagent that asked, when it wasn't the session's own agent. v2 upcasts\nas is (no subagent).",
+  "description": "`agent.tool.finished@4`: a tool call returned (PostToolUse), caused by\nits `agent.tool.requested` when one was logged.",
   "properties": {
-    "decision": {
-      "$ref": "#/$defs/ToolDecision"
-    },
-    "detail": {
-      "description": "A short summary (a truncated command, a search pattern).",
+    "call": {
+      "description": "The harness's id for the call, the same on its request.",
       "type": [
         "string",
+        "null"
+      ]
+    },
+    "command": {
+      "description": "A shell call's command line, whole.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "detail": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "duration_ms": {
+      "description": "How long it ran, in milliseconds, as the harness timed it.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "exit_code": {
+      "description": "A shell command's exit code.",
+      "format": "int64",
+      "type": [
+        "integer",
         "null"
       ]
     },
@@ -136,18 +155,28 @@
     "kind": {
       "$ref": "#/$defs/ToolKind"
     },
+    "ok": {
+      "description": "Whether it succeeded, when the harness said.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "paths": {
-      "description": "The files it names, repo-relative inside the worktree.",
       "items": {
         "type": "string"
       },
       "type": "array"
-    },
-    "reason": {
-      "type": [
-        "string",
-        "null"
-      ]
     },
     "subagent": {
       "anyOf": [
@@ -158,7 +187,7 @@
           "type": "null"
         }
       ],
-      "description": "The subagent that asked, when it wasn't the session's own agent."
+      "description": "The subagent that made the call, when it wasn't the session's own\nagent."
     },
     "tool": {
       "type": "string"
@@ -166,9 +195,8 @@
   },
   "required": [
     "tool",
-    "kind",
-    "decision"
+    "kind"
   ],
-  "title": "AgentToolRequestedV3",
+  "title": "AgentToolFinishedV4",
   "type": "object"
 }
