@@ -9,6 +9,7 @@ use oxplow_domain::agent::harness::HarnessError;
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::Text;
 use oxplow_domain::agent::tool::{Plan, ToolKind, ToolUse};
+use oxplow_domain::hook::RunningWork;
 use oxplow_domain::HookKind;
 use serde_json::json;
 
@@ -208,6 +209,32 @@ pub fn subagent_of(body: &serde_json::Value) -> Option<oxplow_domain::agent::too
 /// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
 /// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
 /// Claude Code sends, and what opencode's bridge translates its calls to.
+/// What a Stop's turn left running: its `background_tasks`, the ones not
+/// reported as finished (`status` other than `running` is left out). `None`
+/// when the body has no list.
+pub fn left_running(body: &serde_json::Value) -> Option<Vec<RunningWork>> {
+    let tasks = body.get("background_tasks")?.as_array()?;
+    let text = |t: &serde_json::Value, key: &str| {
+        t.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(
+        tasks
+            .iter()
+            .filter(|t| text(t, "status").is_none_or(|s| s == "running"))
+            .filter_map(|t| {
+                Some(RunningWork {
+                    id: text(t, "id")?,
+                    kind: text(t, "type"),
+                    description: text(t, "description"),
+                })
+            })
+            .collect(),
+    )
+}
+
 pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
     let name = body.get("tool_name")?.as_str()?.to_string();
     let kind = match name.as_str() {

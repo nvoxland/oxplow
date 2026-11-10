@@ -1049,12 +1049,12 @@ pub struct TurnUsage {
     pub model: Option<String>,
 }
 
-/// `agent.turn.ended@4`: a turn closed — how (`outcome`), what it left
+/// `agent.turn.ended@5`: a turn closed — how (`outcome`), what it left
 /// running, and what the token-usage reactor needs to count it (the
 /// transcript to read, or the counts themselves).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AgentTurnEndedV4 {
+pub struct AgentTurnEndedV5 {
     /// The turn (`trn12`).
     pub turn: String,
     /// The thread (`thr3`).
@@ -1070,13 +1070,26 @@ pub struct AgentTurnEndedV4 {
     /// harness said.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub left_running: Option<Vec<crate::hook::RunningWork>>,
+    /// The harness's own words for the error that ended it (`outcome:
+    /// errored`): `name: message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 pub struct AgentTurnEnded;
 impl EventType for AgentTurnEnded {
     const TYPE: &'static str = "agent.turn.ended";
-    const V: u32 = 4;
-    type Payload = AgentTurnEndedV4;
+    const V: u32 = 5;
+    type Payload = AgentTurnEndedV5;
+    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
+        match from_v {
+            // v4 is v5 with no error.
+            4 => Ok(payload),
+            _ => Err(DomainError::Invalid(format!(
+                "agent.turn.ended@{from_v} has no upcast"
+            ))),
+        }
+    }
 }
 
 /// Where a large or sensitive body lives: `event_content.hash` (xxh3-128
@@ -2322,7 +2335,7 @@ mod tests {
                 ("agent.tokens.reported", 2),
                 ("agent.tool.finished", 4),
                 ("agent.tool.requested", 4),
-                ("agent.turn.ended", 4),
+                ("agent.turn.ended", 5),
                 ("agent.turn.started", 3),
                 ("capability.switched", 1),
                 ("code.diagnostics.changed", 2),
@@ -2380,7 +2393,7 @@ mod tests {
             ]
         );
         assert_eq!(r.latest("task.created"), Some(2));
-        assert_eq!(r.latest("agent.turn.ended"), Some(4));
+        assert_eq!(r.latest("agent.turn.ended"), Some(5));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
 

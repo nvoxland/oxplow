@@ -832,7 +832,13 @@ fn record_tx(
                     .get(LAST_ASSISTANT_MESSAGE)
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.trim().is_empty());
-                (said, TurnOutcome::Completed)
+                (
+                    said,
+                    env.turn_run
+                        .as_ref()
+                        .and_then(|r| r.outcome)
+                        .unwrap_or(TurnOutcome::Completed),
+                )
             } else {
                 (None, TurnOutcome::Interrupted)
             };
@@ -851,6 +857,7 @@ fn record_tx(
                     .turn_run
                     .as_ref()
                     .and_then(|r| r.left_running.as_deref()),
+                error: env.turn_run.as_ref().and_then(|r| r.error.as_deref()),
                 ..TurnEnd::new(now, outcome)
             };
             // What the turn left running are jobs: one no hook showed was
@@ -2700,7 +2707,7 @@ mod tests {
         assert_eq!(states, vec!["running", "idle"]);
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended.len(), 1);
-        assert_eq!(ended[0].envelope.v, 4);
+        assert_eq!(ended[0].envelope.v, 5);
         assert_eq!(ended[0].envelope.payload["transcript_path"], "/t.jsonl");
     }
 
@@ -2801,7 +2808,7 @@ mod tests {
             effort: Some("high".into()),
             context_tokens: Some(52_000),
             context_window: Some(200_000),
-            left_running: None,
+            ..TurnRun::default()
         };
         svc.ingest(envelope(HookKind::Stop, None, Some(run)))
             .await
@@ -2823,6 +2830,74 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(ran_on().await, (None, None, None, None));
+    }
+
+    /// A Stop whose harness says the turn was aborted or failed stores that
+    /// outcome (and the harness's words for an error), not `completed`; a
+    /// Stop that says nothing stays `completed`.
+    #[tokio::test]
+    async fn a_stop_stores_the_outcome_its_harness_reports() {
+        let (svc, tid) = fixture().await;
+        let envelope = |kind, prompt: Option<&str>, turn_run| HookEnvelope {
+            session_title: None,
+            turn_run,
+            kind,
+            thread_id: Some(tid),
+            stream_id: None,
+            agent_session_id: None,
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: prompt.map(Prompt::person),
+            decision: None,
+            tool: None,
+            subagent: None,
+            harness_turn: None,
+        };
+        let ended = || {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    c.query_row(
+                        "SELECT outcome, error FROM v_agent_turn ORDER BY id DESC LIMIT 1",
+                        [],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+                    )
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let cases = [
+            (None, ("completed", None)),
+            (
+                Some(TurnRun {
+                    outcome: Some(TurnOutcome::Interrupted),
+                    ..TurnRun::default()
+                }),
+                ("interrupted", None),
+            ),
+            (
+                Some(TurnRun {
+                    outcome: Some(TurnOutcome::Errored),
+                    error: Some("APIError: overloaded".into()),
+                    ..TurnRun::default()
+                }),
+                ("errored", Some("APIError: overloaded")),
+            ),
+        ];
+        for (run, (outcome, error)) in cases {
+            svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p"), None))
+                .await
+                .unwrap();
+            svc.ingest(envelope(HookKind::Stop, None, run))
+                .await
+                .unwrap();
+            assert_eq!(
+                ended().await,
+                (outcome.to_string(), error.map(str::to_string))
+            );
+        }
     }
 
     #[tokio::test]

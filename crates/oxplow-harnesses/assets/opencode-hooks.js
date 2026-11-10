@@ -26,6 +26,15 @@
 ///   event session.compacted
 ///                       -> PostCompact  (the session's context was
 ///                          summarized)
+///   event session.created (a child, `info.parentID`)
+///                       -> SubagentStart (the parent's, `agent_id` the child)
+///   event session.idle / session.error of a child
+///                       -> SubagentStop (carries the child's last message,
+///                          and the error when it ended in one)
+///   event session.error of a session -> kept for its Stop: an abort
+///                          (`MessageAbortedError`) or an error, and the
+///                          children still running at the Stop ride it as
+///                          `background_tasks`
 ///   event permission.asked / question.asked
 ///                       -> Notification (a permission prompt, naming it) /
 ///                          PreToolUse of an `AskUserQuestion` call (the
@@ -119,6 +128,41 @@ export const OxplowHooks = async ({ client }) => {
       : { session_id: sessionID };
   }
 
+  // Tool calls timed from their two hooks (opencode's carry no duration),
+  // the children a session started that have not stopped, and the last
+  // error each session reported (kept for its next Stop).
+  const toolStarts = new Map();
+  const children = new Map();
+  const errors = new Map();
+
+  // A child session ended: its parent's SubagentStop, once.
+  async function stopChild(childID, error) {
+    const child = children.get(childID);
+    if (!child) return;
+    children.delete(childID);
+    const last = await lastAssistant(childID);
+    await post("SubagentStop", {
+      session_id: child.parent,
+      agent_id: childID,
+      agent_type: "task",
+      last_assistant_message: textOf(last),
+      ...(error ? { error: errorOf(error) } : {}),
+    });
+  }
+
+  // The text parts of an assistant message, in order.
+  const textOf = (message) =>
+    (message?.parts || [])
+      .filter((p) => p && p.type === "text" && typeof p.text === "string")
+      .map((p) => p.text)
+      .join("\n");
+
+  // An error as oxplow reads it: its name, and its message when it has one.
+  const errorOf = (error) => ({
+    name: typeof error?.name === "string" ? error.name : "UnknownError",
+    ...(typeof error?.data?.message === "string" ? { message: error.data.message } : {}),
+  });
+
   // What oxplow asks the model to read with an answer, if anything.
   const contextOf = (res) => {
     const text = res?.hookSpecificOutput?.additionalContext;
@@ -152,7 +196,15 @@ export const OxplowHooks = async ({ client }) => {
         .filter((p) => p && p.type === "text" && typeof p.text === "string")
         .map((p) => p.text)
         .join("\n");
-      const context = contextOf(await post("UserPromptSubmit", { session_id: sessionID, prompt: text }));
+      errors.delete(sessionID);
+      const context = contextOf(
+        await post("UserPromptSubmit", {
+          session_id: sessionID,
+          prompt: text,
+          // The turn's id in opencode: the user message it opens.
+          message_id: output.message?.id ?? input.messageID,
+        }),
+      );
       if (context) {
         output.parts.push({
           id: partId(),
@@ -166,6 +218,7 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     "tool.execute.before": async (input, output) => {
+      if (input.callID) toolStarts.set(input.callID, Date.now());
       const res = await post("PreToolUse", {
         ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
@@ -184,11 +237,14 @@ export const OxplowHooks = async ({ client }) => {
       // Its bash tool reports the command's exit code as `metadata.exit`;
       // other tools have none, and send none.
       const exit = output?.metadata?.exit;
+      const startedAt = toolStarts.get(input.callID);
+      toolStarts.delete(input.callID);
       const res = await post("PostToolUse", {
         ...(await whose(input.sessionID)),
         tool_use_id: input.callID,
         tool_name: toolName(input.tool),
         tool_input: toolInput(input.args),
+        ...(startedAt !== undefined ? { duration_ms: Date.now() - startedAt } : {}),
         tool_response: {
           title: output?.title,
           output: output?.output,
@@ -237,24 +293,61 @@ export const OxplowHooks = async ({ client }) => {
         });
         return;
       }
+      if (event.type === "session.created") {
+        const info = props.info;
+        if (info?.id && info.parentID) {
+          parentCache.set(info.id, info.parentID);
+          children.set(info.id, { parent: info.parentID, description: info.title });
+          await post("SubagentStart", {
+            session_id: info.parentID,
+            agent_id: info.id,
+            agent_type: "task",
+          });
+        }
+        return;
+      }
+      if (event.type === "session.error") {
+        const sessionID = props.sessionID;
+        if (!sessionID) return;
+        if (children.has(sessionID)) {
+          await stopChild(sessionID, props.error);
+          return;
+        }
+        if (props.error) errors.set(sessionID, props.error);
+        return;
+      }
       if (event.type === "session.compacted") {
         await post("PostCompact", await whose(props.sessionID));
         return;
       }
       if (event.type !== "session.idle") return;
       const sessionID = props.sessionID;
-      if (await isChildSession(sessionID)) return;
+      if (await isChildSession(sessionID)) {
+        await stopChild(sessionID, null);
+        return;
+      }
       const last = await lastAssistant(sessionID);
-      // Its text parts, in order; the model, variant and tokens it ran on.
+      const error = errors.get(sessionID);
+      errors.delete(sessionID);
+      // The children still running: the work this turn left behind.
+      const running = [...children.entries()]
+        .filter(([, child]) => child.parent === sessionID)
+        .map(([id, child]) => ({
+          id,
+          type: "subagent",
+          status: "running",
+          ...(child.description ? { description: child.description } : {}),
+        }));
+      // Its text parts, in order; the model, variant and tokens it ran on;
+      // how it ended when it did not simply finish (an abort or an error).
       await post("Stop", {
         session_id: sessionID,
-        last_assistant_message: (last?.parts || [])
-          .filter((p) => p && p.type === "text" && typeof p.text === "string")
-          .map((p) => p.text)
-          .join("\n"),
+        last_assistant_message: textOf(last),
         model: last?.info?.modelID,
         variant: last?.info?.variant,
         tokens: last?.info?.tokens,
+        background_tasks: running,
+        ...(error ? { error: errorOf(error) } : {}),
       });
     },
   };

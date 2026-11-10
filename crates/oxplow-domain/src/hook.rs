@@ -127,6 +127,12 @@ pub struct TurnRun {
     /// turn ended (Claude Code's Stop `background_tasks`); `None` when the
     /// harness says nothing, empty when it says none.
     pub left_running: Option<Vec<RunningWork>>,
+    /// How the harness says the turn ended, when it is not simply finished
+    /// (an abort is `Interrupted`, a failure `Errored`); `None` reads as
+    /// `Completed`.
+    pub outcome: Option<TurnOutcome>,
+    /// The harness's own words for an error that ended it (`name: message`).
+    pub error: Option<String>,
 }
 
 /// A job or subagent a turn left running, as its harness reported it.
@@ -214,8 +220,11 @@ impl CauseBasis {
 pub enum TurnOutcome {
     /// The agent finished (Stop).
     Completed,
-    /// The person interrupted it.
+    /// The person interrupted it (an abort in the harness).
     Interrupted,
+    /// The harness ended it with an error (an API failure, a refused
+    /// request): `agent_turn.error` holds the harness's own words.
+    Errored,
     /// Its harness session ended with the turn still open (an exit sends
     /// no Stop).
     SessionEnded,
@@ -234,6 +243,7 @@ impl TurnOutcome {
         match self {
             TurnOutcome::Completed => "completed",
             TurnOutcome::Interrupted => "interrupted",
+            TurnOutcome::Errored => "errored",
             TurnOutcome::SessionEnded => "session_ended",
             TurnOutcome::SessionRestarted => "session_restarted",
             TurnOutcome::SessionClosed => "session_closed",

@@ -37,7 +37,12 @@
         },
         {
           "const": "interrupted",
-          "description": "The person interrupted it.",
+          "description": "The person interrupted it (an abort in the harness).",
+          "type": "string"
+        },
+        {
+          "const": "errored",
+          "description": "The harness ended it with an error (an API failure, a refused\nrequest): `agent_turn.error` holds the harness's own words.",
           "type": "string"
         },
         {
@@ -104,8 +109,15 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`agent.turn.ended@4`: a turn closed — how (`outcome`), what it left\nrunning, and what the token-usage reactor needs to count it (the\ntranscript to read, or the counts themselves).",
+  "description": "`agent.turn.ended@5`: a turn closed — how (`outcome`), what it left\nrunning, and what the token-usage reactor needs to count it (the\ntranscript to read, or the counts themselves).",
   "properties": {
+    "error": {
+      "description": "The harness's own words for the error that ended it (`outcome:\nerrored`): `name: message`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "left_running": {
       "description": "The jobs and subagents still running when it ended, when the\nharness said.",
       "items": {
@@ -151,6 +163,6 @@
     "thread",
     "outcome"
   ],
-  "title": "AgentTurnEndedV4",
+  "title": "AgentTurnEndedV5",
   "type": "object"
 }

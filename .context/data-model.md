@@ -987,16 +987,17 @@ goes on with), `cause_ref`, `cause_basis` (`reported`, `matched`) and
 `TurnOpening`); `prompt` is the text that opened it, whatever its source.
 V2 also rewrote the logged `agent.turn.started@2` rows to `@3`
 (`source: unknown`). **How it ended** (V4): `outcome` (`completed`,
-`interrupted`, `session_ended`, `session_restarted`, `session_closed`,
-`restart`; `unknown` for an old turn whose end left no trace), set in the
-close transaction; V4 gave ended turns the outcome their event logged
+`interrupted`, `errored`, `session_ended`, `session_restarted`,
+`session_closed`, `restart`; `unknown` for an old turn whose end left no trace), set in the
+close transaction, with `error` (V9: the harness's words for an
+`errored` end; V9 rewrote logged `agent.turn.ended@4` rows to `@5`); V4 gave ended turns the outcome their event logged
 (an expired payload has none), told the ends logged `interrupted` or not
 at all apart by the text oxplow had written into `answer`, cleared that
 text, and rewrote `agent.turn.ended@3` rows to `@4` (an expired payload
 only its version). The new enum-like columns of V2–V7 carry no CHECK:
 Rust owns their values, and a CHECK could only grow by rebuilding the
 table. `agent_turn` open/close log
-`agent.turn.started@3` / `agent.turn.ended@4` in the same transaction as
+`agent.turn.started@3` / `agent.turn.ended@5` in the same transaction as
 the row change; **background jobs** (V7, `agent_job`) are written beside
 them by the hook ingest ([agent-model.md](./agent-model.md) "Background
 jobs");
