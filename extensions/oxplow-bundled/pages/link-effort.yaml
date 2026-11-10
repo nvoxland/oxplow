@@ -20,7 +20,6 @@ view:
     fixed:
     - effort
     fields:
-    - effort
     - work_item
     choices:
       work_item: oxplow/link-effort#changes_link_items

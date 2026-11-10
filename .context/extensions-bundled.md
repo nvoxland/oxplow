@@ -226,7 +226,7 @@ screens and the holder's add the review and analysis:
 - **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
   failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
   and `effort-plan`, mounted at `oxplow/diff-view.sections`.
-  `task-tokens` mounts at `oxplow/work-item.sections`. `thread-tokens`,
+  `thread-tokens`,
   `thread-plan`, `thread-shared-work` and the two handoff strips mounted
   on the old Tasks page; its board has no slot, so they mount nowhere
   until they move.
@@ -235,10 +235,9 @@ screens and the holder's add the review and analysis:
 - **Git History's commit graph.** The `history-graph` component, replacing
   core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
-- **The work list and wiki screens.** `work-item` (and its helper pages),
-  `wiki-index`, `wiki-page`, `wiki-freshness` and `hand-off`. Their menu
-  entries are the commands `knowledge.new_page`, `handoff.offer` and
-  `effort.link_to_task`. Each runs the same operation as a foundation
+- **The wiki screens.** `wiki-index`, `wiki-page`, `wiki-freshness` and
+  `hand-off`. Their menu entries are the commands `knowledge.new_page` and
+  `handoff.offer`. Each runs the same operation as a foundation
   command and adds the label, shortcut and form a person uses.
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
@@ -306,6 +305,15 @@ screens and the holder's add the review and analysis:
   `panel:` fixture, and any rule it repeats with a foundation page made one
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.
+- **The work item page** (`work-item`, the renderer of `oxplow/work_item`;
+  work-items.md "One page for every item"): About, Stage and Details in its
+  rail, the description, the items under it, Activity (the `item-efforts`
+  page), Comments and Links (the `work-item-comments` and
+  `work-item-links` parts) and its sections slot, where bundled mounts
+  `task-tokens` and `item-shared-work`. With it, `work-item-actions` (an
+  agent's Mark done / Record a block… on one item) and `link-effort`, the
+  form behind the `effort.link_to_task` command (Link to Task… on an
+  effort).
 - **The task screens.** Two pages over one query, `work-items` (the items
   a page shows by `show` — assigned to this thread, its stream, you,
   nobody or anyone; a closed item, nobody's, by the efforts that worked

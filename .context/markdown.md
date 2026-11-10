@@ -100,7 +100,7 @@ never reset.
 
 - **`onCommit`**: the text 300 ms after typing stops, on blur and on
   unmount (an edit is never lost to a closed tab). For an owner that
-  saves as the person types: the task body (`TaskDetail`), the React
+  saves as the person types: a work item's description, the React
   wiki page. A value from outside is skipped while the editor has focus
   (a late echo mustn't clobber typing).
 - **`onChange`**: every edit. For an owner that keeps a draft and saves
@@ -152,8 +152,8 @@ Every markdown surface: the `markdown` viz and markdown nodes of a
 page's view, and `oxplow-page` fenced blocks (an inline page, read-only,
 drawn live in the wiki body), foundation's `markdown` page (a `.md` file
 read as a document, View as → Markdown), effort summaries
-(`TaskDetail`, `DiffViewPage`), the wiki body (the wiki page's `markdown` viz), a work
-item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
+(`DiffViewPage`), the wiki body (the wiki page's `markdown` viz), a work
+item's body (the work item page's `markdown` viz), comment messages (`CommentPopover`) and the
 comment composer (`CommentComposer`), a form's markdown field
 (`SchemaForm`: stream and thread prompts, a handoff's body). A
 dashboard's `TextTile` is plain text by its own decision (its file says

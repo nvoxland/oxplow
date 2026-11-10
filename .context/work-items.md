@@ -216,14 +216,28 @@ through `useRerunOnChange` — or `readsChanged` outside a component
 changes. With **none** active every read is empty and the screens show
 their empty states.
 
-**One page for every item** (the `work-item` document page, the renderer of
-`oxplow/work_item`; param `uri`): the stage (a form over the list's stages), the title and the list's declared fields
-(forms over `oxplow.work_item.transition` and `update`), the description
-(a `markdown` viz), About (who it's assigned to; Assign to This Thread,
-Assign to Me, Unassign and Delete on its right-click menu),
-Links, Comments and Activity (its efforts). Links and Comments are left out
-where the list declares no such feature (`needs: [work_items.links]`,
-`[work_items.comments]`). The item's own
+**One page for every item** (oxplow-bundled's `work-item` document page,
+the renderer of `oxplow/work_item`; params `uri`, `thread_id`,
+`stream_id`). Its rail is what the item is and what can be done to it:
+About (its stage by its list's name with its bucket's glyph, who it's
+assigned to, its epic, its list, its id, when it was made, changed and
+closed; its right-click menu has Mark ▸ the list's stages and Assign to ▸
+the stream's threads and You, each one action with `options_from`, the
+current one checked, then Unassign and Delete), Stage (a form over
+`oxplow.work_item.transition`, the replaceable state part) and Details
+(the title and the list's declared fields, over `update`). Its body is
+the description (a `markdown` viz, edited in place), the items under it
+(an epic's: each with its glyph, its description's first sentence, its
+stage and assignee), Activity (its efforts: the `item-efforts` page,
+embedded), Comments and Links (the `work-item-comments` and
+`work-item-links` parts, each declaring its list feature in `needs`, so a
+list without one draws its section as needing it) and the
+`oxplow/work-item.sections` slot, where bundled mounts Agent Tokens
+(`task-tokens`) and Shared work (`item-shared-work`). See also: the Tasks
+board of the thread it's assigned to (else the Task List at its stage)
+and its epic. `work-item-actions` is the agents' page for one item (Mark
+done, Record a block…), and `link-effort` the form behind an effort's
+Link to Task…. The item's own
 list's extension may replace its state part (`work_item.detail.state`,
 decided by the page run from the item's `provider`); About's menu always offers the moves, so an item
 can always move. **Custom views** need no provider: any extension may

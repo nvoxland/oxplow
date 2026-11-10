@@ -1,0 +1,37 @@
+title: Efforts on a work item
+description: "What has been done on a work item: its efforts, newest first, each with the files it changed and its summary."
+params:
+- name: uri
+  label: Work item
+answers:
+- {"question":"What has been done on this work item so far?","about":"oxplow/work_item","params":{"uri":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow"},"skill":"work-items"}
+loaders:
+  efforts:
+    sql: |
+      SELECT e.uri, e.title, e.started_at, e.ended_at,
+             (SELECT count(*) FROM v_effort_file f WHERE f.effort_id = e.id) AS files,
+             e.summary
+      FROM v_effort e WHERE e.work_item = :uri
+      ORDER BY e.started_at DESC, e.id DESC
+view:
+  id: efforts
+  from: efforts
+  viz: list
+  columns:
+  - key: title
+    label: Effort
+    link:
+      kind: page
+      from: uri
+  - key: summary
+    label: Summary
+    format: markdown
+  - key: started_at
+    label: Started
+    format: relative
+  - key: ended_at
+    label: Ended
+    format: relative
+  - key: files
+    label: Files
+  empty: No effort on it yet.

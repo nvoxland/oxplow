@@ -1,0 +1,246 @@
+title: Work Item
+description: "One work item, whichever list it is on: what it is and what can be done to it in the rail, and its description, the items under it, its efforts, comments and links."
+label: '{{row.title}}'
+for: oxplow/work_item
+default: true
+comments: true
+needs:
+- work_items
+params:
+- name: uri
+- name: thread_id
+# The stream whose threads Assign to offers.
+- name: stream_id
+loaders:
+  # The page's row names its tab: the item's title.
+  row:
+    sql: |
+      SELECT w.title AS title FROM v_work_item w WHERE w.uri = :uri
+    columns:
+    - key: title
+  # What it is, for the rail: its stage (by its list's name, its bucket's
+  # glyph), who it's for, its epic, its list, when it changed; and what its
+  # actions may do.
+  about:
+    sql: |
+      WITH feat AS (
+        SELECT p.features AS f FROM v_capability_provider p WHERE p.capability = 'work_items' AND p.active = 1
+      )
+      SELECT w.uri, w.stage, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon,
+             w.assignee,
+             CASE WHEN w.assignee IS NULL THEN 'Nobody'
+                  WHEN w.assignee = uri('oxplow/person') THEN 'You'
+                  ELSE coalesce((SELECT t.title FROM v_thread t WHERE t.uri = w.assignee), w.assignee) END AS assigned_to,
+             (SELECT p.title FROM v_work_item p WHERE p.uri = w.parent_uri) AS parent, w.parent_uri,
+             w.native_id AS id, w.provider AS list,
+             w.created_at, w.updated_at, w.closed_at,
+             -- A closed item is nobody's: no one to give it to.
+             w.state NOT IN ('done', 'canceled') AS is_open,
+             (w.state NOT IN ('done', 'canceled') AND w.assignee IS NOT NULL) AS assigned,
+             coalesce((SELECT json_extract(f, '$.delete') FROM feat), 0) AS can_delete
+      FROM v_work_item w WHERE w.uri = :uri
+  # The list's stages: Mark's options and the Stage form's choices.
+  stages:
+    page: oxplow/work-item-stages
+    loader: work_item_stages
+  marks:
+    sql: SELECT value, label FROM stages ORDER BY ord
+  work_item_states:
+    sql: SELECT value, label FROM stages ORDER BY ord
+  # Who Assign to offers: the stream's open threads, then you.
+  assignees:
+    sql: |
+      SELECT * FROM (SELECT t.uri AS value, t.title AS label FROM v_thread t
+                     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL AND t.archived_at IS NULL
+                     ORDER BY t.sort_index, t.id)
+      UNION ALL
+      SELECT uri('oxplow/person'), 'You'
+  state:
+    sql: |
+      SELECT w.uri, w.stage AS "to" FROM v_work_item w WHERE w.uri = :uri
+  fields:
+    sql: |
+      SELECT w.uri, w.title, w.native FROM v_work_item w WHERE w.uri = :uri
+  body:
+    sql: |
+      SELECT w.uri, coalesce(w.body, '') AS body FROM v_work_item w WHERE w.uri = :uri
+  # The items under it (an epic's), in their list's stage order, then queue.
+  children:
+    sql: |
+      SELECT c.uri, c.title, c.state AS icon, coalesce(c.stage_title, c.stage) AS stage_title,
+             CASE WHEN c.assignee IS NULL THEN NULL
+                  WHEN c.assignee = uri('oxplow/person') THEN 'You'
+                  ELSE (SELECT t.title FROM v_thread t WHERE t.uri = c.assignee) END AS assigned_to,
+             first_sentence(c.body) AS summary
+      FROM v_work_item c
+      WHERE c.parent_uri = :uri
+      ORDER BY CASE c.state WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'todo' THEN 2
+                            WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END,
+               c.rank IS NULL, c.rank, c.created_at
+  # Where it is listed (the board of the thread it's for, else the Task
+  # List at its stage) and its parent epic.
+  related:
+    sql: |
+      SELECT CASE WHEN t.id IS NULL THEN 'Task List' ELSE 'Tasks' END AS title,
+             CASE WHEN t.id IS NULL
+                  THEN uri('oxplow/page', 'page', 'task-list') || '#state=' || w.stage
+                  ELSE uri('oxplow/page', 'page', 'tasks', 'thread_id', t.id) END AS uri,
+             CASE WHEN t.id IS NULL THEN 'The work items in its stage'
+                  ELSE 'The work assigned to its thread' END AS description,
+             1 AS ord
+      FROM v_work_item w LEFT JOIN v_thread t ON t.uri = w.assignee
+      WHERE w.uri = :uri
+      UNION ALL
+      SELECT p.title, p.uri, 'Its parent epic', 2
+      FROM v_work_item w JOIN v_work_item p ON p.uri = w.parent_uri WHERE w.uri = :uri
+      ORDER BY ord
+# What it is and what can be done to it.
+rail:
+  stack:
+  - id: about
+    title: About
+    from: about
+    viz: detail
+    columns:
+    - key: stage_title
+      label: Stage
+      icon: icon
+    - key: assigned_to
+      label: Assigned to
+    - key: parent
+      label: Epic
+      when: parent_uri
+      link:
+        kind: page
+        from: parent_uri
+    - key: list
+      label: List
+    - key: id
+      label: ID
+    - key: created_at
+      label: Created
+      format: relative
+    - key: updated_at
+      label: Updated
+      format: relative
+    - key: closed_at
+      label: Closed
+      format: relative
+      when: closed_at
+    empty: This work item isn't on the active work list.
+    actions:
+    # Mark ▸ the list's stages, its own checked.
+    - id: mark
+      label: Mark
+      command: oxplow.work_item.transition
+      row: true
+      options_from: marks
+      current: stage
+      input:
+        uri: '{{row.uri}}'
+        to: '{{option.value}}'
+    # Assign to ▸ the stream's threads and you; a closed item is nobody's.
+    - id: assign
+      label: Assign to
+      command: oxplow.work_item.assign
+      row: true
+      when: is_open
+      options_from: assignees
+      current: assignee
+      input:
+        uri: '{{row.uri}}'
+        to: '{{option.value}}'
+    - id: unassign
+      label: Unassign
+      command: oxplow.work_item.assign
+      row: true
+      when: assigned
+      input:
+        uri: '{{row.uri}}'
+        to: null
+    - id: delete
+      label: Delete
+      command: oxplow.work_item.delete
+      row: true
+      then: close
+      when: can_delete
+      input:
+        uri: '{{row.uri}}'
+  - id: state
+    replaceable: work_item.detail.state
+    title: Stage
+    from: state
+    viz: form
+    form:
+      command: oxplow.work_item.transition
+      mode: edit
+      fields:
+      - { name: to, label: Move to }
+      choices:
+        to: oxplow/work-item#work_item_states
+  - id: fields
+    title: Details
+    from: fields
+    viz: form
+    form:
+      command: oxplow.work_item.update
+      mode: edit
+      fields:
+      - title
+      - name: native
+        label: Its list's fields
+        from: oxplow/work-item-fields
+view:
+  stack:
+  - id: body
+    replaceable: work_item.detail
+    title: Description
+    from: body
+    viz: markdown
+    markdown:
+      text: body
+    actions:
+    - id: save
+      label: Save
+      command: oxplow.work_item.update
+      edit: true
+      fixed:
+      - uri
+      input:
+        uri: '{{row.uri}}'
+        body: '{{row.body}}'
+  - id: children
+    title: Items under it
+    from: children
+    viz: list
+    columns:
+    - key: title
+      label: Item
+      icon: icon
+      link:
+        kind: page
+        from: uri
+    - key: summary
+      label: Description
+      format: markdown
+    - key: stage_title
+      label: Stage
+    - key: assigned_to
+      label: Assigned to
+    empty: Nothing is filed under it.
+  # Its efforts: what has been done on it.
+  - id: activity
+    title: Activity
+    embed:
+      page: oxplow/item-efforts
+  - id: comments
+    title: Comments
+    embed:
+      page: oxplow/work-item-comments
+  - id: links
+    title: Links
+    embed:
+      page: oxplow/work-item-links
+  - slot: sections
+see_also:
+  - { from: related }

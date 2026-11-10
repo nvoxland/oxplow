@@ -121,6 +121,11 @@ event_types:
       schema: event_types/finished_cleared.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
 ui:
+  # A work item's page shows the agent's tokens on it and what another
+  # thread shares with it.
+  mounts:
+    - { page: task-tokens, at: oxplow/work-item.sections }
+    - { page: item-shared-work, at: oxplow/work-item.sections }
   # The verdict where the effort is shown: it shows; it never acts.
   decorators:
     - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
@@ -250,6 +255,13 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
+  # The person's menu entry for `oxplow.effort.link` on an effort.
+  - name: effort.link_to_task
+    summary: "The person's menu entry for `oxplow.effort.link`: Link to Task… on an effort opens a form to pick the task."
+    scope: efforts.write
+    op: link
+    ui: { label: "Link to Task…", group: Review, about: oxplow/effort, form: "oxplow:oxplow/page?page=link-effort" }
+    example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}
   # The person's menu entry for foundation's `work_item.create`: an agent
   # runs foundation's; this adds the label, shortcut and form a person uses.
   - name: work_item.new

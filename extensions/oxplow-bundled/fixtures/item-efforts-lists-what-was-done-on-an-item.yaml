@@ -1,0 +1,13 @@
+# What has been done on a work item: its efforts, newest first, each
+# opening its effort; the work item page shows it as its Activity.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix it, assignee: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+  - { command: oxplow.work_item.create, input: { title: Other }, bind: other }
+when: { page: item-efforts, params: { uri: $item.uri } }
+expect:
+  loaders:
+    efforts: { rows: [{ uri: $any, started_at: $any, ended_at: null, files: 0 }] }
+steps:
+  - params: { uri: $other.uri }
+    expect: { loaders: { efforts: { rows: 0 } } }

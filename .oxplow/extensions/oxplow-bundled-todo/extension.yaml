@@ -229,8 +229,8 @@ intent:
       input: { part: change-review, params: { change_id: 1 } }
       expect: the summary, the changed functions and the test files of an analyzed commit
     - name: token-pages-sum-a-tasks-and-a-threads-turns
-      input: { part: task-tokens }
-      expect: a task's turns summed and listed, a thread's total, an idle thread nothing
+      input: { part: thread-tokens }
+      expect: a thread's turns summed, an idle thread nothing
     - name: the-plan-pages-show-the-proposed-plans
       input: { part: effort-plan, params: { effort_id: 1 } }
       expect: the plans an agent proposed, newest first, under an effort and a thread
@@ -294,12 +294,6 @@ intent:
     - name: wiki-page-reads-its-body-even-before-it-is-written
       input: { page: wiki-page, params: { slug: otters } }
       expect: the body of a written page and of a slug not written yet, freshness, no references
-    - name: work-item-page-reads-the-item-its-links-and-its-comments
-      input: { page: work-item, params: { uri: "<the item's uri>", thread_id: 1 } }
-      expect: the item, its gated buttons, its links from both ends, its comments
-    - name: work-item-states-name-where-a-transition-may-go
-      input: { query: 'work-item#work_item_states' }
-      expect: each state a transition may move an item to, with its plain name
     - name: the-slot-page-links-the-mounted-page-and-its-host
       input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0" } }
       expect: the page a slot mount shows, the page that hosts it and the slot
@@ -312,9 +306,6 @@ intent:
     - name: the-slot-page-links-to-its-extension
       input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0' } }
       expect: its see-also links name the extension that declares it
-    - name: the-work-item-page-links-to-its-board-efforts-and-parent-epic
-      input: { page: work-item, params: { uri: 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' } }
-      expect: its see-also links open the Tasks board (at its thread, or the backlog), its efforts and its parent epic
     - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
       input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
       expect: its see-also links open the wiki and the work that links to it
@@ -337,8 +328,6 @@ ui:
     - { page: effort-metric-deltas, at: oxplow/diff-view.sections }
     - { page: effort-nudges, at: oxplow/diff-view.sections }
     - { page: effort-plan, at: oxplow/diff-view.sections }
-    - { page: task-tokens, at: oxplow/work-item.sections }
-    - { page: item-shared-work, at: oxplow/work-item.sections }
     - { page: file-co-change, at: oxplow/diff.file-header }
     - { page: decisions, at: oxplow/diff-view.sections }
     - { page: inferred-decisions, at: oxplow/diff-view.sections }
@@ -715,9 +704,3 @@ commands:
     op: send
     ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
     example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case."}
-  - name: effort.link_to_task
-    summary: "The person's menu entry for `oxplow.effort.link`: Link to Task… on an effort opens a form to pick the task."
-    scope: efforts.write
-    op: link
-    ui: { label: "Link to Task…", group: Review, about: oxplow/effort, form: "oxplow:oxplow/page?page=link-effort" }
-    example: {"effort": "eff12", "work_item": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"}

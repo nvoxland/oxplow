@@ -1,0 +1,52 @@
+title: Links
+description: "A work item's links from both ends — what it blocks, relates to or was found from, and what links to it — with Link… and, on its own end, Unlink: where its list keeps links."
+needs:
+- work_items
+- work_items.links
+params:
+- name: uri
+loaders:
+  links:
+    sql: |
+      SELECT l.to_uri AS other, coalesce((SELECT w.title FROM v_work_item w WHERE w.uri = l.to_uri), l.to_uri) AS item,
+             (SELECT w.state FROM v_work_item w WHERE w.uri = l.to_uri) AS icon,
+             replace(l.link_type, '_', ' ') AS kind, l.link_type, 'to' AS direction, 1 AS outbound
+      FROM v_work_item_link l WHERE l.from_uri = :uri
+      UNION ALL
+      SELECT l.from_uri, coalesce((SELECT w.title FROM v_work_item w WHERE w.uri = l.from_uri), l.from_uri),
+             (SELECT w.state FROM v_work_item w WHERE w.uri = l.from_uri),
+             replace(l.link_type, '_', ' ') || ' (from it)', l.link_type, 'from', 0
+      FROM v_work_item_link l WHERE l.to_uri = :uri
+view:
+  id: links
+  from: links
+  viz: list
+  group:
+    by: kind
+  columns:
+  - key: item
+    label: Item
+    icon: icon
+    link:
+      kind: page
+      from: other
+  empty: No links.
+  actions:
+  - id: link
+    label: Link…
+    command: oxplow.work_item.link
+    form: true
+    fixed:
+    - uri
+    input:
+      uri: '{{param.uri}}'
+      link_type: relates_to
+  - id: unlink
+    label: Unlink
+    command: oxplow.work_item.unlink
+    row: true
+    when: outbound
+    input:
+      uri: '{{param.uri}}'
+      target: '{{row.other}}'
+      link_type: '{{row.link_type}}'

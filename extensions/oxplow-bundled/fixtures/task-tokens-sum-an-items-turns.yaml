@@ -1,0 +1,15 @@
+# Agent Tokens, a section of a work item's page: the turns of its efforts
+# listed, their total the line above them; a turn on no effort of it isn't counted.
+given:
+  - { command: oxplow.work_item.create, input: { title: Fix it, assignee: thr1 }, bind: item }
+  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - observe: { token_usage: { effort: eff1, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
+  - observe: { token_usage: { effort: eff1, prompt: again, input_tokens: 99, output_tokens: 1 } }
+  - observe: { token_usage: { prompt: chat, input_tokens: 9, output_tokens: 1 } }
+when: { part: task-tokens, params: { uri: $item.uri } }
+expect:
+  loaders:
+    task_turns:
+      rows:
+        - { prompt: again, tokens: 100, summary: "2,100 tokens over 2 turns: in 2,098, out 2, cache-write 0, cache-read 0." }
+        - { prompt: fix it, tokens: 2000 }
