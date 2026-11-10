@@ -1149,10 +1149,13 @@ a harness that says nothing leaves the default) fills
 | `final_message` | a Stop's `answer`, a SubagentStop's result | `last_assistant_message` |
 | `waits_on_person`, `notice` | a Notification that parks the thread on the person, and its text | `notification_type` (`permission_prompt`, `elicitation_dialog`, `agent_needs_input`), `message` |
 | `compaction` | a SessionStart that is a mid-turn compaction, not a new process | `source: compact` |
+| `compact_summary`, `compact_trigger` | a PostCompact's summary and trigger | `compact_summary`, `trigger` |
 | `end_reason`, `clears_conversation` | a SessionEnd's reason; whether it clears the conversation | `reason`, `reason: clear` |
 
-An external provider harness has no verb for it yet, so reads none of
-these.
+A tool call's content comes the same way: `ToolUse.input` / `.output`
+(Claude's `tool_input` / `tool_response`), stored by hash with the call.
+An external provider harness has no verb for the reading yet, so reads none
+of these.
 
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared with OTLP exports), in order: the session the sender is (the

@@ -820,7 +820,7 @@ fn record_tx(
             let tool = env.tool.clone();
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
-                log_tool_tx(conn, ev, thread, &row, env, tool, &body, session)?;
+                log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
                 // A plan put to the person: on the record before the dialog
                 // answers (a refused call proposes nothing).
                 let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
@@ -987,9 +987,10 @@ fn record_tx(
         HookKind::PostCompact => {
             let turn_id = applied.turn.map(|t| t.to_string());
             let turn = applied.turn.map(turn_uri);
-            let summary = body
-                .get("compact_summary")
-                .and_then(|v| v.as_str())
+            let summary = env
+                .reading
+                .compact_summary
+                .as_deref()
                 .filter(|s| !s.trim().is_empty())
                 .map(|text| event_content_store::put_text_tx(conn, "agent", text))
                 .transpose()?;
@@ -997,10 +998,7 @@ fn record_tx(
                 .typed::<AgentContextCompacted>(&AgentContextCompactedV2 {
                     thread: thread.to_string(),
                     turn: turn_id,
-                    trigger: body
-                        .get("trigger")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
+                    trigger: env.reading.compact_trigger.clone(),
                     summary,
                 })
                 .with_anchors(activity_anchors_tx(conn, thread, slot)?)
@@ -1494,12 +1492,11 @@ fn log_tool_tx(
     row: &ThreadRow,
     env: &HookEnvelope,
     tool: &ToolUse,
-    body: &serde_json::Value,
     session: Option<&str>,
 ) -> Result<(), DomainError> {
     let recorded = crate::tool_calls::recorded(tool, &row.worktree);
-    let content = |key: &str| -> Result<Option<ContentRef>, DomainError> {
-        match body.get(key) {
+    let content = |value: &Option<serde_json::Value>| -> Result<Option<ContentRef>, DomainError> {
+        match value {
             Some(v) if !v.is_null() => event_content_store::put_json_tx(conn, "agent", v).map(Some),
             _ => Ok(None),
         }
@@ -1547,7 +1544,7 @@ fn log_tool_tx(
             call: tool.call_id.clone(),
             paths: recorded.paths,
             detail: recorded.detail,
-            input: content("tool_input")?,
+            input: content(&tool.input)?,
             decision: if decision.allowed {
                 Decision::Allowed
             } else {
@@ -1569,8 +1566,8 @@ fn log_tool_tx(
                 command: tool.command.clone(),
                 ok: tool.ok,
                 exit_code: tool.exit_code,
-                input: content("tool_input")?,
-                output: content("tool_response")?,
+                input: content(&tool.input)?,
+                output: content(&tool.output)?,
                 subagent,
             })
             .with_dedupe_key_opt(dedupe("finished"));
