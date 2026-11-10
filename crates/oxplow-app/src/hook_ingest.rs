@@ -55,12 +55,11 @@ use oxplow_db::{event_content_store, Database};
 use oxplow_domain::agent::observe::Prompt;
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
-    AgentContextCompacted, AgentContextCompactedV2, AgentPeerMessageReceived,
-    AgentPeerMessageReceivedV2, AgentPlanProposed, AgentPlanProposedV2, AgentPromptSubmitted,
-    AgentPromptSubmittedV2, AgentSessionEnded, AgentSessionEndedV2, AgentSessionStarted,
-    AgentSessionStartedV3, AgentSubagentFinished, AgentSubagentFinishedV2, AgentSubagentStarted,
-    AgentSubagentStartedV2, AgentToolFinished, AgentToolFinishedV4, AgentToolRequested,
-    AgentToolRequestedV4, ContentRef, SubagentRef, ToolDecision as Decision,
+    AgentContextCompacted, AgentContextCompactedV2, AgentPlanProposed, AgentPlanProposedV2,
+    AgentPromptSubmitted, AgentPromptSubmittedV3, AgentSessionEnded, AgentSessionEndedV2,
+    AgentSessionStarted, AgentSessionStartedV3, AgentSubagentFinished, AgentSubagentFinishedV2,
+    AgentSubagentStarted, AgentSubagentStartedV2, AgentToolFinished, AgentToolFinishedV4,
+    AgentToolRequested, AgentToolRequestedV4, ContentRef, SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
@@ -581,6 +580,8 @@ fn record_tx(
         oxplow_db::agent_session_store::set_native_title_tx(conn, id, native, title, now)?;
     }
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
+    // A prompt delivered while a turn runs opens none (a re-prompt).
+    let reprompt = applied.turn.is_some();
     match env.kind {
         // A subagent handing its report back: the agent goes on working on
         // it — a turn, if none is open, that goes on with the one the
@@ -619,8 +620,7 @@ fn record_tx(
             status = Some((AgentStatusState::Running, None));
         }
         // Another session's message: the agent goes on working on it — a
-        // turn, if none is open, that says who sent it — and it is logged
-        // with who sent it.
+        // turn, if none is open, that says who sent it.
         HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::PeerMessage { .. })) => {
             let Some(Prompt::PeerMessage { from, socket, text }) = &env.prompt else {
                 unreachable!("matched above")
@@ -637,18 +637,6 @@ fn record_tx(
                 )?);
                 applied.opened_turn = true;
             }
-            let envelope = ev
-                .typed::<AgentPeerMessageReceived>(&AgentPeerMessageReceivedV2 {
-                    thread: thread.to_string(),
-                    turn: applied.turn.map(|t| t.to_string()),
-                    from: from.clone(),
-                })
-                .with_anchors(activity_anchors_tx(conn, thread, slot)?)
-                .with_subject([applied
-                    .turn
-                    .map(turn_uri)
-                    .unwrap_or_else(|| thread_uri(thread))]);
-            ev.append(conn, &envelope)?;
             status = Some((AgentStatusState::Running, None));
         }
         // A job the agent started in the background reported back: the
@@ -759,7 +747,6 @@ fn record_tx(
         }
         HookKind::UserPromptSubmit => {
             // A person's prompt, or one the harness said nothing of.
-            let reprompt = applied.turn.is_some();
             let said = env.prompt.as_ref().map(Prompt::text);
             if !reprompt {
                 let source = env
@@ -775,24 +762,6 @@ fn record_tx(
                 )?);
                 applied.opened_turn = true;
             }
-            let text = said.filter(|p| !p.is_empty());
-            let payload = AgentPromptSubmittedV2 {
-                thread: thread.to_string(),
-                turn: applied.turn.map(|t| t.to_string()),
-                session: session.map(str::to_string),
-                reprompt,
-                prompt: text
-                    .map(|t| event_content_store::put_text_tx(conn, "agent", t))
-                    .transpose()?,
-            };
-            let env = ev
-                .typed::<AgentPromptSubmitted>(&payload)
-                .with_anchors(activity_anchors_tx(conn, thread, slot)?)
-                .with_subject([applied
-                    .turn
-                    .map(turn_uri)
-                    .unwrap_or_else(|| thread_uri(thread))]);
-            ev.append(conn, &env)?;
             status = Some((AgentStatusState::Running, None));
         }
         // A plan outside any tool call: recorded, and nothing waits on it.
@@ -995,6 +964,11 @@ fn record_tx(
             ev.append(conn, &env)?;
         }
         HookKind::SessionStart => {} // handled above
+    }
+    // Every prompt delivered is logged once, with who it came from and its
+    // text, whether it opened a turn or landed in the open one.
+    if env.kind == HookKind::UserPromptSubmit {
+        log_prompt_tx(conn, ev, thread, slot, env, applied.turn, reprompt)?;
     }
     if let Some((state, detail)) = &status {
         if changed(
@@ -1240,6 +1214,47 @@ fn subagent_key(
         .or_else(|| session.map(str::to_string))
         .unwrap_or_else(|| "-".into());
     format!("subagent-event/{who}/{id}/{phase}")
+}
+
+/// Log the delivery of `env`'s prompt (none: a prompt hook that said
+/// nothing) to the agent: `agent.prompt.submitted`, in `turn` (the one it
+/// opened, or the open one it landed in when `reprompt`).
+fn log_prompt_tx(
+    conn: &rusqlite::Connection,
+    ev: &EventCtx<'_>,
+    thread: ThreadId,
+    slot: Option<oxplow_domain::AgentSessionId>,
+    env: &HookEnvelope,
+    turn: Option<AgentTurnId>,
+    reprompt: bool,
+) -> Result<(), DomainError> {
+    let prompt = env.prompt.as_ref();
+    let session = env.session_id.as_deref().filter(|s| !s.is_empty());
+    let (sender, job) = match prompt {
+        Some(Prompt::PeerMessage { from, .. }) => (Some(from.clone()), None),
+        Some(Prompt::Handback { subagent, .. }) => (None, Some(subagent.id.clone())),
+        Some(Prompt::BackgroundJob { job, call, .. }) => (None, job.clone().or(call.clone())),
+        _ => (None, None),
+    };
+    let text = prompt.map(Prompt::text).filter(|t| !t.is_empty());
+    let payload = AgentPromptSubmittedV3 {
+        thread: thread.to_string(),
+        turn: turn.map(|t| t.to_string()),
+        session: session.map(str::to_string),
+        reprompt,
+        source: prompt.map_or(TurnSource::Unknown, Prompt::source),
+        prompt: text
+            .map(|t| event_content_store::put_text_tx(conn, "agent", t))
+            .transpose()?,
+        sender,
+        job,
+    };
+    let env = ev
+        .typed::<AgentPromptSubmitted>(&payload)
+        .with_anchors(activity_anchors_tx(conn, thread, slot)?)
+        .with_subject([turn.map(turn_uri).unwrap_or_else(|| thread_uri(thread))]);
+    ev.append(conn, &env)?;
+    Ok(())
 }
 
 /// What a job a subagent is, in `agent_job.kind`.
@@ -2057,7 +2072,11 @@ mod tests {
         .await
         .unwrap();
         let events = logged(&svc).await;
-        assert_eq!(of_type(&events, "agent.prompt.submitted").len(), 1);
+        assert_eq!(
+            of_type(&events, "agent.prompt.submitted").len(),
+            2,
+            "the person's and the hand-back"
+        );
         assert_eq!(of_type(&events, "agent.subagent.started").len(), 1);
         assert_eq!(of_type(&events, "agent.subagent.finished").len(), 1);
         let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
@@ -2118,12 +2137,15 @@ mod tests {
         ))
         .await
         .unwrap();
+        // Both deliveries are logged with their sender, the second inside
+        // the turn the first opened.
         let events = logged(&svc).await;
-        assert!(of_type(&events, "agent.prompt.submitted").is_empty());
-        let received = of_type(&events, "agent.peer_message.received");
+        let received = of_type(&events, "agent.prompt.submitted");
         assert_eq!(received.len(), 2);
-        assert_eq!(received[0].envelope.payload["from"], "oxplow-main");
-        assert_eq!(received[1].envelope.payload["from"], "oxplow-other");
+        assert_eq!(received[0].envelope.payload["source"], "peer");
+        assert_eq!(received[0].envelope.payload["sender"], "oxplow-main");
+        assert_eq!(received[1].envelope.payload["sender"], "oxplow-other");
+        assert_eq!(received[1].envelope.payload["reprompt"], true);
         assert_eq!(
             received[0].envelope.payload["turn"],
             received[1].envelope.payload["turn"]
@@ -3707,9 +3729,22 @@ mod tests {
                 ("unknown".into(), "".into(), None, None, None, None),
             ]
         );
-        // Only a person's prompt (or one nobody named) is a prompt submitted.
+        // Every delivery is logged, with who it came from.
         let events = logged(&svc).await;
-        assert_eq!(of_type(&events, "agent.prompt.submitted").len(), 2);
+        let sources: Vec<_> = of_type(&events, "agent.prompt.submitted")
+            .iter()
+            .map(|e| e.envelope.payload["source"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            sources,
+            [
+                "person",
+                "background_job",
+                "subagent",
+                "background_job",
+                "unknown"
+            ]
+        );
         let started = of_type(&events, "agent.turn.started");
         assert_eq!(started[1].envelope.payload["source"], "background_job");
         assert_eq!(started[1].envelope.payload["cause_turn"], "trn1");

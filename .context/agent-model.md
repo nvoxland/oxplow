@@ -1170,12 +1170,17 @@ more than the stream would even when it's sometimes wrong.
   started (its `agent.subagent.started`), `cause_basis` `reported`;
   `cause_ref`, the harness's own name for it (the call id, the subagent
   id, the sender's socket); `sender` on a peer's turn. Core never reads a
-  harness's tags: the adapter classifies. Only a person's prompt (or one
-  the harness named nothing of) logs `agent.prompt.submitted`
-  (`reprompt: true` inside an open turn), its text in `event_content`
-  (`oxplow_read` on `event:<id>#prompt`); a hand-back finishes the
-  subagent, a peer's message logs `agent.peer_message.received`. One of
-  these arriving inside an open turn opens nothing. Pinned by
+  harness's tags: the adapter classifies. **Every delivery is logged
+  once** — `agent.prompt.submitted@3 { thread, turn, session, reprompt,
+  source, prompt, sender?, job? }`, whether it opened a turn or landed in
+  the open one (`reprompt: true`; it then opens nothing): its text in
+  `event_content` (`oxplow_read` on `event:<id>#prompt`), the sender of a
+  peer's message, the job a report or hand-back is for. A hand-back also
+  finishes the subagent. A reader that means "a person's prompt" reads
+  `source = person`; status derivation treats every delivery as the agent
+  going to work. V8 rewrote the logged @2 rows (`source: unknown`: they
+  were a person's prompts and background jobs' reports alike) and folded
+  the old `agent.peer_message.received` into it. Pinned by
   `a_turn_records_what_opened_it_and_the_turn_it_goes_on_with`.
 - **PreToolUse** → `agent.tool.requested@4` with the policy's `decision`;
   **PostToolUse** → `agent.tool.finished@4`, caused by its request. Both
@@ -1685,9 +1690,9 @@ The Claude harness's `prompt` reads it as `Prompt::PeerMessage { from,
 socket, text }` (the session name, else the socket), not the person's
 words, as it reads a subagent's hand-back. The control plane passes it as
 `HookEnvelope.prompt`; the ingest opens a turn with source `peer` and the
-message as its text when none is open (none if one is), logs
-`agent.peer_message.received@2 { thread, turn, from }` (no
-`agent.prompt.submitted`) and sets the session running.
+message as its text when none is open (none if one is), logs the
+delivery (`agent.prompt.submitted`, `source: peer`, `sender`) and sets the
+session running.
 `v_agent_turn.sender` names the sender of a turn it opened (its socket in
 `cause_ref`), and Thread Activity titles that turn "Message from …". Pinned by
 `a_peers_message_opens_a_turn_of_its_own_with_its_text`, `a_peers_message_is_not_a_persons_prompt`

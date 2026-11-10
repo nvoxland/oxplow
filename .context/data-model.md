@@ -989,8 +989,8 @@ V2 also rewrote the logged `agent.turn.started@2` rows to `@3`
 (`source: unknown`). **How it ended** (V4): `outcome` (`completed`,
 `interrupted`, `errored`, `session_ended`, `session_restarted`,
 `session_closed`, `restart`; `unknown` for an old turn whose end left no trace), set in the
-close transaction, with `error` (V90: the harness's words for an
-`errored` end; V90 rewrote logged `agent.turn.ended@4` rows to `@5`); V4 gave ended turns the outcome their event logged
+close transaction, with `error` (V9: the harness's words for an
+`errored` end; V9 rewrote logged `agent.turn.ended@4` rows to `@5`); V4 gave ended turns the outcome their event logged
 (an expired payload has none), told the ends logged `interrupted` or not
 at all apart by the text oxplow had written into `answer`, cleared that
 text, and rewrote `agent.turn.ended@3` rows to `@4` (an expired payload
