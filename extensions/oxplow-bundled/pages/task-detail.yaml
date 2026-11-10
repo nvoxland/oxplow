@@ -81,10 +81,10 @@ loaders:
   # List at its stage) and its parent epic.
   related:
     sql: |
-      SELECT CASE WHEN t.id IS NULL THEN 'Task List' ELSE 'Tasks' END AS title,
+      SELECT CASE WHEN t.id IS NULL THEN 'Task List' ELSE 'Work' END AS title,
              CASE WHEN t.id IS NULL
                   THEN uri('oxplow/page', 'page', 'task-list') || '#state=' || w.stage
-                  ELSE uri('oxplow/page', 'page', 'tasks', 'thread_id', t.id) END AS uri,
+                  ELSE uri('oxplow/page', 'page', 'work', 'thread_id', t.id) END AS uri,
              CASE WHEN t.id IS NULL THEN 'The tasks in its stage'
                   ELSE 'The work assigned to its thread' END AS description,
              1 AS ord

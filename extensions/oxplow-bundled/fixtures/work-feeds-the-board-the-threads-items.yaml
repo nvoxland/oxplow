@@ -1,4 +1,4 @@
-# The Tasks board's rows: the ready, started and blocked items and the
+# The Work board's rows: the ready, started and blocked items and the
 # done ones of the last three days, twenty at most (the clock can't move
 # here: the cap is what this tests), no backlog or canceled ones, each
 # list's stages (the board's columns are the ones but backlog and
@@ -30,7 +30,7 @@ given:
   - { command: oxplow.task.create, input: { title: Done 19, stage: done } }
   - { command: oxplow.task.create, input: { title: Done 20, stage: done } }
   - { command: oxplow.task.create, input: { title: Done 21, stage: done } }
-when: { page: tasks, params: { show: all, priority: any, thread_id: 1, stream_id: 1 } }
+when: { page: work, params: { show: all, priority: any, thread_id: 1, stream_id: 1 } }
 expect:
   loaders:
     row: { rows: [{ scope: all }] }

@@ -220,7 +220,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   rides the `#` like a filter but is state the page or the system sets:
   the rail never draws it (not in Filters, not counted for Reset) and a
   person never edits it; a `for:` page may take one, and a custom page whose
-  component draws its own controls declares them so (the Tasks board) (`ParamRole::rides_view`
+  component draws its own controls declares them so (the Work board) (`ParamRole::rides_view`
   is the one test for "rides the `#`"). A `filter`, `selection` or `view`
   param found in a `?` is refused.
 - **`options_from`** makes a choice whose options rows list: `value`,
@@ -615,7 +615,7 @@ at the panel's row cap. A page and an agent's read show every row
 `tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
 a whole number 0–8 that nests: in a full-width `list` a row followed by
 deeper rows is their parent, and the two are one raised panel (the kit's
-`ox-nest`, as the Tasks board's epics: the parent row its top line, with
+`ox-nest`, as the Work board's epics: the parent row its top line, with
 its link, menu and fold; its bottom edge where the children end; panels
 nest; `nestRows` in `vizModel.ts`), while a compact list (a rail panel) and
 a `table` indent instead; `edge` (`list` / `table`) is a tone

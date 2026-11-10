@@ -5,7 +5,7 @@ given:
   - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
   - { command: oxplow.task.create, input: { title: Stuck, stage: blocked, assignee: thr1 } }
   - { command: oxplow.task.create, input: { title: Someday } }
-when: { part: oxplow/tasks-panel, params: { thread_id: 1 } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:
     work: { rows: [{ grp: In progress, title: Untitled effort }, { grp: Up next, title: Next up }, { grp: Up next, title: Stuck }] }

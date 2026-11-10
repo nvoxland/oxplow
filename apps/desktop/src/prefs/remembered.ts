@@ -144,7 +144,7 @@ export function useRememberedStore(): RememberedStore {
 }
 
 /** The page-memory scope of a page: the page or metric itself, whatever it
- *  shows and however (`oxplow/page?page=tasks`), or
+ *  shows and however (`oxplow/page?page=work`), or
  *  its resource for an entity page (`resource:oxplow/file`: every file page
  *  shares one). */
 export function pageMemoryScope(ref: TabRef): string {

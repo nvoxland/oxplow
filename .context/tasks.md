@@ -240,7 +240,7 @@ Link to Task…. The item's own
 list's extension may replace its state part (`task.detail.state`,
 decided by the page run from the item's `provider`); About's menu always offers the moves, so an item
 can always move. **Custom views** need no provider: any extension may
-replace the Tasks board (`task.board`), the Task List's list (`task.list`)
+replace the Work board (`task.board`), the Task List's list (`task.list`)
 or an item's description editor (`task.detail`) — with a
 page or component over `v_task` that changes items only through the
 interface commands, so it works with whichever list is active; the person

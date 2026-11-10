@@ -4,7 +4,7 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
 
 ## What works today: Explore Data
 
-- **The Tasks board: oxplow-bundled's built component** (`pages/tasks.yaml`,
+- **The Work board: oxplow-bundled's built component** (`pages/work.yaml`,
   `custom_components: board`, source `extensions/oxplow-bundled/src/board/`,
   built by bundled's `package.json` with `bun build`, no dependencies). The
   worked example of a custom page that **reuses core where it fits and draws
@@ -380,7 +380,7 @@ pushes a history step, a filter replaces), which a whole-page component
 hears through `onViewParams`. A page's rail stacked above its body (a
 narrow window) is capped and scrolls, so the body keeps the height. A
 custom page whose controls are its own declares them `role: view`
-(the Tasks board): no rail is drawn, and the frame takes the width.
+(the Work board): no rail is drawn, and the frame takes the width.
 
 **Whose view a component has** (protocol 9, `viz/hostedView.ts`
 `useHostedView`): its host's, where the host shares one, and only what
@@ -482,7 +482,7 @@ outside its own list leaves its text. The element gets the kit's `ox-md`
 display). The app's host looks titles up in its caches (`liveTreeDeps`);
 the test harness's host runs the same tree with none (`NO_LOOKUPS`) —
 `markdownTree`, `markdownLinks` and `resourceStore` import no React, so
-the harness stays React-free (`harnessBuild.test.ts`). The Tasks board's
+the harness stays React-free (`harnessBuild.test.ts`). The Work board's
 cards draw their description this way. `oxplow extension new component <name>` scaffolds an
 extension — the component, a page that shows it and a bundle that uses
 the library — that checks and tests clean (`just_works.rs`). The

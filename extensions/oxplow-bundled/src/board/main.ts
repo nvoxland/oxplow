@@ -1,4 +1,4 @@
-// The Tasks page (oxplow-bundled, `pages/tasks.yaml`): the tasks as a
+// The Work page (oxplow-bundled, `pages/work.yaml`): the tasks as a
 // kanban board. A custom page: oxplow draws its nav bar (the title, New
 // Task…), confirms what asks, records what fails; the frame draws the
 // toolbar, the columns and a card's menu with the kit's classes. Its
@@ -49,7 +49,7 @@ function start(c: Component) {
     render();
   };
 
-  c.setTitle("Tasks");
+  c.setTitle("Work");
   c.setActions([{ id: "new", label: "New Task…", prominent: true, icon: "plus" }]);
   c.onAction((id) => {
     const row = records(data.row)[0];

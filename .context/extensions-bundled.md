@@ -292,8 +292,8 @@ screens and the holder's add the review and analysis:
   the collapsed line has none. A fixture's `expect.nodes` sees only the
   host page's own nodes' actions, not an embedded page's, so the part's
   buttons are tested on the part. Each has a `panel:` fixture:
-  the panel run whole, as the rail shows it. Work (`tasks-panel`, collapsed
-  `tasks-line`, no count; its header opens the Tasks board) is what the
+  the panel run whole, as the rail shows it. Work (`work-panel`, collapsed
+  `work-line`, no count; its header opens the Work board) is what the
   thread is working on, from its efforts, not a view of task states: In
   progress is its open effort (its item under its epic, or the effort's
   title), Up next the ready and blocked items assigned to the thread in
@@ -324,7 +324,7 @@ screens and the holder's add the review and analysis:
   `bucket`, `ord`, `is_default`, and `filter`, a bucket's first stage
   named by its bucket, so a static `todo` default fits any list), and New
   Item (`new-task`, with its `task-fields` query and the `task.new` command: New Task…,
-  Cmd/Ctrl+Shift+N). **Tasks** (`tasks`) is the board, a custom page: the
+  Cmd/Ctrl+Shift+N). **Work** (`work`) is the board, a custom page: the
   `board` component (`src/board/`, built into `dist/` by bundled's
   `package.json`; the manifest's `build:` runs it) draws its own toolbar,
   columns and card menu with the kit's classes and runs the task

@@ -431,13 +431,6 @@ export function hookEventsRef(): TabRef {
   return pageTabRef("hook-events");
 }
 
-/** The Tasks board (oxplow-bundled's `tasks` page). Mirrors the
- *  GitDashboard pattern (`gitDashboardRef`, `uncommittedChangesRef`) so
- *  call sites read as intent rather than as `pageTabRef("…")`. */
-export function tasksRef(): TabRef {
-  return pageTabRef("tasks");
-}
-
 /** Git Dashboard — committed-history rollup page. */
 export function gitDashboardRef(): TabRef {
   return pageTabRef("git-dashboard");

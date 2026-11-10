@@ -1,4 +1,4 @@
-/* The Tasks board: the kit's board look (`.ox-board`, `.ox-board-column`,
+/* The Work board: the kit's board look (`.ox-board`, `.ox-board-column`,
    `.ox-card`), its columns sharing the page's width. Tokens only. */
 /* The board fills the frame; each column scrolls on its own, so a long
    To Do or Done never scrolls the page. */

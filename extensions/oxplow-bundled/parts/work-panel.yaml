@@ -1,4 +1,4 @@
-title: Tasks (panel)
+title: Work (panel)
 description: What the thread is working on — its open effort (with its epic), the items assigned to it next, and what it finished.
 params:
 - name: thread_id

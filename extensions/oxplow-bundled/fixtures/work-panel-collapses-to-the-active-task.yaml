@@ -6,7 +6,7 @@ given:
   - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done } }
   - { command: oxplow.effort.open, input: { thread: thr1 } }
   - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
-when: { panel: tasks }
+when: { panel: work }
 expect:
   body:
     loaders:
@@ -17,7 +17,7 @@ expect:
           - { grp: Finished, title: Shipped }
   collapsed:
     loaders:
-      tasks_line:
+      work_line:
         rows:
           - { title: Untitled effort, active: 1 }
   count: null

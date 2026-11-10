@@ -115,7 +115,7 @@ than handing it props it does not know.
 
 | Target | Core component | Capability | Bound | Props | View |
 |---|---|---|---|---|---|
-| `task.board` | the Tasks board (the `board` component node of bundled's `tasks` page; v2) | `task_tracker` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
+| `task.board` | the Work board (the `board` component node of bundled's `work` page; v2) | `task_tracker` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`); a page's implicit `stream_id` applies when `scope` is `stream` | — |
 | `task.list` | the Task List's list (the `list` node of bundled's `task-list` page; v2): its filters and New Task… stay oxplow's | `task_tracker` | no | `scope` (`thread` / `stream` / `me` / `pool` / `all`: whom the items are assigned to), `thread_id` (applies when `scope` is `thread`) | — |
 | `task.detail` | a task's description editor (the `body` node of the `task` page): the state, fields, About, links, comments, activity and the mounts stay oxplow's | `task_tracker` | no | `uri` (the item) | — |
 | `task.detail.state` | a task's State (the `state` node) — never its Move To (the About node's menu), so a replacement cannot strand an item | `task_tracker` | yes | `uri` (the item) | — |
@@ -196,7 +196,7 @@ has `replaced_by`): the embed (kit vizzes, or `viz: custom` with its
 sandbox and, for an extension that isn't oxplow's own, a "by <extension>" mark,
 sharing the view its target's contract lists) under a hover title naming
 the extension (`replacement-<target>`, no chip), kept fresh as any page run is. The page's own chrome
-(a Task List's filters) stays oxplow's; the Tasks board has none, so its stand-in shares its filters (`view`). A run with an `error` draws
+(a Task List's filters) stays oxplow's; the Work board has none, so its stand-in shares its filters (`view`). A run with an `error` draws
 the core component under a line saying whose it was and why ("beads's
 board couldn't load: …. Showing oxplow's.", `replacement-fallback`),
 outside the replacement's frame: no badge. Nothing is decided in the

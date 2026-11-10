@@ -431,7 +431,7 @@ a bookmark doesn't freeze it to one date.
 ## Replacing a view
 
 An extension can put its own page where one of oxplow's views is: the
-Tasks board (`task.board`), the Task List's list (`task.list`) or a
+Work board (`task.board`), the Task List's list (`task.list`) or a
 task's description editor (`task.detail`). It needs no task tracker of its
 own: a view reads `v_task` and changes items through the task
 commands (`oxplow.task.update`, `transition`, `reorder`, `move`), so it

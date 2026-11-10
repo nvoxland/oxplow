@@ -2135,7 +2135,7 @@ RPCs `get_panel_layout` / `set_panel_layout`.
 V96. What the person's oxplow remembers for them outside any one tab
 (`.context/pages-and-tabs.md` "Page state"): `(scope, key)` → `value_json`
 (JSON text), `updated_at`. Scopes: `app` (app preferences); a page's URI
-without its params (`oxplow:oxplow/page?page=tasks`, `…?page=acme/pulls`) or
+without its params (`oxplow:oxplow/page?page=work`, `…?page=acme/pulls`) or
 `resource:<namespace>/<name>` (page memory, shared by every tab of the page); a panel's
 URI; `component:<namespace>/<id>` (a custom component's own memory). Anything
 else is refused, as is text that isn't JSON or a value over 64 KB, and a

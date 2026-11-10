@@ -64,7 +64,7 @@ Standard Monaco bindings apply. The most-used:
 LSP go-to-definition / hover / references all flow through the
 oxplow LSP bridge — same servers the agent calls via MCP.
 
-## Tasks (Tasks board and Task List)
+## Tasks (Work board and Task List)
 
 | Action | Key |
 |---|---|

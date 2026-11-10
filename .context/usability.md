@@ -494,7 +494,7 @@ markdown itself, nor edits it in a `<textarea>`.
   (`setTitle`, `setActions`) and core draws in the bar — never buttons of
   oxplow's look inside the frame for page-level actions. A form it asks
   for (`openForm`) is oxplow's tab modal, with Enter submitting and
-  Escape closing as every form. Its own controls (the Tasks board's Show,
+  Escape closing as every form. Its own controls (the Work board's Show,
   Priority and Search) are the one case a page draws its controls: the
   component is the page, they are `role: view` params so the rail doesn't
   draw them twice, and a change still replaces the tab's entry as a

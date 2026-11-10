@@ -222,7 +222,7 @@ position) stay on identity alone. Two shapes:
   `for` — not a thing in the graph. Its id is
   `oxplow:oxplow/page?page=<id>` plus its params for oxplow's own
   (oxplow-foundation has `namespace: oxplow`, so its pages are
-  core-named as its commands are: `oxplow:oxplow/page?page=tasks`,
+  core-named as its commands are: `oxplow:oxplow/page?page=work`,
   `oxplow:oxplow/page?page=settings#area=agents`, the area in the `#`
   view) and
   `oxplow:oxplow/page?page=<namespace>/<id>` plus its params for any other
@@ -268,7 +268,7 @@ moved into the project DB and started fresh again) — see the decision in [reso
 | task | `oxplow:oxplow/task?id=<id>&provider=<provider>` — every list's item (`taskTabRef(uri)`) opens `TaskPage` | `oxplow:oxplow/task?id=tsk142&provider=oxtask`, `oxplow:oxplow/task?id=W-1&provider=fake` |
 | commit | `oxplow:oxplow/commit?sha=<sha>` | `oxplow:oxplow/commit?sha=abc1234` |
 | metric | `oxplow:oxplow/metric?metric=<key>[#view]` (`metricRef(key, view?)`) | `oxplow:oxplow/metric?metric=oxplow.coverage.abs_pct` |
-| route | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<namespace>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a route; see "Declared pages" below | `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
+| route | `oxplow:oxplow/page?page=<id>[&params]` (oxplow's) / `oxplow:oxplow/page?page=<namespace>/<id>[&params]` (`pageTabRef(id, params?, view?)`, `extPageRef(ext, id, params?, view?)`, plus typed wrappers: `diffRef`, `endpointDiffRef`, `duplicateBlockRef`, `settingsRef`, `newTaskRef`, …) — a route; see "Declared pages" below | `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=symbols&path=src/lib.rs`, `oxplow:oxplow/page?page=github/open-prs`, `oxplow:oxplow/page?page=acme/pr&ref=oxplow:acme/pr?id%3D12` |
 | web page | the URL itself, `https://example.com/docs` (`externalUrlRef(url)` is `{ id: url }`) — rendered by foundation's `external-url` page (a `viz: embed` over the URL), `for: [https, http]`, its tab labelled `{{param.uri|url}}`; see [external-url-tabs.md](./external-url-tabs.md) | `https://example.com/docs` |
 | symbol | `oxplow:oxplow/symbol?path=<path>&symbol=<name>` (`v_symbol.uri`, `symbolRef(uri)`) — no revision in the id; never a tab: opening one (`handleOpenPage`, or in-tab navigation) resolves it (`resolve_symbol`) and opens its file at the name's line (`openSymbol`). A pinned one (`rev=snap:<id>` / `rev=git:<sha>`) opens the file viewer at that revision; if the version is gone it shows a notice and opens the current symbol | `oxplow:oxplow/symbol?path=src/lib.rs&symbol=Widget::spin` |
 | agent_session | `oxplow:oxplow/agent_session?id=<ses id>` (`agentSessionRef(id)`, pinned; the one URI whose tab is pinned) — an open agent session's terminal; its tab draws its harness's declared logo (`CenterTab.icon` from `HarnessListing.icon`, `AgentIcon`; the generic robot when it declares none) | `oxplow:oxplow/agent_session?id=ses3` |
@@ -1170,7 +1170,7 @@ zone grouping); each appears only when it has content:
    its dataset `thread_tasks` (one row per line, per thread), which reads the
    task interface (`v_task`): whichever list is active, nothing
    with none. Its header opens the `work` page, the same list in a tab,
-   every row. The body part `tasks-panel` groups the lines (`group`): "In
+   every row. The body part `work-panel` groups the lines (`group`): "In
    progress" (the active item; under its epic, with the epic's other
    children indented beside it, when it has one, plus an open effort no
    item names; no row is highlighted: its state icon says which is active), "Ready" (every one, by `rank` then
@@ -1181,8 +1181,8 @@ zone grouping); each appears only when it has content:
    arrow and no buttons. In the rail, In progress shows whole and Ready
    and Finished two rows each (`group.compact`), each with "+N more",
    which grows the panel; grown, ten each (`group.grown`), and "+N more"
-   opens the Tasks board, as the header does. Status and kind show as row icons. Collapsed, the
-   `tasks-line` part: the active item (with its epic), else the last
+   opens the Work board, as the header does. Status and kind show as row icons. Collapsed, the
+   `work-line` part: the active item (with its epic), else the last
    finished. The header has no count. Rows link (Cmd-click opens a new
    tab) and offer Add to Context on right-click.
 3. **Git** — an `oxplow-foundation` panel, stream-scoped, its header
@@ -1412,7 +1412,7 @@ probes that used to click `rail-page-*` should drive `title-bar-search` → the
 launcher (type, then assert `page-<kind>` on the body).
 
 **The task pages** (oxplow-bundled; extensions-bundled.md "The task
-screens"). **Tasks** is the board, a custom page whose component draws
+screens"). **Work** is the board, a custom page whose component draws
 its filters, so it takes the whole width with no rail; the Work panel's
 header opens it. **Task List** is one state's items at a time, the
 backlog's too, with a quick add in its rail, for triage, finding and what was
@@ -1421,7 +1421,7 @@ only what the active list can do (`v_capability_provider`): epics with
 `hierarchy`, Delete with `delete`; reordering and assignment are core's,
 for every list. There's no Archived page:
 oxplow's archived tasks are done or canceled, as the interface states
-them. The ref helper is `tasksRef()`.
+them.
 
 ## Navigation model: a tab is a session of entries
 
@@ -1665,7 +1665,7 @@ the wrong place is not read from there. A page param's `role`
 in the `#` like a filter but never drawn in the rail — or a column's
 `select`) says where its value rides (docs/guide/pages.md "Where a param lives in the address").
 Page memory is scoped by `keyIdentityOf` (the
-identity without its `?` params: `oxplow:oxplow/page?page=tasks`) for
+identity without its `?` params: `oxplow:oxplow/page?page=work`) for
 a page, or `resource:<namespace>/<name>` for a resource page.
 
 ## Page state: four homes, one name each
@@ -1678,7 +1678,7 @@ the docs and the skill:
 |---|---|---|---|
 | **view params** | this tab's view: shareable, bookmarkable, agents see it; a filter replaces the entry, a pick pushes one | the `#` of the entry's ref | `nav.viewParams`, `nav.setViewParams(view, { push })`, `nav.patchViewParams(patch, { push })` |
 | **history state** | this step of this tab's history: scroll, open sections, a draft | `Entry.historyState` | `useHistoryState(key, initial)` |
-| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=tasks`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
+| **page memory** | this page, for the person, every tab of it, across restarts | `ui_preference`, scoped by `keyIdentityOf` (the page's URI without its view and its non-key params: `oxplow:oxplow/page?page=work`, `oxplow:oxplow/page?page=x/y`) or `resource:<namespace>/<name>` | `usePageMemory(key, initial)` (scope from the page) |
 | **app preference** | the whole app, for the person | `ui_preference`, scope `app` | `useAppPreference(key, initial)` |
 | (a panel's memory) | a left-nav panel, for the person | `ui_preference`, the panel's ref | `usePanelMemory(panel, key, initial)` |
 | **extension state** | shared with the team, read by scripts | the extension's state | commands |

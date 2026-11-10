@@ -36,7 +36,7 @@ given:
   - { command: oxplow.effort.open, input: { thread: thr1, title: Done 20 } }
   - { command: oxplow.effort.open, input: { thread: thr1, title: Done 21 } }
   - { command: oxplow.effort.open, input: { thread: thr1, title: Still going } }
-when: { part: oxplow/tasks-panel, params: { thread_id: 1 } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:
     work: { rows: 33 }

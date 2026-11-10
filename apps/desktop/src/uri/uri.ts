@@ -236,7 +236,7 @@ export function keyParamOf(resource: string): string {
 }
 
 /** `text` with only its key param: the page it names whatever it
- *  shows and however (`oxplow/page?page=tasks`) — page memory's scope. Null
+ *  shows and however (`oxplow/page?page=work`) — page memory's scope. Null
  *  when `text` isn't a URI. */
 export function keyIdentityOf(text: string): string | null {
   const u = parseUri(text);

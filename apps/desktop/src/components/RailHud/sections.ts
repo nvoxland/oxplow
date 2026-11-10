@@ -25,6 +25,6 @@ export interface PageDirectoryEntry {
   badge?: number;
   /** Extra search terms the launcher fuzzy-matches beyond label/id — for
    *  a page whose name doesn't contain a word users reach for (e.g. the
-   *  "Tasks" page found by typing "dashboard"). */
+   *  "Work" page found by typing "dashboard"). */
   keywords?: string;
 }

@@ -1,4 +1,4 @@
-# The Tasks board itself, drawn by its component: a column per stage of
+# The Work board itself, drawn by its component: a column per stage of
 # the list (oxplow's Ready, In Progress, Blocked, Done), a card per item
 # in its stage's column; a card dragged to another column moves the item there;
 # a card's menu sets a field and who it's for; the toolbar's Show is the
@@ -7,11 +7,11 @@
 given:
   - { command: oxplow.task.create, input: { title: Next up, assignee: thr1, native: { priority: low } } }
   - { command: oxplow.task.create, input: { title: Someday } }
-when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
+when: { page: work, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
 steps:
   - ui:
       - expect:
-          title: Tasks
+          title: Work
           actions: [new]
           count: { '[data-testid="column-ready"] .ox-card': 1, '[data-testid="column-in_progress"] .ox-card': 0 }
           text: { '[data-testid="column-ready"] h2': Ready, '[data-testid="column-in_progress"] h2': In Progress, '[data-testid="column-ready"] .card-title': Next up }

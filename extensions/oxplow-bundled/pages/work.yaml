@@ -1,8 +1,8 @@
-title: Tasks
+title: Work
 description: "The tasks assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per stage of the list, drag a card to move it. The backlog is the Task List's."
 icon: columns-3
 category: Work
-keywords: board kanban tasks columns state
+keywords: work board kanban tasks columns state
 needs:
 - task_tracker
 # The board's filters are its view (the tab's `#`): the board draws them

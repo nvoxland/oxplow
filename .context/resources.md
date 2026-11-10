@@ -138,7 +138,7 @@ oxplow:github/pr?id=12
 `thread?id=thr3`, `turn?id=trn1`), a word for the value's shape
 (`commit?sha=`, `wiki?slug=`, `branch?name=`, `extension?name=`,
 `ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`), and
-the resource's own name for a contribution (`page?page=tasks`, `command?command=oxplow.file.save`,
+the resource's own name for a contribution (`page?page=work`, `command?command=oxplow.file.save`,
 `collector?collector=triage/todos`, `effect?effect=acme/notify`,
 `resource?resource=github/pr`). Resources with several identity params
 have none: `file?path=&rev=&filesystem=`, `dir?path=&filesystem=`, `symbol?path=&symbol=`,

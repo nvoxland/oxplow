@@ -1,4 +1,4 @@
-// The Tasks board's pure half: what its frame draws from the page's rows,
+// The Work board's pure half: what its frame draws from the page's rows,
 // with no DOM. The desktop suite tests it (`apps/desktop/src/viz/boardModel.test.ts`).
 
 export type Cell = string | number | boolean | null;

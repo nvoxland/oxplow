@@ -162,7 +162,7 @@ export function buildQuickOpenResults(input: {
   }
   const tokens = q.split(/\s+/).filter(Boolean);
   // Full (uncapped) matched sets. Pages also match their optional
-  // `keywords` so e.g. the Tasks page (label "Tasks") is still found by
+  // `keywords` so e.g. the Work page (label "Work") is still found by
   // typing "dashboard"; the best title match ranks first (`pageRank`).
   const matchedPages: QuickOpenResult[] = input.pages
     .map((entry, at) => ({ entry, at, rank: pageRank(entry, tokens) }))
