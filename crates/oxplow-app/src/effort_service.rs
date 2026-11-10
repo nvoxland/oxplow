@@ -577,8 +577,15 @@ impl EffortService {
         path: &str,
         worktree_root: Option<&Path>,
     ) -> Result<bool, DomainError> {
-        self.claim_effort_file(thread, None, None, path, worktree_root)
-            .await
+        self.claim_effort_file(
+            thread,
+            None,
+            None,
+            path,
+            worktree_root,
+            oxplow_db::ClaimBasis::Named,
+        )
+        .await
     }
 
     /// [`Self::claim_open_effort_file`] for an edit recorded with the effort
@@ -593,6 +600,7 @@ impl EffortService {
         session: Option<oxplow_domain::AgentSessionId>,
         path: &str,
         worktree_root: Option<&Path>,
+        basis: oxplow_db::ClaimBasis,
     ) -> Result<bool, DomainError> {
         if path.is_empty() {
             return Ok(false);
@@ -622,7 +630,7 @@ impl EffortService {
         let version = self.resolve_effort_file_version(&effort).await;
         let change = classify_change(worktree_root, path);
         effort_store
-            .record_claimed_file(&effort.id, path, change, version.as_ref(), session)
+            .record_claimed_file_as(&effort.id, path, change, version.as_ref(), session, basis)
             .await?;
         Ok(true)
     }

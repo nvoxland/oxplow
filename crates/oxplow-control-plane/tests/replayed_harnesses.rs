@@ -172,6 +172,29 @@ async fn a_recorded_claude_code_session_is_recorded_canonically() {
     replay("claude/hooks.jsonl", "claude", "claude.txt").await;
 }
 
+/// Claude Code's Bash PostToolUse carries `bashEditDiff` on some calls: the
+/// files it says the call changed are on that call's tool event; a Bash
+/// call without it names none (its absence says nothing).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_shell_calls_reported_files_are_on_its_tool_call() {
+    let r = replayed("claude/hooks.jsonl", "claude").await;
+    let bash: Vec<_> = events_of(&r, "agent.tool.finished")
+        .await
+        .into_iter()
+        .filter(|p| p["tool"] == "Bash")
+        .collect();
+    let reported: Vec<_> = bash
+        .iter()
+        .filter(|p| p["paths"].as_array().is_some_and(|a| !a.is_empty()))
+        .collect();
+    assert_eq!(reported.len(), 2, "{bash:#?}");
+    assert!(reported.iter().all(|p| p["paths"][0] == "claude.txt"));
+    assert!(
+        bash.len() > reported.len(),
+        "a call without the field names none"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_opencode_session_is_recorded_canonically() {
     let r = replay("opencode/hooks.jsonl", "opencode", "opencode.txt").await;

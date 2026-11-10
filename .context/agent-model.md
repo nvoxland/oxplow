@@ -1420,6 +1420,15 @@ pinned by synthetic notifications, not recordings):
 | Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
 | Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
 
+**What a shell call reports it changed.** Claude Code's Bash
+`PostToolUse` can carry `tool_response.bashEditDiff { files, changedFiles,
+moreFiles }` (on 2 of 4 Bash calls in `fixtures/claude/hooks.jsonl`);
+`shared::claude_shaped_tool_use` reads `changedFiles` and `files[].filePath`
+into the call's `paths`, so `agent.tool.finished` and the tool-call row
+carry them, and the effort claim consumer claims them with basis
+`reported`. A shell call without the field names no file. Codex, opencode
+and the ACP agents report nothing per shell call.
+
 **Prompt references.** A person's prompt can carry references oxplow
 inserted or the agent's picker wrote: `@<path>`, `[oxplow uri <uri>]`,
 `[oxplow <uri>: "<title>" (<state>)]`, `[oxplow page <id> row: …]`. They

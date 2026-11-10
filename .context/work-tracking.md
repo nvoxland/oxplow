@@ -67,7 +67,9 @@ so a policy may react late: opening adopts the thread's activity back to
 its previous effort's end, and closing can cut the span at a past point.
 
 **Attribution is core's, from observation:** files are *claimed* (an edit
-tool named them) or *observed* (they changed during one of the thread's
+tool named them, `claim_basis` `named`, or the harness said a shell call
+changed them, `reported`: Claude Code's `bashEditDiff`, never taking a
+named file; its absence says nothing) or *observed* (they changed during one of the thread's
 turns and no other thread's overlapping effort claimed them), which covers
 shell edits — the large majority. The `effort.observe` consumer records
 them per turn from the turn's snapshot bracket, after the policy has

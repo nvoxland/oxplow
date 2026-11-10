@@ -92,6 +92,26 @@ pub enum FileSource {
     Observed,
 }
 
+/// How a claimed file was claimed: `Named` by an edit tool's own input,
+/// `Reported` by the harness's statement that a shell call changed it
+/// (Claude Code's `bashEditDiff`). A reported claim never replaces a
+/// named one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimBasis {
+    Named,
+    Reported,
+}
+
+impl ClaimBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Named => "named",
+            Self::Reported => "reported",
+        }
+    }
+}
+
 impl FileSource {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -504,13 +524,27 @@ fn record_file_tx(
     change: EffortFileChange,
     version: FileRefVersion<'_>,
     session: Option<AgentSessionId>,
+    basis: ClaimBasis,
 ) -> rusqlite::Result<()> {
+    // A harness's report never takes a file an edit tool named.
+    if basis == ClaimBasis::Reported {
+        let named: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM effort_file
+                            WHERE effort_id = ?1 AND path = ?2
+                              AND source = 'claimed' AND claim_basis = 'named')",
+            params![id.value(), path],
+            |r| r.get(0),
+        )?;
+        if named {
+            return Ok(());
+        }
+    }
     conn.execute(
         "INSERT OR REPLACE INTO effort_file
            (effort_id, path, change_kind,
             local_snapshot_id, closest_vcs_rev, vcs_rev_exact, source,
-            agent_session_id, shared)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'claimed', ?7, 0)",
+            agent_session_id, shared, claim_basis)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'claimed', ?7, 0, ?8)",
         params![
             id.value(),
             path,
@@ -519,6 +553,7 @@ fn record_file_tx(
             version.closest_vcs_rev,
             if version.vcs_rev_exact { 1 } else { 0 },
             session.map(|s| s.value()),
+            basis.as_str(),
         ],
     )?;
     Ok(())
@@ -778,6 +813,19 @@ pub trait EffortStore: Send + Sync {
         change: EffortFileChange,
         version: FileRefVersion<'_>,
         session: Option<AgentSessionId>,
+    ) -> Result<(), DomainError> {
+        self.record_claimed_file_as(id, path, change, version, session, ClaimBasis::Named)
+            .await
+    }
+    /// [`Self::record_claimed_file`] saying how it was claimed.
+    async fn record_claimed_file_as(
+        &self,
+        id: &EffortId,
+        path: &str,
+        change: EffortFileChange,
+        version: FileRefVersion<'_>,
+        session: Option<AgentSessionId>,
+        basis: ClaimBasis,
     ) -> Result<(), DomainError>;
     /// [`Self::record_claimed_file`] with no session known.
     async fn record_file(
@@ -1411,13 +1459,14 @@ impl EffortStore for SqliteEffortStore {
         Ok(added)
     }
 
-    async fn record_claimed_file(
+    async fn record_claimed_file_as(
         &self,
         id: &EffortId,
         path: &str,
         change: EffortFileChange,
         version: FileRefVersion<'_>,
         session: Option<AgentSessionId>,
+        basis: ClaimBasis,
     ) -> Result<(), DomainError> {
         let id_clone = *id;
         let owned = OwnedFileRefVersion {
@@ -1428,7 +1477,15 @@ impl EffortStore for SqliteEffortStore {
         let path_clone = path.to_string();
         self.db
             .call(move |conn| {
-                record_file_tx(conn, id_clone, &path_clone, change, owned.as_ref(), session)
+                record_file_tx(
+                    conn,
+                    id_clone,
+                    &path_clone,
+                    change,
+                    owned.as_ref(),
+                    session,
+                    basis,
+                )
             })
             .await?;
         {
