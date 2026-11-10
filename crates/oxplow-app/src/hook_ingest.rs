@@ -4700,4 +4700,91 @@ mod tests {
             ]
         );
     }
+
+    /// A request's state is read live from its turns and jobs: running
+    /// while a turn is open, waiting on its own work while a job it started
+    /// has not reported, waiting on the person when its last turn ended on a
+    /// question, else finished; its totals count its turns.
+    #[tokio::test]
+    async fn a_requests_state_and_totals_are_read_from_its_turns() {
+        let (svc, tid) = fixture().await;
+        let state = || {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    let mut stmt = c
+                        .prepare("SELECT state, turns FROM v_request ORDER BY id")
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let said = |text: &str| {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({ "last_assistant_message": text }),
+            )
+        };
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "one"}),
+        ))
+        .await
+        .unwrap();
+        assert_eq!(state().await, vec![("running".to_string(), 1)]);
+        svc.ingest(HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(vec![oxplow_domain::hook::RunningWork {
+                    id: "bsh".into(),
+                    kind: Some("shell".into()),
+                    description: None,
+                }]),
+                ..TurnRun::default()
+            }),
+            ..said("started it")
+        })
+        .await
+        .unwrap();
+        assert_eq!(state().await, vec![("waiting_on_work".to_string(), 1)]);
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: None,
+                job: Some("bsh".into()),
+                status: Some("completed".into()),
+                summary: None,
+                text: "<task-notification>bsh</task-notification>".into(),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        svc.ingest(said("Built it.\nShould I commit?"))
+            .await
+            .unwrap();
+        assert_eq!(state().await, vec![("waiting_on_person".to_string(), 2)]);
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "two"}),
+        ))
+        .await
+        .unwrap();
+        svc.ingest(said("Done.")).await.unwrap();
+        // The person's answer started a new request: the first stops waiting.
+        assert_eq!(
+            state().await,
+            vec![("finished".to_string(), 2), ("finished".to_string(), 1)]
+        );
+    }
 }
