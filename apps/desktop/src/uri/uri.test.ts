@@ -49,16 +49,16 @@ test("its readers name the resource and a param", () => {
   expect(typeOf(u)).toBe("oxplow/task");
   expect(paramOf(u, "id")).toBe("tsk42");
   expect(paramOf(u, "gone")).toBeNull();
-  expect(typeOf("oxplow:oxplow/effort?id=eff1")).toBe("oxplow/effort");
-  expect(typeOf("effort:eff1")).toBeNull();
+  expect(typeOf("oxplow:oxplow/request?id=req1")).toBe("oxplow/request");
+  expect(typeOf("request:req1")).toBeNull();
 });
 
 // A link may name any resource; oxplow's are the oxplow: ones.
 test("an external URI is a URL of another scheme", () => {
   expect(isExternal("https://example.com/a")).toBe(true);
   expect(isExternal("mailto:a@example.com")).toBe(true);
-  expect(isExternal("oxplow:oxplow/effort?id=eff1")).toBe(false);
-  expect(isExternal("oxplow:effort")).toBe(false);
+  expect(isExternal("oxplow:oxplow/request?id=req1")).toBe(false);
+  expect(isExternal("oxplow:request")).toBe(false);
   expect(isExternal("not a uri")).toBe(false);
 });
 

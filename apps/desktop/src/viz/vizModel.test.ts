@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -127,16 +127,15 @@ describe("row groups and styling", () => {
 });
 
 describe("cellLinkRef", () => {
-  const cols = ["id", "title", "path", "slug", "effort"];
-  const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/effort?id=eff7"];
+  const cols = ["id", "title", "path", "slug", "request"];
+  const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/request?id=req7"];
 
   test("a page link reads its ref from `from`", () => {
     expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/task?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/task?id=E-1&provider=issues");
   });
-  test("file / wiki / effort-diff links default to the column itself", () => {
+  test("file / wiki links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
     expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("oxplow:oxplow/wiki?slug=auth-flow");
-    expect(cellLinkRef({ kind: "effort-diff", from: null, line: null, base: null, head: null }, "effort", row, cols)?.id).toBe("oxplow:oxplow/effort?id=eff7");
   });
   test("null or missing target gives no link", () => {
     expect(cellLinkRef({ kind: "file", from: "path", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
@@ -229,14 +228,6 @@ describe("rowAssistantContext", () => {
       label: null,
       text: '[oxplow page review/waiting row: id=42, title="Fix it"]',
     });
-  });
-});
-
-describe("effortRowId", () => {
-  test("the numeric id v_* views use, from an effort id like eff262", () => {
-    expect(effortRowId("eff262")).toBe(262);
-    expect(effortRowId("262")).toBe(262);
-    expect(effortRowId("nope")).toBeNull();
   });
 });
 
@@ -336,15 +327,15 @@ describe("change links", () => {
       cols,
     )!;
     expect(spec(working).rightVersion).toEqual("working");
-    // An effort's change is between two snapshots; those open too.
-    const effort = cellLinkRef(
+    // A change between two snapshots; those open too.
+    const between = cellLinkRef(
       { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
       "path",
       ["a", null, "snap:3", "snap:4", null],
       cols,
     )!;
-    expect(spec(effort).leftVersion).toEqual("snap:3");
-    expect(spec(effort).rightVersion).toEqual("snap:4");
+    expect(spec(between).leftVersion).toEqual("snap:3");
+    expect(spec(between).rightVersion).toEqual("snap:4");
     // A cell that isn't a revision opens nothing rather than a guess.
     expect(
       cellLinkRef(

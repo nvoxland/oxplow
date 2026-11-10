@@ -59,10 +59,10 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     case "directory":
       return Folder;
     case "diff":
-    // A snapshot, an effort and a turn open as their diff (P2.11).
+    // A snapshot and a turn open as their diff (P2.11).
     case "snapshot":
-    case "effort":
     case "turn":
+    case "request":
       return GitCompare;
     case "wiki":
       return BookOpen;
@@ -171,7 +171,7 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
 /**
  * The kind a tab id renders as — an entity ref's kind
  * (`task:oxplow:tsk42` → `task`, `file:src/a.rs@git:HEAD` →
- * `file`) or a declared page's id (`page:diff-view?effort=eff9` →
+ * `file`) or a declared page's id (`page:diff-view#start=snap:1&end=snap:2` →
  * `diff-view`, `page:gh/open-prs` → `gh/open-prs`).
  * Text that is not a tab id comes back unchanged so a caller can still
  * label it. The chrome uses this for icons and kind chips.

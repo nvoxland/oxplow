@@ -20,12 +20,12 @@ import {
 } from "../components/format.js";
 import type { ColumnFormat, VizConfig, PageParam, ColumnLink, VizRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { AssistantContext } from "../components/Assistant/assistantApi.js";
-import { idOf, parseUri } from "../uri/uri.js";
+import { parseUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -331,12 +331,6 @@ export function cellLinkRef(
     }
     case "wiki":
       return wikiPageRef(s);
-    case "effort-diff": {
-      // A viz row carries the effort's ref (`v_effort.ref`); a cell that
-      // isn't one links nowhere.
-      const id = idOf(s, "oxplow/effort");
-      return id === null ? null : effortDiffRef(id);
-    }
   }
 }
 
@@ -603,14 +597,7 @@ export function rowContext(viz: VizConfig, columns: string[], row: SqlCell[]): {
   return ref ? { uri: ref } : { text: rowMention(viz.id, columns, row).trim() };
 }
 
-/** The numeric row id the `v_*` views use, from a UI effort id like
- *  `eff262` (or a bare number). */
-export function effortRowId(effortId: string): number | null {
-  const m = /^(?:eff)?(\d+)$/.exec(effortId);
-  return m ? Number(m[1]) : null;
-}
-
-/** The numeric row id from any prefixed UI id (`tsk42`, `thr7`, `eff262`,
+/** The numeric row id from any prefixed UI id (`tsk42`, `thr7`, `req262`,
  *  or a bare number). */
 export function numericRowId(id: string): number | null {
   const m = /^[a-z]*(\d+)$/.exec(id);

@@ -295,19 +295,6 @@ export interface SnapshotSummary {
 }
 
 
-export interface TaskEffort {
-  id: string;
-  /** The task worked on (`task:oxplow:tsk42`, or another
-   *  provider's `task:issues:ENG-12`). */
-  task: string;
-  started_at: string;
-  ended_at: string | null;
-  start_snapshot_id: string | null;
-  end_snapshot_id: string | null;
-  /** The effort's summary prose (canonical text). */
-  summary: string | null;
-}
-
 export const BACKLOG_SCOPE = "__backlog__";
 
 
@@ -492,7 +479,7 @@ export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
   return unwrap(await commands.reportTabs(report));
 }
 
-/// Analyze a change (a commit, an effort, or a stream's working tree) if
+/// Analyze a change (a commit, a request, or a stream's working tree) if
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
@@ -1089,7 +1076,6 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 
 export type { MetricSpec, SeriesPoint } from "./metricsSql.js";
 
-import { effortUri, idOf } from "./uri/uri.js";
 
 /** Rows a metric reader returned, and what the query read — hand `reads` to
  *  `useRerunOnChange` so the view refreshes when (and only when) they change. */
@@ -1135,18 +1121,6 @@ export async function undoCommand(auditId: number, confirmed = false): Promise<C
 export async function decideProposal(id: number, approve: boolean): Promise<CommandOutcome | null> {
   return unwrap(await commands.decideProposal(id, approve));
 }
-
-/** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
- *  Metrics Explorer's effort-band overlay (tsk233). */
-export async function listEffortsInWindow(
-  windowStart: string,
-  windowEnd: string,
-): Promise<TaskEffort[]> {
-  return unwrap(
-    await commands.listEffortsInWindow(windowStart, windowEnd),
-  ) as unknown as TaskEffort[];
-}
-
 
 /** Snapshot row — one per `request_snapshot()` call that captured
  *  anything. Local History dashboard surfaces this list. */
@@ -1225,22 +1199,6 @@ export async function filesAt(streamId: string, revision: Revision): Promise<str
   return unwrap(await commands.filesAt(streamId || null, revision));
 }
 
-/** One (snapshot, effort) pair. `completedHere` is true when the
- *  effort ended exactly at this snapshot; otherwise the effort was
- *  in flight at this snapshot. Callers group by `snapshotId` and
- *  resolve task titles via `getTaskSummaries` (the IPC only carries
- *  effort columns). */
-export interface EffortAtSnapshot {
-  snapshotId: number;
-  effortId: string;
-  /** The effort's task ref; `null` while it's unlinked. */
-  task: string | null;
-  threadId: string;
-  startSnapshotId: number | null;
-  endSnapshotId: number | null;
-  completedHere: boolean;
-}
-
 /** For each snapshot id in the input list, the wiki slugs whose
  *  body changed in that snapshot. Drives wiki badges on the
  *  Local History dashboard. */
@@ -1253,49 +1211,10 @@ export async function listWikiSlugsForSnapshots(
   return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
 }
 
-/** Efforts' titles (`v_effort.title`: their own, else their item's, else
- *  their first prompt's first line), by effort id (`eff12`). */
-export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
-  if (effortIds.length === 0) return new Map();
-  const res = await querySql(
-    `SELECT uri, title FROM v_effort WHERE uri IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
-    [JSON.stringify(effortIds.map(effortUri))],
-    10_000,
-  );
-  return new Map(res.rows.map((r) => [idOf(String(r[0]), "oxplow/effort") ?? "", String(r[1])] as [string, string]));
-}
-
-export async function listEffortsAtSnapshots(
-  snapshotIds: number[],
-): Promise<EffortAtSnapshot[]> {
-  const rows = unwrap(
-    await commands.listEffortsAtSnapshots(snapshotIds),
-  ) as unknown as Array<{
-    snapshot_id: number;
-    effort: {
-      id: string;
-      task: string | null;
-      thread_id: string;
-      start_snapshot_id: number | null;
-      end_snapshot_id: number | null;
-    };
-  }>;
-  return rows.map((r) => ({
-    snapshotId: r.snapshot_id,
-    effortId: r.effort.id,
-    task: r.effort.task,
-    threadId: r.effort.thread_id,
-    startSnapshotId: r.effort.start_snapshot_id,
-    endSnapshotId: r.effort.end_snapshot_id,
-    completedHere: r.effort.end_snapshot_id === r.snapshot_id,
-  }));
-}
-
 export interface SnapshotTakenEventPayload {
   streamId: string;
   snapshotId: string;
   trigger: SnapshotTrigger;
-  effortId: string | null;
   threadId: string | null;
 }
 
@@ -1313,7 +1232,6 @@ export function subscribeSnapshotEvents(
       streamId: eventStreamId,
       snapshotId: String(event.snapshotId),
       trigger: event.trigger as SnapshotTrigger,
-      effortId: (event.effortId as string | null | undefined) ?? null,
       threadId: (event.threadId as string | null | undefined) ?? null,
     });
   });

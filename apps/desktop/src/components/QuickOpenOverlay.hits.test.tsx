@@ -10,7 +10,7 @@ const KINDS: Array<[string, string]> = [
   ["thread", "thread"],
   ["agent_session", "agent session"],
   ["turn", "turn"],
-  ["effort", "effort"],
+  ["request", "request"],
   ["commit", "commit"],
   ["dashboard", "dashboard"],
 ];

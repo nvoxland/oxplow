@@ -140,8 +140,8 @@ export interface RichTextFieldProps {
   /** Optional className applied to the wrapper. */
   className?: string;
   style?: CSSProperties;
-  /** When true, no pencil affordance (e.g. effort summaries — but
-   *  those should use MarkdownView, not this field). Default false. */
+  /** When true, no pencil affordance (e.g. a read-only summary — but
+   *  that should use MarkdownView, not this field). Default false. */
   hidePencil?: boolean;
   /** When set, the field becomes comment-enabled (highlights, the
    *  selection affordance, and the thread popover). */

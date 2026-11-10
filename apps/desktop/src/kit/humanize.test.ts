@@ -6,7 +6,7 @@ import { humanize } from "./humanize.js";
 test("humanize turns a key into a label", () => {
   expect(humanize("committed_at")).toBe("Committed at");
   expect(humanize("subject")).toBe("Subject");
-  expect(humanize("effort_id")).toBe("Effort id");
+  expect(humanize("request_id")).toBe("Request id");
   expect(humanize("parentCount")).toBe("Parent count");
   expect(humanize("q")).toBe("Q");
   expect(humanize("")).toBe("");

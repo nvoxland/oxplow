@@ -6,7 +6,7 @@ describe("task refs", () => {
     expect(taskId("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toBe("oxtask:tsk42");
     expect(taskId("oxplow:oxplow/task?id=ENG-12&provider=issues")).toBe("issues:ENG-12");
     expect(taskId("task:nope")).toBeNull();
-    expect(taskId("oxplow:oxplow/effort?id=eff1")).toBeNull();
+    expect(taskId("oxplow:oxplow/request?id=req1")).toBeNull();
   });
 
   test("a label is the item's own id, as its list gives it", () => {

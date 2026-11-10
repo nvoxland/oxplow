@@ -8,7 +8,6 @@ import {
   configUri,
   contributionOf,
   dirUri,
-  effortUri,
   eventUri,
   extPageUri,
   fileUri,
@@ -29,7 +28,6 @@ import {
 test("each record is named by its URI", () => {
   expect(threadUri("thr3")).toBe("oxplow:oxplow/thread?id=thr3");
   expect(streamUri("str1")).toBe("oxplow:oxplow/stream?id=str1");
-  expect(effortUri("eff12")).toBe("oxplow:oxplow/effort?id=eff12");
   expect(commentUri("cmt4")).toBe("oxplow:oxplow/comment?id=cmt4");
   expect(agentSessionUri("ses3")).toBe("oxplow:oxplow/agent_session?id=ses3");
   expect(wikiUri("architecture")).toBe("oxplow:oxplow/wiki?slug=architecture");
@@ -45,7 +43,7 @@ test("each record is named by its URI", () => {
 
 test("a contribution's key param is its own name, with the view's params beside it", () => {
   expect(pageUri("tasks")).toBe("oxplow:oxplow/page?page=tasks");
-  expect(pageUri("diff-view", { effort: "eff9" })).toBe("oxplow:oxplow/page?effort=eff9&page=diff-view");
+  expect(pageUri("diff-view", { start: "snap:1" })).toBe("oxplow:oxplow/page?page=diff-view&start=snap:1");
   expect(extPageUri("acme", "board", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toBe(
     "oxplow:oxplow/page?page=acme/board&uri=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask",
   );

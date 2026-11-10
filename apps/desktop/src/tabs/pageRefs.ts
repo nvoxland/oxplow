@@ -36,7 +36,6 @@ import {
   agentSessionUri,
   commitUri,
   dirUri,
-  effortUri,
   extPageUri,
   fileUri,
   formatUri,
@@ -203,8 +202,8 @@ export function gitCommitRef(sha: string): TabRef {
   return { id: commitUri(sha) };
 }
 
-/** Open one metric's detail page, optionally scoped to an effort's window —
- *  the task-page metrics-panel drill-in ("In this effort" before→after +
+/** Open one metric's detail page, optionally scoped to a window —
+ *  the task-page metrics-panel drill-in (before→after +
  *  further exploration). Its own page kind (`metric`); Metrics and the
  *  dashboard tiles both navigate into it. */
 export function metricRef(metricKey: string, view?: Record<string, SqlCell>): TabRef {
@@ -444,8 +443,6 @@ export function gitDashboardRef(): TabRef {
  *
  * - **snapshot** (`snapshot:<N>`) — a single capture, framed as
  *   `[parent → N]` (its recorded parent).
- * - **effort** (`effort:<effN>`) — the effort's start/end snapshot
- *   bracket, carrying the task title + "in progress" state.
  * - **turn** (`turn:<trnN>`) — an agent turn's start/end snapshots:
  *   what the turn changed.
  * - **endpoints** (`page:diff-view#start=<rev>&end=<rev>`) — an explicit
@@ -456,12 +453,6 @@ export function gitDashboardRef(): TabRef {
  *  dashboard, file version history, and snapshot backlinks. */
 export function snapshotRef(snapshotId: number): TabRef {
   return { id: snapshotUri(snapshotId) };
-}
-
-/** An effort's page — its start/end snapshot bracket as a diff. The
- *  'View diff' button on a completed effort points here. */
-export function effortDiffRef(effortId: string): TabRef {
-  return { id: effortUri(effortId) };
 }
 
 /** An agent turn's page (`trn<N>`) — what the turn changed. */

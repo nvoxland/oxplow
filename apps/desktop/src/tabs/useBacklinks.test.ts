@@ -4,10 +4,9 @@ import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUr
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
 import { setResources, type Resource } from "../resourceStore.js";
-import { collectorUri, commitUri, dirUri, effortUri, fileUri, pageUri, resourceUri, wikiUri, taskUri } from "../uri/uri.js";
+import { collectorUri, commitUri, dirUri, fileUri, pageUri, resourceUri, wikiUri, taskUri } from "../uri/uri.js";
 import {
   directoryRef,
-  effortDiffRef,
   fileRef,
   gitCommitRef,
   wikiPageRef,
@@ -33,7 +32,6 @@ describe("graphUriOf", () => {
   });
 
   test("any other kind with a page is its own URI, without its view", () => {
-    expect(graphUriOf(effortDiffRef("eff12"))).toBe(effortUri("eff12"));
   });
 
   test("a shell route has none", () => {
@@ -179,7 +177,7 @@ describe("edges to any ref", () => {
     wikilink: null,
     page,
   });
-  const CORE = () => [coreKind("effort", null), coreKind("task", null), coreKind("collector", null)];
+  const CORE = () => [coreKind("request", null), coreKind("task", null), coreKind("collector", null)];
   beforeEach(() => setResources(CORE()));
   afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
@@ -205,8 +203,8 @@ describe("edges to any ref", () => {
   });
 
   test("a link to a core kind with a page opens it", () => {
-    const entry = edgeToOutboundEntry(edge({ target: effortUri("eff12"), source_label: "An effort" }));
-    expect(entry.open).toBe(effortUri("eff12"));
+    const entry = edgeToOutboundEntry(edge({ target: resourceUri("oxplow/request", { id: "req12" }), source_label: "A request" }));
+    expect(entry.open).toBe(resourceUri("oxplow/request", { id: "req12" }));
   });
 
   test("a link to an extension's resource opens as itself, drawn by its renderer", () => {

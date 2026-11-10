@@ -8,7 +8,7 @@ import { promptsOf } from "./usePromptCatalog.js";
 // every Ask fills the Assistant's box and never sends.
 
 const catalog: CatalogPrompt[] = [
-  { prompt: "Which files did this effort touch?", about: "oxplow/effort", source: { kind: "extension", name: "oxplow-foundation" } },
+  { prompt: "Which files did this request touch?", about: "oxplow/request", source: { kind: "extension", name: "oxplow-foundation" } },
   { prompt: "Who has changed this file the most?", about: "oxplow/file", source: { kind: "extension", name: "oxplow-foundation" } },
   { prompt: "Which PRs wait on me?", about: null, source: { kind: "extension", name: "gh" } },
 ];
@@ -35,7 +35,7 @@ afterEach(() => {
 
 test("v_page_answer's rows are the catalog; prompts about a kind", () => {
   expect(promptsOf(rows)).toEqual(catalog);
-  expect(promptsAbout(catalog, "oxplow/effort").map((p) => p.prompt)).toEqual(["Which files did this effort touch?"]);
+  expect(promptsAbout(catalog, "oxplow/request").map((p) => p.prompt)).toEqual(["Which files did this request touch?"]);
 });
 
 test("an empty state offers prompts; Ask puts it in the Assistant's box", () => {

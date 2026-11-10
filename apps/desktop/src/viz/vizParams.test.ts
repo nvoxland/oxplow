@@ -7,7 +7,6 @@ import { paramKind, paramOptions, paramOptionsSql } from "./vizParams.js";
 
 test("oxplow's id params are pickers; anything else is typed", () => {
   expect(paramKind("uri")).toBe("task");
-  expect(paramKind("effort_id")).toBe("effort");
   expect(paramKind("thread_id")).toBe("thread");
   expect(paramKind("stream_id")).toBe("stream");
   expect(paramKind("change_id")).toBeNull();
@@ -16,7 +15,6 @@ test("oxplow's id params are pickers; anything else is typed", () => {
 
 test("each picker reads its dataset, newest first", () => {
   expect(paramOptionsSql("task")).toContain("FROM v_task");
-  expect(paramOptionsSql("effort")).toContain("FROM v_effort");
   expect(paramOptionsSql("thread")).toContain("FROM v_thread");
   expect(paramOptionsSql("stream")).toContain("FROM v_stream");
 });

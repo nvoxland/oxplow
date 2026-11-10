@@ -58,7 +58,7 @@ test("search offers ref-less commands under their group, by label and keywords",
   const offers = commandOffers(
     [
       spec("oxplow.vcs.pull", { label: "Pull Changes", group: "Git", keywords: ["sync"] }),
-      spec("tracker.effort.note", { label: "Note Effort", about: "oxplow/effort" }),
+      spec("tracker.request.note", { label: "Note Request", about: "oxplow/request" }),
       spec("oxplow.vcs.push", { label: "Push Changes", input: { stream: "{{stream}}" } }),
     ],
     { streamId: null, threadId: null },
@@ -115,7 +115,7 @@ test("a form that isn't a tab id is one of the window's own; an offer says its s
 test("a ref's menus offer the commands about its kind, the ref bound into their input", async () => {
   const { d, calls } = deps();
   const specs = [
-    spec("tracker.effort.note", { label: "Note Effort", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
+    spec("tracker.request.note", { label: "Note Request", about: "oxplow/request", input: { uri: "{{uri}}" } }),
     spec("tracker.item.estimate", { label: "Estimate", about: "oxplow/task", input: { uri: "{{uri}}", points: 3 } }),
     spec("tracker.item.flag", { label: "Flag", about: "oxplow/task" }),
     spec("oxplow.vcs.pull", { label: "Pull" }),

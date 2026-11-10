@@ -311,8 +311,6 @@ export function isExternal(text: string): boolean {
 export const threadUri = (id: string): string => resourceUri("oxplow/thread", { id });
 /** A stream (`str1`). */
 export const streamUri = (id: string): string => resourceUri("oxplow/stream", { id });
-/** An effort (`eff12`). */
-export const effortUri = (id: string): string => resourceUri("oxplow/effort", { id });
 /** A wiki comment (`cmt12`). */
 export const commentUri = (id: string): string => resourceUri("oxplow/comment", { id });
 /** An agent session (`ses3`). */

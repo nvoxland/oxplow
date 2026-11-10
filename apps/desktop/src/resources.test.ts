@@ -7,7 +7,7 @@ import { resourceIcon } from "./resources.js";
 import { extensionWikilinkRef, resourcesFromResult, setResources, type Resource } from "./resourceStore.js";
 import { refFromTabId } from "./tabs/pageRefs.js";
 import { refTargetNow } from "./tabs/refOpener.js";
-import { effortUri, resourceUri } from "./uri/uri.js";
+import { resourceUri } from "./uri/uri.js";
 
 const ACME_PR: Resource = {
   resource: "acme/pr",
@@ -58,20 +58,20 @@ describe("an extension's ref kind (P8.D7)", () => {
   });
 
   test("a sugar is read before a resource's own name, as the backend reads it", () => {
-    const effort: Resource = {
+    const request: Resource = {
       ...ACME_PR,
-      resource: "oxplow/effort",
+      resource: "oxplow/request",
       extension: "oxplow",
       params: { id: { required: true, pattern: null } },
       wikilink: null,
     };
     // Without a declared prefix, an oxplow resource with one required param
     // is named by its own name.
-    setResources([effort]);
-    expect(extensionWikilinkRef("effort:eff3")).toBe(effortUri("eff3"));
+    setResources([request]);
+    expect(extensionWikilinkRef("request:req3")).toBe(resourceUri("oxplow/request", { id: "req3" }));
     // An extension that declares the same prefix wins.
-    setResources([effort, { ...ACME_PR, wikilink: { prefix: "effort", param: "id" } }]);
-    expect(extensionWikilinkRef("effort:12")).toBe(ACME_PR_URI);
+    setResources([request, { ...ACME_PR, wikilink: { prefix: "request", param: "id" } }]);
+    expect(extensionWikilinkRef("request:12")).toBe(ACME_PR_URI);
   });
 
   test("a long id matches as the backend's does (tsk917)", () => {

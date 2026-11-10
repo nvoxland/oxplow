@@ -9,7 +9,6 @@ import {
   settingsRef,
   diskFilePath,
   duplicateBlockRef,
-  effortDiffRef,
   endpointDiffRef,
   extPageRef,
   externalUrlRef,
@@ -120,12 +119,10 @@ describe("pageRefs", () => {
     expect(newTaskRef({ parentRef: "task:tsk3" }).id).toBe("oxplow:oxplow/page?page=new-task&parent=task:tsk3");
   });
 
-  test("an effort, snapshot or turn page is its canonical ref (P2.11)", () => {
-    const effort = effortDiffRef("eff42");
-    expect(effort).toEqual({ id: "oxplow:oxplow/effort?id=eff42" });
+  test("a snapshot or turn page is its canonical ref (P2.11)", () => {
     expect(snapshotRef(112)).toEqual({ id: "oxplow:oxplow/snapshot?id=112" });
     expect(turnRef("trn7")).toEqual({ id: "oxplow:oxplow/turn?id=trn7" });
-    for (const [ref, kind] of [[effort, "oxplow/effort"], [snapshotRef(112), "oxplow/snapshot"], [turnRef("trn7"), "oxplow/turn"]] as const) {
+    for (const [ref, kind] of [[snapshotRef(112), "oxplow/snapshot"], [turnRef("trn7"), "oxplow/turn"]] as const) {
       expect(refFromTabId(ref.id)).toEqual(ref);
       expect(recordedPageKind(ref)).toBe(kind);
     }
@@ -268,7 +265,6 @@ describe("refFromTabId", () => {
       snapshotRef(112),
       taskTabRef("oxplow:oxplow/task?id=tsk42&provider=oxtask"),
       wikiPageRef("some-slug"),
-      effortDiffRef("eff9"),
       pageTabRef("acme/blocked", { stream_id: 2 }),
       pageTabRef("acme/x", { path: "src/a@b.ts", q: "a=b&c" }),
       fileRef("src/a@b.ts"),
@@ -302,10 +298,10 @@ describe("refFromTabId", () => {
   });
 
   test("an extension's page carries its resource params in the `?` and its view in the `#`, and round-trips them", () => {
-    const r = pageTabRef("x/effort-tests", { effort_id: 12 }, { label: "a b" });
-    expect(r.id).toBe("oxplow:oxplow/page?effort_id=12&page=x/effort-tests#label=a%20b");
+    const r = pageTabRef("x/request-tests", { request_id: 12 }, { label: "a b" });
+    expect(r.id).toBe("oxplow:oxplow/page?page=x/request-tests&request_id=12#label=a%20b");
     expect(typeOf(r.id)).toBe("oxplow/page");
-    expect(resourceParamsOf(r)).toEqual({ effort_id: 12 });
+    expect(resourceParamsOf(r)).toEqual({ request_id: 12 });
     expect(refFromTabId(r.id)).toEqual(r);
     expect(viewParamsOf(r)).toEqual({ label: "a b" });
   });

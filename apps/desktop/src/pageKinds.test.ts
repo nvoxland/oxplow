@@ -70,7 +70,6 @@ describe("core kinds a search hit can be", () => {
       thread: "thread",
       agent_session: "agent session",
       turn: "turn",
-      effort: "effort",
       commit: "commit",
       dashboard: "dashboard",
       handoff: "handoff",

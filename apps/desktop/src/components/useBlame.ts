@@ -83,7 +83,7 @@ export function useBlame(opts: {
   }, [filePath, blame]);
 
   // Re-fetch on save (isDirty true→false) so attribution tracks the new
-  // closed effort / HEAD. Not on every edit — attribution is relative to
+  // HEAD. Not on every edit — attribution is relative to
   // the last commit, not the buffer.
   useEffect(() => {
     const wasDirty = prevDirtyRef.current;
