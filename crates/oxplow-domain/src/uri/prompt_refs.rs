@@ -21,6 +21,10 @@ use super::oxplow_uri::OxplowUri;
 pub struct PromptRef {
     /// The URI it targets (a file's, a record's, a page's).
     pub target: String,
+    /// The path of an `@path` reference. Only a guess at a file (`@types/node`
+    /// and `@app.route` read the same), so its writer links it when the file
+    /// exists; `None` for a bracketed reference, which names a URI.
+    pub guessed_path: Option<String>,
 }
 
 /// `[oxplow uri <uri>]`.
@@ -40,10 +44,13 @@ pub fn page_row_mention(id: &str, fields: &str) -> String {
 
 /// The references in `text`, in order, each target once.
 pub fn parse(text: &str) -> Vec<PromptRef> {
-    let mut found: Vec<String> = Vec::new();
-    let mut push = |target: String| {
-        if !found.contains(&target) {
-            found.push(target);
+    let mut found: Vec<PromptRef> = Vec::new();
+    let mut push = |target: String, guessed_path: Option<String>| {
+        if !found.iter().any(|f| f.target == target) {
+            found.push(PromptRef {
+                target,
+                guessed_path,
+            });
         }
     };
     let bytes = text.as_bytes();
@@ -52,7 +59,7 @@ pub fn parse(text: &str) -> Vec<PromptRef> {
         if text[i..].starts_with("[oxplow ") {
             let (target, end) = bracketed(&text[i + "[oxplow ".len()..]);
             if let Some(t) = target {
-                push(t);
+                push(t, None);
             }
             i += "[oxplow ".len() + end;
             continue;
@@ -66,7 +73,7 @@ pub fn parse(text: &str) -> Vec<PromptRef> {
                     .rsplit_once('.')
                     .is_some_and(|(a, b)| !a.is_empty() && !b.is_empty())
             {
-                push(build::file_uri(path));
+                push(build::file_uri(path), Some(path.to_string()));
             }
             i += 1 + word.len();
             continue;
@@ -74,9 +81,6 @@ pub fn parse(text: &str) -> Vec<PromptRef> {
         i += text[i..].chars().next().map_or(1, char::len_utf8);
     }
     found
-        .into_iter()
-        .map(|target| PromptRef { target })
-        .collect()
 }
 
 /// The target of what follows `[oxplow ` and how many bytes it spans.

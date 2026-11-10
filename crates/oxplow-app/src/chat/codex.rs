@@ -1614,7 +1614,7 @@ mod tests {
         (
             r#"The turn's id"#,
             r#"`turn.id` on `turn/started` (and `rootTurnId`)"#,
-            r#"`agent_turn.harness_turn_id` for a turn that starts after `turn/started` is seen (a prompt oxplow itself sends has none yet)"#,
+            r#"`agent_turn.harness_turn_id`, set when `turn/started` arrives (also for a prompt oxplow itself sent)"#,
         ),
         (
             r#"A tool call's life"#,

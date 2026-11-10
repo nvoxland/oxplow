@@ -206,9 +206,6 @@ pub fn subagent_of(body: &serde_json::Value) -> Option<oxplow_domain::agent::too
     })
 }
 
-/// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
-/// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
-/// Claude Code sends, and what opencode's bridge translates its calls to.
 /// What a Stop's turn left running: its `background_tasks`, the ones not
 /// reported as finished (`status` other than `running` is left out). `None`
 /// when the body has no list.
@@ -235,6 +232,37 @@ pub fn left_running(body: &serde_json::Value) -> Option<Vec<RunningWork>> {
     )
 }
 
+/// The files a shell call's response says it changed:
+/// `tool_response.bashEditDiff`'s `changedFiles` and `files[].filePath`,
+/// each once. `moreFiles` (a longer list than it carries) adds nothing.
+fn reported_files(body: &serde_json::Value) -> Vec<String> {
+    let Some(diff) = body.pointer("/tool_response/bashEditDiff") else {
+        return Vec::new();
+    };
+    let named = diff
+        .get("changedFiles")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f.as_str());
+    let diffed = diff
+        .get("files")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f.get("filePath")?.as_str());
+    let mut out: Vec<String> = Vec::new();
+    for path in named.chain(diffed).filter(|p| !p.is_empty()) {
+        if !out.iter().any(|o| o == path) {
+            out.push(path.to_string());
+        }
+    }
+    out
+}
+
+/// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
+/// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
+/// Claude Code sends, and what opencode's bridge translates its calls to.
 pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
     let name = body.get("tool_name")?.as_str()?.to_string();
     let kind = match name.as_str() {
@@ -258,6 +286,13 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         .filter_map(|k| field(k))
         .map(str::to_string)
         .collect();
+    // A shell call's files the harness says it changed (Claude Code's
+    // `bashEditDiff`): evidence when present, and its absence says nothing.
+    let paths = if kind == ToolKind::Shell {
+        reported_files(body)
+    } else {
+        paths
+    };
     let command = (kind == ToolKind::Shell)
         .then(|| field("command"))
         .flatten()

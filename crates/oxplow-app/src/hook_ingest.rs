@@ -352,6 +352,23 @@ impl HookIngestService {
         Ok(())
     }
 
+    /// The harness named the open turn of `session` after it opened (Codex's
+    /// `turn/started` follows the prompt oxplow sent): keep its id on the
+    /// turn.
+    pub async fn identify_turn(
+        &self,
+        thread: ThreadId,
+        session: oxplow_domain::AgentSessionId,
+        harness_turn: String,
+    ) -> Result<(), HookIngestError> {
+        self.db
+            .transaction(move |tx| {
+                oxplow_db::agent_stores::set_harness_turn_tx(tx, thread, session, &harness_turn)
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Log and announce an agent session's status outside a hook (the ACP
     /// session's permission cards). `session` resolves as a hook's does.
     pub async fn set_status(
@@ -1277,7 +1294,25 @@ fn log_prompt_tx(
         (turn, prompt, prompt.map(Prompt::text))
     {
         let source = turn_uri(turn);
+        // An `@path` is a guess at a file: linked when the file is in the
+        // thread's worktree, so no link dangles.
+        let worktree: Option<String> = conn
+            .query_row(
+                "SELECT s.worktree_path FROM threads th JOIN streams s ON s.id = th.stream_id
+                  WHERE th.id = ?1",
+                [thread.value()],
+                |r| r.get(0),
+            )
+            .ok();
         for found in oxplow_domain::uri::prompt_refs::parse(text) {
+            if let Some(path) = &found.guessed_path {
+                let there = worktree
+                    .as_deref()
+                    .is_some_and(|w| std::path::Path::new(w).join(path).exists());
+                if !there {
+                    continue;
+                }
+            }
             oxplow_db::page_ref_store::upsert_edge_tx(
                 conn,
                 &oxplow_db::page_ref_store::PageRefEdge::new(
@@ -4188,6 +4223,19 @@ mod tests {
     #[tokio::test]
     async fn a_prompt_links_its_turn_to_what_it_pointed_at() {
         let (svc, tid) = fixture().await;
+        // The worktree holds `src/a.rs`; `@types/node` is no file of it.
+        let worktree = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(worktree.path().join("src")).unwrap();
+        std::fs::write(worktree.path().join("src/a.rs"), "").unwrap();
+        let wt = worktree.path().to_string_lossy().to_string();
+        svc.db
+            .transaction(move |c| {
+                c.execute("UPDATE streams SET worktree_path = ?1", [wt.as_str()])
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         let prompt = |text: &str| {
             hook(
                 HookKind::UserPromptSubmit,
@@ -4202,7 +4250,7 @@ mod tests {
             .unwrap();
         let task = "oxplow:oxplow/task?id=tsk9&provider=oxtask";
         let text = format!(
-            "fix {} in @src/a.rs, see [oxplow uri oxplow:oxplow/commit?sha=abc1234]",
+            "fix {} in @src/a.rs and @types/node, see [oxplow uri oxplow:oxplow/commit?sha=abc1234]",
             oxplow_domain::uri::prompt_refs::item_mention(task, "Fix it", "todo")
         );
         svc.ingest(prompt(&text)).await.unwrap();

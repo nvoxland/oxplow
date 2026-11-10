@@ -1410,7 +1410,7 @@ pinned by synthetic notifications, not recordings):
 | Fact | Codex reports | oxplow reads |
 |---|---|---|
 | How a turn ended | `turn/completed` `turn.status`: `completed`, `interrupted`, `failed` with `error.message` and `codexErrorInfo` | `completed` is a Stop; `interrupted` is `TurnOutcome::Interrupted`; `failed` is `Errored`, `error` `codexErrorInfo: message` |
-| The turn's id | `turn.id` on `turn/started` (and `rootTurnId`) | `agent_turn.harness_turn_id` for a turn that starts after `turn/started` is seen (a prompt oxplow itself sends has none yet) |
+| The turn's id | `turn.id` on `turn/started` (and `rootTurnId`) | `agent_turn.harness_turn_id`, set when `turn/started` arrives (also for a prompt oxplow itself sent) |
 | A tool call's life | `item/started`, `item/completed` with the item `id`, `exitCode`, `durationMs` | `agent.tool.requested` at `item/started`, the finish with the same call id, `exit_code` and `duration_ms` |
 | A child agent starts and ends | `collabAgentToolCall` `agentsStates`, `subAgentActivity`, `thread/started` `thread_spawn` | `SubagentStart` / `SubagentStop`, an `agent_job` row |
 | The turn that spawned a child | the parent's `turn.id` (the child's `rootTurnId`) | the job's `started_turn`, basis `reported` |
@@ -1419,6 +1419,15 @@ pinned by synthetic notifications, not recordings):
 | A background terminal | `processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list` | not read (the call is an ordinary shell call) |
 | Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
 | Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
+
+**What a shell call reports it changed.** Claude Code's Bash
+`PostToolUse` can carry `tool_response.bashEditDiff { files, changedFiles,
+moreFiles }` (on 2 of 4 Bash calls in `fixtures/claude/hooks.jsonl`);
+`shared::claude_shaped_tool_use` reads `changedFiles` and `files[].filePath`
+into the call's `paths`, so `agent.tool.finished` and the tool-call row
+carry them, and the effort claim consumer claims them with basis
+`reported`. A shell call without the field names no file. Codex, opencode
+and the ACP agents report nothing per shell call.
 
 **Prompt references.** A person's prompt can carry references oxplow
 inserted or the agent's picker wrote: `@<path>`, `[oxplow uri <uri>]`,
@@ -1434,7 +1443,13 @@ URI, written once in the delivery's transaction, never restated. The
 desktop's row mention is TypeScript; `tests/fixtures/prompt_refs.json`
 pins its text in both languages. A task's page lists the turns that named
 it (`v_page_ref.target_uri`, `ref_type = 'prompt_mention'`); only a
-person's prompt is read.
+person's prompt is read. An `@path` is linked only when the file exists in
+the thread's worktree (`@types/node` is no file). What the prompt's
+**context** carried is linked too: the context basket's pages and sources
+and the handoffs delivered with it (`AgentContext::commit`,
+`thread_context_store::link_delivered_tx`) name the turn that was open when
+the prompt was delivered (`thread_context_item.delivered_turn_id`,
+`handoff.delivered_turn_id`) and are `prompt_mention` links from it.
 
 **`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,

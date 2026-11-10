@@ -175,9 +175,13 @@ impl AsyncEventConsumer for EffortClaimConsumer {
         let Some(thread) = event.envelope.anchors.thread_id else {
             return Ok(());
         };
-        if str_field(event, "kind") != Some("edit") {
-            return Ok(());
-        }
+        // An edit tool names its files; a shell call's are the ones its
+        // harness says it changed (`paths` then holds only those).
+        let basis = match str_field(event, "kind") {
+            Some("edit") => oxplow_db::ClaimBasis::Named,
+            Some("shell") => oxplow_db::ClaimBasis::Reported,
+            _ => return Ok(()),
+        };
         // An absolute path is outside the thread's worktree: no effort's file.
         let files: Vec<&str> = paths(event)
             .into_iter()
@@ -195,6 +199,7 @@ impl AsyncEventConsumer for EffortClaimConsumer {
                     event.envelope.anchors.agent_session_id,
                     path,
                     Some(&worktree),
+                    basis,
                 )
                 .await?;
         }
@@ -356,6 +361,72 @@ mod tests {
         assert_eq!(
             rows(&f.svc, "SELECT path FROM v_effort_file").await,
             json!([["src/a.rs"]])
+        );
+    }
+
+    /// A shell call's files the harness reported (`bashEditDiff`) are on its
+    /// tool call and claimed for its effort with the basis `reported`; one
+    /// that reported none claims nothing; a report never takes a file an
+    /// edit tool named.
+    #[tokio::test]
+    async fn a_shell_calls_reported_files_are_claimed_apart_from_named_ones() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let worktree = tempfile::tempdir().unwrap();
+        let wt = worktree.path().to_string_lossy().to_string();
+        f.svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "UPDATE streams SET worktree_path = ?1 WHERE id = 1",
+                    [wt.as_str()],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let abs = |p: &str| worktree.path().join(p).to_string_lossy().to_string();
+        let shell = |id: &str, response: serde_json::Value| {
+            json!({"tool_name": "Bash", "tool_input": {"command": "make"}, "tool_use_id": id,
+                   "tool_response": response})
+        };
+        let ingest = |body| {
+            f.svc
+                .hook_ingest
+                .ingest(hook(f.thread, HookKind::PostToolUse, body))
+        };
+        // Named by an edit tool first.
+        ingest(json!({"tool_name": "Edit", "tool_input": {"file_path": abs("named.rs")}, "tool_response": {}}))
+            .await
+            .unwrap();
+        // A shell call reporting two files (one already named) and one not.
+        ingest(shell(
+            "t1",
+            json!({"stdout": "", "bashEditDiff": {
+                "files": [{"filePath": abs("gen.rs"), "created": true}],
+                "changedFiles": [abs("gen.rs"), abs("named.rs")], "moreFiles": 0}}),
+        ))
+        .await
+        .unwrap();
+        ingest(shell("t2", json!({"stdout": "built"})))
+            .await
+            .unwrap();
+        f.svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT call_id, path FROM v_tool_call WHERE tool = 'Bash' ORDER BY call_id"
+            )
+            .await,
+            json!([["t1", "gen.rs"], ["t2", null]])
+        );
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, claim_basis FROM v_effort_file ORDER BY path"
+            )
+            .await,
+            json!([["gen.rs", "reported"], ["named.rs", "named"]])
         );
     }
 

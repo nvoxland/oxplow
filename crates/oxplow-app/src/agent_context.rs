@@ -131,6 +131,7 @@ impl AgentContext {
             nudges: Vec::new(),
             basket: Vec::new(),
             agent_session,
+            thread: Some(*thread_id),
         };
         let ctx_block = self
             .refreshed_session_context(svc, thread_id, session_id, agent_session)
@@ -189,10 +190,33 @@ impl AgentContext {
         if !built.handoffs.is_empty() {
             if let Err(err) = svc
                 .handoff_store
-                .mark_delivered(built.handoffs, built.agent_session)
+                .mark_delivered(built.handoffs.clone(), built.agent_session)
                 .await
             {
                 warn!(?err, "stamping the delivered handoffs failed");
+            }
+        }
+        // The turn this prompt opened (or went into) took the handoffs and
+        // the basket: on the record, and linked from the turn.
+        if let (Some(thread), false) = (
+            built.thread,
+            built.handoffs.is_empty() && built.basket.is_empty(),
+        ) {
+            let (handoffs, basket, session) = (
+                built.handoffs.clone(),
+                built.basket.clone(),
+                built.agent_session.map(|s| s.value()),
+            );
+            if let Err(err) = svc
+                .db
+                .transaction(move |tx| {
+                    oxplow_db::thread_context_store::link_delivered_tx(
+                        tx, thread, session, &handoffs, &basket,
+                    )
+                })
+                .await
+            {
+                warn!(?err, "linking the delivered context to its turn failed");
             }
         }
         if !built.nudges.is_empty() {
@@ -268,6 +292,8 @@ pub struct PendingContext {
     /// The context basket's items it carries (`thread_context_item.id`).
     basket: Vec<i64>,
     agent_session: Option<AgentSessionId>,
+    /// The thread it was built for (none for a double in tests).
+    thread: Option<ThreadId>,
 }
 
 impl PendingContext {
@@ -281,6 +307,7 @@ impl PendingContext {
             nudges: Vec::new(),
             basket: Vec::new(),
             agent_session: None,
+            thread: None,
         }
     }
 
