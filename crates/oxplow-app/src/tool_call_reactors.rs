@@ -258,7 +258,7 @@ mod tests {
     /// to its turn, and written once however often the event is delivered.
     #[tokio::test]
     async fn a_redelivered_tool_event_projects_one_row() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.hook_ingest
             .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
@@ -297,7 +297,7 @@ mod tests {
     /// anchors.
     #[tokio::test]
     async fn the_projected_row_carries_the_session() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let thread = f.thread.value();
         svc.db
@@ -470,7 +470,7 @@ mod tests {
     /// turn ended with is abandoned; a finish with no request still records.
     #[tokio::test]
     async fn a_tool_calls_row_follows_it_from_request_to_finish() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let ingest = |h: HookEnvelope| svc.hook_ingest.ingest(h);
         let call = |id: &str, cmd: &str| json!({"tool_name": "Bash", "tool_input": {"command": cmd}, "tool_use_id": id});

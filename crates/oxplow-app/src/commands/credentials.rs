@@ -243,7 +243,7 @@ mod tests {
     }
 
     async fn run(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         actor: &Actor,
         name: &str,
         input: serde_json::Value,
@@ -261,7 +261,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         extension(dir.path());
-        let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+        let fx = crate::test_fixtures::services_with_thread_in(dir).await;
         crate::test_fixtures::activate(&fx.svc).await;
         let collector = "oxplow:oxplow/collector?collector=acme/s";
         let set = || async {
@@ -379,7 +379,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         secret_extension(dir.path(), &reference);
-        let fx = crate::test_fixtures::services_with_effort_in(dir).await;
+        let fx = crate::test_fixtures::services_with_thread_in(dir).await;
         crate::test_fixtures::activate(&fx.svc).await;
         let rows = || async {
             fx.svc

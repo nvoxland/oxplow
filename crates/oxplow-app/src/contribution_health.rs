@@ -547,7 +547,7 @@ mod enable_all_tests {
     /// healthy ones alone; an agent may run it too.
     #[tokio::test]
     async fn enable_all_turns_on_every_disabled_contribution_for_a_person() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let health = ContributionHealth::new(fx.svc.db.clone(), VocabularyHandle::core());
         let (a, b, c, ok) = (
             collector("one", "a"),

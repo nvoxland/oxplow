@@ -1690,7 +1690,7 @@ pub fn check_calls(registry: CommandSchemas<'_>, calls: &[CommandCall]) -> Resul
 #[cfg(test)]
 mod tests {
     /// Why `extension` is held back by the last activation, if it is.
-    fn held_problem(fx: &crate::test_fixtures::EffortFixture, extension: &str) -> Option<String> {
+    fn held_problem(fx: &crate::test_fixtures::ThreadFixture, extension: &str) -> Option<String> {
         let problems = fx.svc.extension_activation.problems();
         problems
             .contains_key(extension)
@@ -2182,7 +2182,7 @@ mod tests {
     /// A changed script re-registers its command with the new script.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_changed_script_reregisters_its_command() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_finish(
             &fx,
             "def transform(x):\n    return {\"commands\": [], \"result\": 1}\n",
@@ -2218,7 +2218,7 @@ mod tests {
     /// its own registered namespace is not.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_namespace_the_registry_holds_is_a_check_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx._dir.path();
         let files = [("handlers/finish_review.star", HANDLER)];
         fx.svc
@@ -2412,7 +2412,7 @@ mod tests {
 
     /// `my-review` (namespace `my_review`) with `finish`, whose script is
     /// `script`, in the fixture's project; registered.
-    async fn with_finish(fx: &crate::test_fixtures::EffortFixture, script: &str) {
+    async fn with_finish(fx: &crate::test_fixtures::ThreadFixture, script: &str) {
         write_ext(
             fx._dir.path(),
             "my-review",
@@ -2442,7 +2442,7 @@ mod tests {
     }
 ";
 
-    fn agent(fx: &crate::test_fixtures::EffortFixture) -> oxplow_domain::Actor {
+    fn agent(fx: &crate::test_fixtures::ThreadFixture) -> oxplow_domain::Actor {
         oxplow_domain::Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -2450,14 +2450,14 @@ mod tests {
         }
     }
 
-    async fn task(fx: &crate::test_fixtures::TaskEffortFixture) -> oxplow_oxtask::Oxtask {
+    async fn task(fx: &crate::test_fixtures::TaskFixture) -> oxplow_oxtask::Oxtask {
         use oxplow_oxtask::OxtaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap()
     }
 
     /// `my-review`, declaring `my_review.finished@1`, with a `finish`
     /// command whose script emits `{type}` for its `uri`; registered.
-    async fn with_emitting_finish(fx: &crate::test_fixtures::EffortFixture, event_type: &str) {
+    async fn with_emitting_finish(fx: &crate::test_fixtures::ThreadFixture, event_type: &str) {
         let root = fx._dir.path();
         write(
             root,
@@ -2484,7 +2484,7 @@ mod tests {
     /// caused by the run's `command.executed`.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_emits_its_own_extensions_event_type() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_emitting_finish(&fx, "my_review.finished").await;
         let r = oxplow_oxtask::task_ref(fx.task);
         let out = fx
@@ -2518,7 +2518,7 @@ mod tests {
     /// that it doesn't declare, refuses the run, which writes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_may_not_emit_a_foreign_or_undeclared_type() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let r = oxplow_oxtask::task_ref(fx.task);
         for foreign in ["task.created", "my_review.undeclared"] {
             with_emitting_finish(&fx, foreign).await;
@@ -2543,7 +2543,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extension_command_composes_core_commands_in_one_run() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_finish(&fx, FINISH).await;
         let r = oxplow_oxtask::task_ref(fx.task);
         let out = fx
@@ -2592,7 +2592,7 @@ mod tests {
     /// handlers), isn't registered, and the problem says why.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_declaration_over_an_operation_stays_within_its_floor() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let declare = |block: &str| {
             write_ext(fx._dir.path(), "acme", block, &[]);
         };
@@ -2634,7 +2634,7 @@ mod tests {
     /// that isn't there is rejected (the old command stays), its problem said.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_extension_declares_a_command_over_an_operation() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let star = |op: &str| {
             write_ext(
                 fx._dir.path(),
@@ -2688,7 +2688,7 @@ mod tests {
     /// refused at load: the command isn't offered, and nothing runs.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_scope_the_command_didnt_declare_is_refused() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         write_ext(
             fx._dir.path(),
             "my-review",
@@ -2712,7 +2712,7 @@ mod tests {
     /// change any records. Narrowing the query explicitly still works.
     #[tokio::test(flavor = "multi_thread")]
     async fn sql_read_truncation_prevents_a_commands_child_writes() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let r = oxplow_oxtask::task_ref(fx.task);
         let sql = "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 1001) SELECT n FROM numbers ORDER BY n";
         let handler = |query: &str| {
@@ -2772,7 +2772,7 @@ mod tests {
     /// that composes a command is refused.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_read_command_answers_without_a_record() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let with_count = |script: &str| {
             write_ext(
                 fx._dir.path(),
@@ -2810,7 +2810,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn a_destructive_child_makes_a_persons_run_ask_first() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_finish(
             &fx,
             "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.delete\", \"input\": {\"uri\": x[\"input\"][\"uri\"]}}]}\n",
@@ -2854,7 +2854,7 @@ mod tests {
                 "the script must return",
             ),
         ] {
-            let fx = crate::test_fixtures::services_with_task_effort().await;
+            let fx = crate::test_fixtures::services_with_task().await;
             with_finish(&fx, script).await;
             let r = oxplow_oxtask::task_ref(fx.task);
             let err = fx
@@ -2872,7 +2872,7 @@ mod tests {
     /// not run until the stack overflows; nothing it composed is kept.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_self_composing_command_stops_at_the_nesting_limit() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_finish(
             &fx,
             "def transform(x):\n    r = x[\"input\"][\"uri\"]\n    return {\"commands\": [\n        {\"name\": \"oxplow.task.update\", \"input\": {\"uri\": r, \"title\": \"again\"}},\n        {\"name\": \"my_review.review.finish\", \"input\": {\"uri\": r}},\n    ]}\n",
@@ -2904,7 +2904,7 @@ mod tests {
     /// minutes.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_runaway_script_is_given_up_on_within_the_budget() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_finish(
             &fx,
             "def transform(x):\n    n = 0\n    for i in range(100000):\n        for j in range(100000):\n            n = j\n    return {\"commands\": []}\n",
@@ -2937,7 +2937,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn the_reconciler_registers_enabled_extensions_commands_only() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let bus = &fx.svc.commands;
         with_finish(&fx, FINISH).await;
         assert!(
@@ -3014,7 +3014,7 @@ mod tests {
     /// with that reason and writes nothing. A refusal composes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_script_refuses_with_its_reason() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         with_finish(
             &fx,
             "def transform(x):\n    return {\"refuse\": \"it has unverified claims\"}\n",

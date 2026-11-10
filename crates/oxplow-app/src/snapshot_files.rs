@@ -215,7 +215,7 @@ mod tests {
     /// primary checkout.
     #[tokio::test]
     async fn a_worktree_streams_file_restores_into_its_worktree() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let worktree = tempfile::tempdir().unwrap();
         let now = Timestamp::from_unix_ms(1);
         let stream = f

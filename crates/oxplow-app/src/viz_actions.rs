@@ -821,8 +821,8 @@ mod tests {
     use serde_json::json;
 
     /// A task, and pages over it whose actions run commands.
-    async fn fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+    async fn fixture() -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
+        let fx = crate::test_fixtures::services_with_task().await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("pages")).unwrap();
@@ -1010,7 +1010,7 @@ view:
     }
 
     /// The row whose `uri` is the fixture's task.
-    fn task_row(fx: &crate::test_fixtures::TaskEffortFixture) -> BTreeMap<String, SqlCell> {
+    fn task_row(fx: &crate::test_fixtures::TaskFixture) -> BTreeMap<String, SqlCell> {
         BTreeMap::from([("uri".to_string(), SqlCell::Text(task_ref(fx.task)))])
     }
 
@@ -1689,7 +1689,7 @@ view:
 
     /// P6b.D2: a private extension with a component (`board`) that may
     /// invoke `oxplow.task.transition`.
-    async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
+    async fn component_fixture() -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
@@ -1705,7 +1705,7 @@ view:
     }
 
     /// Load `acme/board`'s bundle as its frame does: the version it runs.
-    async fn load_board(fx: &crate::test_fixtures::EffortFixture, root: &Path) -> String {
+    async fn load_board(fx: &crate::test_fixtures::ThreadFixture, root: &Path) -> String {
         // Whatever was edited since is published first, as the owner of
         // generations does on the file change.
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
@@ -1714,7 +1714,7 @@ view:
 
     /// An invoke of `command` from `acme/board`'s frame loaded at `version`.
     fn board_invoke(
-        fx: &crate::test_fixtures::TaskEffortFixture,
+        fx: &crate::test_fixtures::TaskFixture,
         command: &str,
         version: &str,
     ) -> ComponentInvoke {

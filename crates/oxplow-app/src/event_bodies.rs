@@ -105,7 +105,7 @@ mod tests {
     /// stream's; a person reads any.
     #[tokio::test]
     async fn a_body_is_read_by_event_scoped_and_capped() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let big = "x".repeat(MAX_READ_BYTES * 2);
         let body = serde_json::json!({
             "tool_name": "Bash",
@@ -172,7 +172,7 @@ mod tests {
     /// open turn too, which the turn row (holding the first) never saw.
     #[tokio::test]
     async fn a_reprompts_text_is_kept_with_its_event() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         for text in ["first ask", "and then this"] {
             f.svc
                 .hook_ingest

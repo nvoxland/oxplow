@@ -108,7 +108,7 @@ mod tests {
     /// stream's row.
     #[tokio::test]
     async fn a_checkout_outside_oxplow_updates_the_stream_branch() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let stream = svc.stream_store.list().await.unwrap().remove(0);
         let ws = svc
@@ -130,7 +130,7 @@ mod tests {
     /// channel (`RefMoves`), not the in-memory event bus.
     #[tokio::test]
     async fn a_ref_move_reaches_the_reconciler_on_its_own_channel() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.branch_reconciler.clone().spawn();
         let stream = svc.stream_store.list().await.unwrap().remove(0);

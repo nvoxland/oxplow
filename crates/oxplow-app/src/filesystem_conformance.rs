@@ -262,7 +262,7 @@ mod tests {
     use oxplow_domain::stores::StreamStore as _;
 
     use super::*;
-    use crate::test_fixtures::{commit_all, services_with_effort, EffortFixture};
+    use crate::test_fixtures::{commit_all, services_with_thread, ThreadFixture};
 
     fn write_fixture(ws: &std::path::Path) {
         for (path, content) in fixture() {
@@ -273,7 +273,7 @@ mod tests {
     }
 
     /// A snapshot of the fixture, with its bytes in the blob store.
-    async fn snapshot_of_fixture(f: &EffortFixture) -> i64 {
+    async fn snapshot_of_fixture(f: &ThreadFixture) -> i64 {
         let svc = &f.svc;
         let stream = svc.stream_store.list().await.unwrap()[0].id;
         let id = svc.snapshot_store.create_snapshot(stream).await.unwrap();
@@ -304,7 +304,7 @@ mod tests {
         a_path_never_leaves_the_filesystem(fs, cx, rev).await;
     }
 
-    async fn local(f: &EffortFixture) -> (Arc<dyn FileSystem>, FsCx) {
+    async fn local(f: &ThreadFixture) -> (Arc<dyn FileSystem>, FsCx) {
         let stream = f.svc.stream_store.list().await.unwrap()[0].id;
         (
             f.svc.filesystems.resolve(Some(LOCAL)).unwrap(),
@@ -316,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_passes_on_the_working_tree() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         write_fixture(&f.svc.layout.project_dir);
         let (fs, cx) = local(&f).await;
         run_all(&*fs, &cx, None).await;
@@ -326,7 +326,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_passes_at_a_git_revision() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         write_fixture(&ws);
         commit_all(&ws, "the fixture");
@@ -338,7 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_passes_at_a_snapshot() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let snap = snapshot_of_fixture(&f).await;
         let (fs, cx) = local(&f).await;
         run_all(&*fs, &cx, Some(&format!("snap:{snap}"))).await;
@@ -347,7 +347,7 @@ mod tests {
     /// A revision is the local filesystem's word and it refuses others.
     #[tokio::test]
     async fn local_refuses_a_revision_it_does_not_know() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let (fs, cx) = local(&f).await;
         for rev in ["HEAD", "snap:x", "hg:"] {
             let e = fs

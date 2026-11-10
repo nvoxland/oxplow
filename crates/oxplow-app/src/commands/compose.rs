@@ -184,7 +184,7 @@ mod tests {
     /// `command.executed`, and no undo of the whole.
     #[tokio::test]
     async fn a_sequence_of_task_commands_is_one_audited_run_of_steps() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

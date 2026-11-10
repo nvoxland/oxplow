@@ -771,7 +771,7 @@ resources:
     /// searchable (or goes) takes its entries with it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_searchable_kinds_rows_are_found_and_follow_the_dataset() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         acme(&root, "    searchable: found\n");
@@ -888,7 +888,7 @@ resources:
     /// registry as if those changed, not only the assets' inputs.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_lagged_listener_resyncs_the_searchable_kinds() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         acme(&root, "    searchable: found\n");
@@ -924,7 +924,7 @@ resources:
     /// saying it is searchable.
     #[tokio::test]
     async fn a_kind_whose_view_isnt_compiled_yet_keeps_its_entries() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.search_store
             .upsert(
@@ -976,7 +976,7 @@ resources:
     /// failed has a failure row and nothing else.
     #[tokio::test]
     async fn a_gone_kinds_orphaned_entries_and_failures_leave() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         for (kind, id) in [
             ("acme/pr", "oxplow:acme/pr?id=12"),
@@ -1035,7 +1035,7 @@ resources:
     /// no kind behind it) is cleared at the next start's sync.
     #[tokio::test]
     async fn a_kind_gone_while_oxplow_was_down_leaves_the_index_at_start() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.search_store
             .upsert(

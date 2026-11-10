@@ -2732,7 +2732,7 @@ pub(crate) mod tests {
                     .build()
                     .unwrap()
                     .block_on(async {
-                        let fx = crate::test_fixtures::services_with_effort().await;
+                        let fx = crate::test_fixtures::services_with_thread().await;
                         let svc = &fx.svc;
                         let reply = json!({ "answers": { "label": { "type": "choice", "choice": "bug", "probabilities": { "bug": 0.9, "feature": 0.1 } } } });
                         let (base, _) = oxplow_ai_fake::mock(
@@ -2790,7 +2790,7 @@ pub(crate) mod tests {
     /// `/collector`, and an unknown collector is not found.
     #[tokio::test]
     async fn sync_takes_a_collector_ref() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         for bad in [
             "work/bad",
             "oxplow:oxplow/effort?id=eff1",
@@ -2834,7 +2834,7 @@ pub(crate) mod tests {
     /// `oxplow.contribution.enable` lets it run again. An agent may enable it.
     #[tokio::test]
     async fn a_collector_failing_three_runs_is_disabled_until_enabled() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
@@ -2891,7 +2891,7 @@ pub(crate) mod tests {
     /// around the bus.
     #[tokio::test]
     async fn the_scheduler_runs_collector_sync_through_the_bus() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,
@@ -2979,7 +2979,7 @@ pub(crate) mod tests {
     /// all of them.
     #[tokio::test]
     async fn a_bounded_input_says_whether_it_is_complete() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let count = |limit: Option<usize>| {
             let limit = limit.map(|l| format!(", limit: {l}")).unwrap_or_default();
             format!(
@@ -3025,7 +3025,7 @@ pub(crate) mod tests {
     /// that couldn't happen fails the preview, saying why.
     #[tokio::test]
     async fn a_preview_takes_the_event_it_reacts_to() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         extension(
             &root,

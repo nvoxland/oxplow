@@ -164,7 +164,7 @@ pub fn ops(deps: LspDeps) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::Actor;
     use oxplow_domain::CommandError;
 
@@ -173,7 +173,7 @@ mod tests {
     /// installer and fails there (one registry lookup), not at a gate.
     #[tokio::test]
     async fn an_agents_install_runs_without_asking() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let err = fx
             .svc
             .commands
@@ -196,7 +196,7 @@ mod tests {
     /// start one, for anyone.
     #[tokio::test]
     async fn restarting_a_server_needs_a_server() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = fx.svc.streams.list_streams().await.unwrap()[0]
             .id
             .to_string();
@@ -225,7 +225,7 @@ mod tests {
     /// Removing a server that isn't installed is a no-op, not an error.
     #[tokio::test]
     async fn removing_an_absent_server_is_idempotent() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc
             .commands
             .run(

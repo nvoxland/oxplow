@@ -226,7 +226,7 @@ mod tests {
     use serde_json::json;
 
     async fn run(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         actor: &Actor,
         name: &str,
         input: serde_json::Value,
@@ -239,7 +239,7 @@ mod tests {
     /// a role uses it, unbinds the role and then removes it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_sets_providers_and_roles_and_the_key_is_not_recorded() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let me = Actor::Human;
         let out = run(
             &fx,
@@ -369,7 +369,7 @@ mod tests {
     /// the one way.
     #[tokio::test(flavor = "multi_thread")]
     async fn setting_a_role_announces_a_config_change() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         run(
             &fx,
             &Actor::Human,
@@ -399,7 +399,7 @@ mod tests {
     /// page listing them follows the change.
     #[tokio::test(flavor = "multi_thread")]
     async fn setting_and_removing_a_provider_announce_a_config_change() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let mut rx = fx.svc.events.subscribe_ui();
         for (command, input) in [
             (
@@ -420,7 +420,7 @@ mod tests {
     /// Half a binding is refused; an unknown role names the roles.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_role_binding_is_both_halves_or_neither() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         for input in [
             json!({ "role": "summarize", "provider": "or" }),
             json!({ "role": "nonsense", "provider": "or", "model": "m" }),
@@ -436,7 +436,7 @@ mod tests {
     /// remove the provider.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_may_change_ai_settings() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -463,7 +463,7 @@ mod tests {
     /// Testing a provider that isn't there says so.
     #[tokio::test(flavor = "multi_thread")]
     async fn testing_an_unknown_provider_is_invalid() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let err = run(
             &fx,
             &Actor::Human,

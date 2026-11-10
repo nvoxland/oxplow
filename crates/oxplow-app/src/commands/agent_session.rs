@@ -587,11 +587,11 @@ pub fn ops(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::AgentSessionStore as _;
     use oxplow_domain::Actor;
 
-    fn agent(fx: &EffortFixture) -> Actor {
+    fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -600,7 +600,7 @@ mod tests {
     }
 
     async fn run(
-        fx: &EffortFixture,
+        fx: &ThreadFixture,
         actor: &Actor,
         name: &str,
         input: serde_json::Value,
@@ -609,12 +609,12 @@ mod tests {
         fx.svc.commands.run(actor, name, input, confirmed).await
     }
 
-    async fn open(fx: &EffortFixture, actor: &Actor, input: serde_json::Value) -> AgentSession {
+    async fn open(fx: &ThreadFixture, actor: &Actor, input: serde_json::Value) -> AgentSession {
         let out = run(fx, actor, OPEN, input, false).await.unwrap();
         serde_json::from_value(out.result).unwrap()
     }
 
-    async fn get(fx: &EffortFixture, id: AgentSessionId) -> AgentSession {
+    async fn get(fx: &ThreadFixture, id: AgentSessionId) -> AgentSession {
         fx.svc.agent_session_store.get(&id).await.unwrap().unwrap()
     }
 
@@ -622,7 +622,7 @@ mod tests {
     /// closes it.
     #[tokio::test]
     async fn opening_adds_a_slot_and_undo_closes_it() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let out = run(
             &fx,
             &Actor::Human,
@@ -657,7 +657,7 @@ mod tests {
     /// person's, so an agent that asks is refused and nothing opens.
     #[tokio::test]
     async fn remember_sets_what_new_threads_start_with() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let s = open(
             &fx,
             &Actor::Human,
@@ -701,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn starting_fresh_forgets_the_conversation() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let me = serde_json::json!({ "session": fx.session.to_string() });
         let session = fx.session;
         fx.svc
@@ -728,7 +728,7 @@ mod tests {
     /// An agent may fork a session too.
     #[tokio::test]
     async fn an_agent_may_fork_a_session() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let me = fx.session.to_string();
         bind(&fx, fx.session, "c5").await;
         run(
@@ -748,7 +748,7 @@ mod tests {
     /// and pick the conversation for it too.
     #[tokio::test]
     async fn a_person_opens_a_session_on_a_chosen_conversation() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let (session, now) = (fx.session, Timestamp::now());
         fx.svc
             .db
@@ -825,7 +825,7 @@ mod tests {
     }
 
     /// Bind session `id` to conversation `native`, as a hook would.
-    async fn bind(fx: &EffortFixture, id: AgentSessionId, native: &'static str) {
+    async fn bind(fx: &ThreadFixture, id: AgentSessionId, native: &'static str) {
         fx.svc
             .db
             .transaction(move |tx| {
@@ -836,7 +836,7 @@ mod tests {
     }
 
     async fn fork(
-        fx: &EffortFixture,
+        fx: &ThreadFixture,
         input: serde_json::Value,
     ) -> Result<oxplow_domain::CommandOutcome, CommandError> {
         run(fx, &Actor::Human, FORK_CONVERSATION, input, false).await
@@ -850,7 +850,7 @@ mod tests {
     #[tokio::test]
     async fn a_fork_opens_a_new_session_and_leaves_the_source_alone() {
         use oxplow_domain::stores::ThreadStore as _;
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = fx
             .svc
             .thread_store
@@ -912,7 +912,7 @@ mod tests {
     /// is on may still be forked (the copy is a new one).
     #[tokio::test]
     async fn a_fork_takes_the_named_conversation_or_the_sources() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let me = fx.session.to_string();
         let err = fork(&fx, json!({ "session": me })).await.unwrap_err();
         assert!(
@@ -941,7 +941,7 @@ mod tests {
     /// refused, and nothing opens.
     #[tokio::test]
     async fn a_fork_needs_a_harness_that_can_and_an_open_session() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread;
         let odd = fx
             .svc
@@ -955,7 +955,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let open_count = |fx: &EffortFixture| {
+        let open_count = |fx: &ThreadFixture| {
             let store = fx.svc.agent_session_store.clone();
             let thread = fx.thread;
             async move { store.list_open_for_thread(&thread).await.unwrap().len() }
@@ -999,7 +999,7 @@ mod tests {
     /// harness, is refused.
     #[tokio::test]
     async fn the_input_is_checked() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let thread = fx.thread.to_string();
         fx.svc.config.write().unwrap().agents = vec!["claude".into()];
         for (input, field) in [
@@ -1034,7 +1034,7 @@ mod tests {
     /// is undoable, so it runs without waiting for a person.
     #[tokio::test]
     async fn an_agent_opens_and_closes_in_its_own_stream() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let mine = open(&fx, &agent(&fx), json!({ "thread": fx.thread.to_string() })).await;
         let err = run(
             &fx,
@@ -1065,7 +1065,7 @@ mod tests {
     #[tokio::test]
     async fn closing_ends_the_open_turn_and_undo_reopens_it() {
         use oxplow_domain::stores::AgentTurnStore as _;
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let s = fx.session;
         fx.svc
             .hook_ingest
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[tokio::test]
     async fn renaming_undoes_to_the_old_title() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let r = fx.session.to_string();
         let out = run(
             &fx,
@@ -1176,7 +1176,7 @@ mod tests {
     /// nothing changes. Without it, only oxplow's name changes.
     #[tokio::test]
     async fn renaming_natively_needs_a_harness_that_can() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let r = fx.session.to_string();
         let err = run(
             &fx,
@@ -1209,7 +1209,7 @@ mod tests {
     /// Closing a thread closes its sessions (`thread_closed`).
     #[tokio::test]
     async fn closing_a_thread_closes_its_sessions() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         use oxplow_domain::stores::ThreadStore as _;
         let stream = fx
             .svc
@@ -1241,7 +1241,7 @@ mod tests {
         );
     }
 
-    fn mint(fx: &EffortFixture, session: &AgentSession, stream: oxplow_domain::StreamId) -> String {
+    fn mint(fx: &ThreadFixture, session: &AgentSession, stream: oxplow_domain::StreamId) -> String {
         fx.svc.session_auth.issue(crate::session_auth::Principal {
             session: session.id,
             thread: session.thread_id,
@@ -1254,7 +1254,7 @@ mod tests {
     /// can post or call as it after.
     #[tokio::test]
     async fn closing_a_session_or_its_thread_retires_its_bearer() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         use oxplow_domain::stores::ThreadStore as _;
         let stream = fx
             .svc

@@ -75,7 +75,7 @@ mod tests {
     use crate::test_fixtures::commit_all;
 
     fn hook(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         kind: HookKind,
         prompt: Option<&str>,
         body: serde_json::Value,
@@ -172,7 +172,7 @@ mod tests {
     /// and the task the request worked on is the commit's task, derived.
     #[tokio::test]
     async fn a_commit_of_a_turns_file_links_its_request_and_derives_its_task() {
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_task().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();

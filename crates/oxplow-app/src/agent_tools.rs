@@ -197,10 +197,10 @@ fn params_schema(page_id: &str, params: &[crate::pages::spec::PageParam]) -> Val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{activate_with_problems, services_with_task_effort};
+    use crate::test_fixtures::{activate_with_problems, services_with_task};
     use oxplow_domain::Actor;
 
-    fn agent(fx: &crate::test_fixtures::TaskEffortFixture) -> Actor {
+    fn agent(fx: &crate::test_fixtures::TaskFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -212,7 +212,7 @@ mod tests {
     /// `oxplow_`, its hint its command's access.
     #[tokio::test]
     async fn oxplows_tools_are_foundations_declarations() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
@@ -273,7 +273,7 @@ mod tests {
     /// `oxplow_next_task` nor `oxplow_thread_tasks`; its other tools stay.
     #[tokio::test]
     async fn without_bundled_the_agent_has_no_task_tools() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let svc = &fx.svc;
         svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
@@ -308,7 +308,7 @@ mod tests {
     /// cost nothing keep theirs.
     #[tokio::test]
     async fn a_tool_over_a_spending_scope_is_not_hinted_read_only() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let tools = offered(&fx.svc, &agent(&fx)).await.unwrap();
         let hinted = |name: &str| tools.iter().find(|t| t.name == name).unwrap().read_only;
         for spends in ["oxplow_ai_decide", "oxplow_ai_summarize"] {
@@ -327,7 +327,7 @@ mod tests {
     /// tool too (a script can't need such a scope).
     #[tokio::test]
     async fn an_extension_command_over_ai_compute_is_not_hinted_read_only() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(
@@ -352,7 +352,7 @@ mod tests {
     /// offered to an agent, so each one that names a tool is one.
     #[tokio::test]
     async fn an_extensions_command_and_page_are_tools() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("pages")).unwrap();
         std::fs::write(
@@ -408,7 +408,7 @@ mod tests {
     /// input, and a call runs `oxplow.page.run` on it.
     #[tokio::test]
     async fn an_extensions_page_is_a_tool() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let root = fx._dir.path().join(".oxplow/extensions/acme");
         std::fs::create_dir_all(root.join("pages")).unwrap();
         std::fs::write(
@@ -462,7 +462,7 @@ mod tests {
     /// The agent model doc's tool table names every tool oxplow offers.
     #[tokio::test]
     async fn every_foundation_tool_is_in_the_agent_model_doc() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let doc = std::fs::read_to_string(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/agent-model.md"),
         )

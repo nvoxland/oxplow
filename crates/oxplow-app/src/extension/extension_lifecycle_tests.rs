@@ -24,7 +24,7 @@ use crate::test_fixtures::lifecycle::EXT;
 use crate::test_fixtures::lifecycle::{
     booted, log_retitle, page, problem, readable, CONFIGURATION_V2,
 };
-use crate::test_fixtures::EffortFixture;
+use crate::test_fixtures::ThreadFixture;
 
 const NAME: &str = "alpha";
 
@@ -204,13 +204,13 @@ async fn rollback(svc: &Arc<crate::Services>, name: &str) -> Result<Value, Comma
 }
 
 /// The rows of `sql` as a user's query reads them.
-async fn rows(fx: &EffortFixture, sql: &str) -> Vec<Vec<Value>> {
+async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
     let out = fx.svc.sql.query_sql(sql, vec![], None).await.unwrap();
     serde_json::from_value(serde_json::to_value(out.rows).unwrap()).unwrap()
 }
 
 /// The columns of `view`, in order.
-async fn columns(fx: &EffortFixture, view: &str) -> Vec<String> {
+async fn columns(fx: &ThreadFixture, view: &str) -> Vec<String> {
     fx.svc
         .sql
         .query_sql(&format!("SELECT * FROM {view}"), vec![], None)
@@ -220,14 +220,14 @@ async fn columns(fx: &EffortFixture, view: &str) -> Vec<String> {
 }
 
 /// `alpha.state.peek`'s answer, or why it can't be asked.
-async fn peek(fx: &EffortFixture) -> Result<Value, CommandError> {
+async fn peek(fx: &ThreadFixture) -> Result<Value, CommandError> {
     bus(&fx.svc, "alpha.state.peek", json!({}))
         .await
         .map(|out| out["result"].clone())
 }
 
 /// The title of page `alpha/one` as the catalog runs it, if it does.
-fn page_title(fx: &EffortFixture) -> Option<String> {
+fn page_title(fx: &ThreadFixture) -> Option<String> {
     fx.svc
         .extension_catalog
         .find_page(&fx.svc.layout.project_dir, "alpha/one")
@@ -237,7 +237,7 @@ fn page_title(fx: &EffortFixture) -> Option<String> {
 
 /// An effort is retitled: the collector and the effect react to it, as the
 /// event pump runs them.
-async fn verified(fx: &EffortFixture) {
+async fn verified(fx: &crate::test_fixtures::EffortFixture) {
     log_retitle(&fx.svc, fx.effort, "reviewer").await;
     assert!(
         fx.svc.event_pump.settle_all(Duration::from_secs(10)).await,
@@ -246,7 +246,7 @@ async fn verified(fx: &EffortFixture) {
 }
 
 /// What the collector wrote: `(who)` per event, oldest first.
-async fn seen(fx: &EffortFixture) -> Vec<String> {
+async fn seen(fx: &ThreadFixture) -> Vec<String> {
     rows(fx, "SELECT who FROM v_alpha_seen ORDER BY ev")
         .await
         .into_iter()
@@ -255,7 +255,7 @@ async fn seen(fx: &EffortFixture) -> Vec<String> {
 }
 
 /// What the effect said, in order.
-async fn noted(fx: &EffortFixture) -> Vec<String> {
+async fn noted(fx: &ThreadFixture) -> Vec<String> {
     rows(
         fx,
         "SELECT json_extract(payload, '$.from') FROM v_event WHERE type = 'alpha.noted' ORDER BY seq",
@@ -333,7 +333,7 @@ fn dataset_ref(owner: &str) -> String {
 }
 
 /// Everything `alpha` gives, and `gamma` over it, is there.
-async fn all_there(fx: &EffortFixture) {
+async fn all_there(fx: &ThreadFixture) {
     assert!(readable(&fx.svc, "v_alpha_items").await, "dataset");
     assert!(readable(&fx.svc, "v_gamma_items").await, "consumer");
     assert!(page(&fx.svc, "alpha/one").await.is_ok(), "page");
@@ -628,7 +628,7 @@ async fn a_changed_export_keeps_the_open_consumer_and_holds_the_pinned_one() {
 }
 
 /// The titles `v_task` shows, in order: the active task tracker's.
-async fn titles(fx: &EffortFixture) -> Vec<String> {
+async fn titles(fx: &ThreadFixture) -> Vec<String> {
     rows(fx, "SELECT title FROM v_task ORDER BY title")
         .await
         .into_iter()
@@ -637,7 +637,7 @@ async fn titles(fx: &EffortFixture) -> Vec<String> {
 }
 
 /// The provider `v_capability_provider` says the task tracker is.
-async fn active_task_tracker(fx: &EffortFixture) -> String {
+async fn active_task_tracker(fx: &ThreadFixture) -> String {
     rows(
         fx,
         "SELECT provider FROM v_capability_provider WHERE capability = 'task_tracker' AND active = 1",
@@ -649,7 +649,7 @@ async fn active_task_tracker(fx: &EffortFixture) -> String {
 }
 
 /// Choose `provider` as the task tracker, as a person's setting does.
-async fn choose_task_tracker(fx: &EffortFixture, provider: &str) {
+async fn choose_task_tracker(fx: &ThreadFixture, provider: &str) {
     bus(
         &fx.svc,
         "oxplow.capability.choose",
@@ -666,7 +666,7 @@ async fn choose_task_tracker(fx: &EffortFixture, provider: &str) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
-async fn file_item(fx: &EffortFixture, title: &str) {
+async fn file_item(fx: &ThreadFixture, title: &str) {
     bus(
         &fx.svc,
         crate::commands::task::CREATE,

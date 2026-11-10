@@ -1279,12 +1279,12 @@ mod tests {
     use super::*;
     use oxplow_domain::Actor;
 
-    fn dir(fx: &crate::test_fixtures::EffortFixture) -> PathBuf {
+    fn dir(fx: &crate::test_fixtures::ThreadFixture) -> PathBuf {
         fx.svc.layout.project_dir.clone()
     }
 
     async fn run(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         name: &str,
         input: serde_json::Value,
     ) -> Result<oxplow_domain::CommandOutcome, CommandError> {
@@ -1292,7 +1292,7 @@ mod tests {
     }
 
     async fn events_of(
-        fx: &crate::test_fixtures::EffortFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         event_type: &str,
     ) -> Vec<oxplow_domain::StoredEvent> {
         fx.svc
@@ -1308,7 +1308,7 @@ mod tests {
     /// P5.C3: one run writes the row, the file and the event.
     #[tokio::test]
     async fn one_run_writes_the_row_the_file_and_the_event() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         std::fs::write(dir(&fx).join("src/lib.rs"), "fn x() {}\n").unwrap();
         let body = format!("# VCS notes\n\nSee [[src/lib.rs]] and [[{}]].\n", fx.task);
@@ -1366,7 +1366,7 @@ mod tests {
     /// and nothing — row, edges, event — is recorded (tsk562).
     #[tokio::test]
     async fn a_file_that_cant_be_written_fails_the_run_and_records_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         // A directory where the page's file goes.
         std::fs::create_dir_all(page_path(&dir(&fx), "blocked")).unwrap();
         let err = run(
@@ -1391,7 +1391,7 @@ mod tests {
     /// a page: syncing it records nothing, and a row it left is removed.
     #[tokio::test]
     async fn a_file_whose_name_isnt_a_slug_is_not_a_page() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let wiki = dir(&fx).join(".oxplow/wiki");
         std::fs::create_dir_all(&wiki).unwrap();
         std::fs::write(wiki.join("Bad_Name.md"), "# Bad\n").unwrap();
@@ -1417,7 +1417,7 @@ mod tests {
     /// section follows it — and the body it writes has no `@version`.
     #[tokio::test]
     async fn link_adds_under_related_and_strips_versions() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         std::fs::write(dir(&fx).join("src/lib.rs"), "x").unwrap();
         for slug in ["b", "c"] {
@@ -1451,7 +1451,7 @@ mod tests {
     /// A dangling link is refused, naming it, and nothing is written.
     #[tokio::test]
     async fn a_dangling_link_is_refused_naming_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let err = run(
             &fx,
             WRITE_PAGE,
@@ -1490,7 +1490,7 @@ mod tests {
     /// linked — a new dangling link is still refused.
     #[tokio::test]
     async fn a_link_that_went_dangling_doesnt_block_the_page() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         std::fs::write(dir(&fx).join("src/a.rs"), "a").unwrap();
         std::fs::write(dir(&fx).join("src/b.rs"), "b").unwrap();
@@ -1528,7 +1528,7 @@ mod tests {
     /// makes an edge of their own); removed ones must be gone.
     #[tokio::test]
     async fn verified_and_removed_files_are_checked_against_the_body() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         std::fs::create_dir_all(dir(&fx).join("crates/cp/src")).unwrap();
         std::fs::write(dir(&fx).join("crates/cp/src/lib.rs"), "").unwrap();
         std::fs::write(dir(&fx).join("crates/foo.rs"), "").unwrap();
@@ -1600,7 +1600,7 @@ mod tests {
     /// — dangling links and all.
     #[tokio::test]
     async fn a_hand_edit_converges_as_the_watcher() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let path = page_path(&dir(&fx), "hand");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "# Hand\n\nsee [[not-yet-written]]\n").unwrap();
@@ -1631,7 +1631,7 @@ mod tests {
         assert_eq!(events_of(&fx, "knowledge.page.deleted").await.len(), 1);
     }
 
-    async fn body_of(fx: &crate::test_fixtures::EffortFixture, page: &str) -> Option<String> {
+    async fn body_of(fx: &crate::test_fixtures::ThreadFixture, page: &str) -> Option<String> {
         let out = fx
             .svc
             .sql
@@ -1653,7 +1653,7 @@ mod tests {
     /// workspace), written with it by the command and by the watcher.
     #[tokio::test]
     async fn the_body_reads_back_from_v_knowledge_body() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         run(
             &fx,
             WRITE_PAGE,
@@ -1686,7 +1686,7 @@ mod tests {
         );
     }
 
-    async fn stale_ref_count(fx: &crate::test_fixtures::EffortFixture, page: &str) -> i64 {
+    async fn stale_ref_count(fx: &crate::test_fixtures::ThreadFixture, page: &str) -> i64 {
         let page = page.to_string();
         fx.svc
             .db
@@ -1703,7 +1703,7 @@ mod tests {
     }
 
     /// A snapshot of the primary stream in which `path` changed.
-    async fn snapshot_with(fx: &crate::test_fixtures::EffortFixture, path: &str) -> i64 {
+    async fn snapshot_with(fx: &crate::test_fixtures::ThreadFixture, path: &str) -> i64 {
         let path = path.to_string();
         fx.svc
             .db
@@ -1733,7 +1733,7 @@ mod tests {
     /// keeps a verified one stale, and every reader agrees.
     #[tokio::test]
     async fn another_streams_snapshot_doesnt_make_a_page_stale() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
         snapshot_with(&fx, "src/lib.rs").await;
@@ -1776,7 +1776,7 @@ mod tests {
     /// file drifts and a snapshot lands, and falls when it is verified.
     #[tokio::test]
     async fn stale_ref_count_rises_when_a_pinned_file_drifts() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
         snapshot_with(&fx, "src/lib.rs").await;
@@ -1834,7 +1834,7 @@ mod tests {
     /// names none — against the body the page already has.
     #[tokio::test]
     async fn verify_files_repins_the_named_refs_or_all_of_them() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
         for f in ["a.rs", "b.rs"] {
             std::fs::write(dir(&fx).join("src").join(f), "v1").unwrap();
@@ -1883,7 +1883,7 @@ mod tests {
     /// A page an agent's command writes is marked touched by its thread.
     #[tokio::test]
     async fn a_written_page_is_attributed_to_the_writing_thread() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -1915,7 +1915,7 @@ mod tests {
     /// Delete is confirmed and takes the row, the file and the edges;
     /// link adds under Related and refuses a dangling target.
     /// `id` as the project's knowledge store, its switch applied.
-    async fn choose(fx: &crate::test_fixtures::EffortFixture, id: &str) {
+    async fn choose(fx: &crate::test_fixtures::ThreadFixture, id: &str) {
         fx.svc
             .config
             .write()
@@ -1929,7 +1929,7 @@ mod tests {
             .await;
     }
 
-    async fn recorded(fx: &crate::test_fixtures::EffortFixture) -> Vec<String> {
+    async fn recorded(fx: &crate::test_fixtures::ThreadFixture) -> Vec<String> {
         fx.svc
             .wiki_page_store
             .list()
@@ -1946,7 +1946,7 @@ mod tests {
     /// from its files.
     #[tokio::test]
     async fn the_record_follows_the_active_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         run(
             &fx,
             WRITE_PAGE,
@@ -1979,7 +1979,7 @@ mod tests {
     /// sink — a write through it lands nowhere and succeeds.
     #[tokio::test]
     async fn none_is_a_choice_and_a_sink() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let rows = fx
             .svc
             .sql
@@ -2035,7 +2035,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_and_link() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         run(&fx, WRITE_PAGE, json!({ "slug": "a", "body": "# A\n" }))
             .await
             .unwrap();

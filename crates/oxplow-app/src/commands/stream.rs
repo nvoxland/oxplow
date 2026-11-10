@@ -478,15 +478,15 @@ pub fn ops(deps: StreamDeps) -> Vec<Op> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::StreamStore as _;
     use oxplow_domain::Actor;
 
-    async fn primary(fx: &EffortFixture) -> Stream {
+    async fn primary(fx: &ThreadFixture) -> Stream {
         fx.svc.stream_store.primary().await.unwrap().unwrap()
     }
 
-    fn agent(fx: &EffortFixture) -> Actor {
+    fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -498,7 +498,7 @@ mod tests {
     /// prompt too.
     #[tokio::test]
     async fn rename_undoes_and_the_prompt_is_set() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let s = primary(&fx).await;
         let r = s.id.to_string();
         let out = fx
@@ -563,7 +563,7 @@ mod tests {
     /// asked. The primary stream can't be archived by either.
     #[tokio::test]
     async fn archiving_asks_a_person_first() {
-        let fx = services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_effort().await;
         let r = primary(&fx).await.id.to_string();
         let err = fx
             .svc
@@ -601,7 +601,7 @@ mod tests {
         assert_eq!(open.map(|e| e.id), Some(fx.effort), "the effort stays open");
     }
 
-    async fn main_branch(fx: &EffortFixture) -> String {
+    async fn main_branch(fx: &ThreadFixture) -> String {
         let root = fx.svc.layout.project_dir.clone();
         fx.svc.vcs.head(&root).await.unwrap().branch.unwrap()
     }
@@ -611,7 +611,7 @@ mod tests {
     /// worked out here and not by the caller.
     #[tokio::test]
     async fn a_stream_is_created_from_a_new_or_an_existing_branch() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let main = main_branch(&fx).await;
         let out = fx
             .svc
@@ -661,7 +661,7 @@ mod tests {
     /// Each source needs its own fields, named when they are missing.
     #[tokio::test]
     async fn a_source_without_its_fields_is_refused() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         for (input, field) in [
             (
                 json!({ "title": "T", "source": "existing" }),
@@ -695,7 +695,7 @@ mod tests {
     /// would, not as a refusal).
     #[tokio::test]
     async fn an_agent_creates_from_a_branch_and_may_adopt() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let main = main_branch(&fx).await;
         fx.svc
             .commands
@@ -725,7 +725,7 @@ mod tests {
     /// — keeps the stream from being archived.
     #[tokio::test]
     async fn a_running_second_session_keeps_the_stream() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
         let out = fx
@@ -791,7 +791,7 @@ mod tests {
     /// rows go with it.
     #[tokio::test]
     async fn archiving_closes_its_terminals() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("base.txt"), "b\n").unwrap();
         crate::test_fixtures::commit_all(&root, "base");
@@ -868,7 +868,7 @@ mod tests {
     #[tokio::test]
     async fn archiving_closes_its_efforts_before_the_worktree_goes() {
         use oxplow_db::EffortStore as _;
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("base.txt"), "b\n").unwrap();
         crate::test_fixtures::commit_all(&root, "base");

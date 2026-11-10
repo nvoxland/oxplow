@@ -8,7 +8,7 @@ use oxplow_domain::extension_state::{Area, Namespace, Scope};
 use oxplow_domain::{Actor, CommandError};
 use serde_json::{json, Value};
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
 pub(crate) fn write(root: &Path, rel: &str, body: &str) {
     let path = root.join(rel);
@@ -91,7 +91,7 @@ pub(crate) const CONFIGURATION: &str = "configuration:
 ";
 
 pub(crate) async fn run(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     name: &str,
     input: Value,
 ) -> Result<Value, CommandError> {
@@ -102,7 +102,7 @@ pub(crate) async fn run(
         .map(|outcome| outcome.result)
 }
 
-pub(crate) async fn reconcile(fx: &EffortFixture) {
+pub(crate) async fn reconcile(fx: &ThreadFixture) {
     crate::test_fixtures::activate(&fx.svc).await;
 }
 
@@ -113,7 +113,7 @@ pub(crate) fn write_state(scope: &str, expected: Value, values: Value) -> Value 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_command_writes_state_and_reads_it_back() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", "");
     reconcile(&fx).await;
 
@@ -189,7 +189,7 @@ async fn a_command_writes_state_and_reads_it_back() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_extension_cannot_read_the_first_ones_namespace() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", "");
     declare(fx._dir.path(), "beta", "");
     reconcile(&fx).await;
@@ -243,7 +243,7 @@ async fn a_second_extension_cannot_read_the_first_ones_namespace() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
     run(
@@ -305,7 +305,7 @@ async fn a_disabled_extension_is_denied_while_its_rows_are_kept() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn configuration_resolves_defaults_then_project_then_personal() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
 
@@ -365,7 +365,7 @@ async fn configuration_resolves_defaults_then_project_then_personal() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_value_failing_the_schema_is_refused_without_echoing_it() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     declare(fx._dir.path(), "alpha", CONFIGURATION);
     reconcile(&fx).await;
 

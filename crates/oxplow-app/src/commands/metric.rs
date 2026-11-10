@@ -460,7 +460,7 @@ mod tests {
     /// turn — the capture carries both; a person's carries neither.
     #[tokio::test]
     async fn an_agents_assertion_carries_its_thread_and_turn() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         fx.svc
             .fact_store
             .upsert_spec(oxplow_db::NewMetricSpec::base(

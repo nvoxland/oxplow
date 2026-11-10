@@ -634,7 +634,7 @@ mod tests {
     /// name; a collector's own type never triggers one.
     #[tokio::test]
     async fn after_and_handles_follow_the_declarations() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         crate::effort_reactors::register(&fx.svc);
         crate::test_fixtures::install_code_metrics(&fx.svc.layout.project_dir);
         extension(
@@ -704,7 +704,7 @@ mod tests {
     /// can't be honored.
     #[tokio::test]
     async fn a_collector_after_nothing_is_a_load_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let held = extension(
             &fx.svc,
             &on_retitles("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
@@ -790,7 +790,7 @@ mod tests {
     /// `oxplow:oxplow/collector?collector=<owner>/<id>`, caused by that `collector.synced`.
     #[tokio::test]
     async fn a_collector_emits_its_extensions_events_with_its_run() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         emitter(svc,
             &prs(""),
@@ -877,7 +877,7 @@ mod tests {
         ] {
             // Each on its own project: three failures in a row would
             // disable the collector, which is another rule's business.
-            let fx = crate::test_fixtures::services_with_effort().await;
+            let fx = crate::test_fixtures::services_with_thread().await;
             let svc = &fx.svc;
             emitter(svc, &prs(trigger), &[("prs.star", &prs_script(&events))]).await;
             crate::test_fixtures::activate_with_problems(svc).await;
@@ -915,7 +915,7 @@ mod tests {
     /// recorded as skipped, not as a failure.
     #[tokio::test]
     async fn collectors_on_each_others_events_stop_at_the_guard() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let echo = |id: &str, on: &str| {
             format!("  - id: {id}\n    runtime: starlark\n    entry: {id}.star\n    on: [acme_pr.{on}]\n    sync: upsert\n    entities:\n      - {{ name: {id}, key: n, columns: {{ n: int }} }}\n")

@@ -5,11 +5,11 @@ use oxplow_domain::agent::tool::Subagent;
 use oxplow_domain::HookKind;
 use serde_json::json;
 
-use crate::test_fixtures::{services_with_effort, EffortFixture};
+use crate::test_fixtures::{services_with_thread, ThreadFixture};
 use crate::{HookEnvelope, ToolDecision};
 
 fn envelope(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     kind: HookKind,
     body: serde_json::Value,
     subagent: Option<&str>,
@@ -35,7 +35,7 @@ fn envelope(
     }
 }
 
-async fn subagents(fx: &EffortFixture) -> Vec<Vec<oxplow_db::SqlCell>> {
+async fn subagents(fx: &ThreadFixture) -> Vec<Vec<oxplow_db::SqlCell>> {
     fx.svc
         .sql
         .query_sql(
@@ -60,7 +60,7 @@ fn text(c: &oxplow_db::SqlCell) -> String {
 /// calls made as it; one only a tool call names is `unknown`.
 #[tokio::test]
 async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let ingest = |e: HookEnvelope| {
         let svc = fx.svc.clone();
         async move { svc.hook_ingest.ingest(e).await.unwrap() }
@@ -160,7 +160,7 @@ async fn a_subagent_is_running_finished_or_only_named_by_its_calls() {
 /// builder, and reading it answers its row (who started it, with what).
 #[tokio::test]
 async fn a_requests_uri_reads_its_row() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     fx.svc
         .hook_ingest
         .ingest(HookEnvelope {

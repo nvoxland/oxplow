@@ -310,7 +310,7 @@ mod tests {
     /// destructive, and an agent's is left for the person to confirm.
     #[tokio::test]
     async fn the_oxplow_wiki_is_a_conforming_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let findings = suite(&fx.svc, &Actor::Human).await;
         assert_eq!(findings, vec![]);
     }

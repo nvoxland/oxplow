@@ -1528,7 +1528,7 @@ mod tests {
     /// files: its list is restated against the new HEAD, not kept.
     #[tokio::test]
     async fn after_a_commit_that_cleans_the_tree_the_working_change_lists_nothing() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         crate::test_fixtures::commit_all(&root, "base");
@@ -1564,7 +1564,7 @@ mod tests {
     /// row is there when the query reads it, and its analysis lands after.
     #[tokio::test]
     async fn a_query_that_names_a_change_makes_it() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.rs"), "fn a() {}\n").unwrap();
@@ -1636,7 +1636,7 @@ mod tests {
     /// tree at its head. A side that isn't a revision is refused, saying so.
     #[tokio::test]
     async fn a_range_between_any_two_revisions_is_analyzed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2106,7 +2106,7 @@ mod tests {
 
     #[tokio::test]
     async fn weakened_tests_are_counted_on_both_sides() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("tests")).unwrap();
         std::fs::write(
@@ -2147,7 +2147,7 @@ mod tests {
     /// not failed) rather than analyzed from nothing.
     #[tokio::test]
     async fn a_snapshot_change_is_not_analyzed_without_contents() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         f.svc
             .snapshot_captures
             .set_content_policy(crate::snapshot_capture::ContentPolicy::HashesOnly);
@@ -2197,7 +2197,7 @@ mod tests {
     /// middle (an effort closing mid-turn).
     #[tokio::test]
     async fn a_turn_diffs_from_where_it_started_to_where_it_ended() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         let capture = crate::snapshot_capture::SnapshotCaptureService::new(
             f.svc.snapshot_store.clone(),
@@ -2291,7 +2291,7 @@ mod tests {
     /// turn's.
     #[tokio::test]
     async fn a_turn_ends_at_its_last_take_not_the_next_writers() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         let capture = crate::snapshot_capture::SnapshotCaptureService::new(
             f.svc.snapshot_store.clone(),
@@ -2356,7 +2356,7 @@ mod tests {
     /// While one of its turns runs, its head is the working tree.
     #[tokio::test]
     async fn a_request_diffs_its_turns_span_limited_to_its_files() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         let capture = crate::snapshot_capture::SnapshotCaptureService::new(
             f.svc.snapshot_store.clone(),
@@ -2460,7 +2460,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_commit_is_analyzed_once_and_stored() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2533,7 +2533,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_working_tree_is_recomputed_when_refreshed() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2585,7 +2585,7 @@ mod tests {
     /// leaves the deep analysis alone.
     #[tokio::test]
     async fn refreshing_files_stores_the_file_list_alone() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/lib.rs"), BEFORE).unwrap();
@@ -2729,7 +2729,7 @@ mod tests {
 
     #[tokio::test]
     async fn duplicates_of_changed_files_arrive_after_the_main_analysis() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let root = f.svc.layout.project_dir.clone();
         let body = "pub fn tally(items: &[u32]) -> u32 {\n    let mut total = 0;\n    for item in items {\n        if *item > 10 {\n            total += item * 2;\n        } else {\n            total += item + 1;\n        }\n    }\n    total\n}\n";
         std::fs::create_dir_all(root.join("src")).unwrap();

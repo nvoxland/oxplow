@@ -200,13 +200,13 @@ async fn scratch_launch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
 
     /// Every built-in harness keeps the floor: run over each as any
     /// harness is, its CLI where oxplow looks.
     #[tokio::test]
     async fn every_built_in_harness_passes() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let bin = tempfile::tempdir().unwrap();
         for program in ["claude", "codex", "opencode"] {
             std::fs::write(bin.path().join(program), "").unwrap();
@@ -259,7 +259,7 @@ mod tests {
             }
         }
 
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         fx.svc.harnesses.register(std::sync::Arc::new(Sloppy));
         let run = suite(&fx.svc, "sloppy", &json!({}), &[]).await;
         let mut checks: Vec<&str> = run.findings.iter().map(|f| f.check).collect();

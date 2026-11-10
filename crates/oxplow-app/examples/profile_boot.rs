@@ -1,5 +1,5 @@
 //! Measure what one test's boot costs: `Services::in_memory` over a fresh
-//! repository, as `test_fixtures::services_with_effort` starts it.
+//! repository, as `test_fixtures::services_with_thread` starts it.
 //!
 //! Run from the repo root, in the profile the tests build in:
 //!     cargo run -q -p oxplow-app --example profile_boot -- [boots]

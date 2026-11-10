@@ -73,7 +73,7 @@ pub fn restore_file_op(files: SnapshotFiles, events: crate::events::EventBus) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::services_with_effort;
+    use crate::test_fixtures::services_with_thread;
     use oxplow_domain::Actor;
 
     /// A restore overwrites the worktree: unconfirmed, a person is asked;
@@ -81,7 +81,7 @@ mod tests {
     /// no such snapshot).
     #[tokio::test]
     async fn a_restore_asks_first() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let input = json!({ "file_snapshot": 1 });
         let err = fx
             .svc

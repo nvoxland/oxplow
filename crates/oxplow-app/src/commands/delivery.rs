@@ -164,7 +164,7 @@ mod tests {
     use serde_json::json;
 
     /// Park an event for `consumer`, as the pump would on a failure.
-    async fn park(fx: &crate::test_fixtures::EffortFixture, consumer: &str) -> i64 {
+    async fn park(fx: &crate::test_fixtures::ThreadFixture, consumer: &str) -> i64 {
         let consumer = consumer.to_string();
         fx.svc
             .db

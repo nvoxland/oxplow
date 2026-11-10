@@ -195,10 +195,10 @@ impl AsyncEventConsumer for EffortObservationConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::EffortFixture;
+    use crate::test_fixtures::ThreadFixture;
     use crate::thread_checkpoint::tests::{turn, with_baseline};
 
-    async fn settle(f: &EffortFixture) {
+    async fn settle(f: &ThreadFixture) {
         f.svc
             .event_pump
             .settle(
@@ -209,7 +209,7 @@ mod tests {
     }
 
     /// (path, source) of an effort's files, by path.
-    async fn files(f: &EffortFixture, effort: EffortId) -> Vec<(String, String)> {
+    async fn files(f: &ThreadFixture, effort: EffortId) -> Vec<(String, String)> {
         let mut out: Vec<(String, String)> = f
             .svc
             .effort_store

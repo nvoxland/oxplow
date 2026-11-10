@@ -224,10 +224,10 @@ pub fn ops(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::Actor;
 
-    fn agent(fx: &EffortFixture) -> Actor {
+    fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -235,7 +235,7 @@ mod tests {
         }
     }
 
-    async fn stream_id(fx: &EffortFixture) -> String {
+    async fn stream_id(fx: &ThreadFixture) -> String {
         use oxplow_domain::stores::StreamStore as _;
         fx.svc
             .stream_store
@@ -248,7 +248,7 @@ mod tests {
     }
 
     async fn run(
-        fx: &EffortFixture,
+        fx: &ThreadFixture,
         actor: &Actor,
         name: &str,
         input: serde_json::Value,
@@ -257,7 +257,7 @@ mod tests {
         fx.svc.commands.run(actor, name, input, confirmed).await
     }
 
-    async fn titles(fx: &EffortFixture) -> Vec<String> {
+    async fn titles(fx: &ThreadFixture) -> Vec<String> {
         let out = fx
             .svc
             .sql
@@ -282,7 +282,7 @@ mod tests {
     /// kept; renaming changes the title (and undoes).
     #[tokio::test]
     async fn open_numbers_rename_renames() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = stream_id(&fx).await;
         let first = run(&fx, &Actor::Human, OPEN, json!({ "stream": stream }), false)
             .await
@@ -364,7 +364,7 @@ mod tests {
     /// and deletes the row; an agent can't close one.
     #[tokio::test]
     async fn close_ends_the_shell_and_deletes_the_row() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = stream_id(&fx).await;
         let opened = run(&fx, &Actor::Human, OPEN, json!({ "stream": stream }), false)
             .await

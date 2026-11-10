@@ -386,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn a_table_change_reaches_its_datasets_and_their_readers_only() {
         use oxplow_oxtask::OxtaskStore as _;
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_task().await;
         let lineage = Lineage::load(&f.svc.db).await.unwrap();
         let changed = lineage.affected(&["task".to_string()]);
         assert!(changed.contains(&"v_task".to_string()), "{changed:?}");
@@ -449,7 +449,7 @@ mod tests {
     /// what landed since the last read counts.
     #[tokio::test]
     async fn the_listener_names_the_measures_that_landed_per_stream() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let facts = &f.svc.fact_store;
         let mut listener = CaptureListener::at_end(&f.svc.db).await.unwrap();
         let measure = |key: &'static str| async move {
@@ -513,7 +513,7 @@ mod tests {
     /// into the cube by the asset runner — no recording site emits anything.
     #[tokio::test]
     async fn a_recorded_capture_is_announced_and_folded_without_a_bus_event() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(20));
         let mut rx = f.svc.events.subscribe_ui();
@@ -595,7 +595,7 @@ mod tests {
             DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
         };
         use oxplow_oxtask::OxtaskStore as _;
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_task().await;
         let dataset =
             |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| DatasetSource {
                 decl: DatasetDecl {
@@ -731,7 +731,7 @@ mod tests {
         use oxplow_db::datasets::{
             DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
         };
-        let f = crate::test_fixtures::services_with_task_effort().await;
+        let f = crate::test_fixtures::services_with_task().await;
         let dataset = |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| {
             DatasetSource {
                 decl: DatasetDecl {
@@ -848,7 +848,7 @@ mod tests {
     #[tokio::test]
     async fn telemetry_writes_name_their_datasets() {
         use oxplow_db::PageVisitStore as _;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let mut rx = f.svc.events.subscribe_ui();
         spawn(
             f.svc.db.clone(),

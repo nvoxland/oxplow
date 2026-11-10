@@ -424,7 +424,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::test_fixtures::{new_thread, services_with_effort, services_with_task_effort};
+    use crate::test_fixtures::{new_thread, services_with_task, services_with_thread};
     use oxplow_domain::{StreamId, Thread};
     use oxplow_oxtask::task_ref;
 
@@ -454,7 +454,7 @@ mod tests {
     /// the agent as its sender.
     #[tokio::test]
     async fn an_agent_hands_work_from_its_own_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let to = second_thread(&fx.svc).await;
         let out = run(
             &fx.svc,
@@ -490,7 +490,7 @@ mod tests {
     /// the task tracker doesn't have, and a person who names no sender.
     #[tokio::test]
     async fn a_send_is_refused_for_what_isnt_a_handoff() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let to = second_thread(&fx.svc).await;
         let agent = agent_on(fx.thread);
         let to_ref = to.id.to_string();
@@ -584,7 +584,7 @@ mod tests {
     /// be settled again. Undo opens it again.
     #[tokio::test]
     async fn each_side_settles_only_what_is_its_own() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let to = second_thread(&fx.svc).await;
         let (sender, recipient) = (agent_on(fx.thread), agent_on(to.id));
         let sent = run(
@@ -658,7 +658,7 @@ mod tests {
     /// assigns nothing and undoes.
     #[tokio::test]
     async fn taking_a_handoff_assigns_its_task() {
-        let fx = services_with_task_effort().await;
+        let fx = services_with_task().await;
         let to = second_thread(&fx.svc).await;
         let recipient = agent_on(to.id);
         let send = |body: &str| {

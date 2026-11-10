@@ -5876,7 +5876,7 @@ view:
     /// given thread (else the stream's selected one).
     #[tokio::test]
     async fn view_context_defaults_to_the_primary_stream_and_its_thread() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         use oxplow_domain::stores::ThreadStore as _;
         let thread = f.svc.thread_store.get(&f.thread).await.unwrap().unwrap();
         let expect = ViewContext {
@@ -10057,7 +10057,7 @@ commands:
     async fn an_extension_loads_at_any_revision() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         // Git sees an extension's source once it is shared.
         crate::extension::extension_deploy::share(&f.svc, "acme").unwrap();
@@ -10125,7 +10125,7 @@ commands:
     async fn an_effort_review_names_the_extensions_that_changed() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         // Git sees an extension's source once it is shared.
         crate::extension::extension_deploy::share(&f.svc, "acme").unwrap();
@@ -10203,7 +10203,7 @@ commands:
     async fn the_earlier_side_of_a_review_is_not_checked() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         // Git sees an extension's source once it is shared.
         crate::extension::extension_deploy::share(&f.svc, "acme").unwrap();

@@ -14,9 +14,7 @@ use crate::task_tracker_conformance::{suite, ServicesProbe, TaskTrackerProbe as 
 #[cfg(unix)]
 use crate::test_fixtures::lifecycle::write_extension;
 use crate::test_fixtures::lifecycle::{fake_bin, EXT};
-use crate::test_fixtures::{
-    services_with_effort, services_with_task_effort, EffortFixture, TaskEffortFixture,
-};
+use crate::test_fixtures::{services_with_task, services_with_thread, TaskFixture, ThreadFixture};
 
 /// The manifest `text` with `secrets` declared beside its `process` permission.
 fn permit_secrets(text: &str, secrets: &[&str]) -> String {
@@ -50,15 +48,15 @@ fn extension(project: &Path) -> Extension {
 
 /// Deploys the extension, which publishes a generation that can start
 /// its provider.
-async fn deploy(fx: &EffortFixture, _ext: &Extension) {
+async fn deploy(fx: &ThreadFixture, _ext: &Extension) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
 /// The fixture with the tracker extension (running the fake with
 /// `hooks`) deployed on this machine.
 #[cfg(unix)]
-async fn deployed(hooks: &str) -> (EffortFixture, Extension) {
-    let fx = services_with_effort().await;
+async fn deployed(hooks: &str) -> (ThreadFixture, Extension) {
+    let fx = services_with_thread().await;
     write_extension(&fx.svc.layout.project_dir, hooks);
     let ext = extension(&fx.svc.layout.project_dir);
     deploy(&fx, &ext).await;
@@ -72,7 +70,7 @@ const INSTANCE: &str = "tracker/fake";
 
 /// Enable the instance in the project's config (in memory, as a
 /// reconcile reads it).
-fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
+fn configure(fx: &ThreadFixture, enabled: bool, config: serde_json::Value) {
     fx.svc.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
         oxplow_config::ExtensionInstanceConfig {
@@ -86,7 +84,7 @@ fn configure(fx: &EffortFixture, enabled: bool, config: serde_json::Value) {
 
 /// Make `provider` the active task tracker, as a `oxplow.config.set` would leave it:
 /// the config, and the capability rows the interface reads.
-async fn make_active(fx: &EffortFixture, provider: &str) {
+async fn make_active(fx: &ThreadFixture, provider: &str) {
     // Unchanged, no new generation: the running instances keep running.
     let unchanged = fx
         .svc
@@ -109,7 +107,7 @@ async fn make_active(fx: &EffortFixture, provider: &str) {
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
 }
 
-fn republish(fx: &EffortFixture) {
+fn republish(fx: &ThreadFixture) {
     let config = crate::config_service::read_config(&fx.svc.config);
     fx.svc
         .capabilities
@@ -155,7 +153,7 @@ async fn turn_off(svc: &std::sync::Arc<crate::Services>, instance: &str) {
     crate::test_fixtures::activate_with_problems(svc).await;
 }
 
-async fn logged(fx: &EffortFixture, event_type: &str) -> Vec<serde_json::Value> {
+async fn logged(fx: &ThreadFixture, event_type: &str) -> Vec<serde_json::Value> {
     let t = event_type.to_string();
     fx.svc
         .db
@@ -517,8 +515,8 @@ async fn task_commands_write_another_providers_items_through_its_process() {
         .into_iter()
         .map(|r| r.command)
         .collect();
-    // The fixture opened its effort; starting the instance read it once
-    // (as the system), then the writes — the refused estimate audited too.
+    // Starting the instance read it once (as the system), then the writes —
+    // the refused estimate audited too.
     assert_eq!(
         commands,
         vec![
@@ -526,8 +524,7 @@ async fn task_commands_write_another_providers_items_through_its_process() {
             "tracker.item.estimate",
             "tracker.item.estimate",
             "oxplow.task.create",
-            "oxplow.provider.sync",
-            "oxplow.effort.open"
+            "oxplow.provider.sync"
         ]
     );
 
@@ -791,7 +788,7 @@ async fn a_running_instance_publishes_its_features() {
 #[tokio::test]
 async fn a_provider_reads_the_host_through_what_it_needs() {
     for (needs, reads) in [(true, true), (false, false)] {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         write_extension(&root, "host-read");
         if needs {
@@ -859,7 +856,7 @@ async fn a_provider_reads_the_host_through_what_it_needs() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_reads_its_extensions_configuration_through_host_call() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "config-read");
     let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
@@ -934,7 +931,7 @@ async fn a_provider_reads_its_extensions_configuration_through_host_call() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_verbs_host_reads_are_recorded_with_its_run() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "host-read");
     let manifest = root.join(".oxplow/extensions/tracker/extension.yaml");
@@ -992,7 +989,7 @@ async fn a_verbs_host_reads_are_recorded_with_its_run() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_command_is_declared_over_an_operation_it_lists() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let root = fx.svc.layout.project_dir.clone();
     write_extension(&root, "");
     let ext = extension(&root);
@@ -1057,7 +1054,7 @@ fn a_coverage_runs_profile_path_reaches_the_provider() {
 #[cfg(unix)]
 #[tokio::test]
 async fn provider_args_stay_inside_the_extension_folder() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
@@ -1114,7 +1111,7 @@ fn write_adapter_extension(project: &Path) -> PathBuf {
 /// `entry`, never with one.
 #[tokio::test]
 async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folder() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let dir = write_adapter_extension(&project);
     let ext = extension(&project);
@@ -1171,7 +1168,7 @@ async fn an_adapter_provider_names_its_server_mapping_and_tools_inside_the_folde
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_runs_from_its_deployment() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let script = project.join(".oxplow/extensions/tracker/bin/provider");
@@ -1215,7 +1212,7 @@ async fn a_provider_runs_from_its_deployment() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_provider_cannot_declare_another_core_event_type() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let mut declared = oxplow_provider_fake::declarations();
@@ -1737,7 +1734,7 @@ fn an_event_names_only_its_capabilitys_own_refs() {
 }
 
 /// The fake's three items, filed through `oxplow.task.create`.
-async fn three_items(fx: &EffortFixture) -> Vec<String> {
+async fn three_items(fx: &ThreadFixture) -> Vec<String> {
     let items = fx.svc.tasks_client();
     let mut refs = Vec::new();
     for title in ["one", "two", "three"] {
@@ -1790,7 +1787,7 @@ async fn an_item_made_with_no_provider_named_reaches_the_tracker_and_comes_back_
         1,
         "the active task tracker"
     );
-    let titles = |fx: &EffortFixture| {
+    let titles = |fx: &ThreadFixture| {
         let svc = fx.svc.clone();
         async move {
             svc.sql
@@ -1846,7 +1843,7 @@ async fn an_item_made_with_no_provider_named_reaches_the_tracker_and_comes_back_
     }
 }
 
-async fn collector_state(fx: &EffortFixture) -> oxplow_db::CollectorState {
+async fn collector_state(fx: &ThreadFixture) -> oxplow_db::CollectorState {
     oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone())
         .get(INSTANCE, "tasks")
         .await
@@ -1855,7 +1852,7 @@ async fn collector_state(fx: &EffortFixture) -> oxplow_db::CollectorState {
 }
 
 /// How many `task.recorded` events name `item`.
-async fn recorded_for(fx: &EffortFixture, item: &str) -> usize {
+async fn recorded_for(fx: &ThreadFixture, item: &str) -> usize {
     logged(fx, "task.recorded")
         .await
         .iter()
@@ -1978,7 +1975,7 @@ async fn enabling_returns_before_the_first_read_finishes() {
 }
 
 /// The instance's first read, once its background sync lands.
-async fn first_read(fx: &EffortFixture) -> oxplow_db::CollectorState {
+async fn first_read(fx: &ThreadFixture) -> oxplow_db::CollectorState {
     let store = oxplow_db::SqliteProviderCollectorStore::new(fx.svc.db.clone());
     for _ in 0..200 {
         if let Some(state) = store.get(INSTANCE, "tasks").await.unwrap() {
@@ -2192,7 +2189,7 @@ async fn scheduled_syncs_run_due_collectors_as_the_system() {
 }
 
 /// Send the running fake new script hooks.
-async fn set_hooks(fx: &EffortFixture, hooks: &str) {
+async fn set_hooks(fx: &ThreadFixture, hooks: &str) {
     let instance = fx.svc.providers.get(INSTANCE).await.expect("running");
     instance.hook(hooks).await;
 }
@@ -2214,7 +2211,7 @@ async fn the_fakes_hooks_are_replaced_not_merged() {
 
 /// Run `oxplow.task.create` on the fake as the person.
 async fn create_on_fake(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
 ) -> Result<oxplow_domain::CommandOutcome, oxplow_domain::CommandError> {
     make_active(fx, "fake").await;
     fx.svc
@@ -2229,7 +2226,7 @@ async fn create_on_fake(
 }
 
 #[cfg(unix)]
-async fn enabled_fake() -> (EffortFixture, Extension) {
+async fn enabled_fake() -> (ThreadFixture, Extension) {
     let (fx, ext) = deployed("").await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     // Its start's first read, in the background (tsk716).
@@ -2369,7 +2366,7 @@ async fn three_failures_disable_it_with_rate_limits_interleaved() {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "");
     let dir = project.join(".oxplow/extensions").join(EXT);
@@ -2401,8 +2398,9 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
         .unwrap()
         .len() as i64;
     // Hand the consumer what was logged since last time, as the pump would.
+    let (fx_svc, fx_thread) = (&fx.svc, fx.thread);
     let deliver = |seen: i64| {
-        let (svc, consumer) = (&fx.svc, &consumer);
+        let (svc, consumer) = (fx_svc, &consumer);
         async move {
             let mut at = seen;
             loop {
@@ -2415,7 +2413,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
                     // An effect runs for its event's thread; these events
                     // are the person's, so anchor them to the fixture's.
                     let mut e = e.clone();
-                    e.envelope.anchors.thread_id = Some(fx.thread);
+                    e.envelope.anchors.thread_id = Some(fx_thread);
                     consumer.handle(&e).await.unwrap();
                     at = e.seq;
                 }
@@ -2473,7 +2471,7 @@ async fn an_effect_doesnt_hear_its_own_external_write_echoed_by_a_read() {
 /// Another instance of the tracker's `provider` (in memory, as a
 /// reconcile reads it).
 fn configure_named(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     instance: &str,
     provider: Option<&str>,
     config: serde_json::Value,
@@ -2491,7 +2489,7 @@ fn configure_named(
 
 const SECOND: &str = "tracker/fake_second";
 
-async fn instance_rows(fx: &EffortFixture) -> Vec<(String, String, i64, String)> {
+async fn instance_rows(fx: &ThreadFixture) -> Vec<(String, String, i64, String)> {
     let out = fx
         .svc
         .sql
@@ -2623,7 +2621,7 @@ async fn provider_instances_are_managed_by_commands_and_read_as_a_model() {
 #[cfg(unix)]
 #[tokio::test]
 async fn removing_an_instance_leaves_nothing_behind() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
@@ -2906,7 +2904,7 @@ async fn two_instances_of_one_provider_run_side_by_side() {
 #[cfg(unix)]
 #[tokio::test]
 async fn an_instance_credential_is_its_own() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
@@ -3044,7 +3042,7 @@ async fn a_named_instance_says_which_provider_it_is() {
 /// there unless `with_tracker` is false.
 #[cfg(unix)]
 async fn sibling_project(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     hooks: &str,
     with_tracker: bool,
 ) -> (std::sync::Arc<crate::Services>, tempfile::TempDir) {
@@ -3099,7 +3097,7 @@ fn declare_token(root: &Path) {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_global_credential_change_restarts_it_in_every_project() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     declare_token(&project);
@@ -3344,7 +3342,7 @@ async fn a_project_entry_overrides_a_global_instance_whole() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, "needs:FAKE_TOKEN");
     let manifest = project
@@ -3431,7 +3429,7 @@ async fn a_project_instance_keeps_its_credentials_beside_a_global_one() {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_global_instances_credential_is_shared_across_projects() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let credentialed = |root: &Path| {
         let manifest = root
@@ -3765,7 +3763,7 @@ fn write_oauth_extension(project: &Path, hooks: &str, authorize: &str, token: &s
 #[cfg(unix)]
 #[tokio::test]
 async fn an_oauth_credential_is_declared_and_checked() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let (authorize, token) = (
         "https://auth.example.com/authorize",
@@ -3834,8 +3832,8 @@ async fn an_oauth_credential_is_declared_and_checked() {
 /// the person signs in for at a stand-in authorization server (`more`:
 /// further lines of the manifest, continuing the `oauth:` block).
 #[cfg(unix)]
-async fn signing_in(hooks: &str, more: &str) -> (EffortFixture, OAuthSim) {
-    let fx = services_with_effort().await;
+async fn signing_in(hooks: &str, more: &str) -> (ThreadFixture, OAuthSim) {
+    let fx = services_with_thread().await;
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     write_oauth_extension(&project, hooks, &sim.authorize_url, &sim.token_url, more);
@@ -3864,7 +3862,7 @@ async fn browse(page: &crate::providers::BegunSignIn) -> String {
 
 /// Hand `redirect` to the sign-in for `name`, as the shell does.
 async fn complete(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     name: &str,
     redirect: &str,
 ) -> Result<SignInCompletion, DomainError> {
@@ -3913,7 +3911,7 @@ async fn a_sign_in_whose_account_changed_meanwhile_is_refused() {
 
 /// Start a sign-in, do what the person's browser does, and hand the
 /// redirect over as the shell does. What the renderer then hears.
-async fn sign_in(fx: &EffortFixture, name: &str) -> Option<String> {
+async fn sign_in(fx: &ThreadFixture, name: &str) -> Option<String> {
     let mut ui = fx.svc.events.subscribe_ui();
     let page = fx
         .svc
@@ -3967,7 +3965,7 @@ fn sign_in_state(views: &[ProviderInstanceView], name: &str) -> (bool, Option<oa
     (c.set, c.sign_in.clone())
 }
 
-fn unconfigured_at(fx: &EffortFixture) -> (String, String) {
+fn unconfigured_at(fx: &ThreadFixture) -> (String, String) {
     match fx.svc.providers.health(INSTANCE).map(|h| h.state) {
         Some(InstanceState::Unconfigured { problems }) => {
             (problems[0].path.clone(), problems[0].message.clone())
@@ -4136,8 +4134,8 @@ async fn a_read_that_starts_the_process_renews_a_refused_token() {
 /// Two credentials signed in at the stand-in, `FAKE_TOKEN` and
 /// `OTHER_TOKEN`, the instance ready on both.
 #[cfg(unix)]
-async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
-    let fx = services_with_effort().await;
+async fn signed_in_twice(hooks: &str) -> (ThreadFixture, OAuthSim) {
+    let fx = services_with_thread().await;
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     let other = format!(
@@ -4159,7 +4157,7 @@ async fn signed_in_twice(hooks: &str) -> (EffortFixture, OAuthSim) {
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn a_slow_exchange_holds_up_only_its_own_sign_in() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let sim = OAuthSim::start().await;
     let project = fx.svc.layout.project_dir.clone();
     let other = format!(
@@ -4837,7 +4835,7 @@ fn url_manifest() -> String {
 /// bearer a credential it declares.
 #[tokio::test]
 async fn an_adapter_server_by_url_is_declared_and_checked() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let dir = write_adapter_extension(&project);
     std::fs::remove_file(dir.join("bin/server")).unwrap();
@@ -5069,8 +5067,8 @@ async fn a_call_cut_off_by_a_renewal_is_not_resent_without_a_key() {
 /// calls `script` composes (it may read with `sql.read`); both approved,
 /// the provider enabled.
 #[cfg(unix)]
-async fn with_effect(hooks: &str, script: &str) -> TaskEffortFixture {
-    let fx = services_with_task_effort().await;
+async fn with_effect(hooks: &str, script: &str) -> TaskFixture {
+    let fx = services_with_task().await;
     let project = fx.svc.layout.project_dir.clone();
     write_extension(&project, hooks);
     let dir = project.join(".oxplow/extensions").join(EXT);
@@ -5100,7 +5098,7 @@ const FILE_ON_FAKE: &str = "def transform(x):\n    return {\"commands\": [{\"nam
 
 /// The fixture's task moved to done, anchored to its thread as the command
 /// that makes it would be: an effect reacting runs for that thread.
-fn done_envelope(fx: &TaskEffortFixture) -> oxplow_domain::Envelope {
+fn done_envelope(fx: &TaskFixture) -> oxplow_domain::Envelope {
     use oxplow_domain::events::schema::{TaskStateChanged, TaskStateChangedV1};
     let mut env = oxplow_domain::Envelope::typed::<TaskStateChanged>(
         "human",
@@ -5115,7 +5113,7 @@ fn done_envelope(fx: &TaskEffortFixture) -> oxplow_domain::Envelope {
 
 /// Move the fixture's task to done (what the effect reacts to) and let
 /// the effect react.
-async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
+async fn react(fx: &TaskFixture) -> oxplow_domain::StoredEvent {
     let env = done_envelope(fx);
     let id = env.id.clone();
     fx.svc.event_log_store.append(env).await.unwrap();
@@ -5128,7 +5126,7 @@ async fn react(fx: &TaskEffortFixture) -> oxplow_domain::StoredEvent {
     ev
 }
 
-async fn effect_runs(fx: &EffortFixture) -> serde_json::Value {
+async fn effect_runs(fx: &ThreadFixture) -> serde_json::Value {
     let rows = fx
         .svc
         .sql
@@ -5144,7 +5142,7 @@ async fn effect_runs(fx: &EffortFixture) -> serde_json::Value {
 }
 
 /// The effect's consecutive failures, as its health counts them.
-async fn effect_failures(fx: &EffortFixture) -> i64 {
+async fn effect_failures(fx: &ThreadFixture) -> i64 {
     let health = crate::contribution_health::ContributionHealth::new(
         fx.svc.db.clone(),
         fx.svc.vocabulary.clone(),
@@ -5461,7 +5459,7 @@ async fn a_long_overdue_retry_is_a_persons() {
 /// the attempt, and is dropped once the fake has the call (its write still
 /// lands after). The fake's hooks are cleared after.
 async fn cut_off<F, Fut>(
-    fx: &crate::test_fixtures::TaskEffortFixture,
+    fx: &crate::test_fixtures::TaskFixture,
     run: F,
 ) -> oxplow_domain::StoredEvent
 where
@@ -5655,7 +5653,7 @@ async fn a_cut_off_attempt_found_an_hour_late_is_a_persons() {
 
 /// `provider` the active task tracker tracker (none: oxplow's own list),
 /// published as a generation.
-async fn set_active(fx: &EffortFixture, provider: Option<&str>) {
+async fn set_active(fx: &ThreadFixture, provider: Option<&str>) {
     {
         let mut config = fx.svc.config.write().unwrap();
         match provider {
@@ -6075,7 +6073,7 @@ async fn a_process_that_wont_exit_is_killed_after_its_grace() {
     assert!(stopped);
 }
 
-async fn syncs(fx: &EffortFixture) -> i64 {
+async fn syncs(fx: &ThreadFixture) -> i64 {
     fx.svc
         .db
         .read(|c| {
@@ -6266,8 +6264,8 @@ fn write_policy_extension(project: &Path, hooks: &str) {
 /// running; the fixture's own effort closed, so the policy's are the only
 /// ones open.
 #[cfg(unix)]
-async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
-    let fx = services_with_effort().await;
+async fn running_policy(hooks: &str) -> (crate::test_fixtures::EffortFixture, Extension) {
+    let fx = crate::test_fixtures::services_with_effort().await;
     let project = fx.svc.layout.project_dir.clone();
     write_policy_extension(&project, hooks);
     let ext = crate::extension::extensions::load_extensions(&project)
@@ -6291,7 +6289,7 @@ async fn running_policy(hooks: &str) -> (EffortFixture, Extension) {
 }
 
 /// `id` as the project's effort policy.
-async fn choose_policy(fx: &EffortFixture, id: &str) {
+async fn choose_policy(fx: &ThreadFixture, id: &str) {
     fx.svc
         .config
         .write()
@@ -6305,7 +6303,7 @@ async fn choose_policy(fx: &EffortFixture, id: &str) {
 /// A task filed on the fixture's thread, moved by the thread's agent to
 /// `to` (its anchors carry the thread); the policy has reacted when this
 /// returns.
-async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
+async fn agent_moves(fx: &ThreadFixture, item: &str, to: &str) {
     let agent = Actor::Agent {
         session_id: None,
         thread_id: Some(fx.thread),
@@ -6330,7 +6328,7 @@ async fn agent_moves(fx: &EffortFixture, item: &str, to: &str) {
         .await;
 }
 
-async fn file_task(fx: &EffortFixture) -> String {
+async fn file_task(fx: &ThreadFixture) -> String {
     make_active(fx, "oxtask").await;
     let out = fx
         .svc
@@ -6348,7 +6346,7 @@ async fn file_task(fx: &EffortFixture) -> String {
 
 /// `(task, open?)` of the thread's efforts, oldest first, and the
 /// source of the last `effort.opened`.
-async fn policy_efforts(fx: &EffortFixture) -> (Vec<(Option<String>, bool)>, Option<String>) {
+async fn policy_efforts(fx: &ThreadFixture) -> (Vec<(Option<String>, bool)>, Option<String>) {
     use oxplow_db::SqlCell;
     let efforts = fx
         .svc
@@ -6387,7 +6385,7 @@ async fn policy_efforts(fx: &EffortFixture) -> (Vec<(Option<String>, bool)>, Opt
 }
 
 /// How many `react`s the fake answered.
-fn reacts(fx: &EffortFixture) -> u64 {
+fn reacts(fx: &ThreadFixture) -> u64 {
     std::fs::read_to_string(
         fx.svc
             .layout
@@ -6442,7 +6440,7 @@ async fn a_provider_is_the_projects_effort_policy() {
 }
 
 /// What the fake provider last kept of its state.
-fn fake_policy_state(fx: &EffortFixture) -> serde_json::Value {
+fn fake_policy_state(fx: &ThreadFixture) -> serde_json::Value {
     std::fs::read_to_string(
         fx.svc
             .layout
@@ -6573,8 +6571,8 @@ fn write_harness_extension(project: &Path, hooks: &str) {
 /// The fixture with the harness extension approved and its instance
 /// running.
 #[cfg(unix)]
-async fn running_harness(hooks: &str) -> (EffortFixture, Extension) {
-    let fx = services_with_effort().await;
+async fn running_harness(hooks: &str) -> (ThreadFixture, Extension) {
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_harness_extension(&project, hooks);
     let ext = crate::extension::extensions::load_extensions(&project)
@@ -6723,7 +6721,7 @@ async fn a_slow_harness_provider_reads_as_none_on_the_hook_path() {
 /// A launch's input for the fixture's thread, programs looked for in
 /// `search_path`.
 fn launch_input(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     search_path: Vec<PathBuf>,
 ) -> oxplow_domain::agent::harness::LaunchInput {
     use oxplow_domain::agent::harness::{Endpoints, LaunchInput, SessionIds};
@@ -6791,11 +6789,11 @@ fn write_snapshots_extension(project: &Path, contents: bool) {
 async fn running_snapshots(
     contents: bool,
 ) -> (
-    EffortFixture,
+    ThreadFixture,
     oxplow_domain::StreamId,
     std::sync::Arc<crate::snapshot_capture::SnapshotCaptureService>,
 ) {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_snapshots_extension(&project, contents);
     let ext = crate::extension::extensions::load_extensions(&project)
@@ -6827,7 +6825,7 @@ async fn running_snapshots(
 }
 
 /// `id` as the project's snapshots, its switch applied.
-async fn choose_snapshots(fx: &EffortFixture, id: &str) {
+async fn choose_snapshots(fx: &ThreadFixture, id: &str) {
     fx.svc
         .config
         .write()
@@ -6842,7 +6840,7 @@ async fn choose_snapshots(fx: &EffortFixture, id: &str) {
 }
 
 async fn mark_turn(
-    fx: &EffortFixture,
+    fx: &ThreadFixture,
     stream: oxplow_domain::StreamId,
 ) -> oxplow_domain::snapshot::Marked {
     let mut request = oxplow_domain::snapshot::MarkRequest::new(
@@ -7001,7 +6999,7 @@ fn write_knowledge_extension(project: &Path, state: &Path) {
 #[cfg(unix)]
 #[tokio::test]
 async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     let state = project.join(".oxplow/fake-knowledge.json");
     std::fs::create_dir_all(state.parent().unwrap()).unwrap();
@@ -7124,7 +7122,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
 /// command's or an effect's script does: the metric functions answer.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_providers_host_read_reaches_the_metric_functions() {
-    let fx = services_with_effort().await;
+    let fx = services_with_thread().await;
     let grant = oxplow_domain::grant::Grant::from_permissions(
         "tracker",
         &oxplow_domain::permissions::Permissions {
@@ -7198,8 +7196,8 @@ fn write_filesystem_extension(
 /// The fixture with the filesystem extension `name` approved and its
 /// instance `store` running.
 #[cfg(unix)]
-async fn running_filesystem(name: &str, writable: bool) -> EffortFixture {
-    let fx = services_with_effort().await;
+async fn running_filesystem(name: &str, writable: bool) -> ThreadFixture {
+    let fx = services_with_thread().await;
     let project = fx.svc.layout.project_dir.clone();
     write_filesystem_extension(
         &project,

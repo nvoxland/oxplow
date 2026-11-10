@@ -2427,7 +2427,7 @@ async fn a_command_says_what_it_does_when_it_asks() {
 /// they do, and neither is presented as destroying something.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rebase_and_a_merge_say_what_they_do() {
-    let fx = crate::test_fixtures::services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     for (name, words) in [
         ("oxplow.git.rebase", "Replay"),
         ("oxplow.vcs.merge", "Merge"),

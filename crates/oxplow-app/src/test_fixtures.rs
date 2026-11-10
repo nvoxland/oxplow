@@ -221,15 +221,20 @@ pub struct ThreadFixture {
     pub session: oxplow_domain::AgentSessionId,
 }
 
-/// [`ThreadFixture`] plus an open effort: for a test about efforts.
+/// [`ThreadFixture`] plus an open effort: for a test about efforts. It
+/// derefs to the thread fixture, so a helper over a `&ThreadFixture` takes
+/// either.
 pub struct EffortFixture {
-    pub svc: Arc<crate::Services>,
-    /// Keep alive: the project directory.
-    pub _dir: tempfile::TempDir,
-    pub thread: ThreadId,
-    /// The thread's agent session (the project's default agent).
-    pub session: oxplow_domain::AgentSessionId,
+    pub base: ThreadFixture,
     pub effort: EffortId,
+}
+
+impl std::ops::Deref for EffortFixture {
+    type Target = ThreadFixture;
+
+    fn deref(&self) -> &ThreadFixture {
+        &self.base
+    }
 }
 
 /// An agent session (a Claude terminal) on `thread`, as setup — written to
@@ -280,13 +285,6 @@ pub async fn services_with_effort() -> EffortFixture {
     let dir = tempfile::tempdir().unwrap();
     init_git_repo(dir.path());
     services_with_effort_in(dir).await
-}
-
-/// [`services_with_effort`] while developing oxplow (see
-/// [`services_developing_oxplow`]).
-pub async fn services_developing_oxplow_with_effort() -> EffortFixture {
-    let (dir, svc) = developing_oxplow().await;
-    with_effort(dir, svc).await
 }
 
 /// A project dir and booted services with oxplow's own extensions running
@@ -367,10 +365,12 @@ async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> Effor
         .and_then(|e| e.parse::<oxplow_domain::EffortId>().ok())
         .expect("effort.open names the effort");
     EffortFixture {
-        svc,
-        _dir,
-        thread,
-        session,
+        base: ThreadFixture {
+            svc,
+            _dir,
+            thread,
+            session,
+        },
         effort,
     }
 }
@@ -455,13 +455,7 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
         .unwrap()
         .id;
     TaskEffortFixture {
-        fx: EffortFixture {
-            svc: fx.svc,
-            _dir: fx._dir,
-            thread: fx.thread,
-            session: fx.session,
-            effort,
-        },
+        fx: EffortFixture { base: fx, effort },
         task,
     }
 }

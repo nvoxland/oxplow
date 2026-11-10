@@ -2037,7 +2037,7 @@ mod tests {
     /// A hunks viz resolves each row's diff from the workspace.
     #[tokio::test]
     async fn hunks_resolve_from_the_workspace() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("h.txt"), "one\n").unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "h");
@@ -2165,7 +2165,7 @@ mod tests {
     /// lines; a diff viz diffs its first row's file.
     #[tokio::test]
     async fn code_and_diff_resolve_from_the_workspace() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("c.txt"), "one\ntwo\nthree\n").unwrap();
         let sha = crate::test_fixtures::commit_all(&root, "c");
@@ -2218,7 +2218,7 @@ mod tests {
     /// it, and says the person's unsaved edits aren't in it.
     #[tokio::test]
     async fn an_editor_reads_the_working_file() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         std::fs::write(root.join("e.txt"), "saved text\n").unwrap();
         let editor = with(
@@ -2269,7 +2269,7 @@ mod tests {
     /// An embed viz reads as a link to its page.
     #[tokio::test]
     async fn an_embed_reads_as_a_link() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         let embed = with(
             run(
@@ -2296,7 +2296,7 @@ mod tests {
     /// viz's `thread` param; with none waiting it says so.
     #[tokio::test(flavor = "multi_thread")]
     async fn approvals_list_the_pending_proposals() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         let approvals = |params: &[(&str, SqlCell)]| {
             let mut r = run(Viz::Approvals, None, &["n"], vec![vec![SqlCell::Int(1)]]);

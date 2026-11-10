@@ -106,7 +106,7 @@ mod tests {
     /// failure; turning the extension off takes its views away.
     #[tokio::test]
     async fn extension_datasets_publish_and_report_their_errors() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         // `late` has a good dataset, `shaky` one that doesn't compile: the
@@ -169,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn a_page_over_an_unpublished_dataset_answers_through_its_overlay() {
         use crate::pages::runner::{PageRunner, RunRequest, RunTarget};
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         // An author's worktree: its extensions aren't the activated
         // project's, so nothing of them is published.
@@ -219,7 +219,7 @@ mod tests {
     /// is published, and an extension's `source()` of a core table.
     #[tokio::test]
     async fn validate_catches_a_breaking_change_and_a_foreign_source() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         let manifest = |cols: &str| {
