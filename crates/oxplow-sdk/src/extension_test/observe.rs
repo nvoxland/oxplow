@@ -1178,8 +1178,10 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         None => None,
     };
     let mut prompt = envelope(HookKind::UserPromptSubmit, json!({}));
-    // A `peer` is another session's message and a `subagent` with no
-    // prompt (`prompt: null`) a subagent's hand-back; else a person's words.
+    // A `peer` is another session's message, a `job` a background job's
+    // report (the id of the call that started it), and a `subagent` with
+    // no prompt (`prompt: null`) a subagent's hand-back; else a person's
+    // words.
     let text = match body.get("prompt") {
         Some(Value::Null) => None,
         Some(p) => Some(p.as_str().unwrap_or_default().to_string()),
@@ -1191,7 +1193,14 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         }
         None => None,
     };
+    let job = body.get("job").and_then(Value::as_str);
     prompt.prompt = match (body.get("peer").and_then(Value::as_str), subagent, text) {
+        (None, _, text) if job.is_some() => {
+            Some(oxplow_domain::agent::observe::Prompt::BackgroundJob {
+                call: job.map(str::to_string),
+                text: text.unwrap_or_default(),
+            })
+        }
         (Some(from), _, text) => Some(oxplow_domain::agent::observe::Prompt::PeerMessage {
             from: from.to_string(),
             socket: None,

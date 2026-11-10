@@ -1974,11 +1974,12 @@ mod tests {
         );
     }
 
-    /// Another session's message is no person's prompt: it opens a turn
-    /// with none, is logged with its sender, and ends with the Stop like
-    /// any turn. One arriving in an open turn opens none.
+    /// Another session's message is no person's prompt: it opens a turn of
+    /// its own (source `peer`, the message its text), is logged with its
+    /// sender, and ends with the Stop like any turn. One arriving in an
+    /// open turn opens none.
     #[tokio::test]
-    async fn a_peers_message_opens_a_turn_with_no_prompt() {
+    async fn a_peers_message_opens_a_turn_of_its_own_with_its_text() {
         let (svc, tid) = fixture().await;
         let peer = |from: &str| HookEnvelope {
             prompt: Some(Prompt::PeerMessage {
