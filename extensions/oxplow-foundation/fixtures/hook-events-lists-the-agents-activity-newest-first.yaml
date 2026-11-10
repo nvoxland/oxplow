@@ -1,8 +1,8 @@
 # The agent's activity on the stream, newest first, each event with what it
 # says: a tool, its target and its outcome.
 given:
-  - observe: { event: { type: agent.tool.requested, v: 3, payload: { tool: Edit, kind: edit, paths: [src/a.rs], decision: allowed }, anchors: { stream_id: str1 } } }
-  - observe: { event: { type: agent.tool.finished, v: 3, payload: { tool: Edit, kind: edit, paths: [src/a.rs], ok: false }, anchors: { stream_id: str1 } } }
+  - observe: { event: { type: agent.tool.requested, v: 4, payload: { tool: Edit, kind: edit, paths: [src/a.rs], decision: allowed }, anchors: { stream_id: str1 } } }
+  - observe: { event: { type: agent.tool.finished, v: 4, payload: { tool: Edit, kind: edit, paths: [src/a.rs], ok: false }, anchors: { stream_id: str1 } } }
 when: { page: oxplow/hook-events, params: { stream_id: 1 } }
 expect:
   loaders:

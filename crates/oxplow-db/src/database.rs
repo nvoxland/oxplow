@@ -1896,6 +1896,61 @@ mod tests {
         assert!(events.iter().all(|(v, _)| *v == 4));
     }
 
+    /// V6 gives each recorded call (a finished one) its request — its finish
+    /// event's cause — the time it was requested and how long it ran, and
+    /// moves the tool events to @4.
+    #[test]
+    fn v6_gives_recorded_calls_their_request_and_duration() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(5))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO event_log (id, type, v, at, source, subject, payload)
+               VALUES ('req', 'agent.tool.requested', 3, '2026-01-01T00:00:00.000Z', 's', '[]', '{}');
+             INSERT INTO event_log (id, type, v, at, source, subject, payload, cause)
+               VALUES ('fin', 'agent.tool.finished', 3, '2026-01-01T00:00:02.500Z', 's', '[]', '{}', 'req');
+             INSERT INTO agent_tool_call (thread_id, tool, at, event_id, kind)
+               VALUES (1, 'Bash', '2026-01-01T00:00:02.500Z', 'fin', 'shell');
+             INSERT INTO agent_tool_call (thread_id, tool, at, kind)
+               VALUES (1, 'Read', '2026-01-01T00:00:03Z', 'read');",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        type Row = (String, Option<String>, Option<String>, Option<i64>);
+        let rows: Vec<Row> = conn
+            .prepare(
+                "SELECT state, request_event_id, started_at, duration_ms FROM agent_tool_call ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "finished".into(),
+                    Some("req".into()),
+                    Some("2026-01-01T00:00:00.000Z".into()),
+                    Some(2500)
+                ),
+                ("finished".into(), None, None, None),
+            ]
+        );
+        let versions: Vec<i64> = conn
+            .prepare("SELECT v FROM event_log ORDER BY seq")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(versions, vec![4, 4]);
+    }
+
     /// A database restored from the migrated template is exactly what
     /// migrating from scratch makes: same tables, views, indexes and
     /// triggers, same migration history.

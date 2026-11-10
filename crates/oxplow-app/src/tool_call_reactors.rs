@@ -4,8 +4,11 @@
 //! instead of the best-effort writes the hook route used to make inline.
 //!
 //! - `tool_call.project` (sync) — the `agent_tool_call` row, a projection
-//!   of the event (`v_tool_call`, `v_context_read`); one row
-//!   per event however often it is delivered.
+//!   of a call's events (`v_tool_call`, `v_context_read`): it opens at the
+//!   `agent.tool.requested` (running, or denied), closes at the
+//!   `agent.tool.finished` its request caused, and is abandoned when the
+//!   turn's `agent.turn.ended` comes with it still running. One row per
+//!   call however often an event is delivered.
 //! - `effort.claim` (async) — an edit (`kind: edit`, whatever its harness
 //!   calls it) claims every file it names for the effort that was open
 //!   when it happened (the event's effort anchor), falling back to target
@@ -19,7 +22,9 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use oxplow_db::Database;
-use oxplow_domain::events::schema::{AgentToolFinished, EventType};
+use oxplow_domain::events::schema::{
+    AgentToolFinished, AgentToolRequested, AgentTurnEnded, EventType,
+};
 use oxplow_domain::{DomainError, StoredEvent, ThreadId};
 
 use crate::effort_service::EffortService;
@@ -40,7 +45,7 @@ fn paths(event: &StoredEvent) -> Vec<&str> {
         .unwrap_or_default()
 }
 
-/// Projects each `agent.tool.finished` into `agent_tool_call`.
+/// Projects a call's events into its `agent_tool_call` row.
 pub struct ToolCallProjection;
 
 impl EventConsumer for ToolCallProjection {
@@ -49,14 +54,27 @@ impl EventConsumer for ToolCallProjection {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == AgentToolFinished::TYPE
+        [
+            AgentToolRequested::TYPE,
+            AgentToolFinished::TYPE,
+            AgentTurnEnded::TYPE,
+        ]
+        .contains(&event_type)
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
         let env = &event.envelope;
+        if env.event_type == AgentTurnEnded::TYPE {
+            // What its turn left running when it ended is abandoned.
+            if let Some(turn) = env.anchors.turn_id {
+                oxplow_db::tool_call_store::abandon_running_tx(conn, turn, env.at)?;
+            }
+            return Ok(());
+        }
         let Some(thread) = env.anchors.thread_id else {
             return Ok(()); // no thread, no row (the table requires one)
         };
+        let finished = env.event_type == AgentToolFinished::TYPE;
         let call = oxplow_db::NewToolCall {
             thread_id: thread.value(),
             effort_id: env.anchors.effort_id.map(|e| e.value()),
@@ -67,14 +85,27 @@ impl EventConsumer for ToolCallProjection {
             path: paths(event).first().map(|p| p.to_string()),
             detail: str_field(event, "detail").map(str::to_string),
             ok: env.payload.get("ok").and_then(|v| v.as_bool()),
-            event_id: Some(env.id.as_str().to_string()),
+            event_id: finished.then(|| env.id.as_str().to_string()),
             at: Some(env.at),
             agent_session_id: env.anchors.agent_session_id.map(|s| s.value()),
             // Absent before the harness reports a subagent, so optional.
             subagent_id: env.payload["subagent"]["id"].as_str().map(str::to_string),
             subagent_kind: env.payload["subagent"]["kind"].as_str().map(str::to_string),
+            call_id: str_field(event, "call").map(str::to_string),
+            duration_ms: env.payload.get("duration_ms").and_then(|v| v.as_u64()),
         };
-        oxplow_db::tool_call_store::record_tx(conn, &call).map(|_| ())
+        if finished {
+            // Its request is its cause, when one was logged.
+            oxplow_db::tool_call_store::record_finish_tx(
+                conn,
+                &call,
+                env.cause.as_ref().map(|c| c.as_str()),
+            )
+        } else {
+            let denied = str_field(event, "decision") == Some("denied");
+            oxplow_db::tool_call_store::record_request_tx(conn, &call, env.id.as_str(), denied)
+        }
+        .map(|_| ())
     }
 }
 
@@ -341,6 +372,88 @@ mod tests {
         assert_eq!(
             files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
             vec!["src/b.rs"]
+        );
+    }
+
+    /// A call's row opens at its request and closes at its finish, with the
+    /// harness's timing; a denied call has a row that never ran; a call its
+    /// turn ended with is abandoned; a finish with no request still records.
+    #[tokio::test]
+    async fn a_tool_calls_row_follows_it_from_request_to_finish() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let svc = &f.svc;
+        let ingest = |h: HookEnvelope| svc.hook_ingest.ingest(h);
+        let call = |id: &str, cmd: &str| json!({"tool_name": "Bash", "tool_input": {"command": cmd}, "tool_use_id": id});
+        ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        ingest(hook(
+            f.thread,
+            HookKind::PreToolUse,
+            call("t1", "cargo build"),
+        ))
+        .await
+        .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT call_id, state, started_at IS NOT NULL, ended_at FROM v_tool_call"
+            )
+            .await,
+            json!([["t1", "running", 1, null]])
+        );
+        let mut done = call("t1", "cargo build");
+        done["duration_ms"] = json!(4200);
+        ingest(hook(f.thread, HookKind::PostToolUse, done))
+            .await
+            .unwrap();
+        let mut denied = hook(f.thread, HookKind::PreToolUse, call("t2", "rm -rf /"));
+        denied.decision = Some(ToolDecision {
+            allowed: false,
+            reason: Some("no".into()),
+        });
+        ingest(denied).await.unwrap();
+        ingest(hook(f.thread, HookKind::PostToolUse, call("t3", "ls")))
+            .await
+            .unwrap();
+        ingest(hook(f.thread, HookKind::PreToolUse, call("t4", "sleep 60")))
+            .await
+            .unwrap();
+        ingest(hook(
+            f.thread,
+            HookKind::Stop,
+            json!({"last_assistant_message": "ok"}),
+        ))
+        .await
+        .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            rows(
+                svc,
+                // An abandoned call ran until its turn ended: some time.
+                "SELECT call_id, state, started_at IS NOT NULL, ended_at IS NOT NULL,
+                        CASE state WHEN 'abandoned' THEN duration_ms >= 0 ELSE duration_ms END,
+                        event_id IS NOT NULL
+                   FROM v_tool_call ORDER BY id"
+            )
+            .await,
+            json!([
+                ["t1", "finished", 1, 1, 4200, 1],
+                ["t2", "denied", 1, 1, null, 0],
+                ["t3", "finished", 0, 1, null, 1],
+                ["t4", "abandoned", 1, 1, 1, 0],
+            ])
+        );
+        // A redelivery changes nothing.
+        svc.event_log_store
+            .set_checkpoint(TOOL_CALL_PROJECTION.into(), 0)
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_tool_call").await,
+            json!([[4]])
         );
     }
 }

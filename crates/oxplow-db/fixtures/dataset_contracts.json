@@ -13503,6 +13503,106 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Row id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread."
+        },
+        {
+          "name": "effort_id",
+          "type": "INTEGER",
+          "doc": "Effort open at the time, if any."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "Turn it happened in (v_agent_turn.id), when known."
+        },
+        {
+          "name": "tool",
+          "type": "TEXT",
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, …)."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "What it does, the same for every harness: `read`, `edit`, `shell`, `subagent`, `ask`, `plan`, `search`, `fetch`, `mcp` or `other`."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "File it touched, repo-relative when inside the project."
+        },
+        {
+          "name": "detail",
+          "type": "TEXT",
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
+        },
+        {
+          "name": "ok",
+          "type": "INTEGER",
+          "doc": "1 succeeded, 0 failed, NULL unknown (a shell call often reports no exit code)."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp: when it finished; while running or when denied, when it was requested. (v5)"
+        },
+        {
+          "name": "event_id",
+          "type": "TEXT",
+          "doc": "The `agent.tool.finished` event (v_event.id) this row records; NULL while it runs, when denied or abandoned, and for rows written before the event log carried tool calls."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session that made it (v_agent_session.id); NULL when not recorded. (v4)"
+        },
+        {
+          "name": "subagent_id",
+          "type": "TEXT",
+          "doc": "The subagent it ran inside, when the harness or the Task call bracketing it says so; NULL for the session's own. (v4)"
+        },
+        {
+          "name": "subagent_kind",
+          "type": "TEXT",
+          "doc": "That subagent's kind (`Explore`, `task`, …). (v4)"
+        },
+        {
+          "name": "call_id",
+          "type": "TEXT",
+          "doc": "The harness's id for the call (Claude Code's `tool_use_id`); NULL when it gave none or for a call recorded before. (v5)"
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`running` (requested, not finished), `finished`, `denied` (the policy refused it; it never ran) or `abandoned` (its turn ended with it running). (v5)"
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "When it was requested (RFC 3339); NULL when no request was seen (a harness that reports only the finish). (v5)"
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "When it finished, was denied, or was abandoned; NULL while running. (v5)"
+        },
+        {
+          "name": "duration_ms",
+          "type": "INTEGER",
+          "doc": "How long it ran, in milliseconds: the harness's own timing when it gave one (Claude Code's `duration_ms`), else `ended_at - started_at`; NULL while running or with no start. (v5)"
+        }
+      ],
+      "key": []
     }
   },
   "wiki_page": {

@@ -1,7 +1,11 @@
 {
   "tool": "Bash",
   "kind": "shell",
-  "paths": ["crates/oxplow-app"],
+  "call": "toolu_01EA76RimoAHRFLCmZo5qyX1",
+  "duration_ms": 569,
+  "paths": [
+    "crates/oxplow-app"
+  ],
   "detail": "wc -l src/lib.rs",
   "command": "wc -l src/lib.rs",
   "ok": true,

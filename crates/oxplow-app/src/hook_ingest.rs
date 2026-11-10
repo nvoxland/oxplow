@@ -58,8 +58,8 @@ use oxplow_domain::events::schema::{
     AgentPeerMessageReceivedV2, AgentPlanProposed, AgentPlanProposedV2, AgentPromptSubmitted,
     AgentPromptSubmittedV2, AgentSessionEnded, AgentSessionEndedV2, AgentSessionStarted,
     AgentSessionStartedV3, AgentSubagentFinished, AgentSubagentFinishedV2, AgentSubagentStarted,
-    AgentSubagentStartedV2, AgentToolFinished, AgentToolFinishedV3, AgentToolRequested,
-    AgentToolRequestedV3, ContentRef, SubagentRef, ToolDecision as Decision,
+    AgentSubagentStartedV2, AgentToolFinished, AgentToolFinishedV4, AgentToolRequested,
+    AgentToolRequestedV4, ContentRef, SubagentRef, ToolDecision as Decision,
 };
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::{
@@ -1315,9 +1315,10 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
-        ev.typed::<AgentToolRequested>(&AgentToolRequestedV3 {
+        ev.typed::<AgentToolRequested>(&AgentToolRequestedV4 {
             tool: tool.name.clone(),
             kind: tool.kind,
+            call: tool.call_id.clone(),
             paths: recorded.paths,
             detail: recorded.detail,
             input: content("tool_input")?,
@@ -1332,9 +1333,11 @@ fn log_tool_tx(
         .with_dedupe_key_opt(dedupe("requested"))
     } else {
         let finished = ev
-            .typed::<AgentToolFinished>(&AgentToolFinishedV3 {
+            .typed::<AgentToolFinished>(&AgentToolFinishedV4 {
                 tool: tool.name.clone(),
                 kind: tool.kind,
+                call: tool.call_id.clone(),
+                duration_ms: tool.duration_ms,
                 paths: recorded.paths,
                 detail: recorded.detail,
                 command: tool.command.clone(),

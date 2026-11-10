@@ -75,7 +75,8 @@ impl ThreadCheckpointConsumer {
         let rows = self
             .sql
             .query_sql(
-                "SELECT kind, tool FROM v_tool_call WHERE turn_id = ?1",
+                // A denied call never ran.
+                "SELECT kind, tool FROM v_tool_call WHERE turn_id = ?1 AND state <> 'denied'",
                 vec![SqlCell::Int(turn.value())],
                 None,
             )
