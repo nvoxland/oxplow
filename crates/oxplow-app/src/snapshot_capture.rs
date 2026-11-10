@@ -213,6 +213,14 @@ struct DirtyEntry {
     changed: Option<(Timestamp, Timestamp)>,
 }
 
+/// What a `git_refs` take left the worktree at.
+struct GitRefsTake {
+    /// The snapshot the worktree is at.
+    snapshot: i64,
+    /// Whether it was re-stamped with the new HEAD (the tree was clean).
+    restamped: bool,
+}
+
 #[derive(Clone)]
 pub struct SnapshotCaptureService {
     inner: Arc<Inner>,
@@ -330,6 +338,9 @@ struct Inner {
     /// an effort's baseline reflects the whole pre-edit tree, not a
     /// half-swept one.
     initial_ready: tokio::sync::watch::Sender<bool>,
+    /// `true` once the git-refs listener has read the HEAD it counts moves
+    /// from.
+    head_seeded: tokio::sync::watch::Sender<bool>,
 }
 
 impl SnapshotCaptureService {
@@ -372,6 +383,7 @@ impl SnapshotCaptureService {
                 shutdown: tokio::sync::Notify::new(),
                 refilter: tokio::sync::Notify::new(),
                 initial_ready: tokio::sync::watch::channel(true).0,
+                head_seeded: tokio::sync::watch::channel(false).0,
             }),
         }
     }
@@ -715,16 +727,19 @@ impl SnapshotCaptureService {
     }
 
     /// Spawn a listener that turns a move of this stream's HEAD into a
-    /// snapshot request. `moves` is the VCS watcher's channel, which fires
-    /// for any change under the repository's `refs/` (a commit in another
-    /// worktree, a fetch, a `packed-refs` rewrite, a lock file): the listener
-    /// reads this worktree's own HEAD (branch and commit) and takes only when
-    /// it differs from the one it last saw. The first ref change after the
-    /// listener starts counts as a move, since the HEAD at start is not known
-    /// to have been recorded. A fresh commit therefore shows up in Local
-    /// History as a snapshot tagged with the new HEAD even when the worktree
-    /// itself didn't change between snapshots, and however many file or ref
-    /// events the commit made, it is one take.
+    /// snapshot request and a `vcs.head.moved` event. `moves` is the VCS
+    /// watcher's channel, which fires for any change under the repository's
+    /// `refs/` (a commit in another worktree, a fetch, a `packed-refs`
+    /// rewrite, a lock file): the listener reads this worktree's own HEAD
+    /// (branch and commit) and acts only when it differs from the one it
+    /// last saw. The HEAD at start is the first one seen, so starting is
+    /// not a move. A move is spent only once its take returned a snapshot
+    /// and the event is logged: a take that fails, or finds the stream with
+    /// no snapshot yet, leaves it to the next ref event. A fresh commit
+    /// therefore shows up in Local History as a snapshot tagged with the new
+    /// HEAD even when the worktree itself didn't change between snapshots,
+    /// and however many file or ref events the commit made, it is one take
+    /// and one event.
     pub fn spawn_git_refs_listener(
         &self,
         moves: &crate::ref_moves::RefMoves,
@@ -732,38 +747,83 @@ impl SnapshotCaptureService {
         let mut rx = moves.subscribe();
         let this = self.clone();
         tokio::spawn(async move {
-            let mut seen: Option<(Option<String>, Option<String>)> = None;
+            let mut seen = this.current_head().await;
+            this.inner.head_seeded.send_replace(true);
             // A missed move may have been this stream's: reading HEAD
             // decides, so it is looked at as if it were.
             while let Some(moved) = rx.recv().await {
                 if !moved.may_concern(this.inner.stream_id) {
                     continue;
                 }
-                let Ok(head) = this.inner.vcs.head(&this.inner.project_dir).await else {
+                let Some(head) = this.current_head().await else {
                     continue;
                 };
-                let head = (head.branch, head.revision);
                 if seen.as_ref() == Some(&head) {
                     continue; // another worktree's ref, a fetch, a lock file
                 }
-                seen = Some(head);
-                if let Err(e) = this.request_snapshot_for_git_refs().await {
-                    debug!(error = %e, "snapshot: git-refs trigger failed");
+                let take = match this.git_refs_take().await {
+                    Ok(Some(take)) => take,
+                    Ok(None) => {
+                        debug!("snapshot: no snapshot to follow the HEAD move yet; kept");
+                        continue;
+                    }
+                    Err(e) => {
+                        debug!(error = %e, "snapshot: git-refs trigger failed; the move is kept");
+                        continue;
+                    }
+                };
+                let (from, to) = (
+                    seen.as_ref().and_then(|(_, rev)| rev.clone()),
+                    head.1.clone(),
+                );
+                let logged = this
+                    .inner
+                    .store
+                    .log_head_moved(
+                        this.inner.stream_id,
+                        from,
+                        to,
+                        take.restamped.then_some(take.snapshot),
+                        "system:snapshot_capture".into(),
+                    )
+                    .await;
+                match logged {
+                    Ok(()) => seen = Some(head),
+                    Err(e) => warn!(error = %e, "snapshot: logging the HEAD move failed; kept"),
                 }
             }
         })
     }
 
+    /// This worktree's HEAD as the git-refs listener tells moves: its
+    /// branch and its commit. `None` when it can't be read.
+    async fn current_head(&self) -> Option<(Option<String>, Option<String>)> {
+        let head = self.inner.vcs.head(&self.inner.project_dir).await.ok()?;
+        Some((head.branch, head.revision))
+    }
+
+    /// Resolves once the git-refs listener has read the HEAD it counts moves
+    /// from (a test commits only after this).
+    pub async fn git_refs_listener_ready(&self) {
+        let mut ready = self.inner.head_seeded.subscribe();
+        let _ = ready.wait_for(|up| *up).await;
+    }
+
     /// Drain any pending dirty files (a `git_refs` take), then — if the
     /// worktree is clean and HEAD moved past what the current snapshot
     /// records — re-stamp it with the new HEAD
-    /// (`SqliteSnapshotStore::record_head_moved`: a `head_moved` op and
-    /// `vcs.head.moved`, in one transaction). No new snapshot: the tree
-    /// didn't change, the existing snapshot just now also is a new
-    /// commit. Called from `spawn_git_refs_listener`.
+    /// (`SqliteSnapshotStore::record_head_moved`: a `head_moved` op). No new
+    /// snapshot: the tree didn't change, the existing snapshot just now also
+    /// is a new commit. The snapshot the worktree is at after it.
     pub async fn request_snapshot_for_git_refs(
         &self,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.git_refs_take().await?.map(|take| take.snapshot))
+    }
+
+    async fn git_refs_take(
+        &self,
+    ) -> Result<Option<GitRefsTake>, Box<dyn std::error::Error + Send + Sync>> {
         if self.is_idle() {
             return Ok(None);
         }
@@ -779,29 +839,31 @@ impl SnapshotCaptureService {
         let Some(current) = after_drain else {
             return Ok(None);
         };
+        let unstamped = GitRefsTake {
+            snapshot: current,
+            restamped: false,
+        };
         let head = self.clean_head().await.1;
         let Some(head) = head else {
             // Dirty (the next take records the commit) or not a repo.
-            return Ok(after_drain);
+            return Ok(Some(unstamped));
         };
         let Some(moved) = self
             .inner
             .store
-            .record_head_moved(
-                self.inner.stream_id,
-                current,
-                head,
-                "system:snapshot_capture".into(),
-            )
+            .record_head_moved(self.inner.stream_id, current, head)
             .await?
         else {
-            return Ok(after_drain);
+            return Ok(Some(unstamped));
         };
         info!(
             snapshot_id = moved.snapshot_id,
             "snapshot: re-stamped the current snapshot with the new HEAD",
         );
-        Ok(Some(moved.snapshot_id))
+        Ok(Some(GitRefsTake {
+            snapshot: moved.snapshot_id,
+            restamped: true,
+        }))
     }
 
     /// `watcher` is this stream's watch, which judges by this stream's filter.
@@ -2965,13 +3027,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        svc.git_refs_listener_ready().await;
         let parent = repo.find_commit(head1).unwrap();
         let head2 = repo
             .commit(Some("HEAD"), &sig, &sig, "2", &tree, &[&parent])
             .unwrap();
-
-        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
-        let _listener = svc.spawn_git_refs_listener(&moves);
         // Its move, then more than the channel holds of another stream's,
         // before the listener runs: its own is dropped.
         moves.moved(TEST_STREAM);
@@ -3012,42 +3074,53 @@ mod tests {
         (repo, head, tracked)
     }
 
+    /// The `vcs.head.moved` events logged for the stream, in order.
+    async fn head_moves(db: &Database) -> Vec<serde_json::Value> {
+        db.read(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT payload FROM event_log WHERE type = 'vcs.head.moved' ORDER BY seq")
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(rows
+                .map(|r| serde_json::from_str(&r.unwrap()).unwrap())
+                .collect::<Vec<_>>())
+        })
+        .await
+        .unwrap()
+    }
+
     /// A ref that moved somewhere else in the repository (another worktree's
     /// commit, a fetch, a lock file) fires this stream's ref channel too, but
-    /// its own HEAD did not move: it takes nothing.
+    /// its own HEAD did not move: it takes nothing and logs nothing. Nor is
+    /// the app starting a move: the HEAD at start is where moves count from.
     #[tokio::test]
     async fn a_ref_moved_elsewhere_in_the_repository_causes_no_take_on_this_stream() {
         let project = tempdir().unwrap();
         let (_repo, _head, tracked) = repo_with_one_commit(project.path());
-        let (svc, store) = svc_for(project.path()).await;
+        let (svc, store, db) = svc_with_db(project.path()).await;
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
         let _listener = svc.spawn_git_refs_listener(&moves);
-        // The first ref change after the start counts as a move: it takes.
-        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
-        moves.moved(TEST_STREAM);
-        wait_for_ops(&store, Duration::from_secs(5), |ops| !ops.is_empty()).await;
-        let before = store.list_ops(TEST_STREAM, 20).await.unwrap().len();
-        assert_eq!(before, 1);
-        // Edits wait for a take of their own; refs move elsewhere three times.
-        let waiting = project.path().join("waiting.txt");
-        std::fs::write(&waiting, "x").unwrap();
-        svc.mark_dirty(waiting, WatchEventKind::Other);
+        svc.git_refs_listener_ready().await;
+        // An edit waits for a take of its own; refs move elsewhere three times.
         for _ in 0..3 {
             moves.moved(TEST_STREAM);
         }
         tokio::time::sleep(Duration::from_millis(400)).await;
-        let ops = store.list_ops(TEST_STREAM, 20).await.unwrap();
-        assert_eq!(ops.len(), before, "{ops:?}");
-        assert!(store.list_for_path("waiting.txt").await.unwrap().is_empty());
+        assert!(store.list_ops(TEST_STREAM, 20).await.unwrap().is_empty());
+        assert!(store.list_for_path("tracked.txt").await.unwrap().is_empty());
+        assert!(head_moves(&db).await.is_empty());
     }
 
-    /// A commit in this worktree is one take, stamped with the new HEAD,
-    /// however many ref events it made.
+    /// A commit in this worktree is one take, stamped with the new HEAD, and
+    /// one `vcs.head.moved { from, to }`, however many ref events it made.
     #[tokio::test]
-    async fn a_commit_in_this_worktree_gives_one_take_stamped_with_the_new_head() {
+    async fn a_commit_in_this_worktree_gives_one_take_and_one_head_move() {
         let project = tempdir().unwrap();
         let (repo, head1, tracked) = repo_with_one_commit(project.path());
-        let (svc, store) = svc_for(project.path()).await;
+        let (svc, store, db) = svc_with_db(project.path()).await;
         svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
         let first = svc
             .request_snapshot(SnapshotTrigger::Startup)
@@ -3056,11 +3129,7 @@ mod tests {
             .unwrap();
         let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
         let _listener = svc.spawn_git_refs_listener(&moves);
-        // Listening has begun: one unrelated ref event is its first.
-        moves.moved(TEST_STREAM);
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        let quiet_ops = store.list_ops(TEST_STREAM, 20).await.unwrap().len();
-        assert_eq!(quiet_ops, 1, "an unchanged first event logs no op");
+        svc.git_refs_listener_ready().await;
 
         let sig = repo.signature().unwrap();
         let parent = repo.find_commit(head1).unwrap();
@@ -3073,7 +3142,9 @@ mod tests {
         }
         let want = Some(Revision::git(head2.to_string()));
         for _ in 0..100 {
-            if store.get_snapshot_revision(first).await.unwrap() == want {
+            if store.get_snapshot_revision(first).await.unwrap() == want
+                && !head_moves(&db).await.is_empty()
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -3091,6 +3162,56 @@ mod tests {
             triggers,
             vec![SnapshotTrigger::HeadMoved, SnapshotTrigger::Startup]
         );
+        let moved = head_moves(&db).await;
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert_eq!(moved[0]["from"], head1.to_string());
+        assert_eq!(moved[0]["to"], head2.to_string());
+        assert_eq!(moved[0]["snapshot"], first);
+    }
+
+    /// A move is spent only once its take has landed: a take that fails
+    /// leaves it for the next ref event.
+    #[tokio::test]
+    async fn a_failed_take_leaves_the_head_move_for_the_next_event() {
+        let project = tempdir().unwrap();
+        let (repo, head1, tracked) = repo_with_one_commit(project.path());
+        // A stream with no row: the take's snapshot insert fails its FK.
+        let db = Database::in_memory();
+        let store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        let svc = SnapshotCaptureService::new(
+            store.clone(),
+            BlobStore::new(project.path().join(".oxplow/snapshots")),
+            project.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            TEST_STREAM,
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(Duration::ZERO)
+        .with_predrain_delay(Duration::ZERO);
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        svc.git_refs_listener_ready().await;
+        let sig = repo.signature().unwrap();
+        let parent = repo.find_commit(head1).unwrap();
+        let tree = parent.tree().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+            .unwrap();
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        moves.moved(TEST_STREAM);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(head_moves(&db).await.is_empty(), "the take failed");
+
+        // The store is whole again: the next ref event takes the move.
+        seed_stream(&db).await;
+        moves.moved(TEST_STREAM);
+        for _ in 0..100 {
+            if !head_moves(&db).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(head_moves(&db).await.len(), 1);
     }
 
     #[tokio::test]

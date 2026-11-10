@@ -92,6 +92,27 @@ async fn run_fact_collectors(
                     .await;
             }
         }
+        // A stream's HEAD moved: its whole-tree collectors restate the tree.
+        "vcs.head.moved" => {
+            if let Some(stream) = anchors.stream_id {
+                if let Ok(Some(latest)) = svc
+                    .snapshot_store
+                    .latest_snapshot_id_for_stream(stream)
+                    .await
+                {
+                    svc.metrics
+                        .run_snapshot_collectors(
+                            stream,
+                            latest,
+                            false,
+                            Some(event.clone()),
+                            &now,
+                            None,
+                        )
+                        .await;
+                }
+            }
+        }
         "effort.finished" => {
             let effort = crate::effort_lifecycle::effort_of(&event)?;
             if let Some(thread) = anchors.thread_id {

@@ -403,7 +403,7 @@ async fn deep_now(svc: &Services, target: ChangeTarget, seq: i64) -> Result<(), 
 mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
-        SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV2,
+        SnapshotTaken, SnapshotTakenV3, VcsHeadMoved, VcsHeadMovedV3,
     };
     use oxplow_domain::events::Anchors;
     use oxplow_domain::{Envelope, StreamId};
@@ -452,11 +452,11 @@ mod tests {
     fn head_moved() -> Envelope {
         Envelope::typed::<VcsHeadMoved>(
             "system",
-            &VcsHeadMovedV2 {
+            &VcsHeadMovedV3 {
                 stream: "str1".into(),
-                snapshot: 1,
+                snapshot: Some(1),
                 from: None,
-                to: "abc".into(),
+                to: Some("abc".into()),
             },
         )
     }

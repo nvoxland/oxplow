@@ -478,7 +478,7 @@ agent turns through `agent_turn.start_snapshot_id` / `snapshot_id`.
 Unlike other stores it doesn't expose a `subscribe()`; the renderer
 hears a take that recorded something as `SnapshotTaken`, which the
 `ui.push` consumer derives from the logged `snapshot.taken@3` (and a
-re-stamp from `vcs.head.moved@2`).
+re-stamp from `vcs.head.moved@3`).
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 `preload.ts` → `apps/desktop/src/api.ts`):
