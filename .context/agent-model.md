@@ -1394,6 +1394,27 @@ answers both as its `prompt` and `subagent` verbs (feature `subagents`).
 Recorded in `fixtures/claude/subagent.jsonl` and replayed
 (`a_recorded_claude_code_subagent_is_attributed`).
 
+
+**What Codex reports and what oxplow reads** (the chat host,
+`chat/codex.rs`; `CODEX_FACTS` there is this table and a test keeps the
+two equal; written from the app-server protocol and the recordings in
+`tests/fixtures/codex/`; an approval, an interrupted turn, a failed turn
+and a background terminal have not been recorded yet, so those rows are
+pinned by synthetic notifications, not recordings):
+
+| Fact | Codex reports | oxplow reads |
+|---|---|---|
+| How a turn ended | `turn/completed` `turn.status`: `completed`, `interrupted`, `failed` with `error.message` and `codexErrorInfo` | `completed` is a Stop; `interrupted` is `TurnOutcome::Interrupted`; `failed` is `Errored`, `error` `codexErrorInfo: message` |
+| The turn's id | `turn.id` on `turn/started` (and `rootTurnId`) | `agent_turn.harness_turn_id` for a turn that starts after `turn/started` is seen (a prompt oxplow itself sends has none yet) |
+| A tool call's life | `item/started`, `item/completed` with the item `id`, `exitCode`, `durationMs` | `agent.tool.requested` at `item/started`, the finish with the same call id, `exit_code` and `duration_ms` |
+| A child agent starts and ends | `collabAgentToolCall` `agentsStates`, `subAgentActivity`, `thread/started` `thread_spawn` | `SubagentStart` / `SubagentStop`, an `agent_job` row |
+| The turn that spawned a child | the parent's `turn.id` (the child's `rootTurnId`) | the job's `started_turn`, basis `reported` |
+| A child's tool calls | `item/completed` on the child's own thread | `ToolUse.subagent` of the child, at the finish |
+| Messages inside an agent tree | `senderThreadId` on a collab item | not read |
+| A background terminal | `processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list` | not read (the call is an ordinary shell call) |
+| Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
+| Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
+
 **`v_subagent`** (`subagent:ses<n>/<id>`, `uri::types::SUBAGENT`; its
 page is its session's tab for now) pairs the two events per `(session,
 subagent id)` and counts `v_tool_call.subagent_id` calls: `state` is

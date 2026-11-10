@@ -48,6 +48,18 @@ pub trait ChatHost: Send + Sync + 'static {
         None
     }
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
+    /// [`Self::turn_started`] for a turn the agent gave its own id.
+    async fn turn_started_as(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        prompt: &str,
+        _harness_turn: Option<&str>,
+    ) {
+        self.turn_started(thread, session_id, prompt).await;
+    }
+    /// A tool call began (its request): recorded open until it finishes.
+    async fn tool_started(&self, _thread: &ThreadId, _session_id: &str, _tool: &ToolUse) {}
     /// A tool call finished: record it. What it leaves for the agent
     /// (nudges) waits in the store for the next prompt's context.
     async fn tool_finished(
@@ -82,6 +94,7 @@ pub trait ChatHost: Send + Sync + 'static {
         change: &super::conn::SubagentChange,
         id: &str,
         kind: Option<&str>,
+        spawned_in: Option<&str>,
     );
     /// The agent put a plan to the person. Recorded; nothing waits on it.
     async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str);
@@ -238,16 +251,42 @@ impl ChatHost for ServicesChatHost {
     }
 
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str) {
+        self.turn_started_as(thread, session_id, prompt, None).await;
+    }
+
+    async fn turn_started_as(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        prompt: &str,
+        harness_turn: Option<&str>,
+    ) {
         let Some(svc) = self.svc.upgrade() else {
             return;
         };
-        let env = self.envelope(
+        let mut env = self.envelope(
             HookKind::UserPromptSubmit,
             thread,
             session_id,
             serde_json::json!({ "prompt": prompt, "session_id": session_id }),
             Some(prompt.to_string()),
         );
+        env.harness_turn = harness_turn.map(str::to_string);
+        self.ingest(&svc, env).await;
+    }
+
+    async fn tool_started(&self, thread: &ThreadId, session_id: &str, tool: &ToolUse) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        let mut env = self.envelope(
+            HookKind::PreToolUse,
+            thread,
+            session_id,
+            serde_json::json!({ "session_id": session_id }),
+            None,
+        );
+        env.tool = Some(tool.clone());
         self.ingest(&svc, env).await;
     }
 
@@ -324,6 +363,7 @@ impl ChatHost for ServicesChatHost {
         change: &super::conn::SubagentChange,
         id: &str,
         kind: Option<&str>,
+        spawned_in: Option<&str>,
     ) {
         use super::conn::SubagentChange;
         let Some(svc) = self.svc.upgrade() else {
@@ -342,6 +382,7 @@ impl ChatHost for ServicesChatHost {
             id: id.to_string(),
             kind: kind.map(str::to_string),
         });
+        env.harness_turn = spawned_in.map(str::to_string);
         self.ingest(&svc, env).await;
     }
 

@@ -48,7 +48,7 @@ use thiserror::Error;
 use oxplow_db::agent_job_store::{self, JobSighting};
 use oxplow_db::agent_stores::{
     activity_anchors_tx, close_turn_tx, last_status_tx, log_status_tx, open_harness_turn_ids_tx,
-    open_turn_ids_in_tx, open_turn_tx, TurnEnd, TurnOpening,
+    open_turn_ids_in_tx, open_turn_tx, turn_by_harness_id_tx, TurnEnd, TurnOpening,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
@@ -734,6 +734,12 @@ fn record_tx(
                 let started = matches!(phase, SubagentPhase::Started);
                 log_subagent_tx(conn, ev, thread, slot, session, subagent, Some(phase))?;
                 if started {
+                    // A harness that names the turn that spawned it (Codex's
+                    // `rootTurnId`) is believed over the turn open now.
+                    let spawning = match env.harness_turn.as_deref() {
+                        Some(id) => turn_by_harness_id_tx(conn, thread, id)?,
+                        None => None,
+                    };
                     agent_job_store::seen_tx(
                         conn,
                         thread,
@@ -741,7 +747,7 @@ fn record_tx(
                         &JobSighting {
                             id: &subagent.id,
                             kind: Some(SUBAGENT_JOB),
-                            started_turn: applied.turn,
+                            started_turn: spawning.or(applied.turn),
                             basis: Some(CauseBasis::Reported),
                             running: true,
                             ..JobSighting::default()
@@ -4052,5 +4058,46 @@ mod tests {
                 ("afd".into(), trn(5), reported, "lost".into()),
             ]
         );
+    }
+
+    /// A subagent start that names the turn that spawned it (by the
+    /// harness's own id) starts its job in that turn, even when a later one
+    /// is open.
+    #[tokio::test]
+    async fn a_subagent_start_naming_its_spawning_turn_starts_there() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str, turn: &str| HookEnvelope {
+            harness_turn: Some(turn.into()),
+            ..hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        svc.ingest(prompt("one", "cx1")).await.unwrap();
+        svc.ingest(hook(HookKind::Stop, tid, Some("h1"), json!({})))
+            .await
+            .unwrap();
+        svc.ingest(prompt("two", "cx2")).await.unwrap();
+        svc.ingest(HookEnvelope {
+            harness_turn: Some("cx1".into()),
+            ..subagent_hook(HookKind::SubagentStart, tid, "h1", "kid")
+        })
+        .await
+        .unwrap();
+        let started: Option<String> = svc
+            .db
+            .read(|c| {
+                c.query_row(
+                    "SELECT started_turn FROM v_agent_job WHERE harness_job_id = 'kid'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(started.as_deref(), Some("oxplow:oxplow/turn?id=trn1"));
     }
 }

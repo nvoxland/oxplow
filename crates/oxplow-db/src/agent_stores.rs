@@ -256,6 +256,25 @@ pub fn open_harness_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
+/// The thread's turn the harness itself called `harness_turn` (its own id
+/// for the turn), newest first when several share it.
+pub fn turn_by_harness_id_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    harness_turn: &str,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    conn.query_row(
+        "SELECT id FROM agent_turn
+          WHERE thread_id = ?1 AND harness_turn_id = ?2
+          ORDER BY id DESC LIMIT 1",
+        rusqlite::params![thread.value(), harness_turn],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|id| id.map(AgentTurnId::new))
+    .map_err(map_sql_err)
+}
+
 /// The agent sessions with a turn on `thread` running at any point of the
 /// window `from`..=`to` (a turn overlaps it when it began by `to` and
 /// hadn't ended before `from`): the sessions whose work a change seen over

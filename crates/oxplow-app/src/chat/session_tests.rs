@@ -98,14 +98,17 @@ impl ChatHost for Host {
         _s: &str,
         answer: Option<&str>,
         tokens: Option<&TurnTokens>,
-        _run: Option<&oxplow_domain::hook::TurnRun>,
+        run: Option<&oxplow_domain::hook::TurnRun>,
     ) {
         self.log.lock().push(format!(
-            "turn_ended {}{}",
+            "turn_ended {}{}{}",
             tokens
                 .map(|t| format!("{}/{}", t.input, t.output))
                 .unwrap_or_default(),
-            answer.map(|a| format!(" answer={a}")).unwrap_or_default()
+            answer.map(|a| format!(" answer={a}")).unwrap_or_default(),
+            run.and_then(|r| r.outcome)
+                .map(|o| format!(" outcome={}", o.as_str()))
+                .unwrap_or_default()
         ));
     }
     async fn named(&self, _t: &ThreadId, _s: &str, title: &str) {
@@ -118,6 +121,7 @@ impl ChatHost for Host {
         change: &crate::chat::conn::SubagentChange,
         id: &str,
         _kind: Option<&str>,
+        _spawned_in: Option<&str>,
     ) {
         let what = match change {
             crate::chat::conn::SubagentChange::Started => "started",
@@ -798,6 +802,22 @@ async fn cancel_answers_open_cards() {
         }
     )));
     assert_eq!(rig.agent_text(), vec!["permission: cancelled".to_string()]);
+}
+
+/// A turn the agent cancelled ends `interrupted`, not `completed`.
+#[tokio::test]
+async fn a_cancelled_turn_is_recorded_interrupted() {
+    let mut rig = open(Host::default()).await;
+    rig.prompt("fake:wait").await;
+    rig.wait_status(ChatStatus::Running).await;
+    rig.mgr.cancel(&session()).unwrap();
+    rig.wait_status(ChatStatus::Idle).await;
+    let log = rig.host.log.lock().clone();
+    assert!(
+        log.iter()
+            .any(|l| l.starts_with("turn_ended") && l.ends_with(" outcome=interrupted")),
+        "{log:?}"
+    );
 }
 
 #[tokio::test]

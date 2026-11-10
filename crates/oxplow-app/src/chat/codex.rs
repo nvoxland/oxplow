@@ -72,6 +72,8 @@ struct State {
     running: bool,
     /// The daemon doesn't know `thread/inject_items`.
     inject_unsupported: bool,
+    /// Codex's id for the turn running now (`turn.id`).
+    turn_id: Option<String>,
 }
 
 /// One child agent, as far as it has been seen.
@@ -410,6 +412,7 @@ fn child_changes(
     status: &str,
     said: Option<String>,
 ) -> Vec<Incoming> {
+    let spawned_in = state.turn_id.clone();
     let child = state.children.entry(id.to_string()).or_default();
     child.kind = child.kind.take().or(kind);
     let mut out = Vec::new();
@@ -423,6 +426,8 @@ fn child_changes(
             change: SubagentChange::Started,
             id: id.to_string(),
             kind: child.kind.clone(),
+            // The turn running when the child showed: its `rootTurnId`.
+            spawned_in: spawned_in.clone(),
         });
     }
     if ended && !child.finished {
@@ -434,6 +439,7 @@ fn child_changes(
             ),
             id: id.to_string(),
             kind: child.kind.clone(),
+            spawned_in: None,
         });
     }
     out
@@ -622,10 +628,20 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
         }
         "turn/started" => {
             state.running = true;
-            Vec::new()
+            state.turn_id = p
+                .pointer("/turn/id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            state
+                .turn_id
+                .clone()
+                .map(Incoming::TurnStarted)
+                .into_iter()
+                .collect()
         }
         "turn/completed" => {
             state.running = false;
+            state.turn_id = None;
             let tokens = match (state.tokens_now, state.tokens_at_turn_start) {
                 (Some(now), Some(start)) => Some(now.since(start).tokens()),
                 _ => None,
@@ -636,11 +652,23 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 .and_then(Value::as_str)
                 .unwrap_or("completed");
             let done = match status {
-                "failed" => Err(p
-                    .pointer("/turn/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("the turn failed")
-                    .to_string()),
+                "failed" => {
+                    let said = p
+                        .pointer("/turn/error/message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("the turn failed");
+                    // Codex's own class for it (`codexErrorInfo`: a string, or
+                    // an object keyed by it), ahead of its message.
+                    let info = p.pointer("/turn/error/codexErrorInfo").and_then(|i| {
+                        i.as_str()
+                            .map(str::to_string)
+                            .or_else(|| i.as_object()?.keys().next().cloned())
+                    });
+                    Err(match info {
+                        Some(info) => format!("{info}: {said}"),
+                        None => said.to_string(),
+                    })
+                }
                 _ => Ok(TurnEnd {
                     stop_reason: status.to_string(),
                     usage: tokens,
@@ -901,6 +929,18 @@ fn tool_call(item: &Value, id: String, done: bool) -> Option<ToolCall> {
             call.raw_input = Some(cap_value(item.clone()));
         }
     }
+    // Codex's own timing of a finished call.
+    if status != ToolStatus::InProgress {
+        if let Some(ms) = item.get("durationMs").and_then(Value::as_u64) {
+            let mut out = match call.raw_output.take() {
+                Some(Value::Object(m)) => m,
+                Some(other) => serde_json::Map::from_iter([("result".to_string(), other)]),
+                None => serde_json::Map::new(),
+            };
+            out.insert("duration_ms".into(), json!(ms));
+            call.raw_output = Some(Value::Object(out));
+        }
+    }
     Some(call)
 }
 
@@ -1016,7 +1056,13 @@ mod tests {
                         change: SubagentChange::Started,
                         id,
                         kind,
+                        spawned_in,
                     } => {
+                        assert_eq!(
+                            spawned_in.as_deref(),
+                            Some("01a1479e-92ac-7fb0-9de0-3fbf7914c12a"),
+                            "the turn that spawned it, as Codex's `rootTurnId` names it"
+                        );
                         format!("started {id} {}", kind.unwrap_or_default())
                     }
                     Incoming::Subagent {
@@ -1391,7 +1437,10 @@ mod tests {
             (shell.kind, shell.status),
             (ToolKind::Execute, ToolStatus::Completed)
         );
-        assert_eq!(shell.raw_output, Some(json!({"exit_code": 0})));
+        assert_eq!(
+            shell.raw_output,
+            Some(json!({"exit_code": 0, "duration_ms": 0}))
+        );
         let read = tools.iter().rfind(|t| t.title == "cat notes.txt").unwrap();
         assert_eq!(read.kind, ToolKind::Read);
         assert_eq!(read.locations, ["/w/notes.txt"]);
@@ -1552,5 +1601,129 @@ mod tests {
         let used = super::super::mapping::tool_use(&call).unwrap();
         assert_eq!(used.kind, oxplow_domain::agent::tool::ToolKind::Mcp);
         assert_eq!(used.name, "mcp__oxplow__oxplow_read");
+    }
+
+    /// The table in `.context/agent-model.md` ("Subagents"), kept equal by
+    /// `the_documented_fact_table_is_the_adapters`.
+    const CODEX_FACTS: &[(&str, &str, &str)] = &[
+        (
+            r#"How a turn ended"#,
+            r#"`turn/completed` `turn.status`: `completed`, `interrupted`, `failed` with `error.message` and `codexErrorInfo`"#,
+            r#"`completed` is a Stop; `interrupted` is `TurnOutcome::Interrupted`; `failed` is `Errored`, `error` `codexErrorInfo: message`"#,
+        ),
+        (
+            r#"The turn's id"#,
+            r#"`turn.id` on `turn/started` (and `rootTurnId`)"#,
+            r#"`agent_turn.harness_turn_id` for a turn that starts after `turn/started` is seen (a prompt oxplow itself sends has none yet)"#,
+        ),
+        (
+            r#"A tool call's life"#,
+            r#"`item/started`, `item/completed` with the item `id`, `exitCode`, `durationMs`"#,
+            r#"`agent.tool.requested` at `item/started`, the finish with the same call id, `exit_code` and `duration_ms`"#,
+        ),
+        (
+            r#"A child agent starts and ends"#,
+            r#"`collabAgentToolCall` `agentsStates`, `subAgentActivity`, `thread/started` `thread_spawn`"#,
+            r#"`SubagentStart` / `SubagentStop`, an `agent_job` row"#,
+        ),
+        (
+            r#"The turn that spawned a child"#,
+            r#"the parent's `turn.id` (the child's `rootTurnId`)"#,
+            r#"the job's `started_turn`, basis `reported`"#,
+        ),
+        (
+            r#"A child's tool calls"#,
+            r#"`item/completed` on the child's own thread"#,
+            r#"`ToolUse.subagent` of the child, at the finish"#,
+        ),
+        (
+            r#"Messages inside an agent tree"#,
+            r#"`senderThreadId` on a collab item"#,
+            r#"not read"#,
+        ),
+        (
+            r#"A background terminal"#,
+            r#"`processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list`"#,
+            r#"not read (the call is an ordinary shell call)"#,
+        ),
+        (
+            r#"Files changed"#,
+            r#"`fileChange` paths and diffs; `turn/diff/updated`"#,
+            r#"`fileChange` paths and diffs; `turn/diff/updated` not read"#,
+        ),
+        (
+            r#"Compaction"#,
+            r#"`contextCompaction` item"#,
+            r#"`PostCompact`, with no summary or trigger"#,
+        ),
+    ];
+
+    #[test]
+    fn the_documented_fact_table_is_the_adapters() {
+        let doc = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.context/agent-model.md"),
+        )
+        .unwrap();
+        for (fact, reports, reads) in CODEX_FACTS {
+            let row = format!("| {fact} | {reports} | {reads} |");
+            assert!(doc.contains(&row), "agent-model.md lacks the row {row}");
+        }
+    }
+
+    /// `turn/started` names Codex's own id for the turn; a failed turn's
+    /// class (`codexErrorInfo`) leads its words; an interrupted one ends
+    /// with the status `interrupted` (the session reads it as such).
+    #[test]
+    fn a_turn_has_codexs_id_and_a_failure_names_its_class() {
+        let mut state = State {
+            thread: Some("t".into()),
+            ..State::default()
+        };
+        let started = on_notification(
+            "turn/started",
+            &json!({"threadId": "t", "turn": {"id": "u1", "rootTurnId": "u1", "status": "inProgress"}}),
+            &mut state,
+        );
+        assert!(matches!(&started[..], [Incoming::TurnStarted(id)] if id == "u1"));
+        let failed = on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"id": "u1", "status": "failed",
+                "error": {"message": "quota", "codexErrorInfo": "usageLimitExceeded"}}}),
+            &mut state,
+        );
+        assert!(
+            matches!(&failed[0], Incoming::PromptDone(Err(e)) if e == "usageLimitExceeded: quota")
+        );
+        let cut = on_notification(
+            "turn/completed",
+            &json!({"threadId": "t", "turn": {"id": "u2", "status": "interrupted"}}),
+            &mut state,
+        );
+        assert!(
+            matches!(&cut[0], Incoming::PromptDone(Ok(end)) if end.stop_reason == "interrupted")
+        );
+    }
+
+    /// A call is open from `item/started` and Codex's `durationMs` rides
+    /// its finish.
+    #[test]
+    fn a_finished_call_carries_codexs_duration() {
+        let item = json!({"type": "commandExecution", "id": "c1", "status": "completed",
+            "command": "ls", "cwd": "/w", "exitCode": 0, "durationMs": 42});
+        let call = tool_call(&item, "c1".into(), true).unwrap();
+        let used = super::super::mapping::tool_use(&call).unwrap();
+        assert_eq!((used.duration_ms, used.exit_code), (Some(42), Some(0)));
+        let running = tool_call(
+            &json!({"type": "commandExecution", "id": "c1", "status": "inProgress", "command": "ls"}),
+            "c1".into(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::mapping::tool_use(&running)
+                .unwrap()
+                .duration_ms,
+            None
+        );
     }
 }
