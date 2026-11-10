@@ -950,6 +950,7 @@ pub(super) async fn take_snapshot(
             provider: None,
             contents: false,
             handle: None,
+            changed_at: Default::default(),
         })
         .await
         .map_err(|e| e.to_string())

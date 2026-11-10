@@ -207,6 +207,10 @@ struct DirtyEntry {
     staging: Option<CaptureStaging>,
     first_seen: Instant,
     last_kind: WatchEventKind,
+    /// When the watcher first and last reported the path changed since the
+    /// previous take. `None` for a path the startup sweep found: no one
+    /// heard it change, so its time lies only between two takes.
+    changed: Option<(Timestamp, Timestamp)>,
 }
 
 #[derive(Clone)]
@@ -913,6 +917,19 @@ impl SnapshotCaptureService {
     /// from real ones. Callers without an event source (tests, manual
     /// triggers) pass `WatchEventKind::Other`.
     pub fn mark_dirty(&self, path: PathBuf, kind: WatchEventKind) {
+        let now = Timestamp::now();
+        self.mark_dirty_changed(path, kind, (now, now));
+    }
+
+    /// [`Self::mark_dirty`] for a path whose change was heard at `changed`
+    /// (first, last): a path put back after a failed take keeps the times
+    /// it was first heard at.
+    fn mark_dirty_changed(
+        &self,
+        path: PathBuf,
+        kind: WatchEventKind,
+        changed: (Timestamp, Timestamp),
+    ) {
         let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         set.entry(path)
@@ -923,11 +940,16 @@ impl SnapshotCaptureService {
                 // downgrade an already-staged entry — keep its
                 // pre-computed metadata so capture stays fast.
                 e.last_kind = kind.clone();
+                e.changed = Some(match e.changed {
+                    Some((first, last)) => (first.min(changed.0), last.max(changed.1)),
+                    None => changed,
+                });
             })
             .or_insert_with(|| DirtyEntry {
                 staging: None,
                 first_seen: now,
                 last_kind: kind,
+                changed: Some(changed),
             });
     }
 
@@ -949,12 +971,16 @@ impl SnapshotCaptureService {
         let bypass = Instant::now()
             .checked_sub(Duration::from_secs(3600))
             .unwrap_or_else(Instant::now);
+        // A change the watcher already heard keeps its times; the sweep
+        // itself heard nothing.
+        let changed = set.get(&path).and_then(|e| e.changed);
         set.insert(
             path,
             DirtyEntry {
                 staging: Some(staging),
                 first_seen: bypass,
                 last_kind: WatchEventKind::Other,
+                changed,
             },
         );
     }
@@ -1534,8 +1560,19 @@ impl SnapshotCaptureService {
             set.drain().collect()
         };
         if drained.is_empty() {
-            return self.record(req, Vec::new(), started, policy).await;
+            return self
+                .record(req, Vec::new(), HashMap::new(), started, policy)
+                .await;
         }
+        // When the watcher heard each path change, kept for the rows.
+        let changed: HashMap<String, (Timestamp, Timestamp)> = drained
+            .iter()
+            .filter_map(|(path, entry)| {
+                entry
+                    .changed
+                    .map(|c| (rel_of(&self.inner.project_dir, path), c))
+            })
+            .collect();
         let capture_started = Instant::now();
         let drained_count = drained.len();
         // Split into:
@@ -1774,7 +1811,9 @@ impl SnapshotCaptureService {
                 trigger = ?req.trigger,
                 "snapshot request: nothing to capture (all deferred or dropped)",
             );
-            return self.record(req, Vec::new(), started, policy).await;
+            return self
+                .record(req, Vec::new(), HashMap::new(), started, policy)
+                .await;
         }
 
         debug!(
@@ -1785,7 +1824,7 @@ impl SnapshotCaptureService {
             capture_ms = capture_started.elapsed().as_millis() as u64,
             "snapshot request: rows assembled",
         );
-        self.record(req, rows, started, policy).await
+        self.record(req, rows, changed, started, policy).await
     }
 
     /// Record a take with `rows` (possibly none): stamp the branch HEAD is
@@ -1800,6 +1839,7 @@ impl SnapshotCaptureService {
         &self,
         req: TakeRequest,
         rows: Vec<FileSnapshot>,
+        changed: HashMap<String, (Timestamp, Timestamp)>,
         started: Instant,
         policy: ContentPolicy,
     ) -> Result<Option<TakeOutcome>, Box<dyn std::error::Error + Send + Sync>> {
@@ -1832,8 +1872,10 @@ impl SnapshotCaptureService {
             }),
             contents: policy.keeps(),
             handle: None,
+            changed_at: changed,
         };
         let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();
+        let heard = take.changed_at.clone();
         let outcome = match self.inner.store.record_take(take).await {
             Ok(Some(outcome)) => outcome,
             Ok(None) => return Ok(None),
@@ -1841,7 +1883,12 @@ impl SnapshotCaptureService {
                 // The drained paths go back in the dirty set, so the next
                 // take records them rather than losing the edits.
                 for path in paths {
-                    self.mark_dirty(self.inner.project_dir.join(path), WatchEventKind::Other);
+                    let times = heard.get(&path).copied();
+                    let full = self.inner.project_dir.join(&path);
+                    match times {
+                        Some(times) => self.mark_dirty_changed(full, WatchEventKind::Other, times),
+                        None => self.mark_dirty(full, WatchEventKind::Other),
+                    }
                 }
                 return Err(e.into());
             }
@@ -1931,9 +1978,16 @@ mod tests {
     async fn svc_for(
         project: &std::path::Path,
     ) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>) {
+        let (svc, store, _db) = svc_with_db(project).await;
+        (svc, store)
+    }
+
+    async fn svc_with_db(
+        project: &std::path::Path,
+    ) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>, Database) {
         let db = Database::in_memory();
         seed_stream(&db).await;
-        let store = Arc::new(SqliteSnapshotStore::new(db));
+        let store = Arc::new(SqliteSnapshotStore::new(db.clone()));
         let blobs = BlobStore::new(project.join(".oxplow/snapshots"));
         // Tests bypass the settle gate so they observe immediate
         // captures; the gate is independently tested elsewhere.
@@ -1948,7 +2002,77 @@ mod tests {
         )
         .with_settle_duration(Duration::ZERO)
         .with_predrain_delay(Duration::ZERO);
-        (svc, store)
+        (svc, store, db)
+    }
+
+    /// `(path, first_changed_at, last_changed_at)` of every captured row.
+    async fn change_times(db: &Database) -> Vec<(String, Option<Timestamp>, Option<Timestamp>)> {
+        db.read(|conn| {
+            let bad = |e: rusqlite::Error| oxplow_domain::DomainError::Invalid(e.to_string());
+            let mut stmt = conn
+                .prepare(
+                    "SELECT path, first_changed_at, last_changed_at FROM file_snapshot ORDER BY path",
+                )
+                .map_err(bad)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    let at = |i: usize| -> rusqlite::Result<Option<Timestamp>> {
+                        Ok(r.get::<_, Option<String>>(i)?
+                            .map(|t: String| Timestamp::parse(&t).unwrap()))
+                    };
+                    Ok((r.get::<_, String>(0)?, at(1)?, at(2)?))
+                })
+                .map_err(bad)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(bad)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Two files the watcher heard changing apart, captured in one take, carry
+    /// their own times (first and last report); the take's own time is no
+    /// stand-in for them.
+    #[tokio::test]
+    async fn two_files_changed_apart_and_taken_together_carry_their_own_times() {
+        let project = tempdir().unwrap();
+        let (svc, _store, db) = svc_with_db(project.path()).await;
+        let a = project.path().join("a.txt");
+        let b = project.path().join("b.txt");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        svc.mark_dirty(b.clone(), WatchEventKind::Other);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        // `a` is heard again after `b`.
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+        let times = change_times(&db).await;
+        let [(pa, a_first, a_last), (pb, b_first, b_last)] = &times[..] else {
+            panic!("{times:?}");
+        };
+        assert_eq!((pa.as_str(), pb.as_str()), ("a.txt", "b.txt"));
+        let ms = |t: &Option<Timestamp>| t.expect("heard by the watcher").unix_ms();
+        assert!(ms(b_first) - ms(a_first) >= 350, "{times:?}");
+        assert_eq!(ms(b_first), ms(b_last), "b was heard once");
+        assert!(ms(a_last) - ms(a_first) >= 750, "{times:?}");
+        assert!(ms(a_last) > ms(b_last), "{times:?}");
+    }
+
+    /// A change no one heard (the startup sweep found it) is known only to
+    /// lie between two takes: no time.
+    #[tokio::test]
+    async fn a_file_the_startup_sweep_found_carries_no_change_time() {
+        let project = tempdir().unwrap();
+        let (svc, _store, db) = svc_with_db(project.path()).await;
+        std::fs::write(project.path().join("swept.txt"), "x").unwrap();
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let times = change_times(&db).await;
+        assert_eq!(times.len(), 1, "{times:?}");
+        assert_eq!((times[0].1, times[0].2), (None, None));
     }
 
     /// Init a git repo at `dir` and commit `files` so they're clean
