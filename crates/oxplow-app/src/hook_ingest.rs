@@ -69,7 +69,7 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
-use oxplow_domain::hook::{TurnOutcome, TurnRun, TurnSource};
+use oxplow_domain::hook::{CauseBasis, TurnOutcome, TurnRun, TurnSource};
 
 /// The Stop-body key a transport puts a turn's own token counts under
 /// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
@@ -560,6 +560,8 @@ fn record_tx(
         if let Some(id) = close_open_turns_tx(conn, ev, thread, slot, &end)? {
             applied.closed_turn = applied.closed_turn.or(Some(id));
         }
+        // The jobs the gone process ran will never report.
+        agent_job_store::lose_unreported_tx(conn, thread, slot, now)?;
         status = Some((AgentStatusState::Idle, None));
     }
     // The harness session a session runs is the one its own prompts and
@@ -604,7 +606,8 @@ fn record_tx(
                 let opening = TurnOpening {
                     harness_turn: env.harness_turn.as_deref(),
                     cause_ref: Some(subagent.id.as_str()),
-                    ..TurnOpening::new(TurnSource::Subagent, text).caused_by(job.started_turn)
+                    ..TurnOpening::new(TurnSource::Subagent, text)
+                        .caused_by(job.started_turn, job.basis.unwrap_or(CauseBasis::Reported))
                 };
                 applied.turn = Some(open_turn_tx(
                     conn, ev, thread, slot, &opening, session, now,
@@ -663,16 +666,12 @@ fn record_tx(
             else {
                 unreachable!("matched above")
             };
-            // The job's record says the turn it was started in; one first
-            // seen now is found by the call that started it.
-            let known = match job {
-                Some(id) => agent_job_store::find_tx(conn, thread, slot, id)?,
+            // The call that started the job names its turn (`reported`);
+            // else the job's record says it (its start, or the guess of the
+            // Stop that listed it running).
+            let by_call = match call {
+                Some(call) => tool_call_turn_tx(conn, session, call)?,
                 None => None,
-            };
-            let started_turn = match (known.as_ref().and_then(|j| j.started_turn), call) {
-                (Some(turn), _) => Some(turn),
-                (None, Some(call)) => tool_call_turn_tx(conn, session, call)?,
-                (None, None) => None,
             };
             let name = job.as_deref().or(call.as_deref());
             let recorded = match name {
@@ -683,18 +682,24 @@ fn record_tx(
                     &JobSighting {
                         id,
                         start_call: call.as_deref(),
-                        started_turn,
+                        started_turn: by_call,
+                        basis: Some(CauseBasis::Reported),
                         ..JobSighting::default()
                     },
                     now,
                 )?),
                 None => None,
             };
+            let (started_turn, basis) = match &recorded {
+                Some(job) => (job.started_turn, job.basis.unwrap_or(CauseBasis::Reported)),
+                None => (by_call, CauseBasis::Reported),
+            };
             if applied.turn.is_none() {
                 let opening = TurnOpening {
                     harness_turn: env.harness_turn.as_deref(),
                     cause_ref: name,
-                    ..TurnOpening::new(TurnSource::BackgroundJob, text).caused_by(started_turn)
+                    ..TurnOpening::new(TurnSource::BackgroundJob, text)
+                        .caused_by(started_turn, basis)
                 };
                 applied.turn = Some(open_turn_tx(
                     conn, ev, thread, slot, &opening, session, now,
@@ -737,6 +742,8 @@ fn record_tx(
                             id: &subagent.id,
                             kind: Some(SUBAGENT_JOB),
                             started_turn: applied.turn,
+                            basis: Some(CauseBasis::Reported),
+                            running: true,
                             ..JobSighting::default()
                         },
                         now,
@@ -877,8 +884,9 @@ fn record_tx(
                     .and_then(|r| r.left_running.as_deref()),
                 ..TurnEnd::new(now, outcome)
             };
-            // What the turn left running are jobs it started, as far as is
-            // known (one already recorded keeps the turn it started in).
+            // What the turn left running are jobs: one no hook showed was
+            // started in this turn, as far as oxplow can tell (`matched`);
+            // one already recorded keeps what it knows.
             if let Some(left) = env.turn_run.as_ref().and_then(|r| r.left_running.as_ref()) {
                 for work in left {
                     agent_job_store::seen_tx(
@@ -890,6 +898,8 @@ fn record_tx(
                             kind: work.kind.as_deref(),
                             description: work.description.as_deref(),
                             started_turn: applied.turn,
+                            basis: Some(CauseBasis::Matched),
+                            running: true,
                             ..JobSighting::default()
                         },
                         now,
@@ -934,6 +944,8 @@ fn record_tx(
                 if applied.closed_turn.is_some() {
                     status = Some((AgentStatusState::Stopped, Some("session ended".into())));
                 }
+                // Its jobs will never report.
+                agent_job_store::lose_unreported_tx(conn, thread, slot, now)?;
                 applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
                 let ended =
                     session.or(Some(row.resume_session_id.as_str()).filter(|s| !s.is_empty()));
@@ -3679,36 +3691,35 @@ mod tests {
         ))
         .await
         .unwrap();
-        type Row = (String, Option<String>, Option<String>, Option<String>);
+        type Row = (String, Option<String>, Option<String>);
         let rows: Vec<Row> = svc
             .db
             .read(|c| {
                 let mut stmt = c
-                    .prepare("SELECT prompt, outcome, answer, left_running FROM v_agent_turn ORDER BY id")
+                    .prepare("SELECT prompt, outcome, answer FROM v_agent_turn ORDER BY id")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = stmt
-                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                     .map_err(oxplow_db::map_sql_err)?;
                 rows.collect::<Result<Vec<_>, _>>()
                     .map_err(oxplow_db::map_sql_err)
             })
             .await
             .unwrap();
-        let left_json = serde_json::to_string(&left).unwrap();
         assert_eq!(
             rows,
             vec![
                 (
                     "one".into(),
                     Some("completed".into()),
-                    Some("started it".into()),
-                    Some(left_json)
+                    Some("started it".into())
                 ),
-                ("two".into(), Some("interrupted".into()), None, None),
-                ("three".into(), Some("session_restarted".into()), None, None),
-                ("four".into(), Some("session_ended".into()), None, None),
+                ("two".into(), Some("interrupted".into()), None),
+                ("three".into(), Some("session_restarted".into()), None),
+                ("four".into(), Some("session_ended".into()), None),
             ]
         );
+        // What it left running is on its event, and is a job.
         let events = logged(&svc).await;
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended[0].envelope.payload["left_running"][0]["id"], "a105c");
@@ -3856,6 +3867,114 @@ mod tests {
                 (trn(1), Some("bsh1".into())),
                 (trn(1), Some("afd".into())),
                 (None, Some("ghost".into())),
+            ]
+        );
+    }
+
+    /// A job's start known from its call replaces the guess of the Stop that
+    /// listed it; a subagent resumed after it reported is a new run; and a
+    /// session that ends leaves its unreported jobs lost, not running.
+    #[tokio::test]
+    async fn a_jobs_start_basis_resumed_runs_and_lost_jobs() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = |left: Vec<&str>| HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(
+                    left.into_iter()
+                        .map(|id| oxplow_domain::hook::RunningWork {
+                            id: id.into(),
+                            kind: None,
+                            description: None,
+                        })
+                        .collect(),
+                ),
+                ..TurnRun::default()
+            }),
+            ..hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let bash = json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9"}, "tool_use_id": "toolu_x"});
+        // Turn 1 starts a shell job; turn 2's Stop is the first to list it.
+        svc.ingest(prompt("one")).await.unwrap();
+        svc.ingest(hook(HookKind::PreToolUse, tid, Some("h1"), bash))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        svc.ingest(prompt("two")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec!["bsh", "afd"])).await.unwrap();
+        // The notice names the call: the job started in turn 1.
+        svc.ingest(HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some("toolu_x".into()),
+                job: Some("bsh".into()),
+                status: Some("completed".into()),
+                summary: None,
+                text: "<task-notification>bsh</task-notification>".into(),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop(vec![])).await.unwrap();
+        // The subagent resumed: a new run, which the session's end loses.
+        svc.ingest(prompt("five")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(hook(
+            HookKind::SessionEnd,
+            tid,
+            Some("h1"),
+            json!({"reason": "prompt_input_exit"}),
+        ))
+        .await
+        .unwrap();
+
+        type Job = (String, Option<String>, Option<String>, String);
+        let jobs: Vec<Job> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT harness_job_id, started_turn, start_basis, state
+                           FROM v_agent_job ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let trn = |n: i64| Some(format!("oxplow:oxplow/turn?id=trn{n}"));
+        let reported = Some("reported".to_string());
+        assert_eq!(
+            jobs,
+            vec![
+                ("afd".into(), trn(2), reported.clone(), "reported".into()),
+                ("bsh".into(), trn(1), reported.clone(), "reported".into()),
+                ("afd".into(), trn(5), reported, "lost".into()),
             ]
         );
     }

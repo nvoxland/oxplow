@@ -1165,7 +1165,7 @@ commands:
     op: open
     example: {"thread": "thr3", "task": "oxplow:oxplow/task?id=tsk42&provider=oxtask"}
   - name: effort.report
-    summary: "Optional: describe the thread's current (else latest) effort. It takes a `summary` of what shipped, any `impacts` beyond the edits (a wiki page, a task, a commit, a finding), and the `claims` you can back (each `{ statement, kind, evidence? }`; they replace the ones an earlier report stated that nobody reviewed). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
+    summary: "Optional: describe the thread's current (else latest) effort. It takes a `summary` of what shipped and any `impacts` beyond the edits (a wiki page, a task, a commit, a finding). Without one, the summary is your last turn's final message; files and test runs are observed. Returns `{ effort, link_warnings }`."
     scope: efforts.write
     op: report
     example: {"summary": "Fixed the login redirect loop: the callback kept the stale `next` parameter.", "impacts": [{"kind": "file", "id": "src/auth.rs", "action": "updated"}, {"kind": "task", "id": "oxplow:oxplow/task?id=tsk42&provider=oxtask", "action": "completed"}]}

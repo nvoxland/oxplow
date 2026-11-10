@@ -1188,7 +1188,8 @@ more than the stream would even when it's sometimes wrong.
   the request, `running` (or `denied`, ended at once: it never ran),
   closes `finished` at the finish its request caused (`duration_ms`: the
   harness's timing, else since the request), and is `abandoned` when its
-  turn's `agent.turn.ended` comes with it still running. A finish with no
+  turn's `agent.turn.ended` (or its session's `agent.session.ended`)
+  comes with it still running, with no duration. A finish with no
   request seen (a harness that reports only the finish) still gets a row,
   with no start. Readers that mean "a tool that ran" leave out `denied`
   (`thread.checkpoint`'s `writing_tools`).
@@ -1200,11 +1201,12 @@ more than the stream would even when it's sometimes wrong.
   with it open), `session_restarted` (a new harness process started with
   it open), `session_closed` (oxplow closed the agent session), `restart`
   (oxplow's recovery). `answer` is only ever the agent's own words: NULL
-  when it said nothing. A Stop also stores **what the turn left running**
-  (`agent_turn.left_running`, `TurnRun.left_running`: Claude Code's Stop
-  `background_tasks`, the running ones, `{ id, kind, description }` with
-  the id its report back names; `[]` for none, NULL when the harness says
-  nothing). A Stop also sets the turn's
+  when it said nothing (an old turn whose end left no trace is
+  `unknown`). A Stop also reports **what the turn left running**
+  (`TurnRun.left_running`: Claude Code's Stop `background_tasks`, the
+  running ones, `{ id, kind, description }` with the id its report back
+  names), carried on its `agent.turn.ended` and recorded as jobs
+  ("Background jobs"); no column holds it. A Stop also sets the turn's
   `model` and `effort` (`agent_turn`) from `HookEnvelope.turn_run`: the
   route asks the bearer's harness (`AgentHarness::turn_run(body)`: Claude's
   `effort.level` and the newest non-synthetic `message.model` among the
@@ -1418,23 +1420,32 @@ hook that shows it, so a turn opened by its report finds the turn it goes
 on with at once, with no projection lag:
 
 - **Opened by** a `SubagentStart` (kind `subagent`, started in the open
-  turn), or a Stop's running work (`TurnRun.left_running`, Claude Code's
-  `background_tasks`: started in the turn that Stop closes, as far as is
-  known). A later sight fills only what the row lacks.
+  turn, `start_basis` `reported`), or a Stop's running work
+  (`TurnRun.left_running`, Claude Code's `background_tasks`: started in
+  the turn that Stop closes — oxplow's guess, `matched`). A later sight
+  fills what the row lacks, and a reported start replaces a matched
+  guess. A job seen running again after it reported (a subagent resumed
+  under the same id) is a new row.
 - **Reported by** its notice (`Prompt::BackgroundJob`: Claude's
   `<task-notification>` gives the job's `<task-id>`, the starting call's
   `<tool-use-id>`, `<status>` and `<summary>`) or a subagent's hand-back.
   The report's turn (opened, or the open one it was delivered into) is
   `report_turn_id`; a second report keeps the first's turn.
-- **The report's turn goes on with the job's start**: `cause_turn_id` is
-  the job's `started_turn_id`; a job first seen in its notice is found by
-  the call that started it (the tool events' dedupe key, built by one
-  `tool_key`). Its `cause_ref` is the job's id.
+- **The report's turn goes on with the job's start**: the call the notice
+  names gives the turn it was made in (the tool events' dedupe key, built
+  by one `tool_key`), else the job's record does; `cause_turn_id` and
+  `cause_basis` are the job's start and its basis. Its `cause_ref` is the
+  job's id.
+- **Lost** (`lost_at`, oxplow's own fact, not the harness's status) when
+  its agent session ends, restarts or is closed before it reported: its
+  process is gone. A tool call still running then is `abandoned` too (by
+  its session, for a call made with no turn open).
 
 Claude Code's ids line up: the notice's `<task-id>`, the Stop's
 `background_tasks[].id` and a subagent's `agent_id` are one id
-(`claude/subagent.jsonl`). A job with no report is `running`
-(`v_agent_job.state`): that is what a request is waiting on. Pinned by
+(`claude/subagent.jsonl`). A job with no report and not lost is
+`running` (`v_agent_job.state`): that is what a request is waiting on.
+Pinned also by `a_jobs_start_basis_resumed_runs_and_lost_jobs`. Pinned by
 `a_background_job_is_a_record_from_start_to_report`.
 
 ### Native features: observed, set, left native

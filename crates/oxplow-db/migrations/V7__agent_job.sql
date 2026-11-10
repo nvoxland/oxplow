@@ -10,8 +10,14 @@
 --                    whose call started it, a subagent's start, or the turn
 --                    whose Stop listed it running).
 --   report_turn_id   the turn its report opened or was delivered into.
+--   start_basis      how started_turn_id is known: reported (a hook named
+--                    the call or the subagent's start) or matched (oxplow's
+--                    guess: the turn whose Stop listed it running).
 --   status, summary  how it ended, in the harness's words; NULL while it
 --                    runs.
+--   lost_at          when its session ended or restarted with no report:
+--                    oxplow's own fact, not the harness's status.
+-- A subagent resumed under the same id after it reported is a new row.
 CREATE TABLE agent_job (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
@@ -21,11 +27,14 @@ CREATE TABLE agent_job (
     description TEXT,
     start_call_id TEXT,
     started_turn_id INTEGER REFERENCES agent_turn(id) ON DELETE SET NULL,
+    start_basis TEXT,
     seen_at TEXT NOT NULL,
     report_turn_id INTEGER REFERENCES agent_turn(id) ON DELETE SET NULL,
     reported_at TEXT,
     status TEXT,
-    summary TEXT
+    summary TEXT,
+    lost_at TEXT
 );
 CREATE INDEX idx_agent_job_harness ON agent_job(thread_id, harness_job_id);
-CREATE INDEX idx_agent_job_running ON agent_job(thread_id) WHERE reported_at IS NULL;
+CREATE INDEX idx_agent_job_running ON agent_job(agent_session_id)
+    WHERE reported_at IS NULL AND lost_at IS NULL;

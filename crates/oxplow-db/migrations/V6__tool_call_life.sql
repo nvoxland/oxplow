@@ -5,16 +5,16 @@
 --   ended_at          when it finished, was denied, or its turn ended with
 --                     it open.
 --   duration_ms       how long it ran: the harness's own timing, else
---                     ended_at - started_at.
---   state             running, finished, denied, abandoned (its turn ended
---                     with it open).
+--                     ended_at - started_at; NULL when it didn't finish.
+--   state             running, finished, denied, abandoned (its turn or
+--                     its session ended with it open).
 --   request_event_id  the agent.tool.requested event the row opened with.
 ALTER TABLE agent_tool_call ADD COLUMN call_id TEXT;
 ALTER TABLE agent_tool_call ADD COLUMN started_at TEXT;
 ALTER TABLE agent_tool_call ADD COLUMN ended_at TEXT;
 ALTER TABLE agent_tool_call ADD COLUMN duration_ms INTEGER;
-ALTER TABLE agent_tool_call ADD COLUMN state TEXT NOT NULL DEFAULT 'finished'
-    CHECK (state IN ('running', 'finished', 'denied', 'abandoned'));
+-- No CHECK on state: Rust owns its values.
+ALTER TABLE agent_tool_call ADD COLUMN state TEXT NOT NULL DEFAULT 'finished';
 ALTER TABLE agent_tool_call ADD COLUMN request_event_id TEXT;
 CREATE UNIQUE INDEX idx_agent_tool_call_request ON agent_tool_call(request_event_id)
     WHERE request_event_id IS NOT NULL;

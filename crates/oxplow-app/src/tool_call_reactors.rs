@@ -6,8 +6,9 @@
 //! - `tool_call.project` (sync) — the `agent_tool_call` row, a projection
 //!   of a call's events (`v_tool_call`, `v_context_read`): it opens at the
 //!   `agent.tool.requested` (running, or denied), closes at the
-//!   `agent.tool.finished` its request caused, and is abandoned when the
-//!   turn's `agent.turn.ended` comes with it still running. One row per
+//!   `agent.tool.finished` its request caused, and is abandoned when its
+//!   turn's `agent.turn.ended` (or its session's `agent.session.ended`)
+//!   comes with it still running. One row per
 //!   call however often an event is delivered.
 //! - `effort.claim` (async) — an edit (`kind: edit`, whatever its harness
 //!   calls it) claims every file it names for the effort that was open
@@ -21,9 +22,10 @@
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
+use oxplow_db::tool_call_store::CallOwner;
 use oxplow_db::Database;
 use oxplow_domain::events::schema::{
-    AgentToolFinished, AgentToolRequested, AgentTurnEnded, EventType,
+    AgentSessionEnded, AgentToolFinished, AgentToolRequested, AgentTurnEnded, EventType,
 };
 use oxplow_domain::{DomainError, StoredEvent, ThreadId};
 
@@ -58,16 +60,25 @@ impl EventConsumer for ToolCallProjection {
             AgentToolRequested::TYPE,
             AgentToolFinished::TYPE,
             AgentTurnEnded::TYPE,
+            AgentSessionEnded::TYPE,
         ]
         .contains(&event_type)
     }
 
     fn handle(&self, conn: &rusqlite::Connection, event: &StoredEvent) -> Result<(), DomainError> {
         let env = &event.envelope;
-        if env.event_type == AgentTurnEnded::TYPE {
-            // What its turn left running when it ended is abandoned.
-            if let Some(turn) = env.anchors.turn_id {
-                oxplow_db::tool_call_store::abandon_running_tx(conn, turn, env.at)?;
+        // What a turn or a session left running when it ended is abandoned.
+        let owner = match env.event_type.as_str() {
+            t if t == AgentTurnEnded::TYPE => env.anchors.turn_id.map(CallOwner::Turn),
+            t if t == AgentSessionEnded::TYPE => env
+                .anchors
+                .agent_session_id
+                .map(|s| CallOwner::Session(s.value())),
+            _ => None,
+        };
+        if env.event_type == AgentTurnEnded::TYPE || env.event_type == AgentSessionEnded::TYPE {
+            if let Some(owner) = owner {
+                oxplow_db::tool_call_store::abandon_running_tx(conn, owner, env.at)?;
             }
             return Ok(());
         }
@@ -431,9 +442,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                // An abandoned call ran until its turn ended: some time.
-                "SELECT call_id, state, started_at IS NOT NULL, ended_at IS NOT NULL,
-                        CASE state WHEN 'abandoned' THEN duration_ms >= 0 ELSE duration_ms END,
+                "SELECT call_id, state, started_at IS NOT NULL, ended_at IS NOT NULL, duration_ms,
                         event_id IS NOT NULL
                    FROM v_tool_call ORDER BY id"
             )
@@ -442,7 +451,7 @@ mod tests {
                 ["t1", "finished", 1, 1, 4200, 1],
                 ["t2", "denied", 1, 1, null, 0],
                 ["t3", "finished", 0, 1, null, 1],
-                ["t4", "abandoned", 1, 1, 1, 0],
+                ["t4", "abandoned", 1, 1, null, 0],
             ])
         );
         // A redelivery changes nothing.
