@@ -1038,7 +1038,7 @@ fn record_tx(
 /// The question a final message ended on: its last line, when the message
 /// ends in a question mark. The turn stores it (`agent_turn.question`) and
 /// the thread's status waits on it.
-fn ending_question(answer: Option<&str>) -> Option<&str> {
+pub fn ending_question(answer: Option<&str>) -> Option<&str> {
     answer
         .map(str::trim)
         .filter(|a| a.ends_with('?'))
