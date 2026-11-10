@@ -1,16 +1,16 @@
 title: Review Verdicts
-description: The latest model review of each work item — the effort reviewed, how the review ended, when, and how it opens.
+description: The latest model review of each task — the effort reviewed, how the review ended, when, and how it opens.
 category: Work
 loaders:
   review_verdicts:
     sql: |
       WITH latest AS (
-        SELECT r.work_item, r.effort, r.state, r.reviewed_at, r.review,
-               row_number() OVER (PARTITION BY r.work_item ORDER BY r.reviewed_at DESC, r.job_run DESC) AS n
+        SELECT r.task, r.effort, r.state, r.reviewed_at, r.review,
+               row_number() OVER (PARTITION BY r.task ORDER BY r.reviewed_at DESC, r.job_run DESC) AS n
         FROM import_ref('reviews') r
-        WHERE r.work_item IS NOT NULL
+        WHERE r.task IS NOT NULL
       )
-      SELECT work_item, effort, state, reviewed_at, substr(review, 1, 120) AS opening
+      SELECT task, effort, state, reviewed_at, substr(review, 1, 120) AS opening
       FROM latest
       WHERE n = 1
       ORDER BY reviewed_at DESC
@@ -18,11 +18,11 @@ view:
   from: review_verdicts
   viz: table
   columns:
-  - key: work_item
-    label: Work item
+  - key: task
+    label: Task
     link:
       kind: page
-      from: work_item
+      from: task
   - key: effort
     label: Effort
   - key: state
@@ -31,4 +31,4 @@ view:
     label: Reviewed
   - key: opening
     label: Opening
-  empty: No reviews yet. effort-review writes one when an effort with a work item finishes.
+  empty: No reviews yet. effort-review writes one when an effort with a task finishes.

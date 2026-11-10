@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// task-views' swimlanes (the `work_item.board` replacement): its bundle's own
+// task-views' swimlanes (the `task.board` replacement): its bundle's own
 // script, run against its own page with a stand-in for the client library's
 // connection — the columns, dragging between and within them, renaming a
 // card and opening one, as the frame shows them.
@@ -23,10 +23,10 @@ const STAGES: Array<[string, string, string]> = [
   ["canceled", "Canceled", "canceled"],
 ];
 const ITEMS: Item[] = [
-  { uri: "oxplow:oxplow/work_item?id=1&provider=a", title: "First", stage: "ready" },
-  { uri: "oxplow:oxplow/work_item?id=2&provider=a", title: "Second", stage: "ready" },
-  { uri: "oxplow:oxplow/work_item?id=3&provider=a", title: "Third", stage: "ready" },
-  { uri: "oxplow:oxplow/work_item?id=4&provider=a", title: "Fourth", stage: "done" },
+  { uri: "oxplow:oxplow/task?id=1&provider=a", title: "First", stage: "ready" },
+  { uri: "oxplow:oxplow/task?id=2&provider=a", title: "Second", stage: "ready" },
+  { uri: "oxplow:oxplow/task?id=3&provider=a", title: "Third", stage: "ready" },
+  { uri: "oxplow:oxplow/task?id=4&provider=a", title: "Fourth", stage: "done" },
 ];
 const run = (items: Item[]) => ({
   config: { id: "task_views/swimlanes" },
@@ -103,63 +103,63 @@ test("one column per stage of the list, in its order and titled as it names them
     STAGES.map(([, title]) => title),
   );
   expect([...lane("ready").querySelectorAll(".card")].map((c) => (c as HTMLElement).dataset.ref)).toEqual([
-    "oxplow:oxplow/work_item?id=1&provider=a",
-    "oxplow:oxplow/work_item?id=2&provider=a",
-    "oxplow:oxplow/work_item?id=3&provider=a",
+    "oxplow:oxplow/task?id=1&provider=a",
+    "oxplow:oxplow/task?id=2&provider=a",
+    "oxplow:oxplow/task?id=3&provider=a",
   ]);
   expect(lane("ready").querySelector(".ox-badge")!.textContent).toBe("3");
   expect(lane("done").querySelectorAll(".card").length).toBe(1);
-  expect(card("oxplow:oxplow/work_item?id=1&provider=a").classList.contains("ox-drag")).toBe(true);
+  expect(card("oxplow:oxplow/task?id=1&provider=a").classList.contains("ox-drag")).toBe(true);
 });
 
 test("a card dropped on another column is transitioned; the dragged-over column is marked", async () => {
   await start();
-  fire(card("oxplow:oxplow/work_item?id=1&provider=a"), "dragstart");
-  expect(card("oxplow:oxplow/work_item?id=1&provider=a").classList.contains("ox-dragging")).toBe(true);
+  fire(card("oxplow:oxplow/task?id=1&provider=a"), "dragstart");
+  expect(card("oxplow:oxplow/task?id=1&provider=a").classList.contains("ox-dragging")).toBe(true);
   fire(lane("blocked"), "dragover");
   expect(lane("blocked").classList.contains("ox-drop-target")).toBe(true);
   fire(lane("blocked"), "drop");
   await settle();
   expect(lane("blocked").classList.contains("ox-drop-target")).toBe(false);
-  expect(invokes).toEqual([["oxplow.work_item.transition", { uri: "oxplow:oxplow/work_item?id=1&provider=a", to: "blocked" }]]);
+  expect(invokes).toEqual([["oxplow.task.transition", { uri: "oxplow:oxplow/task?id=1&provider=a", to: "blocked" }]]);
 });
 
 test("a drop within a column reorders it in its assignee's queue", async () => {
   await start();
-  await drag("oxplow:oxplow/work_item?id=3&provider=a", card("oxplow:oxplow/work_item?id=1&provider=a"));
-  await drag("oxplow:oxplow/work_item?id=1&provider=a", card("oxplow:oxplow/work_item?id=2&provider=a"));
+  await drag("oxplow:oxplow/task?id=3&provider=a", card("oxplow:oxplow/task?id=1&provider=a"));
+  await drag("oxplow:oxplow/task?id=1&provider=a", card("oxplow:oxplow/task?id=2&provider=a"));
   expect(invokes).toEqual([
-    ["oxplow.work_item.reorder", { uri: "oxplow:oxplow/work_item?id=3&provider=a", before: "oxplow:oxplow/work_item?id=1&provider=a" }],
-    ["oxplow.work_item.reorder", { uri: "oxplow:oxplow/work_item?id=1&provider=a", after: "oxplow:oxplow/work_item?id=2&provider=a" }],
+    ["oxplow.task.reorder", { uri: "oxplow:oxplow/task?id=3&provider=a", before: "oxplow:oxplow/task?id=1&provider=a" }],
+    ["oxplow.task.reorder", { uri: "oxplow:oxplow/task?id=1&provider=a", after: "oxplow:oxplow/task?id=2&provider=a" }],
   ]);
 
 });
 
 test("a title is edited in place: Enter submits it, Escape leaves it as it was", async () => {
   await start();
-  const title = () => card("oxplow:oxplow/work_item?id=1&provider=a").querySelector<HTMLElement>(".title")!;
+  const title = () => card("oxplow:oxplow/task?id=1&provider=a").querySelector<HTMLElement>(".title")!;
   title().click();
-  const input = card("oxplow:oxplow/work_item?id=1&provider=a").querySelector<HTMLInputElement>("form .ox-input")!;
+  const input = card("oxplow:oxplow/task?id=1&provider=a").querySelector<HTMLInputElement>("form .ox-input")!;
   expect(input.value).toBe("First");
   fire(input.closest("form")!, "keydown", { key: "Escape" });
   expect(title().textContent).toBe("First");
-  expect(card("oxplow:oxplow/work_item?id=1&provider=a").querySelector("form")).toBe(null);
+  expect(card("oxplow:oxplow/task?id=1&provider=a").querySelector("form")).toBe(null);
 
   title().click();
-  const again = card("oxplow:oxplow/work_item?id=1&provider=a").querySelector<HTMLInputElement>("form .ox-input")!;
+  const again = card("oxplow:oxplow/task?id=1&provider=a").querySelector<HTMLInputElement>("form .ox-input")!;
   again.value = "Renamed";
   const submit = new Event("submit", { bubbles: true, cancelable: true });
   again.closest("form")!.dispatchEvent(submit);
   await settle();
   expect(submit.defaultPrevented).toBe(true);
-  expect(invokes).toEqual([["oxplow.work_item.update", { uri: "oxplow:oxplow/work_item?id=1&provider=a", title: "Renamed" }]]);
+  expect(invokes).toEqual([["oxplow.task.update", { uri: "oxplow:oxplow/task?id=1&provider=a", title: "Renamed" }]]);
   expect(opened).toEqual([]);
 });
 
 test("a rejection naming a field shows under the input", async () => {
   await start();
-  card("oxplow:oxplow/work_item?id=2&provider=a").querySelector<HTMLElement>(".title")!.click();
-  const form = card("oxplow:oxplow/work_item?id=2&provider=a").querySelector("form")!;
+  card("oxplow:oxplow/task?id=2&provider=a").querySelector<HTMLElement>(".title")!.click();
+  const form = card("oxplow:oxplow/task?id=2&provider=a").querySelector("form")!;
   form.querySelector<HTMLInputElement>(".ox-input")!.value = "";
   rejection = { code: "INVALID", message: "title can't be empty", field: "/title" };
   fire(form, "submit");
@@ -167,13 +167,13 @@ test("a rejection naming a field shows under the input", async () => {
   const error = form.querySelector<HTMLElement>(".ox-error")!;
   expect(error.hidden).toBe(false);
   expect(error.textContent).toBe("title can't be empty");
-  expect(card("oxplow:oxplow/work_item?id=2&provider=a").querySelector("form")).toBe(form);
+  expect(card("oxplow:oxplow/task?id=2&provider=a").querySelector("form")).toBe(form);
 });
 
 test("a refusal of the board's commands is a one-line note above the board", async () => {
   await start();
   rejection = { code: "DENIED", message: "not deployed" };
-  await drag("oxplow:oxplow/work_item?id=1&provider=a", lane("done"));
+  await drag("oxplow:oxplow/task?id=1&provider=a", lane("done"));
   const note = document.getElementById("note")!;
   expect(note.hidden).toBe(false);
   expect(note.textContent).toContain("not deployed");
@@ -182,13 +182,13 @@ test("a refusal of the board's commands is a one-line note above the board", asy
 
 test("clicking a card opens it; Cmd/Ctrl-click opens it in a new tab", async () => {
   await start();
-  card("oxplow:oxplow/work_item?id=4&provider=a").click();
-  fire(card("oxplow:oxplow/work_item?id=4&provider=a"), "click", { metaKey: true });
-  fire(card("oxplow:oxplow/work_item?id=4&provider=a"), "click", { ctrlKey: true });
+  card("oxplow:oxplow/task?id=4&provider=a").click();
+  fire(card("oxplow:oxplow/task?id=4&provider=a"), "click", { metaKey: true });
+  fire(card("oxplow:oxplow/task?id=4&provider=a"), "click", { ctrlKey: true });
   await settle();
   expect(opened).toEqual([
-    ["oxplow:oxplow/work_item?id=4&provider=a", undefined],
-    ["oxplow:oxplow/work_item?id=4&provider=a", { newTab: true }],
-    ["oxplow:oxplow/work_item?id=4&provider=a", { newTab: true }],
+    ["oxplow:oxplow/task?id=4&provider=a", undefined],
+    ["oxplow:oxplow/task?id=4&provider=a", { newTab: true }],
+    ["oxplow:oxplow/task?id=4&provider=a", { newTab: true }],
   ]);
 });

@@ -25,7 +25,7 @@ pub struct SiteSearchInput {
     #[serde(default)]
     pub stream_id: Option<String>,
     /// Restrict to these resources: any `v_resource` lists as `searchable`
-    /// (`oxplow/work_item`, `oxplow/wiki`, `oxplow/thread_note`, an
+    /// (`oxplow/task`, `oxplow/wiki`, `oxplow/thread_note`, an
     /// extension's), or `oxplow/file`.
     #[serde(default)]
     pub resources: Option<Vec<String>>,

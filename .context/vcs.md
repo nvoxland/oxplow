@@ -314,7 +314,7 @@ oxplow-foundation on, Git History, the commit page and Uncommitted changes
 show their own content and nothing another extension adds
 (`tests-e2e/specs/pages/plain.spec.ts`; the page-run half is every
 foundation fixture's, which runs with only foundation on —
-[work-items.md](./work-items.md), "Conformance"). The commit and
+[tasks.md](./tasks.md), "Conformance"). The commit and
 Uncommitted pages are foundation documents (their mounts are
 `oxplow/commit.sections` and
 `oxplow/uncommitted-changes.sections`; Git Status embeds the

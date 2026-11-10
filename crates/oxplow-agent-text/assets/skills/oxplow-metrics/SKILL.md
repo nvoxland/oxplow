@@ -70,6 +70,6 @@ harness with skill files, or `oxplow_get_skill { name: "oxplow-metrics", referen
   `metric_grid`, `metric_findings`, `v_metric_point`, `v_metric_*`,
   `oxplow.metric.record`, and the gotchas when a fact doesn't appear.
 - `references/entity-metrics.md` (`entity-metrics`) — **a number about
-  records oxplow already has** (work items, commits, test runs): no
+  records oxplow already has** (tasks, commits, test runs): no
   collector, just an aggregate over a `v_*` dataset. Which datasets exist is
   oxplow-extension's (`v_dataset`).

@@ -17,7 +17,7 @@ def transform(x):
         return {"refuse": "no effort " + effort}
     effort_id = ids[0]["id"]
     efforts = read(
-        "SELECT work_item, title, summary, started_at, ended_at, closed_by FROM v_effort WHERE id = :id",
+        "SELECT task, title, summary, started_at, ended_at, closed_by FROM v_effort WHERE id = :id",
         effort_id, 1)
     if not efforts:
         return {"refuse": "no effort " + effort}
@@ -59,7 +59,7 @@ def transform(x):
         + "ORDER BY path, start_line", effort_id, CAP), CAP)
     return {"commands": [], "result": {
         "effort": effort,
-        "workItem": efforts[0]["work_item"],
+        "task": efforts[0]["task"],
         "title": efforts[0]["title"],
         "summary": efforts[0]["summary"],
         "closedBy": efforts[0]["closed_by"],

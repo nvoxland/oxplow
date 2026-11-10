@@ -7,7 +7,7 @@
 import { querySql } from "./api.js";
 import { wikiUri } from "./uri/uri.js";
 import { unionReads } from "./viz/rerun.js";
-import type { CapabilityProvider } from "./workItems.js";
+import type { CapabilityProvider } from "./tasks.js";
 import type { Reads, SqlCell, SqlQueryResult } from "./tauri-bridge/generated/bindings.js";
 
 /** One page as the index lists it. */

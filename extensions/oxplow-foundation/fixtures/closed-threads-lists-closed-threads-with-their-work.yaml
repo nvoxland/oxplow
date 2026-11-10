@@ -4,12 +4,12 @@
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Old }, bind: old }
   - { command: oxplow.thread.create, input: { stream: str1, title: Live } }
-  - { command: oxplow.work_item.create, input: { title: Finished, assignee: thr1 }, bind: finished }
-  - { command: oxplow.work_item.create, input: { title: Left, assignee: thr1 }, bind: left }
-  - { command: oxplow.work_item.transition, input: { uri: $finished.uri, to: in_progress }, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $finished.uri, to: done }, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $left.uri, to: in_progress }, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $left.uri, to: todo }, as: agent }
+  - { command: oxplow.task.create, input: { title: Finished, assignee: thr1 }, bind: finished }
+  - { command: oxplow.task.create, input: { title: Left, assignee: thr1 }, bind: left }
+  - { command: oxplow.task.transition, input: { uri: $finished.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $finished.uri, to: done }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $left.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $left.uri, to: todo }, as: agent }
   - { command: oxplow.thread.close, input: { thread: $old.id } }
   - { command: oxplow.thread.close, input: { thread: thr1 } }
 when: { page: closed-threads, params: { stream_id: 1 } }

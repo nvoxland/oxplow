@@ -70,15 +70,15 @@ where
     .is_some()
 }
 
-use oxplow_tasks::work_item_ref;
+use oxplow_oxtask::task_ref;
 use std::path::Path;
 use std::sync::Arc;
 
 use oxplow_db::EffortStore as _;
 use oxplow_domain::{EffortId, ThreadId};
-use oxplow_tasks::TaskId;
-use oxplow_tasks::TaskStore as _;
-use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+use oxplow_oxtask::OxtaskId;
+use oxplow_oxtask::OxtaskStore as _;
+use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
 
 /// A git repo with one empty commit on `main`, whatever the machine's
 /// `init.defaultBranch` (stream setup refuses non-git dirs).
@@ -237,8 +237,8 @@ pub async fn open_session(
 }
 
 /// In-memory services over a fresh repo with a primary stream, its first
-/// thread and an open effort linked to nothing — an effort needs no work
-/// item (`.context/work-tracking.md`), so a test that isn't about one
+/// thread and an open effort linked to nothing — an effort needs no
+/// task (`.context/work-tracking.md`), so a test that isn't about one
 /// doesn't make one.
 pub async fn services_with_effort() -> EffortFixture {
     let dir = tempfile::tempdir().unwrap();
@@ -323,7 +323,7 @@ async fn with_effort(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> Effor
 /// on the thread: for a test about tasks.
 pub struct TaskEffortFixture {
     pub fx: EffortFixture,
-    pub task: TaskId,
+    pub task: OxtaskId,
 }
 
 impl std::ops::Deref for TaskEffortFixture {
@@ -357,28 +357,28 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
     let now = oxplow_domain::Timestamp::now();
     let task = svc
         .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
+        .insert(&Oxtask {
+            id: OxtaskId::placeholder(),
             parent_id: None,
             title: "t".into(),
             description: String::new(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            created_by: TaskActorKind::User,
+            status: OxtaskStatus::InProgress,
+            priority: OxtaskPriority::Medium,
+            created_by: OxtaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
             deleted_at: None,
             note_count: 0,
-            author: Some(TaskAuthor::User),
+            author: Some(OxtaskAuthor::User),
         })
         .await
         .unwrap();
     restate_task(&svc, task).await;
-    assign_to(&svc, &work_item_ref(task), Some(thread)).await;
+    assign_to(&svc, &task_ref(task), Some(thread)).await;
     let effort = svc
         .effort_store
-        .start(&work_item_ref(task), &thread, None)
+        .start(&task_ref(task), &thread, None)
         .await
         .unwrap()
         .id;
@@ -394,51 +394,51 @@ pub async fn services_with_task_effort() -> TaskEffortFixture {
     }
 }
 
-/// A task filed as a person through `oxplow.work_item.create` with
+/// A task filed as a person through `oxplow.task.create` with
 /// `input` (assigned to nobody unless it names an `assignee`): its id.
-pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> TaskId {
+pub async fn file_item(svc: &crate::Services, input: serde_json::Value) -> OxtaskId {
     let out = svc
         .commands
         .run(
             &oxplow_domain::Actor::Human,
-            crate::commands::work_item::CREATE,
+            crate::commands::task::CREATE,
             input,
             false,
         )
         .await
         .unwrap();
-    oxplow_tasks::task_of_work_item_ref(out.result["uri"].as_str().unwrap()).unwrap()
+    oxplow_oxtask::oxtask_of_task_ref(out.result["uri"].as_str().unwrap()).unwrap()
 }
 
-/// Restate task `task` in the work-item interface, as its list does after
-/// a write: its `work_item.recorded`, logged and projected. For a test
+/// Restate task `task` in the task interface, as its list does after
+/// a write: its `task.recorded`, logged and projected. For a test
 /// that writes the task store directly rather than through the
-/// `oxplow.work_item.*` commands.
-pub async fn restate_task(svc: &crate::Services, task: TaskId) {
+/// `oxplow.task.*` commands.
+pub async fn restate_task(svc: &crate::Services, task: OxtaskId) {
     let record = svc
         .db
-        .read(move |tx| oxplow_tasks::record::record_tx(tx, task))
+        .read(move |tx| oxplow_oxtask::record::record_tx(tx, task))
         .await
         .unwrap();
     svc.event_log_store
-        .append(oxplow_tasks::provider::recorded(record))
+        .append(oxplow_oxtask::provider::recorded(record))
         .await
         .unwrap();
     svc.event_pump.deliver_projections().await.unwrap();
 }
 
-/// Assign `item` to `thread` (`None`: nobody) in the work-item interface,
-/// as `oxplow.work_item.assign` does: its `work_item.assigned`, logged and
+/// Assign `item` to `thread` (`None`: nobody) in the task interface,
+/// as `oxplow.task.assign` does: its `task.assigned`, logged and
 /// projected. For a fixture that sets up who works on what without a
 /// run to count.
 pub async fn assign_to(svc: &crate::Services, item: &str, thread: Option<ThreadId>) {
-    use oxplow_domain::events::schema::{WorkItemAssigned, WorkItemAssignedV1};
+    use oxplow_domain::events::schema::{TaskAssigned, TaskAssignedV1};
     svc.event_log_store
         .append(
-            oxplow_domain::Envelope::typed::<WorkItemAssigned>(
+            oxplow_domain::Envelope::typed::<TaskAssigned>(
                 "human",
-                &WorkItemAssignedV1 {
-                    work_item: item.to_string(),
+                &TaskAssignedV1 {
+                    task: item.to_string(),
                     from: None,
                     to: thread.map(oxplow_domain::uri::build::thread_uri),
                     before: None,

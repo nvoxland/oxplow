@@ -12,5 +12,5 @@ given:
 when: { page: agent-session, params: { uri: "oxplow:oxplow/agent_session?id=ses1" } }
 expect:
   see_also:
-    - { title: Thread work, uri: "oxplow:oxplow/page?page=thread-work&thread=thr1" }
+    - { title: Thread work, uri: "oxplow:oxplow/page?page=thread-tasks&thread=thr1" }
     - { title: Make a file, uri: "oxplow:oxplow/effort?id=eff1" }

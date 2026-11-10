@@ -384,7 +384,7 @@ mod tests {
                     oxplow_db::ClaimProvenance::Inferred,
                     &NewClaim {
                         thread_id: thread.value(),
-                        work_item: Some(oxplow_tasks::work_item_ref(task)),
+                        task: Some(oxplow_oxtask::task_ref(task)),
                         effort_id: Some(effort),
                         statement: "no behavior change".into(),
                         kind: "no_behavior_change".into(),
@@ -401,7 +401,7 @@ mod tests {
                 effort,
                 vec![NewDecision {
                     thread_id: fx.thread.value(),
-                    work_item: Some(oxplow_tasks::work_item_ref(fx.task)),
+                    task: Some(oxplow_oxtask::task_ref(fx.task)),
                     effort_id: Some(effort),
                     question: "Which store?".into(),
                     choice: "SQLite".into(),

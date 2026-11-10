@@ -1676,7 +1676,7 @@
       "type": "object",
       "properties": {
         "to": {
-          "description": "The view it joins to, e.g. `v_work_item` or `v_github_review`.",
+          "description": "The view it joins to, e.g. `v_task` or `v_github_review`.",
           "type": "string"
         },
         "on": {
@@ -1861,7 +1861,7 @@
           "default": []
         },
         "about": {
-          "description": "The ref kind it acts on (`work_item`, `effort`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
+          "description": "The ref kind it acts on (`task`, `effort`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
           "type": [
             "string",
             "null"
@@ -2258,7 +2258,7 @@
           "type": "string"
         },
         "at": {
-          "description": "Where: a page's slot (`oxplow/commit.sections`) or a\nreplaceable core component (`work_item.board`).",
+          "description": "Where: a page's slot (`oxplow/commit.sections`) or a\nreplaceable core component (`task.board`).",
           "type": "string"
         },
         "position": {
@@ -2734,7 +2734,7 @@
           "default": null
         },
         "entry": {
-          "description": "The built-in it is (`oxplow:tasks`), or an effort policy's script.",
+          "description": "The built-in it is (`oxplow:oxtask`), or an effort policy's script.",
           "type": [
             "string",
             "null"
@@ -2843,7 +2843,7 @@
       "type": "object",
       "properties": {
         "id": {
-          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace\n(`<id>.estimate`).",
+          "description": "The provider's id: its program's approval (`<extension>/<id>`) and\nthe id of its default instance — an instance's id is its refs'\nsegment (`oxplow:oxplow/task?id=…&provider=<id>`) and its commands' namespace\n(`<id>.estimate`).",
           "type": "string"
         },
         "capability": {
@@ -2905,7 +2905,7 @@
           "type": "string"
         },
         "idPattern": {
-          "description": "What a work list's own ids look like (a regex matched whole:\n`[A-Z]+-\\d+`), so a loose id resolves to its item while it's the\nactive work list.",
+          "description": "What a task tracker's own ids look like (a regex matched whole:\n`[A-Z]+-\\d+`), so a loose id resolves to its item while it's the\nactive task tracker.",
           "type": [
             "string",
             "null"
@@ -2913,7 +2913,7 @@
           "default": null
         },
         "fields": {
-          "description": "A work list's own fields (kept in an item's `native`), so screens\nrender and edit them: `[{ name, title, kind: enum|text|number,\nvalues? }]`.",
+          "description": "A task tracker's own fields (kept in an item's `native`), so screens\nrender and edit them: `[{ name, title, kind: enum|text|number,\nvalues? }]`.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/FieldDecl"
@@ -2921,7 +2921,7 @@
           "default": []
         },
         "stages": {
-          "description": "A work list's stages, in order, each in one of core's buckets:\n`[{ id, title, bucket }]` — required for a work list, which needs\none in each of todo, in_progress and done. The first of a bucket is\nwhere naming the bucket lands.",
+          "description": "A task tracker's stages, in order, each in one of core's buckets:\n`[{ id, title, bucket }]` — required for a task tracker, which needs\none in each of todo, in_progress and done. The first of a bucket is\nwhere naming the bucket lands.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/StageDecl"
@@ -3145,7 +3145,7 @@
       ]
     },
     "FieldDecl": {
-      "description": "One of a work list's own fields: kept in an item's `native` under\n`name`, declared so screens render and edit it without knowing which\nlist is active.",
+      "description": "One of a task tracker's own fields: kept in an item's `native` under\n`name`, declared so screens render and edit it without knowing which\nlist is active.",
       "type": "object",
       "properties": {
         "name": {
@@ -3168,7 +3168,7 @@
           "default": []
         },
         "read_only": {
-          "description": "Set by the list itself (who filed it, when it synced): shown, never\nedited — a `oxplow.work_item.update` that names it is refused.",
+          "description": "Set by the list itself (who filed it, when it synced): shown, never\nedited — a `oxplow.task.update` that names it is refused.",
           "type": "boolean",
           "default": false
         }
@@ -3198,7 +3198,7 @@
       ]
     },
     "StageDecl": {
-      "description": "One of a work list's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
+      "description": "One of a task tracker's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
       "type": "object",
       "properties": {
         "id": {
@@ -3221,7 +3221,7 @@
       ]
     },
     "Bucket": {
-      "description": "What a work list's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
+      "description": "What a task tracker's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
       "type": "string",
       "enum": [
         "backlog",

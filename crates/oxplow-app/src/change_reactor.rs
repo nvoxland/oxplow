@@ -519,7 +519,7 @@ mod tests {
             .svc
             .effort_store
             .start(
-                "oxplow:oxplow/work_item?id=B-1&provider=issues",
+                "oxplow:oxplow/task?id=B-1&provider=issues",
                 &oxplow_domain::ThreadId::new(7),
                 Some(start),
             )
@@ -1251,7 +1251,7 @@ mod tests {
             "system",
             &oxplow_domain::events::schema::EffortFinishedV3 {
                 effort: f.effort.to_string(),
-                work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
+                task: Some("oxplow:oxplow/task?id=tsk1&provider=oxtask".into()),
                 end_snapshot: Some(end),
             },
         );
@@ -1288,7 +1288,7 @@ mod tests {
             "system",
             &oxplow_domain::events::schema::EffortFinishedV3 {
                 effort: f.effort.to_string(),
-                work_item: None,
+                task: None,
                 end_snapshot: None,
             },
         );

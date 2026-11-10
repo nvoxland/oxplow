@@ -31,7 +31,7 @@ export interface BacklinksListProps {
   /** Optional commit-typed backlinks. Click opens the host's
    *  CommitDetailSlideover. */
   commitEntries?: CommitBacklinkEntry[];
-  /** The host's right-click actions for an entry (Unlink on a work item's
+  /** The host's right-click actions for an entry (Unlink on a task's
    *  link row), ahead of Add to Context, which every entry that opens a
    *  page offers. */
   entryMenu?(entry: BacklinkEntry): MenuItem[];

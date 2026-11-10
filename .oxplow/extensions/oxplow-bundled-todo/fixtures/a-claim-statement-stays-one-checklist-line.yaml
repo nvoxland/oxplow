@@ -1,8 +1,8 @@
 # What the follow-up's checklist names is text: a claim statement can't add
 # items or reshape the body, and a long one is cut.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -25,5 +25,5 @@ steps:
         SELECT instr(body, char(10) || '- [x]') = 0 AS no_forged_item,
                instr(body, '[link](https://evil.example)') = 0 AS no_live_link,
                length(body) < 1200 AS cut
-        FROM v_work_item WHERE title LIKE 'Verify what the review of %'
+        FROM v_task WHERE title LIKE 'Verify what the review of %'
     expect: { rows: [{ no_forged_item: 1, no_live_link: 1, cut: 1 }] }

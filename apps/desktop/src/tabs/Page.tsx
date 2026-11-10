@@ -521,7 +521,7 @@ function RailBody({ children, width, fill, rightRail, rightRailTitle }: { childr
 }
 
 /** What kind of thing a tab shows: its URI's resource's label ("Measure",
- *  "Work item"). A page route names none — the page is the thing, and its
+ *  "Task"). A page route names none — the page is the thing, and its
  *  title says it. */
 export function kindOfTab(uri: string | null, resources: ReadonlyMap<string, { label: string }>): string | null {
   const resource = uri ? typeOf(uri) : null;

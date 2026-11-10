@@ -3,9 +3,9 @@
 # away; a card shows its description's first sentence under its title,
 # its markdown drawn.
 given:
-  - { command: oxplow.work_item.create, input: { title: An epic, assignee: thr1 }, bind: epic }
-  - { command: oxplow.work_item.create, input: { title: Its child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
-  - { command: oxplow.work_item.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt breaks **the build** in `ci.yml`. Then more." } }
+  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.task.create, input: { title: Its child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt breaks **the build** in `ci.yml`. Then more." } }
 when: { page: tasks, params: { show: thread, priority: any, thread_id: 1, stream_id: 1 } }
 steps:
   - ui:
@@ -21,4 +21,4 @@ steps:
       - click: '[data-testid="column-ready"] .epic-toggle'
       - expect: { count: { '[data-testid="column-ready"] .ox-card.nested': 0, '[data-testid="column-ready"] .ox-card': 1 } }
       - click: '[data-testid="column-ready"] .epic-title'
-      - expect: { navigated: ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"] }
+      - expect: { navigated: ["oxplow:oxplow/task?id=tsk1&provider=oxtask"] }

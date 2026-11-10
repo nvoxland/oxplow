@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 pub const MARKER: &str = "OXPLOW_FAKE_HARNESS_SESSION";
 
 /// What it declares in harness mode: the `agent_harness` capability, its
-/// verbs, no event types, no collectors; the same config as its work list.
+/// verbs, no event types, no collectors; the same config as its task tracker.
 pub fn declarations() -> InitializeResult {
     InitializeResult {
         protocol_version: PROTOCOL_VERSION.into(),

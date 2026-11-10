@@ -1,12 +1,12 @@
 //! Reading a provider's collectors (P7.A3, `.context/providers.md`): how
-//! another tracker's items reach `v_work_item` when oxplow didn't write
+//! another tracker's items reach `v_task` when oxplow didn't write
 //! them.
 //!
 //! [`Instance::read`] runs one collector's `read`, resuming from the
 //! checkpoint it last stored. What the provider streams about the request
 //! (`Peer::start_streaming`) is checked as it arrives — a `$/record` must
-//! be the collector's entity and, for a work-items provider, a
-//! `WorkItemRecord` of its own item — and kept as `work_item.recorded@1`
+//! be the collector's entity and, for a task tracker provider, a
+//! `TaskRecord` of its own item — and kept as `task.recorded@1`
 //! envelopes until the next `$/state`, which commits them **with** the
 //! checkpoint in one transaction (`provider_collector_state`). So a read
 //! that fails midway keeps exactly what its last checkpoint covered. The
@@ -385,7 +385,7 @@ impl Instance {
 
     /// Append `batch` and the checkpoint covering it, in one transaction —
     /// each record only when it changes its item: one equal to the item's
-    /// last `work_item.recorded` (a write's, or an earlier read's) restates
+    /// last `task.recorded` (a write's, or an earlier read's) restates
     /// nothing, and logging it would echo a write back to whatever reacted
     /// to it (an effect writing the item, tsk799). The checkpoint counts
     /// what was read.
@@ -427,7 +427,7 @@ impl Instance {
 
 /// Whether `record` says what the last event of its type about the same
 /// row (its `<key>.uri`) already said. The path is the contract's literal
-/// (`$.item.uri`), so the lookup is the expression `event_log_work_item_uri`
+/// (`$.item.uri`), so the lookup is the expression `event_log_task_uri`
 /// indexes; a capability that streams another entity indexes its own.
 fn restates(
     tx: &rusqlite::Connection,

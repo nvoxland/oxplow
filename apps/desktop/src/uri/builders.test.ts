@@ -21,7 +21,7 @@ import {
   threadUri,
   typeOf,
   wikiUri,
-  workItemUri,
+  taskUri,
 } from "./uri.js";
 
 // A command names a record by its URI, never its bare id.
@@ -36,7 +36,7 @@ test("each record is named by its URI", () => {
   expect(eventUri("0190")).toBe("oxplow:oxplow/event?id=0190");
   expect(proposalUri(7)).toBe("oxplow:oxplow/proposal?id=7");
   expect(configUri("snapshotRetentionDays")).toBe("oxplow:oxplow/config?key=snapshotRetentionDays");
-  expect(workItemUri("oxplow", "tsk42")).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
+  expect(taskUri("oxtask", "tsk42")).toBe("oxplow:oxplow/task?id=tsk42&provider=oxtask");
   expect(commitUri("4c44d495")).toBe("oxplow:oxplow/commit?sha=4c44d495");
   expect(fileUri("src/a.rs")).toBe("oxplow:oxplow/file?path=src/a.rs");
   expect(fileUri("src/a.rs", "git:HEAD")).toBe("oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD");
@@ -46,8 +46,8 @@ test("each record is named by its URI", () => {
 test("a contribution's key param is its own name, with the view's params beside it", () => {
   expect(pageUri("tasks")).toBe("oxplow:oxplow/page?page=tasks");
   expect(pageUri("diff-view", { effort: "eff9" })).toBe("oxplow:oxplow/page?effort=eff9&page=diff-view");
-  expect(extPageUri("acme", "board", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toBe(
-    "oxplow:oxplow/page?page=acme/board&uri=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
+  expect(extPageUri("acme", "board", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toBe(
+    "oxplow:oxplow/page?page=acme/board&uri=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask",
   );
   expect(metricUri("oxplow.todos")).toBe("oxplow:oxplow/metric?metric=oxplow.todos");
   expect(metricUri("oxplow.todos", { range: "7d", branch: "main" })).toBe(

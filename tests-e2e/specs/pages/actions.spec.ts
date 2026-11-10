@@ -12,7 +12,7 @@ import { open, shown } from "../../support/ui.js";
 // form too; an action whose `when` is false is not offered; an action with
 // options is a submenu of them, the row's own checked.
 
-const manifest = `permissions: [commands:oxplow.work_item.create, commands:oxplow.work_item.delete]
+const manifest = `permissions: [commands:oxplow.task.create, commands:oxplow.task.delete]
 commands:
   - name: secret.save
     summary: Files a wallaby named by the label, with a secret token that is never kept.
@@ -27,14 +27,14 @@ commands:
 `;
 
 const handler = `def transform(x):
-    return {"commands": [{"name": "oxplow.work_item.create", "input": {"title": "Wallaby " + x["input"]["label"]}}]}
+    return {"commands": [{"name": "oxplow.task.create", "input": {"title": "Wallaby " + x["input"]["label"]}}]}
 `;
 
 const pageYaml = `title: Action Wallaby
 category: Data
 loaders:
   rows:
-    sql: SELECT uri, title, stage, title NOT LIKE '%locked%' AS can_rename FROM v_work_item WHERE title LIKE 'Wallaby %' ORDER BY title
+    sql: SELECT uri, title, stage, title NOT LIKE '%locked%' AS can_rename FROM v_task WHERE title LIKE 'Wallaby %' ORDER BY title
   marks:
     sql: SELECT 'ready' AS value, 'Ready' AS label UNION ALL SELECT 'in_progress', 'Started' UNION ALL SELECT 'done', 'Finished'
 view:
@@ -46,7 +46,7 @@ view:
   actions:
   - id: add
     label: Add a wallaby
-    command: oxplow.work_item.create
+    command: oxplow.task.create
     form: true
     fields: [title, description]
     input: { title: 'Wallaby ' }
@@ -57,14 +57,14 @@ view:
     input: { label: '' }
   - id: copy
     label: Copy…
-    command: oxplow.work_item.create
+    command: oxplow.task.create
     row: true
     form: true
     fields: [title, description]
     input: { title: '{{row.title}} copy' }
   - id: rename
     label: Another…
-    command: oxplow.work_item.create
+    command: oxplow.task.create
     row: true
     form: true
     fields: [title]
@@ -72,14 +72,14 @@ view:
     when: can_rename
   - id: mark
     label: Mark
-    command: oxplow.work_item.transition
+    command: oxplow.task.transition
     row: true
     options_from: marks
     current: stage
     input: { uri: '{{row.uri}}', to: '{{option.value}}' }
   - id: remove
     label: Remove…
-    command: oxplow.work_item.delete
+    command: oxplow.task.delete
     row: true
     input: { uri: '{{row.uri}}' }
 `;
@@ -89,7 +89,7 @@ const formPage = `title: Form Wallaby
 category: Data
 loaders:
   rows:
-    sql: SELECT '' AS label, uri, title FROM v_work_item WHERE title LIKE 'Wallaby %' ORDER BY title
+    sql: SELECT '' AS label, uri, title FROM v_task WHERE title LIKE 'Wallaby %' ORDER BY title
 view:
   stack:
   - id: made
@@ -119,7 +119,7 @@ async function openPage(page: Page, daemon: Parameters<typeof installExtension>[
 }
 
 test("a row's menu opens a form, the form submits, and the page shows the result", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Wallaby one", assignee: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Wallaby one", assignee: daemon.thread });
   const host = await openPage(page, daemon);
   const row = host.getByRole("row", { name: /Wallaby one/ });
   await row.click({ button: "right" });
@@ -135,7 +135,7 @@ test("a row's menu opens a form, the form submits, and the page shows the result
 });
 
 test("a form of one text field is a prompt strip, and Enter submits it", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Wallaby two", assignee: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Wallaby two", assignee: daemon.thread });
   const host = await openPage(page, daemon);
   await host.getByRole("row", { name: /Wallaby two/ }).click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-rename").click();
@@ -148,7 +148,7 @@ test("a form of one text field is a prompt strip, and Enter submits it", async (
 });
 
 test("a command that asks is confirmed in a strip before it runs", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Wallaby three", assignee: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Wallaby three", assignee: daemon.thread });
   const host = await openPage(page, daemon);
   const row = host.getByRole("row", { name: /Wallaby three/ });
   await row.click({ button: "right" });
@@ -161,8 +161,8 @@ test("a command that asks is confirmed in a strip before it runs", async ({ page
 });
 
 test("an action whose `when` is false is not offered on that row", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Wallaby locked", assignee: daemon.thread });
-  await run(daemon, "oxplow.work_item.create", { title: "Wallaby open", assignee: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Wallaby locked", assignee: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Wallaby open", assignee: daemon.thread });
   const host = await openPage(page, daemon);
   await host.getByRole("row", { name: /Wallaby locked/ }).click({ button: "right" });
   await expect(page.getByTestId("menu-item-viz-action-copy")).toBeVisible();
@@ -204,7 +204,7 @@ test("a form node's secret field is masked, and the page never shows it", async 
 });
 
 test("an action with options is a submenu of them, the row's own checked, and the one picked runs", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Wallaby marked", assignee: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Wallaby marked", assignee: daemon.thread });
   const host = await openPage(page, daemon);
   await host.getByRole("row", { name: /Wallaby marked/ }).click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-mark").click();
@@ -215,7 +215,7 @@ test("an action with options is a submenu of them, the row's own checked, and th
   await page.getByTestId("menu-item-viz-action-mark-done").click();
   await expect
     .poll(async () => {
-      const r = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT stage FROM v_work_item WHERE title = 'Wallaby marked'" });
+      const r = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", { sql: "SELECT stage FROM v_task WHERE title = 'Wallaby marked'" });
       return r.rows[0]?.[0];
     })
     .toBe("done");

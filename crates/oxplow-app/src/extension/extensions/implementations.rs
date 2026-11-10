@@ -4,9 +4,9 @@
 //!
 //! ```yaml
 //! implementations:
-//!   - capability: work_items
+//!   - capability: task_tracker
 //!     id: oxplow
-//!     entry: oxplow:tasks
+//!     entry: oxplow:oxtask
 //! ```
 //!
 //! An entry names a built-in in core's standard library
@@ -32,7 +32,7 @@ pub struct ImplementationDecl {
     pub id: String,
     /// How a person names it; the built-in's own title when absent.
     pub title: Option<String>,
-    /// The built-in it is (`oxplow:tasks`), or the script an effort
+    /// The built-in it is (`oxplow:oxtask`), or the script an effort
     /// policy is; its features are core's to say. `None` for an AI
     /// provider, which names its kind instead.
     pub entry: Option<String>,
@@ -71,7 +71,7 @@ pub(crate) struct ImplementationFile {
     id: String,
     #[serde(default)]
     title: Option<String>,
-    /// The built-in it is (`oxplow:tasks`), or an effort policy's script.
+    /// The built-in it is (`oxplow:oxtask`), or an effort policy's script.
     #[serde(default)]
     entry: Option<String>,
     /// An `ai_provider`'s Rust kind (`anthropic`, `openai`,
@@ -590,7 +590,7 @@ mod tests {
                 "takes no `needs`",
             ),
             (
-                "  - { capability: work_items, id: acme, provider: anthropic, entry: oxplow:tasks }\n",
+                "  - { capability: task_tracker, id: acme, provider: anthropic, entry: oxplow:oxtask }\n",
                 "`provider:` names an AI provider's kind",
             ),
         ] {
@@ -650,7 +650,7 @@ mod tests {
                 "takes no `needs`",
             ),
             (
-                "  - { capability: work_items, id: acme, entry: policies/p.star }\n",
+                "  - { capability: task_tracker, id: acme, entry: policies/p.star }\n",
                 "a script implements an `effort_policy`",
             ),
         ] {
@@ -737,15 +737,15 @@ mod tests {
     #[test]
     fn a_built_in_is_declared_for_its_capability() {
         let (decls, errors) =
-            parse("  - { capability: work_items, id: oxplow, entry: oxplow:tasks }\n");
+            parse("  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask }\n");
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls,
             vec![ImplementationDecl {
-                capability: "work_items".into(),
-                id: "oxplow".into(),
+                capability: "task_tracker".into(),
+                id: "oxtask".into(),
                 title: None,
-                entry: Some("oxplow:tasks".into()),
+                entry: Some("oxplow:oxtask".into()),
                 provider: None,
                 skills: vec![],
                 config: serde_json::json!({}),
@@ -761,26 +761,26 @@ mod tests {
     #[test]
     fn an_implementation_keeps_its_description() {
         let (decls, errors) = parse(
-            "  - { capability: work_items, id: oxplow, entry: oxplow:tasks, description: \"The work list oxplow keeps.\" }\n",
+            "  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask, description: \"The task tracker oxplow keeps.\" }\n",
         );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(
             decls[0].description.as_deref(),
-            Some("The work list oxplow keeps.")
+            Some("The task tracker oxplow keeps.")
         );
     }
 
-    /// A built-in whose items' refs carry a provider (`oxplow:oxplow/work_item?id=…&provider=oxplow`)
+    /// A built-in whose items' refs carry a provider (`oxplow:oxplow/task?id=…&provider=oxtask`)
     /// is declared under that id and no other: its refs would otherwise
     /// name a list that refuses them.
     #[test]
     fn a_built_in_is_declared_under_the_provider_its_refs_carry() {
         let (decls, errors) =
-            parse("  - { capability: work_items, id: tasks, entry: oxplow:tasks }\n");
+            parse("  - { capability: task_tracker, id: tasks, entry: oxplow:oxtask }\n");
         assert!(decls.is_empty());
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].message.contains("`oxplow:tasks`") && errors[0].message.contains("`oxplow`"),
+            errors[0].message.contains("`oxplow:oxtask`") && errors[0].message.contains("`oxtask`"),
             "{}",
             errors[0].message
         );
@@ -821,19 +821,19 @@ mod tests {
                 .join("\n")
         };
         assert!(
-            errors("  - { capability: vcs, id: jj, entry: oxplow:tasks }\n")
+            errors("  - { capability: vcs, id: jj, entry: oxplow:oxtask }\n")
                 .contains("an extension implements")
         );
         assert!(
-            errors("  - { capability: work_items, id: beads, entry: oxplow:beads }\n")
+            errors("  - { capability: task_tracker, id: beads, entry: oxplow:beads }\n")
                 .contains("built-ins")
         );
         assert!(
-            errors("  - { capability: snapshots, id: x, entry: oxplow:tasks }\n")
-                .contains("implements `work_items`")
+            errors("  - { capability: snapshots, id: x, entry: oxplow:oxtask }\n")
+                .contains("implements `task_tracker`")
         );
         assert!(
-            errors("  - { capability: work_items, id: none, entry: oxplow:tasks }\n")
+            errors("  - { capability: task_tracker, id: none, entry: oxplow:oxtask }\n")
                 .contains("not `none`")
         );
         assert!(
@@ -841,11 +841,11 @@ mod tests {
                 .contains("core's own")
         );
         assert!(errors(
-            "  - { capability: work_items, id: oxplow, entry: oxplow:tasks, features: [a] }\n"
+            "  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask, features: [a] }\n"
         )
         .contains("features"));
         assert!(errors(
-            "  - { capability: work_items, id: oxplow, entry: oxplow:tasks }\n  - { capability: work_items, id: oxplow, entry: oxplow:tasks }\n"
+            "  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask }\n  - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask }\n"
         )
         .contains("twice"));
     }

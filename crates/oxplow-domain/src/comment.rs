@@ -59,7 +59,7 @@ pub struct Comment {
     /// content comment survives the thread being archived.
     pub thread_id: Option<ThreadId>,
     /// What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
-    /// a file's, a work item's) — the same the `page_ref` graph and tabs
+    /// a file's, a task's) — the same the `page_ref` graph and tabs
     /// use.
     pub target: String,
     pub quote: String,

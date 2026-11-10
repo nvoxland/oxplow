@@ -39,8 +39,8 @@ test("a task made elsewhere appears without a reload", async ({ page, daemon }) 
   await page.goto("/");
   await expandRailSection(page, "ext:oxplow/work");
   await expect(page.getByTestId("rail-section-ext:oxplow/work")).toBeVisible();
-  await waitForModels(daemon, ["v_work_item"], () =>
-    run(daemon, "oxplow.work_item.create", { title: "Made elsewhere", thread: daemon.thread }),
+  await waitForModels(daemon, ["v_task"], () =>
+    run(daemon, "oxplow.task.create", { title: "Made elsewhere", thread: daemon.thread }),
   );
   await expect(page.getByTestId("rail-section-ext:oxplow/work")).toContainText("Made elsewhere");
 });
@@ -75,9 +75,9 @@ test("the Tasks page's scope is its tab's: it re-renders the page, a reload keep
 // Tasks groups the thread's items by state; a row's menu changes one, and
 // a parent's children fold away under it.
 test("the Tasks page lists the thread's items by state, with epics that fold", async ({ page, daemon }) => {
-  const epic = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title: "The epic", thread: daemon.thread });
-  await run(daemon, "oxplow.work_item.create", { title: "Under the epic", thread: daemon.thread, parent_uri: epic.result.uri });
-  await run(daemon, "oxplow.work_item.create", { title: "Standalone", thread: daemon.thread });
+  const epic = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", { title: "The epic", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Under the epic", thread: daemon.thread, parent_uri: epic.result.uri });
+  await run(daemon, "oxplow.task.create", { title: "Standalone", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Tasks");
   const list = page.locator('[data-node="list"]');

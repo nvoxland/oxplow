@@ -1,5 +1,5 @@
 title: Waiting on Me
-description: Questions your agents are waiting on you to answer, work handed to a thread with no agent there, work items assigned to you, blocked work items, and open notes-to-self across the project.
+description: Questions your agents are waiting on you to answer, work handed to a thread with no agent there, tasks assigned to you, blocked tasks, and open notes-to-self across the project.
 icon: bell
 category: Work
 loaders:
@@ -20,10 +20,10 @@ loaders:
                          WHERE s.thread_id = h.to_thread_id AND s.closed_at IS NULL)
       UNION ALL
       SELECT 'Assigned to you', title, uri, NULL, updated_at
-      FROM v_work_item WHERE assignee = uri('oxplow/person')
+      FROM v_task WHERE assignee = uri('oxplow/person')
       UNION ALL
       SELECT 'Blocked', title, uri, NULL, updated_at
-      FROM v_work_item WHERE state = 'blocked' AND assignee IS NOT uri('oxplow/person')
+      FROM v_task WHERE state = 'blocked' AND assignee IS NOT uri('oxplow/person')
       UNION ALL
       SELECT 'Open note', coalesce(body, quote), NULL, NULL, last_activity_at
       FROM v_comment WHERE status = 'open' AND intent = 'note'

@@ -14,7 +14,7 @@ import type { CommandSpec, FormStart } from "../tauri-bridge/generated/bindings.
 afterEach(cleanup);
 
 const UPDATE = {
-  id: "oxplow.work_item.update",
+  id: "oxplow.task.update",
   input_schema: { type: "object", required: ["uri"], properties: { uri: { type: "string" }, title: { type: "string" } } },
 } as unknown as CommandSpec;
 

@@ -220,7 +220,7 @@ impl ClientHost {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TabInput {
-    /// The tab's id: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// The tab's id: a page's ref (`oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/task?id=tsk3&provider=oxtask`,
     /// `oxplow:oxplow/page?page=git-dashboard`).
     pub uri: String,
 }
@@ -260,7 +260,7 @@ pub struct OpenProjectInput {
 #[serde(deny_unknown_fields)]
 pub struct NavigateInput {
     /// What to show: a page's URI (`oxplow:oxplow/file?path=src/a.rs#lines=12`,
-    /// `oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// `oxplow:oxplow/task?id=tsk3&provider=oxtask`,
     /// `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
     /// thread's URI to select it. Its `#` is the page's view (a line, a
     /// filter): the same page in another view keeps its tab.

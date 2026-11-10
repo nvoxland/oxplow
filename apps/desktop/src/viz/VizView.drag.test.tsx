@@ -33,10 +33,10 @@ afterEach(() => {
 });
 
 const action = (over: Partial<PageAction>): PageAction =>
-  ({ id: "x", label: "X", command: "oxplow.work_item.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as PageAction;
+  ({ id: "x", label: "X", command: "oxplow.task.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as PageAction;
 
 const move = action({ id: "move", label: "Move", drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } });
-const reorder = action({ id: "reorder", label: "Reorder", command: "oxplow.work_item.reorder", drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } });
+const reorder = action({ id: "reorder", label: "Reorder", command: "oxplow.task.reorder", drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } });
 const finish = action({ id: "finish", label: "Finish", bulk: true, key: "f", input: { uri: "{{row.uri}}", to: "done" } });
 
 const base = {
@@ -216,7 +216,7 @@ test("a right-click on a board card's title link opens the card's menu, not its 
   });
   const withUris = {
     ...run,
-    result: { ...run.result, rows: rows.map(([, title, state], i) => [`oxplow:oxplow/work_item?id=tsk${i + 1}&provider=oxplow`, title, state]) },
+    result: { ...run.result, rows: rows.map(([, title, state], i) => [`oxplow:oxplow/task?id=tsk${i + 1}&provider=oxtask`, title, state]) },
   } as VizRun;
   const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;
   const view = render(

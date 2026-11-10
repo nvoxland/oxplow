@@ -1,10 +1,10 @@
 title: Task List
-description: "The work list's items in one of its stages, whoever they're assigned to, with epics over their children, the finished ones latest first, and a quick add."
+description: "The task tracker's items in one of its stages, whoever they're assigned to, with epics over their children, the finished ones latest first, and a quick add."
 icon: check-square
 category: Work
-keywords: work items list backlog history done finished in progress
+keywords: tasks list backlog history done finished in progress
 needs:
-- work_items
+- task_tracker
 params:
 # One of the list's stages, as it names them; `todo` is its first to-do
 # stage (a bucket names its first stage).
@@ -32,18 +32,18 @@ params:
 # The stream whose threads Assign to offers.
 - name: stream_id
 answers:
-- {"question":"What work is in progress?","params":{"state":"in_progress"},"skill":"work-items"}
-- {"question":"What is in the backlog?","params":{"state":"backlog"},"skill":"work-items"}
-- {"question":"What is ready to work on?","params":{"state":"todo"},"skill":"work-items"}
-- {"question":"What has been finished lately?","params":{"state":"done"},"skill":"work-items"}
+- {"question":"What work is in progress?","params":{"state":"in_progress"},"skill":"tasks"}
+- {"question":"What is in the backlog?","params":{"state":"backlog"},"skill":"tasks"}
+- {"question":"What is ready to work on?","params":{"state":"todo"},"skill":"tasks"}
+- {"question":"What has been finished lately?","params":{"state":"done"},"skill":"tasks"}
 loaders:
   # The form a new item is filed with.
   row:
     sql: SELECT uri('oxplow/page', 'page', 'new-task') AS new_task
   # The list's stages: the State filter's options, and Mark's.
   stages:
-    page: oxplow/work-item-stages
-    loader: work_item_stages
+    page: oxplow/task-stages
+    loader: task_stages
   state_options:
     sql: SELECT filter AS value, label FROM stages ORDER BY ord
   marks:
@@ -64,7 +64,7 @@ loaders:
                         WHERE (s.filter = :state OR s.value = :state) AND s.bucket IN ('backlog', 'todo', 'blocked')),
                       'todo') AS stage
   items:
-    page: oxplow/work-items
+    page: oxplow/task-rows
     loader: items
     params:
       show: all
@@ -83,16 +83,16 @@ actions:
 # The quick add sits in the rail (Details), above the filters.
 rail:
   id: add
-  title: New item
+  title: New task
   from: new_item
   viz: form
   form:
-    command: oxplow.work_item.create
+    command: oxplow.task.create
     then: stay
     fields: [title]
 view:
   id: list
-  replaceable: work_item.list
+  replaceable: task.list
   title: Task List
   from: list
   viz: list
@@ -101,7 +101,7 @@ view:
   edge: prio_tone
   columns:
   - key: title
-    label: Item
+    label: Task
     link:
       kind: page
       from: uri
@@ -113,11 +113,11 @@ view:
   - key: closed_at
     label: Closed
     format: relative
-  empty: Nothing here in this stage. Add one under New item.
+  empty: Nothing here in this stage. Add one under New task.
   actions:
   - id: reorder
     label: Reorder
-    command: oxplow.work_item.reorder
+    command: oxplow.task.reorder
     row: true
     drag: true
     input:
@@ -125,7 +125,7 @@ view:
       before: '{{before.uri}}'
   - id: nest
     label: Nest under
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     row: true
     drag: true
     when: can_nest
@@ -135,7 +135,7 @@ view:
   # Mark ▸ the list's stages, the row's own checked.
   - id: mark
     label: Mark
-    command: oxplow.work_item.transition
+    command: oxplow.task.transition
     row: true
     bulk: true
     options_from: marks
@@ -145,7 +145,7 @@ view:
       to: '{{option.value}}'
   - id: priority-urgent
     label: Priority Urgent
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     row: true
     bulk: true
     when: can_prioritize
@@ -155,7 +155,7 @@ view:
         priority: urgent
   - id: priority-high
     label: Priority High
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     row: true
     bulk: true
     when: can_prioritize
@@ -165,7 +165,7 @@ view:
         priority: high
   - id: priority-medium
     label: Priority Medium
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     row: true
     bulk: true
     when: can_prioritize
@@ -175,7 +175,7 @@ view:
         priority: medium
   - id: priority-low
     label: Priority Low
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     row: true
     bulk: true
     when: can_prioritize
@@ -185,7 +185,7 @@ view:
         priority: low
   - id: unparent
     label: Make top-level
-    command: oxplow.work_item.update
+    command: oxplow.task.update
     row: true
     bulk: true
     when: has_parent
@@ -195,7 +195,7 @@ view:
   # Assign to ▸ the stream's threads and you; a closed item is nobody's.
   - id: assign
     label: Assign to
-    command: oxplow.work_item.assign
+    command: oxplow.task.assign
     row: true
     bulk: true
     when: is_open
@@ -206,7 +206,7 @@ view:
       to: '{{option.value}}'
   - id: unassign
     label: Unassign
-    command: oxplow.work_item.assign
+    command: oxplow.task.assign
     row: true
     bulk: true
     when: assigned
@@ -215,7 +215,7 @@ view:
       to: null
   - id: delete
     label: Delete
-    command: oxplow.work_item.delete
+    command: oxplow.task.delete
     row: true
     bulk: true
     when: can_delete

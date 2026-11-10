@@ -1,9 +1,9 @@
 # Cancelled while the model writes: the job ends cancelled, and the comment
-# on the work item keeps what it had and says so.
+# on the task keeps what it had and says so.
 when:
   setup:
-    - { command: oxplow.work_item.create, input: { title: Parse blocks } }
-    - { command: oxplow.effort.open, input: { thread: thr1, work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }
+    - { command: oxplow.task.create, input: { title: Parse blocks } }
+    - { command: oxplow.effort.open, input: { thread: thr1, task: "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }
     - { command: oxplow.effort.close, input: { effort: "eff1" } }
   job: review
   intentKey: "review:eff1"
@@ -17,7 +17,7 @@ expect:
   state: cancelled
   effects: { contains: [{ id: effort_review/publish-review, state: ok }] }
 steps:
-  - when: { sql: "SELECT body FROM v_work_item_comment WHERE body LIKE '**Review of eff1**%The review was cancelled after%'" }
+  - when: { sql: "SELECT body FROM v_task_comment WHERE body LIKE '**Review of eff1**%The review was cancelled after%'" }
     expect: { rows: 1 }
 model:
   replies:

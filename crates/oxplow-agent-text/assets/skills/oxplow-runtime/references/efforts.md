@@ -3,13 +3,12 @@
 ## Correcting an effort
 
 - `oxplow.effort.update { effort, title }`: rename it.
-- `oxplow.effort.link { effort | thread, work_item }`: link it to a work
-  item, or unlink it (`null`).
+- `oxplow.effort.link { effort | thread, task }`: link it to a task, or unlink it (`null`).
 - `oxplow.effort.close { effort | thread }` / `oxplow.effort.open { title?,
-  work_item? }`: split work oxplow grouped together.
+  task? }`: split work oxplow grouped together.
 - `oxplow.effort.report { summary?, impacts? }`: other words than your last
   answer, or outcomes beyond edits. Each impact is `{ kind, id, action? }`,
-  where `kind` is `wiki`, `work_item` (its URI, or its id as the work list
+  where `kind` is `wiki`, `task` (its URI, or its id as the task tracker
   writes it), `git_commit`, `file` or `directory`. The result's
   `link_warnings` flags `[[…]]` links that don't resolve.
 
@@ -24,7 +23,7 @@ file is the project's shared config.
 
 ## Reading work
 
-Efforts are `v_effort` (`id`, `work_item`, `thread_id`, `title`,
+Efforts are `v_effort` (`id`, `task`, `thread_id`, `title`,
 `started_at`, `ended_at`, `closed_by`, `summary`), their files
 `v_effort_file`. For one effort, `oxplow_run_page { page: effort-files, params: { effort } }`
 lists its files and `oxplow_effort_summary { effort }` gives its title, item, files,
@@ -44,6 +43,6 @@ In SQL the same history is `v_agent_session` (the slots opened on a
 thread), `v_agent_session_status` (each open session's last status),
 `v_agent_turn` (each prompt and answer), `v_tool_call` and `v_subagent`.
 An effort's evidence is `v_effort_observation`, its claims `v_claim`, its decisions
-`v_decision`, and its work item a `v_work_item` row.
+`v_decision`, and its task a `v_task` row.
 A session whose process ended is opened again with
 `oxplow.agent_session.reopen { session }`; the transcript page offers it.

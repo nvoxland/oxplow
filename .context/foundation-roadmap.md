@@ -59,7 +59,7 @@ The host must provide the common infrastructure and enforce authority.
    does not prove its input collection is complete or current.
 6. **Keep the understanding model open.** Preserve entities, measures,
    dimensions and reference links as reusable data. Do not make custom
-   views depend on adopting oxplow's task provider or code-centric UI.
+   views depend on adopting oxtask or code-centric UI.
 7. **Move optional opinions into extensions.** Core owns evidence,
    analysis mechanisms, host guarantees and safe operations. A particular
    inference prompt, repair-task response, review threshold or workflow
@@ -123,7 +123,7 @@ verify the required boundary.
 Seven epics contain 27 child tasks. Four existing backlog tasks are
 expanded and reparented, preserving their original requests. The
 completed documentation task is recorded under the contracts epic.
-Work-item dependency links express the task graph; the entire epic list
+Task dependency links express the task graph; the entire epic list
 is not a single serial queue.
 
 | Stage | Deliverable and work that can proceed |
@@ -167,7 +167,7 @@ completion.
 
 ## Epics and implementation tasks
 
-The details below mirror the work-item backlog by title. Repository docs
+The details below mirror the task backlog by title. Repository docs
 intentionally omit local task IDs. Dependencies identify prerequisite
 work by title, so this plan is usable outside this project's database.
 
@@ -635,22 +635,22 @@ Starting points: `crates/oxplow-app/src/inferred_decisions.rs`, `crates/oxplow-a
 
 Prerequisites: Provide durable cancellable extension jobs outside database transactions; Add extension AI profiles with compatible high-level helpers; Use one versioned event envelope across runtime and authoring.
 
-#### Extract work-item repair response from core contribution health
+#### Extract task repair response from core contribution health
 
 Status: done. Core keeps detection and the health report; the bundled
 effect `oxplow/repair-disabled` files (or comments on) the repair
-item through `oxplow.work_item.create` / `comment` on the active work list,
+item through `oxplow.task.create` / `comment` on the active task tracker,
 deduplicating by the open item's `Repair <extension> <contribution>:` title
-prefix (no stable work-item key exists yet). An
+prefix (no stable task key exists yet). An
 effect whose event carries no thread is an anchorless effect (no thread
 gate). `contribution_repair.rs`, the `contribution.repair` consumer and
 `contribution_health.repair_item`/`repair_seq` are gone (V58).
 
-Scope: Keep core contribution validation and health reporting, but move automatic repair-task creation and its wording/deduplication policy into a bundled effect. Use the public event envelope, command bus and selected work-list provider.
+Scope: Keep core contribution validation and health reporting, but move automatic repair-task creation and its wording/deduplication policy into a bundled effect. Use the public event envelope, command bus and selected task tracker.
 
-Acceptance: Core detects/report errors even when no work list or repair policy is enabled. The selected extension can create or link repair items using any compatible provider, without directly reading task tables. Repeated failures deduplicate by stable cause/contribution identity; disabling the policy prevents new repair items.
+Acceptance: Core detects/report errors even when no task tracker or repair policy is enabled. The selected extension can create or link repair items using any compatible provider, without directly reading task tables. Repeated failures deduplicate by stable cause/contribution identity; disabling the policy prevents new repair items.
 
-Validation: Exercise healthy/failing contributions, repeated events, no work list, a fake alternate provider, disabled policy and recovered contribution. Verify audit and links.
+Validation: Exercise healthy/failing contributions, repeated events, no task tracker, a fake alternate provider, disabled policy and recovered contribution. Verify audit and links.
 
 Starting points: `crates/oxplow-app/src/contribution_repair.rs`, `crates/oxplow-app/src/extension/extension_catalog.rs`, `.oxplow/extensions/oxplow-bundled-todo/extension.yaml`, `crates/oxplow-app/src/commands`.
 
@@ -699,9 +699,9 @@ Prerequisites: Stage and activate one coherent extension generation; Enforce sco
 
 #### Provide provider-independent custom views, forms and workflow UI
 
-Status: in progress. The Board, the Tasks list and a work item's editor
+Status: in progress. The Board, the Tasks list and a task's editor
 are unbound replacement targets any extension may replace with no
-provider (`work_item.board`, `work_item.list`, `work_item.detail`); only
+provider (`task.board`, `task.list`, `task.detail`); only
 the state control stays bound to its item's provider. Contracts are
 versioned, published as `v_replaceable` and generated into the
 reference. The person picks whose view shows (`replacements`, Settings →
@@ -712,7 +712,7 @@ protocol 4). The triage example keeps workflow decisions in private
 state through its own commands. Still to do: the task-views example and
 its browser spec. See [extensions-slots.md](./extensions-slots.md) "Replacements".
 
-Scope: Expand the existing task-screen follow-up into general presentation primitives: detail/list/board mounting, forms, editing, reorder and navigation over references and host actions. Decouple choosing a presentation from installing a work-list provider. Integrate durable state/config instead of making authors impersonate a provider.
+Scope: Expand the existing task-screen follow-up into general presentation primitives: detail/list/board mounting, forms, editing, reorder and navigation over references and host actions. Decouple choosing a presentation from installing a task tracker. Integrate durable state/config instead of making authors impersonate a provider.
 
 Acceptance: A custom task view works with the existing provider, and a non-task triage view can persist workflow state. Commands, link navigation, accessibility and validation use shared primitives. Default core inspection remains reachable. Public mount/props contracts are discoverable and versioned; the scope is a useful set of mounts, not arbitrary replacement of every app surface.
 
@@ -770,7 +770,7 @@ Status: done. Three trials, tested through public commands and the SDK
 only (`examples/extensions/README.md` lists them, the tests and the
 friction found): effort-review (a job started by an effect on
 `effort.finished`, its tool reading an effort's evidence, streamed,
-cancelled through `oxplow.job.cancel`, commented on the work item and
+cancelled through `oxplow.job.cancel`, commented on the task and
 exported as a dataset); triage's workflow state surviving restart
 and an edited bundle (`crates/oxplow-sdk/tests/trials.rs`, the
 browser spec); review-badges importing effort-review's dataset and

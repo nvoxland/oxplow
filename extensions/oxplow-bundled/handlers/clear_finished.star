@@ -1,4 +1,4 @@
-# oxplow.work.clear_finished { thread_id }: the person cleared the
+# oxplow.tasks.clear_finished { thread_id }: the person cleared the
 # thread's Finished list in the Work panel. Recorded as an event whose
 # subject names the thread; `finished_cleared` reads the latest per thread,
 # and the panel leaves out what finished before it.
@@ -7,6 +7,6 @@ def transform(x):
     thread = uri.build("oxplow/thread", id = "thr%s" % x["input"]["thread_id"])
     return {
         "commands": [],
-        "events": [{"type": "oxplow.work.finished_cleared", "subject": [thread], "payload": {}}],
+        "events": [{"type": "oxplow.tasks.finished_cleared", "subject": [thread], "payload": {}}],
         "result": {"thread": thread},
     }

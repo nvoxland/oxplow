@@ -92,15 +92,15 @@ was a read/append race: advancing to the latest Main message could skip a peer
 reply posted in between. If such a mailbox is reused, track and acknowledge
 peer message UUIDs individually. A file does not wake an idle session.
 
-### oxplow-dev: tasks and the wiki while the work list is none
+### oxplow-dev: tasks and the wiki while the task tracker is none
 
-The work list, effort policy, snapshots and wiki are `oxplow-foundation`'s
+The task tracker, effort policy, snapshots and wiki are `oxplow-foundation`'s
 defaults, so disabling `oxplow-bundled` (`disableExtensions: [oxplow-bundled]`
 in `.oxplow/personal.yaml`, never committed) no longer removes them. A
-project that chose no work list (Settings → Capabilities) has none:
-`work_item.*` is refused and the task tools are hidden. The
+project that chose no task tracker (Settings → Capabilities) has none:
+`task.*` is refused and the task tools are hidden. The
 development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
-bundled) keeps oxplow's own tasks usable meanwhile:
+bundled) keeps oxtask usable meanwhile:
 
 ```
 cargo run -q -p oxplow-dev -- task list [--all]
@@ -166,7 +166,7 @@ index). `wiki note` needs a thread (`--thread` or `$OXPLOW_THREAD_ID`).
 is opened; an option a command doesn't take is refused (both used to
 become a task's title — tasks named `--help`).
 
-It runs the task system's own `work_item.*` commands on a command bus
+It runs the task system's own `task.*` commands on a command bus
 over the project's database (validation, audit and events as the app
 writes them; the acting thread is `$OXPLOW_THREAD_ID` or `--thread`), on
 a bus that checks nothing active. So it's the same tasks, and
@@ -174,8 +174,8 @@ re-enabling the extension shows everything done meanwhile. The database
 is opened as it is (`Database::open_existing`: no migrating, no dataset
 recompile under the running app; refused at another schema version).
 The running app picks up the new events with its next pump pass; with
-the work list none, no effort policy reacts to them. Its reads (`list`,
-`show`) are oxplow's `task` table itself, not the work-item interface
+the task tracker none, no effort policy reacts to them. Its reads (`list`,
+`show`) are oxplow's `task` table itself, not the task interface
 (which shows only the active list's items) — the one reader of oxplow's
 tables outside its implementation, on purpose.
 
@@ -196,9 +196,9 @@ The backend is Rust; the desktop frontend is React/Monaco/xterm.
   Building oxplow needs bun, as its extension builds use it.
 - `crates/` — reusable Rust libraries. `oxplow-domain` (pure types +
   store traits), `oxplow-db` (rusqlite stores + migrations),
-  `oxplow-tasks` (oxplow's own task list, one implementation of the
-  work-item interface: its store, service and status mapping; nothing
-  outside it names them — `.context/work-items.md`),
+  `oxplow-oxtask` (oxtask, one implementation of the
+  task interface: its store, service and status mapping; nothing
+  outside it names them — `.context/tasks.md`),
   `oxplow-config`, `oxplow-fs-watch`, `oxplow-git`, `oxplow-session`,
   `oxplow-runtime` (the write guard),
   `oxplow-pty`, `oxplow-lsp`, `oxplow-mcp`,
@@ -292,7 +292,7 @@ datasets, a custom component's own code (`ui:` steps, "Testing a
 component"). Never a new Rust test: Rust tests are for core. A
 fixture runs on a throwaway oxplow — this build's schema, only the data
 it makes, only the extensions its own declares (a fixture's `requires:`
-adds more, e.g. `oxplow-bundled` for oxplow's work list) — never the
+adds more, e.g. `oxplow-bundled` for the review pages) — never the
 project's database. `ui:` steps need the app built once (`bun run build:dev`).
 **Every script run needs `target/debug/oxplow-script-worker`** (beside the
 executable that runs it). `cargo run -p oxplow-dev` builds only
@@ -342,7 +342,7 @@ before the first generation.)
 **An effort needs no task, and neither does its fixture.**
 `test_fixtures::services_with_effort()` opens an effort linked to nothing
 (through `oxplow.effort.open`, so its event is logged like a real one); a test
-about oxplow's tasks takes `services_with_task_effort()` instead (an
+about oxtask takes `services_with_task_effort()` instead (an
 in-progress task, the effort linked to it; it derefs to the plain
 fixture, so helpers take either). Reach for the task one only when the
 test reads or relies on the task.
@@ -352,7 +352,7 @@ test reads or relies on the task.
 `tests-e2e/` drives the built frontend in Chromium (and, for custom
 components, WebKit) against `oxplow-daemon-sim` over a throwaway git
 project — the real app, a real daemon, the fake terminal harness and the fake
-work-item provider; `tests-e2e/README.md` has the harness. It isn't part
+task tracker; `tests-e2e/README.md` has the harness. It isn't part
 of `test:collect` (it builds the frontend and boots a daemon per test,
 ~70 s); CI runs it as its own `e2e` job, where a spec that passes only on
 its retry fails the run. Each checkout serves on a port of its

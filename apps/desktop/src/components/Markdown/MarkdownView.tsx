@@ -10,9 +10,9 @@ import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { WORKING } from "../../revision.js";
 import { useWikiRef } from "../../wikiTitleCache.js";
-import { useWorkItemRef } from "../../workItemTitleCache.js";
-import { useWorkListProfile } from "../../useWorkListProfile.js";
-import { workItemRefOfMention } from "../../workItems.js";
+import { useTaskRef } from "../../taskTitleCache.js";
+import { useTaskTrackerProfile } from "../../useTaskTrackerProfile.js";
+import { taskRefOfMention } from "../../tasks.js";
 import { useExtensionRefTitle, useResources } from "../../resources.js";
 import { parseMarkdownLink, parsedLinkIconKind, preprocessWikilinks, refLinkNames, refLinkTitle, urlTransform, type RefLinkNames } from "./markdownLinks.js";
 import { attachPanZoom, loadMermaid } from "./mermaidRender.js";
@@ -47,7 +47,7 @@ function WikiLinkSpan({
   items: MenuItem[];
   iconKind: string | null;
   internalSlug: string | null;
-  /** A work item's ref. */
+  /** A task's ref. */
   itemRef: string | null;
   /** A ref of an extension's kind: titled from its kind's dataset. */
   extensionRef: string | null;
@@ -90,7 +90,7 @@ function WikiLinkSpan({
  */
 export function useRefLinkTitle(names: RefLinkNames, text: string): { title: string | null; brokenReason: string | null } {
   const wiki = useWikiRef(names.internalSlug);
-  const item = useWorkItemRef(names.itemRef);
+  const item = useTaskRef(names.itemRef);
   const extensionTitle = useExtensionRefTitle(names.extensionRef);
   return refLinkTitle(names, text, { wiki, item, extensionTitle });
 }
@@ -191,10 +191,10 @@ export interface MarkdownViewProps {
 export function MarkdownView({ body, base = null, maxHeight, style, className, inline = false, testId }: MarkdownViewProps) {
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
-  // …and the active work list's ids do too.
-  const profile = useWorkListProfile();
+  // …and the active task tracker's ids do too.
+  const profile = useTaskTrackerProfile();
   const processedBody = useMemo(
-    () => preprocessWikilinks(body, (id) => workItemRefOfMention(profile, id)),
+    () => preprocessWikilinks(body, (id) => taskRefOfMention(profile, id)),
     [body, refKinds, profile],
   );
   const ref = useRef<HTMLDivElement & HTMLSpanElement>(null);

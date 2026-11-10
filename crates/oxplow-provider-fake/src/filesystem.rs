@@ -34,7 +34,7 @@ pub(crate) struct Files(BTreeMap<String, Vec<u8>>);
 
 /// What it declares in filesystem mode: the `filesystem` capability and
 /// its verbs (`write` only with `writable`), no event types, no
-/// collectors; the same config as its work list.
+/// collectors; the same config as its task tracker.
 pub fn declarations(writable: bool) -> InitializeResult {
     let path = json!({ "type": "string" });
     let rev = json!({ "type": "string" });

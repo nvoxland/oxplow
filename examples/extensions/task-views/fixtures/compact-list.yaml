@@ -1,4 +1,4 @@
-# The list reads v_work_item; a fresh project has no items yet.
+# The list reads v_task; a fresh project has no items yet.
 when:
   part: compact-list
   params: { scope: all }

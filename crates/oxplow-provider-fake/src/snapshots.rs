@@ -29,7 +29,7 @@ pub(crate) struct Marks(BTreeMap<String, Tree>);
 
 /// What it declares in snapshots mode: the `snapshots` capability and its
 /// verbs (`read_at` only with `contents`), no event types, no collectors;
-/// the same config as its work list.
+/// the same config as its task tracker.
 pub fn declarations(contents: bool) -> InitializeResult {
     let handle = json!({ "type": ["string", "null"] });
     let mut commands = vec![

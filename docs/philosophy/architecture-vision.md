@@ -79,7 +79,7 @@ extracts a decision, or how a result is displayed should be replaceable.
 ## Current shape and future direction
 
 Today the product has isolated worktree streams; threads with agent
-sessions; turn/tool-call recording; optional effort and work-item
+sessions; turn/tool-call recording; optional effort and task
 integration; snapshots; a semantic SQL layer; metrics and dimensions;
 declarative extensions; and code drill-down. A desktop shell connects to
 a per-project Rust daemon with SQLite state and an event log.

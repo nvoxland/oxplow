@@ -42,22 +42,18 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     let fx = services_with_task_effort().await;
     let root = fx.svc.layout.project_dir.clone();
     let commands = [
-        (
-            "items",
-            "sql.read:v_work_item",
-            "SELECT uri FROM v_work_item",
-        ),
-        ("efforts", "sql.read:v_work_item", "SELECT id FROM v_effort"),
+        ("items", "sql.read:v_task", "SELECT uri FROM v_task"),
+        ("efforts", "sql.read:v_task", "SELECT id FROM v_effort"),
         ("any", "sql.read", "SELECT id FROM v_effort"),
         (
             "derived",
-            "sql.read:v_work_item",
+            "sql.read:v_task",
             "SELECT id FROM v_acme_efforts",
         ),
         (
             "joined",
-            "sql.read:v_work_item",
-            "SELECT w.uri FROM v_work_item w, v_effort e",
+            "sql.read:v_task",
+            "SELECT w.uri FROM v_task w, v_effort e",
         ),
         (
             "ownlineage",
@@ -66,7 +62,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         ),
         (
             "both",
-            "sql.read:v_acme_mine, sql.read:v_work_item",
+            "sql.read:v_acme_mine, sql.read:v_task",
             "SELECT uri FROM v_acme_mine",
         ),
         ("anyderived", "sql.read", "SELECT id FROM v_acme_efforts"),
@@ -90,7 +86,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     write(
         &root,
         ".oxplow/extensions/acme/datasets/mine.sql",
-        "SELECT uri FROM ref('work_item')",
+        "SELECT uri FROM ref('task')",
     );
     for (name, _, sql) in commands {
         write(
@@ -128,7 +124,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         ("efforts", "v_effort"),
         ("joined", "v_effort"),
         ("derived", "v_effort"),
-        ("ownlineage", "v_work_item"),
+        ("ownlineage", "v_task"),
     ] {
         let error = run(&fx, &format!("acme.read.{name}"))
             .await
@@ -492,7 +488,7 @@ mod program_collectors {
 async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_permission() {
     let fx = services_with_task_effort().await;
     let root = fx.svc.layout.project_dir.clone();
-    let item = oxplow_tasks::work_item_ref(fx.task);
+    let item = oxplow_oxtask::task_ref(fx.task);
     let manifest = |permissions: &str| {
         format!(
             "manifest: 2\nname: acme\nintent:\n  purpose: p\n{permissions}commands:\n  - name: notes.add\n    summary: Comments.\n    input_schema: {{ type: object }}\n    entry: note.star\n"
@@ -502,7 +498,7 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
         &root,
         ".oxplow/extensions/acme/note.star",
         &format!(
-            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.comment\", \"input\": {{\"uri\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
+            "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.task.comment\", \"input\": {{\"uri\": \"{item}\", \"body\": \"noted\"}}}}]}}\n"
         ),
     );
     write(
@@ -516,14 +512,14 @@ async fn a_script_composing_a_command_outside_its_namespace_needs_the_commands_p
         .expect_err("outside its namespace");
     let message = format!("{refused:?}");
     assert!(
-        message.contains("commands:oxplow.work_item.comment"),
+        message.contains("commands:oxplow.task.comment"),
         "{message}"
     );
 
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
-        &manifest("permissions: [commands:oxplow.work_item.*]\n"),
+        &manifest("permissions: [commands:oxplow.task.*]\n"),
     );
     crate::test_fixtures::activate(&fx.svc).await;
     run(&fx, "acme.notes.add")

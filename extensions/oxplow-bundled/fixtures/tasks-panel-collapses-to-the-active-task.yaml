@@ -1,0 +1,23 @@
+# The rail's Work panel run whole: the body groups the thread's work, the
+# collapsed line is its open effort, and the header has no count.
+given:
+  - { command: oxplow.task.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
+  - { command: oxplow.effort.open, input: { thread: thr1, task: $shipped.uri } }
+  - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done } }
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
+when: { panel: tasks }
+expect:
+  body:
+    loaders:
+      work:
+        rows:
+          - { grp: In progress, title: Untitled effort }
+          - { grp: Up next, title: Next up }
+          - { grp: Finished, title: Shipped }
+  collapsed:
+    loaders:
+      tasks_line:
+        rows:
+          - { title: Untitled effort, active: 1 }
+  count: null

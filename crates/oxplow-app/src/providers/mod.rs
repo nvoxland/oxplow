@@ -6,7 +6,7 @@
 //! - [`registry`] — the instances (`Services.providers`): reconciling
 //!   them with `extensionInstances`, their bus commands, health, restart
 //!   with backoff and automatic disable;
-//! - [`work_items`] — `ExternalWorkItems`, the work-items capability over
+//! - [`tasks`] — `ExternalTaskTracker`, the task tracker capability over
 //!   an instance;
 //! - [`effort_policy`] — `ExternalEffortPolicy`, the effort policy over an
 //!   instance;
@@ -24,7 +24,7 @@ pub mod registry;
 pub mod snapshots;
 pub mod spec;
 pub mod sync;
-pub mod work_items;
+pub mod tasks;
 
 #[cfg(test)]
 mod tests;

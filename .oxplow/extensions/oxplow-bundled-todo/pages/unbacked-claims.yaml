@@ -7,7 +7,7 @@ params:
 loaders:
   unbacked_claims:
     sql: |
-      SELECT c.statement, c.kind, t.title AS thread, c.work_item, c.created_at
+      SELECT c.statement, c.kind, t.title AS thread, c.task, c.created_at
       FROM v_claim c
       JOIN v_thread t ON t.id = c.thread_id
       JOIN v_oxplow_claim_status s ON s.uri = c.uri
@@ -22,7 +22,7 @@ view:
     label: Claim
     link:
       kind: page
-      from: work_item
+      from: task
   - key: kind
     label: Kind
   - key: thread

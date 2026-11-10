@@ -2,8 +2,8 @@
 # unreviewed; forced, it closes the item and leaves one review comment
 # that lists what was accepted unchecked.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -22,14 +22,14 @@ expect:
   ok: false
   refused: 1 unverified claim and 1 inferred decision
 steps:
-  - when: { sql: "SELECT w.state, c.body FROM v_work_item w LEFT JOIN v_work_item_comment c ON c.uri = w.uri" }
+  - when: { sql: "SELECT w.state, c.body FROM v_task w LEFT JOIN v_task_comment c ON c.uri = w.uri" }
     expect: { rows: [{ state: in_progress, body: null }] }
   - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
     expect:
       ok: true
       # It ends the effort, and its follow-up item is filed for what was accepted unchecked.
-      commands: [oxplow.work_item.comment, oxplow.work_item.transition, oxplow.effort.close, oxplow.work_item.create]
-  - when: { sql: "SELECT w.state, c.body FROM v_work_item w LEFT JOIN v_work_item_comment c ON c.uri = w.uri" }
+      commands: [oxplow.task.comment, oxplow.task.transition, oxplow.effort.close, oxplow.task.create]
+  - when: { sql: "SELECT w.state, c.body FROM v_task w LEFT JOIN v_task_comment c ON c.uri = w.uri" }
     expect:
       rows:
         - state: done

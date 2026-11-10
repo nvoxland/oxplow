@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn a_scope_not_declared_or_not_known_is_refused_uncounted() {
         let (none, run, mut asked) = (
-            needs(&["work_items"]),
+            needs(&["task_tracker"]),
             crate::run_context::for_dry_run(),
             vec![],
         );

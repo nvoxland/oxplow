@@ -56,16 +56,16 @@ own questions and share its extension files with your team. See
 
 ## Task
 
-A **task** is an optional durable work item. Each work list declares its
+A **task** is an optional durable record of work. Each task tracker declares its
 own stages, and puts each one in a bucket oxplow understands: `backlog`,
 `todo`, `in_progress`, `blocked`, `done`, or `canceled`. The screens show
 the list's stages; oxplow acts on the buckets. Tasks can form epics and dependency
 links. Creating or closing a task is not a prerequisite for editing or
 ending an agent turn.
 
-The active work-list provider supplies tasks. A project can use oxplow's
-implementation, another provider, or none. See
-[Work queue](../guide/work-queue.md).
+The active task tracker supplies tasks. A project can use oxtask,
+another task tracker, or none. See
+[Tasks](../guide/tasks.md).
 
 ## Wiki page
 

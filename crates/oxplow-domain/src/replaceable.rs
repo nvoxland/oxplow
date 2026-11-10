@@ -19,7 +19,7 @@ pub struct Replaceable {
     /// The capability it belongs to.
     pub capability: &'static str,
     /// Whether only the extension of a provider of `capability` may
-    /// replace it — the provider of the thing it shows (a work item's),
+    /// replace it — the provider of the thing it shows (a task's),
     /// else the capability's **active** one. An unbound target may be
     /// replaced by any extension; the person chooses among several
     /// (`replacements:`).
@@ -161,17 +161,17 @@ mod tests {
             assert!(!r.props.is_empty(), "{}", r.target);
             assert!(!r.props.contains(&"stream_id"), "{}", r.target);
             // A target is named for what its capability is about:
-            // `work_item.*` for `work_items`, `effort.*` for
+            // `task.*` for `task_tracker`, `effort.*` for
             // `effort_policy`, `vcs.*` for `vcs`.
             let noun = r.target.split('.').next().unwrap_or_default();
             assert!(r.capability.starts_with(noun), "{}", r.target);
         }
         assert_eq!(
-            replaceable("work_item.board").map(|r| r.bound_to_provider),
+            replaceable("task.board").map(|r| r.bound_to_provider),
             Some(false)
         );
         assert_eq!(
-            replaceable("work_item.detail.state").map(|r| r.bound_to_provider),
+            replaceable("task.detail.state").map(|r| r.bound_to_provider),
             Some(true)
         );
         assert_eq!(
@@ -195,7 +195,7 @@ mod tests {
             Some((2, &["q", "author", "branch"][..]))
         );
         assert_eq!(
-            replaceable("work_item.board").map(|r| r.view),
+            replaceable("task.board").map(|r| r.view),
             Some(&["show", "priority", "q"][..])
         );
     }

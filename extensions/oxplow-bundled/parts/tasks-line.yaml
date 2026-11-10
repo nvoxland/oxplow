@@ -1,0 +1,28 @@
+title: Tasks (collapsed)
+description: The thread's work in one glance — the item in progress (with its epic), or else what finished last.
+params:
+- name: thread_id
+  label: Thread
+loaders:
+  tasks_line:
+    sql: |
+      SELECT title, icon, uri, depth, active
+      FROM v_oxplow_thread_tasks w
+      WHERE thread_id = :thread_id
+        AND (grp = 'In progress'
+             OR (grp = 'Finished' AND ord = 1
+                 AND NOT EXISTS (SELECT 1 FROM v_oxplow_thread_tasks x
+                                 WHERE x.thread_id = :thread_id AND x.grp = 'In progress')))
+      ORDER BY g, ord
+view:
+  from: tasks_line
+  viz: list
+  depth: depth
+  columns:
+  - key: title
+    label: Task
+    icon: icon
+    link:
+      kind: page
+      from: uri
+  empty: No active work

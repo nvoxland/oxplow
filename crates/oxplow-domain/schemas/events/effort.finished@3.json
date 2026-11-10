@@ -15,8 +15,8 @@
         "null"
       ]
     },
-    "work_item": {
-      "description": "The linked work item, when there is one.",
+    "task": {
+      "description": "The linked task, when there is one.",
       "type": [
         "string",
         "null"

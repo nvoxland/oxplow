@@ -94,9 +94,7 @@ async fn comments_survive_and_a_permission_joins_the_existing_line() {
     let after = manifest(root, "base");
     assert!(after.contains("# keep this note\n"), "{after}");
     assert!(
-        after.contains(
-            "permissions: [sql.read, commands:oxplow.work_item.comment] # and this one\n"
-        ),
+        after.contains("permissions: [sql.read, commands:oxplow.task.comment] # and this one\n"),
         "{after}"
     );
     checked(root, "base").await;

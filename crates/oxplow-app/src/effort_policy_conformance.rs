@@ -1,6 +1,6 @@
 //! The effort-policy conformance suite (`.context/work-tracking.md`): what
 //! every effort policy must do, checked through what a person and an agent
-//! see — the `work_item.*` commands in, `v_effort` and the event log out.
+//! see — the `task.*` commands in, `v_effort` and the event log out.
 //! It runs in-tree against the built-in (`oxplow:commit-or-switch`) and
 //! against a provider process through the conformance kit
 //! (`oxplow extension test`), the same way: core never special-cases its
@@ -18,10 +18,10 @@ use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::{Actor, EffortId, StreamId, ThreadId};
 use serde_json::json;
 
-pub use crate::work_items_conformance::{Finding, SuiteRun};
+pub use crate::task_tracker_conformance::{Finding, SuiteRun};
 
 /// Run every check against `policy`, which the caller made the project's
-/// active effort policy, filing its items on the active work list.
+/// active effort policy, filing its items on the active task tracker.
 pub async fn suite(svc: &crate::Services, policy: &str) -> SuiteRun {
     let mut findings = Vec::new();
     if let Err(message) = run(svc, policy, &mut findings).await {
@@ -81,7 +81,7 @@ async fn run(
         .commands
         .run(
             &Actor::Human,
-            crate::commands::work_item::CREATE,
+            crate::commands::task::CREATE,
             json!({ "title": "conformance: an item to start", "assignee": thread.to_string() }),
             false,
         )
@@ -89,7 +89,7 @@ async fn run(
         .map_err(|e| format!("filing an item: {e}"))?
         .result["uri"]
         .as_str()
-        .ok_or("the work list filed no item")?
+        .ok_or("the task tracker filed no item")?
         .to_string();
 
     let before = head(svc).await?;
@@ -156,7 +156,7 @@ async fn transition(
     svc.commands
         .run(
             actor,
-            crate::commands::work_item::NAME,
+            crate::commands::task::NAME,
             json!({ "uri": item, "to": to }),
             false,
         )
@@ -196,7 +196,7 @@ async fn open_efforts(
 ) -> Result<Vec<EffortId>, String> {
     let (sql, params) = match item {
         Some(item) => (
-            "SELECT id FROM v_effort WHERE thread_id = ?1 AND ended_at IS NULL AND work_item = ?2",
+            "SELECT id FROM v_effort WHERE thread_id = ?1 AND ended_at IS NULL AND task = ?2",
             vec![SqlCell::Int(thread.value()), SqlCell::Text(item.into())],
         ),
         None => (

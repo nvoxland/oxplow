@@ -1,4 +1,4 @@
--- Files each effort changed outside the area its work item names. A file
+-- Files each effort changed outside the area its task names. A file
 -- is in the area when the item's title or body names it, or names one of
 -- its directories at least two levels deep (`src/ui`). An item that names
 -- no area has no deviations.
@@ -8,7 +8,7 @@ files AS (
 ),
 area AS (
   SELECT e.id AS effort_id, w.title || ' ' || coalesce(w.body, '') AS text
-  FROM ref('effort') e JOIN ref('work_item') w ON w.uri = e.work_item
+  FROM ref('effort') e JOIN ref('task') w ON w.uri = e.task
 ),
 -- Every directory prefix of every file (`a/`, `a/b/`, …).
 dirs(effort_id, path, prefix, rest) AS (

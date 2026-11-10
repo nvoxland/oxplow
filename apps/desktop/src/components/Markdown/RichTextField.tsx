@@ -149,7 +149,7 @@ export interface RichTextFieldProps {
   /** Where `[[` looks (`RefCompletion`); none, and `[[` is plain text.
    *  Read at mount: a field has it or doesn't. */
   refSearch?: RefSearch;
-  /** A work item id that is the active list's: a picked item saves as it. */
+  /** A task id that is the active list's: a picked item saves as it. */
   mentionRef?: MentionRef;
 }
 

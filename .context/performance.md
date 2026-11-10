@@ -1077,7 +1077,7 @@ committing a unit of work once (a duplicate scan stores its findings in
 one transaction). **The boot page-ref repair** (`page_ref_backfill.rs`,
 run once per projection-code hash and schema version — it used to be
 once per build, ~59 s of a thread at every restart after a dev rebuild)
-restates every work item, effort, note and finding slice: it writes them in
+restates every task, effort, note and finding slice: it writes them in
 batches of 1000 through `SqlitePageRefStore::replace_sources`, one
 transaction each. Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events
@@ -1354,7 +1354,7 @@ never opened by the harness): **all 72 series identical to the fact oracle**,
 72 specs in 27,778 ms from facts → 1,823 ms with the cube, and the three
 specs are no longer among the ones the cube declines (5 remain, all
 unrelated: `oxplow.coverage.branch_pct`, `repo.eval_usage`,
-`repo.focused_tests`, `repo.hardcoded_secrets`, `work.open_tasks`):
+`repo.focused_tests`, `repo.hardcoded_secrets`, `task.open`):
 
 | spec | From facts | From the cube |
 |---|---|---|

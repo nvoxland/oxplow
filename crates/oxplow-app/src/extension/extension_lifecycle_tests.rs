@@ -157,8 +157,8 @@ event_types:
         );
         let sql = match (self.broken_dataset, self.sized) {
             (true, _) => "SELECT nope FROM no_such_table",
-            (false, true) => "SELECT uri, uri AS size FROM ref('work_item')",
-            (false, false) => "SELECT uri FROM ref('work_item')",
+            (false, true) => "SELECT uri, uri AS size FROM ref('task')",
+            (false, false) => "SELECT uri FROM ref('task')",
         };
         write(root, &format!("{dir}/datasets/items.sql"), sql);
         write(
@@ -627,20 +627,20 @@ async fn a_changed_export_keeps_the_open_consumer_and_holds_the_pinned_one() {
     assert!(problem(svc, "pinned").is_empty());
 }
 
-/// The titles `v_work_item` shows, in order: the active work list's.
+/// The titles `v_task` shows, in order: the active task tracker's.
 async fn titles(fx: &EffortFixture) -> Vec<String> {
-    rows(fx, "SELECT title FROM v_work_item ORDER BY title")
+    rows(fx, "SELECT title FROM v_task ORDER BY title")
         .await
         .into_iter()
         .map(|r| r[0].as_str().unwrap().to_string())
         .collect()
 }
 
-/// The provider `v_capability_provider` says the work list is.
-async fn active_work_list(fx: &EffortFixture) -> String {
+/// The provider `v_capability_provider` says the task tracker is.
+async fn active_task_tracker(fx: &EffortFixture) -> String {
     rows(
         fx,
-        "SELECT provider FROM v_capability_provider WHERE capability = 'work_items' AND active = 1",
+        "SELECT provider FROM v_capability_provider WHERE capability = 'task_tracker' AND active = 1",
     )
     .await[0][0]
         .as_str()
@@ -648,12 +648,12 @@ async fn active_work_list(fx: &EffortFixture) -> String {
         .to_string()
 }
 
-/// Choose `provider` as the work list, as a person's setting does.
-async fn choose_work_list(fx: &EffortFixture, provider: &str) {
+/// Choose `provider` as the task tracker, as a person's setting does.
+async fn choose_task_tracker(fx: &EffortFixture, provider: &str) {
     bus(
         &fx.svc,
         "oxplow.capability.choose",
-        json!({ "capability": "work_items", "provider": provider }),
+        json!({ "capability": "task_tracker", "provider": provider }),
     )
     .await
     .unwrap();
@@ -669,19 +669,19 @@ async fn choose_work_list(fx: &EffortFixture, provider: &str) {
 async fn file_item(fx: &EffortFixture, title: &str) {
     bus(
         &fx.svc,
-        crate::commands::work_item::CREATE,
+        crate::commands::task::CREATE,
         json!({ "title": title }),
     )
     .await
     .unwrap();
 }
 
-/// Switching the work list from oxplow's own to a provider's and back
+/// Switching the task tracker from oxplow's own to a provider's and back
 /// shows each list's items on its side, and the first list's items are
 /// there again when it is chosen again.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-async fn switching_the_work_list_shows_each_providers_items_and_brings_the_other_back() {
+async fn switching_the_task_tracker_shows_each_providers_items_and_brings_the_other_back() {
     let fx = booted().await;
     write_extension(&fx.svc.layout.project_dir, "");
     deploy(&fx.svc, EXT).await.unwrap();
@@ -693,25 +693,25 @@ async fn switching_the_work_list_shows_each_providers_items_and_brings_the_other
     .await
     .unwrap();
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    assert_eq!(active_work_list(&fx).await, "oxplow");
+    assert_eq!(active_task_tracker(&fx).await, "oxtask");
     file_item(&fx, "ours").await;
     assert_eq!(titles(&fx).await, ["ours"]);
 
-    choose_work_list(&fx, "fake").await;
-    assert_eq!(active_work_list(&fx).await, "fake");
+    choose_task_tracker(&fx, "fake").await;
+    assert_eq!(active_task_tracker(&fx).await, "fake");
     assert!(titles(&fx).await.is_empty(), "oxplow's items are not shown");
     file_item(&fx, "theirs").await;
     assert_eq!(titles(&fx).await, ["theirs"]);
 
-    choose_work_list(&fx, "oxplow").await;
-    assert_eq!(active_work_list(&fx).await, "oxplow");
+    choose_task_tracker(&fx, "oxtask").await;
+    assert_eq!(active_task_tracker(&fx).await, "oxtask");
     assert_eq!(
         titles(&fx).await,
         ["ours"],
         "the fake's items are not shown"
     );
 
-    choose_work_list(&fx, "fake").await;
+    choose_task_tracker(&fx, "fake").await;
     assert_eq!(titles(&fx).await, ["theirs"], "its items come back");
 }
 

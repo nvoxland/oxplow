@@ -23,7 +23,7 @@ use oxplow_domain::hook::HookKind;
 use oxplow_domain::{AgentSessionId, StreamId, ThreadId};
 use serde_json::json;
 
-pub use crate::work_items_conformance::{Finding, SuiteRun};
+pub use crate::task_tracker_conformance::{Finding, SuiteRun};
 
 /// The bearer the suite's launch is given: a value no harness would
 /// produce on its own, so finding it anywhere means it came from the

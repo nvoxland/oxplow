@@ -273,13 +273,13 @@ async fn a_dataset_that_does_not_compile_holds_back_only_its_extension() {
         dir.path(),
         "late",
         1,
-        "datasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
+        "datasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n",
     );
     std::fs::create_dir_all(dir.path().join(".oxplow/extensions/late/datasets")).unwrap();
     std::fs::write(
         dir.path()
             .join(".oxplow/extensions/late/datasets/blocked.sql"),
-        "SELECT no_such_column AS uri FROM ref('work_item')",
+        "SELECT no_such_column AS uri FROM ref('task')",
     )
     .unwrap();
     write_ext(dir.path(), "alpha", 2, "");

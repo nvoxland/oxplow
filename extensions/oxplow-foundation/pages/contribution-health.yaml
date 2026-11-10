@@ -1,5 +1,5 @@
 title: "Contribution health"
-description: "The extension providers and collectors that are failing or disabled, and the repair work item of one."
+description: "The extension providers and collectors that are failing or disabled, and the repair task of one."
 params:
 - name: namespace
   default: ""
@@ -7,7 +7,7 @@ params:
   default: ""
 answers:
 - {"question":"Which extension providers or collectors are failing or disabled, and why?","params":{},"skill":"oxplow-extension"}
-- {"question":"Which repair work item describes this disabled collector?","params":{"namespace":"tracker","contribution":"issues"},"skill":"oxplow-extension"}
+- {"question":"Which repair task describes this disabled collector?","params":{"namespace":"tracker","contribution":"issues"},"skill":"oxplow-extension"}
 loaders:
   unhealthy:
     sql: "SELECT namespace, contribution, kind, state, reason, last_error FROM v_contribution_health WHERE state <> 'ok'"

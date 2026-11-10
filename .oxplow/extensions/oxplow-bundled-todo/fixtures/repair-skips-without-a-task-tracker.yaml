@@ -1,0 +1,12 @@
+# No task tracker is running: nothing to file on, and not a failure.
+given:
+  - command: oxplow.capability.choose
+    input: { capability: task_tracker, provider: none }
+    confirmed: true
+when:
+  event:
+    type: contribution.disabled
+    payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: boom }
+expect:
+  effects: [{ id: oxplow/repair-disabled, state: skipped }]
+  commands: []

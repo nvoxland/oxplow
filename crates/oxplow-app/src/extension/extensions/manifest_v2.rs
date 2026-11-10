@@ -71,7 +71,7 @@ pub struct Mount {
     /// The page it places: a slug of this extension.
     pub page: String,
     /// Where: a page's slot (`oxplow/commit.sections`) or a
-    /// replaceable core component (`work_item.board`).
+    /// replaceable core component (`task.board`).
     pub at: String,
     /// At a parts slot: where among the page's parts — `start`, `end`,
     /// `{ after: <id> }`, `{ before: <id> }`. Default `end`.

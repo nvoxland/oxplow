@@ -16,15 +16,15 @@
 mod common;
 
 use common::boot;
-use oxplow_tasks::work_item_ref;
+use oxplow_oxtask::task_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
-use oxplow_tasks::TaskId;
-use oxplow_tasks::TaskStore;
-use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
+use oxplow_oxtask::OxtaskId;
+use oxplow_oxtask::OxtaskStore;
+use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskPriority, OxtaskStatus};
 
 /// Seed a stream + thread; returns the thread id
 /// string used in the X-Oxplow-Thread header.
@@ -77,14 +77,14 @@ async fn seed_thread(services: &Services) -> ThreadId {
 
 async fn seed_in_progress_task(services: &Services) {
     let now = Timestamp::from_unix_ms(1);
-    let task = Task {
-        id: TaskId::placeholder(),
+    let task = Oxtask {
+        id: OxtaskId::placeholder(),
         parent_id: None,
         title: "ship the thing".into(),
         description: "d".into(),
-        status: TaskStatus::InProgress,
-        priority: TaskPriority::Medium,
-        created_by: TaskActorKind::User,
+        status: OxtaskStatus::InProgress,
+        priority: OxtaskPriority::Medium,
+        created_by: OxtaskActorKind::User,
         created_at: now,
         updated_at: now,
         completed_at: None,
@@ -672,14 +672,14 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
     let now = Timestamp::from_unix_ms(1);
     let task_id = svc
         .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
+        .insert(&Oxtask {
+            id: OxtaskId::placeholder(),
             parent_id: None,
             title: "ship".into(),
             description: "d".into(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            created_by: TaskActorKind::User,
+            status: OxtaskStatus::InProgress,
+            priority: OxtaskPriority::Medium,
+            created_by: OxtaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
@@ -691,7 +691,7 @@ async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
         .unwrap();
     let effort = svc
         .effort_store
-        .start(&work_item_ref(task_id), &tid, None)
+        .start(&task_ref(task_id), &tid, None)
         .await
         .unwrap();
 
@@ -755,14 +755,14 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
     let now = Timestamp::from_unix_ms(1);
     let task_id = svc
         .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
+        .insert(&Oxtask {
+            id: OxtaskId::placeholder(),
             parent_id: None,
             title: "decide things".into(),
             description: "d".into(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            created_by: TaskActorKind::User,
+            status: OxtaskStatus::InProgress,
+            priority: OxtaskPriority::Medium,
+            created_by: OxtaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
@@ -774,7 +774,7 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
         .unwrap();
     let effort = svc
         .effort_store
-        .start(&work_item_ref(task_id), &tid, None)
+        .start(&task_ref(task_id), &tid, None)
         .await
         .unwrap();
     svc.db
@@ -783,7 +783,7 @@ async fn prompts_carry_the_efforts_decisions_once_per_session() {
                 tx,
                 &oxplow_db::NewDecision {
                     thread_id: tid.value(),
-                    work_item: Some(oxplow_tasks::work_item_ref(task_id)),
+                    task: Some(oxplow_oxtask::task_ref(task_id)),
                     effort_id: Some(effort.id.value()),
                     question: "Storage?".into(),
                     choice: "main DB".into(),

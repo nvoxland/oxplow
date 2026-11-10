@@ -7,7 +7,7 @@ when:
     schemaVersion: 1
     role: reasoning
     messages:
-      - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
+      - { role: user, parts: [{ type: text, text: "Task: Add CSV export" }] }
 expect:
   state: succeeded
   text: '{"decisions": [{"question": "Which CSV library?", "choice": "csv crate", "confidence": "medium"}], "claims": [{"statement": "The export tests pass.", "kind": "tests_pass", "evidence": "oxplow:oxplow/run?id=12"}]}'

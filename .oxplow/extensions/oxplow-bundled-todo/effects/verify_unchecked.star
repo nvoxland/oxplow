@@ -39,7 +39,7 @@ def transform(x):
     event = x["event"]
     subject = event["subject"]
     effort = event["payload"].get("effort")  # the bare id, `eff12`
-    item = event["payload"].get("work_item")
+    item = event["payload"].get("task")
     if not effort or not item:
         return {"skip": "an acceptance names an effort and its item"}
     rows = scope("sql.read", {
@@ -65,7 +65,7 @@ def transform(x):
         lines.append("… and %d more; the review lists them all." % (len(items) - _ITEMS))
     return {
         "commands": [{
-            "name": "oxplow.work_item.create",
+            "name": "oxplow.task.create",
             "input": {
                 "title": "Verify what the review of %s accepted unchecked" % effort,
                 "body": "\n".join(lines),

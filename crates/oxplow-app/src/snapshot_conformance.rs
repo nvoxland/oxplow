@@ -29,7 +29,7 @@ use oxplow_domain::tree_diff::ChangeStatus;
 use oxplow_domain::StreamId;
 use oxplow_fs_watch::WatchEventKind;
 
-pub use crate::work_items_conformance::{Finding, SuiteRun};
+pub use crate::task_tracker_conformance::{Finding, SuiteRun};
 
 /// The directory (under the worktree) the suite's files live in.
 const SCRATCH: &str = "conformance-snapshots";

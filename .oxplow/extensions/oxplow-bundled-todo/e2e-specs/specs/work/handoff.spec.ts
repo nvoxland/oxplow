@@ -17,8 +17,8 @@ test("work handed off is seen on the other thread, and taking it moves its item"
     title: "Docs",
   });
   const docsId = docs.result.id;
-  await waitForModels(daemon, ["v_work_item"], () =>
-    run(daemon, "oxplow.work_item.create", { title: "Write the guide", thread: daemon.thread }),
+  await waitForModels(daemon, ["v_task"], () =>
+    run(daemon, "oxplow.task.create", { title: "Write the guide", thread: daemon.thread }),
   );
   await page.goto("/");
 
@@ -28,7 +28,7 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   await page.getByTestId("menu-item-ref-commands-Threads").click();
   await page.getByTestId("menu-item-ref-command-oxplow.handoff.offer").click();
   await page.getByTestId("viz-form-fields-to_thread").filter({ visible: true }).selectOption({ label: "Docs" });
-  await page.getByTestId("viz-form-fields-work_item").filter({ visible: true }).selectOption({ label: "Write the guide" });
+  await page.getByTestId("viz-form-fields-task").filter({ visible: true }).selectOption({ label: "Write the guide" });
   await page.getByTestId("viz-form-fields-body").filter({ visible: true }).fill("The outline is done; write the rest.");
   await page.getByTestId("viz-form-fields-submit").filter({ visible: true }).click();
   await until("the handoff to be recorded", 15_000, async () => (await value(daemon, "SELECT count(*) FROM v_handoff")) === 1);
@@ -41,10 +41,10 @@ test("work handed off is seen on the other thread, and taking it moves its item"
   await inbound.getByText("The outline is done").click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-take").click();
   await until("the handoff to be taken", 15_000, async () => (await value(daemon, "SELECT state FROM v_handoff")) === "taken");
-  // The work list restates its items after the move lands.
+  // The task tracker restates its items after the move lands.
   await until(
     "the item to be on the other thread",
     15_000,
-    async () => (await value(daemon, "SELECT 'thr' || thread_id FROM v_work_item WHERE title = ?1", ["Write the guide"])) === docsId,
+    async () => (await value(daemon, "SELECT 'thr' || thread_id FROM v_task WHERE title = ?1", ["Write the guide"])) === docsId,
   );
 });

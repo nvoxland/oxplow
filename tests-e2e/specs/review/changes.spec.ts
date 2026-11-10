@@ -7,15 +7,15 @@ import { open, shown, load } from "../../support/ui.js";
 // Rename… does, are the foundation's fixtures'; the app shows the effort's
 // page opened from its URI and the picker turning it into a range.
 test("an effort's page opens from its URI, and the pickers turn it into a range", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title: "Quail fix",
-    state: "in_progress",
-    thread: daemon.thread,
+    stage: "in_progress",
+    assignee: daemon.thread,
   });
   let effortUri = "";
   await until("the item's effort to open", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: `SELECT uri FROM v_effort WHERE work_item = '${created.result.uri}'`,
+      sql: `SELECT uri FROM v_effort WHERE task = '${created.result.uri}'`,
     });
     effortUri = (out.rows[0]?.[0] as string | undefined) ?? "";
     return effortUri !== "";

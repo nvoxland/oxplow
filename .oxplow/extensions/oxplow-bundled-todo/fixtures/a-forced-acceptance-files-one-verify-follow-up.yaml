@@ -2,8 +2,8 @@
 # unchecked — a checklist naming each claim and decision — and a second forced acceptance of the same effort files nothing:
 # it was followed up already.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -23,11 +23,11 @@ steps:
                instr(body, 'no behavior change') > 0 AS names_claim,
                instr(body, 'Which store?') > 0 AND instr(body, 'SQLite') > 0 AS names_decision,
                instr(body, '- [ ] ') > 0 AS checklist
-        FROM v_work_item WHERE title LIKE 'Verify what the review of %'
+        FROM v_task WHERE title LIKE 'Verify what the review of %'
     expect:
       rows:
         - { title: "Verify what the review of eff1 accepted unchecked", names_claim: 1, names_decision: 1, checklist: 1 }
   - when: { command: oxplow.review.accept, input: { effort: eff1, force: true }, confirmed: true }
     expect: { ok: true }
-  - when: { sql: "SELECT count(*) AS n FROM v_work_item WHERE title LIKE 'Verify what the review of %'" }
+  - when: { sql: "SELECT count(*) AS n FROM v_task WHERE title LIKE 'Verify what the review of %'" }
     expect: { rows: [{ n: 1 }] }

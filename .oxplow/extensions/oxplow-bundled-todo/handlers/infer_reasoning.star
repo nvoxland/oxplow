@@ -55,8 +55,8 @@ def read(sql, effort_id):
 def transform(x):
     effort = x["input"]["effort"]
     found = scope("sql.read", {
-        "sql": "SELECT e.id, e.work_item, coalesce(w.title, '') AS title FROM v_effort e "
-        + "LEFT JOIN v_work_item w ON w.uri = e.work_item WHERE e.uri = uri('oxplow/effort', 'id', :effort)",
+        "sql": "SELECT e.id, e.task, coalesce(w.title, '') AS title FROM v_effort e "
+        + "LEFT JOIN v_task w ON w.uri = e.task WHERE e.uri = uri('oxplow/effort', 'id', :effort)",
         "params": {"effort": effort},
     })
     if not found:
@@ -83,7 +83,7 @@ def transform(x):
         "SELECT statement FROM v_claim WHERE effort_id = :id AND provenance = 'recorded' ORDER BY id",
         effort_id)
 
-    head = "Work item: " + found[0]["title"] + "\n"
+    head = "Task: " + found[0]["title"] + "\n"
     if recorded:
         head += "\nDecisions it already recorded (don't repeat these):\n"
         for r in recorded:

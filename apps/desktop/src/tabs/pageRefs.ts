@@ -4,7 +4,7 @@
  * hand-format an id.
  *
  * - An **entity** page's id is the entity's own ref: `file:<path>[@rev]`,
- *   `dir:<path>`, `wiki:<slug>`, `work_item:oxplow:tsk42`, `commit:<sha>`,
+ *   `dir:<path>`, `wiki:<slug>`, `task:oxplow:tsk42`, `commit:<sha>`,
  *   `metric:<key>`, `page:<ext>/<slug>[?params]`.
  * - A **declared page** (a manifest's `pages:` entry, not a thing in the
  *   graph) is `page:<id>[?params]` for oxplow's own extension (core-named,
@@ -185,9 +185,9 @@ export function wikiPageRef(slug: string): TabRef {
   return { id: wikiUri(slug) };
 }
 
-/** A work item's page, whichever list it's on: the tab id is its ref
- *  (`work_item:<provider>:<id>`). */
-export function workItemTabRef(ref: string): TabRef {
+/** A task's page, whichever list it's on: the tab id is its ref
+ *  (`task:<provider>:<id>`). */
+export function taskTabRef(ref: string): TabRef {
   return { id: ref };
 }
 

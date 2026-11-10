@@ -20,7 +20,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   `OXPLOW_E2E_PROVIDER_FAKE`). With `OXPLOW_E2E_BIN=target/debug` it builds
   nothing and runs the binaries already there.
 - **`fixtures/extension/`** — the test extension `e2e`, copied into every
-  project before boot: a fake work-item provider (`bin/provider`, written
+  project before boot: a fake task provider (`bin/provider`, written
   then, runs the fake this checkout built; its `provider.json` is checked
   in and kept equal to the fake's declarations by
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a dataset, a
@@ -66,7 +66,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   - A workspace that fails while booting is stopped and removed; each
     fixture tears down in a `finally`.
   - `daemon` is a spec's own (booted for it, stopped after it), so no spec meets
-    what another left behind: work items, streams, settings, git commits. It is settled before any page opens — boot's background tasks
+    what another left behind: tasks, streams, settings, git commits. It is settled before any page opens — boot's background tasks
     done and the extensions' datasets published — and carries the `stream`
     and `thread` its pages open on.
   - **Templates, not boots from nothing.** Booting a workspace from nothing
@@ -110,7 +110,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
     click opens nothing: a spec that clicked the dock's Alerts as soon as its
     badge showed (the badge comes from the daemon, before the stream) opened
     no page, once in a CI run.
-  - `expandRailSection`, `searchLauncher`, `newSessionPage`, `workItemIdOf`.
+  - `expandRailSection`, `searchLauncher`, `newSessionPage`, `taskIdOf`.
 - **`specs/<area>/*.spec.ts`** — the specs. Wait with web-first `expect`,
   `waitForModels` or `until`, never a sleep. Global setup refuses a spec that
   names `waitForTimeout` or `setTimeout` (`test.setTimeout`, a spec's time
@@ -162,7 +162,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 `shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox and
 an extension's resource; `code/` a commit's diff (file watching over a real daemon is a Rust test, `real_watch_tests.rs`); `data/` extension pages; `settings/`
 Programs approval and the settings pages; `integrations/` the fake tracker's
-Integrations frame (the config form, Check, Enable, the work-list choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,
+Integrations frame (the config form, Check, Enable, the task-tracker choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
 `review/` the effort page and its verdict chip; `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,
 filters, navigation, approval-gated `invoke`, and a self-navigation off

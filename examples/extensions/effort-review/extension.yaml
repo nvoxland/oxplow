@@ -1,6 +1,6 @@
 manifest: 2
 name: effort-review
-description: A model reviews each finished effort from its evidence — tests, coverage, what changed, findings — and comments the review on its work item.
+description: A model reviews each finished effort from its evidence — tests, coverage, what changed, findings — and comments the review on its task.
 engine: ">=0.7"
 version: 0.1.0
 intent:
@@ -9,16 +9,16 @@ intent:
     the tests the agent ran, diff coverage, the files and functions it
     changed, metric movement and code-quality findings on those files — and
     writes a short review. The review streams into the Jobs page, can be
-    cancelled there, and lands as a comment on the effort's work item.
+    cancelled there, and lands as a comment on the effort's task.
     Other extensions read the reviews through the exported `reviews` dataset.
   origin: null
   examples:
     - name: review-asked
       input: { job: review }
       expect: the model reads the effort's evidence, then answers; the call, the evidence and the answer are the job's output
-    - name: a-finished-review-is-commented-on-the-work-item
+    - name: a-finished-review-is-commented-on-the-task
       input: { job: review }
-      expect: the finished review is commented on the effort's work item and its reviews row carries what the model wrote
+      expect: the finished review is commented on the effort's task and its reviews row carries what the model wrote
     - name: a-cancelled-review-keeps-what-it-had-in-the-comment
       input: { job: review }
       expect: a review cancelled while it writes is commented with what it had and says it was cancelled
@@ -30,10 +30,10 @@ intent:
       expect: the finished review reaches publish-review, which skips an effort it can't find
     - name: review-on-finish
       input: { event: effort.finished }
-      expect: a finished effort with a work item asks for its review
+      expect: a finished effort with a task asks for its review
     - name: review-skips-unlinked
       input: { event: effort.finished }
-      expect: an effort without a work item isn't reviewed
+      expect: an effort without a task isn't reviewed
     - name: review-requested
       input: { command: effort_review.effort.review }
       expect: asking for an effort's review enqueues one job keyed by the effort
@@ -42,12 +42,12 @@ intent:
       expect: the effort's evidence in one bounded bundle
     - name: reviews
       input: { page: reviews }
-      expect: one row per review asked for, with its effort and work item
+      expect: one row per review asked for, with its effort and task
 
 # The model the review asks for: a person binds `effort_review/review` in
 # Settings → AI; until then it uses their Summarize model. The review calls
 # a tool, so the bound model must support tool calling.
-permissions: [sql.read, ai.compute, commands:oxplow.effort.*, commands:oxplow.work_item.comment, commands:oxplow.work_item.create, commands:oxplow.test.record_run]
+permissions: [sql.read, ai.compute, commands:oxplow.effort.*, commands:oxplow.task.comment, commands:oxplow.task.create, commands:oxplow.test.record_run]
 ai_profiles:
   - id: review
     description: Reviews one finished effort from the evidence oxplow collected about it.
@@ -86,7 +86,7 @@ commands:
   # Ask for one effort's review: builds the job's request (the prompt) and
   # composes `review.ask`. The effect and the Efforts page both use it.
   - name: effort.review
-    summary: Ask a model to review one effort from its evidence; the review streams into the Jobs page and is commented on the effort's work item.
+    summary: Ask a model to review one effort from its evidence; the review streams into the Jobs page and is commented on the effort's task.
     entry: commands/review_effort.star
     access: record
     input_schema:
@@ -97,7 +97,7 @@ commands:
         effort: { type: string, description: "The effort's id (`eff<id>`)." }
   # The model's tool. Also a person's or an agent's read: it only reads.
   - name: effort.evidence
-    summary: What oxplow collected about one effort — its work item, test runs, latest observations (tests, diff coverage, static analysis), changed files and functions, metric movement and findings on its files — capped so it fits one answer.
+    summary: What oxplow collected about one effort — its task, test runs, latest observations (tests, diff coverage, static analysis), changed files and functions, metric movement and findings on its files — capped so it fits one answer.
     entry: commands/evidence.star
     needs: [sql.read]
     access: read
@@ -113,11 +113,11 @@ effects:
   # `effort.finished`, not `effort.closed`: the evidence (observations,
   # metric deltas) is refreshed between the two.
   - id: review-on-finish
-    summary: When an effort with a work item finishes, ask for its review.
+    summary: When an effort with a task finishes, ask for its review.
     on: [effort.finished]
     entry: effects/review_on_finish.star
   - id: publish-review
-    summary: When a review job ends, comment its review on the effort's work item.
+    summary: When a review job ends, comment its review on the effort's task.
     on: [contribution.job.completed]
     where: { job: "effort_review/review" }
     entry: effects/publish_review.star
@@ -127,11 +127,11 @@ datasets:
   - name: reviews
     version: 2
     key: [job_run]
-    description: "Each effort review: the effort, its work item, the review job's state and what the dataset wrote (as far as it got, for one still running or cancelled)."
+    description: "Each effort review: the effort, its task, the review job's state and what the dataset wrote (as far as it got, for one still running or cancelled)."
     fields:
       - { name: job_run, type: TEXT, doc: "The run of the review job (`oxplow:oxplow/job_run?id=<id>`, `v_job_run.uri`). (v2, was `job`)" }
       - { name: effort, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: work_item, type: TEXT, doc: "Its work item's uri; NULL when it had none." }
+      - { name: task, type: TEXT, doc: "Its task's uri; NULL when it had none." }
       - { name: state, type: TEXT, doc: "The job's state: `queued`, `running`, `succeeded`, `failed`, `cancelled` or `interrupted`." }
       - { name: reviewed_at, type: TEXT, doc: "When the job last changed (RFC 3339)." }
       - { name: review, type: TEXT, doc: "What the model wrote in the job's current attempt ('' before it starts)." }

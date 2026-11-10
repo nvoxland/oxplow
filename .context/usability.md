@@ -23,7 +23,7 @@ Things I keep forgetting. Read this before adding any UI.
 oxplow's pages read like a wiki, not like an admin console or a
 spreadsheet. A page is a document about something: headed sections of
 facts and prose in the reading column, and every thing it names (an
-extension, a page, a commit, a file, a work item, a thread) is a link to
+extension, a page, a commit, a file, a task, a thread) is a link to
 that thing's own page, so a person moves through the project by following
 links. Concretely:
 
@@ -71,7 +71,7 @@ links. Concretely:
 
 ## Markdown is one component
 
-Wherever markdown is read or written — a wiki page, a work item's body,
+Wherever markdown is read or written — a wiki page, a task's body,
 an effort summary, a comment and its composer, a form's markdown field,
 a page's `markdown` viz — it is the one `Markdown` component
 (`.context/markdown.md`), so links, mermaid, code blocks with Copy,
@@ -406,8 +406,8 @@ markdown itself, nor edits it in a `<textarea>`.
   field (a select), mounting a moment after the launcher opened; the
   Enter that opens the typed page went to that select and nothing opened
   (`timeline.spec.ts` on a slow machine, "New Session" left as the title).
-- **"Save and Another"** for repetitive-entry flows (see the New Work
-  Item form): a form page declares `again: { label, keep }`, a second
+- **"Save and Another"** for repetitive-entry flows (see the New
+  Task form): a form page declares `again: { label, keep }`, a second
   button that files and restarts the form with the `keep` fields (state,
   thread, parent, the list's own fields) carried over and the rest
   cleared, so a series of similar items isn't re-picked. Enter keeps the
@@ -867,9 +867,9 @@ declaring *what it is* and mounting the generic layer.
 - **`data-ref` marks a region as a typed "context node."** Its value is
   the canonical URI of the thing, the same as tab ids and the `page_ref`
   graph use ([resources.md](./resources.md)): a file, directory, wiki
-  page, work item, commit or finding. Stamp it on the element that *is*
+  page, task, commit or finding. Stamp it on the element that *is*
   that thing (e.g. a task row carries
-  `data-ref="oxplow:oxplow/work_item?id=tsk42&provider=oxplow"`). Nesting is
+  `data-ref="oxplow:oxplow/task?id=tsk42&provider=oxtask"`). Nesting is
   meaningful: a file row inside a commit card yields the chain
   `[file URI, commit URI, …]`, innermost first. Treat
   this as a first-class seam like `data-testid` — spread
@@ -1343,7 +1343,7 @@ caller may bypass the bus to write to the terminal.
   contribution with an open repair item) is the same gesture: it fills
   the input with `Repair the extension described in [oxplow uri <item>]
   — read it first.` (`contributionHealth.ts` → `repairWithAgent`). The brief
-  itself is the work item's body, not the inserted line — a one-line
+  itself is the task's body, not the inserted line — a one-line
   mention is all `insertIntoAgent` can carry.
 - **Don't fire `recordUsage`** for Add to Context — adding to context
   isn't the same as opening the target; the recents list shouldn't

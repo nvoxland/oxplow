@@ -92,7 +92,7 @@ async fn refs(peer: &Peer, handle: &Handle, incoming: &mut Receiver<Incoming>) -
             method::READ,
             &ReadParams {
                 handle: handle.clone(),
-                collector: "work_items".into(),
+                collector: "tasks".into(),
                 state: None,
             },
         )
@@ -251,9 +251,9 @@ async fn a_peer_drives_the_fake_over_stdio() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake" })
     );
-    assert_eq!(created.events[0].event_type, "work_item.recorded");
+    assert_eq!(created.events[0].event_type, "task.recorded");
     assert_eq!(created.events[0].payload["item"]["stage"], "ready");
     invoke(&peer, &handle, "create", json!({ "title": "Second" }))
         .await
@@ -262,7 +262,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "doing" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake", "to": "doing" }),
     )
     .await
     .unwrap();
@@ -271,7 +271,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "shipped" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-9&provider=fake", "to": "shipped" }),
     )
     .await
     .unwrap_err();
@@ -287,7 +287,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
             method::READ,
             &ReadParams {
                 handle: handle.clone(),
-                collector: "work_items".into(),
+                collector: "tasks".into(),
                 state: None,
             },
         )
@@ -313,8 +313,8 @@ async fn a_peer_drives_the_fake_over_stdio() {
     assert_eq!(
         streamed,
         vec![
-            json!("oxplow:oxplow/work_item?id=W-2&provider=fake"),
-            json!("oxplow:oxplow/work_item?id=W-1&provider=fake")
+            json!("oxplow:oxplow/task?id=W-2&provider=fake"),
+            json!("oxplow:oxplow/task?id=W-1&provider=fake")
         ]
     );
     assert_eq!(state, Some(json!({ "cursor": 3, "seen": 2 })));
@@ -323,7 +323,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
             method::READ,
             &ReadParams {
                 handle: handle.clone(),
-                collector: "work_items".into(),
+                collector: "tasks".into(),
                 state,
             },
         )
@@ -396,7 +396,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
                 method::READ,
                 &ReadParams {
                     handle: handle.clone(),
-                    collector: "work_items".into(),
+                    collector: "tasks".into(),
                     state: None,
                 },
             )
@@ -451,7 +451,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
     let (_, seen) = read(&peer, &handle, &mut incoming).await;
     assert_eq!(
         seen[0].1["row"]["uri"],
-        "oxplow:oxplow/work_item?id=X-1&provider=other"
+        "oxplow:oxplow/task?id=X-1&provider=other"
     );
 }
 
@@ -486,13 +486,13 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         .unwrap();
     assert_eq!(
         created.result["uri"],
-        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
+        "oxplow:oxplow/task?id=W-1&provider=fake_second"
     );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "shipped" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake_second", "to": "shipped" }),
     )
     .await;
     assert!(moved.is_ok(), "{moved:?}");
@@ -501,7 +501,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "shipped" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake", "to": "shipped" }),
     )
     .await;
     assert!(
@@ -614,9 +614,9 @@ async fn as_an_effort_policy_it_composes_efforts() {
     });
     let event = |to: &str, thread: Option<&str>| {
         json!({ "event": {
-            "id": format!("e-{to}"), "type": "work_item.state_changed", "v": 1, "seq": 1,
-            "source": "human", "subject": ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
-            "payload": { "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "to": to },
+            "id": format!("e-{to}"), "type": "task.state_changed", "v": 1, "seq": 1,
+            "source": "human", "subject": ["oxplow:oxplow/task?id=tsk1&provider=oxtask"],
+            "payload": { "task": "oxplow:oxplow/task?id=tsk1&provider=oxtask", "to": to },
             "anchors": { "thread_id": thread },
         }})
     };
@@ -632,7 +632,7 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(
         started.result,
         json!({ "commands": [{ "name": "oxplow.effort.open",
-                               "input": { "thread": "thr3", "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }] })
+                               "input": { "thread": "thr3", "task": "oxplow:oxplow/task?id=tsk1&provider=oxtask" } }] })
     );
     let done = keyed(
         &peer,
@@ -653,8 +653,8 @@ async fn as_an_effort_policy_it_composes_efforts() {
     assert_eq!(asked[0]["key"], "react:e2");
     assert_eq!(asked[0]["scope"], "sql.read");
     assert_eq!(
-        asked[0]["args"]["params"]["work_item"],
-        "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"
+        asked[0]["args"]["params"]["task"],
+        "oxplow:oxplow/task?id=tsk1&provider=oxtask"
     );
     let skipped = keyed(
         &peer,

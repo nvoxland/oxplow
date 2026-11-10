@@ -127,12 +127,12 @@ mod tests {
             rows: vec![vec![SqlCell::Int(1)]],
             ..Default::default()
         };
-        result.reads.datasets.push("v_work_item".into());
+        result.reads.datasets.push("v_task".into());
         assert!(ResultBudget::new(512).admit(&mut result).unwrap());
         assert!(result.columns.is_empty());
         assert!(result.rows.is_empty());
         assert!(result.truncated);
-        assert_eq!(result.reads.datasets, ["v_work_item"]);
+        assert_eq!(result.reads.datasets, ["v_task"]);
     }
 
     #[test]

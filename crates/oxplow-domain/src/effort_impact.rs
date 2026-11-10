@@ -7,16 +7,16 @@ use specta::Type;
 /// "this effort created/updated/deleted/referenced/resolved <kind>:<id>".
 /// Stored as a JSON list on `effort.impacts_json` and projected
 /// into the unified `page_ref` graph as outbound edges from the
-/// effort's work item. Distinct from an effort's files (observed, never
-/// declared) — impacts cover wiki pages, work items, commits, findings,
+/// effort's task. Distinct from an effort's files (observed, never
+/// declared) — impacts cover wiki pages, tasks, commits, findings,
 /// directories, and files alike.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Type, schemars::JsonSchema)]
 pub struct EffortImpact {
-    /// Page kind being impacted — `wiki | work_item | file | directory
+    /// Page kind being impacted — `wiki | task | file | directory
     /// | git_commit | finding`, and no other (`oxplow.effort.report` refuses
     /// one). Projected to the canonical `page_ref` kinds (`git_commit`
     /// → `commit`, `directory` → `dir`; see `impact_kind`). A
-    /// `work_item`'s id is its ref or one of the active list's own ids.
+    /// `task`'s id is its ref or one of the active list's own ids.
     pub kind: String,
     /// Canonical id for that page kind (slug, integer string, repo
     /// path, sha — see `page_ref_projections` docs).

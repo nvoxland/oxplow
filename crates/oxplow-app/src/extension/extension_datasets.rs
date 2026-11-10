@@ -99,7 +99,7 @@ mod tests {
         std::fs::write(p, body).unwrap();
     }
 
-    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
+    const MANIFEST: &str = "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{ name: a }]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n  - name: broken\n    version: 1\n    description: Broken.\n    fields:\n      - { name: nope, doc: x }\n";
 
     /// P4.9 (tsk494): an extension's dataset publishes its view; one that
     /// doesn't compile is that extension's error in the list, not a boot
@@ -116,7 +116,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
         );
         write(
             &root,
@@ -132,7 +132,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/shaky/datasets/broken.sql",
-            "SELECT nope FROM ref('work_item')",
+            "SELECT nope FROM ref('task')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         svc.sql
@@ -178,12 +178,12 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/extension.yaml",
-            "manifest: 2\nname: late\nintent:\n  purpose: x\ndatasets:\n  - name: counted\n    version: 1\n    description: The work items.\n    fields:\n      - { name: uri, type: TEXT, doc: Work item ref. }\n",
+            "manifest: 2\nname: late\nintent:\n  purpose: x\ndatasets:\n  - name: counted\n    version: 1\n    description: The tasks.\n    fields:\n      - { name: uri, type: TEXT, doc: Task ref. }\n",
         );
         write(
             &root,
             ".oxplow/extensions/late/datasets/counted.sql",
-            "SELECT uri FROM ref('work_item')",
+            "SELECT uri FROM ref('task')",
         );
         write(
             &root,
@@ -224,10 +224,10 @@ mod tests {
         let root = svc.layout.project_dir.clone();
         let manifest = |cols: &str| {
             format!(
-                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked work items.\n    fields:\n{cols}"
+                "manifest: 2\nname: late\nintent:\n  purpose: x\n  examples: [{{ name: a }}]\ndatasets:\n  - name: blocked\n    version: 1\n    description: Blocked tasks.\n    fields:\n{cols}"
             )
         };
-        let id = "      - { name: uri, type: TEXT, doc: Work item ref. }\n";
+        let id = "      - { name: uri, type: TEXT, doc: Task ref. }\n";
         let title = "      - { name: title, type: TEXT, doc: Title. }\n";
         write(
             &root,
@@ -237,7 +237,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         let validate = || async {
@@ -262,7 +262,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri, title FROM ref('task') WHERE state = 'blocked'",
         );
         let errors = validate().await;
         assert!(
@@ -272,7 +272,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri, title FROM source('work_item')",
+            "SELECT uri, title FROM source('task')",
         );
         assert!(validate().await.contains("only its own namespace's tables"));
     }

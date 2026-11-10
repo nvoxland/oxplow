@@ -67,7 +67,7 @@ pub struct Anchors {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Envelope {
     pub id: EventId,
-    /// The event's name, `namespace.name[.name]` (`work_item.transitioned`,
+    /// The event's name, `namespace.name[.name]` (`task.transitioned`,
     /// `agent.tool.finished`). Extensions emit only under their own namespace.
     #[serde(rename = "type")]
     pub event_type: String,
@@ -88,7 +88,7 @@ pub struct Envelope {
     pub payload_hash: Option<String>,
     /// The event that caused this one.
     pub cause: Option<EventId>,
-    /// A stable key the emitter derives from the action (`work_item:tsk4:
+    /// A stable key the emitter derives from the action (`task:tsk4:
     /// transition:eff9`), so an at-least-once producer can't log the same
     /// occurrence twice: the second append fails with `Constraint`.
     pub dedupe_key: Option<String>,
@@ -186,7 +186,7 @@ pub fn validate_type_name(name: &str) -> Result<(), DomainError> {
         Ok(())
     } else {
         Err(DomainError::Invalid(format!(
-            "event type `{name}` must be `namespace.name` in snake_case (e.g. `work_item.transitioned`)"
+            "event type `{name}` must be `namespace.name` in snake_case (e.g. `task.transitioned`)"
         )))
     }
 }
@@ -206,13 +206,13 @@ mod tests {
 
     #[test]
     fn type_names_are_namespaced_snake_case() {
-        assert!(validate_type_name("work_item.transitioned").is_ok());
+        assert!(validate_type_name("task.transitioned").is_ok());
         assert!(validate_type_name("agent.tool.finished").is_ok());
         assert!(validate_type_name("acme_review.decision2.made").is_ok());
         for bad in [
             "transitioned",
-            "Work.Item",
-            "work-item.done",
+            "Task.Done",
+            "task-tracker.done",
             "a..b",
             ".a",
             "a.",
@@ -229,15 +229,15 @@ mod tests {
     #[test]
     fn envelope_serializes_with_type_and_flattened_seq() {
         let env = Envelope::new(
-            "work_item.transitioned",
+            "task.transitioned",
             1,
             "human",
             serde_json::json!({"to": "done"}),
         )
         .unwrap()
-        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"])
-        .with_dedupe_key("oxplow:oxplow/work_item?id=transition:1&provider=tsk4");
-        assert_eq!(env.namespace(), "work_item");
+        .with_subject(["oxplow:oxplow/task?id=tsk4&provider=oxtask"])
+        .with_dedupe_key("oxplow:oxplow/task?id=transition:1&provider=tsk4");
+        assert_eq!(env.namespace(), "task");
         let json = serde_json::to_value(StoredEvent {
             seq: 7,
             envelope: env.clone(),
@@ -245,11 +245,11 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json["seq"], 7);
-        assert_eq!(json["type"], "work_item.transitioned");
+        assert_eq!(json["type"], "task.transitioned");
         assert_eq!(json["id"], env.id.0);
         assert_eq!(
             json["subject"][0],
-            "oxplow:oxplow/work_item?id=tsk4&provider=oxplow"
+            "oxplow:oxplow/task?id=tsk4&provider=oxtask"
         );
         let back: StoredEvent = serde_json::from_value(json).unwrap();
         assert_eq!(back.envelope, env);

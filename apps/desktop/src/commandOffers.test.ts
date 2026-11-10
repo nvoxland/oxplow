@@ -72,7 +72,7 @@ test("a form opens its page; a background command runs in the background; anothe
   const { d, calls } = deps();
   const offers = commandOffers(
     [
-      spec("oxplow.work_item.create", { label: "New Task…", form: "oxplow:oxplow/page?page=new-task" }),
+      spec("oxplow.task.create", { label: "New Task…", form: "oxplow:oxplow/page?page=new-task" }),
       spec("oxplow.vcs.pull", { label: "Pull Changes", input: { stream: "{{stream}}" }, background: true }),
       spec("oxplow.dashboard.create", {
         label: "New Dashboard…",
@@ -116,11 +116,11 @@ test("a ref's menus offer the commands about its kind, the ref bound into their 
   const { d, calls } = deps();
   const specs = [
     spec("oxplow.review.accept", { label: "Accept Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
-    spec("tracker.item.estimate", { label: "Estimate", about: "oxplow/work_item", input: { uri: "{{uri}}", points: 3 } }),
-    spec("tracker.item.flag", { label: "Flag", about: "oxplow/work_item" }),
+    spec("tracker.item.estimate", { label: "Estimate", about: "oxplow/task", input: { uri: "{{uri}}", points: 3 } }),
+    spec("tracker.item.flag", { label: "Flag", about: "oxplow/task" }),
     spec("oxplow.vcs.pull", { label: "Pull" }),
   ];
-  const ref = "oxplow:oxplow/work_item?id=W-1&provider=fake";
+  const ref = "oxplow:oxplow/task?id=W-1&provider=fake";
   const offers = refOffers(specs, ref, ["tracker.item.estimate", "tracker.item.flag"], ctx, d);
   expect(offers.map((o) => o.id)).toEqual(["tracker.item.estimate", "tracker.item.flag"]);
   // Only what the daemon says applies to this ref: one whose `about_when`
@@ -130,8 +130,8 @@ test("a ref's menus offer the commands about its kind, the ref bound into their 
   for (const o of offers) o.run();
   await new Promise((r) => setTimeout(r, 0));
   expect(calls).toEqual([
-    'run tracker.item.estimate {"uri":"oxplow:oxplow/work_item?id=W-1&provider=fake","points":3}',
-    'run tracker.item.flag {"uri":"oxplow:oxplow/work_item?id=W-1&provider=fake"}',
+    'run tracker.item.estimate {"uri":"oxplow:oxplow/task?id=W-1&provider=fake","points":3}',
+    'run tracker.item.flag {"uri":"oxplow:oxplow/task?id=W-1&provider=fake"}',
   ]);
 });
 

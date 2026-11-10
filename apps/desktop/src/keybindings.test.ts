@@ -16,7 +16,7 @@ const offer = (id: string, shortcut: string, whileTyping = false, enabled = true
 const offers = [
   offer("oxplow.editor.save", "Ctrl/Cmd+S", true),
   offer("oxplow.window.quick_open", "Ctrl/Cmd+P", true),
-  offer("oxplow.work_item.create", "Ctrl/Cmd+Shift+N"),
+  offer("oxplow.task.create", "Ctrl/Cmd+Shift+N"),
 ];
 
 describe("offerForShortcut", () => {
@@ -24,7 +24,7 @@ describe("offerForShortcut", () => {
     expect(offerForShortcut(offers, eventLike("s", { metaKey: true }), false)?.id).toBe("oxplow.editor.save");
     expect(offerForShortcut(offers, eventLike("p", { ctrlKey: true }), false)?.id).toBe("oxplow.window.quick_open");
     expect(offerForShortcut(offers, eventLike("N", { metaKey: true, shiftKey: true }), false)?.id).toBe(
-      "oxplow.work_item.create",
+      "oxplow.task.create",
     );
   });
 

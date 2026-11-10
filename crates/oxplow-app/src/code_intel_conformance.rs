@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use oxplow_domain::code_intel::{CallDirection, CodeIntelError, CodeIntelligence, Position, Range};
 use oxplow_domain::StreamId;
 
-pub use crate::work_items_conformance::Finding;
+pub use crate::task_tracker_conformance::Finding;
 
 /// The symbol kinds a provider may name (the LSP's, by name).
 const KINDS: &[&str] = &[

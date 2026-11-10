@@ -45,8 +45,8 @@ describe("the fixture", () => {
 });
 
 test("its readers name the resource and a param", () => {
-  const u = resourceUri("oxplow/work_item", { provider: "oxplow", id: "tsk42" });
-  expect(typeOf(u)).toBe("oxplow/work_item");
+  const u = resourceUri("oxplow/task", { provider: "oxtask", id: "tsk42" });
+  expect(typeOf(u)).toBe("oxplow/task");
   expect(paramOf(u, "id")).toBe("tsk42");
   expect(paramOf(u, "gone")).toBeNull();
   expect(typeOf("oxplow:oxplow/effort?id=eff1")).toBe("oxplow/effort");

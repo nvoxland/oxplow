@@ -1,0 +1,65 @@
+# The one statement of which tasks a task page shows: the ones
+# assigned to the thread, its stream, the person, nobody or anyone (a
+# closed item is nobody's: the thread's when its efforts worked it); by
+# stage, or by bucket (its first stage); a priority or a search keeps an
+# item that matches and its epic; open items by their queue with an
+# epic's children under it, then the closed ones, done before canceled,
+# the latest first; what each row's actions may do.
+given:
+  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1, native: { priority: low } }, bind: epic }
+  - { command: oxplow.task.create, input: { title: Urgent child, assignee: thr1, native: { priority: urgent }, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Plain child, assignee: thr1, native: { priority: low }, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
+  - { command: oxplow.task.create, input: { title: Backlogged, stage: backlog } }
+  - { command: oxplow.task.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
+  - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done }, as: agent }
+  - { command: oxplow.task.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
+  - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: canceled }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $loose.uri, to: in_progress } }
+  - { command: oxplow.task.comment, input: { uri: $loose.uri, body: Started. } }
+when: { query: task-rows, params: { show: thread, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+expect:
+  rows:
+    - title: An epic
+      stage: ready
+      stage_title: Ready
+      is_open: 1
+      depth: 0
+      assignee_title: Thread
+      add_child: "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask"
+    - { title: Urgent child, depth: 1, parent_title: An epic, prio: urgent, prio_tone: danger, has_parent: 1, can_delete: 1, can_nest: 1, not_here: 0, not_mine: 1, assigned: 1, can_prioritize: 1 }
+    - { title: Plain child, depth: 1 }
+    - { title: Loose item, state: in_progress, stage: in_progress, stage_title: In Progress, depth: 0, comments: 1, summary: It started here., prio_tone: null }
+    - { title: Shipped, state: done, stage: done, done_rank: 1, is_open: 0, assigned: 0, not_mine: 0 }
+    - { title: Dropped, state: canceled, done_rank: 1 }
+steps:
+  - when: { query: task-rows, params: { show: thread, state: all, priority: urgent, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }] }
+  # A search reads the title or any field, and keeps the epic too.
+  - when: { query: task-rows, params: { show: thread, state: all, priority: any, q: plain, thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Plain child }] }
+  - when: { query: task-rows, params: { show: pool, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Backlogged, state: backlog, assignee_title: Unassigned, not_here: 1, assigned: 0, here: "oxplow:oxplow/thread?id=thr1" }] }
+  - when: { query: task-rows, params: { show: all, state: backlog, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Backlogged }] }
+  - when: { query: task-rows, params: { show: me, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 0 }
+  - when: { query: task-rows, params: { show: all, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 7 }
+  - when: { query: task-rows, params: { show: stream, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: 6 }
+  - when: { query: task-rows, params: { show: thread, state: open, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }, { title: Loose item }] }
+  - when: { query: task-rows, params: { show: thread, state: in_progress, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Loose item, depth: 0 }] }
+  - when: { query: task-rows, params: { show: thread, state: done, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Shipped }] }
+  - when: { query: task-rows, params: { show: thread, state: canceled, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: Dropped }] }
+  - when: { query: task-rows, params: { show: thread, state: todo, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }] }
+  # A stage by its id: the same items, the list's own name for it.
+  - when: { query: task-rows, params: { show: thread, state: ready, priority: any, q: "", thread_id: 1, stream_id: 1 } }
+    expect: { rows: [{ title: An epic }, { title: Urgent child }, { title: Plain child }] }

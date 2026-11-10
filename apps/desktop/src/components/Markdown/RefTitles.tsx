@@ -9,7 +9,7 @@ import { parseMarkdownLink, parsedLinkIconKind, refLinkNames } from "./markdownL
 /**
  * A ref link's title in the editor, as the viewer shows it
  * (`useRefLinkTitle`): a widget drawn before each link that names a titled
- * ref (a wiki page, a work item, an extension's ref). Once its title
+ * ref (a wiki page, a task, an extension's ref). Once its title
  * resolves for a bare link, the widget shows the kind's icon and the title,
  * and CSS hides the link beside it (`.oxplow-ref-title:has([data-ref-title])
  * + a`, in `index.html`) — the stored text stays the slug. With the caret

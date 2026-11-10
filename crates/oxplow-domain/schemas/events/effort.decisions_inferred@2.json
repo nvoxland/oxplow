@@ -13,8 +13,8 @@
       "description": "The effort (`eff12`).",
       "type": "string"
     },
-    "work_item": {
-      "description": "The effort's work item, when it has one.",
+    "task": {
+      "description": "The effort's task, when it has one.",
       "type": [
         "string",
         "null"

@@ -1,8 +1,8 @@
 # Token usage on a thread: its turns' total; an idle thread shows nothing.
-# (A work item's own is bundled's task-tokens.)
+# (A task's own is bundled's task-tokens.)
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix it, assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix it, assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { token_usage: { effort: eff1, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
   - observe: { token_usage: { effort: eff1, prompt: again, input_tokens: 99, output_tokens: 1 } }
   - observe: { token_usage: { prompt: chat, input_tokens: 9, output_tokens: 1 } }

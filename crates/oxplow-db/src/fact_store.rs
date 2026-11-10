@@ -1172,9 +1172,9 @@ pub struct FactRow {
     pub stream_id: i64,
     pub thread_id: Option<i64>,
     pub effort_id: Option<i64>,
-    /// The work item `effort_id` is linked to, as a ref (resolved per read
+    /// The task `effort_id` is linked to, as a ref (resolved per read
     /// from `effort`).
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     pub provenance: String,
     pub source: String,
     /// The capture's producer (gauge key / ingest kind) — identifies which scan
@@ -1242,10 +1242,10 @@ pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 pub(crate) fn fact_row_mapper<'c>(
     conn: &'c rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
-    // Effort → work item, loaded once per read: `effort` is small next to
+    // Effort → task, loaded once per read: `effort` is small next to
     // the facts, and a per-row join would cost a lookup on every fact.
     let items: std::collections::HashMap<i64, String> = conn
-        .prepare_cached("SELECT id, work_item FROM v_effort WHERE work_item IS NOT NULL")?
+        .prepare_cached("SELECT id, task FROM v_effort WHERE task IS NOT NULL")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let mut last: Option<(i64, Timestamp)> = None;
@@ -1270,7 +1270,7 @@ pub(crate) fn fact_row_mapper<'c>(
             }
         };
         let mut fact = row_to_fact_row_with(row, captured_at, &mut text)?;
-        fact.work_item = fact.effort_id.and_then(|e| items.get(&e).cloned());
+        fact.task = fact.effort_id.and_then(|e| items.get(&e).cloned());
         Ok(fact)
     })
 }
@@ -1308,7 +1308,7 @@ fn row_to_fact_row_with(
         stream_id: row.get(19)?,
         thread_id: row.get(20)?,
         effort_id: row.get(21)?,
-        work_item: None,
+        task: None,
         provenance: row.get(22)?,
         source: row.get(23)?,
         producer: row.get(24)?,
@@ -3993,14 +3993,14 @@ mod tests {
                     [now],
                 )?;
                 conn.execute(
-                    "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+                    "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
                      VALUES ('t', 'in_progress', 'medium', 'user', ?1, ?1)",
                     [now],
                 )?;
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
-                    "INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                     VALUES (1, 'oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
+                    "INSERT INTO effort (id, task, thread_id, started_at, ended_at)
+                     VALUES (1, 'oxplow:oxplow/task?id=tsk&provider=oxtask' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
                     params![task_id],
                 )?;
                 Ok(())

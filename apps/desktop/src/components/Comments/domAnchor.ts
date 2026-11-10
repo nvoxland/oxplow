@@ -64,7 +64,7 @@ export function refFromHref(href: string): string | null {
       return dirUri(parsed.path);
     case "commit":
       return commitUri(parsed.sha);
-    case "work_item":
+    case "task":
       return parsed.ref;
     default:
       return null;

@@ -467,14 +467,14 @@ mod tests {
                     [now],
                 )?;
                 conn.execute(
-                    "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+                    "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
                      VALUES ('t', 'in_progress', 'medium', 'user', ?1, ?1)",
                     [now],
                 )?;
                 let task_id = conn.last_insert_rowid();
                 conn.execute(
-                    "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, ?2)",
+                    "INSERT INTO effort (task, thread_id, started_at)
+                     VALUES ('oxplow:oxplow/task?id=tsk&provider=oxtask' || ?1, 1, ?2)",
                     params![task_id, now],
                 )?;
                 Ok(())

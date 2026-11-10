@@ -30,11 +30,11 @@ collectors:
                json_extract(w.native, '$.priority') AS priority,
                th.id AS thread_id, th.stream_id,
                max(w.updated_at,
-                   coalesce((SELECT max(c.created_at) FROM v_work_item_comment c
+                   coalesce((SELECT max(c.created_at) FROM v_task_comment c
                              WHERE c.uri = w.uri), ''),
                    coalesce((SELECT max(coalesce(e.ended_at, e.started_at)) FROM v_effort e
-                             WHERE e.work_item = w.uri), '')) AS last_touched_at
-        FROM v_work_item w
+                             WHERE e.task = w.uri), '')) AS last_touched_at
+        FROM v_task w
         LEFT JOIN v_thread th ON th.uri = w.assignee
         WHERE w.state IN ('todo', 'in_progress', 'blocked')
       )

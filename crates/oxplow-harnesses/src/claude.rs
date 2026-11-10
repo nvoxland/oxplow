@@ -1402,12 +1402,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mut text = oxplow_agent_text::core_text();
         text.skills.push(Text {
-            name: "work-items".into(),
-            body: "---\nname: work-items\ndescription: d\n---\n".into(),
+            name: "tasks".into(),
+            body: "---\nname: tasks\ndescription: d\n---\n".into(),
             ..Default::default()
         });
         text.commands.push(Text {
-            name: "work-next".into(),
+            name: "next-task".into(),
             body: "next".into(),
             ..Default::default()
         });
@@ -1416,15 +1416,15 @@ mod tests {
         let commands = dir.join("commands");
         fs::create_dir_all(skills.join("someone-elses")).unwrap();
         fs::write(skills.join("someone-elses").join("SKILL.md"), "x").unwrap();
-        assert!(skills.join("work-items").join("SKILL.md").exists());
-        assert!(commands.join("work-next.md").exists());
+        assert!(skills.join("tasks").join("SKILL.md").exists());
+        assert!(commands.join("next-task.md").exists());
         let h = harness("oxplow:claude-code", "claude");
         crate::test_launch::block(
             h.refresh_text(&project_only(tmp.path()), &oxplow_agent_text::core_text()),
         )
         .unwrap();
-        assert!(!skills.join("work-items").exists());
-        assert!(!commands.join("work-next.md").exists());
+        assert!(!skills.join("tasks").exists());
+        assert!(!commands.join("next-task.md").exists());
         assert!(skills.join("someone-elses").exists());
         assert!(skills.join("oxplow-runtime").join("SKILL.md").exists());
         assert!(commands.join("configure.md").exists());

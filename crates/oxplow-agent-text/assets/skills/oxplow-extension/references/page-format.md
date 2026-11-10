@@ -44,7 +44,7 @@ intent:                 # required: what it is for, and how to know it works
       expect: one row for the blocked task
 ui:                     # optional: what it adds to other pages
   mounts:
-    - { page: task-history, at: oxplow/work-item.sections }   # also add requires: [oxplow-bundled]
+    - { page: task-history, at: oxplow/task-detail.sections }   # also add requires: [oxplow-bundled]
 panels:                 # optional: a left-nav panel
   - { id: waiting, title: Waiting on Me, icon: bell, scope: stream, body: waiting-on-me, badge: waiting-on-me }
 ```
@@ -154,7 +154,7 @@ called `content` that you never declare. Read it as `FROM content` or `{
 from: content.<col> }`; do not query for what the page renders. For a file
 (`oxplow/file`) it is one row, `uri, path, filesystem, rev, kind, size,
 modified_at, is_text, language`; for a resource a dataset resolves (a
-commit, a work item) it is that dataset's row; for any other it is `{ uri }`.
+commit, a task) it is that dataset's row; for any other it is `{ uri }`.
 `content: { text: true, max_bytes: 262144 }` in the page also reads a file's
 text (`text`, `truncated`; `text` is NULL for a binary file; `max_bytes` at
 most 4 MiB, default 64 KiB). No such file or row: `content` has no rows.

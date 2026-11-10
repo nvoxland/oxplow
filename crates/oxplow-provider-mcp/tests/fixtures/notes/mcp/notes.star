@@ -1,15 +1,15 @@
-# The notes server's mapping: work-items verbs as its tools, its notes as
-# work items. `x.phase` is invoke / invoked (a verb) or read / records (a
+# The notes server's mapping: task tracker verbs as its tools, its notes as
+# tasks. `x.phase` is invoke / invoked (a verb) or read / records (a
 # collector); `x.output` is the tool's output, data to read.
 
 # A note's state is its stage: the manifest declares them (`stages:`), and
 # core resolves a bucket to one of them before the mapping sees it.
 
 def ref(x, id):
-    return uri.build("oxplow/work_item", provider = x["provider"], id = id)
+    return uri.build("oxplow/task", provider = x["provider"], id = id)
 
 def note_id(x, r):
-    if not uri.is_uri(r) or uri.resource(r) != "oxplow/work_item":
+    if not uri.is_uri(r) or uri.resource(r) != "oxplow/task":
         return None
     if uri.param(r, "provider") != x["provider"]:
         return None
@@ -71,7 +71,7 @@ def transform(x):
         item = record(x, x["output"])
         return {
             "result": {"uri": item["uri"]},
-            "events": [{"type": "work_item.recorded", "v": 3, "payload": {"item": item}, "subject": [item["uri"]]}],
+            "events": [{"type": "task.recorded", "v": 3, "payload": {"item": item}, "subject": [item["uri"]]}],
         }
     if phase == "read":
         state = x["state"] or {}

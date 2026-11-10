@@ -204,9 +204,9 @@ mod tests {
             run(r#"uri.id("oxplow:oxplow/claim?id=3", resource = "oxplow/decision")"#).unwrap_err();
         assert!(e.contains("oxplow/decision"), "{e}");
         assert_eq!(
-            run(r#"[uri.param("oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "provider"), uri.param("oxplow:oxplow/file?path=a", "rev")]"#)
+            run(r#"[uri.param("oxplow:oxplow/task?id=tsk1&provider=oxtask", "provider"), uri.param("oxplow:oxplow/file?path=a", "rev")]"#)
                 .unwrap(),
-            json!(["oxplow", null])
+            json!(["oxtask", null])
         );
         let e = run(r#"uri.parse("nope")"#).unwrap_err();
         assert!(e.contains("isn't an oxplow URI"), "{e}");

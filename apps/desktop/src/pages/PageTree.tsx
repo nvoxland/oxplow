@@ -156,7 +156,7 @@ function NodeView(props: NodeViewProps) {
   const id = `${prefix}${at.id}`;
   const own = at.error ? <NodeError message={at.error} /> : def ? <NodeBody {...props} def={def} id={id} /> : <Unknown {...props} />;
   // A node another extension's page stands in for (`replaceable:
-  // work_item.board`): the run decided whose and ran it, drawn as an embed.
+  // task.board`): the run decided whose and ran it, drawn as an embed.
   const body =
     at.replacedBy && def?.replaceable ? (
       <Replaced

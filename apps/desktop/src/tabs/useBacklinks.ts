@@ -100,8 +100,8 @@ export function humanRefTypeForTest(refType: string, sourceExtra: string | null)
   return humanRefType(refType, sourceExtra);
 }
 
-/** The work-item link type an edge's `ref_type` names (`work_item_link:about`). */
-const LINK_TYPE_PREFIX = "work_item_link:";
+/** The task link type an edge's `ref_type` names (`task_link:about`). */
+const LINK_TYPE_PREFIX = "task_link:";
 
 function linkTypeOf(refType: string): string | undefined {
   return refType.startsWith(LINK_TYPE_PREFIX) ? refType.slice(LINK_TYPE_PREFIX.length) : undefined;
@@ -237,10 +237,10 @@ function openFor(uri: string, resolved: boolean): string | null {
  *    action through `source_extra.action`. Both paths normalize
  *    `updated` to `modified` for display.
  *
- *  - **typed link** — `work_item_link:<sub>` becomes the sub-type with
+ *  - **typed link** — `task_link:<sub>` becomes the sub-type with
  *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
  *
- *  - **comment** — `comment_*`: a work item's comment mentions it (the
+ *  - **comment** — `comment_*`: a task's comment mentions it (the
  *    item is the source; its comments live on its page).
  *
  *  Plus a `found in` fallback for `finding_path`, and the raw
@@ -248,8 +248,8 @@ function openFor(uri: string, resolved: boolean): string | null {
  *  crashes the renderer.
  */
 function humanRefType(refType: string, sourceExtra: string | null): string {
-  if (refType.startsWith("work_item_link:")) {
-    const sub = refType.slice("work_item_link:".length);
+  if (refType.startsWith("task_link:")) {
+    const sub = refType.slice("task_link:".length);
     return sub.replace(/_/g, " ");
   }
   switch (refType) {
@@ -259,8 +259,8 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     case "summary_wikilink":
     case "summary_file_ref":
     case "summary_dir_ref":
-    case "work_item_mention":
-    case "summary_work_item_mention":
+    case "task_mention":
+    case "summary_task_mention":
     case "finding_mention":
     case "summary_finding_mention":
     case "commit_mention":
@@ -269,7 +269,7 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     case "comment_file_ref":
     case "comment_dir_ref":
     case "comment_wikilink":
-    case "comment_work_item_mention":
+    case "comment_task_mention":
     case "comment_finding_mention":
     case "comment_commit_mention":
       return "comment";

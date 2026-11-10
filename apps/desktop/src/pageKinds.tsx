@@ -2,7 +2,7 @@
  * Page-kind scheme metadata.
  *
  * `kindForTabId` extracts the kind from a tab id like
- * `file:src/foo.ts` → `"file"`, `work_item:oxplow:tsk42` → `"work_item"`,
+ * `file:src/foo.ts` → `"file"`, `task:oxplow:tsk42` → `"task"`,
  * or, for a declared page, its page id: `page:tasks` → `"tasks"`,
  * `page:gh/open-prs` → `"gh/open-prs"` (what visits and bookmarks
  * record, `recordedPageKind`).
@@ -67,8 +67,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return GitCompare;
     case "wiki":
       return BookOpen;
-    case "work_item":
-    // Comment anchors and the rail's finished list still say `task`.
     case "task":
       return CheckSquare;
     case "commit":
@@ -164,8 +162,8 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
   switch (kind) {
     case "wiki":
       return "wiki page";
-    case "work_item":
-      return "work item";
+    case "task":
+      return "task";
     case "agent_session":
       return "agent session";
     default:
@@ -175,7 +173,7 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
 
 /**
  * The kind a tab id renders as — an entity ref's kind
- * (`work_item:oxplow:tsk42` → `work_item`, `file:src/a.rs@git:HEAD` →
+ * (`task:oxplow:tsk42` → `task`, `file:src/a.rs@git:HEAD` →
  * `file`) or a declared page's id (`page:diff-view?effort=eff9` →
  * `diff-view`, `page:gh/open-prs` → `gh/open-prs`).
  * Text that is not a tab id comes back unchanged so a caller can still

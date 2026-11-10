@@ -2,8 +2,8 @@
 # claims become one reasoning job, keyed by the effort. Each turn's final
 # answer is in the request.
 given:
-  - { command: oxplow.work_item.create, input: { title: Add CSV export }, bind: item }
-  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - { command: oxplow.task.create, input: { title: Add CSV export }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, task: $item.uri } }
   - observe:
       turn:
         prompt: Add CSV export to reports

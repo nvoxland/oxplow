@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { commitUri, fileUri, pageUri, workItemUri } from "../../uri/uri.js";
+import { commitUri, fileUri, pageUri, taskUri } from "../../uri/uri.js";
 import { collectContextChain, contextNodeProps, nearestContextNode } from "./contextNodes.js";
 
 const GIT = pageUri("git-dashboard");
 const COMMIT = commitUri("abc1234");
 const FILE = fileUri("src/app.rs");
 const X = fileUri("x.rs");
-const TASK = workItemUri("oxplow", "tsk42");
+const TASK = taskUri("oxtask", "tsk42");
 
 /// Build a detached DOM tree from nested URI declarations (outermost
 /// first) and return the innermost element so tests can walk up from a

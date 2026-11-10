@@ -4,14 +4,14 @@
 //! `knowledge.*` commands (the wiki as the store, whatever the project
 //! has active).
 //!
-//! `oxplow-dev task …` reads and changes oxplow's tasks while the project
-//! has no work list active (none chosen in Settings → Capabilities). It runs oxplow's own `work_item.*` commands on a command
+//! `oxplow-dev task …` reads and changes oxtask while the project
+//! has no task tracker active (none chosen in Settings → Capabilities). It runs oxplow's own `task.*` commands on a command
 //! bus over the project's database, as the app would — validation, audit,
 //! events and all — on a bus that doesn't check what's active. So the rows
 //! and the log are the task system's own, and turning the extension back
 //! on shows all of it. The database is opened as it is
 //! (`Database::open_existing`): nothing migrated or recompiled under the
-//! running app. Its reads are oxplow's own task table, not the work-item
+//! running app. Its reads are oxplow's own task table, not the task
 //! interface (which shows only the active list's items): the one place
 //! outside oxplow's implementation that reads it, on purpose. See
 //! `.context/working-in-this-repo.md` "oxplow-dev".
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use oxplow_app::commands::CommandBus;
 use oxplow_db::{Database, SqliteEventLogStore};
-use oxplow_domain::work_items::WorkItemsRegistry;
+use oxplow_domain::tasks::TaskTrackers;
 use oxplow_domain::{Actor, ThreadId};
 use serde_json::{json, Map, Value};
 
@@ -61,7 +61,7 @@ oxplow-dev extension test [<name> …] [--only <example,…>] [--require-ui] [--
 
 oxplow-dev --help                            this
 
-<id> is a task's id (tsk12) or ref (work_item:oxplow:tsk12); a link's
+<id> is a task's id (tsk12) or ref (task:oxplow:tsk12); a link's
 <target> is a task too, or any ref the task is `about` (collector:x/y). The project is
 the current directory's (or --project <dir>); the acting thread is
 --thread <thrN>, else $OXPLOW_THREAD_ID, else none (as a person).";
@@ -341,7 +341,7 @@ fn take_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     Some(value)
 }
 
-/// oxplow's tasks over the project's database.
+/// oxtask over the project's database.
 struct Tasks {
     db: Database,
     bus: Arc<CommandBus>,
@@ -355,14 +355,14 @@ impl Tasks {
             .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
         let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
         let log = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
-        // The work-item interface's projections, so a write here reads
+        // The task interface's projections, so a write here reads
         // back at once (the app's pump delivers the rest).
         let pump = Arc::new(oxplow_app::event_pump::EventPump::new(
             db.clone(),
             log.clone(),
             vec![
-                Arc::new(oxplow_app::work_items::WorkItemsProjection),
-                Arc::new(oxplow_app::page_ref_consumers::PageRefWorkItemConsumer { vocabulary }),
+                Arc::new(oxplow_app::tasks::TasksProjection),
+                Arc::new(oxplow_app::page_ref_consumers::PageRefTaskConsumer { vocabulary }),
             ],
         ));
         // No `with_capabilities`: every registered command is offered,
@@ -373,11 +373,10 @@ impl Tasks {
             Arc::new(oxplow_app::agent_policy::AgentPolicy),
             pump,
         ));
-        let work_items =
-            WorkItemsRegistry::new(Arc::new(|| oxplow_app::work_items::PROVIDER.to_string()));
-        work_items.register(
-            oxplow_app::work_items::built_in_provider(oxplow_app::work_items::BUILT_IN, &db)
-                .ok_or("oxplow's tasks aren't a built-in work list")?,
+        let tasks = TaskTrackers::new(Arc::new(|| oxplow_app::tasks::PROVIDER.to_string()));
+        tasks.register(
+            oxplow_app::tasks::built_in_provider(oxplow_app::tasks::BUILT_IN, &db)
+                .ok_or("oxtask aren't a built-in task tracker")?,
         );
         let links = oxplow_app::link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
@@ -385,14 +384,14 @@ impl Tasks {
             db: db.clone(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         };
-        use oxplow_app::commands::work_item as w;
+        use oxplow_app::commands::task as w;
         for op in [
-            w::transition_op(work_items.clone(), db.clone()),
-            w::create_op(work_items.clone(), links.clone()),
-            w::update_op(work_items.clone(), links.clone()),
-            w::link_op(work_items.clone(), links.clone()),
-            w::unlink_op(work_items.clone(), links),
-            w::comment_op(work_items.clone()),
+            w::transition_op(tasks.clone(), db.clone()),
+            w::create_op(tasks.clone(), links.clone()),
+            w::update_op(tasks.clone(), links.clone()),
+            w::link_op(tasks.clone(), links.clone()),
+            w::unlink_op(tasks.clone(), links),
+            w::comment_op(tasks.clone()),
         ] {
             bus.add_op(op).map_err(|e| e.to_string())?;
         }
@@ -460,13 +459,13 @@ impl Tasks {
                 put(&mut input, "body", body);
                 put(&mut input, "parent_uri", parent);
                 put(&mut input, "state", state);
-                self.command("oxplow.work_item.create", input).await
+                self.command("oxplow.task.create", input).await
             }
             Some("transition") => {
                 let mut input = Map::new();
                 input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("to".into(), json!(arg(2, "<state>")?));
-                self.command("oxplow.work_item.transition", input).await
+                self.command("oxplow.task.transition", input).await
             }
             Some("update") => {
                 let mut input = Map::new();
@@ -474,21 +473,20 @@ impl Tasks {
                 put(&mut input, "title", title);
                 put(&mut input, "body", body);
                 put(&mut input, "parent_uri", parent);
-                self.command("oxplow.work_item.update", input).await
+                self.command("oxplow.task.update", input).await
             }
             Some("comment") => {
                 let mut input = Map::new();
                 input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("body".into(), json!(arg(2, "<body>")?));
-                self.command("oxplow.work_item.comment", input).await
+                self.command("oxplow.task.comment", input).await
             }
             Some(verb @ ("link" | "unlink")) => {
                 let mut input = Map::new();
                 input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("target".into(), json!(arg(2, "<target>")?));
                 input.insert("link_type".into(), json!(arg(3, "<link type>")?));
-                self.command(&format!("oxplow.work_item.{verb}"), input)
-                    .await
+                self.command(&format!("oxplow.task.{verb}"), input).await
             }
             _ => Err(format!("usage:\n{USAGE}")),
         }
@@ -604,20 +602,20 @@ impl Tasks {
         let mut result = out.result;
         let task = result["uri"]
             .as_str()
-            .and_then(oxplow_tasks::task_of_work_item_ref);
+            .and_then(oxplow_oxtask::oxtask_of_task_ref);
         if let (Some(task), Value::Object(fields)) = (task, &mut result) {
             fields.insert("id".into(), json!(task.to_string()));
         }
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     }
 
-    /// Oxplow's tasks, from its own table: whatever work list is active
+    /// Oxplow's tasks, from its own table: whatever task tracker is active
     /// (the interface shows only the active one's), this is oxplow's.
     async fn list(&self, all: bool) -> Result<String, String> {
         let rows = self
             .rows(
                 &format!(
-                    "SELECT 'tsk' || id, status, title FROM task WHERE deleted_at IS NULL {}
+                    "SELECT 'tsk' || id, status, title FROM oxtask WHERE deleted_at IS NULL {}
                      ORDER BY id",
                     if all {
                         ""
@@ -636,7 +634,7 @@ impl Tasks {
     }
 
     async fn show(&self, id: &str) -> Result<String, String> {
-        let id = oxplow_domain::uri::build::work_item_of_uri(id)
+        let id = oxplow_domain::uri::build::task_of_uri(id)
             .map_or(id.to_string(), |(_, item)| item)
             .trim_start_matches("tsk")
             .to_string();
@@ -644,7 +642,7 @@ impl Tasks {
             .rows(
                 "SELECT 'tsk' || id, status, title,
                         coalesce('tsk' || parent_id, ''), coalesce(description, '')
-                   FROM task WHERE id = ?1 AND deleted_at IS NULL",
+                   FROM oxtask WHERE id = ?1 AND deleted_at IS NULL",
                 vec![id.clone()],
             )
             .await?;
@@ -761,7 +759,7 @@ mod tests {
         let logged: i64 = db
             .read(|c| {
                 c.query_row(
-                    "SELECT count(*) FROM event_log WHERE type = 'work_item.state_changed'",
+                    "SELECT count(*) FROM event_log WHERE type = 'task.state_changed'",
                     [],
                     |r| r.get(0),
                 )

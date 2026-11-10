@@ -18,7 +18,7 @@ usage:
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the effort/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
-      provider of --capability (work_items, the default, effort_policy,
+      provider of --capability (task_tracker, the default, effort_policy,
       agent_harness, snapshots, knowledge or filesystem)
       with its contract's declarations, a stub program and test config; a Starlark
       collector with a dataset and a page over it; a code metric (--language,
@@ -1023,7 +1023,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains("ran check, provider fake, discover, read work_items, work_items suite"),
+            out.contains("ran check, provider fake, discover, read tasks, task_tracker suite"),
             "{out}"
         );
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
@@ -1048,7 +1048,7 @@ mod tests {
         assert_eq!(code, 0, "{out}");
         assert!(
             out.contains(
-                "ran check, provider fake, discover, read work_items, work_items suite, questions"
+                "ran check, provider fake, discover, read tasks, task_tracker suite, questions"
             ),
             "{out}"
         );

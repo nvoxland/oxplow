@@ -67,7 +67,7 @@ pub struct InitializeParams {
     pub host: Party,
 }
 
-/// A capability the provider implements (`work_items`), with the
+/// A capability the provider implements (`task_tracker`), with the
 /// capability's own feature flags and, for a capability whose contract
 /// asks for more (an agent harness's instruction files, environment
 /// markers and settings), what it declares of itself as `data`.

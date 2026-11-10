@@ -7,7 +7,7 @@ params:
 loaders:
   recent_decisions:
     sql: |
-      SELECT d.question, d.choice, d.confidence, d.provenance, t.title AS thread, d.work_item, d.created_at
+      SELECT d.question, d.choice, d.confidence, d.provenance, t.title AS thread, d.task, d.created_at
       FROM v_decision d
       JOIN v_thread t ON t.id = d.thread_id
       WHERE t.stream_id = :stream_id
@@ -21,7 +21,7 @@ view:
     label: Decision
     link:
       kind: page
-      from: work_item
+      from: task
   - key: choice
     label: Chose
   - key: confidence

@@ -6,7 +6,7 @@ import { markdownTree, type TreeDeps } from "./markdownTree.js";
 // `renderMarkdown`): the viewer's parse, its link rules and titles, as a
 // tree of the elements a frame may draw — no HTML crosses the bridge.
 
-const ITEM = "oxplow:oxplow/work_item?id=tsk7&provider=oxplow";
+const ITEM = "oxplow:oxplow/task?id=tsk7&provider=oxtask";
 const deps: TreeDeps = {
   mentionRef: (id) => (id === "tsk7" ? ITEM : null),
   refTitle: async ({ itemRef }) =>
@@ -36,7 +36,7 @@ test("a whole body keeps its blocks", async () => {
 });
 
 test("a broken ref is marked; a script, raw HTML and an image never cross", async () => {
-  const missing = "oxplow:oxplow/work_item?id=tsk9&provider=oxplow";
+  const missing = "oxplow:oxplow/task?id=tsk9&provider=oxtask";
   expect(await markdownTree(`See [gone](${missing}), [x](javascript:alert(1)) <b>bold</b> ![pic](https://example.com/p.png) end`, true, deps)).toEqual([
     "See ",
     { tag: "a", broken: `Broken link: ${missing}`, children: ["gone"] },

@@ -80,8 +80,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model, and `requires: [<extension>…]` for more extensions that fixture
-   needs on (what only yours declares is on otherwise, plus oxplow's own work
-   list, effort policy and wiki; a fixture that needs what `oxplow-bundled`
+   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker, effort policy and wiki; a fixture that needs what `oxplow-bundled`
    adds, such as its review pages, says `requires: [oxplow-bundled]`; a name
    that isn't an extension here is an error). Any other key is an error:
    The kinds of fixture (generated from the runner's own list):
@@ -158,7 +157,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `$name.uri` (any `.key` / `[n]` path) in a later input, `params` or
      `expect` is that value. `confirmed: true` runs a command that asks a
      person first. Example:
-     `given: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]`,
+     `given: [{ command: oxplow.task.create, input: { title: T }, bind: t }]`,
      `when: { page: items, params: { uri: $t.uri } }`, `expect: { loaders:
      { items: { rows: [{ title: T }] } } }`.
      **Scenarios:** `steps: [ { given: [..] } | { expect, params?, bind? } ]`
@@ -263,7 +262,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a job: `when: { job: <id>, intentKey, request, cancel?, setup?,
      rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
      own commands (`as: agent` for the agent of `oxplow:oxplow/thread?id=thr1`) to make
-     what its tools read: a work item, an effort, a test run — run
+     what its tools read: a task, an effort, a test run — run
      through your commands over `jobs.write/enqueue` and
      `jobs.read/snapshot` (declare both), its model rounds
      answered by `model.replies` (a string, or `{ text?, toolCalls?: [{
@@ -276,8 +275,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a component: `when: { component: <id>, items?: [title], invokes?: [{
      command, input? }] }` — what its frame would ask; `expect: { invokes: [{
      ok, result? } | { ok: false, refused }] }` (an invoke is `refused` when the
-     command refuses or fails; `items` are work
-     items filed first, `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, …);
+     command refuses or fails; `items` are tasks filed first, `oxplow:oxplow/task?id=<id>&provider=oxtask`, …);
    - a page's form (a `viz: form` node): `when: { form: <page>, node?,
      params? }` — opens it as a person would (`node` names the form node,
      else the page's first); `expect: { values?, fixed?, fields? }` (the

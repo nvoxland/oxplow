@@ -1,12 +1,12 @@
 # review-badges
 
-The latest model review of each work item, from
+The latest model review of each task, from
 [effort-review](../effort-review), as a list.
 It reads effort-review's exported `reviews` dataset and writes nothing.
 
 | | |
 |---|---|
-| **Review Verdicts** (Work) | One row per work item: its latest review's effort, how it ended, when, and the first 120 characters. The work item links to its page. |
+| **Review Verdicts** (Work) | One row per task: its latest review's effort, how it ended, when, and the first 120 characters. The task links to its page. |
 
 ```yaml
 imports:

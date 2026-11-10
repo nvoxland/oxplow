@@ -1,8 +1,8 @@
 # oxplow puts no wall between a person and their agent: an agent accepts,
 # forced, without being asked; the verb asks a person.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -20,7 +20,7 @@ when:
 expect:
   ok: true
 steps:
-  - when: { sql: "SELECT title, state FROM v_work_item ORDER BY title" }
+  - when: { sql: "SELECT title, state FROM v_task ORDER BY title" }
     expect:
       rows:
         - { title: Fix the hover state, state: done }

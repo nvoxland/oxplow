@@ -212,7 +212,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         .commands
         .run(
             &human,
-            "oxplow.work_item.create",
+            "oxplow.task.create",
             serde_json::json!({ "title": "Look" }),
             true,
         )
@@ -230,7 +230,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
         .await
         .unwrap();
     assert_eq!(
-        ran.result["children"][0]["name"], "oxplow.work_item.comment",
+        ran.result["children"][0]["name"], "oxplow.task.comment",
         "{}",
         ran.result
     );
@@ -238,7 +238,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
 
 /// `extension new job` checks clean, and its fixtures run the job on the
 /// fixture model: the reply is the job's text, and the finished job reaches
-/// `publish`, which comments it on the work item.
+/// `publish`, which comments it on the task.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_job_checks_tests_and_answers_with_the_fixture_model() {
     let dir = project().await;
@@ -281,7 +281,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
         .commands
         .run(
             &human,
-            "oxplow.work_item.create",
+            "oxplow.task.create",
             serde_json::json!({ "title": "Look" }),
             true,
         )
@@ -291,7 +291,7 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     svc.commands
         .run(
             &human,
-            "oxplow.work_item.transition",
+            "oxplow.task.transition",
             serde_json::json!({ "uri": item, "to": "done" }),
             true,
         )
@@ -444,7 +444,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
     assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert_eq!(report.error_lines(), Vec::<String>::new());
-    for ran in ["work_items suite", "read work_items", "discover"] {
+    for ran in ["task_tracker suite", "read tasks", "discover"] {
         assert!(
             report.ran.iter().any(|r| r == ran),
             "{ran}: {:?}",
@@ -464,7 +464,7 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         report
             .error_lines()
             .iter()
-            .any(|e| e.contains("collector `work_items`") && e.contains("doesn't advance")),
+            .any(|e| e.contains("collector `tasks`") && e.contains("doesn't advance")),
         "{:?}",
         report.errors
     );

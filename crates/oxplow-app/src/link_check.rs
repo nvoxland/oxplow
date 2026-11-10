@@ -65,7 +65,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
             (None, None) => out.push(LinkWarning {
                 target: link.raw.clone(),
                 reason: format!(
-                    "`[[{}]]` is not a recognized reference — use a work item's own id \
+                    "`[[{}]]` is not a recognized reference — use a task's own id \
                      as its list writes it (never the GitHub `#42` form), `[[some-slug]]` for a \
                      wiki page, \
                      `[[path/to/file.rs]]` for a file, or `[[git:<sha>]]` for a commit",
@@ -87,7 +87,7 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
 
 /// What a command checks a body's links against: the project and its
 /// VCS, and the database and vocabulary for a check outside a command's
-/// transaction (a work item's, any list's). Notes and the work-item
+/// transaction (a task's, any list's). Notes and the task
 /// commands carry one.
 #[derive(Clone)]
 pub struct LinkDeps {
@@ -110,7 +110,7 @@ impl LinkDeps {
         self.warnings_tx(ctx.conn, &ctx.events.vocabulary.resources, body, thread)
     }
 
-    /// The links in a work item's `body` that don't resolve, on a read of
+    /// The links in a task's `body` that don't resolve, on a read of
     /// its own — for any list's write, which runs outside the bus's
     /// transaction. The worktree is `thread`'s, else the list `item` is on
     /// as the interface holds it.
@@ -129,7 +129,7 @@ impl LinkDeps {
                     (Some(t), _) => Some(t),
                     (None, Some(item)) => tx
                         .query_row(
-                            "SELECT assignee FROM work_item_assignment WHERE uri = ?1",
+                            "SELECT assignee FROM task_assignment WHERE uri = ?1",
                             [item],
                             |r| r.get::<_, Option<String>>(0),
                         )
@@ -144,7 +144,7 @@ impl LinkDeps {
             })
             .await;
         read.unwrap_or_else(|error| {
-            tracing::warn!(%error, "checking a work item's links failed");
+            tracing::warn!(%error, "checking a task's links failed");
             Vec::new()
         })
     }
@@ -272,10 +272,8 @@ fn unresolved_ref(
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
         // Through the interface: the active list's items.
-        Reference::WorkItem(uri) => {
-            (!exists(world.conn, "SELECT 1 FROM v_work_item WHERE uri = ?1", uri))
-                .then(|| format!("work item `{uri}` does not exist"))
-        }
+        Reference::Task(uri) => (!exists(world.conn, "SELECT 1 FROM v_task WHERE uri = ?1", uri))
+            .then(|| format!("task `{uri}` does not exist")),
         Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
             && !exists(world.conn, "SELECT 1 FROM wiki_page WHERE slug = ?1", slug))
         .then(|| format!("wiki page `{slug}` does not exist")),
@@ -352,9 +350,9 @@ mod tests {
         let warnings = check_links(&services, "See [[effort:eff1]].").await;
         assert_eq!(warnings.len(), 1, "got {warnings:?}");
         assert!(warnings[0].reason.contains("no row in `v_effort`"));
-        // A work item is checked against the active list's items: another
+        // A task is checked against the active list's items: another
         // list's isn't one.
-        let warnings = check_links(&services, "See [[work_item:issues:ENG-12]].").await;
+        let warnings = check_links(&services, "See [[task:issues:ENG-12]].").await;
         assert_eq!(warnings.len(), 1, "got {warnings:?}");
     }
 
@@ -368,13 +366,13 @@ mod tests {
         assert!(
             warnings[0]
                 .reason
-                .contains("`oxplow:oxplow/work_item?id=tsk999&provider=oxplow` does not exist"),
+                .contains("`oxplow:oxplow/task?id=tsk999&provider=oxtask` does not exist"),
             "{}",
             warnings[0].reason
         );
     }
 
-    /// A work-item link checks the interface: with no list, an existing
+    /// A task link checks the interface: with no list, an existing
     /// oxplow task is nothing it can point at.
     #[tokio::test]
     async fn a_task_link_checks_the_active_list() {
@@ -388,7 +386,7 @@ mod tests {
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), "none".into());
+            .insert("task_tracker".into(), "none".into());
         let config = crate::config_service::read_config(&services.config);
         services
             .capabilities

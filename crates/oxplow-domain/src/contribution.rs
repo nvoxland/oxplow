@@ -261,7 +261,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Provider,
         "providers",
         "Provider",
-        "an external program implementing a capability, such as the work list",
+        "an external program implementing a capability, such as the task tracker",
         false,
         false,
     ),

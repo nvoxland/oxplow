@@ -6,7 +6,7 @@ loaders:
   item_shared_work:
     sql: |
       WITH open_work AS (
-        SELECT e.id AS effort_id, e.thread_id, e.work_item, t.title AS thread_title,
+        SELECT e.id AS effort_id, e.thread_id, e.task, t.title AS thread_title,
                e.ended_at IS NULL AS is_open
         FROM v_effort e JOIN v_thread t ON t.id = e.thread_id
         WHERE e.ended_at IS NULL OR julianday(e.ended_at) >= julianday('now') - 1
@@ -14,7 +14,7 @@ loaders:
         SELECT 'Items on two threads' AS section, w.title AS what, w.uri AS uri,
                group_concat(DISTINCT o.thread_title) AS threads,
                group_concat(DISTINCT o.thread_id) AS thread_ids
-        FROM open_work o JOIN v_work_item w ON w.uri = o.work_item
+        FROM open_work o JOIN v_task w ON w.uri = o.task
         WHERE o.is_open
         GROUP BY w.uri HAVING count(DISTINCT o.thread_id) >= 2
         UNION ALL
@@ -25,7 +25,7 @@ loaders:
         UNION ALL
         SELECT 'Epics spread over threads', p.title, p.uri,
                group_concat(DISTINCT t.title), group_concat(DISTINCT t.id)
-        FROM v_work_item c JOIN v_work_item p ON p.uri = c.parent_uri JOIN v_thread t ON t.uri = c.assignee
+        FROM v_task c JOIN v_task p ON p.uri = c.parent_uri JOIN v_thread t ON t.uri = c.assignee
         WHERE c.closed_at IS NULL
         GROUP BY p.uri HAVING count(DISTINCT t.id) >= 2
       )
@@ -33,9 +33,9 @@ loaders:
       WHERE (section = 'Items on two threads' AND uri = :uri)
          OR (section = 'Files two threads changed' AND what IN (
                SELECT f.path FROM v_effort_file f JOIN v_effort e ON e.id = f.effort_id
-               WHERE e.work_item = :uri))
+               WHERE e.task = :uri))
          OR (section = 'Epics spread over threads'
-             AND uri = (SELECT parent_uri FROM v_work_item WHERE uri = :uri))
+             AND uri = (SELECT parent_uri FROM v_task WHERE uri = :uri))
       ORDER BY section, what
 view:
   from: item_shared_work

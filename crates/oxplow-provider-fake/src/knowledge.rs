@@ -42,7 +42,7 @@ pub(crate) type Pages = BTreeMap<String, Page>;
 
 /// What it declares in knowledge mode: the `knowledge` capability, its
 /// three verbs, the recorded event and a collector of the pages; the same
-/// config as its work list.
+/// config as its task tracker.
 pub fn declarations() -> InitializeResult {
     let string = json!({ "type": "string" });
     let refs = json!({ "type": "array", "items": string });

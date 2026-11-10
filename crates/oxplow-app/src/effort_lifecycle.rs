@@ -61,7 +61,7 @@ impl EffortLifecycleConsumer {
                     .as_str()
                     .unwrap_or_default()
                     .to_string(),
-                work_item: effort.work_item.clone(),
+                task: effort.task.clone(),
                 end_snapshot: effort.end_snapshot_id,
             },
         )

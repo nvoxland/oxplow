@@ -1,5 +1,5 @@
 //! Helpers that scenario tests of an extension's life (deploy, disable,
-//! rollback, the work list switching) share with the tests of one
+//! rollback, the task tracker switching) share with the tests of one
 //! transition: what once sat private in those files.
 
 #![cfg(test)]
@@ -26,7 +26,7 @@ pub(crate) fn fake_bin() -> PathBuf {
     bin
 }
 
-/// A private extension declaring the fake as its work-items provider,
+/// A private extension declaring the fake as its task tracker provider,
 /// its entry a script running the fake with `hooks`.
 #[cfg(unix)]
 pub(crate) fn write_extension(project: &Path, hooks: &str) {
@@ -34,7 +34,7 @@ pub(crate) fn write_extension(project: &Path, hooks: &str) {
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a work item's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/work_item, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a task's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/task, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: task_tracker\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
     )
     .unwrap();
     let script = dir.join("bin/provider");

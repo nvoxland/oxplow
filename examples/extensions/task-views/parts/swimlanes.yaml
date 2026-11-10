@@ -1,5 +1,5 @@
 title: Swimlanes
-description: The work items as a column per stage of the active list; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
+description: The tasks as a column per stage of the active list; drag a card to move it, click its title to rename it. It stands in for oxplow's Board.
 params:
 - name: scope
   role: filter
@@ -13,7 +13,7 @@ loaders:
   swimlanes:
     sql: |
       SELECT w.uri, w.title, w.stage, w.rank
-      FROM v_work_item w
+      FROM v_task w
       WHERE :scope = 'all'
          OR (:scope = 'thread' AND w.assignee = uri('oxplow/thread', 'id', 'thr' || :thread_id))
          OR (:scope = 'stream' AND w.assignee IN (SELECT t.uri FROM v_thread t WHERE t.stream_id = :stream_id))
@@ -28,11 +28,11 @@ loaders:
              CAST(s.key AS INTEGER) AS ord
       FROM v_capability_provider p,
            json_each(CASE WHEN json_valid(p.stages) THEN p.stages ELSE '[]' END) s
-      WHERE p.capability = 'work_items' AND p.active = 1
+      WHERE p.capability = 'task_tracker' AND p.active = 1
       ORDER BY ord
 view:
   from: swimlanes
   viz: custom
   custom:
     component: swimlanes
-  empty: No work items.
+  empty: No tasks.

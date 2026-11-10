@@ -9,7 +9,7 @@ def _thread_id(thread):
 
 def _open_effort(thread):
     rows = scope("sql.read", {
-        "sql": "SELECT uri, work_item, started_at FROM v_effort WHERE thread_id = :t AND ended_at IS NULL",
+        "sql": "SELECT uri, task, started_at FROM v_effort WHERE thread_id = :t AND ended_at IS NULL",
         "params": {"t": _thread_id(thread)},
     })
     return rows[0] if rows else None
@@ -37,30 +37,30 @@ def _checkpoint(e):
     opened = {"thread": thread, "adopt_since": since}
     if current != None:
         # The previous prompt's effort ends where this turn began; this one
-        # carries on its work item.
+        # carries on its task.
         commands.append({"name": "oxplow.effort.close",
                          "input": {"effort": uri.param(current["uri"], "id"), "as_of": since, "reason": "switch"}})
-        if current["work_item"] != None:
-            opened["work_item"] = current["work_item"]
+        if current["task"] != None:
+            opened["task"] = current["task"]
     commands.append({"name": "oxplow.effort.open", "input": opened})
     return {"commands": commands}
 
 def _item_moved(e):
-    item = e["payload"]["work_item"]
+    item = e["payload"]["task"]
     to = e["payload"]["to"]
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         current = _open_effort(thread)
         if current == None:
             return {"commands": [{"name": "oxplow.effort.open",
-                                  "input": {"thread": thread, "work_item": item}}]}
-        if current["work_item"] == item:
+                                  "input": {"thread": thread, "task": item}}]}
+        if current["task"] == item:
             return {"skip": "the effort is already the item's"}
         return {"commands": [{"name": "oxplow.effort.link",
-                              "input": {"effort": uri.param(current["uri"], "id"), "work_item": item}}]}
+                              "input": {"effort": uri.param(current["uri"], "id"), "task": item}}]}
     if to == "done" or to == "canceled":
         rows = scope("sql.read", {
-            "sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+            "sql": "SELECT uri FROM v_effort WHERE task = :w AND ended_at IS NULL",
             "params": {"w": item},
         })
         if not rows:
@@ -73,6 +73,6 @@ def transform(x):
     e = x["event"]
     if e["type"] == "thread.checkpoint":
         return _checkpoint(e)
-    if e["type"] == "work_item.state_changed":
+    if e["type"] == "task.state_changed":
         return _item_moved(e)
     return {"skip": "an event this policy doesn't act on"}

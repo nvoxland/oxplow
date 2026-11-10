@@ -556,7 +556,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, ConfigChanged,
-        ConfigChangedV2, WorkItemStateChanged, WorkItemStateChangedV1,
+        ConfigChangedV2, TaskStateChanged, TaskStateChangedV1,
     };
     use serde_json::{json, Value};
 
@@ -623,11 +623,11 @@ mod tests {
     async fn append_commits_with_the_state_change_and_reads_back_in_order() {
         let db = Database::in_memory();
         let store = store(&db);
-        let e1 = Envelope::typed::<WorkItemStateChanged>(
+        let e1 = Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
-                to: oxplow_domain::work_items::Bucket::InProgress,
+            &TaskStateChangedV1 {
+                task: "oxplow:oxplow/task?id=tsk4&provider=oxtask".into(),
+                to: oxplow_domain::tasks::Bucket::InProgress,
             },
         )
         .with_dedupe_key("k1")
@@ -636,11 +636,11 @@ mod tests {
             thread_id: Some(ThreadId::new(4)),
             ..Anchors::default()
         })
-        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"]);
+        .with_subject(["oxplow:oxplow/task?id=tsk4&provider=oxtask"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
             &CommandExecutedV5 {
-                command: "oxplow.work_item.transition".into(),
+                command: "oxplow.task.transition".into(),
                 actor_kind: ActorKind::Agent,
                 actor_id: Some("thr4".into()),
                 outcome: CommandOutcome::Ok,
@@ -777,7 +777,7 @@ mod tests {
             .append(env(None).with_subject([
                 "oxplow:oxplow/config?key=zones",
                 "oxplow:oxplow/stream?id=str1",
-                "oxplow:oxplow/work_item?id=tsk4&provider=oxplow",
+                "oxplow:oxplow/task?id=tsk4&provider=oxtask",
             ]))
             .await
             .unwrap();

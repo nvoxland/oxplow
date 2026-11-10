@@ -145,7 +145,7 @@ Where it lives, and what is loaded:
   needs, and the page shows that instead of an error.
 - `tool: <name>`: the page is also an MCP tool `<namespace>_<tool>`, its
   input the params, its call `oxplow.page.run`. Kept for the few questions
-  agents ask every session (foundation's `thread_work`, `work_next`,
+  agents ask every session (foundation's `thread_tasks`, `next_task`,
   `effort_summary`, `catalog`); everything else is `oxplow_find_page`,
   then `oxplow_run_page`.
 - `answers: [{ question, about?, params, skill? }]` (`PageAnswer`): the
@@ -559,7 +559,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   is an icon drawn before the cell from a fixed vocabulary
   (`viz/vizIcons.tsx`): the work glyphs, one per bucket (`backlog`,
   `todo`, `in_progress`, `blocked`, `done`, `canceled`: pass
-  `v_work_item.state`, never a list's own stage), a file's
+  `v_task.state`, never a list's own stage), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
   `conflicted`), the kinds (`epic`, `task`, `wiki`, `file`, `folder`,
   `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon

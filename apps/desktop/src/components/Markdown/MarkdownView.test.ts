@@ -4,11 +4,11 @@ import {
   directoryRef,
   fileRef,
   gitCommitRef,
-  workItemTabRef,
+  taskTabRef,
   wikiPageRef,
 } from "../../tabs/pageRefs.js";
 import { WORKING } from "../../revision.js";
-import { commitUri, dirUri, fileLinesUri, fileUri, resourceUri, wikiUri, workItemUri } from "../../uri/uri.js";
+import { commitUri, dirUri, fileLinesUri, fileUri, resourceUri, wikiUri, taskUri } from "../../uri/uri.js";
 
 // parseMarkdownLink is shared by WikiPageTab and TaskDetail. WikiPageTab needs
 // to distinguish wiki-internal links (`./foo`, `bar.md`) from external
@@ -297,34 +297,34 @@ test("postprocessWikilinks ∘ preprocessWikilinks is identity for supported for
     "see [[dir:src/components|the folder]] for buttons",
     "see [[tsk42]] for the work",
     "see [[tsk42|fix the parser]] for the work",
-    `see [[${workItemUri("issues", "ENG-1")}]] for theirs`,
+    `see [[${taskUri("issues", "ENG-1")}]] for theirs`,
   ];
-  const ids = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
+  const ids = (id: string) => (/^tsk\d+$/.test(id) ? taskUri("oxtask", id) : null);
   for (const sample of samples) {
     expect(postprocessWikilinks(preprocessWikilinks(sample, ids))).toBe(sample);
   }
 });
 
-// Work item wikilinks: a bare id of the active list's (`[[tsk42]]` with
-// oxplow's tasks, by its declared id pattern) or a full ref → the item's
-// `oxplow:oxplow/work_item?id=<id>&provider=<provider>` href; the renderer swaps the
+// Task wikilinks: a bare id of the active list's (`[[tsk42]]` with
+// oxtask, by its declared id pattern) or a full ref → the item's
+// `oxplow:oxplow/task?id=<id>&provider=<provider>` href; the renderer swaps the
 // `tsk<id>` token for the task title at display time. The backend ref
 // extractor (refs.rs) already recognizes the same form for backlinks.
 
-const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? workItemUri("oxplow", id) : null);
+const oxplowIds = (id: string) => (/^tsk\d+$/.test(id) ? taskUri("oxtask", id) : null);
 
-test("preprocessWikilinks: an id of the active list rewrites to its work_item href", () => {
+test("preprocessWikilinks: an id of the active list rewrites to its task href", () => {
   expect(preprocessWikilinks("see [[tsk42]] for context", oxplowIds))
-    .toBe(`see [tsk42](${workItemUri("oxplow", "tsk42")}) for context`);
+    .toBe(`see [tsk42](${taskUri("oxtask", "tsk42")}) for context`);
 });
 
-test("preprocessWikilinks: a work item with a custom display label", () => {
+test("preprocessWikilinks: a task with a custom display label", () => {
   expect(preprocessWikilinks("[[tsk42|fix the parser]]", oxplowIds))
-    .toBe(`[fix the parser](${workItemUri("oxplow", "tsk42")})`);
+    .toBe(`[fix the parser](${taskUri("oxtask", "tsk42")})`);
 });
 
-test("preprocessWikilinks: a full work item ref links whichever list", () => {
-  const eng1 = workItemUri("issues", "ENG-1");
+test("preprocessWikilinks: a full task ref links whichever list", () => {
+  const eng1 = taskUri("issues", "ENG-1");
   expect(preprocessWikilinks(`[[${eng1}]]`)).toBe(`[${eng1}](${eng1})`);
 });
 
@@ -335,22 +335,22 @@ test("preprocessWikilinks: what isn't the active list's id is a wiki slug", () =
   expect(preprocessWikilinks("[[tsk42]]")).toBe("[tsk42](oxplow:oxplow/wiki?slug=tsk42)");
 });
 
-test("parseMarkdownLink: work_item: scheme, any list", () => {
-  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" });
-  expect(parseMarkdownLink("oxplow:oxplow/work_item?id=ENG-1&provider=issues")).toEqual({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=ENG-1&provider=issues" });
+test("parseMarkdownLink: task: scheme, any list", () => {
+  expect(parseMarkdownLink("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toEqual({ kind: "task", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" });
+  expect(parseMarkdownLink("oxplow:oxplow/task?id=ENG-1&provider=issues")).toEqual({ kind: "task", ref: "oxplow:oxplow/task?id=ENG-1&provider=issues" });
 });
 
-test("parseMarkdownLink: work_item: with empty target", () => {
-  expect(parseMarkdownLink("oxplow:oxplow/work_item")).toEqual({ kind: "empty" });
+test("parseMarkdownLink: task: with empty target", () => {
+  expect(parseMarkdownLink("oxplow:oxplow/task")).toEqual({ kind: "empty" });
 });
 
 test("postprocessWikilinks: task link with matching label collapses to bare wikilink", () => {
-  expect(postprocessWikilinks(`see [tsk42](${workItemUri("oxplow", "tsk42")}) here`))
+  expect(postprocessWikilinks(`see [tsk42](${taskUri("oxtask", "tsk42")}) here`))
     .toBe("see [[tsk42]] here");
 });
 
 test("postprocessWikilinks: task link with distinct label preserves the label", () => {
-  expect(postprocessWikilinks(`see [fix the parser](${workItemUri("oxplow", "tsk42")}) here`))
+  expect(postprocessWikilinks(`see [fix the parser](${taskUri("oxtask", "tsk42")}) here`))
     .toBe("see [[tsk42|fix the parser]] here");
 });
 
@@ -405,8 +405,8 @@ test("linkRef: a wiki link targets its page", () => {
   expect(linkRef({ kind: "internal", slug: "some-page" })).toBe(wikiPageRef("some-page").id);
 });
 
-test("linkRef: a work item link targets its page", () => {
-  expect(linkRef({ kind: "work_item", ref: "oxplow:oxplow/work_item?id=tsk42&provider=oxplow" })).toBe("oxplow:oxplow/work_item?id=tsk42&provider=oxplow");
+test("linkRef: a task link targets its page", () => {
+  expect(linkRef({ kind: "task", ref: "oxplow:oxplow/task?id=tsk42&provider=oxtask" })).toBe("oxplow:oxplow/task?id=tsk42&provider=oxtask");
 });
 
 test("linkRef: a directory link targets its directory", () => {
@@ -452,7 +452,7 @@ test("refLinkOf: each kind saves as its bare wikilink", () => {
   expect(saved(dirUri("src/components"))).toBe("[[dir:src/components]]");
   const sha = "0123456789abcdef0123456789abcdef01234567";
   expect(saved(commitUri(sha))).toBe(`[[git:${sha}]]`);
-  const item = workItemUri("oxplow", "tsk42");
+  const item = taskUri("oxtask", "tsk42");
   // A bare id when it is the active list's, else the whole URI.
   expect(saved(item, "T", (id) => (id === "tsk42" ? item : null))).toBe("[[tsk42]]");
   expect(saved(item, "T", () => null)).toBe(`[[${item}]]`);

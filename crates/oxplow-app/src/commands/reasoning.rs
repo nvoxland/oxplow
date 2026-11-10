@@ -7,20 +7,20 @@
 //! proposes. They land in `v_decision` / `v_claim` for the
 //! review. All are `Record` and never ask. An agent's decision goes on its
 //! own thread whatever thread it names; the effort is the one open for
-//! `work_item` (which must be its stream's work), else its thread's open
+//! `task` (which must be its stream's work), else its thread's open
 //! effort.
 
 use crate::commands::ops::Op;
 use std::sync::Arc;
 
-use oxplow_db::effort_store::find_open_for_work_item_tx;
+use oxplow_db::effort_store::find_open_for_task_tx;
 use oxplow_db::reasoning_store::{
     record_decision_tx, replace_claims_tx, replace_inferred_tx, ClaimProvenance, NewClaim,
     NewDecision,
 };
 use oxplow_db::thread_store::get_tx as thread_tx;
 use oxplow_domain::events::schema::{EffortDecisionsInferred, EffortDecisionsInferredV2};
-use oxplow_domain::uri::build::validate_work_item_uri;
+use oxplow_domain::uri::build::validate_task_uri;
 use oxplow_domain::{CommandError, ThreadId};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
@@ -41,10 +41,10 @@ pub struct DecisionInput {
     /// The thread (`thr3`); an agent's is always its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The work item it was made on (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`); absent,
+    /// The task it was made on (`oxplow:oxplow/task?id=tsk42&provider=oxtask`); absent,
     /// the thread's open effort's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// The fork: what had to be decided.
     pub question: String,
     /// What was chosen.
@@ -163,56 +163,50 @@ impl Confidence {
     }
 }
 
-/// Where a record lands: its thread, work item and effort.
+/// Where a record lands: its thread, task and effort.
 struct Place {
     thread: ThreadId,
-    work_item: Option<String>,
+    task: Option<String>,
     effort: Option<i64>,
 }
 
-/// The acting thread, and the effort the record attaches to: `work_item`'s
+/// The acting thread, and the effort the record attaches to: `task`'s
 /// open one (the item must be the thread's stream's work), else the
 /// thread's newest open effort.
-fn place(
-    ctx: &TxCtx<'_>,
-    thread: Option<&str>,
-    work_item: Option<&str>,
-) -> Result<Place, CommandError> {
+fn place(ctx: &TxCtx<'_>, thread: Option<&str>, task: Option<&str>) -> Result<Place, CommandError> {
     let thread = acting_thread(ctx, thread)?;
     let stream_of = |t: ThreadId| -> Result<Option<oxplow_domain::StreamId>, CommandError> {
         Ok(thread_tx(ctx.conn, t).map_err(sql)?.map(|t| t.stream_id))
     };
-    let Some(work_item) = work_item else {
+    let Some(task) = task else {
         let effort = ctx
             .conn
             .query_row(
-                "SELECT id, work_item FROM effort WHERE thread_id = ?1 AND ended_at IS NULL
+                "SELECT id, task FROM effort WHERE thread_id = ?1 AND ended_at IS NULL
                  ORDER BY started_at DESC LIMIT 1",
                 [thread.value()],
-                // An effort linked to nothing has no work item.
+                // An effort linked to nothing has no task.
                 |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?)),
             )
             .optional()
             .map_err(sql)?;
         return Ok(Place {
             thread,
-            work_item: effort.as_ref().and_then(|(_, item)| item.clone()),
+            task: effort.as_ref().and_then(|(_, item)| item.clone()),
             effort: effort.map(|(id, _)| id),
         });
     };
-    validate_work_item_uri(work_item).map_err(|e| invalid("/work_item", e.to_string()))?;
-    let open = find_open_for_work_item_tx(ctx.conn, work_item).map_err(sql)?;
+    validate_task_uri(task).map_err(|e| invalid("/task", e.to_string()))?;
+    let open = find_open_for_task_tx(ctx.conn, task).map_err(sql)?;
     // Whose work it is: the thread of its open effort, else the list it's
-    // on (the work-item interface's `thread_id`).
+    // on (the task interface's `thread_id`).
     let owner = match &open {
         Some(e) => Some(e.thread_id),
         None => ctx
             .conn
-            .query_row(
-                "SELECT thread_id FROM v_work_item WHERE uri = ?1",
-                [work_item],
-                |r| r.get::<_, Option<i64>>(0),
-            )
+            .query_row("SELECT thread_id FROM v_task WHERE uri = ?1", [task], |r| {
+                r.get::<_, Option<i64>>(0)
+            })
             .optional()
             .map_err(sql)?
             .flatten()
@@ -221,18 +215,18 @@ fn place(
     if let Some(owner) = owner {
         if stream_of(owner)? != stream_of(thread)? {
             return Err(CommandError::Denied {
-                reason: format!("`{work_item}` is another stream's work"),
+                reason: format!("`{task}` is another stream's work"),
             });
         }
     }
     Ok(Place {
         thread,
-        work_item: Some(work_item.to_string()),
+        task: Some(task.to_string()),
         effort: open.map(|e| e.id.value()),
     })
 }
 
-/// `effort.record_decision { thread?, work_item?, question, choice, … }`.
+/// `effort.record_decision { thread?, task?, question, choice, … }`.
 pub fn record_decision_op() -> Op {
     Op::new(
         "efforts.write",
@@ -241,12 +235,12 @@ pub fn record_decision_op() -> Op {
         false,
         Handler::Tx(Arc::new(|ctx: &TxCtx<'_>, input| {
             let input: DecisionInput = parse(input)?;
-            let at = place(ctx, input.thread.as_deref(), input.work_item.as_deref())?;
+            let at = place(ctx, input.thread.as_deref(), input.task.as_deref())?;
             let id = record_decision_tx(
                 ctx.conn,
                 &NewDecision {
                     thread_id: at.thread.value(),
-                    work_item: at.work_item.clone(),
+                    task: at.task.clone(),
                     effort_id: at.effort,
                     question: input.question,
                     choice: input.choice,
@@ -268,7 +262,7 @@ pub fn record_decision_op() -> Op {
 /// writer of provenance `inferred` — what a model proposed the agent
 /// decided without recording it. Replaces the effort's inferred
 /// decisions; its recorded, confirmed and dismissed ones stay. The thread
-/// and work item are the effort's. Inferred decisions are a person's to
+/// and task are the effort's. Inferred decisions are a person's to
 /// review and never reach the agent, so any invoker may propose them.
 pub fn replace_inferred_decisions_op() -> Op {
     Op::new(
@@ -283,13 +277,13 @@ pub fn replace_inferred_decisions_op() -> Op {
                 oxplow_domain::uri::resources::EFFORT,
                 "/effort",
             )?;
-            let (thread_id, work_item) = effort_place(ctx, effort, &input.effort)?;
+            let (thread_id, task) = effort_place(ctx, effort, &input.effort)?;
             let decisions: Vec<NewDecision> = input
                 .decisions
                 .into_iter()
                 .map(|d| NewDecision {
                     thread_id,
-                    work_item: work_item.clone(),
+                    task: task.clone(),
                     effort_id: Some(effort.value()),
                     question: d.question,
                     choice: d.choice,
@@ -305,7 +299,7 @@ pub fn replace_inferred_decisions_op() -> Op {
                 .events
                 .typed::<EffortDecisionsInferred>(&EffortDecisionsInferredV2 {
                     effort: effort.to_string(),
-                    work_item: work_item.clone(),
+                    task: task.clone(),
                     count: count as u32,
                 })
                 .with_subject(vec![effort_ref.clone()]);
@@ -323,7 +317,7 @@ pub fn replace_inferred_decisions_op() -> Op {
 /// answers ("tests pass", "no behavior change"). Replaces the effort's
 /// inferred claims a reviewer hasn't acted on; the agent's recorded ones,
 /// dismissed and reviewer-verified ones stay. The
-/// thread and work item are the effort's. Whether each is backed is a
+/// thread and task are the effort's. Whether each is backed is a
 /// review policy's call (oxplow-bundled's `claim_status`).
 pub fn replace_inferred_claims_op() -> Op {
     Op::new(
@@ -338,13 +332,13 @@ pub fn replace_inferred_claims_op() -> Op {
                 oxplow_domain::uri::resources::EFFORT,
                 "/effort",
             )?;
-            let (thread_id, work_item) = effort_place(ctx, effort, &input.effort)?;
+            let (thread_id, task) = effort_place(ctx, effort, &input.effort)?;
             let claims: Vec<NewClaim> = input
                 .claims
                 .into_iter()
                 .map(|c| NewClaim {
                     thread_id,
-                    work_item: work_item.clone(),
+                    task: task.clone(),
                     effort_id: Some(effort.value()),
                     statement: c.statement,
                     kind: c.kind.as_str().into(),
@@ -366,7 +360,7 @@ pub fn replace_inferred_claims_op() -> Op {
     )
 }
 
-/// An effort's thread and work item, or `Invalid` at `/effort`.
+/// An effort's thread and task, or `Invalid` at `/effort`.
 fn effort_place(
     ctx: &TxCtx<'_>,
     effort: oxplow_domain::EffortId,
@@ -374,7 +368,7 @@ fn effort_place(
 ) -> Result<(i64, Option<String>), CommandError> {
     ctx.conn
         .query_row(
-            "SELECT thread_id, work_item FROM effort WHERE id = ?1",
+            "SELECT thread_id, task FROM effort WHERE id = ?1",
             [effort.value()],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -396,12 +390,12 @@ pub fn ops() -> Vec<Op> {
 mod tests {
     use super::*;
     use oxplow_domain::Actor;
-    use oxplow_tasks::work_item_ref;
+    use oxplow_oxtask::task_ref;
 
-    /// A decision names its work item; a bad confidence is the caller's
+    /// A decision names its task; a bad confidence is the caller's
     /// error, and a person must name the thread.
     #[tokio::test]
-    async fn a_decision_attaches_to_its_work_items_effort() {
+    async fn a_decision_attaches_to_its_tasks_effort() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let agent = Actor::Agent {
             session_id: None,
@@ -410,7 +404,7 @@ mod tests {
         };
         let input = |confidence: &str| {
             json!({
-                "work_item": work_item_ref(fx.task),
+                "task": task_ref(fx.task),
                 "question": "Where does export live?",
                 "choice": "src/export",
                 "confidence": confidence,
@@ -441,7 +435,7 @@ mod tests {
 
     /// A model's proposals replace the effort's inferred decisions and
     /// nothing else: the agent's recorded one and a reviewed one stay.
-    /// The thread and work item come from the effort; an effect may call
+    /// The thread and task come from the effort; an effect may call
     /// it; the replacement is logged with its count.
     #[tokio::test]
     async fn inferred_decisions_replace_only_the_efforts_inferred_ones() {
@@ -449,7 +443,7 @@ mod tests {
         let effort = fx.effort.value();
         let d = |q: &str| NewDecision {
             thread_id: fx.thread.value(),
-            work_item: Some(work_item_ref(fx.task)),
+            task: Some(task_ref(fx.task)),
             effort_id: Some(effort),
             question: q.into(),
             choice: "c".into(),
@@ -512,7 +506,7 @@ mod tests {
             .read(move |c| {
                 let mut s = c
                     .prepare(
-                        "SELECT question, provenance, thread_id, work_item, confidence
+                        "SELECT question, provenance, thread_id, task, confidence
                          FROM decision WHERE effort_id = ?1 ORDER BY id",
                     )
                     .map_err(oxplow_db::map_sql_err)?;
@@ -533,7 +527,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let item = Some(work_item_ref(fx.task));
+        let item = Some(task_ref(fx.task));
         let t = fx.thread.value();
         assert_eq!(
             rows,
@@ -567,7 +561,7 @@ mod tests {
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT json_extract(payload, '$.count'), json_extract(payload, '$.work_item')
+                    "SELECT json_extract(payload, '$.count'), json_extract(payload, '$.task')
                      FROM v_event WHERE type = 'effort.decisions_inferred'",
                     [],
                     |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
@@ -576,24 +570,24 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(logged, (1, work_item_ref(fx.task)));
+        assert_eq!(logged, (1, task_ref(fx.task)));
     }
 
     /// An unknown effort, a ninth proposal and an unknown confidence are
     /// the caller's errors, and nothing changes.
     /// A model's reading of the claims an effort's answers made replaces
     /// the effort's unreviewed claims; verified and dismissed ones stay.
-    /// Thread and work item are the effort's.
+    /// Thread and task are the effort's.
     #[tokio::test]
     async fn inferred_claims_replace_the_efforts_unreviewed_ones() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let effort = fx.effort.value();
-        let item = Some(work_item_ref(fx.task));
+        let item = Some(task_ref(fx.task));
         let seed = |statement: &'static str, review: Option<&'static str>| {
             let svc = fx.svc.clone();
             let claim = NewClaim {
                 thread_id: fx.thread.value(),
-                work_item: item.clone(),
+                task: item.clone(),
                 effort_id: Some(effort),
                 statement: statement.into(),
                 kind: "other".into(),
@@ -651,7 +645,7 @@ mod tests {
             .read(move |c| {
                 let mut s = c
                     .prepare(
-                        "SELECT statement, kind, thread_id, work_item, review
+                        "SELECT statement, kind, thread_id, task, review
                          FROM claim WHERE effort_id = ?1 ORDER BY id",
                     )
                     .map_err(oxplow_db::map_sql_err)?;

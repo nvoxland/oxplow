@@ -3,13 +3,13 @@
 //! efforts itself through an effort policy; these are what that policy, a
 //! person, an agent or a page runs, over the effort store's cores.
 //!
-//! - `effort.open { thread?, work_item?, title?, adopt_since? }` opens one
+//! - `effort.open { thread?, task?, title?, adopt_since? }` opens one
 //!   on a thread (the caller's by default). The thread's current effort
 //!   closes first; a late open adopts the thread's un-efforted activity
 //!   back to `adopt_since`.
 //! - `effort.close { effort | thread, as_of?, summary?, reason? }` closes
 //!   one, optionally as of a past point.
-//! - `effort.link { effort | thread, work_item }` links it to a work item,
+//! - `effort.link { effort | thread, task }` links it to a task,
 //!   or unlinks it (`null`).
 //! - `effort.update { effort, title }` sets or clears its own title.
 //!
@@ -24,10 +24,10 @@ use std::sync::Arc;
 use oxplow_db::effort_store::{
     finish_tx, link_tx, open_for_thread_tx, retitle_tx, start_tx, ClosedBy, EffortEnd, EffortStart,
 };
-use oxplow_domain::uri::build::validate_work_item_uri;
-use oxplow_domain::work_items::WorkItemsRegistry;
+use oxplow_domain::tasks::TaskTrackers;
+use oxplow_domain::uri::build::validate_task_uri;
 
-use super::work_item::with_loose_refs;
+use super::task::with_loose_refs;
 use oxplow_domain::{Actor, CommandCall, CommandError, EffortId, StreamId, ThreadId, Timestamp};
 use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
@@ -49,10 +49,10 @@ pub struct EffortOpenInput {
     /// agent may name only a thread in its own stream.
     #[serde(default)]
     pub thread: Option<String>,
-    /// The work item it's for, as a canonical URI (`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`,
-    /// `oxplow:oxplow/work_item?id=ENG-12&provider=issues`); unlinked when absent.
+    /// The task it's for, as a canonical URI (`oxplow:oxplow/task?id=tsk42&provider=oxtask`,
+    /// `oxplow:oxplow/task?id=ENG-12&provider=issues`); unlinked when absent.
     #[serde(default)]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// Its own title; absent, it shows its item's, else its first prompt's.
     #[serde(default)]
     pub title: Option<String>,
@@ -101,8 +101,8 @@ pub struct EffortLinkInput {
     /// Or the thread (`thr3`) whose open effort it is.
     #[serde(default)]
     pub thread: Option<String>,
-    /// The work item to link it to; `null` unlinks it.
-    pub work_item: Option<String>,
+    /// The task to link it to; `null` unlinks it.
+    pub task: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -196,11 +196,11 @@ fn output(result: serde_json::Value, inverse: Option<CommandCall>) -> HandlerOut
     }
 }
 
-pub fn open_op(work_items: WorkItemsRegistry) -> Op {
+pub fn open_op(tasks: TaskTrackers) -> Op {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: EffortOpenInput = parse(with_loose_refs(&work_items, input)?)?;
-        if let Some(w) = &input.work_item {
-            validate_work_item_uri(w).map_err(|e| invalid("/work_item", e.to_string()))?;
+        let input: EffortOpenInput = parse(with_loose_refs(&tasks, input)?)?;
+        if let Some(w) = &input.task {
+            validate_task_uri(w).map_err(|e| invalid("/task", e.to_string()))?;
         }
         let thread = match input.thread.as_deref() {
             Some(raw) => bare_id(raw, oxplow_domain::uri::resources::THREAD, "/thread")?,
@@ -219,7 +219,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
             ctx.conn,
             &ctx.events,
             &EffortStart {
-                work_item: input.work_item.as_deref(),
+                task: input.task.as_deref(),
                 adopt_since,
                 ..EffortStart::at(thread, Timestamp::now())
             },
@@ -231,7 +231,7 @@ pub fn open_op(work_items: WorkItemsRegistry) -> Op {
             json!({
                 "effort": effort.to_string(),
                 "thread": thread.to_string(),
-                "work_item": input.work_item,
+                "task": input.task,
                 "title": input.title,
             }),
             None,
@@ -301,19 +301,19 @@ pub fn close_op() -> Op {
     )
 }
 
-pub fn link_op(work_items: WorkItemsRegistry) -> Op {
+pub fn link_op(tasks: TaskTrackers) -> Op {
     let handler = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: EffortLinkInput = parse(with_loose_refs(&work_items, input)?)?;
-        if let Some(w) = &input.work_item {
-            validate_work_item_uri(w).map_err(|e| invalid("/work_item", e.to_string()))?;
+        let input: EffortLinkInput = parse(with_loose_refs(&tasks, input)?)?;
+        if let Some(w) = &input.task {
+            validate_task_uri(w).map_err(|e| invalid("/task", e.to_string()))?;
         }
         let (id, _) = target_effort(ctx, input.effort.as_deref(), input.thread.as_deref())?;
-        let before = link_tx(ctx.conn, &ctx.events, id, input.work_item.as_deref())?;
+        let before = link_tx(ctx.conn, &ctx.events, id, input.task.as_deref())?;
         Ok(output(
-            json!({ "effort": id.to_string(), "work_item": input.work_item }),
+            json!({ "effort": id.to_string(), "task": input.task }),
             Some(CommandCall {
                 name: LINK.into(),
-                input: json!({ "effort": id.to_string(), "work_item": before }),
+                input: json!({ "effort": id.to_string(), "task": before }),
             }),
         ))
     }));
@@ -348,13 +348,13 @@ pub fn update_op() -> Op {
     )
 }
 
-/// The effort commands, for the bus. A loose id in `work_item` is the
-/// active work list's (`oxplow:oxplow/work_item?id=with_loose_refs&provider=`).
-pub fn ops(work_items: WorkItemsRegistry) -> Vec<Op> {
+/// The effort commands, for the bus. A loose id in `task` is the
+/// active task tracker's (`oxplow:oxplow/task?id=with_loose_refs&provider=`).
+pub fn ops(tasks: TaskTrackers) -> Vec<Op> {
     vec![
-        open_op(work_items.clone()),
+        open_op(tasks.clone()),
         close_op(),
-        link_op(work_items),
+        link_op(tasks),
         update_op(),
     ]
 }
@@ -372,7 +372,7 @@ mod tests {
         }
     }
 
-    const ISSUES: &str = "oxplow:oxplow/work_item?id=ENG-12&provider=issues";
+    const ISSUES: &str = "oxplow:oxplow/task?id=ENG-12&provider=issues";
 
     /// An agent opens an unlinked effort on its own thread, links it,
     /// titles it and closes it by thread; link and title undo.
@@ -398,21 +398,21 @@ mod tests {
             let svc = fx.svc.clone();
             async move { svc.effort_store.get_effort(&effort).await.unwrap().unwrap() }
         };
-        assert_eq!(row(&fx).await.work_item, None);
+        assert_eq!(row(&fx).await.task, None);
         let linked = bus
             .run(
                 &agent(&fx),
                 LINK,
-                json!({ "thread": fx.thread.to_string(), "work_item": ISSUES }),
+                json!({ "thread": fx.thread.to_string(), "task": ISSUES }),
                 false,
             )
             .await
             .unwrap();
-        assert_eq!(row(&fx).await.work_item.as_deref(), Some(ISSUES));
+        assert_eq!(row(&fx).await.task.as_deref(), Some(ISSUES));
         bus.undo(&Actor::Human, linked.audit_id.unwrap(), false)
             .await
             .unwrap();
-        assert_eq!(row(&fx).await.work_item, None);
+        assert_eq!(row(&fx).await.task, None);
         bus.run(
             &Actor::Human,
             UPDATE,
@@ -449,11 +449,11 @@ mod tests {
         };
         assert_eq!(
             field(
-                bus.run(&agent(&fx), OPEN, json!({ "work_item": "ENG-12" }), false)
+                bus.run(&agent(&fx), OPEN, json!({ "task": "ENG-12" }), false)
                     .await
                     .unwrap_err()
             ),
-            "/work_item"
+            "/task"
         );
         fx.svc
             .db

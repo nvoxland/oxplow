@@ -251,7 +251,7 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
     write(
         &root,
         ".oxplow/extensions/acme/extension.yaml",
-        "manifest: 2\nname: acme\nversion: 1.0.0\nintent: { purpose: p, origin: null, examples: [] }\neffects:\n  - id: note\n    summary: s\n    on: [work_item.state_changed]\n    entry: note.star\n",
+        "manifest: 2\nname: acme\nversion: 1.0.0\nintent: { purpose: p, origin: null, examples: [] }\neffects:\n  - id: note\n    summary: s\n    on: [task.state_changed]\n    entry: note.star\n",
     );
     write(
         &root,
@@ -264,12 +264,12 @@ async fn an_effects_run_holds_no_generation_and_ends_with_its_extension() {
         .next()
         .expect("the effect is declared");
     let event = {
-        use oxplow_domain::events::schema::{WorkItemStateChanged, WorkItemStateChangedV1};
-        let env = oxplow_domain::Envelope::typed::<WorkItemStateChanged>(
+        use oxplow_domain::events::schema::{TaskStateChanged, TaskStateChangedV1};
+        let env = oxplow_domain::Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: oxplow_tasks::work_item_ref(fx.task),
-                to: oxplow_domain::work_items::Bucket::Done,
+            &TaskStateChangedV1 {
+                task: oxplow_oxtask::task_ref(fx.task),
+                to: oxplow_domain::tasks::Bucket::Done,
             },
         );
         let id = env.id.clone();

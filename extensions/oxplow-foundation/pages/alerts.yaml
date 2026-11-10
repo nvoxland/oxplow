@@ -15,7 +15,7 @@ loaders:
              -- Who it is about: the source chip every alert uses.
              CASE WHEN th.title IS NULL THEN NULL
                   ELSE json_object('kind', 'agent', 'label', th.title,
-                                   'uri', uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || n.thread_id)) END AS source,
+                                   'uri', uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr' || n.thread_id)) END AS source,
              n.created_at
       FROM v_agent_nudge n LEFT JOIN v_thread th ON th.id = n.thread_id
       WHERE n.audience = 'person' AND n.delivered_at IS NULL

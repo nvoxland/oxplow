@@ -50,6 +50,7 @@ pub mod review;
 pub mod snapshot;
 mod steps;
 pub mod stream;
+pub mod task;
 pub mod terminal;
 pub mod test_runs;
 pub mod thread;
@@ -57,7 +58,6 @@ pub mod ui;
 mod undo;
 pub mod util;
 pub mod vcs;
-pub mod work_item;
 
 use oxplow_domain::run::{Mode, RunContext};
 use std::collections::BTreeMap;
@@ -1173,7 +1173,7 @@ impl CommandBus {
     }
 
     /// After a run lands: what it wrote reads back once it returns — its
-    /// projections (a work list's records in `work_item`, the page refs)
+    /// projections (a task tracker's records in `task`, the page refs)
     /// are delivered first — and the pump's loops are woken for the rest.
     async fn landed(&self) {
         if let Err(error) = self.pump.deliver_projections().await {

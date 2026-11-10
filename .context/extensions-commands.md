@@ -19,7 +19,7 @@ it declares in `needs` ([commands.md](./commands.md) "Scopes") — `scope("sql.r
 A script's scope needs are the scopes a script can call
 (`scope_calls::CALLABLE`, `check_callable`): one it can't is refused at
 load, the one rule a command's `entry:`, an effect and a provider's
-`host/call` meet. A capability need (`work_items.comments`) gates the
+`host/call` meet. A capability need (`task_tracker.comments`) gates the
 command instead.
 
 `sql.read` returns complete row lists only: more than 1000 result rows
@@ -41,17 +41,17 @@ commands:
     confirm: never                     # never (default) | always | destructive; children only add
     access: write                      # write (default) | record | read (composes nothing, returns a result)
     job: false                         # true: a durable job's model may call it (needs entry:, never over a scope's operation)
-    needs: [sql.read, work_items.comments]   # scopes it calls; capabilities / features it needs active
+    needs: [sql.read, task_tracker.comments]   # scopes it calls; capabilities / features it needs active
     ui:                                # how a person meets it (`.context/commands.md` "Offering a command")
       label: Finish Review
       group: Review
-      about: oxplow/work_item          # resource-bound; absent: search offers it
+      about: oxplow/task          # resource-bound; absent: search offers it
       # about_when: closed             # only where this column of the resource's dataset row is truthy
       input: { uri: "{{uri}}" }
     examples:
-      - { name: happy, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }, expect_commands: [oxplow.work_item.transition] }
-      - { name: gone, input: { uri: "oxplow:oxplow/work_item?id=tsk9&provider=oxplow" }, answers: { sql.read: [[]] }, refused: no such }
-    example: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }   # the input an agent is shown; a script's defaults to its first example that runs
+      - { name: happy, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }, expect_commands: [oxplow.task.transition] }
+      - { name: gone, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask" }, answers: { sql.read: [[]] }, refused: no such }
+    example: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }   # the input an agent is shown; a script's defaults to its first example that runs
 ```
 
 `example:` is the command's example input, for any handler (script,
@@ -66,7 +66,7 @@ fits (`every_command_an_agent_is_offered_has_an_example_that_fits`).
 A command may be **backed by an operation of one of the extension's
 providers**: `provider: fake` + `op: estimate`, the operation one its
 checked-in declarations list (not a capability verb — those run as
-`oxplow.work_item.<verb>`). Its input schema (plus an optional
+`oxplow.task.<verb>`). Its input schema (plus an optional
 `instance`), access and undo are the declaration's, its `confirm` the
 stronger of the manifest's and the declaration's; it runs on the
 instance its input names ([providers.md](./providers.md) "The host").
@@ -95,7 +95,7 @@ error) — and may expect a refusal with `refused: <part of the reason>` instead
 `-` → `_` (`command_namespace`; `check_namespace`: one snake_case segment,
 and `oxplow` only for an extension that ships with oxplow — the bundled one
 declares it, so its commands are `oxplow.review.accept`,
-`oxplow.review.request_changes`, `oxplow.work.clear_finished`). Its event
+`oxplow.review.request_changes`, `oxplow.tasks.clear_finished`). Its event
 types are declared by full name and unaffected. Who holds a namespace is the
 bus's to say (`CommandBus::namespace_owner`: `oxplow`, or the one source —
 `extension:<name>` / `provider:<instance>` — holding it) — there is no
@@ -148,7 +148,7 @@ The bus runs what it composes ([commands.md](./commands.md) →
 in one transaction (`steps::run_composed`; the script runs once, when the bus routes the run) — each child's policy and
 confirmation apply (a person's run whose child asks is asked first; an agent's run asks nothing), one audit row with `{ result,
 children }`, the children's events caused by the run, the reversed
-children as its undo; when one leaves it (`work_item.*` on another
+children as its undo; when one leaves it (`task.*` on another
 provider's item), as **steps** — all checked first, then run in
 order, each landing as it runs, stopping at the first failure, one audit
 row, no undo. A script can't do I/O of its own: `files()` sees
@@ -180,7 +180,7 @@ An extension declares capability implementations (stable,
 
 ```yaml
 implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks" }
+  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask" }
 ```
 
 - `capability` is a choosable one, or one many implementations serve
@@ -204,17 +204,16 @@ implementations:
   (`BuiltIn.config_schema`, `capability::check_config`; a built-in with
   none refuses any config); no built-in takes one now.
 - `entry` names a built-in in core's standard library
-  (`capabilities::BUILT_INS`: `oxplow:tasks`, `oxplow:commit-or-switch`,
+  (`capabilities::BUILT_INS`: `oxplow:oxtask`, `oxplow:commit-or-switch`,
   `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:wiki`), the way a collector names
   `oxplow:junit`. A
   built-in's features are core's table's — it's core's code — never the
   manifest's. A built-in whose items' URIs carry a provider id
-  (`BuiltIn.provider`: `oxplow:tasks` is `oxplow`) is declared under that
+  (`BuiltIn.provider`: `oxplow:oxtask` is `oxplow`) is declared under that
   id and no other.
 - **A process implements a capability through `providers:`**, not
-  here: a capability whose spec carries a provider contract (the work
-  list, the effort policy, an agent harness) may be an external
-  provider's instance — the work list and the effort policy chosen by
+  here: a capability whose spec carries a provider contract (the task tracker, the effort policy, an agent harness) may be an external
+  provider's instance — the task tracker and the effort policy chosen by
   `activeProviders` like a built-in, a harness registered beside the
   built-ins under its instance id, as many as run
   ([providers.md](./providers.md) "What a provider may implement").
@@ -249,7 +248,7 @@ implementations:
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
-- `oxplow-foundation` declares the default implementations (the work list,
+- `oxplow-foundation` declares the default implementations (the task tracker,
   the effort policy and knowledge's wiki, `oxplow:wiki`), so they run with
   `oxplow-bundled` off; turning the list off is choosing another provider
   (or none) in Settings → Capabilities, not disabling an extension
@@ -259,25 +258,25 @@ implementations:
   chosen `hashes` with bundled disabled falls back to core's `oxplow`.
 
 **Declared needs.** A page or an advisory may declare `needs:
-[work_items, snapshots.contents]` — capabilities, or one of a
+[tasks, snapshots.contents]` — capabilities, or one of a
 capability's features (`oxplow_domain::capability::check_need`; an
 unknown one is a load error). A page run checks them against what's
 active (`ViewContext.active`, a `capabilities::Active` snapshot that
 `view_context` fills): unmet, it runs no loader and `PageRun.inactive`
-is set (`PageInactive { needs, message }`: "Needs: Work list (choose one
+is set (`PageInactive { needs, message }`: "Needs: Task tracker (choose one
 in Settings → Capabilities)."). The page view shows that instead of its
 empty state. An advisory whose
 needs aren't met doesn't run. A context built without `Services` (param
 checks) checks nothing. A capability's none declares every feature (it
 takes everything, keeping nothing), so a feature need is met by none and
-only a need of the capability itself (`work_items`) isn't. `oxplow-foundation`
-declares no `work_items` need: with no list chosen its task pages, hint and
+only a need of the capability itself (`task_tracker`) isn't. `oxplow-foundation`
+declares no `task_tracker` need: with no list chosen its task pages, hint and
 skill just find nothing.
 
 **What an implementation owns.** A provider instance owns its command
 namespace (`<id>.*`), offered and run only while it's active
 (`capabilities::Active::refusal`, `.context/commands.md` step 0). The
-built-ins own nothing of the agent's surface: the work-item tools read
+built-ins own nothing of the agent's surface: the task tools read
 whichever list is active.
 
 ## Skills
@@ -287,10 +286,10 @@ An extension gives the coding agent skills and slash commands (stable,
 
 ```yaml
 skills:
-  - { name: work-items, file: skills/work-items/SKILL.md, needs: [work_items] }
-  - { name: work-next, kind: command, file: commands/work-next.md }
+  - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
+  - { name: next-task, kind: command, file: commands/next-task.md }
 implementations:
-  - { capability: work_items, id: oxplow, entry: "oxplow:tasks", skills: [work-next] }
+  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task] }
 ```
 
 - `name` is lowercase letters, digits and `-`, not one of core's own
@@ -308,8 +307,8 @@ implementations:
   already on disk (`refresh_agent_text` → each harness's `refresh_text`). A skill folder oxplow wrote
   carries a `.oxplow` marker, so one no longer offered is removed and a
   person's own stay; the Claude `commands/` folder is oxplow's whole.
-- `oxplow-foundation` gives the `work-items` skill (any work list) and the
-  `work-next` command (oxplow's tasks' ready queue).
+- `oxplow-foundation` gives the `tasks` skill (any task tracker) and the
+  `next-task` command (oxtask's ready queue).
 
 ## Advisories
 
@@ -461,9 +460,9 @@ tool: open_work              # offered as <namespace>_open_work
   share `oxplow`) — are refused at load, on each.
 - **Typed page tools.** `oxplow-foundation/pages/` holds the pages an
   agent asks for most, each with no `category` and a `tool:`: `catalog
-  { dataset? }` (every dataset with its columns), `thread_work { thread }` (the
-  thread's items by state, with their efforts), `work_next { thread }` (what
-  to pick up next; the bundled `/work-next` command calls it) and
+  { dataset? }` (every dataset with its columns), `thread_tasks { thread }` (the
+  thread's items by state, with their efforts), `next_task { thread }` (what
+  to pick up next; the bundled `/next-task` command calls it) and
   `effort_summary { effort }` (title and summary, item, files, test runs,
   claims, decisions as sections). Params take bare ids (`thr3`, `eff9`).
   Each reads published `v_*` datasets only, so it works with the bundled
@@ -535,7 +534,7 @@ tool: open_work              # offered as <namespace>_open_work
   what `oxplow_run_page`, `oxplow_get_open_page` and `copy` return, so an
   agent reads a page the way the person sees it.
 - `oxplow_get_open_page(thread_id)`: what the human has open in that
-  thread, for any page kind (a work item's, file's or a custom page's
+  thread, for any page kind (a task's, file's or a custom page's
   URI): `pageId` is its identity (the URI without its `#`) and the view
   the `#`, decoded. For a page it adds `pageRun`, the window's own run of
   it as text, with `focus`, the node the person is on. `others` lists the

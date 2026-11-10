@@ -38,7 +38,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "snapshot",
     "vcs",
     "effort",
-    "work_item",
+    "task",
     "knowledge",
     "handoff",
     "test",
@@ -182,8 +182,7 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<TestCoverageRecorded>()
             .expect("core type registers");
-        r.register::<WorkItemDeleted>()
-            .expect("core type registers");
+        r.register::<TaskDeleted>().expect("core type registers");
         r.register::<EffortOpened>().expect("core type registers");
         r.register::<EffortClosed>().expect("core type registers");
         r.register::<EffortLinked>().expect("core type registers");
@@ -199,20 +198,15 @@ impl EventSchemaRegistry {
         r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
-        r.register::<WorkItemEdited>().expect("core type registers");
-        r.register::<WorkItemCreated>()
+        r.register::<TaskEdited>().expect("core type registers");
+        r.register::<TaskCreated>().expect("core type registers");
+        r.register::<TaskLinked>().expect("core type registers");
+        r.register::<TaskUnlinked>().expect("core type registers");
+        r.register::<TaskCommented>().expect("core type registers");
+        r.register::<TaskRecorded>().expect("core type registers");
+        r.register::<TaskStateChanged>()
             .expect("core type registers");
-        r.register::<WorkItemLinked>().expect("core type registers");
-        r.register::<WorkItemUnlinked>()
-            .expect("core type registers");
-        r.register::<WorkItemCommented>()
-            .expect("core type registers");
-        r.register::<WorkItemRecorded>()
-            .expect("core type registers");
-        r.register::<WorkItemStateChanged>()
-            .expect("core type registers");
-        r.register::<WorkItemAssigned>()
-            .expect("core type registers");
+        r.register::<TaskAssigned>().expect("core type registers");
         r.register::<ThreadCheckpoint>()
             .expect("core type registers");
         r.register::<KnowledgePageWritten>()
@@ -579,7 +573,7 @@ pub enum CommandOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandExecutedV5 {
-    /// The command's name (`oxplow.work_item.transition`, `oxplow.config.set`).
+    /// The command's name (`oxplow.task.transition`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -851,7 +845,7 @@ impl EventType for FileDeleted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilitySwitchedV1 {
-    /// `work_items`, `effort_policy`, `snapshots`.
+    /// `task_tracker`, `effort_policy`, `snapshots`.
     pub capability: String,
     /// The implementation id that was active (`none` for nothing).
     pub from: String,
@@ -1528,16 +1522,16 @@ impl EventType for TestCoverageRecorded {
     type Payload = TestCoverageRecordedV1;
 }
 
-/// `effort.opened@3`: a span of a thread's work began, linked to a work
-/// item or not (`.context/work-tracking.md`).
+/// `effort.opened@3`: a span of a thread's work began, linked to a
+/// task or not (`.context/work-tracking.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortOpenedV3 {
     /// The effort (`eff12`).
     pub effort: String,
-    /// `oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's item, when linked.
+    /// `oxplow:oxplow/task?id=tsk42&provider=oxtask`, or another provider's item, when linked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// The thread doing the work (`thr3`).
     pub thread: String,
     /// The start snapshot, when the open already had it.
@@ -1626,9 +1620,9 @@ impl EventType for EffortDecisionReviewed {
 pub struct EffortDecisionsInferredV2 {
     /// The effort (`eff12`).
     pub effort: String,
-    /// The effort's work item, when it has one.
+    /// The effort's task, when it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// How many inferred decisions it holds now.
     pub count: u32,
 }
@@ -1714,37 +1708,37 @@ impl EventType for ThreadCheckpoint {
     type Payload = ThreadCheckpointV2;
 }
 
-/// `work_item.state_changed@1`: a `work_item.*` command put an item in
+/// `task.state_changed@1`: a `task.*` command put an item in
 /// a canonical state — logged by core for every provider, anchored to the
-/// thread of whoever ran it (`.context/work-items.md`). A create always
+/// thread of whoever ran it (`.context/tasks.md`). A create always
 /// logs one; for a provider oxplow can't read the prior state of, a
 /// transition or update that names a state logs one even when the item
 /// was already there.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemStateChangedV1 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<provider>`.
-    pub work_item: String,
-    pub to: crate::work_items::Bucket,
+pub struct TaskStateChangedV1 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<provider>`.
+    pub task: String,
+    pub to: crate::tasks::Bucket,
 }
 
-pub struct WorkItemStateChanged;
-impl EventType for WorkItemStateChanged {
-    const TYPE: &'static str = "work_item.state_changed";
+pub struct TaskStateChanged;
+impl EventType for TaskStateChanged {
+    const TYPE: &'static str = "task.state_changed";
     const V: u32 = 1;
-    type Payload = WorkItemStateChangedV1;
+    type Payload = TaskStateChangedV1;
 }
 
-/// `effort.linked@2`: an effort's work item was set, changed or cleared
+/// `effort.linked@2`: an effort's task was set, changed or cleared
 /// (`oxplow.effort.link`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortLinkedV2 {
     /// The effort (`eff12`).
     pub effort: String,
-    /// The work item it's linked to now; absent when unlinked.
+    /// The task it's linked to now; absent when unlinked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
 }
 
 pub struct EffortLinked;
@@ -1793,16 +1787,16 @@ impl EventType for EffortRetitled {
     type Payload = EffortRetitledV2;
 }
 
-/// `effort.closed@3`: a span of a thread's work ended, linked to a work
-/// item or not, and what closed it.
+/// `effort.closed@3`: a span of a thread's work ended, linked to a
+/// task or not, and what closed it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EffortClosedV3 {
     /// The effort (`eff12`).
     pub effort: String,
-    /// The linked work item, when there is one.
+    /// The linked task, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// The end snapshot, when the close already had it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_snapshot: Option<i64>,
@@ -1818,150 +1812,150 @@ impl EventType for EffortClosed {
     type Payload = EffortClosedV3;
 }
 
-// The work-item events are the interface's: core logs them for every
-// list, from the verb a `oxplow.work_item.*` command ran and what the list
-// answered (`.context/work-items.md`).
+// The task events are the interface's: core logs them for every
+// list, from the verb a `oxplow.task.*` command ran and what the list
+// answered (`.context/tasks.md`).
 
-/// `work_item.created@2`: an item was filed on a work list, in `state`.
+/// `task.created@2`: an item was filed on a task tracker, in `state`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemCreatedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskCreatedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
     /// The canonical state it was filed in.
-    pub state: crate::work_items::Bucket,
+    pub state: crate::tasks::Bucket,
 }
 
-pub struct WorkItemCreated;
-impl EventType for WorkItemCreated {
-    const TYPE: &'static str = "work_item.created";
+pub struct TaskCreated;
+impl EventType for TaskCreated {
+    const TYPE: &'static str = "task.created";
     const V: u32 = 2;
-    type Payload = WorkItemCreatedV2;
+    type Payload = TaskCreatedV2;
 }
 
-/// `work_item.deleted@2`: an item was deleted from its work list.
+/// `task.deleted@2`: an item was deleted from its task tracker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemDeletedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskDeletedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
 }
 
-pub struct WorkItemDeleted;
-impl EventType for WorkItemDeleted {
-    const TYPE: &'static str = "work_item.deleted";
+pub struct TaskDeleted;
+impl EventType for TaskDeleted {
+    const TYPE: &'static str = "task.deleted";
     const V: u32 = 2;
-    type Payload = WorkItemDeletedV2;
+    type Payload = TaskDeletedV2;
 }
 
-/// `work_item.edited@2`: a command changed an item's fields — not its
-/// state, which is `work_item.state_changed`.
+/// `task.edited@2`: a command changed an item's fields — not its
+/// state, which is `task.state_changed`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemEditedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskEditedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
     /// The fields the command set: `title`, `body`, `parent`, `stage` (a
     /// move between two stages of one bucket; a move to another bucket is
-    /// `work_item.state_changed`), and `native.<name>` for each of the
+    /// `task.state_changed`), and `native.<name>` for each of the
     /// list's own fields.
     pub fields: Vec<String>,
 }
 
-pub struct WorkItemEdited;
-impl EventType for WorkItemEdited {
-    const TYPE: &'static str = "work_item.edited";
+pub struct TaskEdited;
+impl EventType for TaskEdited {
+    const TYPE: &'static str = "task.edited";
     const V: u32 = 2;
-    type Payload = WorkItemEditedV2;
+    type Payload = TaskEditedV2;
 }
 
-/// `work_item.linked@2`: a typed link from an item to another of the
+/// `task.linked@2`: a typed link from an item to another of the
 /// same list, or to any ref it is about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemLinkedV2 {
-    /// The item linked from (`oxplow:oxplow/work_item?id=<id>&provider=<list>`).
-    pub work_item: String,
+pub struct TaskLinkedV2 {
+    /// The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).
+    pub task: String,
     /// What it links to: an item, or any ref.
     pub target: String,
     /// One of the list's own link types.
     pub link_type: String,
 }
 
-pub struct WorkItemLinked;
-impl EventType for WorkItemLinked {
-    const TYPE: &'static str = "work_item.linked";
+pub struct TaskLinked;
+impl EventType for TaskLinked {
+    const TYPE: &'static str = "task.linked";
     const V: u32 = 2;
-    type Payload = WorkItemLinkedV2;
+    type Payload = TaskLinkedV2;
 }
 
-/// `work_item.unlinked@1`: an item's link was removed
-/// (`oxplow.work_item.unlink`, or undoing a link).
+/// `task.unlinked@1`: an item's link was removed
+/// (`oxplow.task.unlink`, or undoing a link).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemUnlinkedV1 {
-    /// The item linked from (`oxplow:oxplow/work_item?id=<id>&provider=<list>`).
-    pub work_item: String,
+pub struct TaskUnlinkedV1 {
+    /// The item linked from (`oxplow:oxplow/task?id=<id>&provider=<list>`).
+    pub task: String,
     /// What it linked to.
     pub target: String,
     pub link_type: String,
 }
 
-pub struct WorkItemUnlinked;
-impl EventType for WorkItemUnlinked {
-    const TYPE: &'static str = "work_item.unlinked";
+pub struct TaskUnlinked;
+impl EventType for TaskUnlinked {
+    const TYPE: &'static str = "task.unlinked";
     const V: u32 = 1;
-    type Payload = WorkItemUnlinkedV1;
+    type Payload = TaskUnlinkedV1;
 }
 
-/// `work_item.commented@2`: a comment was added to an item.
+/// `task.commented@2`: a comment was added to an item.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemCommentedV2 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskCommentedV2 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
     /// The list's own id for the comment, unique on the item, when its
     /// answer named one (the `comment` verb's `result.comment`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
 }
 
-pub struct WorkItemCommented;
-impl EventType for WorkItemCommented {
-    const TYPE: &'static str = "work_item.commented";
+pub struct TaskCommented;
+impl EventType for TaskCommented {
+    const TYPE: &'static str = "task.commented";
     const V: u32 = 2;
-    type Payload = WorkItemCommentedV2;
+    type Payload = TaskCommentedV2;
 }
 
-/// `work_item.recorded@3`: a list's item as it now stands — how every
-/// list's items reach the work-item interface (the `work_items.project`
+/// `task.recorded@3`: a list's item as it now stands — how every
+/// list's items reach the task interface (the `tasks.project`
 /// consumer upserts it by ref), with its links and comments when it
 /// states them. A list's verbs answer with it. Who it's assigned to and
 /// its place in their queue aren't a list's: core records them
-/// (`work_item.assigned`).
+/// (`task.assigned`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemRecordedV3 {
-    pub item: crate::work_items::WorkItemRecord,
+pub struct TaskRecordedV3 {
+    pub item: crate::tasks::TaskRecord,
 }
 
-pub struct WorkItemRecorded;
-impl EventType for WorkItemRecorded {
-    const TYPE: &'static str = "work_item.recorded";
+pub struct TaskRecorded;
+impl EventType for TaskRecorded {
+    const TYPE: &'static str = "task.recorded";
     const V: u32 = 3;
-    type Payload = WorkItemRecordedV3;
+    type Payload = TaskRecordedV3;
 }
 
-/// `work_item.assigned@1`: who is going to work on an item, or its place
-/// in their queue, changed (`oxplow.work_item.assign`, `.reorder`; a
+/// `task.assigned@1`: who is going to work on an item, or its place
+/// in their queue, changed (`oxplow.task.assign`, `.reorder`; a
 /// closed item or a closed thread's releases it). Core's record, for every
-/// provider; the `work_items.project` consumer keeps `v_work_item.assignee`
+/// provider; the `tasks.project` consumer keeps `v_task.assignee`
 /// and `rank` from it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct WorkItemAssignedV1 {
-    /// `oxplow:oxplow/work_item?id=<id>&provider=<list>`.
-    pub work_item: String,
+pub struct TaskAssignedV1 {
+    /// `oxplow:oxplow/task?id=<id>&provider=<list>`.
+    pub task: String,
     /// Who it was assigned to: a thread's URI, the person's; absent, nobody.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
@@ -1976,11 +1970,11 @@ pub struct WorkItemAssignedV1 {
     pub after: Option<String>,
 }
 
-pub struct WorkItemAssigned;
-impl EventType for WorkItemAssigned {
-    const TYPE: &'static str = "work_item.assigned";
+pub struct TaskAssigned;
+impl EventType for TaskAssigned {
+    const TYPE: &'static str = "task.assigned";
     const V: u32 = 1;
-    type Payload = WorkItemAssignedV1;
+    type Payload = TaskAssignedV1;
 }
 
 /// How many diagnostics of each severity a file has.
@@ -2255,9 +2249,9 @@ pub struct HandoffSentV2 {
     pub from_thread: String,
     /// The receiving thread (`thr4`).
     pub to_thread: String,
-    /// The work item it hands over, when it names one.
+    /// The task it hands over, when it names one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
 }
 
 pub struct HandoffSent;
@@ -2336,9 +2330,9 @@ impl EventType for KnowledgeCommentDeleted {
 pub struct EffortFinishedV3 {
     /// The effort (`eff12`).
     pub effort: String,
-    /// The linked work item, when there is one.
+    /// The linked task, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub work_item: Option<String>,
+    pub task: Option<String>,
     /// The end snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_snapshot: Option<i64>,
@@ -2442,6 +2436,15 @@ mod tests {
                 ("knowledge.page.recorded", 2),
                 ("knowledge.page.written", 2),
                 ("snapshot.taken", 3),
+                ("task.assigned", 1),
+                ("task.commented", 2),
+                ("task.created", 2),
+                ("task.deleted", 2),
+                ("task.edited", 2),
+                ("task.linked", 2),
+                ("task.recorded", 3),
+                ("task.state_changed", 1),
+                ("task.unlinked", 1),
                 ("terminal.closed", 1),
                 ("terminal.opened", 1),
                 ("terminal.renamed", 1),
@@ -2453,18 +2456,9 @@ mod tests {
                 ("ui.op_failed", 2),
                 ("vcs.commit.indexed", 2),
                 ("vcs.head.moved", 2),
-                ("work_item.assigned", 1),
-                ("work_item.commented", 2),
-                ("work_item.created", 2),
-                ("work_item.deleted", 2),
-                ("work_item.edited", 2),
-                ("work_item.linked", 2),
-                ("work_item.recorded", 3),
-                ("work_item.state_changed", 1),
-                ("work_item.unlinked", 1),
             ]
         );
-        assert_eq!(r.latest("work_item.created"), Some(2));
+        assert_eq!(r.latest("task.created"), Some(2));
         assert_eq!(r.latest("agent.turn.ended"), Some(3));
         assert_eq!(r.owner("config.changed", 2), Some(None));
     }
@@ -2472,27 +2466,27 @@ mod tests {
     #[test]
     fn validate_accepts_the_typed_shape_and_names_the_violation() {
         let r = crate::vocabulary::Vocabulary::core();
-        let ok = Envelope::typed::<WorkItemStateChanged>(
+        let ok = Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
-                to: crate::work_items::Bucket::InProgress,
+            &TaskStateChangedV1 {
+                task: "oxplow:oxplow/task?id=tsk4&provider=oxtask".into(),
+                to: crate::tasks::Bucket::InProgress,
             },
         );
-        assert_eq!(ok.event_type, "work_item.state_changed");
+        assert_eq!(ok.event_type, "task.state_changed");
         assert_eq!(ok.v, 1);
         r.validate_envelope(&ok).unwrap();
 
         let bad = r
             .validate(
-                "work_item.state_changed",
+                "task.state_changed",
                 1,
-                &json!({"work_item": "x", "to": "flying"}),
+                &json!({"task": "x", "to": "flying"}),
             )
             .unwrap_err();
         let msg = bad.to_string();
         assert!(
-            msg.contains("work_item.state_changed@1") && msg.contains("/to"),
+            msg.contains("task.state_changed@1") && msg.contains("/to"),
             "{msg}"
         );
 
@@ -2509,9 +2503,7 @@ mod tests {
     #[test]
     fn unknown_types_and_versions_are_refused() {
         let r = EventSchemaRegistry::core();
-        let e = r
-            .validate("work_item.state_changed", 2, &json!({}))
-            .unwrap_err();
+        let e = r.validate("task.state_changed", 2, &json!({})).unwrap_err();
         assert!(e.to_string().contains("newest is v1"), "{e}");
         let e = r.validate("acme.thing", 1, &json!({})).unwrap_err();
         assert!(e.to_string().contains("not registered"), "{e}");
@@ -2548,7 +2540,7 @@ mod tests {
     }
     struct Squatter;
     impl EventType for Squatter {
-        const TYPE: &'static str = "work_item.hijacked";
+        const TYPE: &'static str = "task.hijacked";
         const V: u32 = 1;
         type Payload = ConfigChangedV2;
     }
@@ -2595,7 +2587,7 @@ mod tests {
         // Core can't register into an extension's namespace either, and a
         // second registration of the same type@v collides.
         assert!(r.register::<AcmeDecided>().is_err());
-        assert!(r.register::<WorkItemStateChanged>().is_err());
+        assert!(r.register::<TaskStateChanged>().is_err());
     }
 
     #[test]
@@ -2691,6 +2683,6 @@ mod tests {
         assert_eq!((v, same), (2, json!({"n": 5, "note": "x"})));
         assert!(r.upcast_to_latest("acme.thing", 3, json!({})).is_err());
         // The default upcast refuses: a type that bumps V must define one.
-        assert!(WorkItemStateChanged::upcast(0, json!({})).is_err());
+        assert!(TaskStateChanged::upcast(0, json!({})).is_err());
     }
 }

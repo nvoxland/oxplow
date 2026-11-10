@@ -9,8 +9,8 @@ const rowOf = (page: import("@playwright/test").Page, title: string) =>
   page.locator('[data-node="items"]').locator('[data-testid^="viz-row-"]').filter({ hasText: title });
 
 test("an item typed into the form is filed on the backlog, and the thread's items aren't listed", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Already waiting" });
-  await run(daemon, "oxplow.work_item.create", { title: "On the thread", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Already waiting" });
+  await run(daemon, "oxplow.task.create", { title: "On the thread", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Backlog");
   const items = page.locator('[data-node="items"]');
@@ -23,7 +23,7 @@ test("an item typed into the form is filed on the backlog, and the thread's item
 });
 
 test("a row's menu changes its state and a marked pair changes together", async ({ page, daemon }) => {
-  for (const title of ["First waiting", "Second waiting", "Third waiting"]) await run(daemon, "oxplow.work_item.create", { title });
+  for (const title of ["First waiting", "Second waiting", "Third waiting"]) await run(daemon, "oxplow.task.create", { title });
   await page.goto("/");
   await openFromLauncher(page, "Backlog");
 
@@ -40,7 +40,7 @@ test("a row's menu changes its state and a marked pair changes together", async 
 });
 
 test("Bring to this thread moves an item off the backlog", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Pull me in" });
+  await run(daemon, "oxplow.task.create", { title: "Pull me in" });
   await page.goto("/");
   await openFromLauncher(page, "Backlog");
   await rowOf(page, "Pull me in").click({ button: "right" });
@@ -49,7 +49,7 @@ test("Bring to this thread moves an item off the backlog", async ({ page, daemon
 });
 
 test("dragging a row above another reorders the list", async ({ page, daemon }) => {
-  for (const title of ["Alpha item", "Beta item", "Gamma item"]) await run(daemon, "oxplow.work_item.create", { title });
+  for (const title of ["Alpha item", "Beta item", "Gamma item"]) await run(daemon, "oxplow.task.create", { title });
   await page.goto("/");
   await openFromLauncher(page, "Backlog");
   const order = async () => (await page.locator('[data-node="items"]').locator('[data-testid^="viz-row-"]').allInnerTexts()).map((t) => /(Alpha|Beta|Gamma)/.exec(t)?.[1] ?? "").filter(Boolean);

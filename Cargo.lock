@@ -4584,13 +4584,13 @@ dependencies = [
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",
+ "oxplow-oxtask",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-pty",
  "oxplow-runtime",
  "oxplow-script",
  "oxplow-session",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "parking_lot",
  "proptest",
@@ -4703,9 +4703,9 @@ dependencies = [
  "oxplow-domain",
  "oxplow-harness-fake",
  "oxplow-mcp",
+ "oxplow-oxtask",
  "oxplow-provider-fake",
  "oxplow-runtime",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "parking_lot",
  "prost",
@@ -4839,8 +4839,8 @@ dependencies = [
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
+ "oxplow-oxtask",
  "oxplow-sdk",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "rusqlite",
  "serde_json",
@@ -4992,8 +4992,8 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",
+ "oxplow-oxtask",
  "oxplow-sdk",
- "oxplow-tasks",
  "oxplow-workspace-hack",
  "rmcp",
  "schemars 1.2.2",
@@ -5029,6 +5029,22 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "oxplow-oxtask"
+version = "0.8.0"
+dependencies = [
+ "async-trait",
+ "oxplow-db",
+ "oxplow-domain",
+ "oxplow-workspace-hack",
+ "rusqlite",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -5234,22 +5250,6 @@ dependencies = [
  "oxplow-workspace-hack",
  "tauri-specta",
  "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "oxplow-tasks"
-version = "0.8.0"
-dependencies = [
- "async-trait",
- "oxplow-db",
- "oxplow-domain",
- "oxplow-workspace-hack",
- "rusqlite",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
  "tokio",
 ]
 

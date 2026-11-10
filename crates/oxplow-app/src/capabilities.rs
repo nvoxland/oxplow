@@ -8,7 +8,7 @@
 //! - **core**: the fixed ones (the VCS) and, for every optional
 //!   capability, [`NONE`] — nothing implements it;
 //! - **extensions**: `implementations:` naming a built-in in core's
-//!   standard library ([`BUILT_INS`], `entry: oxplow:tasks`), the way a
+//!   standard library ([`BUILT_INS`], `entry: oxplow:oxtask`), the way a
 //!   collector names `oxplow:junit`. `oxplow-bundled` declares the
 //!   defaults; disabling it takes them away;
 //! - **provider instances** while they run.
@@ -33,8 +33,8 @@ use oxplow_domain::capability::{self, NONE};
 use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::stores::StreamStore as _;
+use oxplow_domain::tasks::Bucket;
 use oxplow_domain::vocabulary::VocabularyHandle;
-use oxplow_domain::work_items::Bucket;
 use oxplow_domain::DomainError;
 use serde_json::Value;
 
@@ -43,17 +43,17 @@ use serde_json::Value;
 /// core resolves the name, like a collector's `oxplow:junit`.
 pub const BUILT_INS: &[BuiltIn] = &[
     BuiltIn {
-        entry: "oxplow:tasks",
-        capability: "work_items",
-        provider: Some("oxplow"),
-        title: "oxplow's tasks",
+        entry: "oxplow:oxtask",
+        capability: "task_tracker",
+        provider: Some("oxtask"),
+        title: "oxtask",
         features: &["hierarchy", "comments", "links", "delete"],
         id_pattern: Some(r"tsk\d+"),
         fields: &[
             BuiltInField {
                 name: "priority",
                 title: "Priority",
-                kind: oxplow_domain::work_items::FieldKind::Enum,
+                kind: oxplow_domain::tasks::FieldKind::Enum,
                 values: &["urgent", "high", "medium", "low"],
                 read_only: false,
             },
@@ -61,7 +61,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
             BuiltInField {
                 name: "author",
                 title: "Filed by",
-                kind: oxplow_domain::work_items::FieldKind::Enum,
+                kind: oxplow_domain::tasks::FieldKind::Enum,
                 values: &["user", "agent"],
                 read_only: true,
             },
@@ -203,19 +203,19 @@ const fn harness(
 pub struct BuiltIn {
     pub entry: &'static str,
     pub capability: &'static str,
-    /// The provider id its items' refs carry (`oxplow:oxplow/work_item?id=…&provider=oxplow`), which
+    /// The provider id its items' refs carry (`oxplow:oxplow/task?id=…&provider=oxtask`), which
     /// a declaration of it must use; `None` for a built-in whose
     /// implementation has no id of its own.
     pub provider: Option<&'static str>,
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
-    /// What its items' own ids look like (a work list's; a regex matched
+    /// What its items' own ids look like (a task tracker's; a regex matched
     /// whole): how a loose id in text or a command is one of its items.
     pub id_pattern: Option<&'static str>,
-    /// Its own fields (a work list's, kept in `native`).
+    /// Its own fields (a task tracker's, kept in `native`).
     pub fields: &'static [BuiltInField],
-    /// A work list's stages, in order: `(id, title, bucket)`.
+    /// A task tracker's stages, in order: `(id, title, bucket)`.
     pub stages: &'static [(&'static str, &'static str, Bucket)],
     /// The JSON Schema a declaration's `config:` must meet; `None` takes
     /// no config.
@@ -227,7 +227,7 @@ pub struct BuiltIn {
 pub struct BuiltInField {
     pub name: &'static str,
     pub title: &'static str,
-    pub kind: oxplow_domain::work_items::FieldKind,
+    pub kind: oxplow_domain::tasks::FieldKind,
     pub values: &'static [&'static str],
     pub read_only: bool,
 }
@@ -237,7 +237,7 @@ fn built_in_fields(b: &BuiltIn) -> Value {
     serde_json::to_value(
         b.fields
             .iter()
-            .map(|f| oxplow_domain::work_items::FieldDecl {
+            .map(|f| oxplow_domain::tasks::FieldDecl {
                 name: f.name.into(),
                 title: f.title.into(),
                 kind: f.kind,
@@ -255,10 +255,10 @@ fn built_in_stages(b: &BuiltIn) -> Value {
 }
 
 /// A built-in's stages as declarations.
-pub fn built_in_stage_decls(b: &BuiltIn) -> Vec<oxplow_domain::work_items::StageDecl> {
+pub fn built_in_stage_decls(b: &BuiltIn) -> Vec<oxplow_domain::tasks::StageDecl> {
     b.stages
         .iter()
-        .map(|(id, title, bucket)| oxplow_domain::work_items::StageDecl {
+        .map(|(id, title, bucket)| oxplow_domain::tasks::StageDecl {
             id: (*id).into(),
             title: (*title).into(),
             bucket: *bucket,
@@ -333,10 +333,10 @@ pub struct Implementation {
     pub features: Value,
     /// Its own fields, as it declares them (a JSON array of `FieldDecl`).
     pub fields: Value,
-    /// A work list's stages, as it declares them (a JSON array of
+    /// A task tracker's stages, as it declares them (a JSON array of
     /// `StageDecl`); `[]` for any other.
     pub stages: Value,
-    /// What its items' own ids look like (a work list's), when it says.
+    /// What its items' own ids look like (a task tracker's), when it says.
     pub id_pattern: Option<String>,
     /// Its logo as a data URI, when its declaration has an `icon:`.
     pub icon: Option<String>,
@@ -546,7 +546,7 @@ pub struct PreparedCapabilities {
     base: Arc<()>,
     candidate: RegistryState,
     active: Active,
-    work_item_ids: Option<(String, String)>,
+    task_ids: Option<(String, String)>,
     rows: Vec<CapabilityProvider>,
     resolved: Vec<(&'static str, Resolved)>,
 }
@@ -577,8 +577,8 @@ impl PreparedCapabilities {
         &self.active
     }
 
-    pub fn work_item_ids(&self) -> Option<(String, String)> {
-        self.work_item_ids.clone()
+    pub fn task_ids(&self) -> Option<(String, String)> {
+        self.task_ids.clone()
     }
 
     pub(crate) fn selected(&self, capability: &str) -> Option<&str> {
@@ -788,7 +788,7 @@ impl CapabilityRegistry {
             base,
             candidate,
             active: Self::snapshot_from(&all, config),
-            work_item_ids: Self::work_item_ids_from(&all, config),
+            task_ids: Self::task_ids_from(&all, config),
             rows,
             resolved,
         })
@@ -984,11 +984,11 @@ impl CapabilityRegistry {
         }
     }
 
-    /// The active work list's id recognizer under `config`: its id and
+    /// The active task tracker's id recognizer under `config`: its id and
     /// declared `id_pattern`, if it declares one (none doesn't).
-    pub fn work_item_ids(&self, config: &OxplowConfig) -> Option<(String, String)> {
+    pub fn task_ids(&self, config: &OxplowConfig) -> Option<(String, String)> {
         let config = self.read_effective_config(config);
-        Self::work_item_ids_from(&self.implementations(), &config)
+        Self::task_ids_from(&self.implementations(), &config)
     }
 
     /// The config the last generation published; before the first one
@@ -1002,14 +1002,11 @@ impl CapabilityRegistry {
             .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
 
-    fn work_item_ids_from(
-        all: &[Implementation],
-        config: &OxplowConfig,
-    ) -> Option<(String, String)> {
-        let id = Self::resolve_from(all, config, "work_items").id;
+    fn task_ids_from(all: &[Implementation], config: &OxplowConfig) -> Option<(String, String)> {
+        let id = Self::resolve_from(all, config, "task_tracker").id;
         let pattern = all
             .iter()
-            .find(|i| i.capability == "work_items" && i.id == id)?
+            .find(|i| i.capability == "task_tracker" && i.id == id)?
             .id_pattern
             .clone()?;
         Some((id, pattern))
@@ -1039,7 +1036,7 @@ impl CapabilityRegistry {
     }
 
     /// [`Self::publish`] at construction, before there's a runtime: so the
-    /// first read of `v_capability_provider` (and of `v_work_item`, which
+    /// first read of `v_capability_provider` (and of `v_task`, which
     /// shows the active list's items) sees what's active.
     pub fn publish_now(
         &self,
@@ -1304,7 +1301,7 @@ pub async fn refresh_agent_text(svc: &crate::Services) {
 }
 
 /// On each `capability.switched`: [`refresh_agent_text`], and the
-/// vocabulary rebuilt (it reads the active work list's ids).
+/// vocabulary rebuilt (it reads the active task tracker's ids).
 pub struct AgentTextRefresh {
     services: std::sync::Weak<crate::Services>,
 }
@@ -1408,7 +1405,7 @@ mod tests {
         let r = CapabilityRegistry::new(Vec::new(), VocabularyHandle::core());
         if declared {
             r.set_declared(vec![
-                builtin("work_items", "oxplow", "oxplow:tasks"),
+                builtin("task_tracker", "oxtask", "oxplow:oxtask"),
                 builtin("effort_policy", "oxplow", "oxplow:commit-or-switch"),
                 builtin("knowledge", "oxplow", "oxplow:wiki"),
             ]);
@@ -1461,7 +1458,7 @@ mod tests {
     #[test]
     fn an_unavailable_choice_falls_back() {
         let r = registry(true);
-        let gone = r.resolve(&config(&[("work_items", "issues")], &[]), "work_items");
+        let gone = r.resolve(&config(&[("task_tracker", "issues")], &[]), "task_tracker");
         assert_eq!(
             gone,
             Resolved {
@@ -1472,7 +1469,7 @@ mod tests {
         );
         let disabled = registry(false);
         let none = config(&[], &[]);
-        assert_eq!(disabled.active(&none, "work_items"), NONE);
+        assert_eq!(disabled.active(&none, "task_tracker"), NONE);
         assert_eq!(disabled.active(&none, "effort_policy"), NONE);
         // The wiki is bundled's: disabled, knowledge is none.
         assert_eq!(disabled.active(&none, "knowledge"), NONE);
@@ -1498,9 +1495,9 @@ mod tests {
     #[test]
     fn a_running_instance_is_available() {
         let r = registry(true);
-        let c = config(&[("work_items", "issues")], &[]);
+        let c = config(&[("task_tracker", "issues")], &[]);
         let issues = Implementation {
-            capability: "work_items".into(),
+            capability: "task_tracker".into(),
             id: "issues".into(),
             title: "Issues".into(),
             extension: Some("tracker".into()),
@@ -1514,9 +1511,9 @@ mod tests {
             description: None,
         };
         r.set_external(issues.clone(), true);
-        assert_eq!(r.active(&c, "work_items"), "issues");
+        assert_eq!(r.active(&c, "task_tracker"), "issues");
         r.set_external(issues, false);
-        assert_eq!(r.active(&c, "work_items"), NONE);
+        assert_eq!(r.active(&c, "task_tracker"), NONE);
     }
 
     /// A capability many implementations serve: every declared one is
@@ -1603,8 +1600,8 @@ mod tests {
         );
     }
 
-    /// With `oxplow-bundled` disabled, the defaults still run: the work
-    /// list, the effort policy and snapshots are `oxplow-foundation`'s
+    /// With `oxplow-bundled` disabled, the defaults still run: the
+    /// task tracker, the effort policy and snapshots are `oxplow-foundation`'s
     /// (core's own snapshots default is the active row); filing works.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
@@ -1620,7 +1617,7 @@ mod tests {
         svc.extension_catalog.changed();
         crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
-        assert_eq!(svc.capabilities.active(&config, "work_items"), "oxplow");
+        assert_eq!(svc.capabilities.active(&config, "task_tracker"), "oxtask");
         assert_eq!(svc.capabilities.active(&config, "effort_policy"), "oxplow");
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
@@ -1644,12 +1641,12 @@ mod tests {
         svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
-                crate::commands::work_item::CREATE,
+                crate::commands::task::CREATE,
                 serde_json::json!({ "title": "x" }),
                 false,
             )
             .await
-            .expect("the work list runs with bundled off");
+            .expect("the task tracker runs with bundled off");
     }
 
     /// The rows say which is active and why, and a choice that isn't
@@ -1657,14 +1654,14 @@ mod tests {
     #[tokio::test]
     async fn the_rows_say_what_is_active_and_why() {
         let fx = crate::test_fixtures::services_with_effort().await;
-        let c = config(&[("work_items", "issues")], &[("effort_policy", "none")]);
+        let c = config(&[("task_tracker", "issues")], &[("effort_policy", "none")]);
         fx.svc.capabilities.publish(&c, &fx.svc.db).await.unwrap();
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT capability, provider, active, chosen_by, available FROM v_capability_provider
-                  WHERE capability IN ('work_items', 'effort_policy') ORDER BY capability, provider",
+                  WHERE capability IN ('task_tracker', 'effort_policy') ORDER BY capability, provider",
                 vec![],
                 None,
             )
@@ -1675,9 +1672,9 @@ mod tests {
             serde_json::json!([
                 ["effort_policy", "none", 1, "personal", 1],
                 ["effort_policy", "oxplow", 0, null, 1],
-                ["work_items", "issues", 0, null, 0],
-                ["work_items", "none", 1, "fallback", 1],
-                ["work_items", "oxplow", 0, null, 1],
+                ["task_tracker", "issues", 0, null, 0],
+                ["task_tracker", "none", 1, "fallback", 1],
+                ["task_tracker", "oxtask", 0, null, 1],
             ])
         );
     }
@@ -1737,12 +1734,12 @@ mod tests {
         );
     }
 
-    /// With no work list, the interface is a sink: every verb is offered
+    /// With no task tracker, the interface is a sink: every verb is offered
     /// and succeeds, keeping nothing — a create files nowhere, a change to an
     /// item (one of another list's, a loose id) changes nothing — and the
     /// interface reads empty.
     #[tokio::test]
-    async fn with_no_work_list_the_interface_is_a_sink() {
+    async fn with_no_task_tracker_the_interface_is_a_sink() {
         use serde_json::json;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
@@ -1755,7 +1752,7 @@ mod tests {
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), NONE.into());
+            .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         let offered: Vec<String> = svc
             .commands
@@ -1764,12 +1761,12 @@ mod tests {
             .map(|c| c.id)
             .collect();
         for name in [
-            "oxplow.work_item.create",
-            "oxplow.work_item.transition",
-            "oxplow.work_item.comment",
-            "oxplow.work_item.link",
-            "oxplow.work_item.reorder",
-            "oxplow.work_item.assign",
+            "oxplow.task.create",
+            "oxplow.task.transition",
+            "oxplow.task.comment",
+            "oxplow.task.link",
+            "oxplow.task.reorder",
+            "oxplow.task.assign",
         ] {
             assert!(offered.iter().any(|n| n == name), "{name} offered");
         }
@@ -1778,27 +1775,27 @@ mod tests {
             let agent = agent.clone();
             async move { svc.commands.run(&agent, name, input, false).await.unwrap() }
         };
-        let task = oxplow_tasks::work_item_ref(fx.task);
+        let task = oxplow_oxtask::task_ref(fx.task);
         for (name, input) in [
             (
-                crate::commands::work_item::CREATE,
+                crate::commands::task::CREATE,
                 json!({ "title": "filed nowhere" }),
             ),
             (
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": task, "to": "done" }),
             ),
             (
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": fx.task.to_string(), "to": "done" }),
             ),
             (
-                crate::commands::work_item::COMMENT,
+                crate::commands::task::COMMENT,
                 json!({ "uri": task, "body": "kept nowhere" }),
             ),
-            (crate::commands::work_item::REORDER, json!({ "uri": task })),
+            (crate::commands::task::REORDER, json!({ "uri": task })),
             (
-                crate::commands::work_item::ASSIGN,
+                crate::commands::task::ASSIGN,
                 json!({ "uri": task, "to": null }),
             ),
         ] {
@@ -1808,28 +1805,28 @@ mod tests {
                 "{name}"
             );
         }
-        use oxplow_tasks::TaskStore as _;
+        use oxplow_oxtask::OxtaskStore as _;
         let kept = svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(
             kept.status,
-            oxplow_tasks::TaskStatus::InProgress,
+            oxplow_oxtask::OxtaskStatus::InProgress,
             "oxplow's task untouched"
         );
         let count = svc
             .sql
-            .query_sql("SELECT count(*) FROM v_work_item", vec![], None)
+            .query_sql("SELECT count(*) FROM v_task", vec![], None)
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(count.rows).unwrap(), json!([[0]]));
     }
 
-    /// A feature the active work list doesn't declare hides what needs it.
+    /// A feature the active task tracker doesn't declare hides what needs it.
     #[test]
     fn a_missing_feature_hides_what_needs_it() {
         let r = registry(true);
         r.set_external(
             Implementation {
-                capability: "work_items".into(),
+                capability: "task_tracker".into(),
                 id: "plain".into(),
                 title: "plain".into(),
                 extension: None,
@@ -1844,14 +1841,17 @@ mod tests {
             },
             true,
         );
-        let plain = r.snapshot(&config(&[("work_items", "plain")], &[]));
+        let plain = r.snapshot(&config(&[("task_tracker", "plain")], &[]));
         let needs = |n: &str| vec![n.to_string()];
-        assert_eq!(plain.command_refusal("x", &needs("work_items.links")), None);
+        assert_eq!(
+            plain.command_refusal("x", &needs("task_tracker.links")),
+            None
+        );
         assert!(plain
-            .command_refusal("x", &needs("work_items.comments"))
+            .command_refusal("x", &needs("task_tracker.comments"))
             .is_some());
         assert_eq!(
-            plain.command_refusal("x", &needs("work_items.delete")),
+            plain.command_refusal("x", &needs("task_tracker.delete")),
             None
         );
     }
@@ -1863,7 +1863,7 @@ mod tests {
         let r = registry(true);
         r.set_external(
             Implementation {
-                capability: "work_items".into(),
+                capability: "task_tracker".into(),
                 id: "fake".into(),
                 title: "Fake".into(),
                 extension: Some("tracker".into()),
@@ -1882,14 +1882,14 @@ mod tests {
         assert!(default
             .command_refusal("fake.sync_now", &[])
             .is_some_and(|m| m.contains("Fake's")));
-        let fake = r.snapshot(&config(&[("work_items", "fake")], &[]));
+        let fake = r.snapshot(&config(&[("task_tracker", "fake")], &[]));
         assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
     }
 
     /// A runtime already on disk gets what's offered (boot refreshes it
     /// for an agent that outlived an upgrade, tsk376): core's skills, the
-    /// work-items skill (any list, none included), and oxplow's tasks' own
-    /// `/work-next` only while they're the list.
+    /// task tracker skill (any list, none included), and oxtask' own
+    /// `/next-task` only while they're the list.
     #[tokio::test]
     async fn the_runtimes_skills_follow_what_is_offered() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1920,22 +1920,22 @@ mod tests {
                 "{skill:?}"
             );
         }
-        assert!(skills.join("work-items/SKILL.md").is_file());
-        assert!(commands.join("work-next.md").is_file());
+        assert!(skills.join("tasks/SKILL.md").is_file());
+        assert!(commands.join("next-task.md").is_file());
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), NONE.into());
+            .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         refresh_agent_text(svc).await;
-        assert!(skills.join("work-items/SKILL.md").is_file());
-        assert!(!commands.join("work-next.md").exists());
+        assert!(skills.join("tasks/SKILL.md").is_file());
+        assert!(!commands.join("next-task.md").exists());
         assert!(commands.join("configure.md").is_file());
     }
 
     /// An implementation's own fields are declared, and published with its
-    /// row: oxplow's tasks have a priority, none has none.
+    /// row: oxtask have a priority, none has none.
     #[tokio::test]
     async fn an_implementations_fields_are_published() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -1944,7 +1944,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT provider, fields FROM v_capability_provider
-                  WHERE capability = 'work_items' ORDER BY provider",
+                  WHERE capability = 'task_tracker' ORDER BY provider",
                 vec![],
                 None,
             )
@@ -1960,7 +1960,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(
-            fields("oxplow"),
+            fields("oxtask"),
             serde_json::json!([
                 {
                     "name": "priority",
@@ -1981,18 +1981,18 @@ mod tests {
         assert_eq!(fields(NONE), serde_json::json!([]));
     }
 
-    /// Each work list's id pattern is published beside it, so a screen
+    /// Each task tracker's id pattern is published beside it, so a screen
     /// recognizes its ids in text as core's vocabulary does: oxplow's
     /// `tsk<n>`, nothing for none.
     #[tokio::test]
-    async fn a_work_lists_id_pattern_is_published() {
+    async fn a_task_trackers_id_pattern_is_published() {
         let fx = crate::test_fixtures::services_with_effort().await;
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT provider, id_pattern FROM v_capability_provider
-                  WHERE capability = 'work_items' ORDER BY provider",
+                  WHERE capability = 'task_tracker' ORDER BY provider",
                 vec![],
                 None,
             )
@@ -2000,12 +2000,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            serde_json::json!([[NONE, null], ["oxplow", r"tsk\d+"]])
+            serde_json::json!([[NONE, null], ["oxtask", r"tsk\d+"]])
         );
     }
 
-    /// The vocabulary reads the active work list's own ids in text, as it
-    /// declares them: `tsk42` with oxplow's tasks, nothing with none.
+    /// The vocabulary reads the active task tracker's own ids in text, as it
+    /// declares them: `tsk42` with oxtask, nothing with none.
     #[tokio::test]
     async fn the_vocabulary_reads_the_active_lists_ids() {
         let fx = crate::test_fixtures::services_with_effort().await;
@@ -2015,20 +2015,20 @@ mod tests {
                 &svc.vocabulary.current().resources,
                 "see tsk42 and [[tsk7]]",
             )
-            .work_items
+            .tasks
         };
         assert_eq!(
             found(),
             vec![
-                oxplow_domain::uri::build::work_item_uri("oxplow", "tsk42"),
-                oxplow_domain::uri::build::work_item_uri("oxplow", "tsk7"),
+                oxplow_domain::uri::build::task_uri("oxtask", "tsk42"),
+                oxplow_domain::uri::build::task_uri("oxtask", "tsk7"),
             ]
         );
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), NONE.into());
+            .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(found().is_empty(), "{:?}", found());

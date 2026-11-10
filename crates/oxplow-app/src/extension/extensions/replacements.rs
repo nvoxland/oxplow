@@ -5,7 +5,7 @@
 //! ```yaml
 //! ui:
 //!   replacements:
-//!     - { page: board, at: work_item.board, version: 1 }
+//!     - { page: board, at: task.board, version: 1 }
 //! ```
 //!
 //! Checked here: the target exists, the page is the extension's and
@@ -29,7 +29,7 @@ pub struct UiReplacement {
     /// `<extension>/<target>`.
     pub id: String,
     pub extension: String,
-    /// The core sub-component it replaces (`work_item.board`).
+    /// The core sub-component it replaces (`task.board`).
     pub target: String,
     /// The capability the target belongs to.
     pub capability: String,
@@ -54,7 +54,7 @@ pub const OXPLOWS_OWN: &str = "oxplow";
 /// target — stands in for it now, if any. `choice` is what the person said
 /// for the target (`replacements: { <target>: <extension> | oxplow }`);
 /// `oxplow` keeps oxplow's own wherever. A target bound to a provider (a
-/// work item's state: that tracker's own states) shows only the
+/// task's state: that tracker's own states) shows only the
 /// replacement of `provider_extension`, the extension bringing the
 /// provider whose thing it shows; none keeps oxplow's own. An unbound one
 /// (the Board, the list, the history graph) shows the person's choice, or
@@ -230,7 +230,7 @@ mod tests {
             id: format!("{extension}/{target}"),
             extension: extension.into(),
             target: target.into(),
-            capability: "work_items".into(),
+            capability: "task_tracker".into(),
             bound_to_provider: bound,
             page: format!("{extension}/page"),
             version: 1,
@@ -246,8 +246,8 @@ mod tests {
     #[test]
     fn whose_replacement_shows() {
         let (a, b) = (
-            candidate("a", "work_item.board", false),
-            candidate("b", "work_item.board", false),
+            candidate("a", "task.board", false),
+            candidate("b", "task.board", false),
         );
         let named = |c: Option<&super::UiReplacement>| c.map(|c| c.extension.clone());
         assert_eq!(named(super::chosen(&[], None, None)), None);
@@ -263,8 +263,8 @@ mod tests {
         );
         assert_eq!(named(super::chosen(&[&a], Some("nobody"), None)), None);
         let (x, y) = (
-            candidate("x", "work_item.detail.state", true),
-            candidate("y", "work_item.detail.state", true),
+            candidate("x", "task.detail.state", true),
+            candidate("y", "task.detail.state", true),
         );
         assert_eq!(
             named(super::chosen(&[&x, &y], None, Some("y"))),
@@ -285,7 +285,7 @@ mod tests {
         );
     }
 
-    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  rows: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: rows }\n";
+    const BOARD: &str = "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  rows: { sql: \"SELECT uri, title, state FROM v_task\" }\nview: { viz: table, from: rows }\n";
 
     /// Extension `tracker`, with `providers` (YAML, or none),
     /// a `board` page taking the Board's whole contract, a `partial` one
@@ -338,7 +338,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/tracker/pages/board-page.yaml",
-            "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT uri, title, state FROM v_work_item\" }\nview: { viz: table, from: items }\n",
+            "title: Board\nparams: [{ name: scope }, { name: thread_id }]\nloaders:\n  items: { sql: \"SELECT uri, title, state FROM v_task\" }\nview: { viz: table, from: items }\n",
         );
         load_extensions(d.path())
             .into_iter()
@@ -350,10 +350,7 @@ mod tests {
     /// `lens:` is no longer a field.
     #[test]
     fn a_page_replaces_a_target_taking_its_whole_contract() {
-        let ext = load(
-            PROVIDER,
-            "    - { page: board-page, at: work_item.board }\n",
-        );
+        let ext = load(PROVIDER, "    - { page: board-page, at: task.board }\n");
         assert_eq!(
             said(&ext),
             "",
@@ -362,13 +359,13 @@ mod tests {
             ext.errors
         );
         assert_eq!(ext.ui.replacements[0].page, "tracker/board-page");
-        let ext = load(PROVIDER, "    - { page: nope, at: work_item.board }\n");
+        let ext = load(PROVIDER, "    - { page: nope, at: task.board }\n");
         assert!(
             said(&ext).contains("page `nope` isn't one of this extension's"),
             "{}",
             said(&ext)
         );
-        let ext = load(PROVIDER, "    - { at: work_item.board, lens: board }\n");
+        let ext = load(PROVIDER, "    - { at: task.board, lens: board }\n");
         assert!(
             said(&ext).contains("unknown field `lens`"),
             "{}",
@@ -376,7 +373,7 @@ mod tests {
         );
     }
 
-    const PROVIDER: &str = "providers:\n  - { id: fake, capability: work_items, entry: bin/provider, declarations: provider.json, stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }] }\n";
+    const PROVIDER: &str = "providers:\n  - { id: fake, capability: task_tracker, entry: bin/provider, declarations: provider.json, stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }] }\n";
 
     /// What a replacement's own checks said (the provider's missing
     /// program and declarations are another check's errors).
@@ -391,15 +388,15 @@ mod tests {
 
     #[test]
     fn a_replacement_names_a_known_target_and_a_page_taking_its_whole_contract() {
-        let ext = load(PROVIDER, "    - { page: board, at: work_item.board }\n");
+        let ext = load(PROVIDER, "    - { page: board, at: task.board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui.replacements,
             vec![super::UiReplacement {
-                id: "tracker/work_item.board".into(),
+                id: "tracker/task.board".into(),
                 extension: "tracker".into(),
-                target: "work_item.board".into(),
-                capability: "work_items".into(),
+                target: "task.board".into(),
+                capability: "task_tracker".into(),
                 page: "tracker/board".into(),
                 version: 2,
                 view: vec!["show".into(), "priority".into(), "q".into()],
@@ -410,22 +407,22 @@ mod tests {
         for (entry, says) in [
             (
                 "{ page: board, at: vcs.conflict.resolver }",
-                "nor a replaceable component (work_item.board, work_item.list, work_item.detail, work_item.detail.state, vcs.history.graph, effort.verdict)",
+                "nor a replaceable component (task.board, task.list, task.detail, task.detail.state, vcs.history.graph, effort.verdict)",
             ),
             (
-                "{ page: board, at: work_item.board, version: 1 }",
-                "`work_item.board` is at version 2 of its props contract, not 1",
+                "{ page: board, at: task.board, version: 1 }",
+                "`task.board` is at version 2 of its props contract, not 1",
             ),
             (
-                "{ page: nope, at: work_item.board }",
+                "{ page: nope, at: task.board }",
                 "page `nope` isn't one of this extension's",
             ),
             (
-                "{ page: partial, at: work_item.board }",
+                "{ page: partial, at: task.board }",
                 "must declare `thread_id`",
             ),
             (
-                "{ page: board, at: work_item.board, order: 1 }",
+                "{ page: board, at: task.board, order: 1 }",
                 "unknown field",
             ),
         ] {
@@ -439,14 +436,11 @@ mod tests {
         }
     }
 
-    /// P10 (K4): the second replaceable component — a work item's state
+    /// P10 (K4): the second replaceable component — a task's state
     /// control — is given the item's `ref`, and its page must take it.
     #[test]
     fn a_detail_state_replacement_takes_ref() {
-        let ext = load(
-            PROVIDER,
-            "    - { page: state, at: work_item.detail.state }\n",
-        );
+        let ext = load(PROVIDER, "    - { page: state, at: task.detail.state }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(
             ext.ui
@@ -454,12 +448,9 @@ mod tests {
                 .iter()
                 .map(|r| (r.target.as_str(), r.page.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("work_item.detail.state", "tracker/state")]
+            vec![("task.detail.state", "tracker/state")]
         );
-        let ext = load(
-            PROVIDER,
-            "    - { page: board, at: work_item.detail.state }\n",
-        );
+        let ext = load(PROVIDER, "    - { page: board, at: task.detail.state }\n");
         assert!(said(&ext).contains("must declare `uri`"), "{}", said(&ext));
     }
 
@@ -510,15 +501,15 @@ mod tests {
     /// extension may bring one, pinning the contract's version or not.
     #[test]
     fn only_a_bound_target_needs_the_extension_to_bring_its_provider() {
-        let ext = load("", "    - { page: state, at: work_item.detail.state }\n");
+        let ext = load("", "    - { page: state, at: task.detail.state }\n");
         let errs = said(&ext);
         assert!(
-            errs.contains("only an extension that brings a `work_items` provider may replace `work_item.detail.state`"),
+            errs.contains("only an extension that brings a `task_tracker` provider may replace `task.detail.state`"),
             "{errs}"
         );
         assert!(ext.ui.replacements.is_empty());
         let ext = load("",
-            "    - { page: board, at: work_item.board, version: 2 }\n    - { page: board, at: work_item.list }\n    - { page: state, at: work_item.detail }\n",
+            "    - { page: board, at: task.board, version: 2 }\n    - { page: board, at: task.list }\n    - { page: state, at: task.detail }\n",
         );
         assert_eq!(said(&ext), "");
         assert_eq!(
@@ -528,17 +519,18 @@ mod tests {
                 .map(|r| (r.target.as_str(), r.bound_to_provider, r.version))
                 .collect::<Vec<_>>(),
             vec![
-                ("work_item.board", false, 2),
-                ("work_item.list", false, 2),
-                ("work_item.detail", false, 1)
+                ("task.board", false, 2),
+                ("task.list", false, 2),
+                ("task.detail", false, 1)
             ]
         );
     }
 
     #[test]
     fn a_target_is_replaced_once_per_extension() {
-        let ext = load(PROVIDER,
-            "    - { page: board, at: work_item.board }\n    - { page: board, at: work_item.board }\n",
+        let ext = load(
+            PROVIDER,
+            "    - { page: board, at: task.board }\n    - { page: board, at: task.board }\n",
         );
         assert!(said(&ext).contains("already replaced"), "{:?}", ext.errors);
         assert_eq!(ext.ui.replacements.len(), 1);
@@ -604,7 +596,7 @@ mod tests {
     /// bound target still needs its provider.
     #[test]
     fn a_shared_extension_may_declare_replacements() {
-        let ext = load(PROVIDER, "    - { page: board, at: work_item.board }\n");
+        let ext = load(PROVIDER, "    - { page: board, at: task.board }\n");
         assert_eq!(said(&ext), "");
         assert_eq!(ext.ui.replacements.len(), 1);
     }

@@ -97,7 +97,7 @@ and [Metrics](../guide/metrics.md).
   work and knowledge tracking.
 - [Pages](../guide/pages.md) — custom views, collection, and sharing.
 - [Metrics](../guide/metrics.md) — facts, measures, and dimensions.
-- [Work queue](../guide/work-queue.md) — optional work items.
+- [Tasks](../guide/tasks.md) — optional tasks.
 - [Agent control](../guide/agent-control.md) — observed activity and
   worktree write guards.
 - [Agents](../guide/agents.md) — sessions and harnesses.

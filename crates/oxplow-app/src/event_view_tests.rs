@@ -77,7 +77,7 @@ fn extensions(root: &Path, with_v2: bool) {
     write(
         root,
         ".oxplow/extensions/acme/note.star",
-        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": \"work_item:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": \"task:oxplow:tsk1\", \"title\": json.encode(x[\"event\"])}}]}\n",
     );
 }
 
@@ -136,7 +136,7 @@ async fn every_path_hands_over_the_same_envelope() {
             agent_session_id: Some(fx.session),
             ..Anchors::default()
         })
-        .with_subject([oxplow_tasks::work_item_ref(fx.task)])
+        .with_subject([oxplow_oxtask::task_ref(fx.task)])
         .with_cause(cause.envelope.id.clone()),
     )
     .await;

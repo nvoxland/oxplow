@@ -90,8 +90,8 @@ test("invoke and navigate resolve with the host's replies", async () => {
   h.init();
   const c = await connecting;
   expect("query" in c).toBe(false);
-  expect(await c.invoke("oxplow.work_item.transition", { to: "done" })).toEqual({ done: true });
-  expect(await c.navigate("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBeNull();
+  expect(await c.invoke("oxplow.task.transition", { to: "done" })).toEqual({ done: true });
+  expect(await c.navigate("oxplow:oxplow/task?id=tsk1&provider=oxtask")).toBeNull();
   h.close();
 });
 
@@ -141,7 +141,7 @@ test("an invalid input's refusal names its field", async () => {
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await expect(c.invoke("oxplow.work_item.update", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: "" })).rejects.toEqual({
+  await expect(c.invoke("oxplow.task.update", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "" })).rejects.toEqual({
     code: "INVALID",
     message: "a title can't be empty",
     field: "/title",
@@ -411,7 +411,7 @@ test("a form the person closes rejects CANCELLED", async () => {
 test("renderMarkdown builds the host's tree; its links open oxplow's pages only", async () => {
   const opened: [string, boolean][] = [];
   const asked: [string, boolean][] = [];
-  const ref = "oxplow:oxplow/work_item?id=tsk7&provider=oxplow";
+  const ref = "oxplow:oxplow/task?id=tsk7&provider=oxtask";
   const h = harness({
     navigate: (uri, opts) => {
       opened.push([uri, opts.newTab]);

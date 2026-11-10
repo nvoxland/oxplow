@@ -377,7 +377,7 @@ page's Activity timeline (`TaskDetail.tsx` → `ActivityTimeline`):
   fetches.
 - A **completed** effort (`ActivityEffortSection`) shows the summary, the
   **Modified Files** tree (token usage is the task-level `task-tokens`
-  page in the `oxplow/work-item.sections` slot) — but
+  page in the `oxplow/task-detail.sections` slot) — but
   **not** coverage, test runs or static analysis. Those live only on the
   effort **diff view** (`DiffViewPage`, the effort-review surface), as the
   oxplow-bundled `effort-tests` page in its `oxplow/diff-view.sections` slot:

@@ -1,9 +1,9 @@
 -- Each effort review: the run of the review job, the effort its intent key
--- (`review:<effort id>`) names, the effort's work item, and the text its
+-- (`review:<effort id>`) names, the effort's task, and the text its
 -- current attempt has streamed.
 SELECT j.uri AS job_run,
        CAST(uri('oxplow/effort', 'id', substr(j.intent_key, length('review:') + 1)) AS TEXT) AS effort,
-       e.work_item,
+       e.task,
        j.state,
        j.updated_at AS reviewed_at,
        CAST(coalesce((SELECT group_concat(o.text, '')

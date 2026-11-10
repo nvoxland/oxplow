@@ -1,0 +1,15 @@
+# The Work panel reads the task interface: with the task tracker switched
+# to none, only the effort no item names is left.
+given:
+  - { command: oxplow.effort.open, input: { thread: thr1 } }
+  - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Stuck, stage: blocked, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Someday } }
+when: { part: oxplow/tasks-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work: { rows: [{ grp: In progress, title: Untitled effort }, { grp: Up next, title: Next up }, { grp: Up next, title: Stuck }] }
+steps:
+  - given:
+      - { command: oxplow.capability.choose, input: { capability: task_tracker, provider: none }, confirmed: true }
+  - expect: { loaders: { work: { rows: [{ grp: In progress, title: Untitled effort }] } } }

@@ -57,6 +57,7 @@ pub mod sql_tokens;
 pub mod stream_store;
 pub mod symbol_store;
 pub mod table_generations;
+pub mod task_refs;
 pub mod terminal_store;
 #[cfg(test)]
 pub(crate) mod test_tasks;
@@ -67,7 +68,6 @@ pub mod tool_call_store;
 pub mod ui_preference_store;
 pub mod wiki_page_store;
 pub mod wiki_page_thread_updates;
-pub mod work_item_refs;
 
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,

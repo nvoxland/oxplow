@@ -7,11 +7,11 @@ loaders:
   review_prompt:
     sql: |
       WITH e AS (
-        -- Its work item, through the interface; one the active list doesn't
+        -- Its task, through the interface; one the active list doesn't
         -- show is named by its uri, an effort on none by its own title.
-        SELECT e.id, coalesce(w.title, e.work_item, e.title, 'Unlinked work') AS title,
+        SELECT e.id, coalesce(w.title, e.task, e.title, 'Unlinked work') AS title,
                coalesce(w.body, '') AS description, coalesce(e.summary, '') AS summary
-        FROM v_effort e LEFT JOIN v_work_item w ON w.uri = e.work_item
+        FROM v_effort e LEFT JOIN v_task w ON w.uri = e.task
         WHERE e.id = :effort_id
       ),
       files AS (

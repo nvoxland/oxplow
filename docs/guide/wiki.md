@@ -22,7 +22,7 @@ commit message.
 
 They are *not* the right place for:
 
-- Personal todos — that's the work queue.
+- Personal todos — that is a task.
 - Per-task detail — that belongs inline in the task description.
 
 ## Editing

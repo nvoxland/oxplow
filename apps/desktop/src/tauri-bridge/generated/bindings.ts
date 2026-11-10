@@ -1115,7 +1115,7 @@ export type AssistantStatus = "idle" | "running";
  *  row and `command.executed`), or outside it, against a system the bus
  *  doesn't own — a VCS, a provider process, a collector's script — and is
  *  audited after it returns (`External`). A `Dispatch` command decides
- *  per input (the `work_item.*` verbs: oxplow's own items in the
+ *  per input (the `task.*` verbs: oxplow's own items in the
  *  transaction, another provider's through its process) and then runs
  *  exactly as one or the other. A test lists the `External` and the
  *  `Dispatch` commands, so each one is a reviewed choice.
@@ -1213,7 +1213,7 @@ export type BlameLine = {
 };
 
 /**
- *  What a work list's stage means to core: the bucket each of its declared
+ *  What a task tracker's stage means to core: the bucket each of its declared
  *  stages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is
  *  filed but not ready, `todo` is ready (what an idle thread may pull),
  *  `in_progress` is started, `blocked` waits on an answer, `done` and
@@ -1358,7 +1358,7 @@ export type CollectorRuntime =
 "jaq" |
 /**
  *  A provider instance's collector (`oxplow.provider.sync`): its records
- *  land in the capability's dataset (`v_work_item`).
+ *  land in the capability's dataset (`v_task`).
  */
 "read";
 
@@ -1570,7 +1570,7 @@ export type CommandOutcome = {
 export type CommandSpec = {
 	/**
 	 *  The command id: `<namespace>.<area>.<verb>`, snake_case —
-	 *  `oxplow.work_item.transition`, `acme_pr.issue.close`. The namespace
+	 *  `oxplow.task.transition`, `acme_pr.issue.close`. The namespace
 	 *  is its owner's (`oxplow` for core and oxplow's own extensions, an
 	 *  extension's declared `namespace:` otherwise), so two extensions'
 	 *  areas never collide. (A person reads the command's label, not its
@@ -1608,7 +1608,7 @@ export type CommandSpec = {
 	access: Access,
 	/**
 	 *  The scopes its handler calls (`sql.read`) and the capabilities, or
-	 *  their features (`work_items.comments`), it needs active; unmet, it
+	 *  their features (`task_tracker.comments`), it needs active; unmet, it
 	 *  isn't offered and doesn't run (`.context/commands.md`).
 	 */
 	needs: string[],
@@ -1641,7 +1641,7 @@ export type CommandUi = {
 	/**  More words search matches it by. */
 	keywords?: string[],
 	/**
-	 *  The ref kind it acts on (`work_item`, `effort`): offered on that
+	 *  The ref kind it acts on (`task`, `effort`): offered on that
 	 *  ref's page and rows. `None`: it needs no ref, and search offers it.
 	 */
 	about?: string | null,
@@ -1716,7 +1716,7 @@ export type Comment = {
 	thread_id: ThreadId | null,
 	/**
 	 *  What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
-	 *  a file's, a work item's) — the same the `page_ref` graph and tabs
+	 *  a file's, a task's) — the same the `page_ref` graph and tabs
 	 *  use.
 	 */
 	target: string,
@@ -1974,7 +1974,7 @@ export type DatasetFreshness = {
 /**  A dataset's declaration and its SQL file. */
 export type DatasetSource = {
 	decl: DatasetDecl,
-	/**  Where the SQL came from, for error locations (`datasets/work_item.sql`). */
+	/**  Where the SQL came from, for error locations (`datasets/task.sql`). */
 	file: string,
 	sql: string,
 	/**
@@ -2206,10 +2206,10 @@ export type EffectDecl = {
 export type Effort = {
 	id: EffortId,
 	/**
-	 *  The work item it's linked to, as a canonical `work_item` ref; `None`
+	 *  The task it's linked to, as a canonical `task` ref; `None`
 	 *  while unlinked (oxplow opens efforts itself).
 	 */
-	work_item: string | null,
+	task: string | null,
 	/**
 	 *  Its own title, when one was set; `None` means the default
 	 *  (`v_effort.title`).
@@ -2262,7 +2262,7 @@ export type EntityDecl = {
  *  tells agents and page authors how the data connects.
  */
 export type EntityRelation = {
-	/**  The view it joins to, e.g. `v_work_item` or `v_github_review`. */
+	/**  The view it joins to, e.g. `v_task` or `v_github_review`. */
 	to: string,
 	/**  The SQL join condition, e.g. `v_github_pr.head_branch = v_stream.branch`. */
 	on: string,
@@ -2804,7 +2804,7 @@ export type Extension_Serialize = {
 };
 
 /**
- *  One of a work list's own fields: kept in an item's `native` under
+ *  One of a task tracker's own fields: kept in an item's `native` under
  *  `name`, declared so screens render and edit it without knowing which
  *  list is active.
  */
@@ -2821,7 +2821,7 @@ export type FieldDecl = {
 	values?: string[],
 	/**
 	 *  Set by the list itself (who filed it, when it synced): shown, never
-	 *  edited — a `oxplow.work_item.update` that names it is refused.
+	 *  edited — a `oxplow.task.update` that names it is refused.
 	 */
 	read_only?: boolean,
 };
@@ -3276,7 +3276,7 @@ export type ImplementationDecl = {
 	/**  How a person names it; the built-in's own title when absent. */
 	title: string | null,
 	/**
-	 *  The built-in it is (`oxplow:tasks`), or the script an effort
+	 *  The built-in it is (`oxplow:oxtask`), or the script an effort
 	 *  policy is; its features are core's to say. `None` for an AI
 	 *  provider, which names its kind instead.
 	 */
@@ -3521,7 +3521,7 @@ export type LinkKind =
 /**  A metric's page; the value is a metric key. */
 "metric" |
 /**
- *  Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
+ *  Any oxplow page by its tab id (`oxplow:oxplow/task?id=<id>&provider=oxtask`,
  *  `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
  *  e.g. `v_page_visit.page_id`.
  */
@@ -3978,7 +3978,7 @@ export type Node_Deserialize = {
 	link: string | null,
 	/**
 	 *  A contract another extension's active provider may take its place
-	 *  under (`work_item.board`).
+	 *  under (`task.board`).
 	 */
 	replaceable: string | null,
 	/**  A grid child's size. */
@@ -4021,7 +4021,7 @@ export type Node_Serialize = {
 	link: string | null,
 	/**
 	 *  A contract another extension's active provider may take its place
-	 *  under (`work_item.board`).
+	 *  under (`task.board`).
 	 */
 	replaceable: string | null,
 	/**  A grid child's size. */
@@ -4245,7 +4245,7 @@ export type OxplowConfig = {
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
 	 *  The project's choice of implementation per choosable capability
-	 *  (`activeProviders: { work_items: issues, effort_policy: none }`); a
+	 *  (`activeProviders: { task_tracker: issues, effort_policy: none }`); a
 	 *  capability absent here keeps its default.
 	 */
 	activeProviders: { [key in string]: string },
@@ -4262,7 +4262,7 @@ export type OxplowConfig = {
 	personalNewThreadSession: string | null,
 	/**
 	 *  Whose component shows for a replaceable core sub-component, by
-	 *  target (`replacements: { work_item.board: task-views,
+	 *  target (`replacements: { task.board: task-views,
 	 *  vcs.history.graph: oxplow }`): an extension replacing it, or
 	 *  `oxplow` for oxplow's own. A target not listed shows its default:
 	 *  the only extension replacing it, or a bound target's provider's.
@@ -4516,7 +4516,7 @@ export type PageAction_Deserialize = {
 	id: string,
 	label: string,
 	/**
-	 *  The command it runs (`oxplow.work_item.transition`). None for an
+	 *  The command it runs (`oxplow.task.transition`). None for an
 	 *  `open` action, which runs none.
 	 */
 	command?: string | null,
@@ -4693,7 +4693,7 @@ export type PageAction_Serialize = {
 	id: string,
 	label: string,
 	/**
-	 *  The command it runs (`oxplow.work_item.transition`). None for an
+	 *  The command it runs (`oxplow.task.transition`). None for an
 	 *  `open` action, which runs none.
 	 */
 	command: string | null,
@@ -4944,7 +4944,7 @@ export type PageColumn = {
 
 /**  A page that didn't run for want of a capability. */
 export type PageInactive = {
-	/**  The needs that aren't met (`work_items`, `knowledge`). */
+	/**  The needs that aren't met (`task_tracker`, `knowledge`). */
 	needs: string[],
 	/**  What a person reads. */
 	message: string,
@@ -5515,7 +5515,7 @@ export type ProviderSpec = {
 	/**
 	 *  The provider's id: its program's approval (`<extension>/<id>`) and
 	 *  the id of its default instance — an instance's id is its refs'
-	 *  segment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace
+	 *  segment (`oxplow:oxplow/task?id=…&provider=<id>`) and its commands' namespace
 	 *  (`<id>.estimate`).
 	 */
 	id: string,
@@ -5538,20 +5538,20 @@ export type ProviderSpec = {
 	/**  The checked-in `InitializeResult` (JSON), relative to the folder. */
 	declarations: string,
 	/**
-	 *  What a work list's own ids look like (a regex matched whole:
+	 *  What a task tracker's own ids look like (a regex matched whole:
 	 *  `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
-	 *  active work list.
+	 *  active task tracker.
 	 */
 	idPattern?: string | null,
 	/**
-	 *  A work list's own fields (kept in an item's `native`), so screens
+	 *  A task tracker's own fields (kept in an item's `native`), so screens
 	 *  render and edit them: `[{ name, title, kind: enum|text|number,
 	 *  values? }]`.
 	 */
 	fields?: FieldDecl[],
 	/**
-	 *  A work list's stages, in order, each in one of core's buckets:
-	 *  `[{ id, title, bucket }]` — required for a work list, which needs
+	 *  A task tracker's stages, in order, each in one of core's buckets:
+	 *  `[{ id, title, bucket }]` — required for a task tracker, which needs
 	 *  one in each of todo, in_progress and done. The first of a bucket is
 	 *  where naming the bucket lands.
 	 */
@@ -5692,11 +5692,11 @@ export type ReportInput = {
 /**  One tab, as its window shows it. */
 export type ReportedTab = {
 	/**
-	 *  Its tab id: a canonical ref (`oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+	 *  Its tab id: a canonical ref (`oxplow:oxplow/task?id=tsk3&provider=oxtask`,
 	 *  `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
 	 */
 	id: string,
-	/**  Its page kind (`work_item`, `page`, `agent_session`). */
+	/**  Its page kind (`task`, `page`, `agent_session`). */
 	kind: string,
 	/**  The title on the tab. */
 	title: string,
@@ -5904,7 +5904,7 @@ export type ScriptsConfig = {
 
 /**
  *  One ranked search result: the URI it found
- *  (`oxplow:oxplow/work_item?id=tsk7&provider=oxplow`), which the caller
+ *  (`oxplow:oxplow/task?id=tsk7&provider=oxtask`), which the caller
  *  opens the way it opens any URI, and its resource. `stream_id` is `None`
  *  for project-global entities (wiki pages); `score` is the BM25 score
  *  (lower = better match).
@@ -5994,7 +5994,7 @@ export type SkillDecl = {
 	kind: SkillKind,
 	/**  Its markdown, inside the extension. */
 	file: string,
-	/**  What it needs active (`work_items`, `work_items.comments`). */
+	/**  What it needs active (`task_tracker`, `task_tracker.comments`). */
 	needs: string[],
 	/**
 	 *  The `description:` of its frontmatter: when the agent loads a skill,
@@ -6173,7 +6173,7 @@ export type SqlQueryResult = {
 };
 
 /**
- *  One of a work list's stages, as it declares them in order: its id (what
+ *  One of a task tracker's stages, as it declares them in order: its id (what
  *  a record and an input name), how a person names it, and its bucket. The
  *  first stage of a bucket is that bucket's default — where an input
  *  naming the bucket (`to: done`) lands.
@@ -6275,6 +6275,23 @@ export type TabReport = {
 export type TabReportAnswer = {
 	/**  The runs it reported that the daemon no longer holds for it. */
 	missingRuns: string[],
+};
+
+/**  What a provider supports beyond create, update and transition. */
+export type TaskTrackerFeatures = {
+	/**  Items nest (a parent ref). */
+	hierarchy: boolean,
+	comments: boolean,
+	links: boolean,
+	/**  Items can be deleted (`oxplow.task.delete`). */
+	delete?: boolean,
+	/**
+	 *  A write sent twice with one idempotency key is done once, the
+	 *  second answered as the first (the protocol's
+	 *  `InvokeParams.idempotency_key`): the host may send a write again
+	 *  when its reply was lost.
+	 */
+	idempotent_writes?: boolean,
 };
 
 /**
@@ -6495,7 +6512,7 @@ export type UiDecorator = {
 	extension: string,
 	/**  The dataset's view (`v_<namespace>_<dataset>`), which has a `ref` column. */
 	view: string,
-	/**  The resource it decorates (`oxplow/work_item`). */
+	/**  The resource it decorates (`oxplow/task`). */
 	resource: string,
 	placement: DecoratorPlacement,
 	/**  The view's column holding the text shown. */
@@ -6537,7 +6554,7 @@ export type UiReplacement = {
 	/**  `<extension>/<target>`. */
 	id: string,
 	extension: string,
-	/**  The core sub-component it replaces (`work_item.board`). */
+	/**  The core sub-component it replaces (`task.board`). */
 	target: string,
 	/**  The capability the target belongs to. */
 	capability: string,
@@ -7154,23 +7171,6 @@ export type Withheld = {
 	contribution: ContributionId,
 	/**  The bindings (`imports[*].id`) whose unavailability withheld it. */
 	imports: string[],
-};
-
-/**  What a provider supports beyond create, update and transition. */
-export type WorkItemsFeatures = {
-	/**  Items nest (a parent ref). */
-	hierarchy: boolean,
-	comments: boolean,
-	links: boolean,
-	/**  Items can be deleted (`oxplow.work_item.delete`). */
-	delete?: boolean,
-	/**
-	 *  A write sent twice with one idempotency key is done once, the
-	 *  second answered as the first (the protocol's
-	 *  `InvokeParams.idempotency_key`): the host may send a write again
-	 *  when its reply was lost.
-	 */
-	idempotent_writes?: boolean,
 };
 
 export type WorkspaceContext = {

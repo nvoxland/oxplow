@@ -1,14 +1,14 @@
 # oxplow.review.request_changes { effort, note? }: comment a checklist of
-# what to fix on the effort's work item — each unverified claim, each
+# what to fix on the effort's task — each unverified claim, each
 # inferred decision, each file outside the item's area — and move it back
 # to todo (oxplow: ready). The verdict is logged as
 # `oxplow.review.changes_requested` with the run, about the effort and
 # the item.
 
-# The effort's work item, and what its review weighs: unverified claims,
+# The effort's task, and what its review weighs: unverified claims,
 # inferred decisions, files outside the item's area (JSON arrays).
 _REVIEW = """
-SELECT e.work_item,
+SELECT e.task,
        (SELECT json_group_array(json_object('claim', c.uri, 'statement', c.statement))
           FROM v_claim c JOIN v_oxplow_claim_status s ON s.uri = c.uri
          WHERE c.effort_id = e.id AND s.verified = 0) AS unverified,
@@ -34,8 +34,8 @@ def transform(x):
     if not rows:
         return {"refuse": "no effort `%s`" % effort}
     row = rows[0]
-    if not row["work_item"]:
-        return {"refuse": "effort `%s` has no work item to review" % effort}
+    if not row["task"]:
+        return {"refuse": "effort `%s` has no task to review" % effort}
     note = x["input"].get("note", "")
     checklist = (
         ["- [ ] Back up the claim: %s" % md_text(c["statement"]) for c in _list(row["unverified"])] +
@@ -50,10 +50,10 @@ def transform(x):
     if checklist:
         lines.append("")
         lines.extend(checklist)
-    item = row["work_item"]
+    item = row["task"]
     payload = {
         "effort": effort,
-        "work_item": item,
+        "task": item,
         "unverified": len(_list(row["unverified"])),
         "inferred": len(_list(row["inferred"])),
         "deviated": len(_list(row["deviated"])),
@@ -62,9 +62,9 @@ def transform(x):
         payload["note"] = note
     return {
         "commands": [
-            {"name": "oxplow.work_item.comment", "input": {"uri": item, "body": "\n".join(lines)}},
-            {"name": "oxplow.work_item.transition", "input": {"uri": item, "to": "todo"}},
+            {"name": "oxplow.task.comment", "input": {"uri": item, "body": "\n".join(lines)}},
+            {"name": "oxplow.task.transition", "input": {"uri": item, "to": "todo"}},
         ],
         "events": [{"type": "oxplow.review.changes_requested", "subject": [ref, item], "payload": payload}],
-        "result": {"work_item": item},
+        "result": {"task": item},
     }

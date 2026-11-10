@@ -81,7 +81,7 @@ pub fn is_operational_metric_key(key: &str) -> bool {
     key.starts_with("agent.")
         || key.starts_with("effort.")
         || key.starts_with("task.")
-        || key.starts_with("work_item.")
+        || key.starts_with("task.")
 }
 
 #[cfg(test)]
@@ -225,7 +225,7 @@ mod tests {
     fn operational_keys_are_recognized() {
         assert!(is_operational_metric_key("agent.tokens.total"));
         assert!(is_operational_metric_key("effort.cycle_time_ms"));
-        assert!(is_operational_metric_key("work_item.efforts"));
+        assert!(is_operational_metric_key("task.efforts"));
         assert!(!is_operational_metric_key("oxplow.rust.unsafe_blocks"));
         assert!(!is_operational_metric_key("acme.custom"));
     }

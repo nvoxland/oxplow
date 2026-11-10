@@ -4471,10 +4471,10 @@ mod tests {
         use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore};
         use oxplow_domain::stores::StreamStore;
         use oxplow_domain::{EffortId, Stream, StreamId, StreamKind, Thread, Timestamp};
-        use oxplow_tasks::SqliteTaskStore;
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+        use oxplow_oxtask::OxtaskId;
+        use oxplow_oxtask::OxtaskStore;
+        use oxplow_oxtask::SqliteOxtaskStore;
+        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
 
         const COBERTURA_50PCT: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>
@@ -4589,21 +4589,21 @@ mod tests {
                 .upsert(&thread)
                 .await
                 .unwrap();
-            let task_id = SqliteTaskStore::new(db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
+            let task_id = SqliteOxtaskStore::new(db.clone())
+                .insert(&Oxtask {
+                    id: OxtaskId::placeholder(),
                     parent_id: None,
                     title: "x".into(),
                     description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    created_by: TaskActorKind::User,
+                    status: OxtaskStatus::InProgress,
+                    priority: OxtaskPriority::Medium,
+                    created_by: OxtaskActorKind::User,
                     created_at: now,
                     updated_at: now,
                     completed_at: None,
                     deleted_at: None,
                     note_count: 0,
-                    author: Some(TaskAuthor::User),
+                    author: Some(OxtaskAuthor::User),
                 })
                 .await
                 .unwrap();
@@ -4650,11 +4650,7 @@ mod tests {
 
             let efforts = Arc::new(SqliteEffortStore::new(db.clone()));
             let effort = efforts
-                .start(
-                    &oxplow_tasks::work_item_ref(task_id),
-                    &thread.id,
-                    Some(snap_id),
-                )
+                .start(&oxplow_oxtask::task_ref(task_id), &thread.id, Some(snap_id))
                 .await
                 .unwrap();
 
@@ -6743,27 +6739,27 @@ mod tests {
             // concurrent e2's analysis delta.
             let h = build(None).await;
             let now = Timestamp::now();
-            let task2 = SqliteTaskStore::new(h.db.clone())
-                .insert(&Task {
-                    id: TaskId::placeholder(),
+            let task2 = SqliteOxtaskStore::new(h.db.clone())
+                .insert(&Oxtask {
+                    id: OxtaskId::placeholder(),
                     parent_id: None,
                     title: "t2".into(),
                     description: String::new(),
-                    status: TaskStatus::InProgress,
-                    priority: TaskPriority::Medium,
-                    created_by: TaskActorKind::User,
+                    status: OxtaskStatus::InProgress,
+                    priority: OxtaskPriority::Medium,
+                    created_by: OxtaskActorKind::User,
                     created_at: now,
                     updated_at: now,
                     completed_at: None,
                     deleted_at: None,
                     note_count: 0,
-                    author: Some(TaskAuthor::User),
+                    author: Some(OxtaskAuthor::User),
                 })
                 .await
                 .unwrap();
             let eff2 = h
                 .efforts
-                .start(&oxplow_tasks::work_item_ref(task2), &h.thread, None)
+                .start(&oxplow_oxtask::task_ref(task2), &h.thread, None)
                 .await
                 .unwrap();
             let eff2_id = eff2.id.to_string();
@@ -8240,7 +8236,7 @@ mod tests {
             h.efforts.finish(&open.id, None, None).await.unwrap();
             let no_base = h
                 .efforts
-                .start(open.work_item.as_deref().unwrap(), &h.thread, None)
+                .start(open.task.as_deref().unwrap(), &h.thread, None)
                 .await
                 .unwrap();
             assert!(no_base.start_snapshot_id.is_none());

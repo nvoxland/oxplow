@@ -1,4 +1,4 @@
-//! A commit is linked to the work item it was for by what it holds.
+//! A commit is linked to the task it was for by what it holds.
 //!
 //! An agent's commit rarely names its task — and the agent rule is to name
 //! tasks by title, never id — so the message can't be the link. The work
@@ -7,9 +7,9 @@
 //! (its end snapshot's bytes, as the object they'd be). A partial commit of
 //! an effort's files holds it too.
 //!
-//! The link is a `work_item → commit` `page_ref` edge (`RT_COMMITTED`, the
+//! The link is a `task → commit` `page_ref` edge (`RT_COMMITTED`, the
 //! effort in `source_extra`) — the same shape as a declared impact — so
-//! `v_commit_work_item` and the commit's backlinks read it. Made from both sides:
+//! `v_commit_task` and the commit's backlinks read it. Made from both sides:
 //! when a commit is indexed, against the efforts that closed before it
 //! ([`link_commit`]); and when an effort finishes, against the commits made
 //! since it started ([`link_effort`]: committed before the task was closed).
@@ -128,18 +128,18 @@ async fn holds_effort(
     Ok(holds(&pairs))
 }
 
-/// The `work_item → commit` edge saying `sha` holds `effort`'s work; none
+/// The `task → commit` edge saying `sha` holds `effort`'s work; none
 /// while the effort is unlinked.
 pub(crate) async fn link(
     svc: &crate::Services,
     sha: &str,
     effort: &Effort,
 ) -> Result<(), DomainError> {
-    let Some(work_item) = effort.work_item.as_deref() else {
+    let Some(task) = effort.task.as_deref() else {
         return Ok(());
     };
     let edge = PageRefEdge::new(
-        work_item,
+        task,
         oxplow_domain::uri::build::commit_uri(sha),
         RT_COMMITTED,
     )
@@ -154,12 +154,12 @@ mod tests {
 
     use crate::test_fixtures::commit_all;
 
-    /// The work items per commit, as `v_commit_work_item` reads them.
+    /// The tasks per commit, as `v_commit_task` reads them.
     async fn items_of(svc: &crate::Services, sha: &str) -> serde_json::Value {
         let out = svc
             .sql
             .query_sql(
-                "SELECT work_item FROM v_commit_work_item WHERE sha = ?1 ORDER BY work_item",
+                "SELECT task FROM v_commit_task WHERE sha = ?1 ORDER BY task",
                 vec![oxplow_db::SqlCell::Text(sha.to_string())],
                 None,
             )
@@ -286,8 +286,8 @@ mod tests {
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
+            serde_json::json!([[oxplow_domain::uri::build::task_uri(
+                "oxtask",
                 &format!("{}", f.task)
             )]])
         );
@@ -315,7 +315,7 @@ mod tests {
         let later = f
             .svc
             .effort_store
-            .start(&oxplow_tasks::work_item_ref(f.task), &f.thread, None)
+            .start(&oxplow_oxtask::task_ref(f.task), &f.thread, None)
             .await
             .unwrap()
             .id;
@@ -325,8 +325,8 @@ mod tests {
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
+            serde_json::json!([[oxplow_domain::uri::build::task_uri(
+                "oxtask",
                 &format!("{}", f.task)
             )]])
         );
@@ -353,7 +353,7 @@ mod tests {
         let later = f
             .svc
             .effort_store
-            .start(&oxplow_tasks::work_item_ref(f.task), &f.thread, None)
+            .start(&oxplow_oxtask::task_ref(f.task), &f.thread, None)
             .await
             .unwrap()
             .id;
@@ -363,8 +363,8 @@ mod tests {
         index_and_link(&f.svc, &sha).await;
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
+            serde_json::json!([[oxplow_domain::uri::build::task_uri(
+                "oxtask",
                 &format!("{}", f.task)
             )]])
         );
@@ -383,8 +383,8 @@ mod tests {
         link_effort(&f.svc, &f.effort).await.unwrap();
         assert_eq!(
             items_of(&f.svc, &sha).await,
-            serde_json::json!([[oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
+            serde_json::json!([[oxplow_domain::uri::build::task_uri(
+                "oxtask",
                 &format!("{}", f.task)
             )]])
         );

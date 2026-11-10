@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn a_malformed_declaration_is_an_error_at_its_line() {
-        let manifest = "name: acme-pr\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: ok\n    - type: work_item.stolen\n      v: 1\n      schema: merged.json\n      summary: no\n    - type: acme_pr.closed\n      v: 1\n      schema: missing.json\n      summary: no\n    - type: acme_pr.opened\n      v: 2\n      schema: merged.json\n      summary: no\n";
+        let manifest = "name: acme-pr\nevent_types:\n  types:\n    - type: acme_pr.merged\n      v: 1\n      schema: merged.json\n      summary: ok\n    - type: task.stolen\n      v: 1\n      schema: merged.json\n      summary: no\n    - type: acme_pr.closed\n      v: 1\n      schema: missing.json\n      summary: no\n    - type: acme_pr.opened\n      v: 2\n      schema: merged.json\n      summary: no\n";
         let (declared, errors) = parse(manifest, &[("merged.json", SCHEMA)]);
         assert_eq!(declared.types.len(), 1);
         assert_eq!(errors.len(), 3, "{errors:?}");

@@ -8,7 +8,7 @@ when:
     schemaVersion: 1
     role: reasoning
     messages:
-      - { role: user, parts: [{ type: text, text: "Work item: Add CSV export" }] }
+      - { role: user, parts: [{ type: text, text: "Task: Add CSV export" }] }
 expect:
   state: succeeded
   effects: [{ id: oxplow/store-reasoning, state: skipped }]

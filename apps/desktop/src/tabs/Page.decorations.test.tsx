@@ -20,7 +20,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [],
-        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", resource: "oxplow/work_item", placement: "ref-chip", label: "label", color: "color" }],
+        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", resource: "oxplow/task", placement: "ref-chip", label: "label", color: "color" }],
       },
     },
     // P10 (K1): oxplow-bundled's verdict, on the effort it was given on.
@@ -50,7 +50,7 @@ mock.module("../api.js", () => ({
     queries.push(sql);
     return {
       columns: ["uri", "label", "color"],
-      rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "urgent", "#ff0000"]],
+      rows: [["oxplow:oxplow/task?id=W-1&provider=fake", "urgent", "#ff0000"]],
       truncated: false,
       reads: { datasets: ["v_flags_flags"], tables: [], measures: [] },
       freshness: {},
@@ -69,7 +69,7 @@ const nav = {
   goForward() {},
   canGoBack: false,
   canGoForward: false,
-  ask: { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" },
+  ask: { ref: "oxplow:oxplow/task?id=W-1&provider=fake" },
 } as unknown as PageNavigation;
 
 const page = () =>

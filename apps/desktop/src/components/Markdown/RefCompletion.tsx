@@ -12,7 +12,7 @@ import type { RefOption, RefSearch } from "./refOptions.js";
 export interface RefCompletionOptions {
   /** Where `[[` looks; none, and `[[` is plain text. */
   search: RefSearch | null;
-  /** A work item id that is the active list's (`refLinkOf`). */
+  /** A task id that is the active list's (`refLinkOf`). */
   mentionRef: MentionRef;
 }
 

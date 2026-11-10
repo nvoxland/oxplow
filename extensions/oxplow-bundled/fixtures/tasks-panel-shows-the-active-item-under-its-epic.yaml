@@ -1,0 +1,18 @@
+# An item with children is an epic: the active item shows under it in
+# "In progress", with the epic's other children indented beside it, and
+# the epic itself is never up next. A ready child shows in Up next too.
+given:
+  - { command: oxplow.task.create, input: { title: The epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.task.create, input: { title: Doing it, stage: in_progress, assignee: thr1, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: After it, assignee: thr1, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: Standalone, assignee: thr1 } }
+when: { part: oxplow/tasks-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: In progress, title: The epic, icon: epic, depth: 0, active: 0 }
+        - { grp: In progress, title: Doing it, depth: 1, active: 1 }
+        - { grp: In progress, title: After it, depth: 1, active: 0 }
+        - { grp: Up next, title: After it }
+        - { grp: Up next, title: Standalone }

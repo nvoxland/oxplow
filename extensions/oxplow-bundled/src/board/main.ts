@@ -1,4 +1,4 @@
-// The Tasks page (oxplow-bundled, `pages/tasks.yaml`): the work items as a
+// The Tasks page (oxplow-bundled, `pages/tasks.yaml`): the tasks as a
 // kanban board. A custom page: oxplow draws its nav bar (the title, New
 // Task…), confirms what asks, records what fails; the frame draws the
 // toolbar, the columns and a card's menu with the kit's classes. Its

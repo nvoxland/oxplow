@@ -1,0 +1,12 @@
+# The stages a transition may move a task to: the active list's, in
+# its order, each as the list names it (the task page's
+# task_states loader, which feeds its State form).
+when: { query: 'task-detail#task_states' }
+expect:
+  rows:
+    - { value: backlog, label: Backlog }
+    - { value: ready, label: Ready }
+    - { value: in_progress, label: In Progress }
+    - { value: blocked, label: Blocked }
+    - { value: done, label: Done }
+    - { value: canceled, label: Canceled }

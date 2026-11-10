@@ -420,7 +420,7 @@ impl KnowledgeProvider for WikiKnowledge {
     }
 }
 
-/// None as a knowledge store: a sink, as the work list's none is. A write
+/// None as a knowledge store: a sink, as the task tracker's none is. A write
 /// lands nowhere and succeeds (`{ tracked: false }`), a delete and a link
 /// too, and nothing is recorded, so nothing that writes pages is refused
 /// while no store is active.

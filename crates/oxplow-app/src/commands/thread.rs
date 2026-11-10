@@ -371,7 +371,7 @@ pub fn mark_op() -> Op {
 
 /// `thread.close { thread }`: its open effort and its agent sessions close
 /// in the same transaction (the effort by `system`, the sessions
-/// `thread_closed`), the work items assigned to it go back to nobody, and
+/// `thread_closed`), the tasks assigned to it go back to nobody, and
 /// the sessions' processes stop once it commits. An agent closes only its
 /// own thread. Undone by reopening it (the effort stays closed, and the
 /// items stay unassigned).
@@ -435,7 +435,7 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
                 }
             }));
             // Its work goes back to nobody: another thread may take it.
-            let released = super::work_item::release_all_tx(
+            let released = super::task::release_all_tx(
                 ctx.conn,
                 &ctx.actor().source(),
                 &oxplow_domain::uri::build::thread_uri(id),

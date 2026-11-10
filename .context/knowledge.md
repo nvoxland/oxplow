@@ -164,8 +164,7 @@ nowhere. `Services.knowledge` is an `oxplow_domain::knowledge::
 KnowledgeRegistry`; `active()` is the project's choice
 (`activeProviders.knowledge`, personal over project over the default).
 `knowledge::register_built_ins` registers the wiki under each id
-declared and core's **none**, `NoneKnowledge`: a sink, as the work
-list's none is — a write lands nowhere and answers its page ref, a
+declared and core's **none**, `NoneKnowledge`: a sink, as the task tracker's none is — a write lands nowhere and answers its page ref, a
 delete and a link succeed, freshness is empty — so nothing that writes
 pages is refused while no store is active, and the record reads empty.
 Bundled disabled, knowledge is none. The wiki pages list and a page's

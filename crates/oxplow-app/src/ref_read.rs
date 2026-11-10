@@ -4,8 +4,8 @@
 //!
 //! - the **row** of the dataset its resource resolves through (its
 //!   declaration's `resolve:`), every column, by its `ref`;
-//! - what sits **beside** it, for the resources that have some: a work
-//!   item's links and comments, a commit's files, an effort's files;
+//! - what sits **beside** it, for the resources that have some: a
+//!   task's links and comments, a commit's files, an effort's files;
 //! - its **content**, for the resources whose body no dataset holds: a file
 //!   at a revision (`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`;
 //!   the working tree when it names none, in the stream asked for else the
@@ -69,14 +69,14 @@ pub enum ReadError {
 /// query's `?1` the URI (its view left out).
 const RELATED: &[(&str, &str, &str)] = &[
     (
-        r::WORK_ITEM,
+        r::TASK,
         "links",
-        "SELECT * FROM v_work_item_link WHERE from_uri = ?1 ORDER BY created_at",
+        "SELECT * FROM v_task_link WHERE from_uri = ?1 ORDER BY created_at",
     ),
     (
-        r::WORK_ITEM,
+        r::TASK,
         "comments",
-        "SELECT * FROM v_work_item_comment WHERE uri = ?1 ORDER BY created_at",
+        "SELECT * FROM v_task_comment WHERE uri = ?1 ORDER BY created_at",
     ),
     (
         r::COMMIT,
@@ -529,9 +529,9 @@ mod tests {
         ));
     }
 
-    /// A work item is its row with its links and comments beside it.
+    /// A task is its row with its links and comments beside it.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_work_item_is_its_row_links_and_comments() {
+    async fn a_task_is_its_row_links_and_comments() {
         let (_dir, svc) = project().await;
         let created = |title: &str| {
             let svc = svc.clone();
@@ -540,7 +540,7 @@ mod tests {
                 svc.commands
                     .run(
                         &Actor::Human,
-                        "oxplow.work_item.create",
+                        "oxplow.task.create",
                         json!({ "title": title }),
                         false,
                     )
@@ -556,11 +556,11 @@ mod tests {
         let other = created("Ship it").await;
         for (id, input) in [
             (
-                "oxplow.work_item.link",
+                "oxplow.task.link",
                 json!({ "uri": item, "target": other, "link_type": "blocks" }),
             ),
             (
-                "oxplow.work_item.comment",
+                "oxplow.task.comment",
                 json!({ "uri": item, "body": "Seen on Safari only." }),
             ),
         ] {

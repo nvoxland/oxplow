@@ -253,10 +253,10 @@ export function idOf(text: string, resource: string): string | null {
   return u.params[keyParamOf(resource)] ?? null;
 }
 
-/** A work item's list and its id in that list; null for anything else. */
-export function workItemOf(text: string): { provider: string; id: string } | null {
+/** A task's list and its id in that list; null for anything else. */
+export function taskOf(text: string): { provider: string; id: string } | null {
   const u = parseUri(text);
-  if (!u || typeOf(text) !== "oxplow/work_item") return null;
+  if (!u || typeOf(text) !== "oxplow/task") return null;
   const { provider, id } = u.params;
   return provider && id ? { provider, id } : null;
 }
@@ -333,8 +333,8 @@ export const snapshotUri = (id: string | number): string => resourceUri("oxplow/
 export const turnUri = (id: string | number): string => resourceUri("oxplow/turn", { id });
 /** A commit, by its sha. */
 export const commitUri = (sha: string): string => resourceUri("oxplow/commit", { sha });
-/** A work item, whichever list holds it. */
-export const workItemUri = (provider: string, id: string): string => resourceUri("oxplow/work_item", { provider, id });
+/** A task, whichever list holds it. */
+export const taskUri = (provider: string, id: string): string => resourceUri("oxplow/task", { provider, id });
 /** A command, by its bus id. */
 export const commandUri = (id: string): string => resourceUri("oxplow/command", { command: id });
 /** A panel the rail or a view remembers things about. */

@@ -4,7 +4,7 @@
 //! - The diff against parent#0 produces `(git-commit:<sha>) --
 //!   touched_file --> (file:<path>)` edges.
 //! - The commit message (subject + body) is run through the shared
-//!   ref extractor so `(git-commit:<sha>) --work_item_mention/
+//!   ref extractor so `(git-commit:<sha>) --task_mention/
 //!   wikilink/finding_mention--> (target)` edges appear too.
 //!
 //! Idempotent. The indexer uses [`SqlitePageRefStore::replace_source`]
@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
+    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::uri::build;
@@ -80,8 +80,8 @@ pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<Pa
         combined.push_str(&detail.body);
     }
     let refs = extract(kinds, &combined);
-    for item in refs.work_items {
-        out.push(PageRefEdge::new(&source, item, RT_BODY_WORK_ITEM));
+    for item in refs.tasks {
+        out.push(PageRefEdge::new(&source, item, RT_BODY_TASK));
     }
     for w in refs.wikis {
         out.push(PageRefEdge::new(&source, build::wiki_uri(&w), RT_WIKILINK));
@@ -442,11 +442,11 @@ fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db:
 mod tests {
     use super::*;
 
-    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
+    /// The core kinds with oxtask as the task tracker (`tsk<n>`).
     fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
         oxplow_domain::uri::resources::foundation()
             .clone()
-            .with_work_item_ids("oxplow", r"tsk\d+")
+            .with_task_ids("oxtask", r"tsk\d+")
             .unwrap()
     }
     use oxplow_domain::vcs::{FileStatus, RevisionFile, RevisionInfo};
@@ -504,7 +504,7 @@ mod tests {
         let edges = commit_edges(&tasks_kinds(), &c);
         let targets: Vec<_> = edges.iter().map(|e| e.target.clone()).collect();
         use oxplow_domain::uri::build;
-        assert!(targets.contains(&build::work_item_uri("oxplow", "tsk42")));
+        assert!(targets.contains(&build::task_uri("oxtask", "tsk42")));
         assert!(targets.contains(&build::wiki_uri("architecture")));
         assert!(targets.contains(&build::finding_uri("fnd-7")));
     }
@@ -750,7 +750,7 @@ mod tests {
         // tsk42 has the commit as a backlink.
         let inbound = page_refs
             .list_backlinks(
-                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk42"),
+                &oxplow_domain::uri::build::task_uri("oxtask", "tsk42"),
                 None,
             )
             .await

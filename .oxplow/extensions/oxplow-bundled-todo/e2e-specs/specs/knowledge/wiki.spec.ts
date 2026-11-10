@@ -3,17 +3,17 @@ import { join } from "node:path";
 
 import { run, searchable } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { openFromLauncher, searchLauncher, workItemIdOf } from "../../support/ui.js";
+import { openFromLauncher, searchLauncher, taskIdOf } from "../../support/ui.js";
 
 test("a written page renders, and a task link in it opens the task", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title: "Wombat follow-up",
     thread: daemon.thread,
   });
   await run(daemon, "oxplow.knowledge.write_page", {
     slug: "wombat-plan",
     title: "Wombat plan",
-    body: `# Wombat plan\n\nFirst do [[${workItemIdOf(created.result.uri)}]].\n`,
+    body: `# Wombat plan\n\nFirst do [[${taskIdOf(created.result.uri)}]].\n`,
   });
   await searchable(daemon, "wombat", "wiki");
   await page.goto("/");

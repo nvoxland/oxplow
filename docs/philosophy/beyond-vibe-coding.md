@@ -14,8 +14,8 @@ plus a refactor of three adjacent files plus a "while I was here"
 rename. Each piece looks reasonable. The combined diff is
 unreviewable.
 
-**Oxplow primitive: the work queue.** A task is a row, not a vibe.
-When a work list is active, tasks make scope and follow-ups durable.
+**Oxplow primitive: tasks.** A task is a row, not a vibe.
+When a task tracker is active, tasks make scope and follow-ups durable.
 New scope can get its own row rather than disappearing into a diff.
 Filing is optional; observed turns, changes and evidence are recorded
 without requiring a task before an edit.
@@ -45,7 +45,7 @@ across turns. When a knowledge store is active, agent guidance encourages retain
 useful Q&A — rationale, comparisons, walkthroughs — with links back to
 its evidence. Threads preserve lines of work across sessions. Research
 threads can investigate and record understanding without owning
-worktree edits. Work-list and knowledge providers are optional.
+worktree edits. Task-tracker and knowledge providers are optional.
 
 ## Failure mode 4: no review trail
 

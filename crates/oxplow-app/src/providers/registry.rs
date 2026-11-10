@@ -6,9 +6,9 @@
 //! [`ProviderRegistry::reconcile`] makes the running set match it — at
 //! boot and on every config change. Starting an instance checks consent,
 //! spawns, handshakes and `check`s its config; only then is its
-//! capability's provider (`ExternalWorkItems`) registered in the
+//! capability's provider (`ExternalTaskTracker`) registered in the
 //! capability's registry — its verbs run as the dispatching
-//! `work_item.<verb>` — and its other declared commands on the bus as
+//! `task.<verb>` — and its other declared commands on the bus as
 //! `<id>.<name>` (`Atomicity::External`), under the namespace `<id>` it
 //! then holds. Every restart goes through consent again.
 //!
@@ -348,7 +348,7 @@ struct Live {
 pub struct Instance {
     /// `<extension>/<instance id>`.
     pub name: String,
-    /// The instance's id: its refs' segment (`oxplow:oxplow/work_item?id=…&provider=<id>`), its
+    /// The instance's id: its refs' segment (`oxplow:oxplow/task?id=…&provider=<id>`), its
     /// commands' namespace, its capability provider's id. A provider's
     /// default instance has the provider's.
     pub id: String,
@@ -1269,7 +1269,7 @@ impl Instance {
     }
 
     /// A returned event as the envelope the bus logs: a type it declared,
-    /// and (for a work-item record) an item of its own.
+    /// and (for a task record) an item of its own.
     pub(crate) fn envelope(
         &self,
         actor: &Actor,
@@ -1338,7 +1338,7 @@ pub fn check_subject(
 }
 
 /// Whether `r` is one of instance `id`'s own URIs under `contract`: a
-/// URI with a `provider` param (`oxplow:oxplow/work_item?id=ENG-12&provider=issues`)
+/// URI with a `provider` param (`oxplow:oxplow/task?id=ENG-12&provider=issues`)
 /// is that instance's; one without (`oxplow:oxplow/wiki?slug=x`) is the
 /// active implementation's, so any well-formed one is.
 pub(super) fn owns(
@@ -1361,7 +1361,7 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 }
 
 /// One capability's side of the host: what turns a started instance into
-/// the capability's implementation (the work list's `ExternalWorkItems`,
+/// the capability's implementation (the task tracker's `ExternalTaskTracker`,
 /// an external effort policy) and takes it out again.
 /// Validated capability adapter awaiting registration. Construction cannot
 /// mutate a live registry; publication is a synchronous map change only.
@@ -1389,7 +1389,7 @@ impl PreparedProviderCapability {
 }
 
 pub trait CapabilityHost: Send + Sync {
-    /// The capability it hosts (`work_items`).
+    /// The capability it hosts (`task_tracker`).
     fn capability(&self) -> &'static str;
     /// Whether `id` already names one of this capability's
     /// implementations: an instance can't take it.
@@ -3379,7 +3379,7 @@ impl crate::commands::ProviderRouter for ProviderRegistry {
 }
 
 /// The instance a URI is of: one of the URIs a capability's instances
-/// own (`oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
+/// own (`oxplow:oxplow/task?id=ENG-12&provider=issues`).
 fn instance_of_ref(r: &str) -> Option<String> {
     oxplow_domain::capability::CAPABILITIES
         .iter()

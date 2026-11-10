@@ -621,7 +621,7 @@ its source; with no model bound, the recorded ones are all there is.
   the profile or to Main it *skips*, saying to bind one in Settings → AI —
   in Delivery, counted against no health, nothing queued to fail.
   Otherwise it composes `oxplow.effort.infer_reasoning`.
-- **The command** digests the effort: the work item's title; the
+- **The command** digests the effort: the task's title; the
   thread's turns overlapping the effort's window (`v_agent_turn` has no
   `effort_id`), each as the human prompt and the agent's final answer
   (`v_agent_turn.answer`); its tool calls; the decisions it recorded and the
@@ -656,9 +656,9 @@ its source; with no model bound, the recorded ones are all there is.
   an empty or missing list (clearing stale ones).
 - **Core** keeps `oxplow.effort.replace_inferred_decisions`
   (`commands/reasoning.rs`, the only writer of provenance `inferred`;
-  thread and work item are the effort's; recorded, confirmed and
+  thread and task are the effort's; recorded, confirmed and
   dismissed rows stay; logs `effort.decisions_inferred@2 { effort,
-  work_item?, count }`) and `oxplow.effort.replace_inferred_claims` (the
+  task?, count }`) and `oxplow.effort.replace_inferred_claims` (the
   only writer of `inferred` claims; it replaces the effort's inferred
   claims whose `review` is NULL, so a verified or dismissed claim and the
   agent's `recorded` ones stay), the review commands

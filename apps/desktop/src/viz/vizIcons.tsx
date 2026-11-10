@@ -36,7 +36,7 @@ export type VizIconSpec =
   | { glyph: string; tone: VizTone | null; label: string }
   | { Icon: LucideIcon; tone: null; label: string };
 
-/** The work-status glyphs, one per bucket (`v_work_item.state`, so a
+/** The work-status glyphs, one per bucket (`v_task.state`, so a
  *  query passes its state: every stage of a bucket draws its glyph), and a
  *  file's change status (`v_file.status`). */
 const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: string }> = {
@@ -58,7 +58,7 @@ const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: strin
 /** Kinds of thing, drawn with the icon their pages use. */
 const KINDS: Record<string, { Icon: LucideIcon | null; label: string }> = {
   epic: { Icon: Layers, label: "Epic" },
-  task: { Icon: pageKindIconComponent("work_item"), label: "Task" },
+  task: { Icon: pageKindIconComponent("task"), label: "Task" },
   wiki: { Icon: pageKindIconComponent("wiki"), label: "Wiki page" },
   file: { Icon: pageKindIconComponent("file"), label: "File" },
   folder: { Icon: pageKindIconComponent("dir"), label: "Folder" },

@@ -1,16 +1,16 @@
-# Shared work, a section of a work item's page: the item when another
+# Shared work, a section of a task's page: the item when another
 # thread has an open effort on it too, and the files both threads'
 # efforts changed.
 given:
-  - { command: oxplow.work_item.create, input: { title: Shared item, assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Shared item, assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
 when: { part: item-shared-work, params: { uri: $item.uri } }
 expect: { loaders: { item_shared_work: { rows: 0 } } }
 steps:
   - given:
       - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
-      - { command: oxplow.effort.open, input: { thread: $beta.id, work_item: $item.uri } }
+      - { command: oxplow.effort.open, input: { thread: $beta.id, task: $item.uri } }
       - observe: { turn: { thread: $beta.id, prompt: beta, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
   - when: { part: item-shared-work, params: { uri: $item.uri } }
     expect:

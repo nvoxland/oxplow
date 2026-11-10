@@ -26,7 +26,7 @@ committed result.
 
 Optional effort policies group a thread's development activity. The
 normal policy opens an effort when a turn changes files, can associate
-it with work items, and closes it when its work lands in a commit or its
+it with tasks, and closes it when its work lands in a commit or its
 work context changes. This is separate from a task's lifecycle: a closed
 effort does not automatically mark a task done.
 

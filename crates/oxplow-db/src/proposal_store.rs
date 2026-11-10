@@ -345,16 +345,10 @@ mod tests {
             proposal_key("oxplow.config.unset", &json!({ "key": "zones" })),
             "oxplow:oxplow/config?key=zones"
         );
-        let a = proposal_key(
-            "oxplow.work_item.delete",
-            &json!({ "ref": "r", "hard": true }),
-        );
-        let b = proposal_key(
-            "oxplow.work_item.delete",
-            &json!({ "hard": true, "ref": "r" }),
-        );
+        let a = proposal_key("oxplow.task.delete", &json!({ "ref": "r", "hard": true }));
+        let b = proposal_key("oxplow.task.delete", &json!({ "hard": true, "ref": "r" }));
         assert_eq!(a, b);
-        assert_eq!(a, r#"oxplow.work_item.delete {"hard":true,"ref":"r"}"#);
+        assert_eq!(a, r#"oxplow.task.delete {"hard":true,"ref":"r"}"#);
     }
 
     #[tokio::test]

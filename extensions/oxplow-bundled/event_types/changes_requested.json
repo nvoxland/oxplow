@@ -1,16 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "oxplow.review.changes_requested",
-  "description": "A person sent an effort's work back with changes requested. Its subject (kept with the envelope) is the effort (first) and its work item.",
+  "description": "A person sent an effort's work back with changes requested. Its subject (kept with the envelope) is the effort (first) and its task.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["effort", "work_item", "unverified", "inferred", "deviated"],
+  "required": ["effort", "task", "unverified", "inferred", "deviated"],
   "properties": {
     "effort": { "type": "string", "description": "Id of the effort the verdict is about (`eff12`)." },
-    "work_item": { "type": "string", "description": "Ref of the effort's work item." },
+    "task": { "type": "string", "description": "Ref of the effort's task." },
     "unverified": { "type": "integer", "minimum": 0, "description": "Claims unverified at the verdict." },
     "inferred": { "type": "integer", "minimum": 0, "description": "Inferred decisions unreviewed at the verdict." },
-    "deviated": { "type": "integer", "minimum": 0, "description": "Files changed outside the work item's area." },
+    "deviated": { "type": "integer", "minimum": 0, "description": "Files changed outside the task's area." },
     "note": { "type": "string", "description": "What the reviewer asked for." }
   }
 }

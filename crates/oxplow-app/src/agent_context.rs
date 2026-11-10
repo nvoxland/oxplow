@@ -483,7 +483,7 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
                FROM v_handoff h
                JOIN v_thread t ON t.id = h.from_thread_id
                LEFT JOIN v_agent_session s ON s.id = h.from_session_id
-               LEFT JOIN v_work_item w ON w.uri = h.work_item
+               LEFT JOIN v_task w ON w.uri = h.task
               WHERE h.to_thread_id = ?1",
             vec![SqlCell::Int(thread.value())],
             None,
@@ -508,14 +508,14 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
     let mut s = String::from(
         "<handoffs>\nWork handed to this thread. When you take one on or decline it, say so with \
          `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`: taking one \
-         moves its work item onto this thread, and its sender reads the note.\n",
+         moves its task onto this thread, and its sender reads the note.\n",
     );
     for h in taken {
         let r = oxplow_domain::uri::build::handoff_uri(h.id);
         let (from_title, from_name, item_title) = labels.get(&r).cloned().unwrap_or_default();
         let by = from_name.unwrap_or_else(|| "the person".into());
         let item = item_title
-            .map(|t| format!("; work item \"{t}\""))
+            .map(|t| format!("; task \"{t}\""))
             .unwrap_or_default();
         s.push_str(&format!(
             "\n- `{r}` from thread {from_title} (`{}`), by {by}, {}{item}:\n",

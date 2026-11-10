@@ -107,7 +107,7 @@ fn mark() -> bool {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChooseProviderInput {
-    /// The capability (`work_items`, `effort_policy`, `snapshots`, …).
+    /// The capability (`task_tracker`, `effort_policy`, `snapshots`, …).
     pub capability: String,
     /// The implementation to use; absent or blank: the default (the
     /// project's, for a personal choice).
@@ -122,7 +122,7 @@ pub struct ChooseProviderInput {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChooseReplacementInput {
-    /// The core sub-component an extension replaces (`work_item.board`).
+    /// The core sub-component an extension replaces (`task.board`).
     pub target: String,
     /// Whose shows: an extension's name, or `oxplow` for oxplow's own.
     /// Leave it out for the default.

@@ -35,7 +35,7 @@ finish.
 `references/efforts.md`: correcting one (`oxplow.effort.update`, `link`,
 `close`, `open`, `report` with its impacts), generated files that keep
 showing among an effort's files, and reading efforts (`v_effort`,
-`v_effort_file`). A work list, when the project has one, has its own skill.
+`v_effort_file`). A task tracker, when the project has one, has its own skill.
 
 ## Decisions and claims
 
@@ -53,7 +53,7 @@ The person reviewing your work checks these first.
 
 ## Writing about work
 
-Refer to a work item by its quoted title, never by id or "#N": the person
+Refer to a task by its quoted title, never by id or "#N": the person
 can't map ids to what they see. Write entities in task bodies, summaries
 and wiki pages as `[[…]]` wikilinks (syntax: the oxplow-wiki-capture skill).
 Inline code is for identifiers and snippets.

@@ -47,7 +47,7 @@ effects:
 - `$OXPLOW_BIN extension new --from triage` copies an example with one, with
   its fixtures (a tool round, a cancel); `--from effort-review`
   starts one per finished effort, its tool reading the effort's evidence,
-  and comments the answer on the work item.
+  and comments the answer on the task.
 - Your namespace is your name with `-` as `_`, and it names everything
   you contribute: extension `effort-review` has commands
   `effort_review.review.ask` and its job is

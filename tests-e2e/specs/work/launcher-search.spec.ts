@@ -6,12 +6,12 @@ import { expect, test } from "../../support/fixtures.js";
 import { searchLauncher, load } from "../../support/ui.js";
 
 test("search finds a task and a wiki page, and opens them", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title: "Quokka migration",
-    thread: daemon.thread,
+    assignee: daemon.thread,
   });
   await run(daemon, "oxplow.knowledge.write_page", { slug: "quokka-notes", title: "Quokka notes", body: "# Quokka notes\n\nWhat we know.\n" });
-  await searchable(daemon, "quokka", "work_item");
+  await searchable(daemon, "quokka", "task");
   await searchable(daemon, "quokka", "wiki");
   await load(page);
   // A hit opens the foundation's resource page for its URI.
@@ -40,7 +40,7 @@ test("a page added while the window is open is in the launcher", async ({ page, 
   );
   writeFileSync(
     join(dir, "pages", "wombats.yaml"),
-    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_work_item }\nview: { from: items, viz: table }\n",
+    "title: Wombat Tasks\ncategory: Work\nloaders:\n  items: { sql: SELECT uri FROM v_task }\nview: { from: items, viz: table }\n",
   );
   await deploy(daemon, "wombat");
   await expect(async () => {

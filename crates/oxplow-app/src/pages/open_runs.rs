@@ -731,7 +731,7 @@ mod diff_tests {
         let changes: [fn(&mut oxplow_db::SqlQueryResult); 3] = [
             |result| result.truncated = true,
             |result| result.generation = Some("generation-b".into()),
-            |result| result.reads.datasets.push("v_work_item".into()),
+            |result| result.reads.datasets.push("v_task".into()),
         ];
         for change in changes {
             let mut new = old.clone();

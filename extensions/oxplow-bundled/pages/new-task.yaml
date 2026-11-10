@@ -1,8 +1,8 @@
-title: New Item
-description: "The form for a new item on the active work list - its title, description, starting stage, who it's for (nobody unless picked) and the list's own fields."
+title: New Task
+description: "The form for a new item on the active task tracker - its title, description, starting stage, who it's for (nobody unless picked) and the list's own fields."
 icon: plus
 needs:
-- work_items
+- task_tracker
 params:
 - name: thread_id
 - name: parent
@@ -13,18 +13,18 @@ loaders:
   new_task_parents:
     sql: |
       SELECT w.uri AS value, w.title AS label
-      FROM v_work_item w
+      FROM v_task w
       WHERE w.state NOT IN ('done', 'canceled')
         AND EXISTS (SELECT 1 FROM v_capability_provider p
-                    WHERE p.capability = 'work_items' AND p.active = 1
+                    WHERE p.capability = 'task_tracker' AND p.active = 1
                       AND json_extract(p.features, '$.hierarchy') = 1)
-        AND EXISTS (SELECT 1 FROM v_work_item c WHERE c.parent_uri = w.uri)
+        AND EXISTS (SELECT 1 FROM v_task c WHERE c.parent_uri = w.uri)
       ORDER BY w.assignee IS NOT (SELECT uri FROM v_thread WHERE id = :thread_id), w.title
   # Where it may start: the list's backlog, to-do and blocked stages, a
   # bucket's first named by its bucket (`todo`, the default).
   stages:
-    page: oxplow/work-item-stages
-    loader: work_item_stages
+    page: oxplow/task-stages
+    loader: task_stages
   new_task_stages:
     sql: |
       SELECT filter AS value, label FROM stages
@@ -46,7 +46,7 @@ view:
   from: new_task
   viz: form
   form:
-    command: oxplow.work_item.new
+    command: oxplow.task.new
     then: replace
     fields:
     - title
@@ -55,7 +55,7 @@ view:
     - assignee
     - parent_uri
     - name: native
-      from: oxplow/work-item-fields
+      from: oxplow/task-fields
     choices:
       stage: oxplow/new-task#new_task_stages
       assignee: oxplow/new-task#new_task_assignees

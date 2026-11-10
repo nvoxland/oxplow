@@ -5,8 +5,8 @@
 //! every reader reads one back through [`parse_as`] / [`id_of`] /
 //! [`param_of`] / [`parse_resource`], so a resource's name and params are
 //! spelled once (`uri::resources::{EFFORT, FILE, …}`) and a value is always
-//! escaped and decoded by the grammar. A work list builds its own items'
-//! URIs through [`work_item_uri`]. The `refs_are_built_and_parsed_through_the_grammar`
+//! escaped and decoded by the grammar. A task tracker builds its own items'
+//! URIs through [`task_uri`]. The `refs_are_built_and_parsed_through_the_grammar`
 //! source guard refuses a hand-built or hand-parsed URI anywhere else.
 //!
 //! The params of oxplow's resources are oxplow-foundation's declarations
@@ -54,7 +54,7 @@ fn uri(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Oxplow
 /// contribution's id is its own name's param (`oxplow/page` → `page`), a
 /// stored thing's is `id`, and a few say what they are (`commit` → `sha`).
 /// `None` for a resource named by several (a file's `path` and `rev`, a
-/// work item's `provider` and `id`), which has its own readers.
+/// task's `provider` and `id`), which has its own readers.
 pub fn key_param(resource: &str) -> Option<String> {
     let (extension, name) = resource.split_once('/')?;
     if extension != "oxplow" {
@@ -76,7 +76,7 @@ pub fn key_param(resource: &str) -> Option<String> {
             "file"
             | "dir"
             | "symbol"
-            | "work_item"
+            | "task"
             | "subagent"
             | "block"
             | "test"
@@ -462,31 +462,30 @@ pub fn test_uri(class: &str, name: &str) -> String {
     of(r::TEST, &[("class", class), ("name", name)])
 }
 
-/// A work list's item: its provider's id and the item's.
-pub fn work_item_uri(provider: &str, id: &str) -> String {
-    of(r::WORK_ITEM, &[("provider", provider), ("id", id)])
+/// A task tracker's item: its provider's id and the item's.
+pub fn task_uri(provider: &str, id: &str) -> String {
+    of(r::TASK, &[("provider", provider), ("id", id)])
 }
 
-/// The provider and the provider's id a work item's URI names.
-pub fn work_item_of_uri(text: &str) -> Option<(String, String)> {
-    let u = parse_resource(text, r::WORK_ITEM).ok()?;
+/// The provider and the provider's id a task's URI names.
+pub fn task_of_uri(text: &str) -> Option<(String, String)> {
+    let u = parse_resource(text, r::TASK).ok()?;
     Some((u.param("provider")?.to_string(), u.param("id")?.to_string()))
 }
 
-/// A work item's URI in its one canonical spelling, or `Invalid` naming
+/// A task's URI in its one canonical spelling, or `Invalid` naming
 /// what's wrong with it. Efforts key on the string (one open effort per
-/// work item is a unique index), so an alias — a view, an extra param, an
+/// task is a unique index), so an alias — a view, an extra param, an
 /// escaped spelling — is refused rather than treated as a different item.
 /// What a list's own ids look like is that list's to say.
-pub fn validate_work_item_uri(text: &str) -> Result<(), crate::DomainError> {
+pub fn validate_task_uri(text: &str) -> Result<(), crate::DomainError> {
     let invalid = |why: &str| Err(crate::DomainError::Invalid(format!("`{text}` {why}")));
-    const SHAPE: &str =
-        "a work item's URI is `oxplow:oxplow/work_item?id=<id>&provider=<provider>`";
+    const SHAPE: &str = "a task's URI is `oxplow:oxplow/task?id=<id>&provider=<provider>`";
     let parsed = OxplowUri::parse(text).map_err(|e| {
         crate::DomainError::Invalid(format!("`{text}` is not a URI: {}; {SHAPE}", e.reason()))
     })?;
-    if parsed.resource().to_string() != r::WORK_ITEM {
-        return invalid(&format!("is not a work item's; {SHAPE}"));
+    if parsed.resource().to_string() != r::TASK {
+        return invalid(&format!("is not a task's; {SHAPE}"));
     }
     let provider_ok = parsed.param("provider").is_some_and(|provider| {
         provider.starts_with(|c: char| c.is_ascii_lowercase())
@@ -498,7 +497,7 @@ pub fn validate_work_item_uri(text: &str) -> Result<(), crate::DomainError> {
         return invalid(&format!("names no provider and id; {SHAPE}"));
     }
     if parsed.params().len() != 2 || !parsed.view().is_empty() {
-        return invalid("names a work item with other params or a view");
+        return invalid("names a task with other params or a view");
     }
     if parsed.to_string() != text {
         return invalid(&format!("is not canonical; write `{parsed}`"));
@@ -527,7 +526,7 @@ pub fn effect_of_source(source: &str) -> Option<&str> {
     source.strip_prefix("effect:")
 }
 
-/// A provider instance's events (`provider:oxplow`, `provider:github/acme`).
+/// A provider instance's events (`provider:oxtask`, `provider:github/acme`).
 pub fn provider_source(instance: &str) -> String {
     format!("provider:{instance}")
 }
@@ -671,20 +670,17 @@ mod tests {
     }
 
     #[test]
-    fn the_work_item_inverses() {
+    fn the_task_inverses() {
         assert_eq!(system_source("hook_ingest"), "system:hook_ingest");
-        let item = work_item_uri("issues", "ENG-1");
-        assert_eq!(item, "oxplow:oxplow/work_item?id=ENG-1&provider=issues");
-        assert_eq!(
-            work_item_of_uri(&item),
-            Some(("issues".into(), "ENG-1".into()))
-        );
-        assert_eq!(work_item_of_uri(&effort_uri(EffortId::new(1))), None);
-        assert!(validate_work_item_uri(&item).is_ok());
-        for bad in ["", "tsk1", "oxplow:tsk1097", "oxplow:oxplow/work_item?id=x"] {
-            let e = validate_work_item_uri(bad).unwrap_err().to_string();
+        let item = task_uri("issues", "ENG-1");
+        assert_eq!(item, "oxplow:oxplow/task?id=ENG-1&provider=issues");
+        assert_eq!(task_of_uri(&item), Some(("issues".into(), "ENG-1".into())));
+        assert_eq!(task_of_uri(&effort_uri(EffortId::new(1))), None);
+        assert!(validate_task_uri(&item).is_ok());
+        for bad in ["", "tsk1", "oxplow:tsk1097", "oxplow:oxplow/task?id=x"] {
+            let e = validate_task_uri(bad).unwrap_err().to_string();
             assert!(
-                e.contains("oxplow:oxplow/work_item?id=<id>&provider=<provider>"),
+                e.contains("oxplow:oxplow/task?id=<id>&provider=<provider>"),
                 "{bad}: {e}"
             );
         }
@@ -692,12 +688,12 @@ mod tests {
         // compares strings, so a view, an extra param or an escaped
         // spelling would slip a second open effort past it.
         for alias in [
-            "oxplow:oxplow/work_item?id=tsk1&provider=oxplow#x=1",
-            "oxplow:oxplow/work_item?id=tsk1&provider=oxplow&v=2",
-            "oxplow:oxplow/work_item?provider=oxplow&id=tsk1",
-            "oxplow:oxplow/work_item?id=ts%6B1&provider=oxplow",
+            "oxplow:oxplow/task?id=tsk1&provider=oxtask#x=1",
+            "oxplow:oxplow/task?id=tsk1&provider=oxtask&v=2",
+            "oxplow:oxplow/task?provider=oxtask&id=tsk1",
+            "oxplow:oxplow/task?id=ts%6B1&provider=oxtask",
         ] {
-            assert!(validate_work_item_uri(alias).is_err(), "{alias}");
+            assert!(validate_task_uri(alias).is_err(), "{alias}");
         }
     }
 }

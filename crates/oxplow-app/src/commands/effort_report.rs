@@ -40,7 +40,7 @@ pub struct ReportInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     /// Outcomes beyond the edits: `{ kind, id, action? }` — a wiki page,
-    /// a work item, a commit, a finding.
+    /// a task, a commit, a finding.
     #[serde(default)]
     pub impacts: Vec<EffortImpact>,
     /// What you claim about the work and can back ("the parser tests
@@ -156,7 +156,7 @@ async fn report(
             .into_iter()
             .map(|c| NewClaim {
                 thread_id: thread.value(),
-                work_item: effort.work_item.clone(),
+                task: effort.task.clone(),
                 effort_id: Some(effort.id.value()),
                 statement: c.statement,
                 kind: c.kind.as_str().into(),
@@ -220,7 +220,7 @@ mod tests {
     use crate::test_fixtures::{new_thread, services_with_effort, EffortFixture};
     use oxplow_db::SqliteCommandAuditStore;
     use oxplow_domain::StreamId;
-    use oxplow_tasks::work_item_ref;
+    use oxplow_oxtask::task_ref;
 
     fn agent(fx: &EffortFixture) -> Actor {
         Actor::Agent {
@@ -237,7 +237,7 @@ mod tests {
         fx: &crate::test_fixtures::TaskEffortFixture,
         report: Value,
     ) -> (Value, Value) {
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         let out = fx
             .svc
             .commands
@@ -245,7 +245,7 @@ mod tests {
                 &agent(fx),
                 crate::commands::compose::SEQUENCE,
                 json!({ "calls": [
-                    { "name": crate::commands::work_item::NAME,
+                    { "name": crate::commands::task::NAME,
                       "input": { "uri": item, "to": "done" } },
                     { "name": REPORT, "input": report },
                 ] }),
@@ -367,12 +367,12 @@ mod tests {
     }
 
     /// An impact names its target in the one documented vocabulary
-    /// (`wiki | work_item | file | directory | git_commit | finding`); any
+    /// (`wiki | task | file | directory | git_commit | finding`); any
     /// other kind is refused at its index, not dropped.
     #[tokio::test]
     async fn an_impact_of_another_kind_is_refused() {
         let fx = services_with_effort().await;
-        for kind in ["commit", "task", "dir", "git-commit", "page"] {
+        for kind in ["commit", "ticket", "dir", "git-commit", "page"] {
             let err = fx
                 .svc
                 .commands

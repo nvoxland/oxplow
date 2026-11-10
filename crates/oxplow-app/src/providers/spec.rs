@@ -4,7 +4,7 @@
 //! ```yaml
 //! providers:
 //!   - id: fake                     # the ref segment and command namespace
-//!     capability: work_items
+//!     capability: task_tracker
 //!     entry: bin/provider          # a program in the extension folder
 //!     args: [--stdio]
 //!     env: [TRACKER_URL]           # host variables passed through
@@ -63,7 +63,7 @@ pub fn contract_of(spec: &ProviderSpec) -> &'static ProviderContract {
 pub struct ProviderSpec {
     /// The provider's id: its program's approval (`<extension>/<id>`) and
     /// the id of its default instance — an instance's id is its refs'
-    /// segment (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its commands' namespace
+    /// segment (`oxplow:oxplow/task?id=…&provider=<id>`) and its commands' namespace
     /// (`<id>.estimate`).
     pub id: String,
     pub capability: String,
@@ -88,22 +88,22 @@ pub struct ProviderSpec {
     pub network: Vec<String>,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
-    /// What a work list's own ids look like (a regex matched whole:
+    /// What a task tracker's own ids look like (a regex matched whole:
     /// `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
-    /// active work list.
+    /// active task tracker.
     #[serde(default)]
     pub id_pattern: Option<String>,
-    /// A work list's own fields (kept in an item's `native`), so screens
+    /// A task tracker's own fields (kept in an item's `native`), so screens
     /// render and edit them: `[{ name, title, kind: enum|text|number,
     /// values? }]`.
     #[serde(default)]
-    pub fields: Vec<oxplow_domain::work_items::FieldDecl>,
-    /// A work list's stages, in order, each in one of core's buckets:
-    /// `[{ id, title, bucket }]` — required for a work list, which needs
+    pub fields: Vec<oxplow_domain::tasks::FieldDecl>,
+    /// A task tracker's stages, in order, each in one of core's buckets:
+    /// `[{ id, title, bucket }]` — required for a task tracker, which needs
     /// one in each of todo, in_progress and done. The first of a bucket is
     /// where naming the bucket lands.
     #[serde(default)]
-    pub stages: Vec<oxplow_domain::work_items::StageDecl>,
+    pub stages: Vec<oxplow_domain::tasks::StageDecl>,
     /// The scopes it calls over the protocol (`host/call`,
     /// `sql.read` or `state.read`): part of what its approval covers, and the only ones it
     /// may call.
@@ -111,18 +111,18 @@ pub struct ProviderSpec {
     pub needs: Vec<String>,
 }
 
-/// What's wrong with `spec`'s stages: a work list declares them (core's
+/// What's wrong with `spec`'s stages: a task tracker declares them (core's
 /// buckets need its stages to mean anything), and nothing else does.
 fn stages_problem(spec: &ProviderSpec) -> Option<String> {
     match (contract_of(spec).items, spec.stages.is_empty()) {
         (true, true) => Some(
-            "a work list declares its `stages:` (`[{ id, title, bucket }]`, one in each of \
+            "a task tracker declares its `stages:` (`[{ id, title, bucket }]`, one in each of \
              todo, in_progress and done)"
                 .into(),
         ),
-        (true, false) => oxplow_domain::work_items::stages_problem(&spec.stages),
+        (true, false) => oxplow_domain::tasks::stages_problem(&spec.stages),
         (false, false) => Some(format!(
-            "stages are a work list's; `{}` has none",
+            "stages are a task tracker's; `{}` has none",
             spec.capability
         )),
         (false, true) => None,
@@ -835,7 +835,7 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ));
         }
     }
-    // Core's call of a verb — `work_item.<verb>`, the effort policy's
+    // Core's call of a verb — `task.<verb>`, the effort policy's
     // dispatcher — is what a person confirms and what is gated: a verb
     // records and never asks on its own.
     for command in declared
@@ -904,12 +904,12 @@ pub fn parse_providers(
         } else if let Some(problem) = (!spec.fields.is_empty() && !contract_of(&spec).items)
             .then(|| {
                 format!(
-                    "provider `{id}`: fields are a work list's; `{}` has none",
+                    "provider `{id}`: fields are a task tracker's; `{}` has none",
                     spec.capability
                 )
             })
             .or_else(|| {
-                oxplow_domain::work_items::fields_problem(&spec.fields)
+                oxplow_domain::tasks::fields_problem(&spec.fields)
                     .map(|p| format!("provider `{id}`: {p}"))
             })
             .or_else(|| stages_problem(&spec).map(|p| format!("provider `{id}`: {p}")))
@@ -921,7 +921,7 @@ pub fn parse_providers(
                     "provider `{id}`: id_pattern `{pattern}` isn't a regex: {e}"
                 )),
                 Ok(_) if !contract_of(&spec).items => Some(format!(
-                    "provider `{id}`: id_pattern is a work list's; `{}` has no ids",
+                    "provider `{id}`: id_pattern is a task tracker's; `{}` has no ids",
                     spec.capability
                 )),
                 Ok(_) => read_declarations(&spec, read).err(),

@@ -34,8 +34,8 @@ icon: layout-dashboard
 answers:
   - { question: "How is work going?" }
 loaders:
-  open:   { sql: "SELECT count(*) AS n FROM v_work_item WHERE state != 'done'" }
-  by_day: { sql: "SELECT date(created_at) AS day, count(*) AS n FROM v_work_item GROUP BY 1 ORDER BY 1" }
+  open:   { sql: "SELECT count(*) AS n FROM v_task WHERE state != 'done'" }
+  by_day: { sql: "SELECT date(created_at) AS day, count(*) AS n FROM v_task GROUP BY 1 ORDER BY 1" }
 view:
   grid:
     - { id: open, title: Open, viz: number, from: open, size: small }

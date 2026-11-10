@@ -2,8 +2,8 @@
 # inferred decision, each file outside the item's area, and the note — and
 # moves the item back to ready.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -21,7 +21,7 @@ when:
 expect:
   ok: true
 steps:
-  - when: { sql: "SELECT w.state, c.body FROM v_work_item w JOIN v_work_item_comment c ON c.uri = w.uri" }
+  - when: { sql: "SELECT w.state, c.body FROM v_task w JOIN v_task_comment c ON c.uri = w.uri" }
     expect:
       rows:
         - state: todo
@@ -34,5 +34,5 @@ steps:
                instr(c.body, '- [ ] Confirm or rework the decision: Which store? → SQLite') > 0 AS decision,
                instr(c.body, '- [ ] Explain or revert the change outside the task''s area: crates/db/store.rs') > 0 AS outside,
                instr(c.body, 'src/ui/button.ts') = 0 AS inside_unnamed
-        FROM v_work_item_comment c
+        FROM v_task_comment c
     expect: { rows: [{ headed: 1, noted: 1, claim: 1, decision: 1, outside: 1, inside_unnamed: 1 }] }

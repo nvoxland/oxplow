@@ -2,15 +2,15 @@
 # to the item (the mover is an agent: the event names its thread).
 given:
   - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
-  - { command: oxplow.work_item.create, input: { title: Parse blocks, assignee: thr1 }, bind: item }
+  - { command: oxplow.task.create, input: { title: Parse blocks, assignee: thr1 }, bind: item }
   - { command: oxplow.effort.open, input: { thread: thr1 } }
 when:
-  command: oxplow.work_item.transition
+  command: oxplow.task.transition
   input: { uri: $item.uri, to: in_progress }
   as: agent
 expect:
   ok: true
   commands: [oxplow.effort.link]
 steps:
-  - when: { sql: "SELECT id, work_item FROM v_effort ORDER BY id" }
-    expect: { rows: [{ id: 1, work_item: $item.uri }] }
+  - when: { sql: "SELECT id, task FROM v_effort ORDER BY id" }
+    expect: { rows: [{ id: 1, task: $item.uri }] }

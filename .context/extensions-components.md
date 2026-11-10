@@ -11,7 +11,7 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
   the rest itself**. Core's: the nav bar (`setTitle`, `setActions`: New
   Task…), the confirmation a delete asks for, the record and line of an
   `invoke` that fails, the tab's `#` with Back and Forward, the page's
-  loaders as its data (the shared `work-items` query), the kit's sheet
+  loaders as its data (the shared `task-rows` query), the kit's sheet
   (`.ox-toolbar`, `.ox-select`, `.ox-input`, `.ox-board`, `.ox-card`, the
   drag classes and `.ox-menu`) and the theme's tokens. Its own: the
   toolbar, the columns, drag and drop, and a card's menu. **A custom page
@@ -170,9 +170,9 @@ a project one's.
 custom_components:
   - id: burndown                       # [a-z0-9-]+
     title: Burndown
-    description: Open work items against the days left in a sprint.   # optional: one sentence (v_custom_component.description; none is made up)
+    description: Open tasks against the days left in a sprint.   # optional: one sentence (v_custom_component.description; none is made up)
     bundle: components/burndown        # default components/<id>; holds index.html
-    commands: [oxplow.work_item.transition]
+    commands: [oxplow.task.transition]
     sql: read                          # optional: its own read-only SQL (querySql); needs sql.read in permissions
 ```
 ```yaml

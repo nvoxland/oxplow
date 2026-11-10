@@ -583,25 +583,25 @@ pub(super) async fn publish_generation(svc: &Arc<oxplow_app::Services>) -> Resul
         .map_err(|e| format!("{e:?}"))
 }
 
-/// An oxplow like `host` with a work list on, for a conformance suite that
+/// An oxplow like `host` with a task tracker on, for a conformance suite that
 /// files work: the first extension in the checkout (by name) that declares a
-/// `work_items` implementation or provider. None is an error the suite
+/// `task_tracker` implementation or provider. None is an error the suite
 /// reports.
-pub(super) async fn with_work_list(host: &Host, ext: &Extension) -> Result<Host, String> {
+pub(super) async fn with_task_tracker(host: &Host, ext: &Extension) -> Result<Host, String> {
     let mut lists: Vec<String> = oxplow_app::extension::extensions::load_extensions(&host.checkout)
         .into_iter()
         .filter(|e| {
             e.implementations
                 .iter()
-                .any(|d| d.capability == "work_items")
-                || e.providers.iter().any(|p| p.capability == "work_items")
+                .any(|d| d.capability == "task_tracker")
+                || e.providers.iter().any(|p| p.capability == "task_tracker")
         })
         .map(|e| e.name)
         .collect();
     lists.sort();
     let Some(list) = lists.into_iter().next() else {
         return Err(
-            "its suite files work, and no extension in the checkout declares a `work_items` \
+            "its suite files work, and no extension in the checkout declares a `task_tracker` \
              implementation or provider — fix: add one to the checkout"
                 .into(),
         );
@@ -629,8 +629,8 @@ pub(super) async fn policy_suite(
 ) {
     report.ran.push(format!("{EFFORT_POLICY} suite"));
     let run = async {
-        // The suite files work, so it runs on an oxplow with a work list.
-        let with_list = with_work_list(host, ext).await?;
+        // The suite files work, so it runs on an oxplow with a task tracker.
+        let with_list = with_task_tracker(host, ext).await?;
         let fork = with_list.fork().await?;
         let svc = &fork.svc;
         svc.config
@@ -679,11 +679,11 @@ pub(super) async fn suite(
     report.ran.push(format!("{} suite", spec.capability));
     let run = async {
         // On an oxplow of its own: what the suite files, no example sees. An
-        // effort policy's suite files work, and oxplow's own work list is
+        // effort policy's suite files work, and oxplow's own task tracker is
         // bundled's: its oxplow has it on.
         let with_list;
         let base = if spec.capability == providers::effort_policy::EffortPolicyHost::CAPABILITY {
-            with_list = with_work_list(host, ext).await?;
+            with_list = with_task_tracker(host, ext).await?;
             &with_list
         } else {
             host
@@ -732,24 +732,24 @@ pub(super) async fn suite(
             other => return Err(format!("it didn't start: {other:?}")),
         }
         let findings = match spec.capability.as_str() {
-            providers::work_items::WorkItemsHost::CAPABILITY => {
-                let provider = svc.work_items.get(&spec.id).map_err(|e| e.to_string())?;
+            providers::tasks::TaskTrackerHost::CAPABILITY => {
+                let provider = svc.tasks.get(&spec.id).map_err(|e| e.to_string())?;
                 // Every create files on the active tracker (tsk1058): the
                 // throwaway host's is the one under test.
                 svc.config
                     .write()
                     .map_err(|e| e.to_string())?
                     .active_providers
-                    .insert("work_items".into(), provider.id.clone());
+                    .insert("task_tracker".into(), provider.id.clone());
                 // …and published, as a `oxplow.config.set` would: the interface
                 // reads the active list's items.
                 publish_generation(&svc).await?;
-                oxplow_app::work_items_conformance::suite(
-                    &svc.work_items_client(),
+                oxplow_app::task_tracker_conformance::suite(
+                    &svc.tasks_client(),
                     &provider.id,
                     provider.features,
                     None,
-                    &oxplow_app::work_items_conformance::ServicesProbe(&svc),
+                    &oxplow_app::task_tracker_conformance::ServicesProbe(&svc),
                     &Actor::Human,
                 )
                 .await
@@ -787,7 +787,7 @@ pub(super) async fn suite(
                     .insert(spec.capability.clone(), spec.id.clone());
                 publish_generation(&svc).await?;
                 svc.event_pump.run_once().await.map_err(|e| e.to_string())?;
-                oxplow_app::work_items_conformance::SuiteRun {
+                oxplow_app::task_tracker_conformance::SuiteRun {
                     findings: oxplow_app::knowledge_conformance::suite(&svc, &Actor::Human).await,
                     left: Vec::new(),
                 }

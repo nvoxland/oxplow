@@ -735,7 +735,8 @@ fn no_tmux_in_the_app() {
 const SPECIAL_CASES: &[(&str, &str, &str)] = &[
     // Reserving the name, so no provider takes oxplow's refs: no decision
     // about how to call one.
-    ("crates/oxplow-domain/src/capability.rs", "== OXPLOW", "the reserved provider id"),
+    ("crates/oxplow-domain/src/capability.rs", "== OXTASK", "the reserved provider id"),
+    ("crates/oxplow-domain/src/capability.rs", "== \"oxplow\"", "the reserved provider id"),
     // The same reservation for filesystems: no extension's filesystem id
     // falls in `oxplow:`, the namespace of oxplow's own.
     ("crates/oxplow-app/src/providers/filesystems.rs", "== \"oxplow\"", "the reserved filesystem namespace"),
@@ -755,8 +756,8 @@ fn special_cases() -> BTreeSet<(String, String)> {
         "\"oxplow-bundled/",
         "\"oxplow-foundation\"",
         "\"oxplow-foundation/",
-        "== OXPLOW",
-        "!= OXPLOW",
+        "== OXTASK",
+        "!= OXTASK",
         "== \"oxplow\"",
         "!= \"oxplow\"",
         "\"oxplow\" ==",
@@ -997,38 +998,37 @@ fn a_handoff_reaches_an_agent_only_at_its_prompt() {
     assert_eq!(offenders, Vec::<String>::new());
 }
 
-/// Where oxplow's own task list — one implementation of the work-item
-/// interface (`.context/work-items.md`) — may be named in production
-/// code: its crate (`crates/oxplow-tasks`, all of it) and the files listed
-/// here. Everything else reads the interface (`v_work_item` and its views)
-/// and writes through the `work_item.*` commands,
+/// Where oxplow's own task list — one implementation of the task
+/// interface (`.context/tasks.md`) — may be named in production
+/// code: its crate (`crates/oxplow-oxtask`, all of it) and the files listed
+/// here. Everything else reads the interface (`v_task` and its views)
+/// and writes through the `task.*` commands,
 /// whichever list is active. Each file still here says why.
 #[rustfmt::skip]
 const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-app/src/work_items.rs", "the built-in factory: `oxplow:tasks` is oxplow_tasks's verbs"),
+    ("crates/oxplow-app/src/tasks.rs", "the built-in factory: `oxplow:oxtask` is oxplow_oxtask's verbs"),
     ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
     ("crates/oxplow-dev/src/main.rs", "oxplow's own task CLI, over its tables"),
 ];
 
 /// The implementation's own crate.
-const TASK_CRATE: &str = "crates/oxplow-tasks/";
+const TASK_CRATE: &str = "crates/oxplow-oxtask/";
 
 /// Production files outside the task crate that name oxplow's task list
 /// (comments left out).
 fn task_implementation_readers() -> BTreeSet<String> {
     const PATTERNS: &[&str] = &[
-        "oxplow_tasks",
-        "TaskId",
-        "task_of_work_item_ref",
-        "FROM task",
-        "JOIN task",
-        "task_note",
-        "task_link",
-        "v_task",
-        "SqliteTaskStore",
+        "oxplow_oxtask",
+        "OxtaskId",
+        "oxtask_of_task_ref",
+        "FROM oxtask",
+        "JOIN oxtask",
+        "oxtask_note",
+        "oxtask_link",
+        "SqliteOxtaskStore",
         "TaskService",
         "task_store",
-        "SqliteTaskNoteStore",
+        "SqliteOxtaskNoteStore",
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {
@@ -1058,7 +1058,7 @@ fn only_oxplows_implementation_names_its_task_list() {
     let gone: Vec<_> = pinned.difference(&found).collect();
     assert!(
         unlisted.is_empty() && gone.is_empty(),
-        "who names oxplow's task list changed.\nunlisted (read the work-item interface instead): {unlisted:#?}\nno longer there (drop from TASK_IMPLEMENTATION): {gone:#?}"
+        "who names oxplow's task list changed.\nunlisted (read the task interface instead): {unlisted:#?}\nno longer there (drop from TASK_IMPLEMENTATION): {gone:#?}"
     );
 }
 
@@ -1095,12 +1095,12 @@ fn hand_made_refs() -> Vec<String> {
     .expect("a fixed pattern");
     let mut out = Vec::new();
     for (path, text) in production_sources() {
-        // A work list builds its own items' refs; the grammar module is the
+        // A task tracker builds its own items' refs; the grammar module is the
         // one place a prefix is written, and a preference scope's `resource:` and
         // `component:` prefixes name a scope, not a URI.
         if path.starts_with("crates/oxplow-domain/src/uri/")
             || path == "crates/oxplow-db/src/ui_preference_store.rs"
-            || path == "crates/oxplow-tasks/src/refs.rs"
+            || path == "crates/oxplow-oxtask/src/refs.rs"
         {
             continue;
         }
@@ -1189,7 +1189,7 @@ fn hand_made_script_refs() -> Vec<String> {
         format!(r#"["'](?:{alt}):[^"'\s]*["']\s*(?:\+|\|\|)"#),
         // `x + "file:"`, `x || 'wiki:'`.
         format!(r#"(?:\+|\|\|)\s*["'](?:{alt}):"#),
-        // `startswith("oxplow:oxplow/effort?id=eff")`, `len("oxplow:oxplow/effort?id=eff")`, `length('work_item:' || …)`.
+        // `startswith("oxplow:oxplow/effort?id=eff")`, `len("oxplow:oxplow/effort?id=eff")`, `length('task:' || …)`.
         format!(r#"(?i)(?:startswith|endswith|len|length)\(\s*["'](?:{alt}):"#),
     ]
     .map(|p| Regex::new(&p).expect("a fixed pattern"));

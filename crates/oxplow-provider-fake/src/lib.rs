@@ -1,20 +1,20 @@
-//! A scripted **work-items provider** speaking oxplow's provider protocol
+//! A scripted **task tracker provider** speaking oxplow's provider protocol
 //! (P5.D2, `.context/providers.md`) — what the host, the instances and the
 //! conformance kit are tested against, the way the other
 //! test doubles stand in for theirs.
 //!
-//! It keeps items in memory (`oxplow:oxplow/work_item?id=W-<n>&provider=<id>`, `<id>` being the
+//! It keeps items in memory (`oxplow:oxplow/task?id=W-<n>&provider=<id>`, `<id>` being the
 //! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by
 //! default), in its own stages — `icebox`, `ready`, `doing`, `stuck`,
 //! `shipped`, `dropped`, one in each of core's buckets, as its manifest
 //! declares them ([`STAGES`]). Its config
 //! needs a `team` (a string); a clean `check` returns the handle
-//! `fake:<team>`. The work-items verbs `create`, `update`, `transition`
+//! `fake:<team>`. The task tracker verbs `create`, `update`, `transition`
 //! (undoable: its inverse moves the item back), `link`, `comment` and
 //! `delete`, over the contract's inputs (`stage` — one of its own — the
 //! fake's `native.points`), plus one command of its own, `estimate` —
-//! each returns `work_item.recorded` events (the item as it now stands).
-//! Collector `work_items` streams every item changed after the cursor
+//! each returns `task.recorded` events (the item as it now stands).
+//! Collector `task_tracker` streams every item changed after the cursor
 //! (each write bumps an item's revision; a deleted item stays, marked
 //! `deleted`), in revision order, as `$/record` followed by a `$/state`
 //! checkpoint `{ cursor, seen }` — opaque to the host.
@@ -116,8 +116,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_domain::events::schema::{EventType, WorkItemRecorded};
-use oxplow_domain::work_items::{CommentRecord, LinkRecord, WorkItemRecord};
+use oxplow_domain::events::schema::{EventType, TaskRecorded};
+use oxplow_domain::tasks::{CommentRecord, LinkRecord, TaskRecord};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
@@ -139,13 +139,13 @@ pub use snapshots::declarations as snapshots_declarations;
 
 pub const PROVIDER: &str = "fake";
 
-/// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): a work list,
+/// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): a task tracker,
 /// the default, an effort policy ([`policy_declarations`]) or an agent
 /// harness ([`harness_declarations`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Capability {
     #[default]
-    WorkItems,
+    Tasks,
     EffortPolicy,
     AgentHarness,
     /// A snapshots provider; `contents` is its feature of that name
@@ -163,18 +163,18 @@ pub enum Capability {
 }
 
 impl Capability {
-    /// The capability `name` names (`work_items` — also when unset —,
+    /// The capability `name` names (`task_tracker` — also when unset —,
     /// `effort_policy` or `agent_harness`).
     pub fn named(name: Option<&str>) -> Result<Self, String> {
-        match name.unwrap_or("work_items") {
-            "work_items" => Ok(Capability::WorkItems),
+        match name.unwrap_or("task_tracker") {
+            "task_tracker" => Ok(Capability::Tasks),
             "effort_policy" => Ok(Capability::EffortPolicy),
             "agent_harness" => Ok(Capability::AgentHarness),
             "snapshots" => Ok(Capability::Snapshots { contents: false }),
             "knowledge" => Ok(Capability::Knowledge),
             "filesystem" => Ok(Capability::FileSystem { writable: false }),
             other => Err(format!(
-                "the fake implements work_items, effort_policy, agent_harness, snapshots, knowledge or filesystem, not `{other}`"
+                "the fake implements tasks, effort_policy, agent_harness, snapshots, knowledge or filesystem, not `{other}`"
             )),
         }
     }
@@ -406,12 +406,12 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
     let native = json!({ "type": "object", "additionalProperties": false,
                          "properties": { "points": { "type": "integer" } } });
     let recorded_schema = Vocabulary::core()
-        .schema(WorkItemRecorded::TYPE, WorkItemRecorded::V)
+        .schema(TaskRecorded::TYPE, TaskRecorded::V)
         .cloned()
         .unwrap_or(Value::Null);
     let mut transition = command(
         "transition",
-        "Move a work item to one of its stages.",
+        "Move a task to one of its stages.",
         json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
                 "properties": { "uri": string, "to": stage } }),
     );
@@ -423,7 +423,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             version: "1".into(),
         },
         capabilities: vec![CapabilityDecl {
-            capability: "work_items".into(),
+            capability: "task_tracker".into(),
             features: json!({
                 "hierarchy": true, "comments": true, "links": true, "delete": true, "idempotent_writes": idempotent_writes
             }),
@@ -432,7 +432,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
         commands: vec![
             command(
                 "create",
-                "Create a work item.",
+                "Create a task.",
                 json!({ "type": "object", "required": ["title"], "additionalProperties": false,
                         "properties": { "title": string, "body": string, "parent_uri": string,
                                         "stage": stage,
@@ -446,7 +446,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             ),
             command(
                 "update",
-                "Edit a work item's title, body, parent, stage or points.",
+                "Edit a task's title, body, parent, stage or points.",
                 json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
                         "properties": { "uri": string, "title": string, "body": string,
                                         "parent_uri": string, "stage": stage,
@@ -455,48 +455,48 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
             transition,
             command(
                 "link",
-                "Link a work item to another, or to any ref it is about.",
+                "Link a task to another, or to any ref it is about.",
                 json!({ "type": "object", "required": ["uri", "target", "link_type"],
                         "additionalProperties": false,
                         "properties": { "uri": string, "target": string, "link_type": string } }),
             ),
             command(
                 "unlink",
-                "Remove a work item's link.",
+                "Remove a task's link.",
                 json!({ "type": "object", "required": ["uri", "target", "link_type"],
                         "additionalProperties": false,
                         "properties": { "uri": string, "target": string, "link_type": string } }),
             ),
             command(
                 "comment",
-                "Comment on a work item.",
+                "Comment on a task.",
                 json!({ "type": "object", "required": ["uri", "body"],
                         "additionalProperties": false,
                         "properties": { "uri": string, "body": string } }),
             ),
             command(
                 "delete",
-                "Delete a work item.",
+                "Delete a task.",
                 json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
                         "properties": { "uri": string } }),
             ),
             command(
                 "estimate",
-                "Set a work item's points (a fake-only command).",
+                "Set a task's points (a fake-only command).",
                 json!({ "type": "object", "required": ["uri", "points"],
                         "additionalProperties": false,
                         "properties": { "uri": string, "points": { "type": "integer" } } }),
             ),
         ],
         event_types: vec![EventTypeDecl {
-            event_type: WorkItemRecorded::TYPE.into(),
-            v: WorkItemRecorded::V,
+            event_type: TaskRecorded::TYPE.into(),
+            v: TaskRecorded::V,
             schema: recorded_schema,
         }],
         collectors: vec![CollectorDecl {
-            name: "work_items".into(),
-            entity: "work_item".into(),
-            description: "Every work item, after the cursor.".into(),
+            name: "tasks".into(),
+            entity: "task".into(),
+            description: "Every task, after the cursor.".into(),
         }],
         config_schema: json!({ "type": "object", "required": ["team"],
                                "properties": { "team": { "type": "string" } } }),
@@ -505,7 +505,7 @@ fn declared(idempotent_writes: bool) -> InitializeResult {
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct Item {
-    record: WorkItemRecord,
+    record: TaskRecord,
     /// The world's revision when it last changed: a read streams the
     /// items changed after its cursor.
     rev: u64,
@@ -863,10 +863,10 @@ async fn handle(
         method::DISCOVER => {
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
-            // A work list reads its items, a knowledge store its pages;
+            // A task tracker reads its items, a knowledge store its pages;
             // a policy or a harness reads nothing.
             let (name, description) = match world.lock().await.capability {
-                Capability::WorkItems => ("work_item", "A work item as the fake has it."),
+                Capability::Tasks => ("task", "A task as the fake has it."),
                 Capability::Knowledge => ("knowledge_page", "A page as the fake keeps it."),
                 _ => return Ok(json!({ "entities": [] })),
             };
@@ -1012,7 +1012,7 @@ async fn handle(
             let (collector, entity) = if knowledge_mode {
                 ("knowledge_pages", "knowledge_page")
             } else {
-                ("work_items", "work_item")
+                ("tasks", "task")
             };
             if p.collector != collector {
                 return Err(ProtocolError::InvalidInput {
@@ -1073,7 +1073,7 @@ async fn handle(
                     .first()
                     .map(|(_, r)| r.clone())
                     .unwrap_or_else(|| json!({ "title": "x", "stage": "ready" }));
-                foreign["uri"] = json!(oxplow_domain::uri::build::work_item_uri("other", "X-1"));
+                foreign["uri"] = json!(oxplow_domain::uri::build::task_uri("other", "X-1"));
                 rows.insert(0, (after + 1, foreign));
             }
             if hooks.stale_read {
@@ -1121,13 +1121,13 @@ async fn handle(
 
 /// The number of instance `id`'s item `item_ref`.
 fn number_of(id: &str, item_ref: &str) -> Result<u64, ProtocolError> {
-    oxplow_domain::uri::build::work_item_of_uri(item_ref)
+    oxplow_domain::uri::build::task_of_uri(item_ref)
         .filter(|(provider, _)| provider == id)
         .and_then(|(_, item)| item.strip_prefix("W-")?.parse().ok())
         .ok_or_else(|| ProtocolError::InvalidInput {
             field: "/uri".into(),
             message: format!(
-                "`{item_ref}` isn't one of `{id}`'s work items (oxplow:oxplow/work_item?id=W-<n>&provider={id})"
+                "`{item_ref}` isn't one of `{id}`'s tasks (oxplow:oxplow/task?id=W-<n>&provider={id})"
             ),
         })
 }
@@ -1143,10 +1143,10 @@ fn str_field(input: &Value, field: &str) -> Result<String, ProtocolError> {
         })
 }
 
-fn recorded(record: &WorkItemRecord) -> EventDraft {
+fn recorded(record: &TaskRecord) -> EventDraft {
     EventDraft {
-        event_type: WorkItemRecorded::TYPE.into(),
-        v: WorkItemRecorded::V,
+        event_type: TaskRecorded::TYPE.into(),
+        v: TaskRecorded::V,
         payload: json!({ "item": record }),
         subject: vec![record.uri.clone()],
     }
@@ -1198,8 +1198,8 @@ async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, Pr
             if let Some(points) = points_of(&input) {
                 native["points"] = points.into();
             }
-            let record = WorkItemRecord {
-                uri: oxplow_domain::uri::build::work_item_uri(&w.id, &format!("W-{n}")),
+            let record = TaskRecord {
+                uri: oxplow_domain::uri::build::task_uri(&w.id, &format!("W-{n}")),
                 title,
                 body: input
                     .get("body")

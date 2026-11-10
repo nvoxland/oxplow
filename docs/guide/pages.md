@@ -13,8 +13,8 @@ can **Save to wiki** or **Save as Page** to keep it.
 
 ## The data
 
-Everything oxplow tracks is exposed as read-only SQL views: `v_work_item`
-(the active work list's items, whichever tracker holds them), `v_effort`,
+Everything oxplow tracks is exposed as read-only SQL views: `v_task`
+(the active task tracker's items, whichever tracker holds them), `v_effort`,
 `v_thread`, `v_comment`, `v_wiki_page`, `v_effort_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
@@ -57,7 +57,7 @@ answers:
 loaders:
   blocked:
     sql: |
-      SELECT uri, title, updated_at FROM v_work_item
+      SELECT uri, title, updated_at FROM v_task
       WHERE state = 'blocked' AND thread_id = :thread_id
 view:
   viz: table            # table | list | sections | tree | number | markdown | bar | line | treemap | board | custom | ...
@@ -120,7 +120,7 @@ A table or list takes `columns:` for headers, order and links. `format`
 holds a JSON array whose elements are a string or `{ "text": ..., "hint"?:
 ..., "uri"?: ... }`: drawn inline separated by " · ", the hint on hover, the
 uri a link. `link: { kind, from }`
-makes a cell clickable: `page` (any oxplow URI, such as a work item's),
+makes a cell clickable: `page` (any oxplow URI, such as a task's),
 `file` (with `line:`), `wiki`, `commit`, `metric`. `select: <param>` makes
 a click set that param, so a detail section that reads it re-runs: master and
 detail with no code.
@@ -262,7 +262,7 @@ the commands it declares, and it is fed its page's data.
 # extension.yaml
 custom_components:
   - id: burndown
-    commands: [oxplow.work_item.transition]    # commands it may run
+    commands: [oxplow.task.transition]    # commands it may run
 ```
 
 ```yaml
@@ -297,8 +297,8 @@ oxplow.connect().then((component) => {
   component.onUpdate(({ data }) => render(data)); // a loader changed
 });
 // Elsewhere, with `component` in hand:
-//   await component.invoke("oxplow.work_item.transition", { uri, to: "done" })
-//   await component.navigate("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")   // oxplow pages only
+//   await component.invoke("oxplow.task.transition", { uri, to: "done" })
+//   await component.navigate("oxplow:oxplow/task?id=tsk42&provider=oxtask")   // oxplow pages only
 //   await component.navigate(uri, { newTab: true })    // open it in a new tab
 //   await component.navigate(uri, { replace: true })   // take the place of this step in Back
 ```
@@ -389,7 +389,7 @@ oxplow.connect().then(async (component) => {
   // Its own memory for you, in every tab:
   //   await component.pageMemory.set("columns", ["title", "state"]);
   // A form oxplow shows; resolves with the result, or rejects CANCELLED:
-  //   await component.openForm("oxplow.work_item.create", { title: "" })
+  //   await component.openForm("oxplow.task.create", { title: "" })
 });
 ```
 
@@ -431,17 +431,17 @@ a bookmark doesn't freeze it to one date.
 ## Replacing a view
 
 An extension can put its own page where one of oxplow's views is: the
-Tasks board (`work_item.board`), the Task List's list (`work_item.list`) or a
-task's description editor (`work_item.detail`). It needs no work-items provider of its
-own: a view reads `v_work_item` and changes items through the work-item
-commands (`oxplow.work_item.update`, `transition`, `reorder`, `move`), so it
+Tasks board (`task.board`), the Task List's list (`task.list`) or a
+task's description editor (`task.detail`). It needs no task tracker of its
+own: a view reads `v_task` and changes items through the task
+commands (`oxplow.task.update`, `transition`, `reorder`, `move`), so it
 works with whichever list is active.
 
 ```yaml
 # extension.yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 2 }
+    - { page: swimlanes, at: task.board, version: 2 }
 ```
 
 The part gets the view's props as params and must declare all of them: the
@@ -455,7 +455,7 @@ load, oxplow's own shows with a line saying why. Some views also share
 their page's view params: Git History's graph (`vcs.history.graph`) has
 the page's `q`, `author` and `branch`, so a custom graph reads them from
 `component.viewParams`, writes them with `setViewParams` and follows
-`onViewParams` — the same address oxplow's own list keeps. A `viz: custom` view that
+`onViewParams` — the same address oxplow's own page keeps. A `viz: custom` view that
 changes items needs its commands declared like any component, and the
 extension must declare the permissions for them.
 
@@ -540,7 +540,7 @@ collectors:
   - id: hot
     runtime: starlark            # or: jaq
     entry: collectors/hot.star
-    input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
     entities:
       - { name: hot_item, key: uri, columns: { uri: text, title: text } }
 ```

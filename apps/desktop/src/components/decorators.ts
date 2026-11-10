@@ -43,7 +43,7 @@ export function decorationQueries(decorator: UiDecorator, refs: string[]): Decor
   // same; this is where the SQL is built).
   const names = [decorator.view, decorator.label, ...(decorator.color ? [decorator.color] : [])];
   if (!names.every((n) => IDENTIFIER.test(n))) return [];
-  // `decorator.resource` names the resource (`oxplow/work_item`).
+  // `decorator.resource` names the resource (`oxplow/task`).
   const mine = refs.filter((r) => typeOf(r) === decorator.resource);
   const color = decorator.color ? `, "${decorator.color}" AS color` : "";
   const out: DecorationQuery[] = [];

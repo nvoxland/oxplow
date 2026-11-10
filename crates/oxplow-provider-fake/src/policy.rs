@@ -14,7 +14,7 @@ use oxplow_provider_protocol::{Peer, ProtocolError};
 use serde_json::{json, Value};
 
 /// What it declares in policy mode: the `effort_policy` capability and its
-/// verb, no event types, no collectors; the same config as its work list.
+/// verb, no event types, no collectors; the same config as its task tracker.
 pub fn declarations() -> InitializeResult {
     InitializeResult {
         protocol_version: PROTOCOL_VERSION.into(),
@@ -51,15 +51,15 @@ pub(crate) async fn react(
     input: &Value,
 ) -> Result<Value, ProtocolError> {
     let event = &input["event"];
-    if event["type"] != "work_item.state_changed" {
+    if event["type"] != "task.state_changed" {
         return Ok(skip("not an item's move"));
     }
-    let item = event["payload"]["work_item"].as_str().unwrap_or_default();
+    let item = event["payload"]["task"].as_str().unwrap_or_default();
     match event["payload"]["to"].as_str() {
         Some("in_progress") => match event["anchors"]["thread_id"].as_str() {
             Some(thread) => Ok(json!({ "commands": [{
                 "name": "oxplow.effort.open",
-                "input": { "thread": thread, "work_item": item },
+                "input": { "thread": thread, "task": item },
             }] })),
             None => Ok(skip("started on no thread")),
         },
@@ -71,8 +71,8 @@ pub(crate) async fn react(
                         "key": key,
                         "scope": "sql.read",
                         "args": {
-                            "sql": "SELECT id FROM v_effort WHERE work_item = :work_item AND ended_at IS NULL",
-                            "params": { "work_item": item },
+                            "sql": "SELECT id FROM v_effort WHERE task = :task AND ended_at IS NULL",
+                            "params": { "task": item },
                         },
                     }),
                 )

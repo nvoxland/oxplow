@@ -87,10 +87,10 @@ event_types:
 
 **Promoted to stable (P9.D6)** on the evidence rule every kind is held to
 — a first-party, shared extension depending on it: oxplow-bundled's
-`oxplow.review.accepted@1 { effort, work_item, unverified, inferred,
-deviated }` and `oxplow.review.changes_requested@1 { effort, work_item,
+`oxplow.review.accepted@1 { effort, task, unverified, inferred,
+deviated }` and `oxplow.review.changes_requested@1 { effort, task,
 unverified, inferred, deviated, note? }` (`effort` is the bare id, `eff12`), which `accept.star` and `request_changes.star` return in
-`events:` (subjects: the effort, its work item and, for an acceptance, the
+`events:` (subjects: the effort, its task and, for an acceptance, the
 claims and decisions it took unchecked; caused by the run's
 `command.executed`). They replaced a single `verdict@1` type, whose
 verdict lived in an expiring payload.
@@ -110,7 +110,7 @@ the provider host was), so a kind carries no stability.
 **`effects` is stable** (P11), on the evidence rule: a bundled
 extension acts with one. oxplow-bundled's **`verify-unchecked`** reacts to
 `oxplow.review.accepted`: its script takes the effort and its item from the event's payload
-(`effort`, `work_item`) and the claims and decisions accepted unchecked from
+(`effort`, `task`) and the claims and decisions accepted unchecked from
 its envelope (`event["subject"]`), links the item it files `about` the
 effort, and reads (`scope("sql.read")`) only what the event
 can't say: which of those are still unverified or inferred now, and its
@@ -128,7 +128,7 @@ at 50 items, saying how many more the review has. A bundled effect
 starts like any (K1), when the generation that first runs it publishes.
 A task an effect (or oxplow
 itself) files has no `author` — it isn't the person's; its
-`work_item.created` and the run's audit name the effect (its `native`
+`task.created` and the run's audit name the effect (its `native`
 `author` is null). The loader limits effects to no kind of extension.
 
 **Retention** (P8.D5) is the extension's window for its namespace's payloads
@@ -208,7 +208,7 @@ request merged". It has no rights to act, needs nothing beyond its
 extension's permissions, and may run again and again over the same input. An effect
 **reacts**: it composes commands with an agent's rights, runs under its extension's
 permissions, and runs at most once per event. So "when a PR merges, close its
-work item" is a collector that emits `acme_pr.merged` and an effect that
+task" is a collector that emits `acme_pr.merged` and an effect that
 reacts to it — never an effect with no commands whose only job is to emit
 from data, and never a collector that acts.
 
@@ -349,7 +349,7 @@ resource's icon and label). A feed may add a `version` column (a row's
 and body of the changed rows only.
 
 - **What is searchable (the rule).** The named things a person looks up
-  are: oxplow-foundation's work items, wiki pages, threads, commits,
+  are: oxplow-foundation's tasks, wiki pages, threads, commits,
   pages, metrics, measures, branches, extensions, dimensions, datasets,
   commands, skills, collectors, jobs, AI profiles, advisories, effects,
   panels, providers, implementations, event types, resources and
@@ -376,7 +376,7 @@ and body of the changed rows only.
   time. `search_dataset` reads the registry (`source('dataset')`) instead.
   Test `no_search_index_reads_what_the_assets_write` and
   `settled_indexes_are_not_restated_while_nothing_changes`. A core
-  dataset's URI uses the bare name (`dataset=work_item`), an extension's
+  dataset's URI uses the bare name (`dataset=task`), an extension's
   `owner/name`, so the `dataset` param pattern allows an optional
   `owner/` (a pattern has no groups: one class holds the `/`). Rows that
   fail the resource's params are skipped with a warning at each restate;
@@ -401,7 +401,7 @@ and body of the changed rows only.
   insert can change or remove may declare `seq`: today `search_decision` and
   `search_turn` (a turn's start is an insert; its end is an update, so a
   whole read). Every other kind reads whole: its text follows rows an
-  insert elsewhere changes (a work item's comments, a wiki body), or it is
+  insert elsewhere changes (a task's comments, a wiki body), or it is
   a window (`search_commit`'s last 500: a new commit pushes one out), or it
   is an extension's resource (bounded, and its SQL can say anything).
 - `Assets::sync_search_kinds` keeps them in step with `resource` and the
@@ -474,11 +474,11 @@ confirms"):
 effects:
   - id: announce-done          # [a-z0-9-]+, unique in the extension
     summary: Note a finished item on its thread.
-    on: [work_item.state_changed]  # core types, its own, or another extension's ("Event types")
+    on: [task.state_changed]  # core types, its own, or another extension's ("Event types")
     where: { to: done }            # optional: payload fields equal to these
     needs: [sql.read]              # the scopes its script calls: only what a script can (`scope_calls::CALLABLE`)
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
-    after: [page_ref.work_item]    # optional: what it runs after on one event ("Ordering")
+    after: [page_ref.task]    # optional: what it runs after on one event ("Ordering")
 ```
 
 **One trigger grammar.** An effect's `on`/`where` are a collector's —
@@ -616,7 +616,7 @@ a step's provider erred, timed out, lost its reply, or asked to
 wait — a composite keeps its failing step's kind) while **every** step it
 composed was a write
 to a provider keeping `idempotent_writes` (`safe_to_resend`, through
-`work_item::provider_for`) is scheduled again — `effect_run.retry_at`, at
+`task::provider_for`) is scheduled again — `effect_run.retry_at`, at
 most two in a row (`RETRY_DELAYS`: 10 s, then 60 s after the failure
 before — or later when the service asked for longer; one asking for more
 than `MAX_ASKED_WAIT`, 15 minutes, is a person's). A refused input, a
@@ -629,7 +629,7 @@ instead of running the script again: composing afresh could read
 changed rows, change a step's input and so its key, and make a write that
 landed again. It is sent only while every step still goes to a provider
 keeping the promise; otherwise it isn't sent (`Reacted::NotResent`) and the
-failure counts, a person's. A composed `oxplow.work_item.create` files on the
+failure counts, a person's. A composed `oxplow.task.create` files on the
 tracker active when it's **sent**, like every create: pointed
 elsewhere meanwhile, the retry goes there — or, when that tracker keeps
 no idempotent writes (oxplow's own), isn't sent by itself and waits for a

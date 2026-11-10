@@ -1964,7 +1964,7 @@ mod tests {
 
     fn provider(id: &str, network: &[&str], comments: bool, commands: &[&str]) -> DeclaredProvider {
         let spec: ProviderSpec = serde_json::from_value(json!({
-            "id": id, "capability": "work_items", "entry": "bin/p", "network": network,
+            "id": id, "capability": "task_tracker", "entry": "bin/p", "network": network,
             "declarations": "provider.json"
         }))
         .unwrap();
@@ -2014,7 +2014,7 @@ mod tests {
     fn a_url_servers_effects_say_what_runs_here() {
         let by_url = |url: &str| {
             let spec: ProviderSpec = serde_json::from_value(json!({
-                "id": "notes", "capability": "work_items", "declarations": "provider.json",
+                "id": "notes", "capability": "task_tracker", "declarations": "provider.json",
                 "adapter": { "mcp": { "url": url, "auth": "NOTES_TOKEN" },
                              "mapping": "mcp/x.star", "tools": "mcp/tools.json" },
                 "credentials": ["NOTES_TOKEN"], "network": ["mcp.example.com"]
@@ -2050,7 +2050,7 @@ mod tests {
     fn moving_a_url_servers_bearer_shows() {
         let with = |auth: &str| {
             let spec: ProviderSpec = serde_json::from_value(json!({
-                "id": "notes", "capability": "work_items", "declarations": "provider.json",
+                "id": "notes", "capability": "task_tracker", "declarations": "provider.json",
                 "adapter": { "mcp": { "url": "https://mcp.example.com/mcp", "auth": auth },
                              "mapping": "mcp/x.star", "tools": "mcp/tools.json" },
                 "credentials": ["NOTES_TOKEN", "GITHUB_TOKEN"], "network": ["mcp.example.com"]
@@ -2078,7 +2078,7 @@ mod tests {
     fn an_adapter_providers_effects_show_its_server_and_pinned_tools() {
         let adapter = |tools: Value| {
             let spec: ProviderSpec = serde_json::from_value(json!({
-                "id": "notes", "capability": "work_items", "declarations": "provider.json",
+                "id": "notes", "capability": "task_tracker", "declarations": "provider.json",
                 "adapter": { "mcp": { "command": ["bin/server", "--stdio"] },
                              "mapping": "mcp/x.star", "tools": "mcp/tools.json" }
             }))
@@ -2183,7 +2183,7 @@ mod tests {
     fn a_provider_change_names_its_first_difference() {
         let before = provider("fake", &[], true, &["create"]);
         let mut after = before.clone();
-        after.declarations.as_mut().unwrap().capabilities[0].capability = "work_items_v2".into();
+        after.declarations.as_mut().unwrap().capabilities[0].capability = "tasks_v2".into();
         let impact = providers_diff(std::slice::from_ref(&before), &[after]).remove(0);
         assert_eq!(impact.change, Change::Changed);
         assert!(impact
@@ -2195,7 +2195,7 @@ mod tests {
             first.contains("/declarations/capabilities/0/capability"),
             "{first}"
         );
-        assert!(first.contains("work_items_v2"), "{first}");
+        assert!(first.contains("tasks_v2"), "{first}");
         let same =
             providers_diff(std::slice::from_ref(&before), std::slice::from_ref(&before)).remove(0);
         assert_eq!(same.first_difference, None);
@@ -2352,7 +2352,7 @@ mod tests {
         write(
             d.path(),
             ".oxplow/extensions/x/extension.yaml",
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: work_items\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [process.run, network:api.example.com]\nproviders:\n  - id: fake\n    capability: task_tracker\n    entry: bin/p\n    network: [api.example.com]\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
         );
         write(
             d.path(),
@@ -2821,21 +2821,21 @@ mod tests {
             std::fs::write(
                 dir.join("extension.yaml"),
                 format!(
-                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [work_item.state_changed]{filter}, entry: e.star }}\n"
+                    "manifest: 2\nname: acme\nintent:\n  purpose: p\n  examples:\n    - {{ name: basic, input: x, expect: y }}\neffects:\n  - {{ id: on-done, summary: s, on: [task.state_changed]{filter}, entry: e.star }}\n"
                 ),
             )
             .unwrap();
             std::fs::write(dir.join("e.star"), script).unwrap();
             std::fs::write(
                 dir.join("fixtures/basic.yaml"),
-                "when: { effect: on-done, event: { type: work_item.state_changed, payload: { work_item: \"work_item:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.work_item.comment] }\n",
+                "when: { effect: on-done, event: { type: task.state_changed, payload: { task: \"task:oxplow:tsk1\", to: done } } }\nexpect: { commands: [oxplow.task.comment] }\n",
             )
             .unwrap();
         };
         write(
             old.path(),
             "",
-            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.comment\", \"input\": {}}]}\n",
+            "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.comment\", \"input\": {}}]}\n",
         );
         write(
             new.path(),
@@ -2881,8 +2881,8 @@ mod tests {
                 .filter(|l| l.starts_with("Effect"))
                 .collect::<Vec<_>>(),
             vec![
-                "Effect on-done: on work_item.state_changed → on work_item.state_changed where to = done",
-                "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
+                "Effect on-done: on task.state_changed → on task.state_changed where to = done",
+                "Effect on-done on fixture basic: runs [oxplow.task.comment] → skips (not today)",
             ]
         );
     }
@@ -3090,7 +3090,7 @@ mod tests {
     fn provider_impact(change: Change) -> ProviderImpact {
         ProviderImpact {
             id: "fake".into(),
-            capability: "work_items".into(),
+            capability: "task_tracker".into(),
             change,
             before: Some(grants(&[], &["token"])),
             after: Some(grants(&[], &["token"])),
@@ -3311,12 +3311,12 @@ mod tests {
                     id: "on-done".into(),
                     change: Change::Changed,
                     before: Some(EffectTrigger {
-                        on: vec!["work_item.state_changed".into()],
+                        on: vec!["task.state_changed".into()],
                         filter: BTreeMap::new(),
                         needs: Vec::new(),
                     }),
                     after: Some(EffectTrigger {
-                        on: vec!["work_item.state_changed".into()],
+                        on: vec!["task.state_changed".into()],
                         filter: [("to".to_string(), "done".to_string())].into(),
                         needs: Vec::new(),
                     }),
@@ -3324,7 +3324,7 @@ mod tests {
                         input: "fixture basic".into(),
                         change: Change::Changed,
                         before: Some(Composes {
-                            commands: vec!["oxplow.work_item.comment".into()],
+                            commands: vec!["oxplow.task.comment".into()],
                             skip: None,
                             error: None,
                         }),
@@ -3363,8 +3363,8 @@ mod tests {
             vec![
                 "Collector gh: now reaches api.example.com (was none)",
                 "Provider fake: command `delete` added (destructive)",
-                "Effect on-done: on work_item.state_changed → on work_item.state_changed where to = done",
-                "Effect on-done on fixture basic: runs [oxplow.work_item.comment] → skips (not today)",
+                "Effect on-done: on task.state_changed → on task.state_changed where to = done",
+                "Effect on-done on fixture basic: runs [oxplow.task.comment] → skips (not today)",
                 "Effect ping: added — on vcs.head.moved",
                 "Collector gh on fixture two: 2 thing → fails (boom)",
                 "Dataset v_shared_x: column `y` added; read by v_b_y",
@@ -3470,7 +3470,7 @@ mod tests {
         changed_before.contract_version = Some(1);
         let mut changed_after = changed_before.clone();
         changed_after.contract_version = Some(2);
-        changed_after.needs = vec!["work_items".into()];
+        changed_after.needs = vec!["task_tracker".into()];
         changed_after.trigger = RunsOn::Declared;
         changed_after.global = Some("acme.opened".into());
         let before = vec![

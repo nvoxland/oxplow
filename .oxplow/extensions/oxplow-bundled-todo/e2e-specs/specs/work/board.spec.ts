@@ -3,10 +3,10 @@ import { expect, test } from "../../support/fixtures.js";
 import { openFromLauncher } from "../../support/ui.js";
 
 // The Board is the foundation's `board` document: a `viz: board` of the
-// work items, a column per state, a card dropped on a column transitioning
-// it through the work list.
+// tasks, a column per state, a card dropped on a column transitioning
+// it through the task tracker.
 test("dragging a card to a column transitions its item, and Undo moves it back", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Card to move", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Card to move", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
   const todo = page.getByTestId("viz-board-column-todo");
@@ -22,7 +22,7 @@ test("dragging a card to a column transitions its item, and Undo moves it back",
 });
 
 test("a card's menu moves it too", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Card in the menu", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Card in the menu", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
   const todo = page.getByTestId("viz-board-column-todo");
@@ -33,8 +33,8 @@ test("a card's menu moves it too", async ({ page, daemon }) => {
 });
 
 test("deleting an item asks first, then it's gone from the board", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.work_item.create", { title: "Card to delete", thread: daemon.thread });
-  await run(daemon, "oxplow.work_item.create", { title: "Card to keep", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Card to delete", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Card to keep", thread: daemon.thread });
   await page.goto("/");
   await openFromLauncher(page, "Board");
   await page.getByTestId("viz-board").getByText("Card to delete").click();

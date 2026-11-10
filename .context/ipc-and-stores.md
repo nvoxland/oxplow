@@ -495,8 +495,8 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   captured file row. The old `get_snapshot_summary` /
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
   through the `diff` RPC (`Trees`, `.context/vcs.md`).
-- `readTaskEfforts(taskId)` (`workItems.ts`) — a task's efforts from
-  `v_effort` (`work_item = oxplow:oxplow/work_item?id=<id>&provider=oxplow`), newest first, each
+- `readTaskEfforts(taskId)` (`tasks.ts`) — a task's efforts from
+  `v_effort` (`task = oxplow:oxplow/task?id=<id>&provider=oxtask`), newest first, each
   with its changed files (`get_effort_files`). Used by the task page's
   Activity timeline and the "Show in history" jump.
 
@@ -748,9 +748,9 @@ schema in [data-model.md](./data-model.md), migration `V33`).
 Most stores have a single writer per row. The unified
 cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
-one `source_uri` like a work item's accumulates
+one `source_uri` like a task's accumulates
 rows from different owners (the item's body, link and comment slices,
-restated from the work-item interface, and the effort store's edges),
+restated from the task interface, and the effort store's edges),
 each owning a slice keyed by `ref_type`.
 
 The pattern that lets writers co-own a source without trampling
@@ -759,8 +759,8 @@ each other:
 1. **Pure projections** (`crates/oxplow-db/src/page_ref_projections.rs`)
    turn each writer's domain rows into `Vec<PageRefEdge>`. Each
    helper also exposes a small list of the `ref_type`s it owns
-   (`work_item_body_ref_types()`, `work_item_comment_ref_types()`,
-   the `work_item_link:` prefix, `effort_ref_types()`).
+   (`task_body_ref_types()`, `task_comment_ref_types()`,
+   the `task_link:` prefix, `effort_ref_types()`).
 2. **Slice-replace** at the store
    (`SqlitePageRefStore::replace_source_for_ref_types`) takes
    `(source, ref_types, edges)` and atomically
@@ -778,13 +778,13 @@ each other:
    SQLite-sourced slice, so a migration that resets `page_ref` (V92)
    or a writer's drift is undone at the next start after a migration or
    under a new build (it doesn't rerun when neither changed).
-4. **Event-driven projection** where the write logs an event. A task
-   work-item command logs core's `work_item.*` events in its
-   transaction (`.context/work-items.md`), and
-   `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
+4. **Event-driven projection** where the write logs an event. A
+   task command logs core's `task.*` events in its
+   transaction (`.context/tasks.md`), and
+   `PageRefTaskConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
    restates the item's body, link and comment slices from the
-   work-item interface (`work_item_refs::restate_tx`) when the pump
-   delivers it, for every list — after `work_items.project` has put a
+   task interface (`task_refs::restate_tx`) when the pump
+   delivers it, for every list — after `tasks.project` has put a
    list's record there —
    checkpointed and dead-lettered, so a crash between commit and
    projection can't leave the graph stale. As writes gain events this

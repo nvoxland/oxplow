@@ -178,7 +178,7 @@ async fn a_fact_collector_reads_the_layer_it_declares() {
     write(
         &root,
         ".oxplow/extensions/acme/items.star",
-        "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_work_item\"})\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": rows[0][\"n\"] + len(files(\"**\"))}]}\n",
+        "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT count(*) AS n FROM v_task\"})\n    return {\"facts\": [{\"measure\": \"acme.items\", \"value\": rows[0][\"n\"] + len(files(\"**\"))}]}\n",
     );
     write(
         &root,

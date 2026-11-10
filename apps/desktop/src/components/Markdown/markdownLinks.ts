@@ -8,7 +8,7 @@
  */
 import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
 import { WORKING, gitRevision, revisionFromSlot, revisionSlot } from "../../revision.js";
-import { workItemId, workItemLabel } from "../../workItemRef.js";
+import { taskId, taskLabel } from "../../taskRef.js";
 import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf, wikiUri, withUriView } from "../../uri/uri.js";
 import { RENDERER_VIEW_KEY } from "../../pages/renderers.js";
 import { extensionWikilinkRef, resourceInfo } from "../../resourceStore.js";
@@ -58,8 +58,8 @@ export type ParsedLink =
     }
   | { kind: "directory"; path: string }
   | { kind: "commit"; sha: string }
-  /** A work item, by its URI. */
-  | { kind: "work_item"; ref: string }
+  /** A task, by its URI. */
+  | { kind: "task"; ref: string }
   /** A URI of an extension's resource (`oxplow:acme/pr?id=12`, P8.D7). */
   | { kind: "ref"; ref: string }
   /** A `[[…]]` whose target matches no known ref shape (e.g. the GitHub
@@ -68,8 +68,8 @@ export type ParsedLink =
 
 const SHA_RE = /^[0-9a-f]{7,40}$/i;
 
-/** Which work item a loose id in text names, if any: the active list's
- *  ids, as it declares them (`workItemRefOfMention`). */
+/** Which task a loose id in text names, if any: the active list's
+ *  ids, as it declares them (`taskRefOfMention`). */
 export type MentionRef = (id: string) => string | null;
 
 /**
@@ -107,8 +107,8 @@ export function parsedLinkIconKind(parsed: ParsedLink): string | null {
       return "dir";
     case "commit":
       return "commit";
-    case "work_item":
-      return "work_item";
+    case "task":
+      return "task";
     case "external":
       return "external-url";
     default:
@@ -151,9 +151,9 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
         return p.sha ? { kind: "commit", sha: p.sha } : { kind: "empty" };
       case "oxplow/wiki":
         return p.slug ? { kind: "internal", slug: p.slug } : { kind: "empty" };
-      case "oxplow/work_item":
+      case "oxplow/task":
         // Any list's item, by its URI.
-        return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: identityOf(rawHref) ?? rawHref };
+        return taskId(rawHref) === null ? { kind: "empty" } : { kind: "task", ref: identityOf(rawHref) ?? rawHref };
       default: {
         // URI-SWITCH: the registry is keyed by resource name (`v_resource`).
         const resource = typeOf(rawHref);
@@ -165,7 +165,7 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
     const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
     return {
       kind: "broken",
-      reason: `Broken link: “${target}” is not a recognized reference (use a work item's id, [[some-slug]] for a wiki page)`,
+      reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for a wiki page)`,
     };
   }
   const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -283,7 +283,7 @@ function collapseLinksOutsideInlineCode(text: string): string {
  * paste put in: `href` its link target, `text` the label
  * `postprocessWikilinks` collapses to the bare wikilink (a wiki page's slug,
  * a file's `path[@rev][:line]`, a directory's path, a commit's short sha, a
- * work item's id when it is the active list's (`mentionRef`), else its
+ * task's id when it is the active list's (`mentionRef`), else its
  * whole URI), so it saves as `[[…]]` and shows its title (`useRefLinkTitle`).
  * A ref with no bare form keeps `title` as its label (`[title](uri)`).
  */
@@ -307,10 +307,10 @@ export function refLinkOf(uri: string, title: string, mentionRef: MentionRef = (
     case "oxplow/commit":
       if (p.sha) return { href, text: p.sha.slice(0, 7) };
       break;
-    case "oxplow/work_item": {
-      if (workItemId(uri) === null) break;
+    case "oxplow/task": {
+      if (taskId(uri) === null) break;
       const whole = identityOf(uri) ?? uri;
-      const id = workItemLabel(uri);
+      const id = taskLabel(uri);
       return { href, text: mentionRef(id) === whole ? id : whole };
     }
   }
@@ -347,12 +347,12 @@ function collapseInternalLink(label: string, url: string): string | null {
         const labelIsHexPrefix = /^[0-9a-f]{7,40}$/i.test(label) && sha.toLowerCase().startsWith(label.toLowerCase());
         return labelIsHexPrefix ? `[[git:${sha}]]` : `[[git:${sha}|${label}]]`;
       }
-      case "oxplow/work_item": {
-        if (workItemId(url) === null) return null;
+      case "oxplow/task": {
+        if (taskId(url) === null) return null;
         // A bare `[[tsk42]]` (or the whole URI) renders with what was
         // written as its text (the title swap is a render-time overlay, not
         // stored), so a label equal to it collapses to the bare form.
-        const id = workItemLabel(url);
+        const id = taskLabel(url);
         const whole = identityOf(url) ?? url;
         if (label === whole) return `[[${whole}]]`;
         return label === id ? `[[${id}]]` : `[[${id}|${label}]]`;
@@ -490,12 +490,12 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
           return `[${dirDisplay}](${linkTarget(dirUri(dir))})`;
         }
       }
-      // A work item: its whole URI, or a bare id of the active list's
-      // (`[[tsk42]]` with oxplow's tasks), as the backend's ref extractor
+      // A task: its whole URI, or a bare id of the active list's
+      // (`[[tsk42]]` with oxtask), as the backend's ref extractor
       // recognizes them for backlinks. The
       // rendered text defaults to the token; the item's title is swapped
-      // in at render time (WikiLinkSpan + useWorkItemRef).
-      const itemRef = workItemId(target) !== null ? (identityOf(target) ?? target) : mentionRef(target);
+      // in at render time (WikiLinkSpan + useTaskRef).
+      const itemRef = taskId(target) !== null ? (identityOf(target) ?? target) : mentionRef(target);
       if (itemRef) {
         return `[${display}](${linkTarget(itemRef)})`;
       }
@@ -525,7 +525,7 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
   }).join("");
 }
 
-/** What a link names that has a title: a wiki page, a work item, an
+/** What a link names that has a title: a wiki page, a task, an
  *  extension's ref (`refLinkNames`). */
 export interface RefLinkNames {
   internalSlug: string | null;
@@ -538,12 +538,12 @@ export interface RefLinkNames {
 export function refLinkNames(parsed: ParsedLink): RefLinkNames {
   return {
     internalSlug: parsed.kind === "internal" ? parsed.slug : null,
-    itemRef: parsed.kind === "work_item" ? parsed.ref : null,
+    itemRef: parsed.kind === "task" ? parsed.ref : null,
     extensionRef: parsed.kind === "ref" ? parsed.ref : null,
   };
 }
 
-/** What a ref's lookups found: its wiki page's, its work item's, its
+/** What a ref's lookups found: its wiki page's, its task's, its
  *  extension resource's title. */
 export interface RefLookups {
   wiki: { title: string | null; status: "loading" | "found" | "missing" };
@@ -561,7 +561,7 @@ export function refLinkTitle(
   const title =
     internalSlug && wiki.title && text === internalSlug
       ? wiki.title
-      : itemRef && item.title && (text === workItemLabel(itemRef) || text === itemRef)
+      : itemRef && item.title && (text === taskLabel(itemRef) || text === itemRef)
         ? item.title
         : extensionRef && extensionTitle && extensionWikilinkRef(text) === extensionRef
           ? extensionTitle
@@ -570,7 +570,7 @@ export function refLinkTitle(
     internalSlug && wiki.status === "missing"
       ? `Broken link: wiki page “${internalSlug}” does not exist`
       : itemRef && item.status === "missing"
-        ? `Broken link: work item ${workItemLabel(itemRef)} isn't on the active work list`
+        ? `Broken link: task ${taskLabel(itemRef)} isn't on the active task tracker`
         : null;
   return { title, brokenReason };
 }
@@ -592,7 +592,7 @@ export function linkRef(parsed: ParsedLink): string | null {
       return directoryRef(parsed.path).id;
     case "commit":
       return gitCommitRef(parsed.sha).id;
-    case "work_item":
+    case "task":
     case "ref":
       return parsed.ref;
     case "internal":

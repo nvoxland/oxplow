@@ -3709,8 +3709,8 @@ mod tests {
             db_for_seed.with_conn(|conn| {
                 conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
                 conn.execute(
-                    "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01T00:00:00Z')",
+                    "INSERT INTO effort (task, thread_id, started_at)
+                     VALUES ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01T00:00:00Z')",
                     [],
                 )?;
                 conn.execute(

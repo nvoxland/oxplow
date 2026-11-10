@@ -2,7 +2,7 @@
 # (Renaming through the title's form needs Enter to submit it; a `ui` key
 # step only sends the key event, so that is still the app spec's.)
 given:
-  - { command: oxplow.work_item.create, input: { title: Card one, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Card one, assignee: thr1 } }
 when: { part: swimlanes, params: { scope: all } }
 steps:
   - ui:
@@ -10,6 +10,6 @@ steps:
       - drag: { from: ".card", to: '.lane[data-stage="done"]' }
       - expect:
           count: { '.lane[data-stage="done"] .card': 1 }
-          invoked: [{ command: oxplow.work_item.transition, ok: true }]
-  - when: { sql: "SELECT stage FROM v_work_item WHERE title = 'Card one'" }
+          invoked: [{ command: oxplow.task.transition, ok: true }]
+  - when: { sql: "SELECT stage FROM v_task WHERE title = 'Card one'" }
     expect: { rows: [{ stage: done }] }

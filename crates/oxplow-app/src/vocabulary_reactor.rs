@@ -37,15 +37,15 @@ use crate::extension::extensions::Extension;
 use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 
 /// What the generation needs of the host to build a vocabulary: the
-/// active work list's id recognizer, asked at each build.
+/// active task tracker's id recognizer, asked at each build.
 pub struct VocabularyService {
-    /// The active work list's id recognizer (its id and `id_pattern`), if
+    /// The active task tracker's id recognizer (its id and `id_pattern`), if
     /// it declares one: the vocabulary's way of reading `tsk42` in text.
-    work_item_ids: WorkItemIds,
+    task_ids: TaskIds,
 }
 
-/// The active work list's id recognizer, asked at each build.
-pub type WorkItemIds = Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>;
+/// The active task tracker's id recognizer, asked at each build.
+pub type TaskIds = Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>;
 
 /// What one enabled extension brings to the vocabulary.
 #[derive(serde::Serialize)]
@@ -73,16 +73,16 @@ pub type VocabularyErrors = BTreeMap<String, Vec<crate::extension::extensions::D
 pub struct PreparedVocabulary {
     generation: String,
     declared: Declared,
-    work_item_ids: Option<(String, String)>,
+    task_ids: Option<(String, String)>,
 }
 
 impl PreparedVocabulary {
-    /// Freeze one candidate's enabled declarations with a host-selected work
-    /// item recognizer. This permits capability and vocabulary candidates to
+    /// Freeze one candidate's enabled declarations with a host-selected
+    /// task recognizer. This permits capability and vocabulary candidates to
     /// use the same planned selection without changing either live registry.
     pub fn prepare(
         snapshot: &CatalogSnapshot,
-        work_item_ids: Option<(String, String)>,
+        task_ids: Option<(String, String)>,
     ) -> Result<Self, VocabularyErrors> {
         let errors: VocabularyErrors = snapshot
             .extensions()
@@ -96,7 +96,7 @@ impl PreparedVocabulary {
         Ok(Self {
             generation: snapshot.generation().to_string(),
             declared: declarations(snapshot.extensions()),
-            work_item_ids,
+            task_ids,
         })
     }
 
@@ -121,23 +121,23 @@ impl PreparedVocabulary {
             Ok((mut vocabulary, mut errors)) => {
                 // A bad recognizer rejects the candidate instead of
                 // silently dropping recognition.
-                match self.work_item_ids.as_ref() {
+                match self.task_ids.as_ref() {
                     Some((provider, pattern)) => {
                         match vocabulary
                             .resources
                             .clone()
-                            .with_work_item_ids(provider, pattern)
+                            .with_task_ids(provider, pattern)
                         {
                             Ok(resources) => vocabulary.resources = resources,
                             Err(error) => errors.entry("<host>".to_string()).or_default().push(
                                 Diagnostic::error(
-                                    "activation.work_item_id_recognizer",
-                                    format!("work item id recognizer: {error}"),
+                                    "activation.task_id_recognizer",
+                                    format!("task id recognizer: {error}"),
                                 ),
                             ),
                         }
                     }
-                    None => vocabulary.resources = vocabulary.resources.without_work_item_ids(),
+                    None => vocabulary.resources = vocabulary.resources.without_task_ids(),
                 }
                 errors.retain(|_, messages| !messages.is_empty());
                 if errors.is_empty() {
@@ -179,8 +179,8 @@ fn declarations(extensions: &[Extension]) -> Declared {
 }
 
 impl VocabularyService {
-    pub fn new(work_item_ids: WorkItemIds) -> Self {
-        Self { work_item_ids }
+    pub fn new(task_ids: TaskIds) -> Self {
+        Self { task_ids }
     }
 
     /// Capture declarations and the current host recognizer from one catalog
@@ -190,24 +190,24 @@ impl VocabularyService {
         &self,
         snapshot: &CatalogSnapshot,
     ) -> Result<PreparedVocabulary, VocabularyErrors> {
-        PreparedVocabulary::prepare(snapshot, (self.work_item_ids)())
+        PreparedVocabulary::prepare(snapshot, (self.task_ids)())
     }
 }
 
-/// `resources` recognizing the active work list's ids (`ids`), or none.
-pub fn with_work_item_ids(
+/// `resources` recognizing the active task tracker's ids (`ids`), or none.
+pub fn with_task_ids(
     resources: ResourceRegistry,
     ids: Option<&(String, String)>,
 ) -> ResourceRegistry {
     match ids {
         Some((provider, pattern)) => resources
             .clone()
-            .with_work_item_ids(provider, pattern)
+            .with_task_ids(provider, pattern)
             .unwrap_or_else(|e| {
-                tracing::warn!(provider, error = %e, "the work list's id pattern doesn't compile");
-                resources.without_work_item_ids()
+                tracing::warn!(provider, error = %e, "the task tracker's id pattern doesn't compile");
+                resources.without_task_ids()
             }),
-        None => resources.without_work_item_ids(),
+        None => resources.without_task_ids(),
     }
 }
 
@@ -545,7 +545,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT resource, resolve, searchable FROM v_resource \
-                 WHERE resource IN ('oxplow/work_item', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
+                 WHERE resource IN ('oxplow/task', 'oxplow/decision', 'oxplow/comment', 'oxplow/file', 'oxplow/event') \
                  ORDER BY resource",
                 vec![],
                 None,
@@ -569,11 +569,7 @@ mod tests {
                 ],
                 vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
                 vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
-                vec![
-                    text("oxplow/work_item"),
-                    text("v_work_item"),
-                    text("v_search_work_item")
-                ],
+                vec![text("oxplow/task"), text("v_task"), text("v_search_task")],
             ]
         );
     }
@@ -978,7 +974,7 @@ resources:
     #[tokio::test]
     async fn a_subscription_to_no_type_at_all_is_refused_at_load() {
         let d = tempfile::tempdir().unwrap();
-        for bad in ["work_item.nope", "beta.nope", "nope"] {
+        for bad in ["task.nope", "beta.nope", "nope"] {
             write(
                 d.path(),
                 ".oxplow/extensions/beta/extension.yaml",

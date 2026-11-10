@@ -26,7 +26,7 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 `new` takes a kind instead of `extension` to start from that kind's
 starter: `page`, `collector`, `command`, `effect`, `provider`,
 `component`, `policy`, `advisory`, `skill` or `panel`. A provider takes `--capability` for what it
-implements: `work_items` (the default), `effort_policy`,
+implements: `task_tracker` (the default), `effort_policy`,
 `agent_harness` (a harness that tells its subagents apart also declares
 the `subagents` feature; see the provider protocol), `snapshots` (its
 example marks a one-file tree under `fixtures/tree`; the `contents`
@@ -144,7 +144,7 @@ pages, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
 `` optional import `items` for `oxplow:oxplow/dataset?dataset=maker/items` v1 is unavailable: maker
-is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow.work-item.sections-0` ``.
+is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow.task-detail.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -232,7 +232,7 @@ lists each declared reference with Set… and Revoke.
 | `advisories` | guidance queries for the coding agent |  |
 | `skills` | skills and slash commands for the coding agent |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | below |
-| `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
+| `providers` | an external program implementing a capability, such as the task tracker | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
 | `ui.mounts` | a page placed at another page's slot (`at: <namespace>/<page>.<slot>`) |  |
@@ -303,7 +303,7 @@ collectors:
   - id: prs
     runtime: starlark        # starlark | jaq | exec
     entry: collectors/prs.star
-    input: "SELECT uri, title FROM v_work_item"
+    input: "SELECT uri, title FROM v_task"
     on: { every: 15m }  # or manual (the default), or { on: [event types] }
     entities:
       - { name: pr, key: number, columns: { number: int, title: text } }
@@ -363,7 +363,7 @@ commands:
     input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
     entry: handlers/finish.star     # transform(x) → { commands: [...] } | { refuse: "why" }
     needs: [sql.read]               # the scopes its script calls
-    ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { uri: "{{uri}}" } }
+    ui: { label: Finish Review, group: Review, about: oxplow/task, input: { uri: "{{uri}}" } }
 ```
 
 A command with `about` is offered on every ref of that resource. Add
@@ -402,7 +402,7 @@ the page's own actions, sorted by label.
   or is compared with a `uri`. A URI can outlive what it names, so store it even when
   the thing may go.
 - `ui` says how a person meets it. `about` names a resource
-  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
+  (`oxplow/task`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
   `{{uri}}` (the page's URI) or `{{uri.id}}` (its key), each as a whole string. `form` opens a
   page to gather the input instead; offered on a URI (`about`), the page
   opens with `uri=<uri>`, which a page's form prefills from with
@@ -538,7 +538,7 @@ resources:
 - A resource has no page of its own to name. A URI opens as itself, and
   a page you declare with `for:` draws it ("Showing a resource" below).
 - `about:` on a command or a prompt, and `resource:` on a decorator, take
-  a resource name: `oxplow/work_item`, `github/pr`.
+  a resource name: `oxplow/task`, `github/pr`.
 
 `oxplow extension check` refuses an unknown dataset, a pattern
 outside that subset, an icon oxplow doesn't draw, and a resource or
@@ -599,16 +599,16 @@ The same table is the `v_replaceable` dataset.
 <!-- replaceables:begin (generated from oxplow_domain::replaceable::REPLACEABLE; bless with OXPLOW_BLESS=1) -->
 | Target | What it is | Bound to a provider | Version | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | board | no | 2 | `scope`, `thread_id` | `show`, `priority`, `q` |
-| `work_item.list` | list | no | 2 | `scope`, `thread_id` | — |
-| `work_item.detail` | description editor | no | 1 | `uri` | — |
-| `work_item.detail.state` | state control | yes | 1 | `uri` | — |
+| `task.board` | board | no | 2 | `scope`, `thread_id` | `show`, `priority`, `q` |
+| `task.list` | list | no | 2 | `scope`, `thread_id` | — |
+| `task.detail` | description editor | no | 1 | `uri` | — |
+| `task.detail.state` | state control | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
 | `effort.verdict` | effort verdict | no | 1 | `effort_id` | — |
 <!-- replaceables:end -->
 
-A view of work items reads `v_work_item` and changes items only through
-the interface commands (`oxplow.work_item.update`, `transition`,
+A view of tasks reads `v_task` and changes items only through
+the interface commands (`oxplow.task.update`, `transition`,
 `reorder`, `move`, …), so it works with whichever list is active; the
 active list's `features` (`v_capability_provider`) say which of them it
 takes.
@@ -619,7 +619,7 @@ takes.
 effects:
   - id: announce-done
     summary: Note a finished item on its thread.
-    on: [work_item.state_changed]
+    on: [task.state_changed]
     where: { to: done }
     needs: [sql.read]
     entry: effects/announce.star    # transform({ event }) → { commands } | { skip: "why" }
@@ -638,7 +638,7 @@ which run first:
 ```yaml
 effects:
   - id: notify
-    on: [work_item.state_changed]
+    on: [task.state_changed]
     entry: effects/notify.star
     after: [react, "collector:acme/gather", change.analyze]
 ```
@@ -649,7 +649,7 @@ An entry is one of:
   any extension's (the short forms of `oxplow:oxplow/effect?effect=…` and
   `oxplow:oxplow/collector?collector=…`);
 - one of oxplow's own steps, by name (`change.analyze`, `collection`,
-  `page_ref.work_item`, …), or as `consumer:<name>`.
+  `page_ref.task`, …), or as `consumer:<name>`.
 
 A target nothing declares, or contributions that wait on each other, is
 a load error, and the contribution doesn't run. A target in a disabled
@@ -671,12 +671,12 @@ triggered it):
 
 ```json
 {
-  "id": "0199…", "type": "work_item.state_changed", "v": 1, "seq": 812,
+  "id": "0199…", "type": "task.state_changed", "v": 1, "seq": 812,
   "at": "2026-10-09T14:02:11.120000Z", "source": "agent:thr3",
-  "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
+  "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
   "anchors": { "stream_id": "str1", "thread_id": "thr3", "effort_id": null,
                "turn_id": 41, "agent_session_id": "ses2", "snapshot_id": null },
-  "payload": { "work_item": "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "to": "done" },
+  "payload": { "task": "oxplow:oxplow/task?id=tsk4&provider=oxtask", "to": "done" },
   "cause": null
 }
 ```
@@ -723,7 +723,7 @@ implementations:
 ### Effort policies
 
 An effort policy decides when a thread's effort opens, closes and links
-to a work item. oxplow's own opens one per commit or task switch; a
+to a task. oxplow's own opens one per commit or task switch; a
 script can be yours instead. `oxplow extension new policy <name>`
 writes one that opens an item's effort when an agent starts it on a
 thread and closes it when the item is done. For a fuller one, see

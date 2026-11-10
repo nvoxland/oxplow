@@ -133,7 +133,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.work_item.create",
+                "oxplow.task.create",
                 serde_json::json!({
                     "title": "Fix it",
                     "assignee": thread.to_string(),

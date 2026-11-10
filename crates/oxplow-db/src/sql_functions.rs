@@ -179,7 +179,7 @@ fn uri_param(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
         .and_then(|u| u.param(&key).map(str::to_string)))
 }
 
-/// `uri_resource(uri)`: the resource a URI names (`oxplow/work_item`);
+/// `uri_resource(uri)`: the resource a URI names (`oxplow/task`);
 /// NULL when it isn't an oxplow URI.
 fn uri_resource(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
     Ok(text(ctx, 0)?.and_then(|t| oxplow_domain::uri::build::resource_of(&t)))
@@ -328,10 +328,10 @@ mod tests {
             Some("oxplow:oxplow/effort?id=eff12")
         );
         assert_eq!(
-            run("SELECT uri('oxplow/work_item', 'provider', 'oxplow', 'id', 'tsk1', 'x', NULL)")
+            run("SELECT uri('oxplow/task', 'provider', 'oxtask', 'id', 'tsk1', 'x', NULL)")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")
+            Some("oxplow:oxplow/task?id=tsk1&provider=oxtask")
         );
         assert_eq!(
             run("SELECT uri('oxplow/file', 'path', 'a b&c.rs')")
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn uri_param_reads_one_param() {
         assert_eq!(
-            run("SELECT uri_param('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'id')")
+            run("SELECT uri_param('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'id')")
                 .unwrap()
                 .as_deref(),
             Some("tsk1")
@@ -377,10 +377,10 @@ mod tests {
     #[test]
     fn uri_resource_reads_the_resource() {
         assert_eq!(
-            run("SELECT uri_resource('oxplow:oxplow/work_item?id=tsk1&provider=oxplow')")
+            run("SELECT uri_resource('oxplow:oxplow/task?id=tsk1&provider=oxtask')")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow/work_item")
+            Some("oxplow/task")
         );
         assert_eq!(run("SELECT uri_resource('effort:eff1')").unwrap(), None);
         assert_eq!(run("SELECT uri_resource(NULL)").unwrap(), None);

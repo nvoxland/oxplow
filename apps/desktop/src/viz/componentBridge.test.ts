@@ -10,13 +10,13 @@ import { componentBundleUrl, componentMayOpen, createBridgeHost, initMessage, vi
 
 test("frame messages parse into their requests and ready; anything else is refused", () => {
   expect(parseFrameMessage({ type: "ready" })).toEqual({ type: "ready" });
-  expect(parseFrameMessage({ id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } })).toEqual({
+  expect(parseFrameMessage({ id: "2", method: "invoke", command: "oxplow.task.transition", input: { to: "done" } })).toEqual({
     type: "request",
-    request: { id: "2", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } },
+    request: { id: "2", method: "invoke", command: "oxplow.task.transition", input: { to: "done" } },
   });
-  expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({
+  expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toEqual({
     type: "request",
-    request: { id: "3", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", newTab: false, replace: false },
+    request: { id: "3", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", newTab: false, replace: false },
   });
   expect(parseFrameMessage({ id: "4", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true })).toEqual({
     type: "request",
@@ -192,31 +192,31 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
 test("an invoke that asks is confirmed in the host, with what it asks about, then runs confirmed; declined, it's CANCELLED", async () => {
   const asked: [string, string[]][] = [];
   const yes = harness({ confirm: async (command, details) => (asked.push([command, details]), true) });
-  yes.send({ id: "i1", method: "invoke", command: "oxplow.work_item.transition", input: { to: "done" } });
+  yes.send({ id: "i1", method: "invoke", command: "oxplow.task.transition", input: { to: "done" } });
   await yes.settle();
   expect(yes.calls).toEqual([
-    ["invoke", "oxplow.work_item.transition", { to: "done" }, false],
-    ["invoke", "oxplow.work_item.transition", { to: "done" }, true],
+    ["invoke", "oxplow.task.transition", { to: "done" }, false],
+    ["invoke", "oxplow.task.transition", { to: "done" }, true],
   ]);
   expect(yes.received).toEqual([{ id: "i1", ok: true, result: null }]);
-  expect(asked).toEqual([["oxplow.work_item.transition", ["process — runs programs"]]]);
+  expect(asked).toEqual([["oxplow.task.transition", ["process — runs programs"]]]);
   yes.channel.port1.close();
 
   const no = harness({ confirm: async () => false });
-  no.send({ id: "i2", method: "invoke", command: "oxplow.work_item.transition", input: {} });
+  no.send({ id: "i2", method: "invoke", command: "oxplow.task.transition", input: {} });
   await no.settle();
-  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `oxplow.work_item.transition`." } }]);
+  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `oxplow.task.transition`." } }]);
   no.channel.port1.close();
 });
 
 test("navigate opens the ref; a malformed request is answered with an error when it has an id", async () => {
   const h = harness();
-  h.send({ id: "n1", method: "navigate", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+  h.send({ id: "n1", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" });
   h.send({ id: "n2", method: "navigate", uri: "oxplow:oxplow/commit?sha=abc", newTab: true });
   h.send({ id: "b1", method: "exec" });
   await h.settle();
   expect(h.calls).toEqual([
-    ["navigate", "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", { newTab: false, replace: false }],
+    ["navigate", "oxplow:oxplow/task?id=tsk1&provider=oxtask", { newTab: false, replace: false }],
     ["navigate", "oxplow:oxplow/commit?sha=abc", { newTab: true, replace: false }],
   ]);
   expect(h.received).toEqual([
@@ -261,7 +261,7 @@ test("ready is heard once; an update posts only what the frame hasn't seen, nami
 });
 
 test("a component navigates to app pages only", async () => {
-  expect(componentMayOpen("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")).toBe(true);
+  expect(componentMayOpen("oxplow:oxplow/task?id=tsk1&provider=oxtask")).toBe(true);
   expect(componentMayOpen("oxplow:oxplow/handoff?id=hnd1")).toBe(true);
   expect(componentMayOpen("https://evil.example/?d=1")).toBe(false);
   expect(componentMayOpen("not a ref")).toBe(false);

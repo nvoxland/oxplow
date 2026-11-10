@@ -1,8 +1,8 @@
 # Provider protocol
 
 A provider is a program that implements one of oxplow's capabilities
-for it. Today that's the work list: a provider can make oxplow's tasks
-live in another tracker. oxplow starts the program, talks to it over
+for it. Today that's the task tracker: a provider can replace oxtask
+with another tracker. oxplow starts the program, talks to it over
 stdin/stdout, and reads and writes through it.
 
 ```sh
@@ -59,7 +59,7 @@ foreign body.
 # .oxplow/extensions/my-tracker/extension.yaml
 providers:
   - id: tracker
-    capability: work_items
+    capability: task_tracker
     entry: bin/provider            # the program, inside the folder
     declarations: provider.json    # what `initialize` answers, checked in
     env: [HOME]                    # environment variables it may read
@@ -72,7 +72,7 @@ providers:
   a scrubbed environment: `PATH`, `HOME`, the `env` names, its
   credentials, `OXPLOW_EXTENSION_DIR` and `OXPLOW_PROVIDER_ID` (the
   instance it runs as, which is the `provider` param of its URIs:
-  `oxplow:oxplow/work_item?id=…&provider=<id>`).
+  `oxplow:oxplow/task?id=…&provider=<id>`).
 - It runs only from a deployment of its extension, and only if the
   extension declares the permissions it needs (`process`, plus `network`
   and `secrets` for the hosts and credentials above). A person approves
@@ -151,8 +151,8 @@ The standard JSON-RPC codes, plus:
 - **Exits are noticed.** A process that exits on its own is restarted
   after a backoff. Three failures in a row (calls, starts or exits)
   disable the instance until a person turns it back on.
-- **You emit only your capability's events.** A work list's are
-  `work_item.recorded`, for its own items.
+- **You emit only your capability's events.** A task tracker's are
+  `task.recorded`, for its own items.
 
 ## Testing
 
@@ -160,6 +160,6 @@ The standard JSON-RPC codes, plus:
 config (`fixtures/provider-<id>.yaml`): the handshake against
 `declarations`, every intent example, every message against the
 schemas, a golden transcript (`--bless` writes it) and the
-capability's conformance suite. The work-items suite creates, updates,
+capability's conformance suite. The task tracker suite creates, updates,
 transitions, links, comments on and deletes an item through you, and
 reads each back.

@@ -32,8 +32,8 @@ loaders:
   # Its thread's work, and the efforts whose files it edited.
   related:
     sql: |
-      SELECT 'Thread work' AS title, uri('oxplow/page', 'page', 'thread-work', 'thread', 'thr' || s.thread_id) AS uri,
-             'The work items of its thread' AS description, 1 AS ord
+      SELECT 'Thread work' AS title, uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr' || s.thread_id) AS uri,
+             'The tasks of its thread' AS description, 1 AS ord
       FROM v_agent_session s WHERE s.uri = :uri
       UNION ALL
       SELECT e.title, e.uri, 'An effort whose files this session edited', 2

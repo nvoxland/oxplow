@@ -24,7 +24,7 @@ export interface Stage {
   bucket: string;
 }
 
-/** The `work-item-stages` query's rows, in the list's order. */
+/** The `task-stages` query's rows, in the list's order. */
 export function stagesOf(rows: Rec[]): Stage[] {
   return rows
     .filter((r) => r.value != null)
@@ -138,7 +138,7 @@ export interface Field {
 }
 
 /** The list's own choice fields a person may set (priority, …), from the
- *  `work-item-fields` query's rows. */
+ *  `task-fields` query's rows. */
 export function choiceFields(rows: Rec[]): Field[] {
   return rows
     .filter((r) => r.kind === "enum" && !truthy(r.read_only))
@@ -189,7 +189,7 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
   };
   group(stages.filter((s) => s.value !== card.stage).map((s) => ({
     kind: "item" as const, id: `to-${s.value}`, label: `Mark ${s.label}`,
-    act: { command: "oxplow.work_item.transition", input: { uri, to: s.value } },
+    act: { command: "oxplow.task.transition", input: { uri, to: s.value } },
   })));
   const native = parseObject(card.native);
   for (const f of fields) {
@@ -197,7 +197,7 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
       { kind: "heading", label: f.title },
       ...f.values.map((v) => ({
         kind: "item" as const, id: `${f.name}-${v}`, label: humanize(v), checked: native[f.name] === v,
-        act: { command: "oxplow.work_item.update", input: { uri, native: { [f.name]: v } } },
+        act: { command: "oxplow.task.update", input: { uri, native: { [f.name]: v } } },
       })),
     ]);
   }
@@ -205,7 +205,7 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
   if (truthy(card.is_open)) {
     const assign = (id: string, label: string, to: string | null): MenuEntry => ({
       kind: "item", id, label, checked: (card.assignee ?? null) === to,
-      act: { command: "oxplow.work_item.assign", input: { uri, to } },
+      act: { command: "oxplow.task.assign", input: { uri, to } },
     });
     group([
       { kind: "heading", label: "Assign to" },
@@ -214,8 +214,8 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
     ]);
   }
   const moves: MenuEntry[] = [];
-  if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { command: "oxplow.work_item.update", input: { uri, parent_uri: "" } } });
-  if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { command: "oxplow.work_item.delete", input: { uri } } });
+  if (truthy(card.has_parent)) moves.push({ kind: "item", id: "unparent", label: "Make top-level", act: { command: "oxplow.task.update", input: { uri, parent_uri: "" } } });
+  if (truthy(card.can_delete)) moves.push({ kind: "item", id: "delete", label: "Delete", danger: true, act: { command: "oxplow.task.delete", input: { uri } } });
   group(moves);
   return out;
 }
@@ -226,9 +226,9 @@ export function cardMenu(card: Rec, { fields, assignees, stages }: MenuContext):
 export function dropAct(card: Rec, to: string, before: Rec | null): Act | null {
   if (card.uri == null) return null;
   const uri = String(card.uri);
-  if (to !== card.stage) return { command: "oxplow.work_item.transition", input: { uri, to } };
+  if (to !== card.stage) return { command: "oxplow.task.transition", input: { uri, to } };
   if (before && before.uri === card.uri) return null;
-  return { command: "oxplow.work_item.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
+  return { command: "oxplow.task.reorder", input: before?.uri ? { uri, before: String(before.uri) } : { uri } };
 }
 
 export interface Filters {

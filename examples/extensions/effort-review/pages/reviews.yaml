@@ -1,5 +1,5 @@
 title: Effort Reviews
-description: Each finished effort a model reviewed — its work item, its review's state and what it wrote. Open the output to follow a running one; Cancel stops it.
+description: Each finished effort a model reviewed — its task, its review's state and what it wrote. Open the output to follow a running one; Cancel stops it.
 category: Work
 loaders:
   reviews:
@@ -7,7 +7,7 @@ loaders:
       SELECT job_run,
              uri('oxplow/page', 'page', 'job-run-output', 'job_run', job_run) AS output_ref,
              effort,
-             work_item,
+             task,
              state,
              substr(review, 1, 200) AS opening,
              reviewed_at
@@ -22,18 +22,18 @@ view:
     link:
       kind: page
       from: output_ref
-  - key: work_item
-    label: Work item
+  - key: task
+    label: Task
     link:
       kind: page
-      from: work_item
+      from: task
   - key: state
     label: State
   - key: opening
     label: Review
   - key: reviewed_at
     label: Changed
-  empty: No effort has been reviewed yet. A review starts when an effort with a work item finishes, or from Review on the Finished Efforts page.
+  empty: No effort has been reviewed yet. A review starts when an effort with a task finishes, or from Review on the Finished Efforts page.
   actions:
   - id: cancel
     label: Cancel

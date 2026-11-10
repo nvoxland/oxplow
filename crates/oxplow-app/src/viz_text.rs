@@ -1937,7 +1937,7 @@ mod tests {
     /// reads as it is.
     #[test]
     fn a_source_column_reads_as_who() {
-        let agent = r#"{"kind":"agent","label":"Main Controller","uri":"oxplow:oxplow/page?page=thread-work&thread=thr1"}"#;
+        let agent = r#"{"kind":"agent","label":"Main Controller","uri":"oxplow:oxplow/page?page=thread-tasks&thread=thr1"}"#;
         let r = with(
             run(
                 Viz::Detail,

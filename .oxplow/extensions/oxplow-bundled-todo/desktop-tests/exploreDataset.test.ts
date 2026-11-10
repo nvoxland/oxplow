@@ -48,7 +48,7 @@ test("lineage splits what a dataset reads from what reads it", () => {
     ],
     readBy: ["v_claim_digest", "v_effort_claim"],
   });
-  expect(lineage("v_work_item", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
+  expect(lineage("v_task", result(["view", "input", "kind"], []))).toEqual({ reads: [], readBy: [] });
 });
 
 
@@ -91,7 +91,7 @@ test("the view reads back from the tab's address, a chart viz only by name", () 
   const v = readView({ dataset: "v_effort", sql: "SELECT 1", viz: "bar", chart: JSON.stringify({ x: "a", y: "b" }) });
   expect(v).toMatchObject({ dataset: "v_effort", sql: "SELECT 1", viz: "bar", chart: { x: "a", y: "b" } });
   expect(readView({ viz: "pie" }).viz).toBe("table");
-  expect(sampleSql("v_work_item")).toBe("SELECT * FROM v_work_item LIMIT 50");
+  expect(sampleSql("v_task")).toBe("SELECT * FROM v_task LIMIT 50");
 });
 
 // What the host draws under the explorer (`showView`) is an inline page:

@@ -80,16 +80,16 @@ mod tests {
     const TIDY: &str = r#"
 def transform(x):
     e = x["event"]
-    if e["type"] != "work_item.state_changed":
+    if e["type"] != "task.state_changed":
         return {"skip": "not an item's move"}
-    item = e["payload"]["work_item"]
+    item = e["payload"]["task"]
     to = e["payload"]["to"]
     thread = e["anchors"].get("thread_id")
     if to == "in_progress" and thread != None:
         return {"commands": [{"name": "oxplow.effort.open",
-                              "input": {"thread": thread, "work_item": item}}]}
+                              "input": {"thread": thread, "task": item}}]}
     if to == "done" or to == "canceled":
-        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE work_item = :w AND ended_at IS NULL",
+        rows = scope("sql.read", {"sql": "SELECT uri FROM v_effort WHERE task = :w AND ended_at IS NULL",
                                   "params": {"w": item}})
         return {"commands": [{"name": "oxplow.effort.close",
                               "input": {"effort": uri.param(r["uri"], "id"), "reason": "switch"}}
@@ -145,7 +145,7 @@ def transform(x):
             .commands
             .run(
                 &Actor::Human,
-                crate::commands::work_item::CREATE,
+                crate::commands::task::CREATE,
                 json!({ "title": "scripted", "assignee": fx.thread.to_string() }),
                 false,
             )
@@ -164,7 +164,7 @@ def transform(x):
             .commands
             .run(
                 &agent,
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": item, "to": to }),
                 false,
             )
@@ -185,7 +185,7 @@ def transform(x):
             .svc
             .sql
             .query_sql(
-                "SELECT count(*) FROM v_effort WHERE thread_id = ?1 AND work_item = ?2 AND ended_at IS NULL",
+                "SELECT count(*) FROM v_effort WHERE thread_id = ?1 AND task = ?2 AND ended_at IS NULL",
                 vec![SqlCell::Int(fx.thread.value()), SqlCell::Text(item.into())],
                 None,
             )

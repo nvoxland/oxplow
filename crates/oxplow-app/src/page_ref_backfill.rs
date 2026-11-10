@@ -4,8 +4,8 @@
 //! `page_ref` on every save, so between boots the graph follows its
 //! sources. A migration that resets `page_ref` (V92 rewrote its kinds
 //! and cleared it) leaves every unsaved row without its edges, and a
-//! writer's bug leaves drift. This restates every work item (from the
-//! work-item interface, the same core its pump consumer runs), effort,
+//! writer's bug leaves drift. This restates every task (from the
+//! task interface, the same core its pump consumer runs), effort,
 //! finding, thread-note and handoff slice from its row on boot, so the graph is its
 //! sources' again — which is why it stays (tsk920): it is the graph's
 //! one repair path.
@@ -31,7 +31,7 @@
 //! Wiki bodies and recent commits are NOT re-projected here —
 //! the wiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
-//! kinds whose data lives entirely in SQLite (work items, efforts,
+//! kinds whose data lives entirely in SQLite (tasks, efforts,
 //! findings, handoffs).
 
 use std::sync::Arc;
@@ -46,7 +46,7 @@ use oxplow_domain::vocabulary::VocabularyHandle;
 /// trail makes the backfill observable.
 #[derive(Debug, Default)]
 pub struct BackfillCounts {
-    pub work_items: usize,
+    pub tasks: usize,
     pub efforts: usize,
     pub findings: usize,
     pub handoffs: usize,
@@ -91,13 +91,13 @@ fn slice(
 pub const REPAIR: &str = "page_ref_repair";
 
 /// The code that decides a source's edges: this module, the shared
-/// projections, the work-item interface's and the effort store's
+/// projections, the task interface's and the effort store's
 /// projectors. When any of it changes, the graph may have drifted; an
 /// edit elsewhere can't move it.
 const PROJECTION_SOURCES: &[&str] = &[
     include_str!("page_ref_backfill.rs"),
     include_str!("../../oxplow-db/src/page_ref_projections.rs"),
-    include_str!("../../oxplow-db/src/work_item_refs.rs"),
+    include_str!("../../oxplow-db/src/task_refs.rs"),
     include_str!("../../oxplow-db/src/effort_store.rs"),
 ];
 
@@ -183,7 +183,7 @@ pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
     }
 }
 
-/// What the backfill projects: the work-item interface (in `db`) and the
+/// What the backfill projects: the task interface (in `db`) and the
 /// stores of the other kinds.
 pub struct Sources {
     pub db: oxplow_db::Database,
@@ -208,13 +208,10 @@ pub async fn run(
     let vocabulary = vocabulary.current();
     let kinds = &vocabulary.resources;
 
-    // 1. Every work item's body, link and comment slices, from the
+    // 1. Every task's body, link and comment slices, from the
     //    interface — whichever list it's on.
-    match db
-        .read(|tx| oxplow_db::work_item_refs::all_refs_tx(tx))
-        .await
-    {
-        Err(e) => tracing::warn!(?e, "page-ref backfill: reading the work items failed"),
+    match db.read(|tx| oxplow_db::task_refs::all_refs_tx(tx)).await {
+        Err(e) => tracing::warn!(?e, "page-ref backfill: reading the tasks failed"),
         Ok(refs) => {
             for batch in refs.chunks(BATCH) {
                 let batch = batch.to_vec();
@@ -224,26 +221,22 @@ pub async fn run(
                         let vocabulary = vocabulary.clone();
                         move |tx| {
                             for item in &batch {
-                                oxplow_db::work_item_refs::restate_tx(
-                                    tx,
-                                    &vocabulary.resources,
-                                    item,
-                                )?;
+                                oxplow_db::task_refs::restate_tx(tx, &vocabulary.resources, item)?;
                             }
                             Ok(())
                         }
                     })
                     .await;
                 match restated {
-                    Ok(()) => counts.work_items += n,
-                    Err(e) => tracing::warn!(?e, "page-ref backfill: a work-item batch failed"),
+                    Ok(()) => counts.tasks += n,
+                    Err(e) => tracing::warn!(?e, "page-ref backfill: a task batch failed"),
                 }
             }
         }
     }
 
     // 1b. The effort-owned slice (touched files, summary mentions,
-    //     declared impacts) of every work item with an effort — an oxplow
+    //     declared impacts) of every task with an effort — an oxplow
     //     task's or another provider's — through the store's own projector.
     //     Read in one go and written in batches, like the kinds below.
     match efforts.effort_slices().await {
@@ -285,9 +278,9 @@ mod tests {
     use oxplow_db::Database;
     use oxplow_domain::stores::{StreamStore, ThreadStore};
     use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
-    use oxplow_tasks::TaskId;
-    use oxplow_tasks::TaskStore;
-    use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+    use oxplow_oxtask::OxtaskId;
+    use oxplow_oxtask::OxtaskStore;
+    use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
 
     fn ts() -> Timestamp {
         Timestamp::from_unix_ms(1_700_000_000_000)
@@ -405,11 +398,11 @@ mod tests {
         );
     }
 
-    /// Every work item is restated from the interface, whichever list
+    /// Every task is restated from the interface, whichever list
     /// it's on: its body, its links (the list's own types) and its
     /// comments; and the effort slices survive.
     #[tokio::test]
-    async fn backfill_restates_every_work_item_from_the_interface() {
+    async fn backfill_restates_every_task_from_the_interface() {
         let db = Database::in_memory();
 
         // Every store mirrors into the ref graph at write time now —
@@ -417,7 +410,7 @@ mod tests {
         // inserting normally, then clearing the projected slice below.
         let streams = oxplow_db::SqliteStreamStore::new(db.clone());
         let threads = oxplow_db::SqliteThreadStore::new(db.clone());
-        let bare_items = oxplow_tasks::SqliteTaskStore::new(db.clone());
+        let bare_items = oxplow_oxtask::SqliteOxtaskStore::new(db.clone());
 
         streams
             .upsert(&Stream {
@@ -458,27 +451,27 @@ mod tests {
             .await
             .unwrap();
         let task_id = bare_items
-            .insert(&Task {
-                id: TaskId::placeholder(),
+            .insert(&Oxtask {
+                id: OxtaskId::placeholder(),
                 parent_id: None,
                 title: "fix".into(),
                 description: "see [[src/app.rs]]".into(),
-                status: TaskStatus::Ready,
-                priority: TaskPriority::Medium,
-                created_by: TaskActorKind::User,
+                status: OxtaskStatus::Ready,
+                priority: OxtaskPriority::Medium,
+                created_by: OxtaskActorKind::User,
                 created_at: ts(),
                 updated_at: ts(),
                 completed_at: None,
                 deleted_at: None,
                 note_count: 0,
-                author: Some(TaskAuthor::User),
+                author: Some(OxtaskAuthor::User),
             })
             .await
             .unwrap();
         // Its row in the interface, as its record put it there: its stage's
         // bucket is the list's declaration.
         let stages = serde_json::to_string(&crate::capabilities::built_in_stage_decls(
-            crate::capabilities::built_in("oxplow:tasks").unwrap(),
+            crate::capabilities::built_in("oxplow:oxtask").unwrap(),
         ))
         .unwrap();
         db.transaction(move |tx| {
@@ -487,17 +480,17 @@ mod tests {
                 "INSERT INTO capability_provider
                    (capability, provider, features_json, active, title, source, available,
                     capability_title, choosable, optional, stages_json)
-                 VALUES ('work_items', 'oxplow', '{}', 1, 'oxplow', 'builtin', 1,
-                         'Work list', 1, 1, ?1)",
+                 VALUES ('task_tracker', 'oxtask', '{}', 1, 'oxtask', 'builtin', 1,
+                         'Task tracker', 1, 1, ?1)",
                 [&stages],
             )
             .map_err(oxplow_db::map_sql_err)?;
-            let record = oxplow_tasks::record::record_tx(tx, task_id)?;
-            crate::work_items::WorkItemsProjection.handle(
+            let record = oxplow_oxtask::record::record_tx(tx, task_id)?;
+            crate::tasks::TasksProjection.handle(
                 tx,
                 &oxplow_domain::StoredEvent {
                     seq: 1,
-                    envelope: oxplow_tasks::provider::recorded(record),
+                    envelope: oxplow_oxtask::provider::recorded(record),
                     payload_expired_at: None,
                 },
             )
@@ -506,15 +499,11 @@ mod tests {
         .unwrap();
 
         // An effort on the task that declared an impact, and one on another
-        // provider's work item with a summary mention (tsk452).
+        // provider's task with a summary mention (tsk452).
         use oxplow_db::EffortStore as _;
         let effort_writer = SqliteEffortStore::new(db.clone());
         let own = effort_writer
-            .start(
-                &oxplow_tasks::work_item_ref(task_id),
-                &ThreadId::new(1),
-                None,
-            )
+            .start(&oxplow_oxtask::task_ref(task_id), &ThreadId::new(1), None)
             .await
             .unwrap();
         effort_writer
@@ -530,7 +519,7 @@ mod tests {
             .unwrap();
         let foreign = effort_writer
             .start(
-                "oxplow:oxplow/work_item?id=ENG-12&provider=issues",
+                "oxplow:oxplow/task?id=ENG-12&provider=issues",
                 &ThreadId::new(1),
                 None,
             )
@@ -544,12 +533,12 @@ mod tests {
         // Another list's item, as its records left it in the interface.
         db.transaction(|tx| {
             for sql in [
-                "INSERT INTO work_item (uri, provider, title, body, state, stage, created_at, updated_at)
-                 VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
-                "INSERT INTO work_item_link (from_uri, to_uri, link_type, created_at)
-                 VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'oxplow:oxplow/work_item?id=ENG-7&provider=issues', 'parent_of', 't')",
-                "INSERT INTO work_item_comment (id, uri, body, created_at)
-                 VALUES ('oxplow:oxplow/work_item?id=ENG-12&provider=issues#part=c1', 'oxplow:oxplow/work_item?id=ENG-12&provider=issues', 'see [[src/c.rs]]', 't')",
+                "INSERT INTO task (uri, provider, title, body, state, stage, created_at, updated_at)
+                 VALUES ('oxplow:oxplow/task?id=ENG-12&provider=issues', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
+                "INSERT INTO task_link (from_uri, to_uri, link_type, created_at)
+                 VALUES ('oxplow:oxplow/task?id=ENG-12&provider=issues', 'oxplow:oxplow/task?id=ENG-7&provider=issues', 'parent_of', 't')",
+                "INSERT INTO task_comment (id, uri, body, created_at)
+                 VALUES ('oxplow:oxplow/task?id=ENG-12&provider=issues#part=c1', 'oxplow:oxplow/task?id=ENG-12&provider=issues', 'see [[src/c.rs]]', 't')",
             ] {
                 tx.execute(sql, []).map_err(oxplow_db::map_sql_err)?;
             }
@@ -561,8 +550,8 @@ mod tests {
         // Wipe the slices the writes just projected so the table looks
         // like a DB whose graph was reset.
         for source in [
-            oxplow_domain::uri::build::work_item_uri("oxplow", &task_id.to_string()),
-            oxplow_domain::uri::build::work_item_uri("issues", "ENG-12"),
+            oxplow_domain::uri::build::task_uri("oxtask", &task_id.to_string()),
+            oxplow_domain::uri::build::task_uri("issues", "ENG-12"),
         ] {
             page_refs.replace_source(&source, Vec::new()).await.unwrap();
         }
@@ -583,7 +572,7 @@ mod tests {
             },
         )
         .await;
-        assert_eq!(counts.work_items, 2);
+        assert_eq!(counts.tasks, 2);
 
         let post = page_refs
             .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
@@ -592,17 +581,14 @@ mod tests {
         assert_eq!(post.len(), 1, "got {post:?}");
         assert_eq!(
             post[0].source,
-            oxplow_domain::uri::build::work_item_uri("oxplow", &task_id.to_string())
+            oxplow_domain::uri::build::task_uri("oxtask", &task_id.to_string())
         );
-        // Another provider's work item is backfilled too — its effort's
+        // Another provider's task is backfilled too — its effort's
         // summary, its link and its comment …
         use oxplow_domain::uri::build;
         for (target, ref_type) in [
             (build::file_uri("src/lib.rs"), "summary_file_ref"),
-            (
-                build::work_item_uri("issues", "ENG-7"),
-                "work_item_link:parent_of",
-            ),
+            (build::task_uri("issues", "ENG-7"), "task_link:parent_of"),
             (build::file_uri("src/c.rs"), "comment_file_ref"),
         ] {
             let refs = page_refs.list_backlinks(&target, None).await.unwrap();
@@ -610,7 +596,7 @@ mod tests {
                 refs.iter()
                     .map(|r| (r.source.clone(), r.ref_type.as_str()))
                     .collect::<Vec<_>>(),
-                vec![(build::work_item_uri("issues", "ENG-12"), ref_type)],
+                vec![(build::task_uri("issues", "ENG-12"), ref_type)],
                 "{target}"
             );
         }

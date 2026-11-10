@@ -762,7 +762,7 @@ pub struct OxplowConfig {
     #[serde(rename = "extensionInstances")]
     pub extension_instances: std::collections::BTreeMap<String, ExtensionInstanceConfig>,
     /// The project's choice of implementation per choosable capability
-    /// (`activeProviders: { work_items: issues, effort_policy: none }`); a
+    /// (`activeProviders: { task_tracker: issues, effort_policy: none }`); a
     /// capability absent here keeps its default.
     #[serde(rename = "activeProviders")]
     pub active_providers: std::collections::BTreeMap<String, String>,
@@ -776,7 +776,7 @@ pub struct OxplowConfig {
     #[serde(rename = "personalNewThreadSession")]
     pub personal_new_thread_session: Option<String>,
     /// Whose component shows for a replaceable core sub-component, by
-    /// target (`replacements: { work_item.board: task-views,
+    /// target (`replacements: { task.board: task-views,
     /// vcs.history.graph: oxplow }`): an extension replacing it, or
     /// `oxplow` for oxplow's own. A target not listed shows its default:
     /// the only extension replacing it, or a bound target's provider's.
@@ -1176,10 +1176,10 @@ struct RawConfig {
     /// Instances of extension providers, by `<extension>/<instance id>`: `{ enabled, config, provider? }` (the provider's instance config; `provider` names which of the extension's providers an instance with its own id is). Enabling one runs its program once this machine approved it.
     #[serde(rename = "extensionInstances", default)]
     extension_instances: Option<std::collections::BTreeMap<String, ExtensionInstanceConfig>>,
-    /// Each capability's active provider, by instance id: `{ work_items: issues }` (a provider's default instance has the provider's id). New work items file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
+    /// Each capability's active provider, by instance id: `{ task_tracker: issues }` (a provider's default instance has the provider's id). New tasks file there; absent, oxplow's own. A provider that isn't running is a failure, never a fallback.
     #[serde(rename = "activeProviders", default)]
     active_providers: Option<std::collections::BTreeMap<String, String>>,
-    /// Whose component shows for a replaceable core sub-component, by target: `{ work_item.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`work_item.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.
+    /// Whose component shows for a replaceable core sub-component, by target: `{ task.board: task-views, vcs.history.graph: oxplow }` — an extension replacing it, or `oxplow` for oxplow's own. Unlisted, the only extension replacing it shows (several: oxplow's own); a bound target (`task.detail.state`) shows its provider's extension's, and may only be set to `oxplow`.
     #[serde(rename = "replacements", default)]
     replacements: Option<std::collections::BTreeMap<String, String>>,
     /// How long each event namespace's payloads and large content are kept, in days: `{ agent: { payloadDays: 60, contentDays: 14 } }`, over core's defaults (agent 30/14; test, code, collector, effect 90/30). An extension's namespace is kept no longer than its window; core state (snapshot, vcs, effort, …) is kept whole.
@@ -3864,17 +3864,17 @@ mod tests {
     #[test]
     fn active_providers_name_one_provider_per_capability() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
-        let config = parse("activeProviders: { work_items: issues }\n").unwrap();
-        assert_eq!(config.active_providers["work_items"], "issues");
+        let config = parse("activeProviders: { task_tracker: issues }\n").unwrap();
+        assert_eq!(config.active_providers["task_tracker"], "issues");
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(
-            yaml.contains("activeProviders:\n  work_items: issues"),
+            yaml.contains("activeProviders:\n  task_tracker: issues"),
             "{yaml}"
         );
         let err = parse("activeProviders: { vcs: jj }\n").unwrap_err();
-        assert!(err.to_string().contains("work_items"), "{err}");
-        let err = parse("activeProviders: { work_items: Issues-App }\n").unwrap_err();
+        assert!(err.to_string().contains("task_tracker"), "{err}");
+        let err = parse("activeProviders: { task_tracker: Issues-App }\n").unwrap_err();
         assert!(err.to_string().contains("instance id"), "{err}");
         assert!(parse("agents: [claude]\n")
             .unwrap()
@@ -3893,7 +3893,7 @@ mod tests {
         std::fs::create_dir_all(&oxplow).unwrap();
         std::fs::write(
             oxplow.join("project.yaml"),
-            "activeProviders: { work_items: issues }\n",
+            "activeProviders: { task_tracker: issues }\n",
         )
         .unwrap();
         std::fs::write(
@@ -3905,7 +3905,7 @@ mod tests {
         assert_eq!(
             config
                 .active_providers
-                .get("work_items")
+                .get("task_tracker")
                 .map(String::as_str),
             Some("issues")
         );
@@ -4087,27 +4087,24 @@ mod tests {
     fn replacements_chooses_whose_component_shows() {
         let parse = |yaml: &str| parse_project_config(serde_yaml::from_str(yaml).unwrap(), "demo");
         let config = parse(
-            "replacements: { vcs.history.graph: oxplow-bundled, work_item.board: task-views, work_item.detail.state: oxplow }\n",
+            "replacements: { vcs.history.graph: oxplow-bundled, task.board: task-views, task.detail.state: oxplow }\n",
         )
         .unwrap();
         assert_eq!(
-            config
-                .replacements
-                .get("work_item.board")
-                .map(String::as_str),
+            config.replacements.get("task.board").map(String::as_str),
             Some("task-views")
         );
         assert_eq!(
             config
                 .replacements
-                .get("work_item.detail.state")
+                .get("task.detail.state")
                 .map(String::as_str),
             Some("oxplow")
         );
         let doc = render_project_config(&config, "demo");
         let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(doc)).unwrap();
         assert!(yaml.contains("vcs.history.graph: oxplow-bundled"), "{yaml}");
-        let bound = parse("replacements: { work_item.detail.state: beads }\n").unwrap_err();
+        let bound = parse("replacements: { task.detail.state: beads }\n").unwrap_err();
         assert!(
             bound
                 .to_string()
@@ -4115,10 +4112,10 @@ mod tests {
             "{bound}"
         );
         let unknown = parse("replacements: { vcs.conflict.resolver: x }\n").unwrap_err();
-        assert!(unknown.to_string().contains("work_item.list"), "{unknown}");
+        assert!(unknown.to_string().contains("task.list"), "{unknown}");
         assert!(parse("agents: [claude]\n").unwrap().replacements.is_empty());
         assert!(
-            parse("replacementsOff: [work_item.board]\n").is_err(),
+            parse("replacementsOff: [task.board]\n").is_err(),
             "the old key is gone"
         );
     }
@@ -4249,7 +4246,7 @@ mod tests {
     /// own: `oxplow`, and a core namespace.
     #[test]
     fn an_instance_id_may_not_be_oxplows_own() {
-        for id in ["oxplow", "code", "config", "work_item"] {
+        for id in ["oxplow", "code", "config", "task"] {
             let mut all = std::collections::BTreeMap::new();
             all.insert(
                 format!("tracker/{id}"),
@@ -4335,16 +4332,16 @@ mod tests {
 metrics:
   - key: work.done
     title: Tasks completed
-    entity: v_work_item
+    entity: v_task
     where: "state = 'done'"
     time: closed_at
   - key: work.median_prio
-    entity: v_work_item
+    entity: v_task
     aggregation: median
     value: "e.rank"
 dimensions:
   - key: work.prio
-    entity: v_work_item
+    entity: v_task
     expr: "json_extract(e.native, '$.priority')"
     join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
 "#;
@@ -4360,7 +4357,7 @@ dimensions:
         assert_eq!(
             resolved[0].entity,
             Some(EntitySpec {
-                view: "v_work_item".into(),
+                view: "v_task".into(),
                 where_: Some("state = 'done'".into()),
                 time: Some("closed_at".into()),
                 value: None,
@@ -4373,7 +4370,7 @@ dimensions:
         assert_eq!(
             rd[0].entity,
             Some(EntityDimensionSpec {
-                view: "v_work_item".into(),
+                view: "v_task".into(),
                 expr: "json_extract(e.native, '$.priority')".into(),
                 join: Some("LEFT JOIN v_thread t ON t.id = e.thread_id".into()),
             })
@@ -4389,14 +4386,12 @@ dimensions:
                 .to_string()
         };
         assert!(bad("[{key: a.b, entity: tasks}]").contains("v_*"));
+        assert!(bad("[{key: a.b, entity: v_task, aggregation: sum}]").contains("needs a `value`"));
         assert!(
-            bad("[{key: a.b, entity: v_work_item, aggregation: sum}]").contains("needs a `value`")
-        );
-        assert!(
-            bad("[{key: a.b, entity: v_work_item, aggregation: ratio, value: x}]")
+            bad("[{key: a.b, entity: v_task, aggregation: ratio, value: x}]")
                 .contains("entity aggregation")
         );
-        assert!(bad("[{key: a.b, entity: v_work_item, measure: m}]").contains("can't also set"));
+        assert!(bad("[{key: a.b, entity: v_task, measure: m}]").contains("can't also set"));
         assert!(bad("[{key: a.b, measure: m, where: x}]").contains("without `entity`"));
         assert!(bad("[{use: a.b, time: x}]").contains("`use:` entry"));
         let dim = |yaml: &str| {
@@ -4405,12 +4400,10 @@ dimensions:
                 .unwrap_err()
                 .to_string()
         };
-        assert!(dim("[{key: a.b, entity: v_work_item}]").contains("needs an `expr`"));
+        assert!(dim("[{key: a.b, entity: v_task}]").contains("needs an `expr`"));
         assert!(dim("[{key: a.b, expr: x}]").contains("without `entity`"));
-        assert!(
-            dim("[{key: a.b, entity: v_work_item, expr: x, promote: true}]")
-                .contains("fact dimensions only")
-        );
+        assert!(dim("[{key: a.b, entity: v_task, expr: x, promote: true}]")
+            .contains("fact dimensions only"));
     }
     use tempfile::tempdir;
 

@@ -43,7 +43,7 @@ function command(id: string, label: string, enabled = true): CommandEntry {
 describe("dedupeSiteHits", () => {
   test("keeps body hits for pages and non-matching files", () => {
     const out = dedupeSiteHits(
-      [hit("wiki", "architecture-overview"), hit("file", "src/other.rs"), hit("work_item", "12")],
+      [hit("wiki", "architecture-overview"), hit("file", "src/other.rs"), hit("task", "12")],
       new Set(["src/main.rs"]),
     );
     expect(out.map((h) => keyOf(h.uri))).toEqual(["architecture-overview", "src/other.rs", "12"]);
@@ -124,9 +124,9 @@ describe("buildQuickOpenResults", () => {
       pages,
       commands,
       files,
-      siteHits: [hit("wiki", "w"), hit("work_item", "tsk30")],
+      siteHits: [hit("wiki", "w"), hit("task", "tsk30")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/work_item", uri: keyedUri("oxplow/work_item", "tsk30") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/task", uri: keyedUri("oxplow/task", "tsk30") } });
   });
 
   test("an exact content match floats above a fuzzy page/file match", () => {

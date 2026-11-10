@@ -6,16 +6,16 @@ import { open, load } from "../../support/ui.js";
 // in the effort page's header.
 
 test("an accepted effort's page carries the review's verdict chip", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title: "Wombat fix",
-    state: "in_progress",
-    thread: daemon.thread,
+    stage: "in_progress",
+    assignee: daemon.thread,
   });
   // The effort opens in the background once the item is in progress.
   let effort = "";
   await until("the item's effort to open", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: `SELECT uri FROM v_effort WHERE work_item = '${created.result.uri}'`,
+      sql: `SELECT uri FROM v_effort WHERE task = '${created.result.uri}'`,
     });
     effort = (out.rows[0]?.[0] as string | undefined) ?? "";
     return effort !== "";

@@ -484,7 +484,7 @@ pub struct Node {
     /// bare slug is this extension's).
     pub link: Option<String>,
     /// A contract another extension's active provider may take its place
-    /// under (`work_item.board`).
+    /// under (`task.board`).
     pub replaceable: Option<String>,
     /// A grid child's size.
     pub size: Option<TileSize>,

@@ -4,7 +4,7 @@ when:
   component: swimlanes
   items: [Fix the parser]
   invokes:
-    - { command: oxplow.work_item.update, input: { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", title: Fix the lexer } }
+    - { command: oxplow.task.update, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: Fix the lexer } }
 expect:
   invokes:
     - { ok: true, result: $any }

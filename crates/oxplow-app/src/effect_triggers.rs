@@ -37,7 +37,7 @@
 //! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
-//! while the retry is scheduled ([`Resend`]); a `oxplow.work_item.create` in it
+//! while the retry is scheduled ([`Resend`]); a `oxplow.task.create` in it
 //! files on the tracker active when it's sent, as every create does
 //! (tsk1058). An
 //! attempt cut off by oxplow stopping is retried the same way, timed from
@@ -706,7 +706,7 @@ fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
             // A sink (none: the list went away) never takes a retry: the
             // work was meant for a list, and resending it nowhere would
             // lose it quietly.
-            crate::commands::work_item::provider_for(&svc.work_items, &call.name, &call.input)
+            crate::commands::task::provider_for(&svc.tasks, &call.name, &call.input)
                 .is_some_and(|p| !p.sink && p.features.idempotent_writes)
         })
 }
@@ -975,19 +975,19 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, WorkItemEdited,
-        WorkItemStateChanged, WorkItemStateChangedV1,
+        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, TaskEdited,
+        TaskStateChanged, TaskStateChangedV1,
     };
-    use oxplow_domain::work_items::Bucket;
+    use oxplow_domain::tasks::Bucket;
     use oxplow_domain::Envelope;
     use serde_json::Value;
     use std::path::Path;
 
-    const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\npermissions: [sql.read, commands:oxplow.work_item.*, commands:oxplow.probe.*]\neffects:\n";
+    const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\npermissions: [sql.read, commands:oxplow.task.*, commands:oxplow.probe.*]\neffects:\n";
 
     /// Marks a finished item's title.
-    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
-    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
+    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [task.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
+    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE uri = :task\", \"params\": {\"task\": x[\"event\"][\"payload\"][\"task\"]}})\n    uri = x[\"event\"][\"payload\"][\"task\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
     /// Write extension `acme` into the project and publish the generation
     /// that carries it.
@@ -1018,10 +1018,10 @@ mod tests {
     /// The task's state change, anchored to the fixture's thread as the
     /// command that makes it would: an effect reacting runs for that thread.
     fn state_changed(fx: &crate::test_fixtures::TaskEffortFixture, to: Bucket) -> Envelope {
-        let mut env = Envelope::typed::<WorkItemStateChanged>(
+        let mut env = Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: oxplow_tasks::work_item_ref(fx.task),
+            &TaskStateChangedV1 {
+                task: oxplow_oxtask::task_ref(fx.task),
                 to,
             },
         );
@@ -1030,7 +1030,7 @@ mod tests {
     }
 
     async fn title(fx: &crate::test_fixtures::TaskEffortFixture) -> String {
-        use oxplow_tasks::TaskStore as _;
+        use oxplow_oxtask::OxtaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap().title
     }
 
@@ -1047,7 +1047,7 @@ mod tests {
         let skip = "def transform(x):\n    return {\"skip\": \"noted\"}\n";
         let effect = |id: &str, after: &str| {
             format!(
-                "  - id: {id}\n    summary: s\n    on: [work_item.state_changed]\n    entry: skip.star\n    after: [{after}]\n"
+                "  - id: {id}\n    summary: s\n    on: [task.state_changed]\n    entry: skip.star\n    after: [{after}]\n"
             )
         };
         extension(
@@ -1083,14 +1083,14 @@ mod tests {
         let svc = &fx.svc;
         extension(
             svc,
-            "  - id: react\n    summary: s\n    on: [work_item.state_changed]\n    entry: skip.star\n    after: [page_ref.work_item]\n",
+            "  - id: react\n    summary: s\n    on: [task.state_changed]\n    entry: skip.star\n    after: [page_ref.task]\n",
             &[("skip.star", "def transform(x):\n    return {\"skip\": \"x\"}\n")],
         )
         .await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         assert_eq!(
-            consumer.after_for("work_item.state_changed"),
-            vec!["page_ref.work_item".to_string()]
+            consumer.after_for("task.state_changed"),
+            vec!["page_ref.task".to_string()]
         );
         assert!(consumer.after_for("snapshot.taken").is_empty());
     }
@@ -1107,7 +1107,7 @@ mod tests {
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
-        assert!(consumer.handles("work_item.state_changed"));
+        assert!(consumer.handles("task.state_changed"));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
@@ -1139,8 +1139,8 @@ mod tests {
     async fn an_effect_reads_the_events_own_row() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
+        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [task.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"task\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(svc, stamp, &[("stamp.star", script)]).await;
         start(svc).await;
         let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
@@ -1148,10 +1148,7 @@ mod tests {
             .handle(&ev)
             .await
             .unwrap();
-        assert_eq!(
-            title(&fx).await,
-            format!("work_item.state_changed #{}", ev.seq)
-        );
+        assert_eq!(title(&fx).await, format!("task.state_changed #{}", ev.seq));
         // The script ran before its reaction; the reaction's run records
         // what the script called.
         let audit = svc.commands.audit_store().list_recent(1).await.unwrap();
@@ -1172,7 +1169,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            format!("{reaction:?}").contains(&format!("work_item.state_changed #{}", ev.seq)),
+            format!("{reaction:?}").contains(&format!("task.state_changed #{}", ev.seq)),
             "{reaction:?}"
         );
     }
@@ -1300,7 +1297,7 @@ mod tests {
 
     /// A reaction of two steps: the item marked inside oxplow, then a
     /// write outside it (`oxplow.probe.write`).
-    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
+    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"task\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
 
     /// `oxplow.probe.write`: a write outside oxplow that keeps each idempotency
     /// key it is sent, and fails while `fail` is set.
@@ -1679,16 +1676,16 @@ mod tests {
     async fn the_loop_guard_holds() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [task.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE uri = :task\", \"params\": {\"task\": x[\"event\"][\"payload\"][\"task\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let r = oxplow_tasks::work_item_ref(fx.task);
+        let r = oxplow_oxtask::task_ref(fx.task);
         svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.work_item.update",
+                "oxplow.task.update",
                 json!({ "uri": r, "title": "renamed" }),
                 false,
             )
@@ -1699,7 +1696,7 @@ mod tests {
             let edits = svc.event_log_store.read_after(0, 10_000).await.unwrap();
             for e in edits
                 .iter()
-                .filter(|e| e.envelope.event_type == WorkItemEdited::TYPE)
+                .filter(|e| e.envelope.event_type == TaskEdited::TYPE)
             {
                 // The person's edit carries no thread; an effect runs for
                 // its event's, so anchor the delivered copy to the fixture's.
@@ -1728,9 +1725,9 @@ mod tests {
             cause = Some(executed.id.clone());
             log(svc, executed).await;
         }
-        let mut chained = Envelope::typed::<WorkItemEdited>(
+        let mut chained = Envelope::typed::<TaskEdited>(
             "effect:other/e3",
-            &serde_json::from_value(json!({ "work_item": r, "fields": ["title"] })).unwrap(),
+            &serde_json::from_value(json!({ "task": r, "fields": ["title"] })).unwrap(),
         );
         chained.cause = cause;
         let chained = log(svc, chained).await;
@@ -1756,7 +1753,7 @@ mod tests {
     async fn a_command_that_asks_leaves_a_proposal() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"]}}]}\n";
         extension(
             svc,
             &MARK_DONE.replace("entry: mark.star", "entry: drop.star"),
@@ -1776,7 +1773,7 @@ mod tests {
             rows(svc, "SELECT json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result'").await,
             json!([["proposed"]])
         );
-        use oxplow_tasks::TaskStore as _;
+        use oxplow_oxtask::OxtaskStore as _;
         assert!(
             svc.task_store.get(fx.task).await.unwrap().is_some(),
             "nothing deleted"
@@ -1933,7 +1930,7 @@ mod tests {
                 ("skip.star", "def transform(x):\n    return {\"skip\": \"not today\"}\n"),
                 (
                     "drop.star",
-                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
+                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"]}}]}\n",
                 ),
             ],
         ).await;
@@ -2002,7 +1999,7 @@ mod tests {
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         );
         // The subscriber: retitles the fixture's task with what it saw.
-        let task = oxplow_tasks::work_item_ref(fx.task);
+        let task = oxplow_oxtask::task_ref(fx.task);
         write(
             &root,
             ".oxplow/extensions/acme/extension.yaml",
@@ -2012,7 +2009,7 @@ mod tests {
             &root,
             ".oxplow/extensions/acme/note.star",
             &format!(
-                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
+                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.task.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2090,14 +2087,14 @@ mod tests {
     /// An effect that retitles the fixture's task with the first ref its
     /// event is about.
     async fn retitle_by_subject(fx: &crate::test_fixtures::TaskEffortFixture) {
-        let task = oxplow_tasks::work_item_ref(fx.task);
+        let task = oxplow_oxtask::task_ref(fx.task);
         extension(
             &fx.svc,
-            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [work_item.state_changed]\n    entry: note.star\n",
+            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [task.state_changed]\n    entry: note.star\n",
             &[(
                 "note.star",
                 &format!(
-                    "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": x[\"event\"][\"subject\"][0]}}}}]}}\n"
+                    "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.task.update\", \"input\": {{\"uri\": \"{task}\", \"title\": x[\"event\"][\"subject\"][0]}}}}]}}\n"
                 ),
             )],
         )
@@ -2251,15 +2248,15 @@ mod tests {
         use crate::commands::effect::BACKFILL_PLAN;
         let fx = crate::test_fixtures::services_with_task_effort().await;
         let svc = &fx.svc;
-        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [task.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE uri = :task\", \"params\": {\"task\": x[\"event\"][\"payload\"][\"task\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         register(svc);
-        let r = oxplow_tasks::work_item_ref(fx.task);
+        let r = oxplow_oxtask::task_ref(fx.task);
         let edited = |source: &str| {
-            Envelope::typed::<WorkItemEdited>(
+            Envelope::typed::<TaskEdited>(
                 source,
-                &serde_json::from_value(json!({ "work_item": r, "fields": ["title"] })).unwrap(),
+                &serde_json::from_value(json!({ "task": r, "fields": ["title"] })).unwrap(),
             )
         };
         // A person's edit, and one the effect's own run made (its source).

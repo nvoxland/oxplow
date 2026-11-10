@@ -24,7 +24,7 @@ pub const BRANCH: &str = "oxplow/branch";
 pub const FILE: &str = "oxplow/file";
 pub const DIR: &str = "oxplow/dir";
 pub const SYMBOL: &str = "oxplow/symbol";
-pub const WORK_ITEM: &str = "oxplow/work_item";
+pub const TASK: &str = "oxplow/task";
 pub const WIKI: &str = "oxplow/wiki";
 pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
@@ -233,14 +233,14 @@ struct Entry {
 pub struct ResourceRegistry {
     resources: BTreeMap<ResourceName, Entry>,
     wikilinks: BTreeMap<String, ResourceName>,
-    /// The active work list's own ids, when it declares them: what makes a
+    /// The active task tracker's own ids, when it declares them: what makes a
     /// loose `tsk42` (or `ENG-12`) in text one of its items.
-    work_item_ids: Option<WorkItemIds>,
+    task_ids: Option<TaskIds>,
 }
 
-/// A work list's ids, as it declares them (`WorkItemsProvider::id_pattern`).
+/// A task tracker's ids, as it declares them (`TaskTracker::id_pattern`).
 #[derive(Debug, Clone)]
-struct WorkItemIds {
+struct TaskIds {
     provider: String,
     /// The pattern, matched whole.
     whole: Regex,
@@ -248,50 +248,46 @@ struct WorkItemIds {
 
 impl ResourceRegistry {
     /// This registry recognizing `provider`'s ids (`pattern`, a regex
-    /// matched whole): the active work list's, set by the app.
-    pub fn with_work_item_ids(
-        mut self,
-        provider: &str,
-        pattern: &str,
-    ) -> Result<Self, ResourceError> {
+    /// matched whole): the active task tracker's, set by the app.
+    pub fn with_task_ids(mut self, provider: &str, pattern: &str) -> Result<Self, ResourceError> {
         let whole =
             Regex::new(&format!("^(?:{pattern})$")).map_err(|e| ResourceError::BadPattern {
-                resource: WORK_ITEM.into(),
+                resource: TASK.into(),
                 param: "id".into(),
                 error: e.to_string(),
             })?;
-        self.work_item_ids = Some(WorkItemIds {
+        self.task_ids = Some(TaskIds {
             provider: provider.into(),
             whole,
         });
         Ok(self)
     }
 
-    /// This registry recognizing no work list's ids (none is active, or the
+    /// This registry recognizing no task tracker's ids (none is active, or the
     /// active one declares none).
-    pub fn without_work_item_ids(mut self) -> Self {
-        self.work_item_ids = None;
+    pub fn without_task_ids(mut self) -> Self {
+        self.task_ids = None;
         self
     }
 
-    /// `text`, whole, as one of the active work list's ids: that item's URI.
-    pub fn work_item_uri_of(&self, text: &str) -> Option<String> {
-        let ids = self.work_item_ids.as_ref()?;
+    /// `text`, whole, as one of the active task tracker's ids: that item's URI.
+    pub fn task_uri_of(&self, text: &str) -> Option<String> {
+        let ids = self.task_ids.as_ref()?;
         ids.whole
             .is_match(text)
-            .then(|| super::build::work_item_uri(&ids.provider, text))
+            .then(|| super::build::task_uri(&ids.provider, text))
     }
 
-    /// Every token of `text` that is one of the active work list's ids — a
+    /// Every token of `text` that is one of the active task tracker's ids — a
     /// token being a run of letters, digits, `_` and `-` — as its item's
     /// URI, in order, each once.
-    pub fn find_work_item_uris(&self, text: &str) -> Vec<String> {
-        if self.work_item_ids.is_none() {
+    pub fn find_task_uris(&self, text: &str) -> Vec<String> {
+        if self.task_ids.is_none() {
             return Vec::new();
         }
         let mut out: Vec<String> = Vec::new();
         for token in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
-            if let Some(uri) = self.work_item_uri_of(token) {
+            if let Some(uri) = self.task_uri_of(token) {
                 if !out.contains(&uri) {
                     out.push(uri);
                 }

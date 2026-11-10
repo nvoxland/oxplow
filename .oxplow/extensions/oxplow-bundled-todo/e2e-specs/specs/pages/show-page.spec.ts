@@ -10,7 +10,7 @@ const source = (title: string, prefix: string) => `# Keep the source comment
 title: ${title}
 loaders:
   count:
-    sql: SELECT count(*) AS n FROM v_work_item WHERE title LIKE '${prefix}%'
+    sql: SELECT count(*) AS n FROM v_task WHERE title LIKE '${prefix}%'
 view: { id: count, viz: number, from: count }
 `;
 
@@ -42,6 +42,6 @@ test("Save to wiki keeps a live oxplow-page block that renders again after reloa
   await expect(inline.locator('[data-node="count"]')).toContainText("0");
   await page.reload();
   await expect(inline.locator('[data-node="count"]')).toContainText("0");
-  await run(daemon, "oxplow.work_item.create", { title: "Saved Bilby evidence", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Saved Bilby evidence", thread: daemon.thread });
   await expect(inline.locator('[data-node="count"]')).toContainText("1");
 });

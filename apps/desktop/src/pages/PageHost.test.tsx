@@ -362,17 +362,17 @@ test("Copy puts the open run's text on the clipboard, as an agent reads it", asy
 });
 
 // A custom page (its view one `component` node) that is `replaceable:` and
-// another extension stands in for (the Tasks board, `work_item.board`):
+// another extension stands in for (the Tasks board, `task.board`):
 // the page draws the stand-in, as any replaced node, never its own frame.
 test("a custom page another extension replaces draws the replacement, not its own component", async () => {
   const lanes = fakeRun(fakePage(node.viz("lanes", "rows"), { id: "beta/lanes", extension: "beta", slug: "lanes" }), {
     loaders: { rows: loader(["lane"], [["Doing"]]) },
   });
-  const page = fakePage({ ...node.component("board", "board"), replaceable: "work_item.board" });
+  const page = fakePage({ ...node.component("board", "board"), replaceable: "task.board" });
   const run = fakeRun(page, {});
   const { runs } = fakePageRuns({ ...run, tree: { ...run.tree, replacedBy: "beta", embed: lanes } });
   const view = render(<PageHost pageKey={key} runs={runs} />);
-  await view.findByTestId("replacement-work_item.board");
+  await view.findByTestId("replacement-task.board");
   expect(view.container.textContent).toContain("Doing");
   expect(view.queryByTestId("custom-component")).toBeNull();
   expect(view.queryByTestId("custom-component-fallback")).toBeNull();

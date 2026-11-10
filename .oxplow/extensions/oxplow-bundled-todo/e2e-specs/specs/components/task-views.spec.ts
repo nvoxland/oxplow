@@ -10,7 +10,7 @@ import { openFromLauncher } from "../../support/ui.js";
 
 // The task-views example (`examples/extensions/task-views`): swimlanes for
 // the Board, a compact list for the Tasks page and a plain editor form for
-// a work item, each replacing oxplow's own view with no provider of its
+// a task, each replacing oxplow's own view with no provider of its
 // own — in Chromium and WebKit.
 
 /** Put the example into `daemon`'s project and wait until it's loaded. It
@@ -31,12 +31,12 @@ async function choose(page: Page, target: string, who: string) {
   await expect(row).toContainText("In use");
 }
 
-const TARGETS = ["work_item.board", "work_item.list", "work_item.detail"] as const;
+const TARGETS = ["task.board", "task.list", "task.detail"] as const;
 
 /** The state of the item titled `title`, from the datasets. */
 async function stateOf(daemon: Daemon, title: string): Promise<string | undefined> {
   const out = await ipc<{ rows: string[][] }>(daemon, "query_sql", {
-    sql: "SELECT state FROM v_work_item WHERE title = ?1",
+    sql: "SELECT state FROM v_task WHERE title = ?1",
     params: [title],
   });
   return out.rows[0]?.[0];
@@ -44,27 +44,27 @@ async function stateOf(daemon: Daemon, title: string): Promise<string | undefine
 
 async function titled(daemon: Daemon, title: string): Promise<boolean> {
   const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-    sql: "SELECT 1 FROM v_work_item WHERE title = ?1",
+    sql: "SELECT 1 FROM v_task WHERE title = ?1",
     params: [title],
   });
   return out.rows.length > 0;
 }
 
 /** The Board, replaced: the lanes, the drag and the title's rename are the
- *  example's `ui` fixtures'; here the drag runs over each work list. `scope`
+ *  example's `ui` fixtures'; here the drag runs over each task tracker. `scope`
  *  is the Board's scope that shows the items. */
 async function swimlanes(page: Page, daemon: Workspace, scope: string) {
-  await run(daemon, "oxplow.work_item.create", { title: "Card one", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Card one", thread: daemon.thread });
   // A tracker's items reach oxplow's datasets through its collector's read.
-  if (scope === "all") await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "work_items" });
+  if (scope === "all") await run(daemon, "oxplow.provider.sync", { instance: "e2e/fake", collector: "task_tracker" });
   await until("the item to be in the datasets", 30_000, () => titled(daemon, "Card one"));
   await page.goto("/");
-  await choose(page, "work_item.board", "task-views");
+  await choose(page, "task.board", "task-views");
   await openFromLauncher(page, "Board");
-  await expect(page.getByTestId("replacement-work_item.board")).toHaveAttribute("title", /by task-views/);
+  await expect(page.getByTestId("replacement-task.board")).toHaveAttribute("title", /by task-views/);
   await page.getByTestId("page-param-show-value").filter({ visible: true }).click();
   await page.getByTestId("page-param-show-edit").filter({ visible: true }).selectOption(scope);
-  await expect(page.getByTestId("replacement-work_item.board")).toHaveAttribute("title", /by task-views/);
+  await expect(page.getByTestId("replacement-task.board")).toHaveAttribute("title", /by task-views/);
   // Settings may still be open in another tab: its Integrations frame is a second one.
   const frame = page.frameLocator('iframe[aria-label="Swimlanes"]');
   const card = frame.locator(".card", { hasText: "Card one" });
@@ -80,9 +80,9 @@ test("the swimlanes replace the Board and move a card", async ({ page, daemon })
   await swimlanes(page, daemon, "thread");
 });
 
-test("the swimlanes work over another work list too (e2e/fake active)", async ({ page, daemon }) => {
+test("the swimlanes work over another task tracker too (e2e/fake active)", async ({ page, daemon }) => {
   await install(daemon);
-  // The fake tracker as the active work list, set up before any page is
+  // The fake tracker as the active task tracker, set up before any page is
   // open: Settings → Integrations does the same (see fake-provider.spec).
   await run(daemon, "oxplow.provider.set_instance", { instance: "e2e/fake", enabled: true, config: { team: "core" } });
   await until("the fake to be ready", 30_000, async () => {
@@ -91,10 +91,10 @@ test("the swimlanes work over another work list too (e2e/fake active)", async ({
     });
     return out.rows.length === 1;
   });
-  await run(daemon, "oxplow.config.set", { key: "activeProviders", value: { work_items: "fake" } });
-  await until("the fake to be the active work list", 30_000, async () => {
+  await run(daemon, "oxplow.config.set", { key: "activeProviders", value: { tasks: "fake" } });
+  await until("the fake to be the active task tracker", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: "SELECT 1 FROM v_capability_provider WHERE capability = 'work_items' AND active = 1 AND provider = 'fake'",
+      sql: "SELECT 1 FROM v_capability_provider WHERE capability = 'task_tracker' AND active = 1 AND provider = 'fake'",
     });
     return out.rows.length > 0;
   });
@@ -107,14 +107,14 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   // quiet machine, so the default 60s leaves it no room.
   test.setTimeout(180_000);
   await install(daemon);
-  await run(daemon, "oxplow.work_item.create", { title: "Item to edit", thread: daemon.thread });
-  await searchable(daemon, "Item to edit", "work_item");
+  await run(daemon, "oxplow.task.create", { title: "Item to edit", thread: daemon.thread });
+  await searchable(daemon, "Item to edit", "task");
   await page.goto("/");
   for (const target of TARGETS) await choose(page, target, "task-views");
 
   // The item's page: the form in place of the description editor, the other parts still oxplow's.
   await openFromLauncher(page, "Item to edit");
-  const detail = page.getByTestId("replacement-work_item.detail");
+  const detail = page.getByTestId("replacement-task.detail");
   await expect(detail).toHaveAttribute("title", /by task-views/);
   // Only the fields the form names are shown; the item's ref is fixed, not editable.
   await expect(detail.getByTestId("viz-form-fields-uri")).toHaveCount(0);
@@ -139,7 +139,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
 
   // The Tasks page: the compact list, its Edit… row action in a slideover.
   await openFromLauncher(page, "Tasks");
-  const list = page.getByTestId("replacement-work_item.list");
+  const list = page.getByTestId("replacement-task.list");
   await expect(list).toHaveAttribute("title", /by task-views/);
   await expect(list).toContainText("Item edited");
   // The title is a link; the row's menu is on its other cells.
@@ -160,7 +160,7 @@ test("the editor, the list and oxplow's own, each chosen from Settings", async (
   await openFromLauncher(page, "Board");
   await expect(page.getByTestId("viz-board")).toBeVisible();
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
-  await searchable(daemon, "Item edited again", "work_item");
+  await searchable(daemon, "Item edited again", "task");
   await openFromLauncher(page, "Item edited again");
   await expect(page.locator('[data-testid^="replacement-"]:visible')).toHaveCount(0);
 });

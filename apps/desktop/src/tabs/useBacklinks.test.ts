@@ -4,7 +4,7 @@ import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUr
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
 import { setResources, type Resource } from "../resourceStore.js";
-import { collectorUri, commitUri, dirUri, effortUri, fileUri, pageUri, resourceUri, wikiUri, workItemUri } from "../uri/uri.js";
+import { collectorUri, commitUri, dirUri, effortUri, fileUri, pageUri, resourceUri, wikiUri, taskUri } from "../uri/uri.js";
 import {
   directoryRef,
   effortDiffRef,
@@ -12,14 +12,14 @@ import {
   gitCommitRef,
   wikiPageRef,
   pageTabRef,
-  workItemTabRef,
+  taskTabRef,
 } from "./pageRefs.js";
 
 describe("graphUriOf", () => {
   // page_ref rows hang on a resource's URI (.context/resources.md), whichever list.
-  test("a work item is its own URI", () => {
-    const item = workItemUri("fake", "W-1");
-    expect(graphUriOf(workItemTabRef(item))).toBe(item);
+  test("a task is its own URI", () => {
+    const item = taskUri("fake", "W-1");
+    expect(graphUriOf(taskTabRef(item))).toBe(item);
   });
 
   test("a wiki page, a file and a directory are theirs, a file without its revision", () => {
@@ -50,8 +50,8 @@ describe("humanRefType", () => {
       "summary_wikilink",
       "summary_file_ref",
       "summary_dir_ref",
-      "work_item_mention",
-      "summary_work_item_mention",
+      "task_mention",
+      "summary_task_mention",
       "finding_mention",
       "summary_finding_mention",
       "commit_mention",
@@ -61,14 +61,14 @@ describe("humanRefType", () => {
     }
   });
 
-  // A work item's comments' mentions are the item's own edges: the
+  // A task's comments' mentions are the item's own edges: the
   // backlink says it's in a comment.
   test("comment-mention ref_types read as 'comment'", () => {
     for (const rt of [
       "comment_file_ref",
       "comment_dir_ref",
       "comment_wikilink",
-      "comment_work_item_mention",
+      "comment_task_mention",
       "comment_finding_mention",
       "comment_commit_mention",
     ]) {
@@ -94,9 +94,9 @@ describe("humanRefType", () => {
   });
 
   test("typed task links humanize the sub-type", () => {
-    expect(humanRefTypeForTest("work_item_link:blocks", null)).toBe("blocks");
-    expect(humanRefTypeForTest("work_item_link:relates_to", null)).toBe("relates to");
-    expect(humanRefTypeForTest("work_item_link:discovered_from", null)).toBe("discovered from");
+    expect(humanRefTypeForTest("task_link:blocks", null)).toBe("blocks");
+    expect(humanRefTypeForTest("task_link:relates_to", null)).toBe("relates to");
+    expect(humanRefTypeForTest("task_link:discovered_from", null)).toBe("discovered from");
   });
 
   test("finding_path stays as 'found in'", () => {
@@ -179,13 +179,13 @@ describe("edges to any ref", () => {
     wikilink: null,
     page,
   });
-  const CORE = () => [coreKind("effort", null), coreKind("work_item", null), coreKind("collector", null)];
+  const CORE = () => [coreKind("effort", null), coreKind("task", null), coreKind("collector", null)];
   beforeEach(() => setResources(CORE()));
   afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
-    source: workItemUri("oxplow", "tsk1"),
+    source: taskUri("oxtask", "tsk1"),
     target: wikiUri("x"),
-    ref_type: "work_item_link:about",
+    ref_type: "task_link:about",
     source_extra: null,
     source_label: null,
     resolved: true,
@@ -245,7 +245,7 @@ describe("edges to any ref", () => {
 
   test("an inbound edge reads the source side", () => {
     const entry = edgeToInboundEntry(edge({ source_label: "Fix it" }));
-    expect(entry.open).toBe("oxplow:oxplow/work_item?id=tsk1&provider=oxplow");
+    expect(entry.open).toBe("oxplow:oxplow/task?id=tsk1&provider=oxtask");
     expect(entry.label).toBe("Fix it");
   });
 });

@@ -1,11 +1,11 @@
-# A finished effort with a work item asks for its review.
+# A finished effort with a task asks for its review.
 given:
-  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
-  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - { command: oxplow.task.create, input: { title: Parse blocks }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, task: $item.uri } }
 when:
   event:
     type: effort.finished
-    payload: { effort: "eff1", work_item: $item.uri, end_snapshot: 3 }
+    payload: { effort: "eff1", task: $item.uri, end_snapshot: 3 }
 expect:
   effects: { contains: [{ id: effort_review/review-on-finish, state: ok }] }
   commands: { contains: [effort_review.effort.review] }

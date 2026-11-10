@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`effort.opened@3`: a span of a thread's work began, linked to a work\nitem or not (`.context/work-tracking.md`).",
+  "description": "`effort.opened@3`: a span of a thread's work began, linked to a\ntask or not (`.context/work-tracking.md`).",
   "properties": {
     "effort": {
       "description": "The effort (`eff12`).",
@@ -15,16 +15,16 @@
         "null"
       ]
     },
-    "thread": {
-      "description": "The thread doing the work (`thr3`).",
-      "type": "string"
-    },
-    "work_item": {
-      "description": "`oxplow:oxplow/work_item?id=tsk42&provider=oxplow`, or another provider's item, when linked.",
+    "task": {
+      "description": "`oxplow:oxplow/task?id=tsk42&provider=oxtask`, or another provider's item, when linked.",
       "type": [
         "string",
         "null"
       ]
+    },
+    "thread": {
+      "description": "The thread doing the work (`thr3`).",
+      "type": "string"
     }
   },
   "required": [

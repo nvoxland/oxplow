@@ -50,13 +50,13 @@ intent:
       expect: one "⚠ <metric> crossed its warn threshold" line, once per metric
     - name: repair-files-an-item
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
-      expect: one repair item filed on the active work list for the disabled contribution
+      expect: one repair item filed on the active task tracker for the disabled contribution
     - name: repair-comments-on-the-open-item
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
       expect: a comment on the contribution's open repair item, not a second item
-    - name: repair-skips-without-a-work-list
+    - name: repair-skips-without-a-task-tracker
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
-      expect: nothing filed when no work list is running
+      expect: nothing filed when no task tracker is running
     - name: verify-unchecked-files-an-item
       input: { effect: verify-unchecked, event: { type: oxplow.review.accepted, v: 1 } }
       expect: an acceptance that left a claim unverified files one follow-up about the effort
@@ -93,21 +93,21 @@ intent:
     - name: comments-panel-counts-open-comments-by-who-acts
       input: { part: oxplow/comments-panel, params: { stream_id: 1 } }
       expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
-    - name: work-panel-groups-a-threads-work
+    - name: tasks-panel-groups-a-threads-work
       input: { part: oxplow/work, params: { thread_id: 1 } }
       expect: in progress, ready and finished under headings; clearing hides the finished; an effort no item names shows
     - name: work-count-counts-the-active-item-and-the-ready-ones
       input: { part: oxplow/work-count, params: { thread_id: 1 } }
       expect: the active item and the ready ones, not the finished
-    - name: work-shows-only-the-active-work-list
+    - name: work-shows-only-the-active-task-tracker
       input: { part: oxplow/work, params: { thread_id: 1 } }
-      expect: only the unlinked effort once the work list is none
-    - name: work-count-shows-only-the-active-work-list
+      expect: only the unlinked effort once the task tracker is none
+    - name: work-count-shows-only-the-active-task-tracker
       input: { part: oxplow/work-count, params: { thread_id: 1 } }
-      expect: the count follows the active work list
-    - name: waiting-on-me-shows-only-the-active-work-list
+      expect: the count follows the active task tracker
+    - name: waiting-on-me-shows-only-the-active-task-tracker
       input: { page: oxplow/waiting-on-me }
-      expect: a blocked item gone once the work list is none
+      expect: a blocked item gone once the task tracker is none
     - name: struggle-is-five-edits-of-a-file-or-three-failed-commands
       input: { sql: v_oxplow_struggle }
       expect: a file edited five times, or three failed shell commands, is struggle
@@ -203,7 +203,7 @@ intent:
       expect: files outside the area the task names; none when it names no area
     - name: review-prompt-names-the-task-and-what-changed
       input: { part: review-prompt, params: { effort_id: 1 } }
-      expect: the prompt names the task, its files and claims; a foreign work item is named
+      expect: the prompt names the task, its files and claims; a foreign task is named
     - name: review-starters-read-the-viewers-streams-decisions-and-claims
       input: { page: recent-decisions }
       expect: the stream's decisions and unbacked claims, for the viewer's stream only
@@ -295,7 +295,7 @@ intent:
       input: { page: wiki-page, params: { slug: otters } }
       expect: the body of a written page and of a slug not written yet, freshness, no references
     - name: the-slot-page-links-the-mounted-page-and-its-host
-      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0" } }
+      input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0" } }
       expect: the page a slot mount shows, the page that hosts it and the slot
     - name: wiki-index-lists-pages-newest-change-first-and-searches
       input: { page: wiki-index }
@@ -304,13 +304,13 @@ intent:
       input: { page: wiki-freshness }
       expect: the wiki-freshness page lists what its loaders read
     - name: the-slot-page-links-to-its-extension
-      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0' } }
+      input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0' } }
       expect: its see-also links name the extension that declares it
     - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
       input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
       expect: its see-also links open the wiki and the work that links to it
     - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.work-item.sections-0"} }
+      input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0"} }
       expect: its description is a paragraph above the facts
     - name: dashboards-list-the-dashboard-pages
       input: { page: dashboards }
@@ -385,9 +385,9 @@ advisories:
       SELECT w.uri AS key,
              '“' || w.title || '” is still in progress, but a commit landed its work. '
              || 'Mark it done if it is.' AS message
-      FROM v_effort e JOIN v_work_item w ON w.uri = e.work_item
+      FROM v_effort e JOIN v_task w ON w.uri = e.task
       WHERE e.thread_id = :thread_id AND e.closed_by = 'commit' AND w.state = 'in_progress'
-        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.work_item = w.uri AND o.ended_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM v_effort o WHERE o.task = w.uri AND o.ended_at IS NULL)
       GROUP BY w.uri
   # How code metrics moved this effort, every prompt while any moved.
   # Operational metrics (tokens, cycle time, …) grow every turn and aren't
@@ -414,7 +414,7 @@ advisories:
                                       ELSE printf('%.1f', abs(delta)) END) || ')' END) AS line
         FROM v_effort_metric_delta
         WHERE effort_id = :effort_id AND changed = 1 AND kind <> 'event'
-          AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+          AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'effort.%'
       )
       SELECT message FROM (
         SELECT 0 AS o, key, line AS message FROM d
@@ -436,7 +436,7 @@ advisories:
       FROM (SELECT *, CASE WHEN crossing = 'fail' THEN fail_at ELSE warn_at END AS t
             FROM v_effort_metric_delta)
       WHERE effort_id = :effort_id AND crossing IS NOT NULL AND kind <> 'event'
-        AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'task.%'
+        AND key NOT LIKE 'agent.%' AND key NOT LIKE 'effort.%' AND key NOT LIKE 'effort.%'
       ORDER BY key
   # A hint that ran a hundred times and never once spoke is dead weight, or
   # watching for something that can't happen here. Once per hint; this one
@@ -511,7 +511,7 @@ advisories:
              || '”) also changed ' || group_concat(path, ', ')
              || '. Read the handoffs to or from that thread (v_handoff, thread_id = ' || other
              || ') before duplicating its work. '
-             || 'oxplow.handoff.send hands the overlap over; the work item you are on stays with this thread until a handoff of it is taken.' AS message
+             || 'oxplow.handoff.send hands the overlap over; the task you are on stays with this thread until a handoff of it is taken.' AS message
       FROM (SELECT other, path FROM shared ORDER BY path)
       GROUP BY other
 measures:
@@ -634,7 +634,7 @@ effects:
     entry: effects/verify_unchecked.star
     needs: [sql.read]
   - id: repair-disabled
-    summary: When an extension's contribution is disabled after repeated failures, file one repair item on the active work list (comment on it while it is open).
+    summary: When an extension's contribution is disabled after repeated failures, file one repair item on the active task tracker (comment on it while it is open).
     on: [contribution.disabled]
     entry: effects/repair_disabled.star
     needs: [sql.read]
@@ -665,7 +665,7 @@ commands:
     summary: Ask a model for one effort's unrecorded decisions and the claims its answers made; returns the job. The intent key `reasoning:<effort id>` makes it one job per effort.
     scope: jobs.write
     op: enqueue
-    example: {"job": "reasoning", "intentKey": "reasoning:eff3", "request": {"schemaVersion": 1, "role": "reasoning", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Work item: Add CSV export"}]}]}}
+    example: {"job": "reasoning", "intentKey": "reasoning:eff3", "request": {"schemaVersion": 1, "role": "reasoning", "messages": [{"role": "user", "parts": [{"type": "text", "text": "Task: Add CSV export"}]}]}}
   - name: reasoning.status
     summary: A reasoning job's state and, once it ends, its answer.
     scope: jobs.read
@@ -703,4 +703,4 @@ commands:
     scope: handoffs.write
     op: send
     ui: { label: "Hand Off Work…", group: Threads, keywords: [handoff, delegate, give], about: oxplow/thread, form: "oxplow:oxplow/page?page=hand-off" }
-    example: {"to_thread": "thr4", "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow", "body": "The parser fix is in; the remaining failure is the timezone case."}
+    example: {"to_thread": "thr4", "task": "oxplow:oxplow/task?id=tsk12&provider=oxtask", "body": "The parser fix is in; the remaining failure is the timezone case."}

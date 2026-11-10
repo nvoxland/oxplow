@@ -203,7 +203,7 @@ fn sql_tokens(sql: &str) -> Vec<SqlToken> {
 
 /// Whether `text` names `name` (a dataset or a command) as a whole word,
 /// in any case: `v_commit_file` doesn't name `v_commit`, and a sentence's
-/// full stop after `oxplow.work_item.link` doesn't hide it.
+/// full stop after `oxplow.task.link` doesn't hide it.
 pub fn names(text: &str, name: &str) -> bool {
     let (text, name) = (text.to_lowercase(), name.to_lowercase());
     let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
@@ -290,7 +290,10 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
         };
         if let Some(about) = &q.about {
             if let Some(why) = oxplow_app::extension::extension_resources::resource_problem(about) {
-                out.errors.push(at.error("answer.about_unknown", format!("`about: {about}`: {why}")).fix("`oxplow/file`, `oxplow/commit`, `oxplow/effort`, `oxplow/work_item`, …"));
+                out.errors.push(
+                    at.error("answer.about_unknown", format!("`about: {about}`: {why}"))
+                        .fix("`oxplow/file`, `oxplow/commit`, `oxplow/effort`, `oxplow/task`, …"),
+                );
             }
         }
         let Some(text) = (c.skill_text)(&q.skill) else {
@@ -568,7 +571,15 @@ pub async fn check_pages(
                             .fix("name a registered one"),
                         ),
                         Some(spec) => {
-                            let valid = InputValidator::compile(&spec.input_schema)
+                            // A form's person fills in the rest: what it
+                            // gives must fit, nothing it leaves is missing.
+                            let mut schema = spec.input_schema.clone();
+                            if action.form {
+                                if let Some(o) = schema.as_object_mut() {
+                                    o.remove("required");
+                                }
+                            }
+                            let valid = InputValidator::compile(&schema)
                                 .map_err(|e| e.to_string())
                                 .and_then(|v| v.check(&action.input).map_err(|e| e.to_string()));
                             if let Err(e) = valid {
@@ -680,12 +691,12 @@ mod tests {
     fn datasets_are_the_tables_a_query_reads() {
         assert_eq!(
             datasets_in(
-                "WITH x AS (SELECT 1 FROM V_Work_Item) \
+                "WITH x AS (SELECT 1 FROM V_Task) \
                  SELECT a.n AS v_total, 'v_quoted' -- v_comment\n\
                  FROM v_commit a, v_branch b /* v_block */ \
                  JOIN (SELECT * FROM v_tag) t ON 1 LEFT JOIN json_each(a.parents) p"
             ),
-            vec!["v_work_item", "v_commit", "v_branch", "v_tag"]
+            vec!["v_task", "v_commit", "v_branch", "v_tag"]
         );
     }
 
@@ -697,15 +708,9 @@ mod tests {
         assert!(names("Read V_COMMIT.", "v_commit"));
         assert!(!names("read v_commit_file", "v_commit"));
         assert!(!names("read xv_commit", "v_commit"));
-        assert!(names("run oxplow.work_item.link.", "oxplow.work_item.link"));
-        assert!(!names(
-            "run oxplow.work_item.link_all",
-            "oxplow.work_item.link"
-        ));
-        assert!(!names(
-            "run oxplow.work_item.links",
-            "oxplow.work_item.link"
-        ));
+        assert!(names("run oxplow.task.link.", "oxplow.task.link"));
+        assert!(!names("run oxplow.task.link_all", "oxplow.task.link"));
+        assert!(!names("run oxplow.task.links", "oxplow.task.link"));
     }
 
     #[test]
@@ -797,10 +802,9 @@ mod tests {
             .unwrap();
             oxplow_app::extension::extensions::load_extension_at(&dir, "acme")
         };
-        let skill = |name: &str| {
-            (name == "acme-skill").then(|| "Use v_work_item to list work.".to_string())
-        };
-        let list = "SELECT title FROM v_work_item WHERE state = :state";
+        let skill =
+            |name: &str| (name == "acme-skill").then(|| "Use v_task to list work.".to_string());
+        let list = "SELECT title FROM v_task WHERE state = :state";
 
         let ok = extension("params: { state: open }, skill: acme-skill", list);
         let checked = check_pages(&[ok], &skill, Some(&svc)).await;
@@ -822,7 +826,7 @@ mod tests {
 
         let broken = extension(
             "params: { state: open }",
-            "SELECT title FROM v_work_item WHERE nope = :state",
+            "SELECT title FROM v_task WHERE nope = :state",
         );
         let checked = check_pages(&[broken], &skill, Some(&svc)).await;
         assert!(

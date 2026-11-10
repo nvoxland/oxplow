@@ -11,7 +11,7 @@ const viz = (over: Partial<VizConfig> = {}): VizConfig => ({
   slug: "waiting",
   title: "Waiting on me",
   description: "Blocked tasks",
-  query: "SELECT ref, title FROM v_work_item",
+  query: "SELECT ref, title FROM v_task",
   viz: "table",
   params: [],
   columns: [],
@@ -129,7 +129,7 @@ describe("cellLinkRef", () => {
   const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/effort?id=eff7"];
 
   test("a page link reads its ref from `from`", () => {
-    expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/work_item?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/work_item?id=E-1&provider=issues");
+    expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/task?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/task?id=E-1&provider=issues");
   });
   test("file / wiki / effort-diff links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
@@ -194,7 +194,7 @@ describe("changedParams", () => {
         { name: "range", label: null, default: "30d", type: "date_range" },
       ],
     });
-    expect(changedParams(l, { merges: 0, range: "30d", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+    expect(changedParams(l, { merges: 0, range: "30d", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" });
     expect(changedParams(l, { merges: true, range: "7d" })).toEqual({ merges: true, range: "7d" });
   });
 });
@@ -376,7 +376,7 @@ describe("change links", () => {
 });
 
 test("page links name any ref, which opens where its kind's page says", () => {
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow"], ["p"])).toBe("oxplow:oxplow/work_item?id=tsk3&provider=oxplow");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/task?id=tsk3&provider=oxtask"], ["p"])).toBe("oxplow:oxplow/task?id=tsk3&provider=oxtask");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/page?page=git-dashboard"], ["p"])).toBe("oxplow:oxplow/page?page=git-dashboard");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/handoff?id=hnd1"], ["p"])).toBe("oxplow:oxplow/handoff?id=hnd1");
 });

@@ -4532,10 +4532,7 @@ mod tests {
             subscribes("oxplow", &[], "oxplow.review.accepted"),
             Subscribes::Foreign
         );
-        assert_eq!(
-            subscribes("oxplow", &[], "work_item.nope"),
-            Subscribes::Unknown
-        );
+        assert_eq!(subscribes("oxplow", &[], "task.nope"), Subscribes::Unknown);
     }
 
     /// An extension's errors as the lines a person reads, one per line.
@@ -4565,10 +4562,10 @@ mod tests {
     fn a_broken_list_entry_is_an_error_at_its_own_line() {
         for (block, says) in [
             ("commands:\n  - name: a.b\n    summary: S.\n    entry: h.star\n  - name: c.d\n    bogus: 1\n", "command"),
-            ("effects:\n  - id: a\n    summary: S.\n    on: [work_item.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
+            ("effects:\n  - id: a\n    summary: S.\n    on: [task.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
             ("collectors:\n  - id: a\n    runtime: starlark\n    entry: c.star\n  - id: b\n    bogus: 1\n", "collector"),
             ("skills:\n  - name: a\n    file: a.md\n  - name: b\n    bogus: 1\n", "skill"),
-            ("implementations:\n  - id: a\n    capability: work_items\n  - id: b\n    bogus: 1\n", "implementation"),
+            ("implementations:\n  - id: a\n    capability: task_tracker\n  - id: b\n    bogus: 1\n", "implementation"),
         ] {
             let d = tempfile::tempdir().unwrap();
             let manifest = format!("manifest: 2\nname: x\nintent:\n  purpose: p\n{block}");
@@ -5429,7 +5426,7 @@ columns: [{ key: title }]
             "provider.json",
             &serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap(),
         );
-        let body = "providers:\n  - id: tracker\n    capability: work_items\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n    network: [api.example.com]\n";
+        let body = "providers:\n  - id: tracker\n    capability: task_tracker\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n    network: [api.example.com]\n";
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
@@ -5455,20 +5452,20 @@ columns: [{ key: title }]
     fn a_component_may_invoke_only_its_own_or_a_declared_command() {
         let dir = tempfile::tempdir().unwrap();
         write(dir.path(), "components/board/index.html", "<!doctype html>");
-        let body = "custom_components:\n  - { id: board, commands: [oxplow.work_item.transition, acme.item.tidy] }\n";
+        let body = "custom_components:\n  - { id: board, commands: [oxplow.task.transition, acme.item.tidy] }\n";
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),
         );
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(
-            errors[0].contains("`commands:oxplow.work_item.transition`")
+            errors[0].contains("`commands:oxplow.task.transition`")
                 && errors[0].contains("component `board`"),
             "{errors:?}"
         );
         let errors = permission_errors(
             dir.path(),
-            &format!("manifest: 2\nname: acme\npermissions: [commands:oxplow.work_item.*]\nintent:\n  purpose: x\n{body}"),
+            &format!("manifest: 2\nname: acme\npermissions: [commands:oxplow.task.*]\nintent:\n  purpose: x\n{body}"),
         );
         assert!(errors.is_empty(), "{errors:?}");
     }
@@ -5550,13 +5547,13 @@ columns: [{ key: title }]
         "manifest: 2\nname: review\nintent:\n  purpose: test\ndescription: Review helpers\n";
     const PAGE: &str = r#"
 title: Items by state
-description: Every work item in a given state.
+description: Every task in a given state.
 params:
   - { name: state, label: State, default: in_progress }
 loaders:
   items:
     sql: |
-      SELECT uri, title FROM v_work_item WHERE state = :state ORDER BY title
+      SELECT uri, title FROM v_task WHERE state = :state ORDER BY title
 view:
   viz: table
   from: items
@@ -6229,7 +6226,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT uri FROM v_work_item\"
+    input: \"SELECT uri FROM v_task\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 datasets:
@@ -6486,8 +6483,9 @@ commands:
                 "oxplow.review_policy.write",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
-                "oxplow.work.clear_finished",
-                "oxplow.work_item.new"
+                "oxplow.tasks.clear_finished",
+                "oxplow.effort.link_to_task",
+                "oxplow.task.new"
             ]
         );
         let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();
@@ -6502,7 +6500,7 @@ commands:
                 "deviation",
                 "finished_cleared",
                 "struggle",
-                "thread_work",
+                "thread_tasks",
                 "verdict",
                 "verdicts"
             ]
@@ -6520,8 +6518,8 @@ commands:
         }
     }
 
-    /// The work list and the wiki are foundation's data and the agent's
-    /// tools, with no screens of its own: a work item or wiki link opens the
+    /// The task tracker and the wiki are foundation's data and the agent's
+    /// tools, with no screens of its own: a task or wiki link opens the
     /// generic resource page, and no menu offers a form that isn't there.
     #[test]
     fn foundation_has_no_task_or_wiki_ui() {
@@ -6529,7 +6527,7 @@ commands:
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let foundation = ext("oxplow-foundation");
-        for resource in ["oxplow/work_item", "oxplow/wiki"] {
+        for resource in ["oxplow/task", "oxplow/wiki"] {
             let renders = |e: &Extension| {
                 e.page_files
                     .iter()
@@ -6552,7 +6550,7 @@ commands:
                 .filter(|c| c.ui.is_some())
                 .filter(|c| {
                     let scope = scope_of(c);
-                    ["work_items.", "knowledge.", "handoffs."]
+                    ["tasks.", "knowledge.", "handoffs."]
                         .iter()
                         .any(|s| scope.starts_with(s))
                         || c.name == "effort.link"
@@ -6965,7 +6963,7 @@ commands:
             ),
             (
                 "pages/c.yaml",
-                "title: C\nparams: [{ name: s, type: choice, options_from: opts }]\nloaders:\n  q: { page: c2, loader: q }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: c2 } }\n    - { id: f, title: F, viz: form, form: { command: oxplow.work_item.create, choices: { state: opts } } }\n",
+                "title: C\nparams: [{ name: s, type: choice, options_from: opts }]\nloaders:\n  q: { page: c2, loader: q }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: q }\n    - { id: e, title: E, embed: { page: c2 } }\n    - { id: f, title: F, viz: form, form: { command: oxplow.task.create, choices: { state: opts } } }\n",
             ),
             ("pages/c2.yaml", &viz_page("", "SELECT 1 AS a", "")),
             ("queries/opts.yaml", "title: O\nloaders:\n  rows: { sql: \"SELECT 1 AS value, 'a' AS label\" }\n"),
@@ -7136,7 +7134,7 @@ commands:
         write(
             root,
             ".oxplow/extensions/x/pages/p.yaml",
-            "title: T\nparams:\n  - { name: ok, type: choice, options_from: good }\n  - { name: bad, type: choice, options_from: plain }\n  - { name: own, type: choice, options_from: '#own' }\nloaders:\n  own: { sql: 'SELECT 1 AS nope' }\n  shown: { sql: 'SELECT :ok AS ok, :bad AS bad, :own AS own' }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: shown }\n    - { id: f, title: F, viz: form, form: { command: oxplow.work_item.create, fields: [{ name: native, from: fields }] } }\n",
+            "title: T\nparams:\n  - { name: ok, type: choice, options_from: good }\n  - { name: bad, type: choice, options_from: plain }\n  - { name: own, type: choice, options_from: '#own' }\nloaders:\n  own: { sql: 'SELECT 1 AS nope' }\n  shown: { sql: 'SELECT :ok AS ok, :bad AS bad, :own AS own' }\nview:\n  stack:\n    - { id: t, title: T, viz: table, from: shown }\n    - { id: f, title: F, viz: form, form: { command: oxplow.task.create, fields: [{ name: native, from: fields }] } }\n",
         );
         let v = validate_extension(&layer().await, &cat(), root, "x", None)
             .await
@@ -8332,13 +8330,13 @@ commands:
                     &viz_page(
                         "params: [{ name: k }]\n",
                         "SELECT 1 AS a",
-                        "actions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                        "actions:\n  - { id: go, label: Go, command: oxplow.task.transition, input: { uri: '{{param.k}}' } }\n",
                     ),
                 ),
                 (
                     "page",
                     &viz_page(
-                        "params: [{ name: k }]\nactions:\n  - { id: go, label: Go, command: oxplow.work_item.transition, input: { uri: '{{param.k}}' } }\n",
+                        "params: [{ name: k }]\nactions:\n  - { id: go, label: Go, command: oxplow.task.transition, input: { uri: '{{param.k}}' } }\n",
                         "SELECT 1 AS a",
                         "",
                     ),
@@ -8470,7 +8468,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/tbl/extension.yaml",
-            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM work_item\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM work_item\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
+            "manifest: 2\nname: tbl\nintent:\n  purpose: test\nadvisories:\n  - id: peek\n    on: turn-end\n    query: SELECT title AS message FROM task\ncollectors:\n  - id: sum\n    runtime: starlark\n    entry: sum.star\n    input: SELECT title FROM task\n    entities:\n      - { name: notes, key: n, columns: { n: int } }\n",
         );
         write(
             dir.path(),
@@ -8480,7 +8478,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/tbl/pages/all.yaml",
-            &viz_page("title: All\n", "SELECT title FROM work_item", ""),
+            &viz_page("title: All\n", "SELECT title FROM task", ""),
         );
         let e = validate_extension(&layer().await, &cat(), dir.path(), "tbl", None)
             .await
@@ -8489,9 +8487,9 @@ commands:
             let found = e
                 .errors
                 .iter()
-                .find(|m| m.contains(what) && m.contains("`work_item` is a physical table"));
+                .find(|m| m.contains(what) && m.contains("`task` is a physical table"));
             let found = found.unwrap_or_else(|| panic!("{what}: {:?}", e.errors));
-            assert!(found.contains("read v_work_item"), "{found:?}");
+            assert!(found.contains("read v_task"), "{found:?}");
         }
     }
 
@@ -8751,9 +8749,9 @@ commands:
             "datasets:",
             "  - name: late",
             "    version: 1",
-            "    description: Blocked work items.",
+            "    description: Blocked tasks.",
             "    fields:",
-            "      - { name: uri, type: TEXT, doc: Work item ref. }",
+            "      - { name: uri, type: TEXT, doc: Task ref. }",
             "  - { name: gone, version: 1, description: No file., fields: [] }",
             "",
         ]
@@ -8762,7 +8760,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/datasets/late.sql",
-            "SELECT uri FROM ref('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
         );
         write(
             dir.path(),
@@ -8800,7 +8798,7 @@ commands:
             ext.datasets[0].file,
             ".oxplow/extensions/x/datasets/late.sql"
         );
-        assert!(ext.datasets[0].sql.contains("ref('work_item')"));
+        assert!(ext.datasets[0].sql.contains("ref('task')"));
 
         write(
             dir.path(),
@@ -8829,7 +8827,7 @@ commands:
         let manifest = [
             "dimensions:",
             "  - { key: acme.team, label: Team }",
-            "  - { key: acme.prio, entity: v_work_item, expr: \"json_extract(e.native, '$.priority')\" }",
+            "  - { key: acme.prio, entity: v_task, expr: \"json_extract(e.native, '$.priority')\" }",
             "  - { key: acme.hot, promote: true }",
             "",
         ]
@@ -9198,7 +9196,7 @@ commands:
                     &viz_page(
                         "params: [{ name: stream_id, default: '' }]\n",
                         "SELECT 1 AS id, 'Ready' AS bucket, 'oxplow:oxplow/page?page=tasks' AS bucket_ref, 1 AS current, 0 AS indent, 'done' AS glyph, 'success' AS hue",
-                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\nedge: hue\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.work_item.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
+                        "viz: list\ngroup: { by: bucket, link: { kind: page, from: bucket_ref } }\nemphasis: current\ndepth: indent\nedge: hue\ncolumns:\n  - { key: id, icon: glyph, tone: hue }\nactions:\n  - { id: add, label: '+', command: oxplow.task.create, group: Ready, input: { stream: '{{param.stream_id}}' } }\n",
                     ),
                 ),
                 ("t", &viz_page("", "SELECT 1 AS id, NULL AS p, 'x' AS l, 1 AS on_", "viz: tree\ntree: { id: id, parent: p, label: l }\nemphasis: on_\n")),
@@ -9333,13 +9331,13 @@ commands:
                     &viz_page(
                         "params: [{ name: item, default: '' }]\n",
                         "SELECT 1 AS id",
-                        "actions:\n  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.work_item.transition, row: true, input: { uri: 'work_item:oxplow:tsk{{row.id}}', to: done } }\n",
+                        "actions:\n  - { id: finish, label: Finish, command: oxplow.task.transition, input: { uri: '{{param.item}}', to: done } }\n  - { id: row, label: Row, command: oxplow.task.transition, row: true, input: { uri: 'task:oxplow:tsk{{row.id}}', to: done } }\n",
                     ),
                 ),
                 ("b", &viz_page("", "SELECT 1", "actions: [copy]\n")),
                 ("c", &viz_page("", "SELECT 1", "actions: [{ action: run-source, source: a/b }]\n")),
-                ("d", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{param.nope}}' } }]\n")),
-                ("e", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.work_item.create, input: { title: '{{row.id}}' } }]\n")),
+                ("d", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.task.create, input: { title: '{{param.nope}}' } }]\n")),
+                ("e", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: oxplow.task.create, input: { title: '{{row.id}}' } }]\n")),
                 ("f", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: Not-A-Name }]\n")),
                 ("g", &viz_page("", "SELECT 1", "actions: [{ id: x, label: X, command: a.b.c }, { id: x, label: Y, command: a.b.d }]\n")),
                 // A whole-page action is never a row's: the row is a node's.
@@ -9354,8 +9352,8 @@ commands:
                 .map(|x| (x.id.as_str(), x.command.as_deref().unwrap(), x.row))
                 .collect::<Vec<_>>(),
             vec![
-                ("finish", "oxplow.work_item.transition", false),
-                ("row", "oxplow.work_item.transition", true)
+                ("finish", "oxplow.task.transition", false),
+                ("row", "oxplow.task.transition", true)
             ]
         );
         for (slug, needle) in [

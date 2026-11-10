@@ -1,11 +1,11 @@
 # A verdict is a typed event, not only a comment's text. Each review verb
 # logs its own type with its run — caused by its `command.executed`, about
-# the effort and its work item — so the effort's timeline carries who
+# the effort and its task — so the effort's timeline carries who
 # decided what. An acceptance's subject also names each claim and decision
 # it accepted unchecked. A refused review decides nothing.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state

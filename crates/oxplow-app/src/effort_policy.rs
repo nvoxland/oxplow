@@ -1,13 +1,13 @@
 //! The effort policy (`.context/work-tracking.md`): when a thread's effort
 //! opens, closes and links, as a reaction to core's events. A policy is an
 //! [`EffortPolicy`] — it composes commands and core runs them — and the
-//! project chooses one like a work list (`activeProviders.effort_policy`:
+//! project chooses one like a task tracker (`activeProviders.effort_policy`:
 //! `oxplow`, the default; `none`, which leaves efforts to people and
 //! agents; or a provider instance's id).
 //!
 //! [`EffortPolicyConsumer`] is the dispatcher: it offers the active policy
 //! each of [`EVENTS`] and runs what it composes, in order, as the effect
-//! `effort_policy:<id>` — the public `effort.*` and `work_item.*` commands,
+//! `effort_policy:<id>` — the public `effort.*` and `task.*` commands,
 //! with every gate they meet — stopping at the first that fails. Switching
 //! the effort policy (`capability.switched`) closes every open effort
 //! (`switch`): that is core's rule, whichever policy is active after.
@@ -20,7 +20,7 @@
 //!   one if none is open. The thread is the mover's (an agent's), else the
 //!   thread the item is assigned to. An agent that starts an item not
 //!   assigned to its thread takes it: the item is assigned there first
-//!   (`oxplow.work_item.assign`); a person starting one assigns nothing.
+//!   (`oxplow.task.assign`); a person starting one assigns nothing.
 //!   A descendant of the linked item refines the link; an ancestor
 //!   leaves it; an unrelated item closes the effort (`switch`) and opens
 //!   the next;
@@ -50,11 +50,11 @@ use oxplow_db::SqlCell;
 use oxplow_domain::effort_policy::{EffortPolicy, EffortPolicyRegistry, EVENTS};
 use oxplow_domain::events::schema::{
     CapabilitySwitched, CapabilitySwitchedV1, EffortLanded, EffortLandedV2, EffortLinked,
-    EffortLinkedV2, EffortOpenedV3, EventType as _, ThreadCheckpoint, ThreadCheckpointV2,
-    WorkItemStateChanged, WorkItemStateChangedV1,
+    EffortLinkedV2, EffortOpenedV3, EventType as _, TaskStateChanged, TaskStateChangedV1,
+    ThreadCheckpoint, ThreadCheckpointV2,
 };
 use oxplow_domain::events::EventView;
-use oxplow_domain::work_items::Bucket;
+use oxplow_domain::tasks::Bucket;
 use oxplow_domain::{Actor, CommandCall, DomainError, EffortId, StoredEvent, ThreadId};
 use serde_json::{json, Value};
 
@@ -95,12 +95,12 @@ fn call(name: &str, input: Value) -> CommandCall {
 /// A thread's open effort, as `v_effort` has it.
 struct Open {
     id: EffortId,
-    work_item: Option<String>,
+    task: Option<String>,
 }
 
 /// The built-in effort policy (`oxplow:commit-or-switch`): rules 1–3,
 /// reading through the `v_*` datasets and composing `effort.*` /
-/// `work_item.*` calls.
+/// `task.*` calls.
 pub struct CommitOrSwitch {
     /// The id it's declared under.
     pub id: String,
@@ -119,14 +119,14 @@ impl CommitOrSwitch {
     async fn open_on(&self, thread: ThreadId) -> Result<Option<Open>, DomainError> {
         let rows = self
             .rows(
-                "SELECT id, work_item FROM v_effort WHERE thread_id = ?1 AND ended_at IS NULL",
+                "SELECT id, task FROM v_effort WHERE thread_id = ?1 AND ended_at IS NULL",
                 vec![SqlCell::Int(thread.value())],
             )
             .await?;
         Ok(rows.into_iter().next().and_then(|row| match &row[..] {
             [SqlCell::Int(id), item] => Some(Open {
                 id: EffortId::new(*id),
-                work_item: text(item),
+                task: text(item),
             }),
             _ => None,
         }))
@@ -150,7 +150,7 @@ impl CommitOrSwitch {
     ) -> Result<Option<(Option<Bucket>, Option<ThreadId>)>, DomainError> {
         let rows = self
             .rows(
-                "SELECT state, assignee FROM v_work_item WHERE uri = ?1",
+                "SELECT state, assignee FROM v_task WHERE uri = ?1",
                 vec![SqlCell::Text(item_ref.into())],
             )
             .await?;
@@ -173,7 +173,7 @@ impl CommitOrSwitch {
         for _ in 0..MAX_DEPTH {
             let rows = self
                 .rows(
-                    "SELECT parent_uri FROM v_work_item WHERE uri = ?1",
+                    "SELECT parent_uri FROM v_task WHERE uri = ?1",
                     vec![SqlCell::Text(at.clone())],
                 )
                 .await?;
@@ -201,7 +201,7 @@ impl CommitOrSwitch {
         let mover_is_agent = event.source.starts_with("agent:");
         let take = (mover_is_agent && assigned != Some(thread)).then(|| {
             call(
-                crate::commands::work_item::ASSIGN,
+                crate::commands::task::ASSIGN,
                 json!({
                     "uri": item_ref,
                     "to": oxplow_domain::uri::build::thread_uri(thread),
@@ -211,13 +211,13 @@ impl CommitOrSwitch {
         let open_new = || {
             call(
                 crate::commands::effort::OPEN,
-                json!({ "thread": thread.to_string(), "work_item": item_ref }),
+                json!({ "thread": thread.to_string(), "task": item_ref }),
             )
         };
         let Some(open) = self.open_on(thread).await? else {
             return Ok(take.into_iter().chain([open_new()]).collect());
         };
-        let effort = match open.work_item.as_deref() {
+        let effort = match open.task.as_deref() {
             Some(linked) if linked == item_ref => Vec::new(),
             Some(linked) if self.is_under(linked, item_ref).await? => Vec::new(),
             Some(linked) if !self.is_under(item_ref, linked).await? => vec![
@@ -229,7 +229,7 @@ impl CommitOrSwitch {
             ],
             _ => vec![call(
                 crate::commands::effort::LINK,
-                json!({ "effort": open.id.to_string(), "work_item": item_ref }),
+                json!({ "effort": open.id.to_string(), "task": item_ref }),
             )],
         };
         Ok(take.into_iter().chain(effort).collect())
@@ -238,7 +238,7 @@ impl CommitOrSwitch {
     async fn finished(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
         close_open(
             &self.sql,
-            "SELECT id FROM v_effort WHERE work_item = ?1 AND ended_at IS NULL",
+            "SELECT id FROM v_effort WHERE task = ?1 AND ended_at IS NULL",
             vec![SqlCell::Text(item_ref.into())],
         )
         .await
@@ -270,7 +270,7 @@ impl CommitOrSwitch {
     async fn linked(&self, item_ref: &str) -> Result<Vec<CommandCall>, DomainError> {
         Ok(match self.item(item_ref).await? {
             Some((Some(Bucket::Backlog | Bucket::Todo), _)) => vec![call(
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": item_ref, "to": "in_progress" }),
             )],
             _ => Vec::new(),
@@ -291,18 +291,18 @@ impl EffortPolicy for CommitOrSwitch {
     ) -> Result<Vec<CommandCall>, DomainError> {
         let payload = event.payload.clone();
         match event.event_type.as_str() {
-            t if t == WorkItemStateChanged::TYPE => {
-                let changed: WorkItemStateChangedV1 =
+            t if t == TaskStateChanged::TYPE => {
+                let changed: TaskStateChangedV1 =
                     serde_json::from_value(payload).map_err(storage)?;
                 match changed.to {
-                    Bucket::InProgress => self.started(event, &changed.work_item).await,
-                    Bucket::Done | Bucket::Canceled => self.finished(&changed.work_item).await,
+                    Bucket::InProgress => self.started(event, &changed.task).await,
+                    Bucket::Done | Bucket::Canceled => self.finished(&changed.task).await,
                     Bucket::Backlog | Bucket::Todo | Bucket::Blocked => Ok(Vec::new()),
                 }
             }
             t if t == EffortLinked::TYPE => {
                 let linked: EffortLinkedV2 = serde_json::from_value(payload).map_err(storage)?;
-                match linked.work_item {
+                match linked.task {
                     Some(item) => self.linked(&item).await,
                     None => Ok(Vec::new()),
                 }
@@ -333,7 +333,7 @@ impl EffortPolicy for CommitOrSwitch {
             }
             _ => {
                 let opened: EffortOpenedV3 = serde_json::from_value(payload).map_err(storage)?;
-                match opened.work_item {
+                match opened.task {
                     Some(item) => self.linked(&item).await,
                     None => Ok(Vec::new()),
                 }
@@ -599,7 +599,7 @@ mod tests {
     use super::*;
     use crate::test_fixtures::{services_with_effort, EffortFixture};
     use oxplow_domain::StreamId;
-    use oxplow_tasks::work_item_ref;
+    use oxplow_oxtask::task_ref;
 
     async fn settle(fx: &EffortFixture) {
         fx.svc
@@ -629,12 +629,7 @@ mod tests {
         let out = fx
             .svc
             .commands
-            .run(
-                &Actor::Human,
-                crate::commands::work_item::CREATE,
-                input,
-                false,
-            )
+            .run(&Actor::Human, crate::commands::task::CREATE, input, false)
             .await
             .unwrap();
         out.result["uri"].as_str().unwrap().to_string()
@@ -645,7 +640,7 @@ mod tests {
             .commands
             .run(
                 actor,
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": item, "to": to }),
                 false,
             )
@@ -654,13 +649,13 @@ mod tests {
         settle(fx).await;
     }
 
-    /// (effort id, work item, closed_by) of each effort on the thread, oldest
+    /// (effort id, task, closed_by) of each effort on the thread, oldest
     /// first.
     async fn efforts(fx: &EffortFixture) -> Vec<(i64, Option<String>, Option<String>)> {
         fx.svc
             .sql
             .query_sql(
-                "SELECT id, work_item, CASE WHEN ended_at IS NULL THEN 'open' ELSE closed_by END
+                "SELECT id, task, CASE WHEN ended_at IS NULL THEN 'open' ELSE closed_by END
                    FROM v_effort WHERE thread_id = ?1 ORDER BY id",
                 vec![SqlCell::Int(fx.thread.value())],
                 None,
@@ -687,7 +682,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT state FROM v_work_item WHERE uri = ?1",
+                "SELECT state FROM v_task WHERE uri = ?1",
                 vec![SqlCell::Text(item.into())],
                 None,
             )
@@ -736,7 +731,7 @@ mod tests {
             .svc
             .sql
             .query_sql(
-                "SELECT assignee FROM v_work_item WHERE uri = ?1",
+                "SELECT assignee FROM v_task WHERE uri = ?1",
                 vec![SqlCell::Text(backlog.clone())],
                 None,
             )
@@ -764,7 +759,7 @@ mod tests {
     #[tokio::test]
     async fn a_child_refines_the_link_and_an_unrelated_item_switches() {
         let fx = crate::test_fixtures::services_with_task_effort().await;
-        let parent = work_item_ref(fx.task);
+        let parent = task_ref(fx.task);
         let child = item(&fx, "child", Some(&parent), true).await;
         transition(&fx, &agent(&fx), &child, "in_progress").await;
         assert_eq!(
@@ -798,7 +793,7 @@ mod tests {
             .run(
                 &Actor::Human,
                 crate::commands::effort::LINK,
-                json!({ "effort": fx.effort.to_string(), "work_item": todo }),
+                json!({ "effort": fx.effort.to_string(), "task": todo }),
                 false,
             )
             .await
@@ -854,12 +849,12 @@ mod tests {
         settle(&fx).await;
         let other = item(&fx, "other", None, false).await;
         transition(&fx, &agent(&fx), &other, "in_progress").await;
-        transition(&fx, &agent(&fx), &work_item_ref(fx.task), "done").await;
+        transition(&fx, &agent(&fx), &task_ref(fx.task), "done").await;
         assert_eq!(
             efforts(&fx).await,
             vec![(
                 fx.effort.value(),
-                Some(work_item_ref(fx.task)),
+                Some(task_ref(fx.task)),
                 Some("switch".into())
             )],
             "nothing opened, nothing else closed"
@@ -923,7 +918,7 @@ mod tests {
             efforts(&fx).await,
             vec![(
                 fx.effort.value(),
-                Some(work_item_ref(fx.task)),
+                Some(task_ref(fx.task)),
                 Some("switch".into())
             )]
         );

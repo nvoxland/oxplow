@@ -107,7 +107,7 @@ test("a value that is not a list of items shows as it is; an empty list shows no
 // A `format: source` column says who caused a row: a chip with its kind's
 // icon and its label, a link where it has a `uri`; an agent reads it as text.
 test("a source column is a chip that says who, opening its thread", () => {
-  const agent = JSON.stringify({ kind: "agent", label: "Main Controller", uri: "oxplow:oxplow/page?page=thread-work&thread=thr1" });
+  const agent = JSON.stringify({ kind: "agent", label: "Main Controller", uri: "oxplow:oxplow/page?page=thread-tasks&thread=thr1" });
   const view = render(
     runOf("table", { columns: [{ ...column, key: "perms", format: "source" }] }, [
       ["a", "Alpha", agent],
@@ -121,7 +121,7 @@ test("a source column is a chip that says who, opening its thread", () => {
   ]);
   opened.length = 0;
   fireEvent.click(chips[0]!.querySelector("button")!);
-  expect(opened).toEqual(["oxplow:oxplow/page?page=thread-work&thread=thr1"]);
+  expect(opened).toEqual(["oxplow:oxplow/page?page=thread-tasks&thread=thr1"]);
   expect(chips[1]!.querySelector("button")).toBeNull();
 });
 

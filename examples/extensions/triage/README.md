@@ -1,12 +1,12 @@
 # Triage: TODOs sorted by a model
 
 Every TODO comment in your code, classified as a bug, cleanup or a
-feature, next to the number of open work items. It's one fact collector
+feature, next to the number of open tasks. It's one fact collector
 (`collectors/todos.star`) that uses all three host services:
 
 - **`tree.read`**: `source_files()` and `markers()` find the TODOs in the
   snapshot. A fact collector reads its tree without declaring it.
-- **`sql.read`**: `scope("sql.read", …)` counts the open work items.
+- **`sql.read`**: `scope("sql.read", …)` counts the open tasks.
 - **`ai.compute`**: `ai_classify()` sorts each TODO. It spends your AI
   provider's key, so the extension declares `permissions.ai` and the
   collector runs once it is deployed with that approved. Each

@@ -1,5 +1,5 @@
 # effort_review/publish-review: a review's answer, commented on the effort's
-# work item. The event carries only which run of the review job ended
+# task. The event carries only which run of the review job ended
 # (`where:` in the manifest keeps it to this job); the run's intent key,
 # `review:<effort id>`, says which effort it was about.
 
@@ -15,11 +15,11 @@ def transform(x):
     if not effort.startswith("eff"):
         return {"skip": "not an effort review: " + key}
     efforts = scope("sql.read", {
-        "sql": "SELECT work_item FROM v_effort WHERE uri = :effort",
+        "sql": "SELECT task FROM v_effort WHERE uri = :effort",
         "params": {"effort": uri.build("oxplow/effort", id = effort)},
     })
-    if not efforts or not efforts[0]["work_item"]:
-        return {"skip": "no work item for " + effort}
+    if not efforts or not efforts[0]["task"]:
+        return {"skip": "no task for " + effort}
     answer = run.get("result") or {}
     text = "".join([p.get("text", "") for p in answer.get("parts", []) if p.get("type") == "text"]).strip()
     if not text:
@@ -27,6 +27,6 @@ def transform(x):
     if payload["outcome"] == "cancelled":
         text += "\n\n_The review was cancelled after " + str(len(text.split())) + " words._"
     return {"commands": [{
-        "name": "oxplow.work_item.comment",
-        "input": {"uri": efforts[0]["work_item"], "body": "**Review of " + effort + "**\n\n" + text},
+        "name": "oxplow.task.comment",
+        "input": {"uri": efforts[0]["task"], "body": "**Review of " + effort + "**\n\n" + text},
     }]}

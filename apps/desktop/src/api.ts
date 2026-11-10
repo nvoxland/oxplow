@@ -254,9 +254,9 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-// Work items are read through the work-item interface by `workItems.ts`,
+// Tasks are read through the task interface by `tasks.ts`,
 // which owns their shape.
-export type { WorkItem } from "./workItems.js";
+export type { Task } from "./tasks.js";
 
 
 /** Why a snapshot take ran (`snapshot_op.trigger`). */
@@ -297,9 +297,9 @@ export interface SnapshotSummary {
 
 export interface TaskEffort {
   id: string;
-  /** The work item worked on (`work_item:oxplow:tsk42`, or another
-   *  provider's `work_item:issues:ENG-12`). */
-  work_item: string;
+  /** The task worked on (`task:oxplow:tsk42`, or another
+   *  provider's `task:issues:ENG-12`). */
+  task: string;
   started_at: string;
   ended_at: string | null;
   start_snapshot_id: string | null;
@@ -1233,8 +1233,8 @@ export async function filesAt(streamId: string, revision: Revision): Promise<str
 export interface EffortAtSnapshot {
   snapshotId: number;
   effortId: string;
-  /** The effort's work item ref; `null` while it's unlinked. */
-  workItem: string | null;
+  /** The effort's task ref; `null` while it's unlinked. */
+  task: string | null;
   threadId: string;
   startSnapshotId: number | null;
   endSnapshotId: number | null;
@@ -1274,7 +1274,7 @@ export async function listEffortsAtSnapshots(
     snapshot_id: number;
     effort: {
       id: string;
-      work_item: string | null;
+      task: string | null;
       thread_id: string;
       start_snapshot_id: number | null;
       end_snapshot_id: number | null;
@@ -1283,7 +1283,7 @@ export async function listEffortsAtSnapshots(
   return rows.map((r) => ({
     snapshotId: r.snapshot_id,
     effortId: r.effort.id,
-    workItem: r.effort.work_item,
+    task: r.effort.task,
     threadId: r.effort.thread_id,
     startSnapshotId: r.effort.start_snapshot_id,
     endSnapshotId: r.effort.end_snapshot_id,

@@ -23,7 +23,7 @@ use crate::Services;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RefSummary {
     pub uri: String,
-    /// Its resource (`oxplow/work_item`); empty when it isn't a URI.
+    /// Its resource (`oxplow/task`); empty when it isn't a URI.
     pub resource: String,
     /// Primary human label — wiki/task title, commit subject.
     pub title: Option<String>,
@@ -57,7 +57,7 @@ impl RefSummary {
 /// gist, small enough not to bloat the agent's context.
 const EXCERPT_LEN: usize = 280;
 
-/// Resolve one URI into a [`RefSummary`]. Work items, commits, files,
+/// Resolve one URI into a [`RefSummary`]. Tasks, commits, files,
 /// directories, wiki pages and findings have richer resolvers; any other
 /// resource resolves through the view its declaration names (`resolve:`
 /// and `title:`), by its `ref`. Anything else — not a URI, an undeclared
@@ -69,7 +69,7 @@ pub async fn resolve_ref(services: &Services, uri: &str) -> RefSummary {
     };
     let param = |name: &str| parsed.param(name).unwrap_or_default().to_string();
     let mut summary = match base.resource.as_str() {
-        r::WORK_ITEM => resolve_work_item(services, base, &parsed.identity()).await,
+        r::TASK => resolve_task(services, base, &parsed.identity()).await,
         r::COMMIT => resolve_commit(services, base, &param("sha")).await,
         r::FILE => resolve_file(services, base, &param("path")).await,
         r::DIR => resolve_directory(services, base, &param("path")).await,
@@ -127,13 +127,13 @@ pub async fn resolve_refs(services: &Services, uris: &[String]) -> Vec<RefSummar
     out
 }
 
-/// A work item, through the interface: the active list's items only,
+/// A task, through the interface: the active list's items only,
 /// whichever list it is; another stays bare.
-async fn resolve_work_item(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
+async fn resolve_task(services: &Services, mut summary: RefSummary, uri: &str) -> RefSummary {
     let row = services
         .sql
         .query_sql(
-            "SELECT title, state, body FROM v_work_item WHERE uri = ?1",
+            "SELECT title, state, body FROM v_task WHERE uri = ?1",
             vec![oxplow_db::SqlCell::Text(uri.to_string())],
             None,
         )
@@ -323,12 +323,8 @@ mod tests {
         let services = Services::in_memory(dir.path()).await.unwrap();
         let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "stage": "in_progress" })).await;
 
-        let summary = resolve_ref(
-            &services,
-            &build::work_item_uri("oxplow", &task.to_string()),
-        )
-        .await;
-        assert_eq!(summary.resource, "oxplow/work_item");
+        let summary = resolve_ref(&services, &build::task_uri("oxtask", &task.to_string())).await;
+        assert_eq!(summary.resource, "oxplow/task");
         assert_eq!(summary.title.as_deref(), Some("Fix the flaky test"));
         assert_eq!(summary.detail.as_deref(), Some("in_progress"));
         assert!(summary
@@ -338,10 +334,10 @@ mod tests {
             .starts_with("It fails on CI only."));
     }
 
-    /// A work item resolves through the interface: the active list's
+    /// A task resolves through the interface: the active list's
     /// items only — with none, even oxplow's task is bare.
     #[tokio::test]
-    async fn a_work_item_resolves_from_the_active_list_only() {
+    async fn a_task_resolves_from_the_active_list_only() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
         let task = crate::test_fixtures::file_item(
@@ -354,18 +350,14 @@ mod tests {
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), "none".into());
+            .insert("task_tracker".into(), "none".into());
         let config = crate::config_service::read_config(&services.config);
         services
             .capabilities
             .publish(&config, &services.db)
             .await
             .unwrap();
-        let summary = resolve_ref(
-            &services,
-            &build::work_item_uri("oxplow", &task.to_string()),
-        )
-        .await;
+        let summary = resolve_ref(&services, &build::task_uri("oxtask", &task.to_string())).await;
         assert_eq!(summary.title, None);
     }
 
@@ -373,10 +365,10 @@ mod tests {
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();
-        let summary = resolve_ref(&services, &build::work_item_uri("oxplow", "tsk999999")).await;
+        let summary = resolve_ref(&services, &build::task_uri("oxtask", "tsk999999")).await;
         assert_eq!(summary.title, None);
         assert_eq!(summary.detail, None);
-        assert_eq!(summary.uri, build::work_item_uri("oxplow", "tsk999999"));
+        assert_eq!(summary.uri, build::task_uri("oxtask", "tsk999999"));
     }
 
     #[tokio::test]
@@ -398,7 +390,7 @@ mod tests {
     }
 
     /// An old ref is no URI: a caller still saying `oxplow:oxplow/commit?sha=<sha>` or
-    /// `oxplow:oxplow/work_item?id=tsk1&provider=oxplow` gets a bare summary.
+    /// `oxplow:oxplow/task?id=tsk1&provider=oxtask` gets a bare summary.
     #[tokio::test]
     async fn old_refs_are_not_resolved() {
         let dir = git_repo_with_commit("Add the widget", "");
@@ -406,7 +398,7 @@ mod tests {
         let sha = head_sha(dir.path());
         for old in [
             format!("commit:{sha}"),
-            "work_item:oxplow:tsk1".into(),
+            "task:oxplow:tsk1".into(),
             "dir:.".into(),
         ] {
             let summary = resolve_ref(&services, &old).await;

@@ -3,7 +3,7 @@
 //! Each row is one directed edge `(source) --ref_type--> (target)`, each
 //! end a URI (`.context/resources.md`). Per-subsystem writers own their
 //! sources' rows (the wiki sync owns every wiki page's, the task save
-//! path every work item's, …). The standard write pattern is
+//! path every task's, …). The standard write pattern is
 //! [`SqlitePageRefStore::replace_source`]: delete every row whose source
 //! matches, then re-insert the new edge set in one transaction. The
 //! reader looks up `target_uri` for backlinks or `source_uri` for
@@ -198,7 +198,7 @@ impl SqlitePageRefStore {
     /// identified by `ref_types`: only rows whose `ref_type` matches
     /// one of the supplied values are deleted, then `edges` is
     /// inserted. Used when a single source has multiple writers
-    /// contributing different `ref_type`s — e.g. a work item gets
+    /// contributing different `ref_type`s — e.g. a task gets
     /// body-mention edges from the task upsert, link edges from the
     /// link store, and touched-file edges from the effort store. Each
     /// writer passes only its own ref_types so the others' rows survive.
@@ -530,7 +530,7 @@ pub fn replace_source_for_ref_types_tx(
 mod tests {
     use super::*;
 
-    use oxplow_domain::uri::build::{file_uri, wiki_uri, work_item_uri};
+    use oxplow_domain::uri::build::{file_uri, task_uri, wiki_uri};
 
     fn w(slug: &str) -> String {
         wiki_uri(slug)
@@ -640,11 +640,7 @@ mod tests {
         let store = SqlitePageRefStore::new(Database::in_memory());
         let edges = vec![
             edge(&w("a"), &f("x.rs"), "wiki_file_ref"),
-            edge(
-                &w("a"),
-                &work_item_uri("oxplow", "wi-1"),
-                "work_item_mention",
-            ),
+            edge(&w("a"), &task_uri("oxtask", "wi-1"), "task_mention"),
         ];
         store.replace_source(&w("a"), edges.clone()).await.unwrap();
         store.replace_source(&w("a"), edges.clone()).await.unwrap();

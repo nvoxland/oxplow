@@ -28,8 +28,8 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Tasks while the work list is none.** The work list ships in
-  `oxplow-foundation`, so it runs even with `oxplow-bundled` off. With no list
+- **Tasks while the task tracker is none.** The task tracker ships in
+  `oxplow-foundation`, so it runs even with `oxplow-bundled` off. With no task tracker
   chosen (Settings → Capabilities) or oxplow not running, file and update
   tasks with `cargo run -q -p oxplow-dev -- task …`
   (`.context/working-in-this-repo.md` "oxplow-dev"). How oxplow tracks work and how to ask the person a
@@ -111,9 +111,9 @@ or exact mechanics.
 | If you're touching… | Read first |
 |---|---|
 | Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
-| Tables, stores, work queue, sort_index, migrations | `.context/data-model.md` |
+| Tables, stores, tasks, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
-| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the capabilities direction (swappable work list, effort policy, snapshots) | `.context/work-tracking.md` |
+| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the capabilities direction (swappable task tracker, effort policy, snapshots) | `.context/work-tracking.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
@@ -129,8 +129,8 @@ or exact mechanics.
 | Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | Knowledge (the wiki) — `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the wiki write guard | `.context/knowledge.md` |
-| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalWorkItems`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
-| Work items — `v_work_item`, the `WorkItemsProvider` capability and registry, the oxplow provider, the conformance suite | `.context/work-items.md` |
+| External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalTaskTracker`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
+| Tasks — `v_task`, the `TaskTracker` capability and registry, oxtask, the conformance suite | `.context/tasks.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
 | Extensions — the terms (extension, contribution, capability, provider, scope, access, effect) and the index of the extensions docs | `.context/extensions.md` |
 | Extensions — `extension.yaml` (manifest v2), contribution descriptors, `configuration:`, private state, the design rules | `.context/extensions-manifest.md` |

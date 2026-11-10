@@ -2,7 +2,7 @@
 
 An external provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities outside the
-app (P5.D): one core gives a provider contract (the work list, the effort
+app (P5.D): one core gives a provider contract (the task tracker, the effort
 policy; "What a provider may implement"). This doc
 covers the protocol (D1), the fake provider (D2), what a provider may
 implement, the host with its permission and spawn rules (D3), instances with health (D4), the
@@ -68,7 +68,7 @@ manifest `needs` (`sql.read`: `args` `{ sql, params? }` →
 rows), `key` naming the idempotency key of the `invoke` it serves so the
 call is recorded with that run. `Instance::invoke(run, …)` registers the
 run under the key for the call's length (`HostCalls::begin`), whichever
-verb it is — a command, a work-item, knowledge, snapshot or harness
+verb it is — a command, a task, knowledge, snapshot or harness
 verb, an effort policy's `react`. Refused (`InvalidInput` at `/scope`)
 for one it doesn't need or that isn't there, and for one naming no
 `invoke` under way: nothing a provider does of oxplow is outside a run.
@@ -103,23 +103,23 @@ stub generation for provider authors.
 
 ## The fake provider (`crates/oxplow-provider-fake`)
 
-A scripted **work-items** provider, lib + bin, that the host's tests and the conformance kit drive over real
-stdio. `declarations()` is its `InitializeResult`: the `work_items`
+A scripted **task tracker** provider, lib + bin, that the host's tests and the conformance kit drive over real
+stdio. `declarations()` is its `InitializeResult`: the `task_tracker`
 capability (hierarchy, comments, links, delete and `idempotent_writes`),
-the work-items verbs `create` / `update` / `transition` (undoable: its
+the task tracker verbs `create` / `update` / `transition` (undoable: its
 inverse moves the item back) / `link` / `comment` / `delete` over the contract's inputs (`stage`,
 one of its own; its `native.points`; `additionalProperties: false`), one
 command of its own, `estimate { uri, points }`, the
-`work_item.recorded@3` event type with the core schema (its records
+`task.recorded@3` event type with the core schema (its records
 state its links and comments), a
-`work_items`
-collector over the `work_item` entity, and a config schema requiring
+`task_tracker`
+collector over the `task` entity, and a config schema requiring
 `team`. `check` returns handle `fake:<team>` or a `/team` problem. Items
-live in memory as `oxplow:oxplow/work_item?id=W-<n>&provider=fake` in its stages `icebox`,
+live in memory as `oxplow:oxplow/task?id=W-<n>&provider=fake` in its stages `icebox`,
 `ready`, `doing`, `stuck`, `shipped`, `dropped` (one per bucket, declared
 in its manifest's `stages:`; `STAGES`, and `with_its_stages` for a test
 that turns a scaffold into the fake); every
-`invoke` returns the `work_item.recorded` events the host logs. Each
+`invoke` returns the `task.recorded` events the host logs. Each
 write bumps the item's revision (a deleted item stays, marked
 `deleted`); `read` streams each item changed after the cursor, in
 revision order, as `$/record` followed by a `$/state { cursor, seen }`
@@ -175,7 +175,7 @@ Two notifications drive it from a test: `fake/changed { collectors? }`
 notifications against the goldens.
 
 **As an effort policy** (`OXPLOW_FAKE_CAPABILITY=effort_policy`; unset or
-`work_items` is the work list, anything else exits 2) it declares
+`task_tracker` is the task tracker, anything else exits 2) it declares
 `policy_declarations()` — the `effort_policy` capability, its one verb
 `react` (`confirm: never`, `access: record`), no event types or
 collectors, the same `team` config — and keeps no items (`discover` is
@@ -239,14 +239,14 @@ keeps no pins). `link` appends `[[target]]` under a `## Related` heading;
 `delete_page` answers the record with `deleted: true`, and a page that is
 absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
 streams the pages changed after the cursor in revision order, each
-followed by a `$/state` checkpoint, as the work list's does.
+followed by a `$/state` checkpoint, as the task tracker's does.
 
 ## Which trackers are backends (decided 2026-10-05)
 
-A work-items provider is a **backend for the project's own work**: when
-it's the active tracker, every new item goes to it ([work-items.md](./work-items.md)
+A task tracker is a **backend for the project's own work**: when
+it's the active tracker, every new item goes to it ([tasks.md](./tasks.md)
 "One write surface"). So it should have the visibility the person wants
-for that work — usually still just theirs, like oxplow's own list or a
+for that work — usually still just theirs, like oxtask or a
 local tracker such as beads (filed as the example to build). A team's
 tracker (Linear, GitHub Issues) isn't one: an agent's every small task
 would land in the team's tracker. At most it would be a separate view of
@@ -263,7 +263,7 @@ pinned tools instead of an `entry` (exactly one of the two):
 ```yaml
 providers:
   - id: notes
-    capability: work_items
+    capability: task_tracker
     adapter:
       mcp: { command: [bin/notes-server, --stdio] }  # a program in the folder
       mapping: mcp/notes.star                        # Starlark transform(x)
@@ -360,7 +360,7 @@ pinned tool added, removed or changed (`ProviderImpact.tools`).
   `$/state`. **Tool output is data**: the mapping reads it and nothing
   runs it. **What the mapping returns is checked**: an event type the
   declarations don't list, or a subject, item or record that isn't this
-  provider's (`oxplow:oxplow/work_item?…&provider=<id>`, the id from `OXPLOW_PROVIDER_ID`) fails
+  provider's (`oxplow:oxplow/task?…&provider=<id>`, the id from `OXPLOW_PROVIDER_ID`) fails
   the call; so does a `records` answer without a `state` (a missing
   checkpoint would restart every read from nothing). **A tool error**
   (`isError`) is the server refusing the request, not a failure: the
@@ -386,7 +386,7 @@ bearer refused at check and mid-session, and a missing one, and
 calls and outcomes, the read and its cursor, an undeclared event and a
 foreign ref refused; `the_pinned_tools_are_the_servers` checks the pin
 (`OXPLOW_BLESS=1` re-pins). `tests/kit.rs` runs the fixture through
-`oxplow extension test`, the work-items suite through a throwaway host over
+`oxplow extension test`, the task tracker suite through a throwaway host over
 the adapter included.
 
 ## The host (`crates/oxplow-app/src/providers/`)
@@ -399,7 +399,7 @@ has none):
 ```yaml
 providers:
   - id: fake                     # the URI segment and command namespace
-    capability: work_items       # one with a provider contract (below)
+    capability: task_tracker       # one with a provider contract (below)
     entry: bin/provider          # a program in the extension folder
     args: [--stdio]
     env: [TRACKER_URL]           # host variables passed through by name
@@ -407,29 +407,29 @@ providers:
                                  # `{ name, oauth }` — "Credentials and sign-in"
     network: [api.example.com]   # hosts it may reach
     declarations: provider.json  # its InitializeResult, checked in
-    id_pattern: "[A-Z]+-\\d+"     # a work list's own ids (optional)
-    stages:                      # a work list's workflow (required for one)
+    id_pattern: "[A-Z]+-\\d+"     # a task tracker's own ids (optional)
+    stages:                      # a task tracker's workflow (required for one)
       - { id: ready, title: Ready, bucket: todo }
       - { id: doing, title: Doing, bucket: in_progress }
       - { id: shipped, title: Shipped, bucket: done }
     needs: [sql.read]            # scopes it calls (`host/call`); read ones only
 ```
 
-`fields` (a work list's own, kept in `native`: `[{ name, title, kind:
-enum|text|number, values? }]`, work-items.md "Declared fields") and
-`stages` (its workflow, each in one of core's buckets, work-items.md
+`fields` (a task tracker's own, kept in `native`: `[{ name, title, kind:
+enum|text|number, values? }]`, tasks.md "Declared fields") and
+`stages` (its workflow, each in one of core's buckets, tasks.md
 "Buckets and stages") are published with the instance's capability row.
-A work list must declare `stages:` (one in each of todo, in_progress and
+A task tracker must declare `stages:` (one in each of todo, in_progress and
 done; `stages_problem`), and nothing else may. `id_pattern` (a regex
-matched whole) is what a work list's ids look
-like: while it's the active one, a loose id (`ENG-12`) in a work-item
-command resolves to its item (`work_item::with_loose_refs`,
-work-items.md).
+matched whole) is what a task tracker's ids look
+like: while it's the active one, a loose id (`ENG-12`) in a task
+command resolves to its item (`task::with_loose_refs`,
+tasks.md).
 
 The loader refuses (into `errors`) an id that isn't lowercase
 snake_case, is `oxplow` or a core namespace, or repeats
 (`capability::instance_id_problem`); a capability with no provider
-contract; a work list without `stages:`, or stages `stages_problem`
+contract; a task tracker without `stages:`, or stages `stages_problem`
 refuses, or `stages:` on anything else; an `id_pattern` that isn't a regex, or `fields` / `idPattern`
 on a capability that keeps no items; an entry or declarations path
 outside the folder (or the manifest, or under a retired UI folder); a bad host
@@ -440,7 +440,7 @@ isn't its contract's shape (`ProviderContract::data`, a JSON Schema: an
 agent harness's environment markers and settings) or
 any `data` when the contract asks for none, lack a verb its contract requires
 for the features it declares, declare a verb that isn't `confirm: never`
-and `access: record` (core's call of it — `work_item.<verb>`, the effort
+and `access: record` (core's call of it — `task.<verb>`, the effort
 policy's dispatcher — is what a person confirms and what is gated), or
 declare an event type its contract doesn't let it emit.
 
@@ -454,21 +454,21 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the URIs an instance owns,
 and whether it keeps items.
 
-| | `work_items` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
+| | `task_tracker` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
 |---|---|---|---|---|---|---|
 | verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` | `stat`, `read`, `list`; `write` ← writable |
-| verbs run as | `oxplow.work_item.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
+| verbs run as | `oxplow.task.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
 | declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing | nothing |
-| may emit | `work_item.recorded@3` | nothing | nothing | nothing | `knowledge.page.recorded@2` | nothing |
-| collectors stream | `work_item` rows, logged as `work_item.recorded@3` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` | nothing |
-| owns URIs | `oxplow/work_item` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) | none (its id is the `filesystem` param of the file URIs it serves) |
+| may emit | `task.recorded@3` | nothing | nothing | nothing | `knowledge.page.recorded@2` | nothing |
+| collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` | nothing |
+| owns URIs | `oxplow/task` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) | none (its id is the `filesystem` param of the file URIs it serves) |
 | keeps items (`fields`, `idPattern`) | yes | no | no | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
 it out again. `Services` builds one per capability and hands them to the
-`ProviderRegistry`: `work_items::WorkItemsHost` registers an
-`ExternalWorkItems` in `Services.work_items`; the effort policy's
+`ProviderRegistry`: `tasks::TaskTrackerHost` registers an
+`ExternalTaskTracker` in `Services.tasks`; the effort policy's
 registers an external policy in `Services.effort_policies`; the agent
 harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 `Services.harnesses` under the instance id, beside the built-ins (a
@@ -505,7 +505,7 @@ removed_files }` (the body in oxplow's markdown, `title` also given), `link
 Each answers the page's `knowledge.page.recorded@2 { page: { uri, title,
 body, uris, updated_at, deleted? } }`: `body` what it keeps (in its own
 grammar if it likes), `uris` what the page links **in oxplow's grammar**
-(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, a work item's URI) — core links and pins
+(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, a task's URI) — core links and pins
 from those, never parsing a foreign body. A write answering no record of
 the page fails. Core records the row, the edges and the pins from it and
 logs `knowledge.page.written` after the store's own record. Its collector
@@ -627,7 +627,7 @@ runs it with config `{}` and the kit environment's search path (its PATH,
 then the install dirs under its HOME — `kit_search_path`), so a harness
 provider's program must be findable where a person's would be; `ran`
 shows `agent_harness suite`. The MCP adapter
-(`oxplow-provider-mcp`) still maps work-item URIs only.
+(`oxplow-provider-mcp`) still maps task URIs only.
 
 **A provider runs under its extension's permissions** (`.context/extensions-permissions.md`
 "Permissions"): its manifest declares `process` (an `entry` or an MCP
@@ -674,8 +674,8 @@ gateway — `HostDeps::sql`, metric functions included — or `state.read`
 over its own private namespace), each call counted
 into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
-`Invocation::trace` under its key, and `ExternalWorkItems` the
-`work_item.<verb>` run's, from `VerbCall::trace`) — so the run's audit
+`Invocation::trace` under its key, and `ExternalTaskTracker` the
+`task.<verb>` run's, from `VerbCall::trace`) — so the run's audit
 row records it. An effort policy's `react` is no command run: its reads
 count nowhere.
 The conformance kit has no project: it answers `host/call` like any
@@ -692,7 +692,7 @@ extensionInstances:
 ```
 
 **An instance id** follows the provider id's rule — one rule,
-`oxplow_domain::work_items::provider_id_problem` (tsk840): lowercase
+`oxplow_domain::tasks::provider_id_problem` (tsk840): lowercase
 letters, digits and underscores, starting with a letter, and none of
 oxplow's own (`oxplow`, a core namespace such as `code` or `config`),
 checked wherever an id is written (`extensionInstances`, `instances.yaml`,
@@ -707,9 +707,9 @@ One spelling everywhere, because the id is used as it stands:
 
 | Keyed on the **instance id** | Keyed on the **provider (program)** |
 |---|---|
-| the URI's `provider` param (`oxplow:oxplow/work_item?id=ENG-1&provider=issues_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
+| the URI's `provider` param (`oxplow:oxplow/task?id=ENG-1&provider=issues_acme`) and `check_subject` | the extension's deployment (`.oxplow/runtime/extensions/<ext>/<hash>/`) |
 | an extension command's `instance` (`tracker.item.estimate { instance: issues_acme }`) | the extension's permissions (`process.run`, `network`, `secrets`) |
-| the work-items registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
+| the task tracker registry id, `v_capability_provider.provider`, the `activeProviders` value | the Extensions page's provider row, `declaration_impact` |
 | `OXPLOW_PROVIDER_ID` (the provider is told which instance it is) | the kit's fixtures and transcripts (it tests the program, as its default instance) |
 | `contribution_health.contribution`, `provider_collector_state.instance` (the name) | |
 | the credential accounts (`instance:<project>:<namespace>/<id>:<name>`) | |
@@ -1032,14 +1032,14 @@ owner's), missing, or disabled is left out with that state on its row, and one
 whose start failed or hung is published failing, restarting with backoff and
 counted by `contribution_health` — every other extension and instance
 activates. A started instance is handed to its capability's host at
-publication — for a work list,
-`ExternalWorkItems::provider` (id, declared features, and the
-`WorkItemVerbs` the `work_item.*` commands call — the trait every list
-implements, oxplow's own tasks included (`oxplow_tasks::OxplowTasks`) — each verb's
+publication — for a task tracker,
+`ExternalTaskTracker::provider` (id, declared features, and the
+`TaskVerbs` the `task.*` commands call — the trait every tracker
+implements, oxtask included (`oxplow_oxtask::OxtaskTracker`) — each verb's
 input checked against its declared schema first) in
-`Services.work_items` — and its **other** declared commands on the bus as
+`Services.tasks` — and its **other** declared commands on the bus as
 `<id>.<name>` (`External`, `Experimental`; confirm / access / undoable as declared). Its capability's verbs are never
-commands of their own: `work_item.<verb>` is the one write surface
+commands of their own: `task.<verb>` is the one write surface
 (P7.A1). A refusal —
 unconfigured, a handshake that doesn't match — registers
 nothing; a start that merely failed (it may come up) registers and
@@ -1059,24 +1059,24 @@ A run goes through the bus's **provider router**
 (`CommandBus::set_provider_router`, `ProviderRouter for
 ProviderRegistry::run_op`) to the instance its input names — an
 `instance` field, else the instance its `uri` is of
-(a work item URI's `provider` param), else the provider's default instance —
+(a task URI's `provider` param), else the provider's default instance —
 `Unavailable` when that one isn't running; its inverse names an
 operation, made a call of the command declared over it (with the
 instance), or `<family>.<verb>` for a capability verb (its contract's
-`dispatch`: `oxplow.work_item.<verb>`). A capability verb can't be
+`dispatch`: `oxplow.task.<verb>`). A capability verb can't be
 declared this way: core calls it. An instance registers only its
 capability's implementation (no bus namespace). **A provider emits only
-its capability's event types** (its contract's `events`: `work_items` →
-`work_item.recorded@3` — a published version's schema never changes,
+its capability's event types** (its contract's `events`: `task_tracker` →
+`task.recorded@3` — a published version's schema never changes,
 since declarations are compared to it exactly;
 tsk548): declaring any other type — another core one such as
 `contribution.enabled`, which would clear another contribution's disable — is
 refused when the manifest loads, and the declared schema must equal
 core's (checked at enable). Its own types are P7. A command's run
 invokes the process and hands the bus its result, its inverse (as
-`<id>.<command>`, or for a verb `work_item.<verb>`) and its events —
+`<id>.<command>`, or for a verb `task.<verb>`) and its events —
 refused if a type isn't declared, a record names another provider's row
-(a `work_item.recorded` another's item), or a subject isn't one of its
+(a `task.recorded` another's item), or a subject isn't one of its
 own URIs (`check_subject`: its contract's resource with `provider=<id>`, or
 the extension's URI `oxplow:oxplow/extension?name=<ext>`).
 
@@ -1177,19 +1177,19 @@ checkpoint it last stored
 (`provider_collector_state`, [data-model.md](./data-model.md)), through
 `start_streaming`. Each `$/record` must be the collector's entity — the
 one its contract streams — and a row of its own (its `uri`), valid as
-the contract's event; it is kept as that envelope (`work_item.recorded@3`
+the contract's event; it is kept as that envelope (`task.recorded@3`
 `{ item }`, the actor's source) until the
 next `$/state`, which commits the batch **and** the checkpoint in one
 transaction, so a read that fails midway keeps exactly what its last
 checkpoint covered and the next read resumes there. A record equal to its
-item's last `work_item.recorded` (a write's or an earlier read's —
+item's last `task.recorded` (a write's or an earlier read's —
 looked up by the contract key's literal path, `json_extract(payload,
-'$.item.uri')`, the expression index `event_log_work_item_uri`) is
+'$.item.uri')`, the expression index `event_log_task_uri`) is
 **not logged**: it restates nothing, and logging it would echo a write
 back to whatever reacted to it — an effect that writes another
 provider's item would hear its own write again on every sync (tsk799).
 The checkpoint's `records` still counts what was read. This leans on a
-read restating a write exactly, which the work-items conformance suite
+read restating a write exactly, which the task tracker conformance suite
 checks. The result's
 `records` must equal what was streamed; records after the last
 checkpoint of a read that succeeded land too. A read holds at most
@@ -1199,8 +1199,8 @@ streams more without a `$/state` fails. A record that breaks a
 rule, a count that doesn't match, or a read that sends nothing for
 `call_timeout` (`$/cancel` follows) fails the read and counts toward the
 instance's health like a failed call (a refused input or a cancel
-doesn't). The projection (`work_items.project`) then restates
-`v_work_item`.
+doesn't). The projection (`tasks.project`) then restates
+`v_task`.
 
 **`oxplow.provider.sync { instance, collector? }`** is the one way to read
 ([commands.md](./commands.md)): Settings → Integrations' **Sync Now**, an
@@ -1265,7 +1265,7 @@ removed. The core is covered by `providers/tests.rs`
 (`provider_instances_are_managed_by_commands_and_read_as_a_model`), and the
 whole in a browser by the suite's `integrations/fake-provider` spec
 (`tests-e2e/`, P11): a person configures the fake's Team in the form, presses Check and
-Enable, makes it the project's work list in Settings → Capabilities; an item created on it reaches the
+Enable, makes it the project's task tracker in Settings → Capabilities; an item created on it reaches the
 fake's service, and after Sync Now it is on the Board. Admitting the
 program is the extension's deploy (the Extensions page); a deploy restarts
 its running instances on the new declarations in the same activation, so
@@ -1281,9 +1281,9 @@ the instance; an unconfigured instance can't be enabled (nothing
 written) and a configured one enables, writes `extensionInstances` and
 disables again; `fail-next:3` disables it after three failures with the
 reason logged, keeps it off across a reconcile, refuses an agent's
-`oxplow.contribution.enable` and comes back on a person's; and the work-items
-conformance suite passes through the dispatching `work_item.*` over the
-fake; `work_item.*` writes the fake's items through its process with one
+`oxplow.contribution.enable` and comes back on a person's; and the task tracker
+conformance suite passes through the dispatching `task.*` over the
+fake; `task.*` writes the fake's items through its process with one
 audit row (and undo dispatches again), its verbs aren't on the bus but
 its extension's `tracker.item.estimate` is, run on the instance its `uri`
 names; a verb's input is checked against its declared schema
@@ -1299,13 +1299,13 @@ runs nothing and the item's move stands; and once stopped the choice
 resolves to `none` and starting a task opens nothing.
 
 **Its commands appear in core menus** by their own `ui`: one about a
-URI's kind (`ui.about: work_item`) is on that URI's page menu and its
+URI's kind (`ui.about: task`) is on that URI's page menu and its
 rows' right-click menus (`refOffers`).
 
 **Its features are published** while it runs: publication writes the
 instance in the capability registry and the generation's withdrawal takes it
 out, each restating `v_capability_provider`, so the UI offers only what the
-provider declares ([work-items.md](./work-items.md)). Each generation restates
+provider declares ([tasks.md](./tasks.md)). Each generation restates
 the rows, so a choice takes effect with the config change.
 
 ## Idempotency
@@ -1314,7 +1314,7 @@ A write to a provider may land without oxplow learning it did (a crash, a
 timeout, a lost reply). Sending it again is safe only if the provider can
 tell it is the same write. The contract (P10, built):
 
-- **`features.idempotent_writes: true`** in a provider's work-items
+- **`features.idempotent_writes: true`** in a provider's task tracker
   declaration promises that two `invoke`s carrying the same key perform
   the write once and answer alike (a key sent with another write is
   `InvalidInput` at `/idempotency_key`; protocol 2).
@@ -1334,8 +1334,8 @@ tell it is the same write. The contract (P10, built):
   same ([extensions-events.md](./extensions-events.md) "Attempts"); anything else waits for
   a person's `oxplow.effect.retry`, asked first. A failed command a person ran
   is reported, not retried.
-- **The kit checks the promise** (the work-items suite,
-  [work-items.md](./work-items.md) "Conformance"): a provider that
+- **The kit checks the promise** (the task tracker suite,
+  [tasks.md](./tasks.md) "Conformance"): a provider that
   declares it and doesn't keep it fails.
 
 The fake declares and keeps it, which proves the host and nothing about a
@@ -1354,9 +1354,9 @@ approval is asked; credentials come from the environment (the declared
 names — for a signed-in credential, an access token the author got
 themselves: the kit never signs in — and never a client secret).
 The report's **`left`** lists what the run made in a provider's own
-system and didn't remove — the URI a work-items `create` example returned,
+system and didn't remove — the URI a task tracker `create` example returned,
 and the items the conformance suite filed and couldn't delete
-(`work_items_conformance::SuiteRun.left`: everything, for a provider
+(`task_tracker_conformance::SuiteRun.left`: everything, for a provider
 without `delete`); the text form prints each as `left in the provider:`.
 Against a real service that is what to clean up.
 `test_extension` reads this process's; `test_extension_in` takes a
@@ -1404,8 +1404,8 @@ and the throwaway host the conformance suite runs in
   project (`GitProvider::init_repository`: an empty root commit) with a
   copy of the extension, `Services::in_memory` over it, the provider
   enabled there with the fixture config, then its
-  capability's suite: `work_items_conformance::suite` against its
-  `ExternalWorkItems`, or — the instance made the project's effort policy —
+  capability's suite: `task_tracker_conformance::suite` against its
+  `ExternalTaskTracker`, or — the instance made the project's effort policy —
   `effort_policy_conformance::suite` (an agent starting an item on its
   thread opens an effort linked to it, finishing it closes it, each run as
   `effect:effort_policy:<id>`), which the built-in passes too; or — the

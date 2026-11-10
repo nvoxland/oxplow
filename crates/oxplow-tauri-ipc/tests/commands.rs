@@ -282,7 +282,7 @@ async fn page_ref_reads_empty_for_fresh_project() {
     .is_empty());
     assert!(commands::generated::list_outbound(
         app.state(),
-        oxplow_domain::uri::build::work_item_uri("oxplow", "tsk1"),
+        oxplow_domain::uri::build::task_uri("oxtask", "tsk1"),
         Some(10)
     )
     .await

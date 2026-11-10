@@ -24,7 +24,7 @@ use crate::Services;
 pub enum ToolTarget {
     /// A command, by id (`oxplow.sql.query`).
     Command(String),
-    /// A page, by id (`oxplow/thread-work`), through
+    /// A page, by id (`oxplow/thread-tasks`), through
     /// [`PAGE_RUN`].
     Page(String),
 }
@@ -236,6 +236,7 @@ mod tests {
                 "oxplow_list_comments",
                 "oxplow_list_tabs",
                 "oxplow_navigate",
+                "oxplow_next_task",
                 "oxplow_preview_collector",
                 "oxplow_query_sql",
                 "oxplow_read",
@@ -243,14 +244,13 @@ mod tests {
                 "oxplow_run_page_action",
                 "oxplow_search",
                 "oxplow_show_page",
-                "oxplow_thread_work",
+                "oxplow_thread_tasks",
                 "oxplow_validate_extension",
                 "oxplow_vcs_blame",
                 "oxplow_vcs_branches",
                 "oxplow_vcs_log",
                 "oxplow_vcs_status",
                 "oxplow_wiki_ref_drift",
-                "oxplow_work_next",
             ]
         );
         let query = tools.iter().find(|t| t.name == "oxplow_query_sql").unwrap();
@@ -261,9 +261,9 @@ mod tests {
         // A page tool's params are its input's properties.
         let work = tools
             .iter()
-            .find(|t| t.name == "oxplow_thread_work")
+            .find(|t| t.name == "oxplow_thread_tasks")
             .unwrap();
-        assert_eq!(work.target, ToolTarget::Page("oxplow/thread-work".into()));
+        assert_eq!(work.target, ToolTarget::Page("oxplow/thread-tasks".into()));
         assert!(work.read_only);
         assert!(work.input_schema["properties"]["thread"].is_object());
     }
@@ -323,7 +323,7 @@ mod tests {
         std::fs::write(
             root.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: p\ncommands:\n\
-             \x20 - name: work.count\n    summary: Count the work items.\n    scope: sql.read\n    op: query\n\
+             \x20 - name: work.count\n    summary: Count the tasks.\n    scope: sql.read\n    op: query\n\
              \x20   example: { sql: \"SELECT 1\" }\n    tool: count\n\
              \x20 - name: work.secret\n    summary: Also for agents.\n    scope: sql.read\n    op: query\n\
              \x20   tool: secret\n",

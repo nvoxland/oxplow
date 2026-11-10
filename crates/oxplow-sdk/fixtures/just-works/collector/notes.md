@@ -24,11 +24,11 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
   To see that, rerun with `--output-format stream-json` and read it.
 
 - **Patched after recording (2026-10-07):** the old UI format dropped the
-  `task` link kind (a work item links as `page`, by its ref), so the
+  `task` link kind (a task links as `page`, by its ref), so the
   title column's `link: { kind: task, from: id }` was removed to keep the
-  recording checking clean. The run predates the work-item interface:
+  recording checking clean. The run predates the task interface:
   it read `v_task`, which is gone, so the collector's `input` was
-  rewritten over `v_work_item` (same output columns; the id is the
+  rewritten over `v_task` (same output columns; the id is the
   number in an oxplow ref). Re-record it with the current skill.
 - **Patched after recording (2026-10-26):** the old UI format became pages, so the
   recorded `lenses/stale-tasks.yaml` was rewritten by hand as

@@ -41,6 +41,7 @@ pub mod service;
 pub mod snapshot;
 pub mod stores;
 pub mod stream;
+pub mod tasks;
 pub mod template;
 pub mod thread;
 pub mod time;
@@ -49,7 +50,6 @@ pub mod uri;
 pub mod vcs;
 pub mod vocabulary;
 pub mod when;
-pub mod work_items;
 
 pub use ai_context::AiContext;
 pub use commands::{

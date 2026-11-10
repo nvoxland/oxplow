@@ -817,7 +817,7 @@ mod tests {
     };
     use crate::pages::open_runs::PageRuns;
     use crate::pages::runner::{PageRun, RunRequest, RunTarget};
-    use oxplow_tasks::work_item_ref;
+    use oxplow_oxtask::task_ref;
     use serde_json::json;
 
     /// A task, and pages over it whose actions run commands.
@@ -842,22 +842,22 @@ loaders:
     sql: |
       SELECT uri, title,
              CASE :open WHEN '1' THEN 1 WHEN 'null' THEN NULL WHEN 'empty' THEN '' ELSE 0 END AS open
-      FROM v_work_item
+      FROM v_task
   stages:
     sql: |
       SELECT 'blocked' AS value, 'Stuck' AS label UNION ALL SELECT 'done', 'Done'
 actions:
-  - { id: finish, label: Finish, command: oxplow.work_item.transition, input: { uri: "{{param.item}}", to: done } }
+  - { id: finish, label: Finish, command: oxplow.task.transition, input: { uri: "{{param.item}}", to: done } }
   - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
 view:
   viz: table
   from: items
   actions:
-    - { id: finish-row, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
-    - { id: finish-open, label: Finish, command: oxplow.work_item.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
-    - { id: retitle, label: Retitle…, command: oxplow.work_item.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
-    - { id: mark, label: Mark, command: oxplow.work_item.transition, row: true, options_from: stages, input: { uri: "{{row.uri}}", to: "{{option.value}}" } }
+    - { id: finish-row, label: Finish, command: oxplow.task.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+    - { id: finish-open, label: Finish, command: oxplow.task.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
+    - { id: retitle, label: Retitle…, command: oxplow.task.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
+    - { id: mark, label: Mark, command: oxplow.task.transition, row: true, options_from: stages, input: { uri: "{{row.uri}}", to: "{{option.value}}" } }
 "#,
         )
         .unwrap();
@@ -875,10 +875,10 @@ view:
   from: one
   columns: [{ key: title }, { key: open }]
   actions:
-    - { id: make, label: Make, command: oxplow.work_item.create, when: open, input: { title: "{{row.title}}" } }
-    - { id: plain, label: Plain, command: oxplow.work_item.create, input: { title: Plain } }
-    - { id: gated, label: Gated, command: oxplow.work_item.create, enabled: open, input: { title: Gated } }
-    - { id: rename, label: Rename, command: oxplow.work_item.update, form: true, fixed: [uri], input: { uri: "{{param.item}}", title: "{{row.title}}" } }
+    - { id: make, label: Make, command: oxplow.task.create, when: open, input: { title: "{{row.title}}" } }
+    - { id: plain, label: Plain, command: oxplow.task.create, input: { title: Plain } }
+    - { id: gated, label: Gated, command: oxplow.task.create, enabled: open, input: { title: Gated } }
+    - { id: rename, label: Rename, command: oxplow.task.update, form: true, fixed: [uri], input: { uri: "{{param.item}}", title: "{{row.title}}" } }
 "#,
         )
         .unwrap();
@@ -886,15 +886,15 @@ view:
             ext.join("pages/board.yaml"),
             r#"title: Board
 loaders:
-  items: { sql: "SELECT uri, title, state FROM v_work_item" }
+  items: { sql: "SELECT uri, title, state FROM v_task" }
 view:
   viz: board
   from: items
   group: { by: state, values: [todo, in_progress, done] }
   actions:
-    - { id: move, label: Move, command: oxplow.work_item.transition, drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } }
-    - { id: reorder, label: Reorder, command: oxplow.work_item.reorder, drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } }
-    - { id: finish, label: Finish, command: oxplow.work_item.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+    - { id: move, label: Move, command: oxplow.task.transition, drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } }
+    - { id: reorder, label: Reorder, command: oxplow.task.reorder, drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } }
+    - { id: finish, label: Finish, command: oxplow.task.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
 "#,
         )
         .unwrap();
@@ -902,13 +902,13 @@ view:
             ext.join("pages/note.yaml"),
             r#"title: Note
 loaders:
-  items: { sql: "SELECT uri, body FROM v_work_item" }
+  items: { sql: "SELECT uri, body FROM v_task" }
 view:
   viz: markdown
   from: items
   markdown: { text: body }
   actions:
-    - { id: save, label: Save, command: oxplow.work_item.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
+    - { id: save, label: Save, command: oxplow.task.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
 "#,
         )
         .unwrap();
@@ -1011,7 +1011,7 @@ view:
 
     /// The row whose `uri` is the fixture's task.
     fn task_row(fx: &crate::test_fixtures::TaskEffortFixture) -> BTreeMap<String, SqlCell> {
-        BTreeMap::from([("uri".to_string(), SqlCell::Text(work_item_ref(fx.task)))])
+        BTreeMap::from([("uri".to_string(), SqlCell::Text(task_ref(fx.task)))])
     }
 
     /// The form node of `page`'s run with `params`: its start.
@@ -1073,8 +1073,8 @@ view:
             .unwrap()
     }
 
-    async fn state(svc: &crate::Services, task: oxplow_tasks::TaskId) -> String {
-        use oxplow_tasks::TaskStore as _;
+    async fn state(svc: &crate::Services, task: oxplow_oxtask::OxtaskId) -> String {
+        use oxplow_oxtask::OxtaskStore as _;
         let t = svc.task_store.get(task).await.unwrap().unwrap();
         serde_json::to_value(t.status)
             .unwrap()
@@ -1086,7 +1086,7 @@ view:
     async fn column(svc: &crate::Services, item: &str, column: &str) -> String {
         let (item, sql) = (
             item.to_string(),
-            format!("SELECT {column} FROM v_work_item WHERE uri = ?1"),
+            format!("SELECT {column} FROM v_task WHERE uri = ?1"),
         );
         svc.db
             .read(move |c| {
@@ -1102,7 +1102,7 @@ view:
     #[tokio::test]
     async fn an_action_runs_its_command_as_the_page() {
         let (fx, _root) = fixture().await;
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         Press::on("acme/tasks", None, "finish")
             .params(&[("item", SqlCell::Text(item))])
             .run(&fx.svc)
@@ -1171,7 +1171,7 @@ view:
         let err = Press::on("acme/tasks", Some("items"), "finish-row")
             .row(BTreeMap::from([(
                 "uri".to_string(),
-                SqlCell::Text("oxplow:oxplow/work_item?id=tsk999999&provider=oxplow".into()),
+                SqlCell::Text("oxplow:oxplow/task?id=tsk999999&provider=oxtask".into()),
             )]))
             .run(&fx.svc)
             .await
@@ -1226,10 +1226,10 @@ view:
     #[tokio::test]
     async fn an_editors_save_runs_its_edit_action_with_the_text() {
         let (fx, _root) = fixture().await;
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         let mut press = Press::on("acme/note", Some("items"), "save").row(task_row(&fx));
         press.input = Some(json!({
-            "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow",
+            "uri": "oxplow:oxplow/task?id=tsk999999&provider=oxtask",
             "body": "## New\n\nThe saved text."
         }));
         press.run(&fx.svc).await.unwrap();
@@ -1258,7 +1258,7 @@ view:
         let titles = || async {
             svc.sql
                 .query_sql(
-                    "SELECT title FROM v_work_item WHERE title IN ('Made', 'Plain', 'Forged') ORDER BY title",
+                    "SELECT title FROM v_task WHERE title IN ('Made', 'Plain', 'Forged') ORDER BY title",
                     vec![],
                     None,
                 )
@@ -1306,7 +1306,7 @@ view:
     #[tokio::test]
     async fn a_one_row_nodes_form_action_starts_from_that_row() {
         let (fx, _root) = fixture().await;
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         let form = Press::on("acme/one", Some("one"), "rename")
             .params(&[("item", SqlCell::Text(item.clone()))])
             .form(&fx.svc)
@@ -1434,20 +1434,20 @@ view:
     #[tokio::test]
     async fn a_form_action_runs_what_the_person_filled_in_keeping_its_fixed_fields() {
         let (fx, _root) = fixture().await;
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         let old_title = column(&fx.svc, &item, "title").await;
         let start = Press::on("acme/tasks", Some("items"), "retitle")
             .row(task_row(&fx))
             .form(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(start.command.id, "oxplow.work_item.update");
+        assert_eq!(start.command.id, "oxplow.task.update");
         assert_eq!(start.values, json!({ "uri": item, "title": old_title }));
         assert_eq!(start.fixed, vec!["uri".to_string()]);
 
         let mut press = Press::on("acme/tasks", Some("items"), "retitle").row(task_row(&fx));
         press.input = Some(
-            json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "New title" }),
+            json!({ "uri": "oxplow:oxplow/task?id=tsk999999&provider=oxtask", "title": "New title" }),
         );
         press.run(&fx.svc).await.unwrap();
         assert_eq!(
@@ -1514,11 +1514,11 @@ view:
     #[tokio::test]
     async fn a_secret_field_is_one_its_command_doesnt_record() {
         let (fx, root) = fixture().await;
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/leaky.yaml"),
-            "title: Leaky\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
-             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] } }\n",
+            "title: Leaky\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_task WHERE uri = :uri }\n\
+             view: { viz: form, from: item, form: { command: oxplow.task.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] } }\n",
         )
         .unwrap();
         std::fs::write(
@@ -1534,7 +1534,7 @@ view:
             .unwrap_err()
             .to_string();
         assert!(
-            refused.contains("`title` is secret but `oxplow.work_item.update` records it"),
+            refused.contains("`title` is secret but `oxplow.task.update` records it"),
             "{refused}"
         );
         let start = form_of(&fx.svc, "acme/kept", BTreeMap::new())
@@ -1549,11 +1549,11 @@ view:
     #[tokio::test]
     async fn a_form_keeps_its_fixed_fields() {
         let (fx, root) = fixture().await;
-        let item = work_item_ref(fx.task);
+        let item = task_ref(fx.task);
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/edit.yaml"),
-            "title: Edit\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_work_item WHERE uri = :uri }\n\
-             view: { viz: form, from: item, form: { command: oxplow.work_item.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] } }\n",
+            "title: Edit\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_task WHERE uri = :uri }\n\
+             view: { viz: form, from: item, form: { command: oxplow.task.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
@@ -1569,7 +1569,7 @@ view:
             &fx.svc,
             "acme/edit",
             params,
-            json!({ "uri": "oxplow:oxplow/work_item?id=tsk999999&provider=oxplow", "title": "Edited" }),
+            json!({ "uri": "oxplow:oxplow/task?id=tsk999999&provider=oxtask", "title": "Edited" }),
         )
         .await
         .unwrap();
@@ -1648,8 +1648,8 @@ view:
         let (fx, root) = fixture().await;
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/new-task.yaml"),
-            "title: New Task\nparams: [{ name: body, default: from the form }]\n\
-             view: { viz: form, form: { command: oxplow.work_item.create, defaults: { body: '{{param.body}}' } } }\n",
+            "title: New Oxtask\nparams: [{ name: body, default: from the form }]\n\
+             view: { viz: form, form: { command: oxplow.task.create, defaults: { body: '{{param.body}}' } } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
@@ -1688,13 +1688,13 @@ view:
                              view: { viz: custom, from: n, custom: { component: board } }\n";
 
     /// P6b.D2: a private extension with a component (`board`) that may
-    /// invoke `oxplow.work_item.transition`.
+    /// invoke `oxplow.task.transition`.
     async fn component_fixture() -> (crate::test_fixtures::TaskEffortFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.task.transition] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
@@ -1721,7 +1721,7 @@ view:
         ComponentInvoke {
             component: "acme/board".into(),
             command: command.into(),
-            input: serde_json::json!({ "uri": oxplow_tasks::work_item_ref(fx.task), "to": "done" }),
+            input: serde_json::json!({ "uri": oxplow_oxtask::task_ref(fx.task), "to": "done" }),
             on_behalf_of: Actor::Human,
             confirmed: false,
             version: version.into(),
@@ -1749,7 +1749,7 @@ view:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "oxplow.work_item.transition", "0123abcd"),
+                board_invoke(&fx, "oxplow.task.transition", "0123abcd"),
             )
             .await
             .unwrap_err(),
@@ -1759,7 +1759,7 @@ view:
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.work_item.transition", &loaded),
+            board_invoke(&fx, "oxplow.task.transition", &loaded),
         )
         .await
         .unwrap();
@@ -1788,7 +1788,7 @@ view:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "oxplow.work_item.transition", &old),
+                board_invoke(&fx, "oxplow.task.transition", &old),
             )
             .await
             .unwrap_err(),
@@ -1800,7 +1800,7 @@ view:
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.work_item.transition", &new),
+            board_invoke(&fx, "oxplow.task.transition", &new),
         )
         .await
         .unwrap();
@@ -1856,7 +1856,7 @@ view:
         }
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.work_item.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.task.transition] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
@@ -1886,7 +1886,7 @@ view:
         let err = invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.work_item.transition", &version),
+            board_invoke(&fx, "oxplow.task.transition", &version),
         )
         .await
         .unwrap_err();
@@ -1910,7 +1910,7 @@ view:
                 .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
-        let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.work_item.transition"))
+        let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.task.transition"))
             .await
             .unwrap();
         let audit = fx
@@ -1961,14 +1961,14 @@ view:
         );
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.task.transition], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;
         let out = ask("SELECT ?1 AS n", version.clone()).await.unwrap();
         assert_eq!(out.rows, vec![vec![SqlCell::Int(2)]]);
         // Read-only, as any query over the datasets is.
-        assert!(ask("DELETE FROM v_work_item", version).await.is_err());
+        assert!(ask("DELETE FROM v_task", version).await.is_err());
     }
 
     /// The Timeline's own queries, through the component SQL path.
@@ -1978,7 +1978,7 @@ view:
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.work_item.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.work_item.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.task.transition], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;
@@ -2024,12 +2024,12 @@ view:
             &fx.svc,
             &root,
             "acme/board",
-            "oxplow.work_item.transition",
+            "oxplow.task.transition",
             serde_json::json!({ "to": "done" }),
             &version,
         )
         .unwrap();
-        assert_eq!(start.command.id, "oxplow.work_item.transition");
+        assert_eq!(start.command.id, "oxplow.task.transition");
         assert_eq!(start.values, serde_json::json!({ "to": "done" }));
         let err = component_form(
             &fx.svc,
@@ -2063,7 +2063,7 @@ view:
                 &root,
                 ComponentInvoke {
                     component: "acme/board".into(),
-                    command: "oxplow.work_item.transition".into(),
+                    command: "oxplow.task.transition".into(),
                     input: input.clone(),
                     on_behalf_of: Actor::Human,
                     confirmed: false,

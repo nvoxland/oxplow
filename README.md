@@ -52,7 +52,7 @@ limits documented in the [extension reference](docs/reference/extensions.md).
   terminal harnesses.
 - **Work tracking and history.** Activity is recorded without requiring
   task bookkeeping. Optional effort policies group work and link it to
-  work items. Snapshots preserve working-tree history alongside git.
+  tasks. Snapshots preserve working-tree history alongside git.
 - **Code drill-down.** File, diff, history, and language-server views let
   you check the implementation behind an explanation.
 - **Shared actions.** Commands validate inputs and apply permissions,

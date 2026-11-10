@@ -1,6 +1,0 @@
-{
-  "work_item": "oxplow:oxplow/work_item?id=tsk12&provider=oxplow",
-  "from": "oxplow:oxplow/thread?id=thr1",
-  "to": "oxplow:oxplow/person",
-  "before": "oxplow:oxplow/work_item?id=tsk9&provider=oxplow"
-}

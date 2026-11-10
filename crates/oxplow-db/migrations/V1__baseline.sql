@@ -1,6 +1,5 @@
 -- The schema the migrations built, as one migration, with the rows they
 -- seeded. Views aren't here: the datasets compile them at every open.
-
 CREATE TABLE streams (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('primary', 'worktree')),
@@ -38,23 +37,6 @@ CREATE TABLE thread_selection (
     stream_id INTEGER PRIMARY KEY REFERENCES streams(id) ON DELETE CASCADE,
     selected_thread_id INTEGER REFERENCES threads(id) ON DELETE SET NULL
 );
-CREATE TABLE task (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    -- Nullable: null means the task is on the project-wide backlog.
-    thread_id INTEGER REFERENCES threads(id) ON DELETE CASCADE,
-    parent_id INTEGER REFERENCES task(id) ON DELETE CASCADE,
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL CHECK (status IN ('ready', 'in_progress', 'blocked', 'done', 'canceled', 'archived')),
-    priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
-    sort_index INTEGER NOT NULL DEFAULT 0,
-    created_by TEXT NOT NULL CHECK (created_by IN ('user', 'agent', 'system')),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    completed_at TEXT,
-    deleted_at TEXT,
-    -- Semantic origin (vs. created_by which is the writer).
-    author TEXT CHECK (author IN ('user', 'agent')));
 CREATE TABLE "wiki_page" (
     slug TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -137,7 +119,7 @@ CREATE TABLE "effort" (
     summary TEXT,
     impacts_json TEXT
 , closed_by TEXT
-    CHECK (closed_by IN ('commit', 'switch', 'person', 'agent', 'system')), work_item TEXT, title TEXT);
+    CHECK (closed_by IN ('commit', 'switch', 'person', 'agent', 'system')), task TEXT, title TEXT);
 CREATE TABLE search_entry (
     rowid     INTEGER PRIMARY KEY,
     kind      TEXT NOT NULL,
@@ -226,7 +208,7 @@ INSERT INTO measure VALUES(9,'oxplow.tokens','Agent tokens','count','model','add
 INSERT INTO measure VALUES(10,'oxplow.cycle_time','Effort cycle time','ms','effort','non-additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','complete','oxplow-foundation','sum');
 INSERT INTO measure VALUES(11,'oxplow.ast_hit','AST idiom hits','count','file','semi-additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','per-path','oxplow-foundation','last');
 INSERT INTO measure VALUES(12,'oxplow.turn','Agent turns','count','model','additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','complete','oxplow-foundation','sum');
-INSERT INTO measure VALUES(13,'oxplow.work_item_effort','Efforts per work item','count','work_item','non-additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','complete','oxplow-foundation','sum');
+INSERT INTO measure VALUES(13,'oxplow.task_effort','Efforts per task','count','task','non-additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','complete','oxplow-foundation','sum');
 INSERT INTO measure VALUES(14,'oxplow.nudge','Nudges fired','count',NULL,'additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','complete','oxplow-foundation','sum');
 INSERT INTO measure VALUES(15,'oxplow.effort_test_outcome','Effort test outcome','count','effort','non-additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','complete','oxplow-foundation','sum');
 INSERT INTO measure VALUES(16,'oxplow.test_duration','Test duration','ms','test','semi-additive','global',NULL,'1970-01-01T00:00:00.000000Z','1970-01-01T00:00:00.000000Z','per-subject','oxplow-foundation','last');
@@ -608,19 +590,6 @@ CREATE TABLE git_tag (
     sha TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE TABLE work_item (
-    uri TEXT PRIMARY KEY,            -- work_item:<provider>:<id>
-    provider TEXT NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL DEFAULT '',
-    state TEXT NOT NULL CHECK (state IN ('todo', 'in_progress', 'blocked', 'done', 'canceled')),
-    native_state TEXT NOT NULL,
-    native TEXT NOT NULL DEFAULT '{}',
-    parent_uri TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    deleted_at TEXT
-, thread_id INTEGER, rank REAL, closed_at TEXT);
 CREATE TABLE symbol (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     uri TEXT NOT NULL,
@@ -687,7 +656,7 @@ CREATE TABLE capability_provider (
     provider TEXT NOT NULL,
     extension TEXT,
     features_json TEXT NOT NULL DEFAULT '{}',
-    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), title TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'core', available INTEGER NOT NULL DEFAULT 1, chosen_by TEXT, capability_title TEXT NOT NULL DEFAULT '', choosable INTEGER NOT NULL DEFAULT 0, optional INTEGER NOT NULL DEFAULT 0, fields_json TEXT NOT NULL DEFAULT '[]', id_pattern TEXT, description TEXT,
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), title TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'core', available INTEGER NOT NULL DEFAULT 1, chosen_by TEXT, capability_title TEXT NOT NULL DEFAULT '', choosable INTEGER NOT NULL DEFAULT 0, optional INTEGER NOT NULL DEFAULT 0, fields_json TEXT NOT NULL DEFAULT '[]', id_pattern TEXT, description TEXT, stages_json TEXT NOT NULL DEFAULT '[]',
     PRIMARY KEY (capability, provider)
 );
 CREATE TABLE provider_collector_state (
@@ -752,20 +721,13 @@ CREATE TABLE event_type_contract (
     recorded_at TEXT NOT NULL,
     PRIMARY KEY (event_type, v)
 ) STRICT;
-CREATE TABLE "extension_event_retention" (
-    namespace TEXT PRIMARY KEY,
-    extension TEXT NOT NULL,
-    payload_days INTEGER NOT NULL CHECK (payload_days >= 1),
-    content_days INTEGER NOT NULL CHECK (content_days >= 1),
-    updated_at TEXT NOT NULL
-) STRICT;
 CREATE TABLE effect_state (
     effect TEXT PRIMARY KEY,
     start_after_seq INTEGER NOT NULL,
     approved_at TEXT NOT NULL
 ) STRICT;
 CREATE TABLE "contribution_health" (
-    extension TEXT NOT NULL,
+    namespace TEXT NOT NULL,
     contribution TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('provider', 'collector', 'effect')),
     state TEXT NOT NULL CHECK (state IN ('ok', 'failing', 'disabled')),
@@ -776,7 +738,7 @@ CREATE TABLE "contribution_health" (
     mean_ms REAL,
     next_due_at TEXT,
     updated_at TEXT NOT NULL,
-    PRIMARY KEY (extension, kind, contribution)
+    PRIMARY KEY (namespace, kind, contribution)
 ) STRICT;
 CREATE TABLE asset_failure (
     asset TEXT PRIMARY KEY,
@@ -855,8 +817,8 @@ CREATE TABLE table_generation (
     name TEXT PRIMARY KEY,
     gen  INTEGER NOT NULL
 ) STRICT, WITHOUT ROWID;
-CREATE TABLE work_item_comment (
-    -- The provider's own id for it (oxplow: `task_note:<id>`).
+CREATE TABLE task_comment (
+    -- The provider's own id for it (oxplow: `oxtask_note:<id>`).
     id TEXT PRIMARY KEY,
     uri TEXT NOT NULL,
     body TEXT NOT NULL,
@@ -866,8 +828,8 @@ CREATE TABLE work_item_comment (
 CREATE TABLE "claim" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    -- `work_item:<provider>:<id>`; NULL when made on no item.
-    work_item TEXT,
+    -- `task:<provider>:<id>`; NULL when made on no item.
+    task TEXT,
     effort_id INTEGER REFERENCES "effort"(id) ON DELETE SET NULL,
     statement TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('tests_pass', 'no_behavior_change', 'handles_case', 'other')),
@@ -880,8 +842,8 @@ CREATE TABLE "claim" (
 CREATE TABLE "decision" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    -- `work_item:<provider>:<id>`; NULL when made on no item.
-    work_item TEXT,
+    -- `task:<provider>:<id>`; NULL when made on no item.
+    task TEXT,
     effort_id INTEGER REFERENCES "effort"(id) ON DELETE SET NULL,
     question TEXT NOT NULL,
     choice TEXT NOT NULL,
@@ -893,18 +855,18 @@ CREATE TABLE "decision" (
         CHECK (provenance IN ('recorded', 'inferred', 'confirmed', 'dismissed')),
     turn_id INTEGER REFERENCES agent_turn(id) ON DELETE SET NULL
 );
-CREATE TABLE "task_note" (
+CREATE TABLE "oxtask_note" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+    task_id INTEGER NOT NULL REFERENCES oxtask(id) ON DELETE CASCADE,
     body TEXT NOT NULL,
     author TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
-CREATE TABLE "work_item_link" (
+CREATE TABLE "task_link" (
     from_uri TEXT NOT NULL,
     to_uri TEXT NOT NULL,
     link_type TEXT NOT NULL,
-    created_at TEXT NOT NULL, to_kind TEXT NOT NULL DEFAULT 'work_item',
+    created_at TEXT NOT NULL, to_kind TEXT NOT NULL DEFAULT 'task',
     PRIMARY KEY (from_uri, to_uri, link_type)
 );
 CREATE TABLE fact_path (
@@ -972,9 +934,9 @@ CREATE TABLE contribution (
     global_name TEXT,
     file TEXT NOT NULL,
     line INTEGER
-, order_level INTEGER, description TEXT) STRICT;
+, order_level INTEGER, description TEXT, namespace TEXT NOT NULL DEFAULT '') STRICT;
 CREATE TABLE extension_state (
-    extension TEXT NOT NULL,
+    namespace TEXT NOT NULL,
     scope TEXT NOT NULL CHECK (scope IN ('project', 'personal')),
     area TEXT NOT NULL CHECK (area IN ('state', 'cache')),
     schema_version INTEGER NOT NULL
@@ -984,7 +946,7 @@ CREATE TABLE extension_state (
         CHECK (json_valid(values_json)
             AND json_type(values_json) = 'object'
             AND length(CAST(values_json AS BLOB)) <= 1048576),
-    PRIMARY KEY (extension, scope, area)
+    PRIMARY KEY (namespace, scope, area)
 ) STRICT, WITHOUT ROWID;
 CREATE TABLE extension_job_context (
     job_id TEXT PRIMARY KEY NOT NULL REFERENCES extension_job(id),
@@ -1030,7 +992,7 @@ CREATE TABLE extension_job_observation (
         REFERENCES extension_job_attempt(job_id, attempt, fence)
 ) STRICT, WITHOUT ROWID;
 CREATE TABLE extension_config (
-    extension TEXT NOT NULL CHECK (length(CAST(extension AS BLOB)) BETWEEN 1 AND 128),
+    namespace TEXT NOT NULL CHECK (length(CAST(namespace AS BLOB)) BETWEEN 1 AND 128),
     scope TEXT NOT NULL CHECK (scope IN ('project', 'personal')),
     schema_version INTEGER NOT NULL CHECK (schema_version BETWEEN 1 AND 4294967295),
     revision INTEGER NOT NULL CHECK (revision > 0),
@@ -1040,7 +1002,7 @@ CREATE TABLE extension_config (
         AND length(CAST(values_json AS BLOB)) <= 1048576,
         0
     )),
-    PRIMARY KEY (extension, scope)
+    PRIMARY KEY (namespace, scope)
 ) STRICT, WITHOUT ROWID;
 CREATE TABLE extension_job_output (
     job_id TEXT NOT NULL,
@@ -1064,9 +1026,9 @@ CREATE TABLE replaceable (
     props TEXT NOT NULL,
     label TEXT NOT NULL
 , view TEXT NOT NULL DEFAULT '[]') STRICT;
-CREATE TABLE "task_link" (
+CREATE TABLE "oxtask_link" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_item_id INTEGER NOT NULL REFERENCES task(id) ON DELETE CASCADE,
+    from_item_id INTEGER NOT NULL REFERENCES oxtask(id) ON DELETE CASCADE,
     to_uri TEXT NOT NULL,
     link_type TEXT NOT NULL CHECK (link_type IN ('blocks', 'relates_to', 'discovered_from',
         'duplicates', 'supersedes', 'replies_to', 'about')),
@@ -1247,7 +1209,7 @@ CREATE TABLE handoff (
     from_session_id INTEGER REFERENCES agent_session(id) ON DELETE SET NULL,
     from_actor TEXT NOT NULL CHECK (from_actor IN ('user', 'agent', 'effect', 'job', 'system')),
     to_thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    work_item TEXT,
+    task TEXT,
     body TEXT NOT NULL,
     sent_at TEXT NOT NULL,
     delivered_at TEXT,
@@ -1402,12 +1364,11 @@ CREATE TABLE page (
     renders_json TEXT NOT NULL,
     is_default INTEGER NOT NULL,
     pinned INTEGER NOT NULL,
-    hidden INTEGER NOT NULL,
     tool TEXT,
     needs_json TEXT NOT NULL,
     source TEXT,
     deployment TEXT NOT NULL
-, running_uri TEXT) STRICT;
+, running_uri TEXT, kind TEXT NOT NULL DEFAULT 'page') STRICT;
 CREATE TABLE page_answer (
     page_uri TEXT NOT NULL,
     position INTEGER NOT NULL,
@@ -1450,10 +1411,6 @@ CREATE TABLE "command_audit" (
 CREATE UNIQUE INDEX idx_streams_one_primary ON streams(kind) WHERE kind = 'primary';
 CREATE INDEX idx_streams_branch ON streams(branch);
 CREATE INDEX idx_threads_stream_sort ON threads(stream_id, sort_index);
-CREATE INDEX idx_task_thread_parent ON task(thread_id, parent_id, sort_index);
-CREATE INDEX idx_task_thread_status ON task(thread_id, status, sort_index);
-CREATE INDEX idx_task_thread_deleted ON task(thread_id, deleted_at, sort_index);
-CREATE INDEX idx_task_backlog ON task(deleted_at, sort_index) WHERE thread_id IS NULL;
 CREATE INDEX idx_page_visit_time ON page_visit(visited_at DESC);
 CREATE INDEX idx_page_visit_kind_id ON page_visit(page_kind, page_id);
 CREATE INDEX idx_usage_event_time ON usage_event(occurred_at DESC);
@@ -1520,8 +1477,6 @@ CREATE UNIQUE INDEX idx_agent_nudge_cause_kind
     ON agent_nudge(cause, kind, coalesce(effort_id, 0)) WHERE cause IS NOT NULL;
 CREATE INDEX idx_code_quality_scan_revision
     ON code_quality_scan(tool, revision, file_filter);
-CREATE INDEX idx_work_item_provider ON work_item(provider, deleted_at);
-CREATE INDEX idx_work_item_parent ON work_item(parent_uri);
 CREATE INDEX idx_symbol_file ON symbol(stream_id, path);
 CREATE INDEX idx_symbol_name ON symbol(name);
 CREATE INDEX idx_command_proposal_pending ON command_proposal(decision, key);
@@ -1530,14 +1485,14 @@ CREATE INDEX effect_run_by_effect ON effect_run (effect, id);
 CREATE INDEX effect_run_retry_due ON effect_run (retry_at) WHERE retry_at IS NOT NULL;
 CREATE UNIQUE INDEX bookmark_owner
     ON bookmark (uri, scope, coalesce(thread_id, 0), coalesce(stream_id, 0));
-CREATE INDEX idx_effort_work_item ON effort(work_item, started_at DESC)
-    WHERE work_item IS NOT NULL;
+CREATE INDEX idx_effort_task ON effort(task, started_at DESC)
+    WHERE task IS NOT NULL;
 CREATE UNIQUE INDEX idx_effort_open_per_thread ON effort(thread_id)
     WHERE ended_at IS NULL;
 CREATE UNIQUE INDEX idx_once_mark ON once_mark(thread_id, coalesce(effort_id, 0), mark);
 CREATE INDEX idx_claim_effort ON claim(effort_id);
 CREATE INDEX idx_decision_effort ON decision(effort_id);
-CREATE INDEX idx_task_note_task ON task_note(task_id, created_at);
+CREATE INDEX idx_oxtask_note_task ON oxtask_note(task_id, created_at);
 CREATE INDEX idx_agent_turn_open_session ON agent_turn(agent_session_id)
     WHERE ended_at IS NULL;
 CREATE INDEX idx_event_log_agent_session ON event_log(agent_session_id, seq)
@@ -1550,8 +1505,8 @@ CREATE INDEX idx_fact_path_hold_path ON fact_path_hold(measure_id, path_id, capt
 CREATE INDEX idx_fact_measure_path ON fact(measure_id, path_id, capture_id);
 CREATE INDEX extension_job_observation_history
     ON extension_job_observation (job_id, observed_at_ms, id);
-CREATE INDEX idx_task_link_from ON task_link (from_item_id);
-CREATE INDEX idx_task_link_to ON task_link (to_uri);
+CREATE INDEX idx_oxtask_link_from ON oxtask_link (from_item_id);
+CREATE INDEX idx_oxtask_link_to ON oxtask_link (to_uri);
 CREATE INDEX extension_job_recovery ON extension_job (state, updated_at_ms, id);
 CREATE INDEX idx_snapshot_op_stream ON snapshot_op (stream_id, seq);
 CREATE INDEX idx_snapshot_op_snapshot ON snapshot_op (snapshot_id);
@@ -1577,9 +1532,9 @@ CREATE INDEX idx_page_ref_snapshot ON page_ref(local_snapshot_id);
 CREATE INDEX idx_comment_stream ON comment(stream_id, status, last_activity_at DESC);
 CREATE INDEX idx_comment_thread ON comment(thread_id, last_activity_at DESC);
 CREATE INDEX idx_comment_target ON comment(target_uri);
-CREATE INDEX work_item_comment_uri ON work_item_comment (uri);
+CREATE INDEX task_comment_uri ON task_comment (uri);
 CREATE UNIQUE INDEX idx_symbol_uri ON symbol (stream_id, uri);
-CREATE INDEX event_log_work_item_uri
+CREATE INDEX event_log_task_uri
     ON event_log (json_extract(payload, '$.item.uri'), seq);
 CREATE INDEX terminal_stream ON terminal(stream_id, position);
 CREATE INDEX thread_context_item_waiting
@@ -1620,14 +1575,6 @@ BEFORE UPDATE ON extension_job_observation
 BEGIN
     SELECT RAISE(ABORT, 'extension job observations are append-only');
 END;
-CREATE TRIGGER extension_config_revision
-BEFORE UPDATE ON extension_config
-WHEN NEW.extension IS NOT OLD.extension OR NEW.scope IS NOT OLD.scope
-    OR NEW.revision != OLD.revision + 1
-    OR NEW.schema_version < OLD.schema_version
-BEGIN
-    SELECT RAISE(ABORT, 'extension configuration namespace or revision');
-END;
 CREATE TRIGGER extension_job_output_append_only
 BEFORE UPDATE ON extension_job_output
 BEGIN
@@ -1666,3 +1613,60 @@ WHEN OLD.state IN ('succeeded', 'failed', 'cancelled')
 BEGIN
     SELECT RAISE(ABORT, 'extension job immutable identity or revision');
 END;
+CREATE TRIGGER extension_config_revision
+BEFORE UPDATE ON extension_config
+WHEN NEW.namespace IS NOT OLD.namespace OR NEW.scope IS NOT OLD.scope
+    OR NEW.revision != OLD.revision + 1
+BEGIN
+    SELECT RAISE(ABORT, 'extension configuration namespace or revision');
+END;
+CREATE INDEX idx_metric_capture_stream_producer ON metric_capture(stream_id, producer, captured_at);
+CREATE TABLE "extension_event_retention" (
+    namespace TEXT NOT NULL,
+    extension TEXT NOT NULL,
+    payload_days INTEGER NOT NULL CHECK (payload_days >= 1),
+    content_days INTEGER NOT NULL CHECK (content_days >= 1),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (namespace, extension)
+) STRICT;
+CREATE TABLE task_assignment (
+    uri         TEXT PRIMARY KEY REFERENCES task(uri) ON DELETE CASCADE,
+    -- `oxplow:oxplow/thread?id=thr3`, `oxplow:oxplow/person`; NULL: nobody.
+    assignee    TEXT,
+    -- Its place in the assignee's queue (ascending).
+    rank        REAL NOT NULL,
+    assigned_at TEXT NOT NULL
+) STRICT;
+CREATE INDEX idx_task_assignment_assignee ON task_assignment(assignee, rank);
+CREATE TABLE "task" (
+    uri TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL
+        CHECK (state IN ('backlog', 'todo', 'in_progress', 'blocked', 'done', 'canceled')),
+    stage TEXT NOT NULL,
+    native TEXT NOT NULL DEFAULT '{}',
+    parent_uri TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    deleted_at TEXT,
+    closed_at TEXT
+);
+CREATE INDEX idx_task_provider ON task(provider, deleted_at);
+CREATE INDEX idx_task_parent ON task(parent_uri);
+CREATE TABLE "oxtask" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER REFERENCES oxtask(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('backlog', 'ready', 'in_progress', 'blocked', 'done', 'canceled')),
+    priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    created_by TEXT NOT NULL CHECK (created_by IN ('user', 'agent', 'system')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    deleted_at TEXT,
+    -- Semantic origin (vs. created_by which is the writer).
+    author TEXT CHECK (author IN ('user', 'agent')));
+CREATE INDEX idx_oxtask_parent ON oxtask(parent_id, deleted_at);

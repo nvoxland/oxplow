@@ -6,7 +6,7 @@ params:
 - name: source
   default: ""
 answers:
-- {"question":"What points at this file — pages, commits, work items?","about":"oxplow/file","params":{"target":"oxplow:oxplow/file?path=src/lib.rs"},"skill":"oxplow-wiki-capture"}
+- {"question":"What points at this file — pages, commits, tasks?","about":"oxplow/file","params":{"target":"oxplow:oxplow/file?path=src/lib.rs"},"skill":"oxplow-wiki-capture"}
 - {"question":"What does this wiki page point at?","params":{"source":"oxplow:oxplow/wiki?slug=auth-flow"},"skill":"oxplow-wiki-capture"}
 loaders:
   pointing_at:

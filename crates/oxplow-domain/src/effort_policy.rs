@@ -16,7 +16,7 @@ use crate::{CommandCall, DomainError};
 /// effort policy is core's to handle: it closes every open effort,
 /// whichever policy is active after.)
 pub const EVENTS: &[(&str, u32)] = &[
-    ("work_item.state_changed", 1),
+    ("task.state_changed", 1),
     ("effort.linked", 1),
     ("effort.opened", 2),
     ("thread.checkpoint", 1),

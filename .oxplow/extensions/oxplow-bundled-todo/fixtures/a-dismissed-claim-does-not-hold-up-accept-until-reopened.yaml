@@ -2,8 +2,8 @@
 # confirmed, accept needs no force, and reopening it brings the refusal
 # back.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -27,5 +27,5 @@ expect:
 steps:
   - given: [{ command: oxplow.effort.dismiss_claim, input: { claim: 1 } }]
   - expect: { ok: true }
-  - when: { sql: "SELECT state FROM v_work_item" }
+  - when: { sql: "SELECT state FROM v_task" }
     expect: { rows: [{ state: done }] }

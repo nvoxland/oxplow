@@ -40,17 +40,17 @@ without a restart: the advisory reads it on its next run.
   rows are a model's guesses from the conversation, until a person
   confirms or dismisses them (below, "Decisions Oxplow Noticed").
 - `v_oxplow_deviation` (this extension's dataset) — files an effort
-  changed outside the area its work item names. A file is in the area
+  changed outside the area its task names. A file is in the area
   when the item's title or body names it, or one of its directories at
   least two levels deep (`src/ui`). An item that names no area has none.
-- `v_effort_file`, `v_work_item` — what the packet's other pages show.
+- `v_effort_file`, `v_task` — what the packet's other pages show.
 
 ## What a reviewer does
 
 On an effort's page, **Commands**:
 
 - **Accept Review** (`oxplow.review.accept { effort, force? }`) comments the
-  review on the effort's work item and marks it done. It refuses while a
+  review on the effort's task and marks it done. It refuses while a
   claim is unverified (a dismissed one doesn't count) or an inferred
   decision unreviewed; `force` accepts
   anyway and lists them in the comment.
@@ -60,20 +60,20 @@ On an effort's page, **Commands**:
   todo.
 
 Each logs its verdict as an event (`event_types:` in the manifest):
-`oxplow.review.accepted { effort, work_item, unverified, inferred, deviated }` or
-`oxplow.review.changes_requested { effort, work_item, unverified, inferred, deviated, note? }`,
+`oxplow.review.accepted { effort, task, unverified, inferred, deviated }` or
+`oxplow.review.changes_requested { effort, task, unverified, inferred, deviated, note? }`,
 caused by the command's run. The counts are what stood at the verdict —
 claims unverified, inferred decisions unreviewed, files outside the area.
 The verdict itself is in the envelope, which is kept when the payload
 expires (30 days): the type says which, and the subject names the effort,
-its work item and — for an acceptance — every claim and decision accepted
+its task and — for an acceptance — every claim and decision accepted
 unchecked (any at all makes it forced). Read them in `v_event`, or react
 to one from another extension's effect (`on: [oxplow.review.accepted]`).
 
 Both work on any list's item. On oxplow's own tasks the comment and the
 move are one change you can undo; on another provider's item
 they run in order through the provider — if the move fails the comment
-stays — and can't be undone from oxplow. An effort with no work item is
+stays — and can't be undone from oxplow. An effort with no task is
 refused.
 
 On the packet's rows: **Mark Verified** on an unverified claim

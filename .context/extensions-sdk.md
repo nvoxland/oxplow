@@ -69,17 +69,17 @@ check already reported is not repeated.
   one example) and, but for a bare extension, that example's fixture
   `fixtures/basic.yaml` — then the kind's starter (P7.C6):
   - `page` — `pages/<name>.yaml`, open tasks in the viewer's stream, with
-    a Start row action (`oxplow.work_item.transition`, a `uri` column it
+    a Start row action (`oxplow.task.transition`, a `uri` column it
     binds but doesn't show) and an `answers:` entry; its example is
     `{ page: <name>, params: { stream_id: 1 } }`;
-  - `query` — `queries/<name>.yaml`, a rows loader of work-item states as
+  - `query` — `queries/<name>.yaml`, a rows loader of task states as
     `value` / `label`, for a choice's `options_from`; its example is
     `{ query: <name> }` expecting a row;
   - `component` — a `custom_components:` entry (a bundle under
     `components/<name>/`) and a page whose `component` node it feeds;
     `panel` — a `panels:` entry whose `body` is a part (`parts/<name>.yaml`),
     its example `{ panel: <name> }` checking the body's rows;
-  - `collector` — a Starlark collector `items` over `v_work_item` declaring
+  - `collector` — a Starlark collector `items` over `v_task` declaring
     entity `item`, a dataset `open_items` over `ref('item')` and a page over
     the dataset; its example runs the collector over fixture rows;
   - `metric` — a code metric, built by `oxplow_app::metric_scaffold::
@@ -97,11 +97,11 @@ check already reported is not repeated.
     `path` column links `file` at the `line` column. Its example runs the
     collector over a two-folder fixture corpus and expects the facts;
   - `command` — `commands: [note]` whose `handlers/note.star` composes
-    `oxplow.work_item.comment`, with an example and a `ui` about
-    `work_item`; its intent example dry-runs it;
-  - `effect` (P8.D12) — `effects: [on-done]` on `work_item.state_changed`
+    `oxplow.task.comment`, with an example and a `ui` about
+    `task`; its intent example dry-runs it;
+  - `effect` (P8.D12) — `effects: [on-done]` on `task.state_changed`
     `where: { to: done }`, whose `effects/on-done.star` composes
-    `oxplow.work_item.comment`; its intent example dry-runs it on a fixture
+    `oxplow.task.comment`; its intent example dry-runs it on a fixture
     event;
   - `policy` — an `implementations:` entry (`capability: effort_policy`,
     id = the name with `_` for `-`, `needs: [sql.read]`) whose
@@ -116,7 +116,7 @@ check already reported is not repeated.
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the page's row action names a registered
   command, the collector syncs and its dataset publishes, the command runs
-  through the bus; a work list and an effort policy each pass the kit
+  through the bus; a task tracker and an effort policy each pass the kit
   with the fake behind their stub, the policy with its scaffolded example.
 - **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
   <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
@@ -192,7 +192,7 @@ check already reported is not repeated.
 - **`scaffold(…, Kind::Provider { capability }, …)`** (`extension new
   provider <name> [--capability <cap>]`, P5.D5) adds a `providers:` entry
   (id = the name with `_` for `-`, the capability). `Kind::parse("provider")`
-  is `work_items`; `Kind::provider(cap)` refuses a capability without a
+  is `task_tracker`; `Kind::provider(cap)` refuses a capability without a
   provider contract (the CLI exits 2), and `--capability` on another kind
   is a usage error. `provider.json` comes from the capability's
   `ProviderContract`: the verbs it always needs (`confirm: never`,
@@ -202,7 +202,7 @@ check already reported is not repeated.
   schema. What the contract doesn't say is the SDK's starter per
   capability (`provider_starter`, `verb_input`): each verb's summary and
   input schema, the intent example and its fixture — `create` expecting
-  `{ uri: $any }` for a work list; `react` to a checkpoint expecting
+  `{ uri: $any }` for a task tracker; `react` to a checkpoint expecting
   `{ skip: $any }` for an effort policy, whose manifest also `needs:
   [sql.read]` (it hears events only, and reads oxplow for what to close);
   `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
@@ -312,7 +312,7 @@ exists for. The questions live on the **pages** that answer them: a page's
 is phrased with "this" and offered on pages for that kind of ref). Core has
 no questions files: the pages carry them, including small pages with no
 `category` that exist to hold a question (`collectors`, `zones`,
-`branch-sync`, `work-item-actions`, …), and a question that says "do this"
+`branch-sync`, `task-actions`, …), and a question that says "do this"
 is held by a page with a whole-page action running that command. A part
 and a query carry no answers: a question about what one shows goes on a
 page that hosts it.
@@ -334,7 +334,7 @@ page that hosts it.
   it.
 - **In tree:** `every_page_answer_reaches_what_its_skill_names` runs it over
   oxplow's own extensions (and checks the kinds a person is offered
-  questions about: file, commit, effort, work item);
+  questions about: file, commit, effort, task);
   `a_page_answer_must_be_named_by_its_skill_and_run` the mechanism.
   `oxplow extension test` runs the second half for every extension's pages
   (`ran: answers`).
@@ -370,9 +370,9 @@ foundation, the one tested, and what each of those `requires:` or imports
 from, in turn — and a fixture's own `requires: [<ext>…]` (a fixture key,
 same meaning as the manifest's) adds more, on an oxplow of that fixture's
 own (an unknown name is a finding). The default extensions are not on:
-oxplow's own pages run complete without them. Oxplow's own work list,
+oxplow's own pages run complete without them. oxtask,
 effort policy and wiki are foundation's (always on), so a fixture that makes
-work items, efforts or wiki pages needs nothing extra (`requires:
+tasks, efforts or wiki pages needs nothing extra (`requires:
 [oxplow-bundled]` only for what bundled adds: its review pages, verdict and
 replacements), and an effort policy's conformance suite, which files work,
 runs on an oxplow of its own — deployed in that order,

@@ -820,9 +820,9 @@
     const u = parseUri(text);
     return u ? `${u.resource.namespace}/${u.resource.name}` : null;
   }
-  function workItemOf(text) {
+  function taskOf(text) {
     const u = parseUri(text);
-    if (!u || typeOf(text) !== "oxplow/work_item")
+    if (!u || typeOf(text) !== "oxplow/task")
       return null;
     const { provider, id } = u.params;
     return provider && id ? { provider, id } : null;
@@ -11298,9 +11298,9 @@
     return { id: commitUri(sha) };
   }
 
-  // src/workItemRef.ts
-  function workItemId(ref) {
-    const item = workItemOf(ref);
+  // src/taskRef.ts
+  function taskId(ref) {
+    const item = taskOf(ref);
     return item === null ? null : `${item.provider}:${item.id}`;
   }
 
@@ -11394,8 +11394,8 @@
           return p.sha ? { kind: "commit", sha: p.sha } : { kind: "empty" };
         case "oxplow/wiki":
           return p.slug ? { kind: "internal", slug: p.slug } : { kind: "empty" };
-        case "oxplow/work_item":
-          return workItemId(rawHref) === null ? { kind: "empty" } : { kind: "work_item", ref: identityOf(rawHref) ?? rawHref };
+        case "oxplow/task":
+          return taskId(rawHref) === null ? { kind: "empty" } : { kind: "task", ref: identityOf(rawHref) ?? rawHref };
         default: {
           const resource = typeOf(rawHref);
           if (resource && resourceInfo(resource))
@@ -11407,7 +11407,7 @@
       const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
       return {
         kind: "broken",
-        reason: `Broken link: “${target}” is not a recognized reference (use a work item's id, [[some-slug]] for a wiki page)`
+        reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for a wiki page)`
       };
     }
     const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -11536,7 +11536,7 @@
             return `[${dirDisplay}](${linkTarget(dirUri(dir))})`;
           }
         }
-        const itemRef = workItemId(target) !== null ? identityOf(target) ?? target : mentionRef(target);
+        const itemRef = taskId(target) !== null ? identityOf(target) ?? target : mentionRef(target);
         if (itemRef) {
           return `[${display}](${linkTarget(itemRef)})`;
         }
@@ -11558,7 +11558,7 @@
   function refLinkNames(parsed) {
     return {
       internalSlug: parsed.kind === "internal" ? parsed.slug : null,
-      itemRef: parsed.kind === "work_item" ? parsed.ref : null,
+      itemRef: parsed.kind === "task" ? parsed.ref : null,
       extensionRef: parsed.kind === "ref" ? parsed.ref : null
     };
   }
@@ -11570,7 +11570,7 @@
         return directoryRef(parsed.path).id;
       case "commit":
         return gitCommitRef(parsed.sha).id;
-      case "work_item":
+      case "task":
       case "ref":
         return parsed.ref;
       case "internal":

@@ -25,7 +25,7 @@ use oxplow_domain::DomainError;
 use crate::database::Database;
 
 /// One ranked search result: the URI it found
-/// (`oxplow:oxplow/work_item?id=tsk7&provider=oxplow`), which the caller
+/// (`oxplow:oxplow/task?id=tsk7&provider=oxtask`), which the caller
 /// opens the way it opens any URI, and its resource. `stream_id` is `None`
 /// for project-global entities (wiki pages); `score` is the BM25 score
 /// (lower = better match).

@@ -3,8 +3,8 @@
 //! rmcp's stock [`rmcp::handler::server::wrapper::Parameters`]
 //! deserializes the raw JSON `arguments` object straight into `P`, so a
 //! weak model (opencode / GPT-5-mini) that sends camelCase keys
-//! (`workItem`) against our snake_case params (`work_item`) hits an
-//! opaque `-32602 missing field "work_item"` transport error it
+//! (`task`) against our snake_case params (`task`) hits an
+//! opaque `-32602 missing field "task"` transport error it
 //! can't act on. The camelCase priors come from training; our tool
 //! *outputs* are camelCase too, which reinforces the wrong guess.
 //!

@@ -1,18 +1,18 @@
 manifest: 2
 name: github
-description: Pull requests from this repo's GitHub, joined to work items and streams.
+description: Pull requests from this repo's GitHub, joined to tasks and streams.
 engine: ">=0.7"
 version: 0.1.0
 intent:
   purpose: >-
     Bring the repo's pull requests into the semantic layer as v_github_pr,
-    joined to streams by branch and to work items by the item's id in the
+    joined to streams by branch and to tasks by the item's id in the
     title, so pages can show what is open against each stream.
   origin: null
   examples:
     - name: prs-by-task
       input: { page: prs-by-task, params: { state: all } }
-      expect: each PR's number, title and author, with the work item its title names
+      expect: each PR's number, title and author, with the task its title names
     - name: pr-link
       input: { wikilink: "pr:12" }
       expect: the pull request's URI, `oxplow:github/pr?id=12`
@@ -60,7 +60,7 @@ collectors:
           url: text
         relations:
           - { to: v_stream, on: "v_github_pr.head_branch = v_stream.branch" }
-          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || v_work_item.native_id || '%'" }
+          - { to: v_task, on: "v_github_pr.title LIKE '%' || v_task.native_id || '%'" }
 datasets:
   - name: pull_request
     version: 2

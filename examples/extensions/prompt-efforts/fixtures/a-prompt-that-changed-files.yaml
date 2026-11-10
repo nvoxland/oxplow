@@ -1,17 +1,17 @@
 # A turn that wrote a file closes the thread's open effort as of the turn's
-# start and opens a new one for the turn, keeping the effort's work item.
+# start and opens a new one for the turn, keeping the effort's task.
 given:
   - { command: oxplow.capability.choose, input: { capability: effort_policy, provider: prompt_efforts }, confirmed: true }
-  - { command: oxplow.work_item.create, input: { title: Parse blocks, assignee: thr1 }, bind: item }
-  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - { command: oxplow.task.create, input: { title: Parse blocks, assignee: thr1 }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, task: $item.uri } }
   - observe:
       turn:
         prompt: Add a helper
         tools: [{ name: Edit, kind: edit, paths: [helper.txt], ok: true }]
         write: { path: helper.txt, body: "one" }
 when:
-  sql: "SELECT id, work_item, ended_at IS NOT NULL AS ended FROM v_effort ORDER BY id"
+  sql: "SELECT id, task, ended_at IS NOT NULL AS ended FROM v_effort ORDER BY id"
 expect:
   rows:
     - { id: 1, ended: 1 }
-    - { id: 2, work_item: $item.uri, ended: 0 }
+    - { id: 2, task: $item.uri, ended: 0 }

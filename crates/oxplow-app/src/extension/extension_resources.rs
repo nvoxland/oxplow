@@ -94,8 +94,8 @@ const SVG_ICON_DIR: &str = "assets/";
 const MAX_SVG_BYTES: usize = 32 * 1024;
 
 /// Wikilink sugar oxplow-foundation declares (`dir:`,
-/// `finding:`): another extension's `wikilink.prefix` may not take it. A work
-/// list's own ids (`tsk42`) are its id pattern's, not a prefix core keeps.
+/// `finding:`): another extension's `wikilink.prefix` may not take it. A
+/// task tracker's own ids (`tsk42`) are its id pattern's, not a prefix core keeps.
 const RESERVED_PREFIXES: &[&str] = &["dir", "finding"];
 
 /// Why `name` can't name a resource from a manifest (a decorator's
@@ -107,7 +107,7 @@ pub fn resource_problem(name: &str) -> Option<String> {
         Ok(n) => n,
         Err(_) => {
             return Some(
-                "a resource is `<namespace>/<name>` (`oxplow/work_item`, `oxplow/commit`)".into(),
+                "a resource is `<namespace>/<name>` (`oxplow/task`, `oxplow/commit`)".into(),
             )
         }
     };

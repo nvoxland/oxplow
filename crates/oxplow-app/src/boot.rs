@@ -487,7 +487,7 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Page-ref graph repair: re-project every existing work item, effort,
+    // Page-ref graph repair: re-project every existing task, effort,
     // finding and handoff into `page_ref` — only when a migration or a
     // new build may have left it drifted (`page_ref_backfill::needs_repair`).
     {

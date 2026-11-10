@@ -151,8 +151,8 @@ pub const MANIFEST: &[Capability] = &[
     // A dry run for an agent writing a source in its worktree.
     agent("oxplow_preview_collector"),
     dataset("list_streams", &["v_stream"]),
-    // The work-item interface, read for the agent; the UI reads the
-    // datasets (`v_work_item`).
+    // The task interface, read for the agent; the UI reads the
+    // datasets (`v_task`).
     // Per-effort metric roll-up for the task-page panel (tsk250): the
     // agent gets the same numbers as prompt text via oxplow-bundled's
     // `metric-deltas` advisory (over `v_effort_metric_delta`).
@@ -336,8 +336,8 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_code_workspace_symbols"),
     agent("oxplow_code_call_hierarchy"),
     agent("oxplow_navigate"),
-    agent("oxplow_thread_work"),
-    agent("oxplow_work_next"),
+    agent("oxplow_thread_tasks"),
+    agent("oxplow_next_task"),
     agent("oxplow_effort_summary"),
     agent("oxplow_catalog"),
     // ---- git ----

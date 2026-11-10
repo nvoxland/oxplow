@@ -15,7 +15,7 @@ use crate::database::{map_sql_err, Database};
 /// One implementation of a capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityProvider {
-    /// `work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`.
+    /// `task_tracker`, `effort_policy`, `snapshots`, `vcs`, `knowledge`.
     pub capability: String,
     /// The implementation's id (`oxplow`, `git`, `issues`, `none`).
     pub provider: String,
@@ -44,10 +44,10 @@ pub struct CapabilityProvider {
     pub optional: bool,
     /// Its own fields, as it declares them (a JSON array).
     pub fields: Value,
-    /// A work list's stages, in order, as it declares them (a JSON array
+    /// A task tracker's stages, in order, as it declares them (a JSON array
     /// of `{ id, title, bucket }`); `[]` for any other.
     pub stages: Value,
-    /// What a work list's own ids look like (a regex matched whole), if
+    /// What a task tracker's own ids look like (a regex matched whole), if
     /// it says: how its ids are recognized in text.
     pub id_pattern: Option<String>,
     /// One sentence saying what it is; `None` when its declaration says nothing.
@@ -175,12 +175,12 @@ mod tests {
         let db = Database::in_memory();
         let store = SqliteCapabilityStore::new(db.clone());
         let reset = |rows: Vec<CapabilityProvider>| db.transaction(move |tx| reset_tx(tx, &rows));
-        let mut fake = row("work_items", "fake", json!({ "comments": false }));
+        let mut fake = row("task_tracker", "fake", json!({ "comments": false }));
         fake.extension = Some("tracker".into());
         fake.available = false;
         fake.chosen_by = None;
         reset(vec![
-            row("work_items", "oxplow", json!({ "comments": true })),
+            row("task_tracker", "oxtask", json!({ "comments": true })),
             fake.clone(),
         ])
         .await
@@ -189,7 +189,7 @@ mod tests {
             store.list().await.unwrap(),
             vec![
                 fake,
-                row("work_items", "oxplow", json!({ "comments": true }))
+                row("task_tracker", "oxtask", json!({ "comments": true }))
             ]
         );
         reset(vec![row("vcs", "git", json!({ "remotes": true }))])

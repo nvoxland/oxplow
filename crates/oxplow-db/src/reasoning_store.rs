@@ -11,8 +11,8 @@ use crate::Database;
 #[serde(rename_all = "camelCase")]
 pub struct NewDecision {
     pub thread_id: i64,
-    /// The work item it was made on (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`).
-    pub work_item: Option<String>,
+    /// The task it was made on (`oxplow:oxplow/task?id=<id>&provider=<provider>`).
+    pub task: Option<String>,
     pub effort_id: Option<i64>,
     /// The fork: what had to be decided.
     pub question: String,
@@ -29,8 +29,8 @@ pub struct NewDecision {
 #[serde(rename_all = "camelCase")]
 pub struct NewClaim {
     pub thread_id: i64,
-    /// The work item it was made on (`oxplow:oxplow/work_item?id=<id>&provider=<provider>`).
-    pub work_item: Option<String>,
+    /// The task it was made on (`oxplow:oxplow/task?id=<id>&provider=<provider>`).
+    pub task: Option<String>,
     pub effort_id: Option<i64>,
     pub statement: String,
     /// `tests_pass`, `no_behavior_change`, `handles_case` or `other`.
@@ -94,9 +94,9 @@ pub fn replace_inferred_tx(
         let alternatives = serde_json::to_string(&d.alternatives)
             .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
         conn.execute(
-            "INSERT INTO decision (thread_id, work_item, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
+            "INSERT INTO decision (thread_id, task, effort_id, question, choice, alternatives_json, confidence, why, provenance, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'inferred', ?9)",
-            rusqlite::params![d.thread_id, d.work_item, effort_id, d.question, d.choice, alternatives, confidence, d.why, now],
+            rusqlite::params![d.thread_id, d.task, effort_id, d.question, d.choice, alternatives, confidence, d.why, now],
         )
         .map_err(map_sql_err)?;
         stored += 1;
@@ -125,11 +125,11 @@ pub fn record_decision_tx(
     let alternatives = serde_json::to_string(&d.alternatives)
         .map_err(|e| DomainError::Storage(format!("alternatives: {e}")))?;
     conn.execute(
-        "INSERT INTO decision (thread_id, work_item, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
+        "INSERT INTO decision (thread_id, task, effort_id, question, choice, alternatives_json, confidence, why, created_at, turn_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, (SELECT id FROM agent_turn
             WHERE thread_id = ?1 AND ended_at IS NULL ORDER BY started_at DESC, id DESC LIMIT 1))",
         rusqlite::params![
-            d.thread_id, d.work_item, d.effort_id, d.question, d.choice,
+            d.thread_id, d.task, d.effort_id, d.question, d.choice,
             alternatives, d.confidence, d.why, now_string()
         ],
     )
@@ -171,9 +171,9 @@ pub fn insert_claim_tx(
         return Err(DomainError::Invalid("a claim needs a statement".into()));
     }
     conn.execute(
-        "INSERT INTO claim (thread_id, work_item, effort_id, statement, kind, evidence, created_at, agent_session_id, provenance)
+        "INSERT INTO claim (thread_id, task, effort_id, statement, kind, evidence, created_at, agent_session_id, provenance)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![c.thread_id, c.work_item, c.effort_id, c.statement, c.kind, c.evidence, now_string(), c.agent_session_id, provenance.as_str()],
+        rusqlite::params![c.thread_id, c.task, c.effort_id, c.statement, c.kind, c.evidence, now_string(), c.agent_session_id, provenance.as_str()],
     )
     .map_err(map_sql_err)?;
     Ok(conn.last_insert_rowid())
@@ -231,10 +231,10 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, title, status, priority, created_by, created_at, updated_at)
+                 INSERT INTO oxtask (id, title, status, priority, created_by, created_at, updated_at)
                    VALUES (1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at) VALUES (1, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (2, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-02');",
+                 INSERT INTO effort (id, task, thread_id, started_at, ended_at) VALUES (1, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01', '2026-01-01');
+                 INSERT INTO effort (id, task, thread_id, started_at) VALUES (2, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-02');",
             )
         })
         .await
@@ -252,7 +252,7 @@ mod tests {
         store
             .record_decision(NewDecision {
                 thread_id: 1,
-                work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
+                task: Some("oxplow:oxplow/task?id=tsk1&provider=oxtask".into()),
                 effort_id: Some(1),
                 question: "Where do extensions live?".into(),
                 choice: ".oxplow/extensions/".into(),
@@ -264,7 +264,7 @@ mod tests {
             .unwrap();
         let out = sl
             .query_sql(
-                "SELECT work_item, effort_id, choice, alternatives, confidence FROM v_decision",
+                "SELECT task, effort_id, choice, alternatives, confidence FROM v_decision",
                 vec![],
                 None,
             )
@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             json!([[
-                "oxplow:oxplow/work_item?id=tsk1&provider=oxplow",
+                "oxplow:oxplow/task?id=tsk1&provider=oxtask",
                 1,
                 ".oxplow/extensions/",
                 "[\".oxplow/extensions/\"]",
@@ -288,7 +288,7 @@ mod tests {
         let err = store
             .record_decision(NewDecision {
                 thread_id: 1,
-                work_item: None,
+                task: None,
                 effort_id: None,
                 question: "q".into(),
                 choice: "c".into(),
@@ -318,7 +318,7 @@ mod tests {
     fn decision(question: &str) -> NewDecision {
         NewDecision {
             thread_id: 1,
-            work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
+            task: Some("oxplow:oxplow/task?id=tsk1&provider=oxtask".into()),
             effort_id: Some(1),
             question: question.into(),
             choice: "c".into(),
@@ -383,7 +383,7 @@ mod tests {
     fn claim(statement: &str) -> NewClaim {
         NewClaim {
             thread_id: 1,
-            work_item: Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow".into()),
+            task: Some("oxplow:oxplow/task?id=tsk1&provider=oxtask".into()),
             effort_id: Some(1),
             statement: statement.into(),
             kind: "tests_pass".into(),

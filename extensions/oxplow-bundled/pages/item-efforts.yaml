@@ -1,17 +1,17 @@
-title: Efforts on a work item
-description: "What has been done on a work item: its efforts, newest first, each with the files it changed and its summary."
+title: Efforts on a task
+description: "What has been done on a task: its efforts, newest first, each with the files it changed and its summary."
 params:
 - name: uri
-  label: Work item
+  label: Task
 answers:
-- {"question":"What has been done on this work item so far?","about":"oxplow/work_item","params":{"uri":"oxplow:oxplow/work_item?id=tsk1&provider=oxplow"},"skill":"work-items"}
+- {"question":"What has been done on this task so far?","about":"oxplow/task","params":{"uri":"oxplow:oxplow/task?id=tsk1&provider=oxtask"},"skill":"tasks"}
 loaders:
   efforts:
     sql: |
       SELECT e.uri, e.title, e.started_at, e.ended_at,
              (SELECT count(*) FROM v_effort_file f WHERE f.effort_id = e.id) AS files,
              e.summary
-      FROM v_effort e WHERE e.work_item = :uri
+      FROM v_effort e WHERE e.task = :uri
       ORDER BY e.started_at DESC, e.id DESC
 view:
   id: efforts

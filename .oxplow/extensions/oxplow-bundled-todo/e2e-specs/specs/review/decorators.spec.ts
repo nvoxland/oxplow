@@ -6,7 +6,7 @@ import { openFromLauncher } from "../../support/ui.js";
 // in the effort page's header.
 
 test("an accepted effort's page leads with the effort-verdict replacement", async ({ page, daemon }) => {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title: "Wombat fix",
     state: "in_progress",
     thread: daemon.thread,
@@ -15,7 +15,7 @@ test("an accepted effort's page leads with the effort-verdict replacement", asyn
   let effort = "";
   await until("the item's effort to open", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: `SELECT uri FROM v_effort WHERE work_item = '${created.result.uri}'`,
+      sql: `SELECT uri FROM v_effort WHERE task = '${created.result.uri}'`,
     });
     effort = (out.rows[0]?.[0] as string | undefined) ?? "";
     return effort !== "";

@@ -639,7 +639,7 @@ mod tests {
         // The default-on code gauges (the test extension's) handle `snapshot.taken`; an
         // event no collector names isn't handled.
         assert!(consumer.handles("snapshot.taken"));
-        assert!(!consumer.handles("work_item.created"));
+        assert!(!consumer.handles("task.created"));
         assert!(!consumer.handles("collector.synced"));
     }
 
@@ -833,7 +833,7 @@ mod tests {
         for (trigger, events, says) in [
             (
                 "",
-                "[{\"type\": \"work_item.created\", \"payload\": {}}]".to_string(),
+                "[{\"type\": \"task.created\", \"payload\": {}}]".to_string(),
                 "may emit only the event types `acme-pr` declares",
             ),
             (

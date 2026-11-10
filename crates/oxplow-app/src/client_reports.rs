@@ -31,10 +31,10 @@ pub struct TabReportAnswer {
 /// One tab, as its window shows it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ReportedTab {
-    /// Its tab id: a canonical ref (`oxplow:oxplow/work_item?id=tsk3&provider=oxplow`,
+    /// Its tab id: a canonical ref (`oxplow:oxplow/task?id=tsk3&provider=oxtask`,
     /// `oxplow:oxplow/page?page=settings`, `oxplow:oxplow/agent_session?id=ses2`).
     pub id: String,
-    /// Its page kind (`work_item`, `page`, `agent_session`).
+    /// Its page kind (`task`, `page`, `agent_session`).
     pub kind: String,
     /// The title on the tab.
     pub title: String,

@@ -981,10 +981,7 @@ resources:
         for (kind, id) in [
             ("acme/pr", "oxplow:acme/pr?id=12"),
             ("oxplow/wiki", "oxplow:oxplow/wiki?slug=widgets"),
-            (
-                "oxplow/work_item",
-                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow",
-            ),
+            ("oxplow/task", "oxplow:oxplow/task?id=tsk7&provider=oxtask"),
         ] {
             svc.search_store
                 .upsert(kind, id, None, "Widget", "")
@@ -1018,7 +1015,7 @@ resources:
         left.sort();
         assert_eq!(
             left,
-            vec!["oxplow/wiki", "oxplow/work_item"],
+            vec!["oxplow/task", "oxplow/wiki"],
             "core's entries are untouched"
         );
         let failures = svc
@@ -1169,7 +1166,7 @@ mod core_tests {
     async fn task(svc: &Services, thread: ThreadId, title: &str) -> String {
         run(
             svc,
-            crate::commands::work_item::CREATE,
+            crate::commands::task::CREATE,
             serde_json::json!({ "title": title, "assignee": thread.to_string() }),
         )
         .await["uri"]
@@ -1178,7 +1175,7 @@ mod core_tests {
             .to_string()
     }
 
-    /// tsk864: a work item is indexed from `v_search_work_item` — written, edited,
+    /// tsk864: a task is indexed from `v_search_task` — written, edited,
     /// found by its id, gone when deleted — its kind restated as a whole.
     #[tokio::test]
     async fn a_task_edit_restates_its_kind() {
@@ -1188,35 +1185,35 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the new task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/task")
         })
         .await;
-        let id = oxplow_domain::uri::build::work_item_of_uri(&t).unwrap().1;
+        let id = oxplow_domain::uri::build::task_of_uri(&t).unwrap().1;
         assert!(
-            found(&svc, &id, Some(stream.id), "oxplow/work_item").await,
+            found(&svc, &id, Some(stream.id), "oxplow/task").await,
             "its id finds it"
         );
 
         run(
             &svc,
-            crate::commands::work_item::UPDATE,
+            crate::commands::task::UPDATE,
             serde_json::json!({ "uri": t, "title": "Quux the flange" }),
         )
         .await;
         eventually("the edit is found", || {
-            found(&svc, "flange", Some(stream.id), "oxplow/work_item")
+            found(&svc, "flange", Some(stream.id), "oxplow/task")
         })
         .await;
-        assert!(!found(&svc, "sprocket", Some(stream.id), "oxplow/work_item").await);
+        assert!(!found(&svc, "sprocket", Some(stream.id), "oxplow/task").await);
 
         run(
             &svc,
-            crate::commands::work_item::DELETE,
+            crate::commands::task::DELETE,
             serde_json::json!({ "uri": t }),
         )
         .await;
         eventually("the deleted task leaves", || async {
-            entries(&svc, "oxplow/work_item").await.is_empty()
+            entries(&svc, "oxplow/task").await.is_empty()
         })
         .await;
     }
@@ -1230,18 +1227,18 @@ mod core_tests {
         change_loop(&svc);
         task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/task")
         })
         .await;
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), "none".into());
+            .insert("task_tracker".into(), "none".into());
         let config = crate::config_service::read_config(&svc.config);
         svc.capabilities.publish(&config, &svc.db).await.unwrap();
         eventually("with no list it leaves", || async {
-            entries(&svc, "oxplow/work_item").await.is_empty()
+            entries(&svc, "oxplow/task").await.is_empty()
         })
         .await;
     }
@@ -1257,14 +1254,14 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("indexed", || async {
-            entries(&svc, "oxplow/work_item").await.len() == 1
+            entries(&svc, "oxplow/task").await.len() == 1
         })
         .await;
         let refs: Vec<String> = svc
             .db
             .read(|c| {
                 let mut s = c
-                    .prepare("SELECT uri FROM v_search_work_item")
+                    .prepare("SELECT uri FROM v_search_task")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = s
                     .query_map([], |r| r.get(0))
@@ -1281,7 +1278,7 @@ mod core_tests {
             oxplow_domain::uri::validate_uri(&kinds, r).unwrap();
         }
         assert_eq!(
-            entries(&svc, "oxplow/work_item").await,
+            entries(&svc, "oxplow/task").await,
             vec![(t.clone(), Some(stream.id.to_string()))]
         );
     }
@@ -1301,7 +1298,7 @@ mod core_tests {
         // An item assigned to nobody is project-wide.
         let backlog = run(
             &svc,
-            crate::commands::work_item::CREATE,
+            crate::commands::task::CREATE,
             serde_json::json!({ "title": "On the backlog" }),
         )
         .await["uri"]
@@ -1309,14 +1306,14 @@ mod core_tests {
             .unwrap()
             .to_string();
         eventually("all three are indexed", || async {
-            entries(&svc, "oxplow/work_item").await.len() == 3
+            entries(&svc, "oxplow/task").await.len() == 3
         })
         .await;
         oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &shelved.id)
             .await
             .unwrap();
         eventually("the archived thread's task leaves", || async {
-            entries(&svc, "oxplow/work_item").await
+            entries(&svc, "oxplow/task").await
                 == vec![
                     (stays.clone(), Some(stream.id.to_string())),
                     (backlog.clone(), None),
@@ -1328,7 +1325,7 @@ mod core_tests {
             .unwrap();
         eventually(
             "the archived stream's tasks leave; the backlog stays",
-            || async { entries(&svc, "oxplow/work_item").await == vec![(backlog.clone(), None)] },
+            || async { entries(&svc, "oxplow/task").await == vec![(backlog.clone(), None)] },
         )
         .await;
     }
@@ -1344,18 +1341,17 @@ mod core_tests {
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         let id = t.clone();
         eventually("in its thread's stream", || async {
-            entries(&svc, "oxplow/work_item").await
-                == vec![(id.clone(), Some(stream.id.to_string()))]
+            entries(&svc, "oxplow/task").await == vec![(id.clone(), Some(stream.id.to_string()))]
         })
         .await;
         run(
             &svc,
-            crate::commands::work_item::ASSIGN,
+            crate::commands::task::ASSIGN,
             serde_json::json!({ "uri": t, "to": null }),
         )
         .await;
         eventually("project-wide", || async {
-            entries(&svc, "oxplow/work_item").await == vec![(id.clone(), None)]
+            entries(&svc, "oxplow/task").await == vec![(id.clone(), None)]
         })
         .await;
     }
@@ -1371,14 +1367,14 @@ mod core_tests {
         task(&svc, thread.id, "Quux the sprocket").await;
         let assets = change_loop(&svc);
         eventually("indexed", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/task")
         })
         .await;
         let computed = |svc: Arc<Services>| async move {
             svc.db
                 .read(|c| {
                     c.query_row(
-                        "SELECT computed_at FROM asset_state WHERE asset = 'search:oxplow/work_item'",
+                        "SELECT computed_at FROM asset_state WHERE asset = 'search:oxplow/task'",
                         [],
                         |r| r.get::<_, String>(0),
                     )
@@ -1682,7 +1678,7 @@ mod core_tests {
 
     /// An effort is found by its title and by the item it was on.
     #[tokio::test]
-    async fn an_effort_is_found_by_its_title_and_its_work_item() {
+    async fn an_effort_is_found_by_its_title_and_its_task() {
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
@@ -1694,7 +1690,7 @@ mod core_tests {
             serde_json::json!({
                 "thread": thread.id.to_string(),
                 "title": "Reticulate splines",
-                "work_item": item,
+                "task": item,
             }),
         )
         .await;
@@ -1702,12 +1698,10 @@ mod core_tests {
             found(&svc, "reticulate", Some(stream.id), "oxplow/effort")
         })
         .await;
-        let native = oxplow_domain::uri::build::work_item_of_uri(&item)
-            .unwrap()
-            .1;
+        let native = oxplow_domain::uri::build::task_of_uri(&item).unwrap().1;
         assert!(
             found(&svc, &native, Some(stream.id), "oxplow/effort").await,
-            "by its work item's id"
+            "by its task's id"
         );
     }
 
@@ -1824,9 +1818,9 @@ mod core_tests {
         }
     }
 
-    /// A work item's comments are in its text.
+    /// A task's comments are in its text.
     #[tokio::test]
-    async fn a_work_item_is_found_by_its_comments() {
+    async fn a_task_is_found_by_its_comments() {
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
@@ -1834,18 +1828,18 @@ mod core_tests {
         let item = task(&svc, thread.id, "Plain item").await;
         run(
             &svc,
-            crate::commands::work_item::COMMENT,
+            crate::commands::task::COMMENT,
             serde_json::json!({ "uri": item, "body": "the ocelot repro is attached" }),
         )
         .await;
         eventually("found by a comment", || {
-            found(&svc, "ocelot", Some(stream.id), "oxplow/work_item")
+            found(&svc, "ocelot", Some(stream.id), "oxplow/task")
         })
         .await;
     }
 
     /// A core dataset is named by its bare name in its URI
-    /// (`oxplow:oxplow/dataset?dataset=work_item`), an extension's by
+    /// (`oxplow:oxplow/dataset?dataset=task`), an extension's by
     /// `owner/name`: both are indexed, none skipped.
     #[tokio::test]
     async fn a_core_dataset_is_found_by_its_bare_name() {
@@ -1856,7 +1850,7 @@ mod core_tests {
             entries(&svc, "oxplow/dataset")
                 .await
                 .iter()
-                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=work_item")
+                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=task")
         })
         .await;
     }
@@ -2020,9 +2014,9 @@ mod core_tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         task(&svc, thread.id, "Quux the sprocket").await;
-        let index = index_of(&svc, "oxplow/work_item").await;
+        let index = index_of(&svc, "oxplow/task").await;
         index.recompute(true).await.unwrap();
-        assert_eq!(entries(&svc, "oxplow/work_item").await.len(), 1);
+        assert_eq!(entries(&svc, "oxplow/task").await.len(), 1);
 
         let (release, writer) = hold_write_lock(&svc.db).await;
 
@@ -2044,6 +2038,6 @@ mod core_tests {
         release.send(()).unwrap();
         writer.await.unwrap().unwrap();
         index.recompute(false).await.unwrap();
-        assert_eq!(entries(&svc, "oxplow/work_item").await.len(), 2);
+        assert_eq!(entries(&svc, "oxplow/task").await.len(), 2);
     }
 }

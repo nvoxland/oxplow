@@ -774,7 +774,7 @@ pub enum LinkKind {
     Commit,
     /// A metric's page; the value is a metric key.
     Metric,
-    /// Any oxplow page by its tab id (`oxplow:oxplow/work_item?id=<id>&provider=oxplow`,
+    /// Any oxplow page by its tab id (`oxplow:oxplow/task?id=<id>&provider=oxtask`,
     /// `oxplow:oxplow/commit?sha=<sha>`, `oxplow:oxplow/page?page=git-dashboard`, …),
     /// e.g. `v_page_visit.page_id`.
     Page,
@@ -1273,7 +1273,7 @@ pub struct PageAction {
     /// Unique within the viz; `oxplow_run_page_action` names it.
     pub id: String,
     pub label: String,
-    /// The command it runs (`oxplow.work_item.transition`). None for an
+    /// The command it runs (`oxplow.task.transition`). None for an
     /// `open` action, which runs none.
     #[serde(default)]
     pub command: Option<String>,
@@ -1419,7 +1419,7 @@ pub(crate) struct ActionFile {
     /// Unique within the viz.
     id: String,
     label: String,
-    /// The command it runs (`oxplow.work_item.transition`). One of
+    /// The command it runs (`oxplow.task.transition`). One of
     /// `command` or `open`.
     #[serde(default)]
     command: Option<String>,

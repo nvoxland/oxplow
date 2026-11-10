@@ -18,12 +18,12 @@
       "identity": "oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD"
     },
     {
-      "text": "oxplow:oxplow/work_item?provider=oxplow&id=tsk42",
-      "resource": { "namespace": "oxplow", "name": "work_item" },
-      "params": { "id": "tsk42", "provider": "oxplow" },
+      "text": "oxplow:oxplow/task?provider=oxtask&id=tsk42",
+      "resource": { "namespace": "oxplow", "name": "task" },
+      "params": { "id": "tsk42", "provider": "oxtask" },
       "view": {},
-      "canonical": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow",
-      "identity": "oxplow:oxplow/work_item?id=tsk42&provider=oxplow"
+      "canonical": "oxplow:oxplow/task?id=tsk42&provider=oxtask",
+      "identity": "oxplow:oxplow/task?id=tsk42&provider=oxtask"
     },
     {
       "text": "oxplow:acme_tools/pr?id=12",
@@ -113,12 +113,12 @@
     },
     {
       "$comment": "A value holding a whole URI is encoded where the grammar needs it.",
-      "text": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
+      "text": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask",
       "resource": { "namespace": "oxplow", "name": "page" },
-      "params": { "page": "new-task", "parent": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" },
+      "params": { "page": "new-task", "parent": "oxplow:oxplow/task?id=tsk1&provider=oxtask" },
       "view": {},
-      "canonical": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow",
-      "identity": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/work_item?id%3Dtsk1%26provider%3Doxplow"
+      "canonical": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask",
+      "identity": "oxplow:oxplow/page?page=new-task&parent=oxplow:oxplow/task?id%3Dtsk1%26provider%3Doxtask"
     },
     {
       "$comment": "A file on a filesystem other than the local one names it (`filesystem`); keys sort whatever order they were written in, so the filesystem comes first.",

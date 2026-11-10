@@ -1,7 +1,7 @@
 title: Link Effort to Task
-description: Link an effort to one of the open work items, or take its link away.
+description: Link an effort to one of the open tasks, or take its link away.
 needs:
-- work_items
+- task_tracker
 params:
 - name: uri
   label: Effort
@@ -9,7 +9,7 @@ loaders:
   changes_link_items:
     sql: |
       SELECT w.uri AS value, w.title AS label
-      FROM v_work_item w WHERE w.state NOT IN ('done', 'canceled')
+      FROM v_task w WHERE w.state NOT IN ('done', 'canceled')
       ORDER BY w.updated_at DESC LIMIT 200
 view:
   viz: form
@@ -20,6 +20,6 @@ view:
     fixed:
     - effort
     fields:
-    - work_item
+    - task
     choices:
-      work_item: oxplow/link-effort#changes_link_items
+      task: oxplow/link-effort#changes_link_items

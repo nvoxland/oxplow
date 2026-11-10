@@ -1,4 +1,4 @@
-SELECT e.id, e.work_item,
+SELECT e.id, e.task,
        e.thread_id, th.stream_id, e.started_at, e.ended_at,
        e.start_snapshot_id, e.end_snapshot_id,
        -- Its own summary (`oxplow.effort.report`), else the final message of the
@@ -18,7 +18,7 @@ SELECT e.id, e.work_item,
        -- skipped. With none, "Untitled effort".
        coalesce(
          nullif(trim(e.title), ''),
-         (SELECT w.title FROM source('work_item') w WHERE w.uri = e.work_item),
+         (SELECT w.title FROM source('task') w WHERE w.uri = e.task),
          (SELECT l.line FROM (
             SELECT p.started_at,
                    trim(CASE WHEN instr(p.text, char(10)) > 0

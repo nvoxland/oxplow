@@ -1,7 +1,7 @@
 [
   {
-    "target": "work_item.board",
-    "capability": "work_items",
+    "target": "task.board",
+    "capability": "task_tracker",
     "bound_to_provider": false,
     "version": 2,
     "props": [
@@ -14,11 +14,11 @@
       "q"
     ],
     "label": "board",
-    "about": "The Tasks board (the `board` component of oxplow-bundled's `tasks` page): `scope` is `thread`, `stream`, `me`, `pool` or `all` — the work assigned to the viewed thread, its stream's threads, the person, nobody, or anyone (`v_work_item.assignee`); `thread_id` the viewed thread, which applies when `scope` is `thread`; a page's `stream_id` (implicit, as on every page) is the viewed stream, which applies when `scope` is `stream`. A view of the capability as a whole, so any extension may bring one: it reads `v_work_item` and runs the interface verbs (`oxplow.work_item.transition`, `update`, `assign`, `reorder`, …), whichever list is active. It shares the page's filters (`show`, `priority`, `q`, the tab's view): it draws them, as oxplow's board does, since the page has no rail."
+    "about": "The Tasks board (the `board` component of oxplow-bundled's `tasks` page): `scope` is `thread`, `stream`, `me`, `pool` or `all` — the work assigned to the viewed thread, its stream's threads, the person, nobody, or anyone (`v_task.assignee`); `thread_id` the viewed thread, which applies when `scope` is `thread`; a page's `stream_id` (implicit, as on every page) is the viewed stream, which applies when `scope` is `stream`. A view of the capability as a whole, so any extension may bring one: it reads `v_task` and runs the interface verbs (`oxplow.task.transition`, `update`, `assign`, `reorder`, …), whichever list is active. It shares the page's filters (`show`, `priority`, `q`, the tab's view): it draws them, as oxplow's board does, since the page has no rail."
   },
   {
-    "target": "work_item.list",
-    "capability": "work_items",
+    "target": "task.list",
+    "capability": "task_tracker",
     "bound_to_provider": false,
     "version": 2,
     "props": [
@@ -27,11 +27,11 @@
     ],
     "view": [],
     "label": "list",
-    "about": "The Task List's list (the `list` node of oxplow-bundled's `task-list` page): `scope` is `thread`, `stream`, `me`, `pool` or `all` — whom the items are assigned to (`v_work_item.assignee`); `thread_id` the viewed thread, which applies when `scope` is `thread`. The page's filters and New Task… stay oxplow's."
+    "about": "The Task List's list (the `list` node of oxplow-bundled's `task-list` page): `scope` is `thread`, `stream`, `me`, `pool` or `all` — whom the items are assigned to (`v_task.assignee`); `thread_id` the viewed thread, which applies when `scope` is `thread`. The page's filters and New Task… stay oxplow's."
   },
   {
-    "target": "work_item.detail",
-    "capability": "work_items",
+    "target": "task.detail",
+    "capability": "task_tracker",
     "bound_to_provider": false,
     "version": 1,
     "props": [
@@ -39,11 +39,11 @@
     ],
     "view": [],
     "label": "description editor",
-    "about": "A work item's description editor (the `body` part of the `work-item` document): `uri` is the item. Its state, fields, About, links, comments, activity and mounts stay oxplow's."
+    "about": "A task's description editor (the `body` part of the `task` document): `uri` is the item. Its state, fields, About, links, comments, activity and mounts stay oxplow's."
   },
   {
-    "target": "work_item.detail.state",
-    "capability": "work_items",
+    "target": "task.detail.state",
+    "capability": "task_tracker",
     "bound_to_provider": true,
     "version": 1,
     "props": [
@@ -51,7 +51,7 @@
     ],
     "view": [],
     "label": "state control",
-    "about": "A work item's state control (the `state` part of the `work-item` document; its Move To is never replaced, so an item can always move): `uri` is the item. The item's own provider's extension replaces it, whichever is active: it shows that provider's own states."
+    "about": "A task's state control (the `state` part of the `task` document; its Move To is never replaced, so an item can always move): `uri` is the item. The item's own provider's extension replaces it, whichever is active: it shows that provider's own states."
   },
   {
     "target": "vcs.history.graph",

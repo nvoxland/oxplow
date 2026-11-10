@@ -25,11 +25,10 @@ that exists is refused):
   counting each file's functions over a complexity limit, the dimension
   its facts carry, the headline metric and a page linking to the file and
   line (`--language`, `--glob`; the `oxplow-metrics` skill teaches it);
-- `command` — a command whose script comments on a work item, on a work
-  item's Commands menu;
+- `command` — a command whose script comments on a task, on a task's Commands menu;
 - `provider` — an external provider's declarations and a stub program
   (red until you write the program); `--capability <cap>` picks what it
-  implements: `work_items` (the default), `effort_policy`,
+  implements: `task_tracker` (the default), `effort_policy`,
   `snapshots`, `knowledge`, `filesystem` or `agent_harness` (a harness launching agent sessions: its command runs in
   the person's terminal, so the deploy that admits it (`process`) says that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
@@ -58,7 +57,7 @@ that exists is refused):
   starter has the job and its model profile, `job.ask|status|cancel`
   commands, a `note.ask` command that holds the prompt, a page over
   `v_job_run_output` that follows the reply live, and a `publish` effect on
-  `contribution.job.completed` that comments the reply on a work item. Its
+  `contribution.job.completed` that comments the reply on a task. Its
   fixtures run the job on a fixture model (`model: { replies }`); a person
   can cancel it (`references/jobs-and-ai.md`);
 - `component` — a custom component (private): a page with its component
@@ -80,7 +79,7 @@ that exists is refused):
 Words used exactly: an **extension** is the folder; a **contribution** is
 one thing it declares (a page, collector, command, effect, provider …); a
 **capability** is a swappable slot a project chooses an implementation of
-(`work_items`, `effort_policy`, `snapshots`); an **implementation** fills
+(`task_tracker`, `effort_policy`, `snapshots`); an **implementation** fills
 one (a built-in, a script, or a provider's instance); a **provider** is
 the process implementing a capability (an *external provider* speaks the
 provider protocol). A **need** is what a contribution says it requires (a

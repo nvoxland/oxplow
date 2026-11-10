@@ -235,7 +235,7 @@ mod tests {
             turn_id: Some(7),
             ..Default::default()
         })
-        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"])
+        .with_subject(["oxplow:oxplow/task?id=tsk4&provider=oxtask"])
         .with_cause(EventId("01990000-0000-7000-8000-000000000001".into()));
         env.at = Timestamp::parse("2026-10-09T12:00:00.000000Z").unwrap();
         StoredEvent {
@@ -260,7 +260,7 @@ mod tests {
                 "seq": 42,
                 "at": "2026-10-09T12:00:00.000000Z",
                 "source": "oxplow:oxplow/collector?collector=acme/c",
-                "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
+                "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
                 "anchors": {
                     "stream_id": null, "thread_id": "thr3", "effort_id": null,
                     "turn_id": 7, "agent_session_id": null, "snapshot_id": null
@@ -281,7 +281,7 @@ mod tests {
         let given = json!({
             "id": event.envelope.id.0, "type": "acme.thing", "v": 1, "seq": 42,
             "at": "2026-10-09T12:00:00.000000Z", "source": "oxplow:oxplow/collector?collector=acme/c",
-            "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
+            "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
             "anchors": { "thread_id": "thr3", "turn_id": 7 },
             "payload": { "n": 5 },
             "cause": "01990000-0000-7000-8000-000000000001",

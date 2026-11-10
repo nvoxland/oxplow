@@ -7,8 +7,8 @@ intent:
   purpose: >-
     Shows what the TODO comments in the code are asking for. Each TODO is
     classified by a model as a bug, cleanup or a feature, and the count of
-    open work items is kept beside them, so a growing pile of bug TODOs
-    against a short work list stands out.
+    open tasks is kept beside them, so a growing pile of bug TODOs
+    against a short task tracker stands out.
   origin: null
   examples:
     - name: summary-published
@@ -51,7 +51,7 @@ measures:
     fold: sum
     captureScope: per-path
   - key: triage.open_items
-    title: Open work items
+    title: Open tasks
     unit: items
     temporalSemantics: non-additive
     fold: sum
@@ -67,7 +67,7 @@ metrics:
     displayKind: findings
 collectors:
   # On each snapshot: its tree (a fact collector reads it without asking),
-  # the open work items (`sql.read`) and a model for each TODO
+  # the open tasks (`sql.read`) and a model for each TODO
   # (`ai.compute`, under `permissions.ai`, approved when the extension is deployed).
   - id: todos
     runtime: starlark

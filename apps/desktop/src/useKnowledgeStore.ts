@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { onRemoteReconnect, subscribeOxplowEvents } from "./api.js";
 import { knowledgeIsNone } from "./knowledge.js";
 import { coalesce, NO_READS, readsChanged } from "./viz/rerun.js";
-import { readCapabilityProviders } from "./workItems.js";
+import { readCapabilityProviders } from "./tasks.js";
 
 /**
  * Whether the project keeps no knowledge store (its active row is

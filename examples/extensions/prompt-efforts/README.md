@@ -2,7 +2,7 @@
 
 oxplow's own effort policy opens an effort when a turn first changes files
 and keeps it open across prompts until a commit lands its changes or its
-work item finishes. This one gives **every prompt that changes files an
+task finishes. This one gives **every prompt that changes files an
 effort of its own**, so an effort's review packet, files, test runs and
 tokens are exactly that prompt's.
 
@@ -12,11 +12,11 @@ core's events and answers with the commands to run.
 - **A turn that changed the worktree** (`thread.checkpoint` with `changed`
   and a writing tool): the thread's open effort closes as of the turn's
   start, and a new one opens adopting the turn, carrying the previous
-  effort's work item. A question-only turn gets nothing; a turn whose
+  effort's task. A question-only turn gets nothing; a turn whose
   effort was already opened during it (an item started mid-turn) is left
   alone.
-- **A work item started** on a thread links the thread's open effort to it,
-  or opens one. **A work item finished** closes its effort. Every effort
+- **A task started** on a thread links the thread's open effort to it,
+  or opens one. **A task finished** closes its effort. Every effort
   policy keeps this floor; `oxplow extension test` checks it.
 
 ## Use it

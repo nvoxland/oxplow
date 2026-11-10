@@ -31,7 +31,7 @@ import {
   threadSettingsRef,
   wikiFreshnessRef,
   wikiPageRef,
-  workItemTabRef,
+  taskTabRef,
   pagePayload,
   resourceParamsOf,
   viewParamsOf,
@@ -75,11 +75,11 @@ describe("pageRefs", () => {
     expect(settingsRef("agents", "models").id).toBe("oxplow:oxplow/page?page=settings#area=agents&section=models");
   });
 
-  test("wikiPageRef and workItemTabRef encode canonical refs", () => {
+  test("wikiPageRef and taskTabRef encode canonical refs", () => {
     expect(wikiPageRef("how-x-works").id).toBe("oxplow:oxplow/wiki?slug=how-x-works");
-    // A work item's tab is its ref, whichever list (.context/resources.md).
-    expect(workItemTabRef("oxplow:oxplow/work_item?id=tsk123&provider=oxplow")).toEqual({
-      id: "oxplow:oxplow/work_item?id=tsk123&provider=oxplow",
+    // A task's tab is its ref, whichever list (.context/resources.md).
+    expect(taskTabRef("oxplow:oxplow/task?id=tsk123&provider=oxtask")).toEqual({
+      id: "oxplow:oxplow/task?id=tsk123&provider=oxtask",
     });
     expect(gitCommitRef("abc1234")).toEqual({ id: "oxplow:oxplow/commit?sha=abc1234" });
     expect(metricRef("oxplow.todos")).toEqual({ id: "oxplow:oxplow/metric?metric=oxplow.todos" });
@@ -117,7 +117,7 @@ describe("pageRefs", () => {
 
   test("a new item's parent is its param", () => {
     expect(newTaskRef().id).toBe("oxplow:oxplow/page?page=new-task");
-    expect(newTaskRef({ parentRef: "work_item:tsk3" }).id).toBe("oxplow:oxplow/page?page=new-task&parent=work_item:tsk3");
+    expect(newTaskRef({ parentRef: "task:tsk3" }).id).toBe("oxplow:oxplow/page?page=new-task&parent=task:tsk3");
   });
 
   test("an effort, snapshot or turn page is its canonical ref (P2.11)", () => {
@@ -195,7 +195,7 @@ describe("refFromTabId", () => {
   test("rebuilds payload-bearing kinds from their id", () => {
     expect(refFromTabId("oxplow:oxplow/wiki?slug=some-slug")).toEqual(wikiPageRef("some-slug"));
     // `:` inside an id is legal; a naive split on the first colon breaks here.
-    expect(refFromTabId("oxplow:oxplow/work_item?id=tsk42&provider=oxplow")).toEqual(workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"));
+    expect(refFromTabId("oxplow:oxplow/task?id=tsk42&provider=oxtask")).toEqual(taskTabRef("oxplow:oxplow/task?id=tsk42&provider=oxtask"));
     expect(refFromTabId("oxplow:oxplow/commit?sha=abc1234")).toEqual(gitCommitRef("abc1234"));
     expect(refFromTabId("oxplow:oxplow/metric?metric=oxplow.todos")).toEqual(metricRef("oxplow.todos"));
     // Single snapshot is a diff-view ref now (kind "snapshot" is gone).
@@ -266,7 +266,7 @@ describe("refFromTabId", () => {
       metricRef("oxplow.todos"),
       metricRef("oxplow.todos", { range: "7d", branch: "main" }),
       snapshotRef(112),
-      workItemTabRef("oxplow:oxplow/work_item?id=tsk42&provider=oxplow"),
+      taskTabRef("oxplow:oxplow/task?id=tsk42&provider=oxtask"),
       wikiPageRef("some-slug"),
       effortDiffRef("eff9"),
       pageTabRef("acme/blocked", { stream_id: 2 }),
@@ -322,12 +322,12 @@ describe("refFromTabId", () => {
   });
 });
 
-// Every list's work item opens the one work item page, by its ref.
-test("a work item ref opens for every provider", () => {
-  const theirs = workItemTabRef("oxplow:oxplow/work_item?id=W-1&provider=fake");
-  expect(theirs).toEqual({ id: "oxplow:oxplow/work_item?id=W-1&provider=fake" });
-  expect(refFromTabId("oxplow:oxplow/work_item?id=W-1&provider=fake")).toEqual(theirs);
-  expect(refFromTabId("oxplow:oxplow/work_item?id=tsk3&provider=oxplow")).toEqual(workItemTabRef("oxplow:oxplow/work_item?id=tsk3&provider=oxplow"));
+// Every list's task opens the one task page, by its ref.
+test("a task ref opens for every provider", () => {
+  const theirs = taskTabRef("oxplow:oxplow/task?id=W-1&provider=fake");
+  expect(theirs).toEqual({ id: "oxplow:oxplow/task?id=W-1&provider=fake" });
+  expect(refFromTabId("oxplow:oxplow/task?id=W-1&provider=fake")).toEqual(theirs);
+  expect(refFromTabId("oxplow:oxplow/task?id=tsk3&provider=oxtask")).toEqual(taskTabRef("oxplow:oxplow/task?id=tsk3&provider=oxtask"));
 });
 
 

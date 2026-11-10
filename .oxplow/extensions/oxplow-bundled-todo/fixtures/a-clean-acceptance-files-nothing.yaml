@@ -1,8 +1,8 @@
 # An acceptance that left nothing unchecked files nothing: the follow-up
 # effect skips.
 given:
-  - { command: oxplow.work_item.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Fix the hover state, body: "Fix the hover state in [[src/ui/button.ts]].", assignee: thr1 }, bind: item }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe:
       turn:
         prompt: Fix the hover state
@@ -22,5 +22,5 @@ when:
 expect:
   ok: true
 steps:
-  - when: { sql: "SELECT (SELECT count(*) FROM v_work_item WHERE title LIKE 'Verify what the review of %') AS follow_ups, (SELECT group_concat(state) FROM v_effect_run WHERE effect = 'oxplow/verify-unchecked') AS reacted" }
+  - when: { sql: "SELECT (SELECT count(*) FROM v_task WHERE title LIKE 'Verify what the review of %') AS follow_ups, (SELECT group_concat(state) FROM v_effect_run WHERE effect = 'oxplow/verify-unchecked') AS reacted" }
     expect: { rows: [{ follow_ups: 0, reacted: skipped }] }

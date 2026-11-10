@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::events::Envelope;
-use crate::work_items::ActiveSource;
+use crate::tasks::ActiveSource;
 use crate::{Actor, CommandError};
 
 /// A page to write.

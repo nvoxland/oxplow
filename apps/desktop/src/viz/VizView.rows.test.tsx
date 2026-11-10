@@ -63,9 +63,9 @@ const base: VizConfig = {
 };
 const columns = ["bucket", "bucket_ref", "id", "title", "status", "hue", "on", "d", "uri"];
 const rows: SqlCell[][] = [
-  ["In progress", "oxplow:oxplow/page?page=tasks", 1, "Epic", "in_progress", null, 0, 0, "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
-  ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/work_item?id=tsk2&provider=oxplow"],
-  ["Ready", null, 3, "Next", "todo", null, 0, 0, "oxplow:oxplow/work_item?id=tsk3&provider=oxplow"],
+  ["In progress", "oxplow:oxplow/page?page=tasks", 1, "Epic", "in_progress", null, 0, 0, "oxplow:oxplow/task?id=tsk1&provider=oxtask"],
+  ["In progress", "oxplow:oxplow/page?page=tasks", 2, "Child", "done", "warning", 1, 1, "oxplow:oxplow/task?id=tsk2&provider=oxtask"],
+  ["Ready", null, 3, "Next", "todo", null, 0, 0, "oxplow:oxplow/task?id=tsk3&provider=oxtask"],
 ];
 const runOf = (viz: Partial<VizConfig>): VizRun =>
   ({ config: { ...base, ...viz }, params: {}, result: { columns, rows, truncated: false } }) as unknown as VizRun;
@@ -74,7 +74,7 @@ const grouped: Partial<VizConfig> = {
   emphasis: "on",
   depth: "d",
   columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null, icon: "status", tone: "hue" }],
-  actions: [{ id: "add", label: "+", command: "oxplow.work_item.create", input: {}, row: false, group: "Ready" }],
+  actions: [{ id: "add", label: "+", command: "oxplow.task.create", input: {}, row: false, group: "Ready" }],
 };
 
 test("a grouped list puts its rows under a heading per value, in order, and the heading has an arrow to its page", () => {
@@ -349,7 +349,7 @@ test("a link to a ref of any kind opens through the page's openRef", () => {
   fireEvent.click(view.getByTestId("viz-row-2").querySelector("button")!);
   fireEvent.click(view.getAllByTestId("open-page-link")[0]!, { metaKey: true });
   expect(opened).toEqual([
-    ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow", false],
+    ["oxplow:oxplow/task?id=tsk3&provider=oxtask", false],
     ["oxplow:oxplow/page?page=tasks", true],
   ]);
 });
@@ -451,7 +451,7 @@ test("a link opens with its column's pages as the origin", () => {
   );
   fireEvent.click(view.getByText("Child"));
   const [ref, origin] = opened[0]!;
-  expect(ref).toBe("oxplow:oxplow/work_item?id=tsk2&provider=oxplow");
+  expect(ref).toBe("oxplow:oxplow/task?id=tsk2&provider=oxtask");
   // The collection is the viz's link column, run again for its list.
   expect(origin).toMatchObject({ items: [], live: { node: "x/work", column: "title" } });
 });
@@ -477,7 +477,7 @@ test("↑/↓ and Enter open the row under the cursor", () => {
   fireEvent.keyDown(table, { key: "ArrowDown" });
   fireEvent.keyDown(table, { key: "ArrowUp" });
   fireEvent.keyDown(table, { key: "Enter" });
-  expect(opened).toEqual([["oxplow:oxplow/work_item?id=tsk2&provider=oxplow", "origin"]]);
+  expect(opened).toEqual([["oxplow:oxplow/task?id=tsk2&provider=oxtask", "origin"]]);
   expect(view.getByTestId("viz-row-1").getAttribute("data-cursor")).toBe("true");
 });
 
@@ -488,7 +488,7 @@ test("Enter runs the first row action of a row with no link", async () => {
       run={runOf({
         viz: "table",
         columns: [{ key: "title", label: null, link: null, unit: null }],
-        actions: [{ id: "open", label: "Open", command: "oxplow.work_item.update", input: {}, row: true }],
+        actions: [{ id: "open", label: "Open", command: "oxplow.task.update", input: {}, row: true }],
       })}
       onOpenPage={() => {}}
     />,
@@ -509,8 +509,8 @@ test("a click on a row runs the primary action, but not from a link in it", asyn
         viz: "table",
         columns: [{ key: "title", label: null, link: null, unit: null }],
         actions: [
-          { id: "other", label: "Other", command: "oxplow.work_item.update", input: {}, row: true },
-          { id: "take", label: "Take", command: "oxplow.work_item.update", input: {}, row: true, primary: true },
+          { id: "other", label: "Other", command: "oxplow.task.update", input: {}, row: true },
+          { id: "take", label: "Take", command: "oxplow.task.update", input: {}, row: true, primary: true },
         ],
       })}
       onOpenPage={() => {}}

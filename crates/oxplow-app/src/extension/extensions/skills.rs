@@ -4,10 +4,10 @@
 //!
 //! ```yaml
 //! skills:
-//!   - { name: work-items, file: skills/work-items/SKILL.md, needs: [work_items] }
-//!   - { name: work-next, kind: command, file: commands/work-next.md }
+//!   - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
+//!   - { name: next-task, kind: command, file: commands/next-task.md }
 //! implementations:
-//!   - { capability: work_items, id: oxplow, entry: oxplow:tasks, skills: [work-next] }
+//!   - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask, skills: [next-task] }
 //! ```
 //!
 //! An implementation that lists a skill owns it: it's offered only while
@@ -51,7 +51,7 @@ pub struct SkillDecl {
     pub kind: SkillKind,
     /// Its markdown, inside the extension.
     pub file: String,
-    /// What it needs active (`work_items`, `work_items.comments`).
+    /// What it needs active (`task_tracker`, `task_tracker.comments`).
     pub needs: Vec<String>,
     /// The `description:` of its frontmatter: when the agent loads a skill,
     /// what a command does.
@@ -226,12 +226,12 @@ mod tests {
         )
     }
 
-    const SKILL: &str = "---\nname: work-items\ndescription: Work items.\n---\n# Work items\n";
+    const SKILL: &str = "---\nname: tasks\ndescription: Tasks.\n---\n# Tasks\n";
 
     #[test]
     fn a_skill_and_a_command_are_declared() {
         let (decls, errors) = parse(
-            "  - { name: work-items, file: s/SKILL.md, needs: [work_items] }\n  - { name: work-next, kind: command, file: c.md }\n",
+            "  - { name: tasks, file: s/SKILL.md, needs: [task_tracker] }\n  - { name: next-task, kind: command, file: c.md }\n",
             &[("s/SKILL.md", SKILL), ("c.md", "---\ndescription: Next.\n---\nGo.\n")],
         );
         assert!(errors.is_empty(), "{errors:?}");
@@ -239,14 +239,14 @@ mod tests {
             decls,
             vec![
                 SkillDecl {
-                    name: "work-items".into(),
+                    name: "tasks".into(),
                     kind: SkillKind::Skill,
                     file: "s/SKILL.md".into(),
-                    needs: vec!["work_items".into()],
-                    description: "Work items.".into(),
+                    needs: vec!["task_tracker".into()],
+                    description: "Tasks.".into(),
                 },
                 SkillDecl {
-                    name: "work-next".into(),
+                    name: "next-task".into(),
                     kind: SkillKind::Command,
                     file: "c.md".into(),
                     needs: vec![],
@@ -271,14 +271,13 @@ mod tests {
             errors("  - { name: configure, kind: command, file: s.md }\n", &[])
                 .contains("oxplow's own")
         );
-        assert!(errors("  - { name: work-items, file: s.md }\n", &[]).contains("no file"));
+        assert!(errors("  - { name: tasks, file: s.md }\n", &[]).contains("no file"));
+        assert!(
+            errors("  - { name: tasks, file: s.md }\n", &[("s.md", "# x\n")])
+                .contains("frontmatter")
+        );
         assert!(errors(
-            "  - { name: work-items, file: s.md }\n",
-            &[("s.md", "# x\n")]
-        )
-        .contains("frontmatter"));
-        assert!(errors(
-            "  - { name: work-items, file: s.md, needs: [tickets] }\n",
+            "  - { name: tasks, file: s.md, needs: [tickets] }\n",
             &[("s.md", SKILL)]
         )
         .contains("isn't a capability"));
@@ -287,12 +286,12 @@ mod tests {
                 .contains("`name:` must be `other`")
         );
         assert!(errors(
-            "  - { name: work-items, file: s.md }\n",
-            &[("s.md", "---\nname: work-items\n---\n")]
+            "  - { name: tasks, file: s.md }\n",
+            &[("s.md", "---\nname: tasks\n---\n")]
         )
         .contains("description"));
         assert!(errors(
-            "  - { name: work-items, file: s.md }\n  - { name: work-items, file: s.md }\n",
+            "  - { name: tasks, file: s.md }\n  - { name: tasks, file: s.md }\n",
             &[("s.md", SKILL)]
         )
         .contains("twice"));

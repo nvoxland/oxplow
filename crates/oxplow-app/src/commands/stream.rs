@@ -349,7 +349,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         Ok(())
                     })
                     .await?;
-                // Its threads' work items go back to nobody.
+                // Its threads' tasks go back to nobody.
                 let thread_uris: Vec<String> = threads
                     .iter()
                     .map(|t| oxplow_domain::uri::build::thread_uri(t.id))
@@ -360,7 +360,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         let mut events = Vec::new();
                         for thread in &thread_uris {
                             events.extend(
-                                super::work_item::release_all_tx(tx, &source, thread)
+                                super::task::release_all_tx(tx, &source, thread)
                                     .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?,
                             );
                         }
@@ -903,7 +903,7 @@ mod tests {
             .svc
             .effort_store
             .start(
-                "oxplow:oxplow/work_item?id=A-1&provider=issues",
+                "oxplow:oxplow/task?id=A-1&provider=issues",
                 &thread.id,
                 start,
             )

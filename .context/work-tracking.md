@@ -3,7 +3,7 @@
 How oxplow knows what the agent is doing and has done, and the direction
 it is moving in. This is the target design; each section says what is
 built. Read it before touching efforts, the edit guard, the Stop hook,
-hints (advisories), work-item providers or snapshots.
+hints (advisories), task trackers or snapshots.
 
 ## Why
 
@@ -49,7 +49,7 @@ tokens, the review packet and commit links hang off. It is finer than a
 commit and needs no task.
 
 **Core owns** the entity and its invariants: spans on one thread never
-overlap and at most one is open per thread; the work-item link is
+overlap and at most one is open per thread; the task link is
 optional and can be attached later; a title (default: the linked item's
 title, else the first line of the first prompt a person typed in it, else
 "Untitled effort" — never empty; `v_effort.title`). A turn with an empty
@@ -80,7 +80,7 @@ holds, by content.
 
 **A policy decides** when to open, close and link, reacting to core's
 events (a checkpoint after a turn's snapshot, a commit indexed, an effort
-landed by a commit, a work item changing state). The default:
+landed by a commit, a task changing state). The default:
 
 1. An item started on a thread links that thread's effort, opening one if
    none is open; an agent that starts an item not assigned to its thread
@@ -104,7 +104,7 @@ per turn.
 only composes; core runs. It gets the event envelope
 ([extensions-events.md](./extensions-events.md) "The event envelope"), whose `anchors`
 say the mover's thread, a checkpoint's turn, a landing's effort; it is
-offered each of `EVENTS`: `work_item.state_changed` (core's, logged for
+offered each of `EVENTS`: `task.state_changed` (core's, logged for
 every provider), `effort.linked`, `effort.opened`, `thread.checkpoint`,
 `effort.landed`. `EffortPolicyRegistry` (`Services.effort_policies`) holds
 the policies by id: the declared built-ins, which each activation
@@ -162,9 +162,9 @@ none.
 `CommitOrSwitch` (`oxplow:commit-or-switch`) is the built-in, the rules
 above composed as calls (it reads first, then composes). Rule 1: the
 thread is the event's (the agent that moved the item), else the thread
-it's assigned to (`v_work_item.assignee`); a person moving an unassigned
+it's assigned to (`v_task.assignee`); a person moving an unassigned
 item opens nothing. An agent's start of an item not assigned to its
-thread composes `oxplow.work_item.assign` to that thread first. A
+thread composes `oxplow.task.assign` to that thread first. A
 descendant of the linked item refines the link; an ancestor leaves it. A
 task's status no longer opens or closes an effort anywhere else.
 
@@ -183,8 +183,8 @@ the thread has none open; a later item start links it (rule 1).
 ## Cross-thread ownership
 
 Who is going to work on an item is its assignee — a thread, the person or
-nobody (`v_work_item.assignee`; `oxplow.work_item.assign`, core's for
-every list, [work-items.md](./work-items.md) "Assignment") — and there is
+nobody (`v_task.assignee`; `oxplow.task.assign`, core's for
+every list, [tasks.md](./tasks.md) "Assignment") — and there is
 no second one. Who worked on it is its efforts. A done item is nobody's,
 and a closed thread's items go back to nobody. Two threads may
 still work on the same thing, and nothing refuses it (below, "No
@@ -193,7 +193,7 @@ gates"). It is made visible, all of it bundled over existing datasets
 
 - The **Shared work** page (`shared-work` in the launcher under Work;
   `thread-shared-work` on the thread page, slot `thread.plan.header`;
-  `item-shared-work` on a work item, slot `oxplow/work-item.sections`): items
+  `item-shared-work` on a task, slot `oxplow/task-detail.sections`): items
   with open efforts on two threads, files changed by two threads' efforts
   (open, or closed in the last day, from `v_effort_file`), and epics whose
   open children sit on different threads.
@@ -308,10 +308,10 @@ extension, not tuned.
 
 The direction for most of oxplow: a base interface in core, a standard
 implementation shipped in `oxplow-bundled`, and users free to write their
-own — heavier ones included (beads as a work list).
+own — heavier ones included (beads as a task tracker).
 
 - **A capability** is defined by its interface, whether it may be
-  **none** (then a core no-op stands in — for the work list a sink that
+  **none** (then a core no-op stands in — for the task tracker a sink that
   takes every verb and keeps nothing, so everything written against the
   interface just finds nothing — and anything that declares it needs the
   capability itself says so), its
@@ -321,12 +321,12 @@ own — heavier ones included (beads as a work list).
   other, and a choice is a project default with a personal override.
   Core declares the capabilities (`oxplow_domain::capability`:
   `CapabilitySpec` — choosable, optional, default, the features an
-  implementation may declare): the work list, the effort policy and
+  implementation may declare): the task tracker, the effort policy and
   knowledge may be none, snapshots may not, and `vcs` isn't chosen. A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
   (`oxplow.config.set { layer: personal }`).
 - **One active, or many at once.** Most capabilities have one active
-  implementation, chosen (the work list, the effort policy, snapshots) or
+  implementation, chosen (the task tracker, the effort policy, snapshots) or
   fixed (`vcs`). A **many-capability** (`CapabilitySpec.many`:
   `agent_harness`, `ai_provider`) is served by every
   implementation declared — the way collectors are — never chosen,
@@ -348,9 +348,9 @@ own — heavier ones included (beads as a work list).
   `source_guards::core_never_special_cases_its_own_implementations` fails on a
   literal `"oxplow-bundled"` or `"oxplow-foundation"` outside
   `bundled_extensions.rs` or a provider id compared with oxplow's; what's
-  left is pinned with its reason. oxplow's tasks sit behind the interface
-  like any list (`crates/oxplow-tasks`, registered by declaration, their
-  verbs called outside the transaction — [work-items.md](./work-items.md)).
+  left is pinned with its reason. oxtask sits behind the interface
+  like any tracker (`crates/oxplow-oxtask`, registered by declaration, its
+  verbs called outside the transaction — [tasks.md](./tasks.md)).
   The agent harnesses likewise: `only_harness_implementations_name_a_harness`
   fails on production code outside `crates/oxplow-harnesses` and
   `crates/oxplow-harness-fake` that names a harness's own pieces
@@ -381,16 +381,16 @@ The four in progress:
 
 | Capability | May be none | Default | Notes |
 |---|---|---|---|
-| Work list | yes | oxplow's tasks | Task screens stay core components, written against the interface; moving them into the extension is later work |
+| Task tracker | yes | oxtask | Task screens stay core components, written against the interface; moving them into the extension is later work |
 | Effort policy | yes | the three rules above (`CommitOrSwitch`) | An `EffortPolicy`: it composes commands for an event, the dispatcher runs them as `effect:effort_policy:<id>`. A provider process may implement it (`react`) |
 | Snapshots | no | keeps everything (core's `oxplow`) | `SnapshotProvider` (`oxplow_domain::snapshot`): mark now, what changed between two points, read a path at a point (bytes only with `contents`). `Services.snapshots` (a `SnapshotRegistry`) answers the active one; every core take (an effort's brackets, a turn's end, a measured run, an archive) is its mark. Both built-ins are `snapshots::CoreSnapshots`, one capture pipeline under a content policy: `oxplow` keeps every version, `hashes` (bundled, "Track changes only") records identities and keeps no bytes. The captures follow the active one's policy (`SnapshotSwitch` on `capability.switched`, and every reload); a switch changes what's kept from then on, nothing taken before. A provider process implements it too (`providers::snapshots::SnapshotsHost`, `.context/providers.md` "A snapshots provider"): it marks, core records what it reports in the same ledger, and the capture pipeline idles while it's active |
-| Knowledge | yes | oxplow's wiki (bundled, `oxplow:wiki`) | `KnowledgeProvider` (`oxplow_domain::knowledge`): write, delete and link pages, and how current each page's pinned refs are. `Services.knowledge` (a `KnowledgeRegistry`) answers the active one. None is a sink, as the work list's is (`knowledge::NoneKnowledge`, core's, always registered): a write lands nowhere and succeeds, so nothing that writes pages is refused. An extension's provider may keep pages elsewhere (an Obsidian vault, a Confluence or MediaWiki server; `.context/knowledge.md` "The capability") |
+| Knowledge | yes | oxplow's wiki (bundled, `oxplow:wiki`) | `KnowledgeProvider` (`oxplow_domain::knowledge`): write, delete and link pages, and how current each page's pinned refs are. `Services.knowledge` (a `KnowledgeRegistry`) answers the active one. None is a sink, as the task tracker's is (`knowledge::NoneKnowledge`, core's, always registered): a write lands nowhere and succeeds, so nothing that writes pages is refused. An extension's provider may keep pages elsewhere (an Obsidian vault, a Confluence or MediaWiki server; `.context/knowledge.md` "The capability") |
 
 ## Status
 
 - Built: the hook payload dump and the observed hook events; the Stop
   hook never refuses; the edit guard is isolation only; efforts need no
-  work item, one is open per thread, and the seam (open with adoption,
+  task, one is open per thread, and the seam (open with adoption,
   close as of a point, link, retitle — `commands/effort.rs`); the
   effort-policy choice with "none"; rules 1, 2 (`thread.checkpoint`) and
   3 (`vcs.commit.indexed` → `effort.landed`); observed files and runs by
@@ -430,18 +430,18 @@ The four in progress:
   Settings → Capabilities, generated from `v_capability_provider` (v4 carries
   each capability's title and whether it's choosable and optional),
   chooses for the project and just for me, and replaces Integrations'
-  work-items radio. A switch is logged (`capability.switched@1`) and
+  task tracker radio. A switch is logged (`capability.switched@1`) and
   closes open efforts when it's the policy's; a source guard pins core's
   remaining special cases.
   The agent's surface follows the active implementation: commands
   declare `needs:`, built-ins declare the commands and tools only they
   offer, an instance owns its namespace, and the bus and MCP offer and run
   only what's active. Skills and slash commands come from extensions
-  too (`skills:`), offered the same way; the work-item guidance and
-  `/work-next` moved from core into `oxplow-bundled`. A work list
+  too (`skills:`), offered the same way; the task guidance and
+  `/next-task` moved from core into `oxplow-bundled`. A task tracker
   declares its id pattern, and a loose id in a command (`tsk12`) is the
   active list's item.
   The app's test fixture opens an effort with no task; only tests about
   tasks make one (which found a claim on an unlinked effort failing).
-- Next: "none" as a work list end to end, then the other three
+- Next: "none" as a task tracker end to end, then the other three
   capabilities in the table (the effort policy, snapshots, knowledge).

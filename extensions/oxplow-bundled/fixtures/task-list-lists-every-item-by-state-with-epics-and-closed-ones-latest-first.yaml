@@ -1,22 +1,22 @@
-# Task List lists the work list's items in one of its stages (its first
+# Task List lists the task tracker's items in one of its stages (its first
 # to-do stage unless asked), whoever they are assigned to: an epic's
 # children under it, closed items latest first with when they closed.
 # A row names who it is assigned to, when anyone is. Its quick add files
 # the stage it shows (to do for a closed one), for nobody. A row's Mark ▸
 # offers the list's stages and its Assign to ▸ the stream's threads and you.
 given:
-  - { command: oxplow.work_item.create, input: { title: An epic, assignee: thr1 }, bind: epic }
-  - { command: oxplow.work_item.create, input: { title: Its child, assignee: thr1, parent_uri: $epic.uri } }
-  - { command: oxplow.work_item.create, input: { title: In the backlog, stage: backlog } }
-  - { command: oxplow.work_item.create, input: { title: Mine, assignee: "oxplow:oxplow/person" } }
-  - { command: oxplow.work_item.create, input: { title: Nobody's } }
-  - { command: oxplow.work_item.create, input: { title: First done, assignee: thr1 }, bind: first }
-  - { command: oxplow.work_item.create, input: { title: Second done, assignee: thr1 }, bind: second }
-  - { command: oxplow.work_item.create, input: { title: Done elsewhere, stage: done } }
-  - { command: oxplow.work_item.transition, input: { uri: $first.uri, to: in_progress }, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $first.uri, to: done }, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $second.uri, to: in_progress }, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $second.uri, to: done }, as: agent }
+  - { command: oxplow.task.create, input: { title: An epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.task.create, input: { title: Its child, assignee: thr1, parent_uri: $epic.uri } }
+  - { command: oxplow.task.create, input: { title: In the backlog, stage: backlog } }
+  - { command: oxplow.task.create, input: { title: Mine, assignee: "oxplow:oxplow/person" } }
+  - { command: oxplow.task.create, input: { title: Nobody's } }
+  - { command: oxplow.task.create, input: { title: First done, assignee: thr1 }, bind: first }
+  - { command: oxplow.task.create, input: { title: Second done, assignee: thr1 }, bind: second }
+  - { command: oxplow.task.create, input: { title: Done elsewhere, stage: done } }
+  - { command: oxplow.task.transition, input: { uri: $first.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $first.uri, to: done }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $second.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $second.uri, to: done }, as: agent }
 when: { page: task-list, params: { state: todo, priority: any, stream_id: 1 } }
 expect:
   params: { state: todo, priority: any }

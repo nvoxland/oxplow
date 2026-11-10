@@ -68,9 +68,9 @@ pub struct ExtractedRefs {
     pub files_detail: Vec<FileRefDetail>,
     pub dirs: Vec<String>,
     pub wikis: Vec<String>,
-    /// The active work list's items it names, as their URIs: `[[…]]` or
+    /// The active task tracker's items it names, as their URIs: `[[…]]` or
     /// loose, as the list declares its ids.
-    pub work_items: Vec<String>,
+    pub tasks: Vec<String>,
     pub findings: Vec<String>,
     pub commits: Vec<String>,
 }
@@ -84,8 +84,8 @@ pub enum Reference {
     File(FileRefDetail),
     Dir(String),
     Wiki(String),
-    /// A work item, by its URI.
-    WorkItem(String),
+    /// A task, by its URI.
+    Task(String),
     Finding(String),
     Commit(String),
 }
@@ -141,7 +141,7 @@ fn named(resource: &str, params: &[(&str, &str)], view: &[(&str, &str)]) -> Opti
 /// URI itself and the authoring sugar:
 /// - a declared `<prefix>:<value>` (`git:<sha>`, `oxplow:oxplow/dir?path=<path>`,
 ///   `oxplow:oxplow/finding?id=<id>`, an extension's `pr:12`)
-/// - one of the active work list's ids (`tsk42`)
+/// - one of the active task tracker's ids (`tsk42`)
 /// - `path/file.ext[@version][:line]` → a file (`@disk` / `@local` mean
 ///   the working tree and add no revision)
 /// - a bare 7–40 hex sha → a commit; `bare-slug` → a wiki page
@@ -187,9 +187,9 @@ pub fn canonical_wikilink(resources: &ResourceRegistry, interior: &str) -> Optio
             return resources.validate(&u).is_ok().then_some(u);
         }
     }
-    // One of the active work list's own ids (`tsk42`, `ENG-12`), as it
+    // One of the active task tracker's own ids (`tsk42`, `ENG-12`), as it
     // declares them; anything else falls through (a slug or path).
-    if let Some(uri) = resources.work_item_uri_of(interior) {
+    if let Some(uri) = resources.task_uri_of(interior) {
         return OxplowUri::parse(&uri).ok();
     }
     // path/file.ext[@version][:line]
@@ -235,7 +235,7 @@ impl TryFrom<&OxplowUri> for Reference {
             resources::WIKI => Ok(Reference::Wiki(param("slug")?)),
             resources::FINDING => Ok(Reference::Finding(param("id")?)),
             resources::COMMIT => Ok(Reference::Commit(param("sha")?)),
-            resources::WORK_ITEM => Ok(Reference::WorkItem(u.identity())),
+            resources::TASK => Ok(Reference::Task(u.identity())),
             resources::FILE => {
                 let version = match u.param("rev").map(|v| v.strip_prefix("git:")) {
                     Some(Some(v)) => RefVersion::Ref(v.to_string()),
@@ -303,7 +303,7 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
     let mut files: BTreeSet<String> = BTreeSet::new();
     let mut dirs: BTreeSet<String> = BTreeSet::new();
     let mut wikis: BTreeSet<String> = BTreeSet::new();
-    let mut work_items: BTreeSet<String> = BTreeSet::new();
+    let mut tasks: BTreeSet<String> = BTreeSet::new();
     let mut findings: BTreeSet<String> = BTreeSet::new();
     let mut commits: BTreeSet<String> = BTreeSet::new();
     let mut files_detail: Vec<FileRefDetail> = Vec::new();
@@ -321,8 +321,8 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
             Some(Reference::Finding(id)) => {
                 findings.insert(id);
             }
-            Some(Reference::WorkItem(uri)) => {
-                work_items.insert(uri);
+            Some(Reference::Task(uri)) => {
+                tasks.insert(uri);
             }
             Some(Reference::File(detail)) => {
                 if files.insert(detail.path.clone()) {
@@ -358,7 +358,7 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
             }
         }
     }
-    work_items.extend(resources.find_work_item_uris(&stripped));
+    tasks.extend(resources.find_task_uris(&stripped));
     for f in find_inline_findings(&stripped) {
         findings.insert(f);
     }
@@ -368,7 +368,7 @@ pub fn extract(resources: &ResourceRegistry, body: &str) -> ExtractedRefs {
         files_detail,
         dirs: dirs.into_iter().collect(),
         wikis: wikis.into_iter().collect(),
-        work_items: work_items.into_iter().collect(),
+        tasks: tasks.into_iter().collect(),
         findings: findings.into_iter().collect(),
         commits: commits.into_iter().collect(),
     }
@@ -759,41 +759,41 @@ fn mask_inline_code(out: &mut String, line: &str) {
 mod tests {
     use super::*;
 
-    /// oxplow-foundation's resources with oxplow's tasks as the work list
+    /// oxplow-foundation's resources with oxtask as the task tracker
     /// (`tsk<n>`).
     fn tasks_kinds() -> ResourceRegistry {
         resources::foundation()
             .clone()
-            .with_work_item_ids("oxplow", r"tsk\d+")
+            .with_task_ids("oxtask", r"tsk\d+")
             .unwrap()
     }
 
-    /// The registry recognizes the work list's own ids it's told of, as
+    /// The registry recognizes the task tracker's own ids it's told of, as
     /// whole tokens and in `[[…]]`; told of none, it recognizes none.
     #[test]
-    fn a_work_lists_ids_are_recognized_as_it_declares_them() {
+    fn a_task_trackers_ids_are_recognized_as_it_declares_them() {
         let issues = resources::foundation()
             .clone()
-            .with_work_item_ids("issues", r"[A-Z]+-\d+")
+            .with_task_ids("issues", r"[A-Z]+-\d+")
             .unwrap();
         assert_eq!(
-            issues.work_item_uri_of("ENG-12").as_deref(),
-            Some("oxplow:oxplow/work_item?id=ENG-12&provider=issues")
+            issues.task_uri_of("ENG-12").as_deref(),
+            Some("oxplow:oxplow/task?id=ENG-12&provider=issues")
         );
-        assert_eq!(issues.work_item_uri_of("ENG-12x"), None);
+        assert_eq!(issues.task_uri_of("ENG-12x"), None);
         let r = extract(
             &issues,
             "Fixes ENG-12 (see [[ENG-7]]); not XENG-7a or tsk42.",
         );
         assert_eq!(
-            r.work_items,
+            r.tasks,
             vec![
-                "oxplow:oxplow/work_item?id=ENG-12&provider=issues".to_string(),
-                "oxplow:oxplow/work_item?id=ENG-7&provider=issues".to_string()
+                "oxplow:oxplow/task?id=ENG-12&provider=issues".to_string(),
+                "oxplow:oxplow/task?id=ENG-7&provider=issues".to_string()
             ]
         );
         let none = extract(resources::foundation(), "tsk42 [[tsk7]] ENG-12");
-        assert!(none.work_items.is_empty(), "{none:?}");
+        assert!(none.tasks.is_empty(), "{none:?}");
     }
 
     #[test]
@@ -818,8 +818,8 @@ mod tests {
         assert_eq!(r.dirs, vec!["src/components"]);
         assert_eq!(r.wikis, vec!["architecture"]);
         assert_eq!(
-            r.work_items,
-            vec!["oxplow:oxplow/work_item?id=tsk42&provider=oxplow".to_string()]
+            r.tasks,
+            vec!["oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string()]
         );
         assert_eq!(r.findings, vec!["fnd-1"]);
         assert_eq!(r.commits, vec!["abcdef0"]);
@@ -848,8 +848,8 @@ mod tests {
     fn inline_task_and_finding_mention() {
         let r = extract(&tasks_kinds(), "blocked by tsk42 see finding:fnd-2");
         assert_eq!(
-            r.work_items,
-            vec!["oxplow:oxplow/work_item?id=tsk42&provider=oxplow".to_string()]
+            r.tasks,
+            vec!["oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string()]
         );
         assert_eq!(r.findings, vec!["fnd-2"]);
     }
@@ -857,17 +857,17 @@ mod tests {
     #[test]
     fn inline_task_rejects_non_digits() {
         let r = extract(&tasks_kinds(), "tskfoo and tsk42abc");
-        assert!(r.work_items.is_empty());
+        assert!(r.tasks.is_empty());
     }
 
     #[test]
     fn inline_task_with_trailing_punctuation() {
         let r = extract(&tasks_kinds(), "tsk42 fixes issue. also tsk7, see");
         assert_eq!(
-            r.work_items,
+            r.tasks,
             vec![
-                "oxplow:oxplow/work_item?id=tsk42&provider=oxplow".to_string(),
-                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow".to_string()
+                "oxplow:oxplow/task?id=tsk42&provider=oxtask".to_string(),
+                "oxplow:oxplow/task?id=tsk7&provider=oxtask".to_string()
             ]
         );
     }
@@ -875,7 +875,7 @@ mod tests {
     #[test]
     fn wikilink_task_rejects_non_digits() {
         let r = extract(&tasks_kinds(), "[[tsknotanumber]] [[tsk42abc]]");
-        assert!(r.work_items.is_empty());
+        assert!(r.tasks.is_empty());
     }
 
     #[test]
@@ -896,8 +896,8 @@ mod tests {
         let r = extract(&tasks_kinds(), "[[tsk7]]");
         assert!(r.wikis.is_empty());
         assert_eq!(
-            r.work_items,
-            vec!["oxplow:oxplow/work_item?id=tsk7&provider=oxplow".to_string()]
+            r.tasks,
+            vec!["oxplow:oxplow/task?id=tsk7&provider=oxtask".to_string()]
         );
     }
 
@@ -911,8 +911,8 @@ mod tests {
         let refs: Vec<Option<Reference>> = links.into_iter().map(|l| l.reference).collect();
         assert_eq!(
             refs[0],
-            Some(Reference::WorkItem(
-                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow".into()
+            Some(Reference::Task(
+                "oxplow:oxplow/task?id=tsk7&provider=oxtask".into()
             ))
         );
         assert_eq!(refs[1], Some(Reference::Wiki("architecture".into())));
@@ -940,8 +940,8 @@ mod tests {
         assert_eq!(links[0].raw, "tsk7");
         assert_eq!(
             links[0].reference,
-            Some(Reference::WorkItem(
-                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow".into()
+            Some(Reference::Task(
+                "oxplow:oxplow/task?id=tsk7&provider=oxtask".into()
             ))
         );
     }
@@ -953,8 +953,8 @@ mod tests {
         // itself does not gatekeep — that's the renderer's job.
         let r = extract(&tasks_kinds(), "[[tsk0]] inline tsk0");
         assert_eq!(
-            r.work_items,
-            vec!["oxplow:oxplow/work_item?id=tsk0&provider=oxplow".to_string()]
+            r.tasks,
+            vec!["oxplow:oxplow/task?id=tsk0&provider=oxtask".to_string()]
         );
     }
 
@@ -963,7 +963,7 @@ mod tests {
         // The wikilink grammar accepts only ASCII digits — the leading
         // `-` makes the body fail the digit check.
         let r = extract(&tasks_kinds(), "[[tsk-1]] inline tsk-1");
-        assert!(r.work_items.is_empty());
+        assert!(r.tasks.is_empty());
     }
 
     /// An id is the list's declared shape, not a number: a long one is
@@ -972,13 +972,13 @@ mod tests {
     fn a_long_task_id_is_an_id() {
         let r = extract(&tasks_kinds(), "see tsk99999999999999999999 in passing");
         assert_eq!(
-            r.work_items,
-            vec!["oxplow:oxplow/work_item?id=tsk99999999999999999999&provider=oxplow".to_string()]
+            r.tasks,
+            vec!["oxplow:oxplow/task?id=tsk99999999999999999999&provider=oxtask".to_string()]
         );
         let r = extract(&tasks_kinds(), "[[tsk99999999999999999999]]");
         assert_eq!(
-            r.work_items,
-            vec!["oxplow:oxplow/work_item?id=tsk99999999999999999999&provider=oxplow".to_string()]
+            r.tasks,
+            vec!["oxplow:oxplow/task?id=tsk99999999999999999999&provider=oxtask".to_string()]
         );
     }
 

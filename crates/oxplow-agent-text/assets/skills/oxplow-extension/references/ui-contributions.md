@@ -14,7 +14,7 @@
     puts a strip above the uncommitted page;
   - `oxplow/diff-view.sections` (an effort's or a range's diff) →
     `effort_id`, `change_id`, …;
-  - `oxplow/work-item.sections` (a work item's page, whichever
+  - `oxplow/task-detail.sections` (a task's page, whichever
     list; oxplow-bundled's, so declare `requires: [oxplow-bundled]`) → `uri`;
   - `oxplow/new-session.sections` (sections `start`, `earlier`) →
     `thread_id`.
@@ -22,7 +22,7 @@
   nodes; read a page's loaders to learn the params it binds.
 
 - **`ui.decorators`** add a label to the URIs of one resource: `{ dataset,
-  resource: oxplow/work_item, placement: ref-chip | row-badge, label, color?
+  resource: oxplow/task, placement: ref-chip | row-badge, label, color?
   }` — the dataset (this extension's) needs a `uri` column plus the `label`
   (and `color`) columns; a chip shows on that URI's page, a badge after a
   linked cell in a row.
@@ -45,20 +45,19 @@
 
 ## Replacing a core view
 
-When a person wants their own Board, Tasks list or work item editor, an
-extension replaces that core view with a page (or a component) — no work
-list provider needed. The views and their props are `v_replaceable`; the
+When a person wants their own Board, Tasks list or task editor, an
+extension replaces that core view with a page (or a component) — no task tracker needed. The views and their props are `v_replaceable`; the
 page declares each prop as a param:
 
 ```yaml
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 2 }   # props: scope, thread_id (stream_id is implicit)
-    - { page: edit-item, at: work_item.detail, version: 1 }  # props: uri
+    - { page: swimlanes, at: task.board, version: 2 }   # props: scope, thread_id (stream_id is implicit)
+    - { page: edit-item, at: task.detail, version: 1 }  # props: uri
 ```
 
-- Read items from `v_work_item`; change them only through the interface
-  commands (`oxplow.work_item.update`, `transition`, `assign` — who works
+- Read items from `v_task`; change them only through the interface
+  commands (`oxplow.task.update`, `transition`, `assign` — who works
   on it — and `reorder` — its place in that assignee's queue; both core's,
   for every list), so the view works with whichever list is active. A component
   declares the commands it runs (`commands:`); one outside the extension's
@@ -73,8 +72,7 @@ ui:
   `replacements: { <target>: <extension> | oxplow }` in the project config
   (a person-only key: tell them, don't set it). One extension replacing a
   view shows by itself.
-- The page around the view stays oxplow's (the Task List's filters, a work
-  item's state pill and Move To), so an item can always move. The Tasks
+- The page around the view stays oxplow's (the Task List's filters, a task's state pill and Move To), so an item can always move. The Tasks
   board is a whole custom page: its stand-in draws its filters too, through
   the shared view (`show`, `priority`, `q`).
 - A target whose `view` (in `v_replaceable`) lists keys shares them with its

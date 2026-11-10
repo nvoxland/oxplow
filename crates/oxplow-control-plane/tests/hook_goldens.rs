@@ -23,9 +23,9 @@ use oxplow_control_plane::ControlPlane;
 use oxplow_db::EffortStore as _;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
-use oxplow_tasks::TaskId;
-use oxplow_tasks::TaskStore as _;
-use oxplow_tasks::{Task, TaskActorKind, TaskPriority, TaskStatus};
+use oxplow_oxtask::OxtaskId;
+use oxplow_oxtask::OxtaskStore as _;
+use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskPriority, OxtaskStatus};
 
 fn golden(name: &str, body: &serde_json::Value, root: &std::path::Path) {
     let text = serde_json::to_string_pretty(body)
@@ -92,18 +92,18 @@ async fn seed_thread(services: &Services) -> ThreadId {
 }
 
 /// An `in_progress` task on the thread, with its effort open.
-async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> TaskId {
+async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> OxtaskId {
     let now = Timestamp::from_unix_ms(1);
     let task = services
         .task_store
-        .insert(&Task {
-            id: TaskId::placeholder(),
+        .insert(&Oxtask {
+            id: OxtaskId::placeholder(),
             parent_id: None,
             title: title.into(),
             description: "d".into(),
-            status: TaskStatus::InProgress,
-            priority: TaskPriority::Medium,
-            created_by: TaskActorKind::User,
+            status: OxtaskStatus::InProgress,
+            priority: OxtaskPriority::Medium,
+            created_by: OxtaskActorKind::User,
             created_at: now,
             updated_at: now,
             completed_at: None,
@@ -115,7 +115,7 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Tas
         .unwrap();
     services
         .effort_store
-        .start(&oxplow_tasks::work_item_ref(task), &thread_id, None)
+        .start(&oxplow_oxtask::task_ref(task), &thread_id, None)
         .await
         .unwrap();
     task

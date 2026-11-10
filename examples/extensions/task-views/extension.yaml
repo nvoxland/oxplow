@@ -1,18 +1,18 @@
 manifest: 2
 name: task-views
-description: Another way to see the work list — swimlanes for the Board, a compact list and a plain editor — over whichever work-items provider is active.
+description: Another way to see the task tracker — swimlanes for the Board, a compact list and a plain editor — over whichever task tracker provider is active.
 engine: ">=0.7"
 version: 0.1.0
 intent:
   purpose: >-
     Replace oxplow's Board, Tasks list and task editor with views of my own.
-    They read v_work_item and change items only through the work-item
-    interface commands, so they work with any work list.
+    They read v_task and change items only through the task
+    interface commands, so they work with any task tracker.
   origin: null
   examples:
     - name: compact-list
       input: { part: compact-list, params: { scope: all } }
-      expect: the work items as a table with title, state and updated
+      expect: the tasks as a table with title, state and updated
     - name: swimlanes-reads
       input: { part: swimlanes, params: { scope: all } }
       expect: the board's page reads its cards and the active list's stages
@@ -23,7 +23,7 @@ intent:
       input: { component: swimlanes }
       expect: renaming an item through the board goes through
     - name: edit-item
-      input: { part: edit-item, params: { uri: "oxplow:oxplow/work_item?id=1&provider=oxplow" } }
+      input: { part: edit-item, params: { uri: "oxplow:oxplow/task?id=1&provider=oxtask" } }
       expect: a form for the item's title and body, its uri fixed
     - name: swimlanes-drags-a-card-to-a-lane
       input: { part: swimlanes, params: { scope: all } }
@@ -31,13 +31,13 @@ intent:
     - name: swimlanes-renames-a-card-through-its-title
       input: { part: swimlanes, params: { scope: all } }
       expect: an empty title is refused under the input, Escape puts it back and Enter saves a new one
-permissions: [commands:oxplow.work_item.transition, commands:oxplow.work_item.reorder, commands:oxplow.work_item.update]
+permissions: [commands:oxplow.task.transition, commands:oxplow.task.reorder, commands:oxplow.task.update]
 custom_components:
   - id: swimlanes
     title: Swimlanes
-    commands: [oxplow.work_item.transition, oxplow.work_item.reorder, oxplow.work_item.update]
+    commands: [oxplow.task.transition, oxplow.task.reorder, oxplow.task.update]
 ui:
   mounts:
-    - { page: swimlanes, at: work_item.board, version: 2 }
-    - { page: compact-list, at: work_item.list, version: 2 }
-    - { page: edit-item, at: work_item.detail, version: 1 }
+    - { page: swimlanes, at: task.board, version: 2 }
+    - { page: compact-list, at: task.list, version: 2 }
+    - { page: edit-item, at: task.detail, version: 1 }

@@ -1,8 +1,8 @@
-# Blocked work items and open notes-to-self are listed, and the page's
+# Blocked tasks and open notes-to-self are listed, and the page's
 # alert fires while anything waits.
 given:
-  - { command: oxplow.work_item.create, input: { title: Wait for the API key, stage: blocked, assignee: thr1 } }
-  - { command: oxplow.work_item.create, input: { title: Ship it, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Wait for the API key, stage: blocked, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Ship it, assignee: thr1 } }
 when: { page: oxplow/waiting-on-me }
 expect:
   loaders:

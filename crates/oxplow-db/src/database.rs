@@ -1517,8 +1517,8 @@ mod tests {
         let plain = write_caller(here, None);
         assert_eq!(plain, format!("{}:{}", here.file(), here.line()));
         assert_eq!(
-            write_caller(here, Some("search kind work_item")),
-            format!("{plain} (search kind work_item)")
+            write_caller(here, Some("search kind task")),
+            format!("{plain} (search kind task)")
         );
     }
 
@@ -2263,7 +2263,7 @@ mod tests {
             "runtime_state",
             "threads",
             "thread_selection",
-            "task_note",
+            "oxtask_note",
             "agent_turn",
             "wiki_page",
             "page_visit",
@@ -2273,7 +2273,7 @@ mod tests {
             "file_snapshot",
             "snapshot",
             "task",
-            "task_link",
+            "oxtask_link",
             "effort",
             "effort_file",
             "wiki_page_thread_update",
@@ -2408,26 +2408,29 @@ mod tests {
         .unwrap();
         // Both null — must fail.
         let r = conn.execute(
-            "INSERT INTO task_note (body, author, created_at) VALUES ('b', 'u', ?1)",
+            "INSERT INTO oxtask_note (body, author, created_at) VALUES ('b', 'u', ?1)",
             [now],
         );
         assert!(
             r.is_err(),
-            "task_note with neither parent should fail CHECK"
+            "oxtask_note with neither parent should fail CHECK"
         );
         // Both set — must fail.
         let r = conn.execute(
-            "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+            "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
              VALUES ('t', 'ready', 'medium', 'user', ?1, ?1)",
             [now],
         );
         assert!(r.is_ok());
         let r = conn.execute(
-            "INSERT INTO task_note (task_id, thread_id, body, author, created_at)
+            "INSERT INTO oxtask_note (task_id, thread_id, body, author, created_at)
              VALUES (1, 1, 'b', 'u', ?1)",
             [now],
         );
-        assert!(r.is_err(), "task_note with both parents should fail CHECK");
+        assert!(
+            r.is_err(),
+            "oxtask_note with both parents should fail CHECK"
+        );
     }
 
     #[test]
@@ -2461,10 +2464,10 @@ mod tests {
         let db = Database::open_read_only(&path).unwrap();
         let conn = db.conn().unwrap();
         let n: i64 = conn
-            .query_row("SELECT count(*) FROM v_work_item", [], |r| r.get(0))
+            .query_row("SELECT count(*) FROM v_task", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
-        assert!(conn.execute("DELETE FROM work_item", []).is_err());
+        assert!(conn.execute("DELETE FROM task", []).is_err());
     }
 
     /// Migrating refuses to open a database whose migrations left a row
@@ -2493,7 +2496,7 @@ mod tests {
     /// Regression: the first version of V18 rebuilt the `task` table
     /// via `task_new` + `DROP TABLE task` + rename, which under
     /// `PRAGMA foreign_keys = ON` cascaded and wiped every
-    /// `task_effort` row (`task_effort.task_id REFERENCES task(id)
+    /// `task_effort` row (`task_effort.task_id REFERENCES oxtask(id)
     /// ON DELETE CASCADE`). The fixed migration uses
     /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
     /// untouched. This test asserts an `effort` row created
@@ -2517,15 +2520,15 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task (title, status, priority, created_by, created_at, updated_at)
+            "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
              VALUES ('t', 'in_progress', 'medium', 'user', ?1, ?1)",
             [now],
         )
         .unwrap();
         let task_id: i64 = conn.last_insert_rowid();
         conn.execute(
-            "INSERT INTO effort (work_item, thread_id, started_at)
-             VALUES ('work_item:oxplow:tsk' || ?1, 1, ?2)",
+            "INSERT INTO effort (task, thread_id, started_at)
+             VALUES ('task:oxplow:tsk' || ?1, 1, ?2)",
             (task_id, now),
         )
         .unwrap();
@@ -2533,7 +2536,7 @@ mod tests {
         // effort row survives alongside its parent.
         let n: i64 = conn
             .query_row(
-                "SELECT count(*) FROM v_effort WHERE work_item = 'work_item:oxplow:tsk' || ?1",
+                "SELECT count(*) FROM v_effort WHERE task = 'task:oxplow:tsk' || ?1",
                 [task_id],
                 |row| row.get(0),
             )
@@ -2542,7 +2545,7 @@ mod tests {
 
         // acceptance_criteria column is gone.
         let cols: Vec<String> = conn
-            .prepare("PRAGMA table_info(task)")
+            .prepare("PRAGMA table_info(oxtask)")
             .unwrap()
             .query_map([], |row| row.get::<_, String>(1))
             .unwrap()
@@ -2552,46 +2555,5 @@ mod tests {
             !cols.iter().any(|c| c == "acceptance_criteria"),
             "task.acceptance_criteria column must be dropped by V18 (cols: {cols:?})"
         );
-    }
-
-    /// An item on no thread's list was the backlog: migrating a database
-    /// that holds one puts it in the backlog state, which the old tables'
-    /// checks don't allow, so the tables are rebuilt before it moves.
-    #[test]
-    fn an_unthreaded_ready_item_migrates_to_the_backlog() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        crate::sql_functions::register(&conn).unwrap();
-        embedded::migrations::runner()
-            .set_target(refinery::Target::Version(6))
-            .run(&mut conn)
-            .unwrap();
-        let now = "2026-11-01T00:00:00Z";
-        conn.execute(
-            "INSERT INTO task (id, title, status, priority, created_by, created_at, updated_at)
-             VALUES (1, 't', 'ready', 'medium', 'user', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO work_item (uri, provider, title, state, native_state, created_at, updated_at)
-             VALUES ('work_item:oxplow:tsk1', 'oxplow', 't', 'todo', 'ready', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-
-        migrate_and_compile(&mut conn).unwrap();
-
-        let status: String = conn
-            .query_row("SELECT status FROM task WHERE id = 1", [], |r| r.get(0))
-            .unwrap();
-        let (state, stage): (String, String) = conn
-            .query_row(
-                "SELECT state, stage FROM work_item WHERE uri = 'work_item:oxplow:tsk1'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(status, "backlog");
-        assert_eq!((state.as_str(), stage.as_str()), ("backlog", "backlog"));
     }
 }

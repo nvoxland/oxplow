@@ -1,9 +1,9 @@
-# The effort's evidence in one bundle: its work item, the files its edits
+# The effort's evidence in one bundle: its task, the files its edits
 # claimed and the test runs its shell calls made. What the effort hasn't
 # got (functions, observations, metrics, findings) is empty.
 given:
-  - { command: oxplow.work_item.create, input: { title: Parse blocks }, bind: item }
-  - { command: oxplow.effort.open, input: { thread: thr1, work_item: $item.uri } }
+  - { command: oxplow.task.create, input: { title: Parse blocks }, bind: item }
+  - { command: oxplow.effort.open, input: { thread: thr1, task: $item.uri } }
   - observe:
       turn:
         prompt: Parse blocks
@@ -18,7 +18,7 @@ expect:
   commands: []
   result:
     effort: eff1
-    workItem: $item.uri
+    task: $item.uri
     title: Parse blocks
     files: [{ path: src/parse.rs, source: claimed }]
     functions: []

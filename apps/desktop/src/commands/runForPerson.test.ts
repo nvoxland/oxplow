@@ -59,10 +59,10 @@ test("a failure is recorded once and shown at the control that ran it", async ()
 test("a failure's record names the run's audit row and the proposal it decided", async () => {
   const { reports, runner } = setup();
   await runner.run("Approve: Delete", () => Promise.reject(new IpcCallError("gone", "INVALID", null, [], 41)), {
-    command: "oxplow.work_item.delete",
+    command: "oxplow.task.delete",
     proposal: 3,
   });
-  expect(reports).toEqual([{ label: "Approve: Delete", message: "gone", command: "oxplow.work_item.delete", auditId: 41, proposalId: 3 }]);
+  expect(reports).toEqual([{ label: "Approve: Delete", message: "gone", command: "oxplow.task.delete", auditId: 41, proposalId: 3 }]);
 });
 
 test("a failure with no control on screen is left to the toast", async () => {

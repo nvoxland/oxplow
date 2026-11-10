@@ -443,7 +443,7 @@ fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<Ser
 #[derive(Debug, Clone, Default)]
 pub struct SeriesRead {
     /// Slice by a dimension (conformed, `dims_json`, or a spine dim such as
-    /// `oxplow.work_item`).
+    /// `oxplow.task`).
     pub group_by: Option<String>,
     /// Scope to one stream; `None` reads all.
     pub stream: Option<i64>,
@@ -541,13 +541,13 @@ pub(crate) fn dim_value_cached(
         "oxplow.stream" => Some(f.stream_id.to_string()),
         "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
         "oxplow.effort" => f.effort_id.map(|v| v.to_string()),
-        "oxplow.work_item" => f.work_item.clone(),
+        "oxplow.task" => f.task.clone(),
         "oxplow.vcs_rev" => f.closest_vcs_rev.clone(),
         key => dims.get(f).and_then(|d| dim_from_map(d, key)),
     }
 }
 
-/// Dimensions read off the capture spine (stream, thread, effort, work item, git
+/// Dimensions read off the capture spine (stream, thread, effort, task, git
 /// version). Sliceable on the fact path only: the cube never buckets by them,
 /// because a capture's effort is stamped when the effort closes, after the
 /// cube may already have folded it.
@@ -555,7 +555,7 @@ pub(crate) const SPINE_DIMS: &[&str] = &[
     "oxplow.stream",
     "oxplow.thread",
     "oxplow.effort",
-    "oxplow.work_item",
+    "oxplow.task",
     "oxplow.vcs_rev",
 ];
 
@@ -671,7 +671,7 @@ fn aggregate_facts(facts: &[&FactRow], agg: Aggregation) -> (f64, Option<f64>, O
 /// appends (num 0 / den spend) and a detected revert appends (num spend /
 /// den 0), so Σn/Σd over the measure is the wasted share. Testing the
 /// denominator alone matched the revert leg exactly and dropped it, which
-/// pinned `task.tokens.wasted_pct` at 0% for every possible input.
+/// pinned `effort.tokens.wasted_pct` at 0% for every possible input.
 ///
 /// Only `Ratio`: an `avg` cell's denominator is its fact count, which is
 /// nonzero whenever there is anything to emit.
@@ -2275,7 +2275,7 @@ mod tests {
             stream_id: 1,
             thread_id: None,
             effort_id: None,
-            work_item: None,
+            task: None,
             provenance: "observed".into(),
             source: "test".into(),
             producer: "test.gauge".into(),
@@ -2411,7 +2411,7 @@ mod tests {
         // contributes (num spend / den 0) in its OWN capture, so Σn/Σd across
         // the measure is the wasted share. The tsk109 "zero-denominator ratio
         // is no data" guard matched the revert leg's shape exactly and dropped
-        // it, pinning task.tokens.wasted_pct at 0% for every input. A cell
+        // it, pinning effort.tokens.wasted_pct at 0% for every input. A cell
         // carrying a numerator IS data; only 0/0 is empty.
         let facts = vec![
             FactRow {
@@ -2437,7 +2437,7 @@ mod tests {
 
     #[test]
     fn range_value_sums_a_non_ratio_read_of_a_non_additive_measure() {
-        // tsk156, second symptom: `task.tokens.wasted` is a `sum` metric over
+        // tsk156, second symptom: `effort.tokens.wasted` is a `sum` metric over
         // the non-additive `oxplow.token_waste` measure. A summed point carries
         // no numerator/denominator, so the Σn/Σd branch found Σden = 0 and
         // reported NO DATA — the MCP headline read empty even with waste
@@ -2614,7 +2614,7 @@ mod tests {
             branch: Some("feature/x".into()),
             thread_id: Some(4),
             effort_id: Some(9),
-            work_item: Some("oxplow:oxplow/work_item?id=ENG-12&provider=issues".into()),
+            task: Some("oxplow:oxplow/task?id=ENG-12&provider=issues".into()),
             closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
@@ -2656,7 +2656,7 @@ mod tests {
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.effort",
-            "oxplow.work_item",
+            "oxplow.task",
             "oxplow.vcs_rev",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
@@ -2673,7 +2673,7 @@ mod tests {
         let f = FactRow {
             thread_id: Some(4),
             effort_id: Some(9),
-            work_item: Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
+            task: Some("oxplow:oxplow/task?id=tsk12&provider=oxtask".into()),
             closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
@@ -2681,7 +2681,7 @@ mod tests {
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.effort",
-            "oxplow.work_item",
+            "oxplow.task",
             "oxplow.vcs_rev",
         ]
         .iter()
@@ -2693,13 +2693,13 @@ mod tests {
                 Some(f.stream_id.to_string()),
                 Some("4".into()),
                 Some("9".into()),
-                Some("oxplow:oxplow/work_item?id=tsk12&provider=oxplow".into()),
+                Some("oxplow:oxplow/task?id=tsk12&provider=oxtask".into()),
                 Some("abc123".into())
             ]
         );
-        // Unattributed facts have no effort/work-item group rather than a blank one.
+        // Unattributed facts have no effort/task group rather than a blank one.
         let bare = fact(1, "2026-06-30T00:00:00Z", 1.0);
-        assert_eq!(dim_value(&bare, "oxplow.work_item"), None);
+        assert_eq!(dim_value(&bare, "oxplow.task"), None);
         // The cube never buckets by these: an effort is stamped on its
         // captures at close, after the cube may have folded them.
         assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));
@@ -3108,7 +3108,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_spec_series_groups_by_work_item_filters_by_it_and_buckets_by_day() {
+    async fn a_spec_series_groups_by_task_filters_by_it_and_buckets_by_day() {
         let db = Database::in_memory();
         db.transaction(|c| {
             c.execute_batch(
@@ -3116,11 +3116,11 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, title, status, priority, created_by, created_at, updated_at)
+                 INSERT INTO oxtask (id, title, status, priority, created_by, created_at, updated_at)
                    VALUES (1, 'One', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01'),
                           (2, 'Two', 'done', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at, ended_at)
-                   VALUES (7, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01', '2026-01-02'), (8, 'oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 1, '2026-01-01', '2026-01-02');",
+                 INSERT INTO effort (id, task, thread_id, started_at, ended_at)
+                   VALUES (7, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01', '2026-01-02'), (8, 'oxplow:oxplow/task?id=tsk2&provider=oxtask', 1, '2026-01-01', '2026-01-02');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -3169,14 +3169,14 @@ mod tests {
             }
         };
         let task = |t: &str| {
-            Some(oxplow_domain::uri::build::work_item_uri(
-                "oxplow",
+            Some(oxplow_domain::uri::build::task_uri(
+                "oxtask",
                 &format!("tsk{t}"),
             ))
         };
         assert_eq!(
             read(SeriesRead {
-                group_by: Some("oxplow.work_item".into()),
+                group_by: Some("oxplow.task".into()),
                 ..SeriesRead::default()
             })
             .await,
@@ -3189,7 +3189,7 @@ mod tests {
         );
         assert_eq!(
             read(SeriesRead {
-                group_by: Some("oxplow.work_item".into()),
+                group_by: Some("oxplow.task".into()),
                 bucket: Some(crate::metric_bucket::TimeBucket::Day),
                 ..SeriesRead::default()
             })
@@ -3199,8 +3199,8 @@ mod tests {
         assert_eq!(
             read(SeriesRead {
                 dim_eq: Some((
-                    "oxplow.work_item".into(),
-                    "oxplow:oxplow/work_item?id=tsk2&provider=oxplow".into()
+                    "oxplow.task".into(),
+                    "oxplow:oxplow/task?id=tsk2&provider=oxtask".into()
                 )),
                 ..SeriesRead::default()
             })

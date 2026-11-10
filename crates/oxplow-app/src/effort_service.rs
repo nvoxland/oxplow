@@ -1,11 +1,11 @@
 //! EffortService — what an effort's lifecycle does around the effort
-//! store, whichever work list its work item is on: the `effort_start` /
+//! store, whichever task tracker its task is on: the `effort_start` /
 //! `effort_end` snapshot pins and the lifecycle metrics (the
 //! effort-lifecycle consumer's work), file claims onto the effort an edit
 //! happened in, and the file version an effort's files are read at.
 //!
 //! Efforts are core's (`.context/work-tracking.md`); this service knows
-//! nothing about any work list's items.
+//! nothing about any task tracker's items.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -39,7 +39,7 @@ pub struct EffortService {
     /// mark.
     snapshots: Option<Arc<oxplow_domain::snapshot::SnapshotRegistry>>,
     /// Durable fact layer: when set, closing an effort projects derived
-    /// process metrics (`effort.cycle_time_ms`, `work_item.efforts`, …) as
+    /// process metrics (`effort.cycle_time_ms`, `task.efforts`, …) as
     /// facts under a capture that stamps the producing `effort_id`.
     fact_store: Option<Arc<SqliteFactStore>>,
     events: Option<EventBus>,
@@ -303,7 +303,7 @@ impl EffortService {
 
     /// Project derived process metrics into the unified substrate when an
     /// effort closes (tsk216): `effort.cycle_time_ms` (how long the effort
-    /// was open) and `work_item.efforts` (efforts-so-far on its work item — the
+    /// was open) and `task.efforts` (efforts-so-far on its task — the
     /// redo-rate signal). Reads `effort` as the source of truth; the
     /// table is untouched. Best-effort — a metric write error is logged and
     /// never blocks the status transition.
@@ -332,10 +332,10 @@ impl EffortService {
             return; // not actually closed — nothing to measure
         };
         let cycle_ms = (ended_at.unix_ms() - effort.started_at.unix_ms()).max(0);
-        // Efforts so far on its work item (none while unlinked).
-        let efforts_so_far = match effort.work_item.as_deref() {
+        // Efforts so far on its task (none while unlinked).
+        let efforts_so_far = match effort.task.as_deref() {
             None => 0,
-            Some(w) => match effort_store.list_for_work_item(w).await {
+            Some(w) => match effort_store.list_for_task(w).await {
                 Ok(rows) => rows.len() as i64,
                 Err(e) => {
                     tracing::warn!(error = %e, "effort lifecycle metrics: list_for_item failed");
@@ -352,7 +352,7 @@ impl EffortService {
 
         // Write the durable facts (epic tsk12): cycle time as a fact on `oxplow.cycle_time` (subject =
         // the just-closed effort) + the efforts-so-far count on
-        // `oxplow.work_item_effort` (subject = the work item, the redo-rate signal). The
+        // `oxplow.task_effort` (subject = the task, the redo-rate signal). The
         // capture stamps `effort_id` directly — this producer knows the exact
         // producing effort, so attribution is unambiguous (decision #11) — plus
         // the thread/branch spine. Best-effort.
@@ -361,10 +361,10 @@ impl EffortService {
                 let mut rows = Vec::new();
                 // Both measures are NON-ADDITIVE with denominator 1 (V47): the
                 // cross-time collapse Σn/Σd is the MEAN across closes (average
-                // cycle time / efforts per work item), never a lifetime sum.
+                // cycle time / efforts per task), never a lifetime sum.
                 // Stop-collecting gate (tsk31): only emit each lifecycle fact when
                 // an enabled metric consumes its measure (`effort.cycle_time_ms` /
-                // `work_item.efforts`).
+                // `task.efforts`).
                 if facts
                     .measure_has_active_spec("oxplow.cycle_time")
                     .await
@@ -379,15 +379,15 @@ impl EffortService {
                         });
                     }
                 }
-                if let Some(work_item) = effort.work_item.as_deref() {
+                if let Some(task) = effort.task.as_deref() {
                     if facts
-                        .measure_has_active_spec("oxplow.work_item_effort")
+                        .measure_has_active_spec("oxplow.task_effort")
                         .await
                         .unwrap_or(true)
                     {
-                        if let Some(measure) = facts.get_measure("oxplow.work_item_effort").await? {
+                        if let Some(measure) = facts.get_measure("oxplow.task_effort").await? {
                             rows.push(NewFact {
-                                subject: Some(work_item.to_string()),
+                                subject: Some(task.to_string()),
                                 numerator: Some(efforts_so_far as f64),
                                 denominator: Some(1.0),
                                 ..NewFact::new(measure.id, efforts_so_far as f64)
@@ -403,7 +403,7 @@ impl EffortService {
                 // cache read/write), summed from the effort-stamped otel token
                 // facts. One fact per closed effort on `oxplow.effort_tokens`
                 // (non-additive, den=1 → the collapse is MEAN tokens per close,
-                // read by `task.tokens`). Token-denominated by decision — never
+                // read by `effort.tokens`). Token-denominated by decision — never
                 // dollars. No fact when the effort has no token captures (an
                 // unmetered effort is "no data", not a zero).
                 if facts
@@ -477,7 +477,7 @@ impl EffortService {
                 // nudges (the effort's `oxplow.nudge` facts) + user-authored
                 // comments in the thread window. One fact per close on
                 // `oxplow.effort_steering` (non-additive, den=1 → MEAN per
-                // close, read by `task.steering`). ZERO is emitted — a fully
+                // close, read by `effort.steering`). ZERO is emitted — a fully
                 // autonomous effort is real data, unlike unmetered tokens.
                 // Interrupts are not counted: nothing records them yet.
                 if facts
@@ -988,14 +988,11 @@ mod tests {
             .await
             .unwrap()
             .expect("a baseline snapshot");
-        let item = "oxplow:oxplow/work_item?id=1&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=1&provider=test".to_string();
         let opened = effort_store.start(&item.clone(), &tid, None).await.unwrap();
         effort_store.finish(&opened.id, None, None).await.unwrap();
         svc.event_pump.clone().unwrap().run_once().await.unwrap();
-        let effort = &effort_store
-            .list_for_work_item(&item.clone())
-            .await
-            .unwrap()[0];
+        let effort = &effort_store.list_for_task(&item.clone()).await.unwrap()[0];
         assert_eq!(effort.start_snapshot_id, Some(baseline));
         assert!(effort.end_snapshot_id.is_some());
     }
@@ -1006,7 +1003,7 @@ mod tests {
     #[tokio::test]
     async fn a_committed_open_is_pinned_by_the_next_pump_run_after_a_crash() {
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=2&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=2&provider=test".to_string();
         let primary = captures.primary().unwrap();
         std::fs::write(project.path().join("a.txt"), "v").unwrap();
         primary.mark_dirty(
@@ -1031,7 +1028,7 @@ mod tests {
     #[tokio::test]
     async fn an_effort_is_pinned_at_its_open_and_its_close() {
         let (svc, tid, effort_store, _project, captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=3&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=3&provider=test".to_string();
 
         // Nothing is dirty yet, so the open pins no start snapshot: the
         // "nothing to pin" case.
@@ -1053,17 +1050,14 @@ mod tests {
 
         // The close pins its end snapshot.
         close_effort(&svc, &effort_store, open.id).await;
-        let efforts = effort_store
-            .list_for_work_item(&item.clone())
-            .await
-            .unwrap();
+        let efforts = effort_store.list_for_task(&item.clone()).await.unwrap();
         assert_eq!(efforts.len(), 1);
         let closed = &efforts[0];
         assert!(closed.ended_at.is_some());
         assert!(closed.end_snapshot_id.is_some());
         // And nothing opened another.
         assert!(effort_store
-            .find_open_for_work_item(&item.clone())
+            .find_open_for_task(&item.clone())
             .await
             .unwrap()
             .is_none());
@@ -1075,7 +1069,7 @@ mod tests {
     #[tokio::test]
     async fn a_redelivered_close_records_its_lifecycle_once() {
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=4&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=4&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
         let primary = captures.primary().unwrap();
         std::fs::write(project.path().join("work.txt"), "w").unwrap();
@@ -1085,7 +1079,7 @@ mod tests {
         );
         close_effort(&svc, &effort_store, effort.id).await;
         let effort = effort_store
-            .list_for_work_item(&item.clone())
+            .list_for_task(&item.clone())
             .await
             .unwrap()
             .remove(0);
@@ -1114,10 +1108,10 @@ mod tests {
 
     #[tokio::test]
     async fn closing_an_effort_projects_lifecycle_metrics() {
-        // Closing an effort projects `effort.cycle_time_ms` + `work_item.efforts`
+        // Closing an effort projects `effort.cycle_time_ms` + `task.efforts`
         // into the metric substrate, reading `effort` as the source of truth.
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=5&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=5&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
         // No facts while the effort is still open.
@@ -1169,23 +1163,20 @@ mod tests {
             "subject is the producing effort's ref"
         );
 
-        // …and the efforts-so-far count on `oxplow.work_item_effort`, subject =
-        // the work item (the redo-rate signal `work_item.efforts` averages).
+        // …and the efforts-so-far count on `oxplow.task_effort`, subject =
+        // the task (the redo-rate signal `task.efforts` averages).
         let effort_measure = facts
-            .get_measure("oxplow.work_item_effort")
+            .get_measure("oxplow.task_effort")
             .await
             .unwrap()
             .expect("effort measure seeded");
         let effort_facts = facts.facts_for_measure(effort_measure.id).await.unwrap();
         assert_eq!(effort_facts.len(), 1, "one effort fact per close");
-        assert_eq!(effort_facts[0].value, 1.0, "first effort for the work item");
-        assert_eq!(
-            effort_facts[0].subject_kind.as_deref(),
-            Some("oxplow/work_item")
-        );
+        assert_eq!(effort_facts[0].value, 1.0, "first effort for the task");
+        assert_eq!(effort_facts[0].subject_kind.as_deref(), Some("oxplow/task"));
         assert_eq!(effort_facts[0].subject.as_deref(), Some(item.as_str()));
-        // Ratio components: `work_item.efforts` collapses Σn/Σd across closes
-        // — the mean efforts per work item, not the last-closed one's count.
+        // Ratio components: `task.efforts` collapses Σn/Σd across closes
+        // — the mean efforts per task, not the last-closed one's count.
         assert_eq!(effort_facts[0].numerator, Some(1.0));
         assert_eq!(effort_facts[0].denominator, Some(1.0));
     }
@@ -1194,9 +1185,9 @@ mod tests {
     async fn closing_an_effort_projects_its_token_spend() {
         // tsk73: at close, the effort's token spend (ALL kinds, from its
         // effort-stamped otel captures) lands as one `oxplow.effort_tokens`
-        // fact — token-denominated, never dollars. `task.tokens` averages it.
+        // fact — token-denominated, never dollars. `effort.tokens` averages it.
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=6&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=6&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
         // Simulate the OTLP ingest: an effort-stamped otel-tokens capture with
@@ -1235,13 +1226,13 @@ mod tests {
         assert_eq!(spend.len(), 1, "one token-spend fact per close");
         assert_eq!(spend[0].value, 820.0, "input + output + cache summed");
         assert_eq!(spend[0].subject_kind.as_deref(), Some("oxplow/effort"));
-        // Non-additive den=1: `task.tokens` collapses to MEAN per close.
+        // Non-additive den=1: `effort.tokens` collapses to MEAN per close.
         assert_eq!(spend[0].numerator, Some(820.0));
         assert_eq!(spend[0].denominator, Some(1.0));
 
         // tsk77: the close also enters the wasted-token ratio's DENOMINATOR —
         // one `oxplow.token_waste` row with num 0 / den = the spend, value 0
-        // (so `task.tokens.wasted`'s SUM stays untouched by closes). The
+        // (so `effort.tokens.wasted`'s SUM stays untouched by closes). The
         // numerator side comes later from the revert leg, if ever.
         let waste = facts
             .get_measure("oxplow.token_waste")
@@ -1261,10 +1252,10 @@ mod tests {
         // tsk76: at close, steering = user prompt submissions (agent_turn rows
         // opened in the effort window) + Stop-hook nudges (the effort's
         // `oxplow.nudge` facts) + user-authored comments in the thread window,
-        // as ONE `oxplow.effort_steering` fact. `task.steering` averages it.
+        // as ONE `oxplow.effort_steering` fact. `effort.steering` averages it.
         use oxplow_domain::stores::AgentTurnStore;
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=7&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=7&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, tid).await;
 
         // Two prompts inside the window + one ancient one outside it. At the
@@ -1358,17 +1349,14 @@ mod tests {
             exclude: vec!["generated".into()],
             ..Default::default()
         });
-        let item = "oxplow:oxplow/work_item?id=10&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=10&provider=test".to_string();
         open_effort(&svc, &effort_store, &item, tid).await;
         let claimed = svc
             .claim_open_effort_file(&tid, "apps/desktop/src/generated/bindings.ts", None)
             .await
             .unwrap();
         assert!(!claimed, "a never-snapshotted path is not claimable");
-        let efforts = effort_store
-            .list_for_work_item(&item.clone())
-            .await
-            .unwrap();
+        let efforts = effort_store.list_for_task(&item.clone()).await.unwrap();
         let files = effort_store.list_files(&efforts[0].id).await.unwrap();
         assert!(files.is_empty(), "nothing should have been recorded");
 
@@ -1385,7 +1373,7 @@ mod tests {
     #[tokio::test]
     async fn an_edit_in_a_native_worktree_follows_git_s_exclude() {
         let (svc, tid, effort_store, project, captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=12&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=12&provider=test".to_string();
         let open = open_effort(&svc, &effort_store, &item, tid).await;
         let edited = ".claude/worktrees/x/src/a.rs";
         assert!(svc
@@ -1418,7 +1406,7 @@ mod tests {
         // thread's open effort, and a repeat claim of the same path is
         // idempotent (INSERT OR REPLACE → still one row).
         let (svc, tid, effort_store, _project, _captures) = fixture_with_lifecycle().await;
-        let item = "oxplow:oxplow/work_item?id=11&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=11&provider=test".to_string();
         let open = open_effort(&svc, &effort_store, &item, tid).await;
 
         let claimed = svc
@@ -1589,7 +1577,7 @@ mod tests {
             .unwrap();
 
         // Its effort opens, capturing start_snapshot_id.
-        let item = "oxplow:oxplow/work_item?id=12&provider=test".to_string();
+        let item = "oxplow:oxplow/task?id=12&provider=test".to_string();
         let effort = open_effort(&svc, &effort_store, &item, thread.id).await;
 
         // Edit a file in the WORKTREE stream's directory and mark it
@@ -1615,7 +1603,7 @@ mod tests {
         close_effort(&svc, &effort_store, effort.id).await;
 
         let closed = effort_store
-            .list_for_work_item(&item.clone())
+            .list_for_task(&item.clone())
             .await
             .unwrap()
             .into_iter()

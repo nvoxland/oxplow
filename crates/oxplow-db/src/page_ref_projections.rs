@@ -7,7 +7,7 @@
 //! boot-time backfill replay the exact same mapping from existing rows.
 //!
 //! Every end is a URI (`.context/resources.md`), built here through
-//! `uri::build`: a wiki page's, a work item's, a file's, a directory's, a
+//! `uri::build`: a wiki page's, a task's, a file's, a directory's, a
 //! finding's, a commit's, a thread note's.
 
 use oxplow_domain::uri::build;
@@ -21,7 +21,7 @@ use crate::page_ref_store::PageRefEdge;
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
 pub const RT_WIKILINK: &str = "wikilink";
-pub const RT_BODY_WORK_ITEM: &str = "work_item_mention";
+pub const RT_BODY_TASK: &str = "task_mention";
 pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
 pub const RT_TOUCHED_FILE: &str = "touched_file";
@@ -52,7 +52,7 @@ pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_
 }
 pub const RT_SUMMARY_DIR: &str = "summary_dir_ref";
 pub const RT_SUMMARY_WIKILINK: &str = "summary_wikilink";
-pub const RT_SUMMARY_WORK_ITEM: &str = "summary_work_item_mention";
+pub const RT_SUMMARY_TASK: &str = "summary_task_mention";
 pub const RT_SUMMARY_FINDING: &str = "summary_finding_mention";
 pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 
@@ -62,31 +62,31 @@ pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 /// kind already discriminates wiki vs task vs file vs etc.
 pub const RT_IMPACT: &str = "impact";
 
-/// A work item → the commit that holds its effort's work: the commit's
+/// A task → the commit that holds its effort's work: the commit's
 /// version of every file they share is the effort's end version (tsk1035,
 /// `commit_links`). The effort is carried in `source_extra` as
 /// `{"effort": "eff12"}`.
 pub const RT_COMMITTED: &str = "committed";
 
-/// A work item's body slice: its title and body's mentions.
-pub fn work_item_body_ref_types() -> Vec<String> {
+/// A task's body slice: its title and body's mentions.
+pub fn task_body_ref_types() -> Vec<String> {
     BODY_MENTIONS.all()
 }
 
-/// A work item's comment slice: its comments' mentions, recorded as the
+/// A task's comment slice: its comments' mentions, recorded as the
 /// item's own edges (a comment lives on its item's page).
-pub fn work_item_comment_ref_types() -> Vec<String> {
+pub fn task_comment_ref_types() -> Vec<String> {
     COMMENT_MENTIONS.all()
 }
 
-/// A work item's link slice is every ref type with this prefix — one per
-/// link type, the list's own (`work_item_link:blocks`).
-pub const RT_LINK_PREFIX: &str = "work_item_link:";
+/// A task's link slice is every ref type with this prefix — one per
+/// link type, the list's own (`task_link:blocks`).
+pub const RT_LINK_PREFIX: &str = "task_link:";
 
 pub const RT_COMMENT_FILE: &str = "comment_file_ref";
 pub const RT_COMMENT_DIR: &str = "comment_dir_ref";
 pub const RT_COMMENT_WIKILINK: &str = "comment_wikilink";
-pub const RT_COMMENT_WORK_ITEM: &str = "comment_work_item_mention";
+pub const RT_COMMENT_TASK: &str = "comment_task_mention";
 pub const RT_COMMENT_FINDING: &str = "comment_finding_mention";
 pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
 
@@ -95,7 +95,7 @@ struct MentionTypes {
     file: &'static str,
     dir: &'static str,
     wiki: &'static str,
-    work_item: &'static str,
+    task: &'static str,
     finding: &'static str,
     commit: &'static str,
 }
@@ -106,7 +106,7 @@ impl MentionTypes {
             self.file,
             self.dir,
             self.wiki,
-            self.work_item,
+            self.task,
             self.finding,
             self.commit,
         ]
@@ -119,7 +119,7 @@ const BODY_MENTIONS: MentionTypes = MentionTypes {
     file: RT_WIKI_FILE,
     dir: RT_WIKI_DIR,
     wiki: RT_WIKILINK,
-    work_item: RT_BODY_WORK_ITEM,
+    task: RT_BODY_TASK,
     finding: RT_BODY_FINDING,
     commit: RT_BODY_COMMIT,
 };
@@ -128,7 +128,7 @@ const COMMENT_MENTIONS: MentionTypes = MentionTypes {
     file: RT_COMMENT_FILE,
     dir: RT_COMMENT_DIR,
     wiki: RT_COMMENT_WIKILINK,
-    work_item: RT_COMMENT_WORK_ITEM,
+    task: RT_COMMENT_TASK,
     finding: RT_COMMENT_FINDING,
     commit: RT_COMMENT_COMMIT,
 };
@@ -143,7 +143,7 @@ pub fn effort_ref_types() -> Vec<String> {
         RT_SUMMARY_FILE.to_string(),
         RT_SUMMARY_DIR.to_string(),
         RT_SUMMARY_WIKILINK.to_string(),
-        RT_SUMMARY_WORK_ITEM.to_string(),
+        RT_SUMMARY_TASK.to_string(),
         RT_SUMMARY_FINDING.to_string(),
         RT_SUMMARY_COMMIT.to_string(),
         RT_IMPACT.to_string(),
@@ -154,23 +154,16 @@ const SUMMARY_MENTIONS: MentionTypes = MentionTypes {
     file: RT_SUMMARY_FILE,
     dir: RT_SUMMARY_DIR,
     wiki: RT_SUMMARY_WIKILINK,
-    work_item: RT_SUMMARY_WORK_ITEM,
+    task: RT_SUMMARY_TASK,
     finding: RT_SUMMARY_FINDING,
     commit: RT_SUMMARY_COMMIT,
 };
 
 /// The kinds a `EffortImpact` may name, as the agent's tools document them.
-pub const IMPACT_KINDS: [&str; 6] = [
-    "wiki",
-    "work_item",
-    "file",
-    "directory",
-    "git_commit",
-    "finding",
-];
+pub const IMPACT_KINDS: [&str; 6] = ["wiki", "task", "file", "directory", "git_commit", "finding"];
 
 /// The URI an `EffortImpact` names: its `kind` (one of [`IMPACT_KINDS`])
-/// and `id`. A work item's id is its URI or one of the active list's own
+/// and `id`. A task's id is its URI or one of the active list's own
 /// ids (`tsk7`); `None` for anything else (refused where impacts come in).
 pub fn impact_target(kinds: &ResourceRegistry, kind: &str, id: &str) -> Option<String> {
     let id = id.trim();
@@ -179,9 +172,9 @@ pub fn impact_target(kinds: &ResourceRegistry, kind: &str, id: &str) -> Option<S
     }
     Some(match kind {
         "wiki" => build::wiki_uri(id),
-        "work_item" => match build::work_item_of_uri(id) {
-            Some((provider, item)) => build::work_item_uri(&provider, &item),
-            None => kinds.work_item_uri_of(id)?,
+        "task" => match build::task_of_uri(id) {
+            Some((provider, item)) => build::task_uri(&provider, &item),
+            None => kinds.task_uri_of(id)?,
         },
         "file" => build::file_uri(id),
         "directory" => build::dir_uri(id),
@@ -192,7 +185,7 @@ pub fn impact_target(kinds: &ResourceRegistry, kind: &str, id: &str) -> Option<S
 }
 
 /// Edges contributed by the union of every effort's declared impacts,
-/// from the work item `source` (its URI). Self references are filtered
+/// from the task `source` (its URI). Self references are filtered
 /// out (an effort on tsk7 declaring it "completed" tsk7 is implicit).
 pub fn effort_impact_edges(
     kinds: &ResourceRegistry,
@@ -255,7 +248,7 @@ fn stated_type(target: &str) -> Option<&'static str> {
         r::FILE => RT_WIKI_FILE,
         r::DIR => RT_WIKI_DIR,
         r::WIKI => RT_WIKILINK,
-        r::WORK_ITEM => RT_BODY_WORK_ITEM,
+        r::TASK => RT_BODY_TASK,
         r::FINDING => RT_BODY_FINDING,
         r::COMMIT => RT_BODY_COMMIT,
         _ => return None,
@@ -263,7 +256,7 @@ fn stated_type(target: &str) -> Option<&'static str> {
 }
 
 /// Edges of a wiki page whose store states its links (a provider's
-/// record: a file's URI, another page's, a work item's, …) rather than a
+/// record: a file's URI, another page's, a task's, …) rather than a
 /// body core parses. A URI of another resource isn't an edge a page has.
 pub fn stated_edges(slug: &str, uris: &[String]) -> Vec<PageRefEdge> {
     let source = build::wiki_uri(slug);
@@ -278,9 +271,9 @@ pub fn note_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<Pag
     mention_edges(kinds, source, body, &BODY_MENTIONS)
 }
 
-/// A work item's body-mention edges — what its title and body name — for
+/// A task's body-mention edges — what its title and body name — for
 /// any list's item; `item` is its URI.
-pub fn work_item_edges(
+pub fn task_edges(
     kinds: &ResourceRegistry,
     item: &str,
     title: &str,
@@ -289,8 +282,8 @@ pub fn work_item_edges(
     mention_edges(kinds, item, &format!("{title}\n{body}"), &BODY_MENTIONS)
 }
 
-/// A work item's comment-mention edges: what its comments' bodies name.
-pub fn work_item_comment_edges<'a>(
+/// A task's comment-mention edges: what its comments' bodies name.
+pub fn task_comment_edges<'a>(
     kinds: &ResourceRegistry,
     item: &str,
     bodies: impl IntoIterator<Item = &'a str>,
@@ -309,10 +302,10 @@ pub fn work_item_comment_edges<'a>(
     out
 }
 
-/// A work item's link edges: one per `(target URI, link type)`, its ref
-/// type `work_item_link:<type>`. Any URI: another item, or what the item
+/// A task's link edges: one per `(target URI, link type)`, its ref
+/// type `task_link:<type>`. Any URI: another item, or what the item
 /// is about.
-pub fn work_item_link_edges(item: &str, links: &[(String, String)]) -> Vec<PageRefEdge> {
+pub fn task_link_edges(item: &str, links: &[(String, String)]) -> Vec<PageRefEdge> {
     links
         .iter()
         .filter(|(target, _)| oxplow_domain::uri::OxplowUri::parse(target).is_ok())
@@ -345,10 +338,10 @@ fn mention_edges(
             .map(|w| edge(build::wiki_uri(w), types.wiki)),
     );
     out.extend(
-        refs.work_items
+        refs.tasks
             .into_iter()
             .filter(|t| t != source)
-            .map(|t| edge(t, types.work_item)),
+            .map(|t| edge(t, types.task)),
     );
     out.extend(
         refs.findings
@@ -364,7 +357,7 @@ fn mention_edges(
     out
 }
 
-/// Touched-file edges for a work item (`source`, its URI).
+/// Touched-file edges for a task (`source`, its URI).
 ///
 /// `entries` is `(path, change_kind)` — the change_kind is one of
 /// the `effort_file.change_kind` values (`created` / `updated`
@@ -383,7 +376,7 @@ pub fn effort_touched_file_edges(source: &str, entries: &[(String, String)]) -> 
 }
 
 /// Edges contributed by the union of every `effort.summary` body for one
-/// work item (`source`, its URI). Parsed via the shared ref extractor, so
+/// task (`source`, its URI). Parsed via the shared ref extractor, so
 /// wikilinks (`[[some-slug]]`), file/dir refs, task/finding/commit
 /// mentions all flow through as outbound edges from the item.
 /// Owned slice = the `summary_*` ref_types above (paired with
@@ -413,16 +406,16 @@ mod tests {
     use super::*;
     use oxplow_domain::uri::build::resource_of;
 
-    /// Foundation's resources with oxplow's tasks as the work list (`tsk<n>`).
+    /// Foundation's resources with oxtask as the task tracker (`tsk<n>`).
     fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
         oxplow_domain::uri::resources::foundation()
             .clone()
-            .with_work_item_ids("oxplow", r"tsk\d+")
+            .with_task_ids("oxtask", r"tsk\d+")
             .unwrap()
     }
 
     fn task(id: &str) -> String {
-        build::work_item_uri("oxplow", id)
+        build::task_uri("oxtask", id)
     }
 
     fn resource(e: &PageRefEdge) -> String {
@@ -434,7 +427,7 @@ mod tests {
         let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[tsk7]] [[finding:fnd-1]] [[git:abcdef0]]";
         let edges = wiki_edges(&tasks_kinds(), "intro", body);
         let kinds: std::collections::BTreeSet<_> = edges.iter().map(resource).collect();
-        for k in ["file", "dir", "wiki", "work_item", "finding", "commit"] {
+        for k in ["file", "dir", "wiki", "task", "finding", "commit"] {
             assert!(kinds.contains(&format!("oxplow/{k}")), "{k}: {kinds:?}");
         }
         // Every stored target is a URI foundation declares.
@@ -450,8 +443,8 @@ mod tests {
     }
 
     #[test]
-    fn work_item_edges_parse_the_body() {
-        let edges = work_item_edges(
+    fn task_edges_parse_the_body() {
+        let edges = task_edges(
             &tasks_kinds(),
             &task("tsk1"),
             "fix something",
@@ -503,7 +496,7 @@ mod tests {
             |target: String, rt: &str| edges.iter().any(|e| e.target == target && e.ref_type == rt);
         assert!(has(build::wiki_uri("url-schemes"), "summary_wikilink"));
         assert!(has(build::file_uri("src/foo.rs"), "summary_file_ref"));
-        assert!(has(task("tsk99"), "summary_work_item_mention"));
+        assert!(has(task("tsk99"), "summary_task_mention"));
         assert!(has(build::finding_uri("fnd-2"), "summary_finding_mention"));
         assert!(edges.iter().any(|e| resource(e) == "oxplow/commit"));
         assert!(has(build::dir_uri("src/x"), "summary_dir_ref"));
@@ -515,7 +508,7 @@ mod tests {
         let edges = effort_summary_edges(&tasks_kinds(), &task("tsk7"), &summaries);
         let tasks: Vec<_> = edges
             .iter()
-            .filter(|e| resource(e) == "oxplow/work_item")
+            .filter(|e| resource(e) == "oxplow/task")
             .map(|e| e.target.clone())
             .collect();
         assert_eq!(tasks, vec![task("tsk9")]);
@@ -551,7 +544,7 @@ mod tests {
                 action: None,
             }, // not an impact kind — filtered
             EffortImpact {
-                kind: "work_item".into(),
+                kind: "task".into(),
                 id: "tsk7".into(),
                 action: Some("completed".into()),
             }, // self — filtered
@@ -561,7 +554,7 @@ mod tests {
                 action: None,
             }, // bad kind — filtered
             EffortImpact {
-                kind: "work_item".into(),
+                kind: "task".into(),
                 id: "".into(),
                 action: None,
             }, // empty id — filtered
@@ -586,14 +579,14 @@ mod tests {
         assert!(dir.source_extra.is_none());
     }
 
-    /// A work-item impact names the active list's item: a loose id as the
+    /// A task impact names the active list's item: a loose id as the
     /// list declares its ids, or its URI; stored canonical either way.
     /// What isn't one of its ids names nothing.
     #[test]
-    fn impact_work_items_are_stored_canonical_whatever_the_agent_wrote() {
+    fn impact_tasks_are_stored_canonical_whatever_the_agent_wrote() {
         use oxplow_domain::EffortImpact;
         let impact = |id: &str| EffortImpact {
-            kind: "work_item".into(),
+            kind: "task".into(),
             id: id.into(),
             action: None,
         };
@@ -612,20 +605,20 @@ mod tests {
 
     #[test]
     fn link_edges_carry_the_lists_own_link_type() {
-        let item = build::work_item_uri("issues", "ENG-10");
-        let other = build::work_item_uri("issues", "ENG-20");
-        let edges = work_item_link_edges(&item, &[(other.clone(), "parent_of".into())]);
+        let item = build::task_uri("issues", "ENG-10");
+        let other = build::task_uri("issues", "ENG-20");
+        let edges = task_link_edges(&item, &[(other.clone(), "parent_of".into())]);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].source, item);
         assert_eq!(edges[0].target, other);
-        assert_eq!(edges[0].ref_type, "work_item_link:parent_of");
+        assert_eq!(edges[0].ref_type, "task_link:parent_of");
     }
 
     /// Comments' mentions are the item's own edges, under the comment
     /// ref types, each target once.
     #[test]
     fn comment_edges_are_the_items_under_comment_types() {
-        let edges = work_item_comment_edges(
+        let edges = task_comment_edges(
             &tasks_kinds(),
             &task("tsk1"),
             ["see [[src/app.rs]] and tsk2", "again [[src/app.rs]]"],
@@ -638,7 +631,7 @@ mod tests {
             got,
             vec![
                 (task("tsk1"), build::file_uri("src/app.rs"), RT_COMMENT_FILE),
-                (task("tsk1"), task("tsk2"), RT_COMMENT_WORK_ITEM),
+                (task("tsk1"), task("tsk2"), RT_COMMENT_TASK),
             ]
         );
     }

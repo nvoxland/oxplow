@@ -1,11 +1,11 @@
-// task_views/swimlanes: the work list as one column per stage of the active
+// task_views/swimlanes: the task tracker as one column per stage of the active
 // list, in its order. Drag a card to another column to move it; drag within a
 // column to reorder it (only when the active list keeps an order); click a
 // title to rename; click a card to open it.
 //
-// It reads `v_work_item` through its page's `swimlanes` loader and the list's
+// It reads `v_task` through its page's `swimlanes` loader and the list's
 // stages through its `stages` loader, and changes items only through the
-// work-item interface commands, so it works with any work list.
+// task interface commands, so it works with any task tracker.
 (function () {
   "use strict";
 
@@ -88,7 +88,7 @@
           const from = items.find((i) => i.uri === ref);
           if (!from) return;
           if (from.stage !== stage) {
-            change("oxplow.work_item.transition", { uri: ref, to: stage }).catch(() => {});
+            change("oxplow.task.transition", { uri: ref, to: stage }).catch(() => {});
             return;
           }
           // Within its column: its place in its assignee's queue.
@@ -96,7 +96,7 @@
           const over = target ? cards.find((i) => i.uri === target.dataset.ref) : cards[cards.length - 1];
           if (!over || over.uri === ref) return;
           const input = cards.indexOf(from) > cards.indexOf(over) ? { uri: ref, before: over.uri } : { uri: ref, after: over.uri };
-          change("oxplow.work_item.reorder", input).catch(() => {});
+          change("oxplow.task.reorder", input).catch(() => {});
         });
         board.append(lane);
       }
@@ -161,7 +161,7 @@
       };
       form.addEventListener("submit", (e) => {
         e.preventDefault();
-        change("oxplow.work_item.update", { uri: item.uri, title: input.value }).then(
+        change("oxplow.task.update", { uri: item.uri, title: input.value }).then(
           () => leave(),
           (err) => {
             if (err && err.field) {

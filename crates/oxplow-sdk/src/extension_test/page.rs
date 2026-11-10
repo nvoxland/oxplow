@@ -2,8 +2,8 @@ use super::*;
 
 /// Load component `id` as its frame would, then ask what the fixture asks
 /// (`when: { component, items?: [title], invokes?: [{ command, input? }]
-/// }`): `items` are work items filed first
-/// (`oxplow:oxplow/work_item?id=tsk1&provider=oxplow`, …); each invoke's
+/// }`): `items` are tasks filed first
+/// (`oxplow:oxplow/task?id=tsk1&provider=oxtask`, …); each invoke's
 /// outcome — what the command answers when the component calls it —
 /// against `expect: { invokes?: [{ ok?, refused? }] }`. The data a
 /// component draws is its page's loaders: a page example tests those. The
@@ -40,10 +40,10 @@ pub(super) async fn component_example(
     {
         let made = host
             .svc
-            .work_items_client()
+            .tasks_client()
             .create(
                 &Actor::Human,
-                oxplow_app::work_items::NewItem {
+                oxplow_app::tasks::NewItem {
                     title: title.as_str().unwrap_or_default().into(),
                     ..Default::default()
                 },

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { navigate, workItemIdOf, shown } from "../../support/ui.js";
+import { navigate, taskIdOf, shown } from "../../support/ui.js";
 
 test("an extension's ref renders as a link and opens its page", async ({ page, daemon }) => {
   const n = await createItem(daemon, "Platypus item");
@@ -17,11 +17,11 @@ test("an extension's ref renders as a link and opens its page", async ({ page, d
 
 
 async function createItem(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", {
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", {
     title,
-    thread: daemon.thread,
+    assignee: daemon.thread,
   });
-  return workItemIdOf(created.result.uri).replace(/^tsk/, "");
+  return taskIdOf(created.result.uri).replace(/^tsk/, "");
 }
 
 test("an extension's resource URI opens on its renderer, and the tab's id is the URI", async ({ page, daemon }) => {

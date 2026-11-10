@@ -608,10 +608,10 @@ fn find_inline_paths(body: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// Core's vocabulary with oxplow's tasks as the work list (`tsk<n>`).
+    /// Core's vocabulary with oxtask as the task tracker (`tsk<n>`).
     fn tasks_vocabulary() -> oxplow_domain::vocabulary::VocabularyHandle {
         let mut v = oxplow_domain::vocabulary::Vocabulary::core();
-        v.resources = v.resources.with_work_item_ids("oxplow", r"tsk\d+").unwrap();
+        v.resources = v.resources.with_task_ids("oxtask", r"tsk\d+").unwrap();
         oxplow_domain::vocabulary::VocabularyHandle::new(v)
     }
 
@@ -1164,10 +1164,7 @@ mod tests {
 
         // wi-1 backlink picks up the wiki source.
         let inbound_wi = page_refs
-            .list_backlinks(
-                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk1"),
-                None,
-            )
+            .list_backlinks(&oxplow_domain::uri::build::task_uri("oxtask", "tsk1"), None)
             .await
             .unwrap();
         assert_eq!(inbound_wi.len(), 1);
@@ -1205,7 +1202,7 @@ mod tests {
         let targets: std::collections::BTreeSet<_> =
             outbound.iter().map(|e| e.target.clone()).collect();
         use oxplow_domain::uri::build;
-        assert!(targets.contains(&build::work_item_uri("oxplow", "tsk1")));
+        assert!(targets.contains(&build::task_uri("oxtask", "tsk1")));
         assert!(targets.contains(&build::file_uri("src/app.rs")));
         assert!(targets.contains(&build::finding_uri("fnd-1")));
     }
@@ -1312,18 +1309,12 @@ mod tests {
             .unwrap();
 
         let inbound_2 = page_refs
-            .list_backlinks(
-                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk2"),
-                None,
-            )
+            .list_backlinks(&oxplow_domain::uri::build::task_uri("oxtask", "tsk2"), None)
             .await
             .unwrap();
         assert!(inbound_2.is_empty(), "expected no backlinks after removal");
         let inbound_1 = page_refs
-            .list_backlinks(
-                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk1"),
-                None,
-            )
+            .list_backlinks(&oxplow_domain::uri::build::task_uri("oxtask", "tsk1"), None)
             .await
             .unwrap();
         assert_eq!(inbound_1.len(), 1);

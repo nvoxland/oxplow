@@ -160,10 +160,10 @@ mod tests {
         assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 
-    /// The default work list, effort policy, snapshots and wiki are
+    /// The default task tracker, effort policy, snapshots and wiki are
     /// oxplow-foundation's: with oxplow-bundled off they still run.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_work_list_and_wiki_run_with_bundled_off() {
+    async fn the_task_tracker_and_wiki_run_with_bundled_off() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -183,12 +183,12 @@ mod tests {
             .commands
             .run(
                 &human,
-                "oxplow.work_item.create",
+                "oxplow.task.create",
                 serde_json::json!({ "title": "Still here" }),
                 true,
             )
             .await
-            .expect("the work list runs with bundled off");
+            .expect("the task tracker runs with bundled off");
         assert!(item.result["uri"].is_string(), "{}", item.result);
         svc.commands
             .run(

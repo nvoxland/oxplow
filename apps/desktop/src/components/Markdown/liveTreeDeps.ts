@@ -3,20 +3,20 @@
  *  title by the viewer's rule over the same title caches. */
 import { loadExtensionRefTitle } from "../../resources.js";
 import { loadWikiRef } from "../../wikiTitleCache.js";
-import { loadWorkItemRef } from "../../workItemTitleCache.js";
-import { loadWorkListProfile } from "../../useWorkListProfile.js";
-import { workItemRefOfMention } from "../../workItems.js";
+import { loadTaskRef } from "../../taskTitleCache.js";
+import { loadTaskTrackerProfile } from "../../useTaskTrackerProfile.js";
+import { taskRefOfMention } from "../../tasks.js";
 import { refLinkTitle } from "./markdownLinks.js";
 import type { TreeDeps } from "./markdownTree.js";
 
 export async function liveTreeDeps(): Promise<TreeDeps> {
-  const profile = await loadWorkListProfile();
+  const profile = await loadTaskTrackerProfile();
   return {
-    mentionRef: (id) => workItemRefOfMention(profile, id),
+    mentionRef: (id) => taskRefOfMention(profile, id),
     refTitle: async (names, text) => {
       const [wiki, item, extensionTitle] = await Promise.all([
         names.internalSlug ? loadWikiRef(names.internalSlug) : NONE,
-        names.itemRef ? loadWorkItemRef(names.itemRef) : NONE,
+        names.itemRef ? loadTaskRef(names.itemRef) : NONE,
         names.extensionRef ? loadExtensionRefTitle(names.extensionRef) : null,
       ]);
       return refLinkTitle(names, text, { wiki, item, extensionTitle });

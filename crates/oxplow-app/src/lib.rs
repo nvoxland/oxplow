@@ -165,6 +165,8 @@ pub mod stream_watch;
 mod subagent_tests;
 pub mod symbol_collector;
 pub mod symbol_resolve;
+pub mod task_tracker_conformance;
+pub mod tasks;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -185,8 +187,6 @@ pub mod vocabulary_reactor;
 pub mod wiki_drift;
 pub mod wiki_pages;
 pub mod wiki_pages_watch;
-pub mod work_items;
-pub mod work_items_conformance;
 pub mod workspace_files;
 pub mod worktrees;
 
@@ -196,7 +196,7 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-use oxplow_tasks::SqliteTaskStore;
+use oxplow_oxtask::SqliteOxtaskStore;
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -507,7 +507,7 @@ pub struct Services {
     pub thread_store: Arc<SqliteThreadStore>,
     /// A thread's agent sessions (`agent_session`).
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
-    pub task_store: Arc<SqliteTaskStore>,
+    pub task_store: Arc<SqliteOxtaskStore>,
     /// Work handed between threads (`.context/agent-model.md` "Handoffs").
     pub handoff_store: Arc<oxplow_db::SqliteHandoffStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
@@ -549,8 +549,8 @@ pub struct Services {
     pub vocabulary_service: Arc<vocabulary_reactor::VocabularyService>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
-    /// The work-items providers, by name (`.context/work-items.md`).
-    pub work_items: oxplow_domain::work_items::WorkItemsRegistry,
+    /// The task trackers, by name (`.context/tasks.md`).
+    pub tasks: oxplow_domain::tasks::TaskTrackers,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
     /// Where the harnesses' saved conversations are read: the machine's,
@@ -890,10 +890,10 @@ impl Services {
         }
     }
 
-    /// The `work_item.*` commands, typed (`work_items::WorkItems`): the
+    /// The `task.*` commands, typed (`tasks::Tasks`): the
     /// one write surface for every provider's items.
-    pub fn work_items_client(&self) -> work_items::WorkItems {
-        work_items::WorkItems::new(self.commands.clone())
+    pub fn tasks_client(&self) -> tasks::Tasks {
+        tasks::Tasks::new(self.commands.clone())
     }
 
     /// The tree a thread works in: its stream's worktree (a sibling
@@ -978,7 +978,7 @@ impl Services {
             vocabulary.clone(),
         ));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
-        let task_store = Arc::new(SqliteTaskStore::new(db.clone()));
+        let task_store = Arc::new(SqliteOxtaskStore::new(db.clone()));
         let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation =
@@ -997,8 +997,8 @@ impl Services {
             vec![
                 // A list's records reach the interface before an item's
                 // page refs are restated from it.
-                Arc::new(work_items::WorkItemsProjection),
-                Arc::new(page_ref_consumers::PageRefWorkItemConsumer {
+                Arc::new(tasks::TasksProjection),
+                Arc::new(page_ref_consumers::PageRefTaskConsumer {
                     vocabulary: vocabulary.clone(),
                 }),
                 Arc::new(tool_call_reactors::ToolCallProjection),
@@ -1406,23 +1406,21 @@ impl Services {
             db.clone(),
             layout.project_dir.clone(),
         )));
-        // The vocabulary reads the active work list's own ids in text
+        // The vocabulary reads the active task tracker's own ids in text
         // (`tsk42`), as that list declares them; from the first read, and
         // at every rebuild (a switch rebuilds it).
-        let work_item_ids: vocabulary_reactor::WorkItemIds = {
+        let task_ids: vocabulary_reactor::TaskIds = {
             let (capabilities, config) = (capabilities.clone(), config_arc.clone());
-            Arc::new(move || capabilities.work_item_ids(&config_service::read_config(&config)))
+            Arc::new(move || capabilities.task_ids(&config_service::read_config(&config)))
         };
         {
             // oxplow-foundation's resources, built in, until the service's
             // first pass adds every enabled extension's.
             let mut boot = oxplow_domain::vocabulary::Vocabulary::core();
-            boot.resources =
-                vocabulary_reactor::with_work_item_ids(boot.resources, work_item_ids().as_ref());
+            boot.resources = vocabulary_reactor::with_task_ids(boot.resources, task_ids().as_ref());
             vocabulary.swap(boot);
         }
-        let vocabulary_service =
-            Arc::new(vocabulary_reactor::VocabularyService::new(work_item_ids));
+        let vocabulary_service = Arc::new(vocabulary_reactor::VocabularyService::new(task_ids));
         let agent_policy = Arc::new(agent_policy::AgentPolicy);
         let commands = Arc::new(
             commands::CommandBus::new(
@@ -1452,18 +1450,18 @@ impl Services {
         commands
             .register(commands::compose::sequence_command())
             .expect("command.sequence registers");
-        // The work-items providers (`.context/work-items.md`); oxplow's
+        // The task trackers (`.context/tasks.md`); oxplow's
         // own, over this bus. Its active one is resolved from the config as
         // it is now.
-        let work_items = {
+        let tasks = {
             let (config, capabilities) = (config_arc.clone(), capabilities.clone());
-            oxplow_domain::work_items::WorkItemsRegistry::new(Arc::new(move || {
-                capabilities.active(&config_service::read_config(&config), "work_items")
+            oxplow_domain::tasks::TaskTrackers::new(Arc::new(move || {
+                capabilities.active(&config_service::read_config(&config), "task_tracker")
             }))
         };
-        // None as a work list: the sink every verb reaches while no list is
-        // active (`work_items::none_provider`).
-        work_items.register(work_items::none_provider());
+        // None as a task tracker: the sink every verb reaches while no list is
+        // active (`tasks::none_provider`).
+        tasks.register(tasks::none_provider());
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
@@ -1527,15 +1525,15 @@ impl Services {
             vocabulary: vocabulary.clone(),
         };
         for command in [
-            commands::work_item::transition_op(work_items.clone(), db.clone()),
-            commands::work_item::update_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::create_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::link_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::unlink_op(work_items.clone(), link_deps.clone()),
-            commands::work_item::comment_op(work_items.clone()),
-            commands::work_item::reorder_op(work_items.clone()),
-            commands::work_item::assign_op(work_items.clone()),
-            commands::work_item::delete_op(work_items.clone()),
+            commands::task::transition_op(tasks.clone(), db.clone()),
+            commands::task::update_op(tasks.clone(), link_deps.clone()),
+            commands::task::create_op(tasks.clone(), link_deps.clone()),
+            commands::task::link_op(tasks.clone(), link_deps.clone()),
+            commands::task::unlink_op(tasks.clone(), link_deps.clone()),
+            commands::task::comment_op(tasks.clone()),
+            commands::task::reorder_op(tasks.clone()),
+            commands::task::assign_op(tasks.clone()),
+            commands::task::delete_op(tasks.clone()),
         ]
         .into_iter()
         .chain(commands::review::ops())
@@ -1547,7 +1545,7 @@ impl Services {
             chat.clone(),
             capabilities.clone(),
         ))
-        .chain(commands::effort::ops(work_items.clone()))
+        .chain(commands::effort::ops(tasks.clone()))
         .chain(commands::hint::ops())
         .chain(commands::terminal::ops(
             db.clone(),
@@ -1569,10 +1567,7 @@ impl Services {
                 vcs: vcs.clone(),
             },
         ))
-        .chain(commands::handoff::ops(
-            link_deps.clone(),
-            work_items.clone(),
-        ))
+        .chain(commands::handoff::ops(link_deps.clone(), tasks.clone()))
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
@@ -1641,7 +1636,7 @@ impl Services {
             },
             &commands,
             vec![
-                Arc::new(providers::work_items::WorkItemsHost(work_items.clone())),
+                Arc::new(providers::tasks::TaskTrackerHost(tasks.clone())),
                 Arc::new(providers::effort_policy::EffortPolicyHost(
                     effort_policies.clone(),
                 )),
@@ -1911,7 +1906,7 @@ impl Services {
             extension_checks: Default::default(),
             client_host,
             commands,
-            work_items,
+            tasks,
             harnesses,
             saved_conversations,
             session_auth,
@@ -2374,6 +2369,18 @@ mod tests {
                 // A stream's worktree and its capture service (P8.A4).
                 "oxplow.stream.archive",
                 "oxplow.stream.create",
+                // Every task tracker's verbs, oxplow's own included. Who works
+                // on an item and its place in their queue are core's
+                // (`assign`, `reorder`), in the bus's transaction.
+                "oxplow.task.comment",
+                "oxplow.task.create",
+                "oxplow.task.delete",
+                "oxplow.task.link",
+                // bundled's menu entry for create.
+                "oxplow.task.new",
+                "oxplow.task.transition",
+                "oxplow.task.unlink",
+                "oxplow.task.update",
                 // A run's capture, through the collection service (P8.A8).
                 "oxplow.terminal.close",
                 "oxplow.test.record_run",
@@ -2395,18 +2402,6 @@ mod tests {
                 "oxplow.vcs.stage",
                 "oxplow.vcs.status",
                 "oxplow.vcs.uncommit",
-                // Every work list's verbs, oxplow's own included. Who works
-                // on an item and its place in their queue are core's
-                // (`assign`, `reorder`), in the bus's transaction.
-                "oxplow.work_item.comment",
-                "oxplow.work_item.create",
-                "oxplow.work_item.delete",
-                "oxplow.work_item.link",
-                // bundled's menu entry for create.
-                "oxplow.work_item.new",
-                "oxplow.work_item.transition",
-                "oxplow.work_item.unlink",
-                "oxplow.work_item.update",
             ]
         );
     }
@@ -2425,11 +2420,11 @@ mod tests {
                 "oxplow.command.sequence",
                 // The bundled extension's script commands compose their
                 // calls per input.
-                // Taking a handoff moves its work item, then settles it.
+                // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
                 "oxplow.review.accept",
                 "oxplow.review.request_changes",
-                "oxplow.work.clear_finished",
+                "oxplow.tasks.clear_finished",
             ]
         );
     }

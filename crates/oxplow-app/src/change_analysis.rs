@@ -2276,7 +2276,7 @@ mod tests {
             .svc
             .effort_store
             .start(
-                "oxplow:oxplow/work_item?id=A-1&provider=issues",
+                "oxplow:oxplow/task?id=A-1&provider=issues",
                 &f.thread,
                 start,
             )

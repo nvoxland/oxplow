@@ -49,7 +49,7 @@ test("tones map to theme variables; anything else is plain", () => {
 // bookmark, a visit) shows each one's own: an entity's, or the icon a
 // declared page names.
 test("a page kind draws its page's icon", () => {
-  for (const kind of ["work_item", "dir"]) {
+  for (const kind of ["task", "dir"]) {
     const spec = vizIcon(kind);
     expect(spec, kind).not.toBeNull();
     expect(spec && "Icon" in spec ? spec.Icon : null, kind).toBe(pageKindIconComponent(kind));

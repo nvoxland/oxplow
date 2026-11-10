@@ -2883,7 +2883,7 @@ pub struct BaselineReport {
 }
 
 /// `metrics.entity_states` (P7.B6): re-capture state entity metrics when
-/// their rows may have moved — a work item written, a snapshot taken, a
+/// their rows may have moved — a task written, a snapshot taken, a
 /// collector run — throttled per metric (`capture_entity_states`).
 pub const ENTITY_STATES: &str = "metrics.entity_states";
 
@@ -2898,7 +2898,7 @@ impl crate::event_pump::AsyncEventConsumer for EntityStates {
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type.starts_with("work_item.")
+        event_type.starts_with("task.")
             || event_type == "snapshot.taken"
             || event_type == "collector.synced"
     }
@@ -2972,14 +2972,14 @@ mod tests {
         }
     }
     use super::*;
-    use oxplow_tasks::work_item_ref;
+    use oxplow_oxtask::task_ref;
 
     /// A distinct count's buckets don't add up, so its points aren't
     /// stored as a `sum` (the detail page would total them) (tsk367).
     #[test]
     fn a_distinct_event_metric_is_not_summed_across_buckets() {
         let entity = |aggregation: &str| oxplow_config::EntitySpec {
-            view: "v_work_item".into(),
+            view: "v_task".into(),
             where_: None,
             time: Some("closed_at".into()),
             value: Some("json_extract(e.native, '$.priority')".into()),
@@ -4566,35 +4566,35 @@ def transform(input):
         // `record_collector_facts` stamps the capture's `effort_id` so the T-D
         // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
         // (the other fixtures, `effort_id: None`) stay unstamped.
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore as _;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+        use oxplow_oxtask::OxtaskId;
+        use oxplow_oxtask::OxtaskStore as _;
+        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
         let (svc, dir) = fixture().await;
         // A real effort row (the capture's effort_id is a foreign key).
         let now = oxplow_domain::Timestamp::now();
         let thread = ThreadId::new(1);
         let task = svc
             .task_store
-            .insert(&Task {
-                id: TaskId::placeholder(),
+            .insert(&Oxtask {
+                id: OxtaskId::placeholder(),
                 parent_id: None,
                 title: "t".into(),
                 description: String::new(),
-                status: TaskStatus::InProgress,
-                priority: TaskPriority::Medium,
-                created_by: TaskActorKind::User,
+                status: OxtaskStatus::InProgress,
+                priority: OxtaskPriority::Medium,
+                created_by: OxtaskActorKind::User,
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
                 deleted_at: None,
                 note_count: 0,
-                author: Some(TaskAuthor::User),
+                author: Some(OxtaskAuthor::User),
             })
             .await
             .unwrap();
         let effort = svc
             .effort_store
-            .start(&work_item_ref(task), &thread, None)
+            .start(&task_ref(task), &thread, None)
             .await
             .unwrap();
 
@@ -4643,34 +4643,34 @@ def transform(input):
     async fn effort_finished_runs_on_effort_complete_collectors() {
         // Effort-triggered collectors run from the `collector.triggers` pump
         // consumer on `effort.finished` (P7.B3).
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore as _;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+        use oxplow_oxtask::OxtaskId;
+        use oxplow_oxtask::OxtaskStore as _;
+        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
         let (svc, dir) = fixture().await;
         let now = oxplow_domain::Timestamp::now();
         let thread = ThreadId::new(1);
         let task = svc
             .task_store
-            .insert(&Task {
-                id: TaskId::placeholder(),
+            .insert(&Oxtask {
+                id: OxtaskId::placeholder(),
                 parent_id: None,
                 title: "t".into(),
                 description: String::new(),
-                status: TaskStatus::InProgress,
-                priority: TaskPriority::Medium,
-                created_by: TaskActorKind::User,
+                status: OxtaskStatus::InProgress,
+                priority: OxtaskPriority::Medium,
+                created_by: OxtaskActorKind::User,
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
                 deleted_at: None,
                 note_count: 0,
-                author: Some(TaskAuthor::User),
+                author: Some(OxtaskAuthor::User),
             })
             .await
             .unwrap();
         let effort = svc
             .effort_store
-            .start(&work_item_ref(task), &thread, None)
+            .start(&task_ref(task), &thread, None)
             .await
             .unwrap();
         crate::collector_triggers::register(&svc);
@@ -5261,7 +5261,7 @@ def transform(input):
         assert_eq!(spec.source_measure.as_deref(), Some("oxplow.coverage"));
         assert_eq!(spec.aggregation, "ratio");
         // The new V46 measures exist for the producers with no prior home.
-        for key in ["oxplow.turn", "oxplow.work_item_effort", "oxplow.nudge"] {
+        for key in ["oxplow.turn", "oxplow.task_effort", "oxplow.nudge"] {
             assert!(
                 svc.fact_store.get_measure(key).await.unwrap().is_some(),
                 "{key} measure seeded by V46"
@@ -5366,12 +5366,12 @@ def transform(input):
             .transaction(|c| {
                 c.execute_batch(
                     // The active list's items, as the interface holds them.
-                    "INSERT INTO work_item (uri, provider, title, state, stage, native, created_at, updated_at, closed_at) VALUES
-                       ('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'oxplow', 'a', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
-                       ('oxplow:oxplow/work_item?id=tsk2&provider=oxplow', 'oxplow', 'b', 'done', 'done', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
-                       ('oxplow:oxplow/work_item?id=tsk3&provider=oxplow', 'oxplow', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/work_item?id=tsk4&provider=oxplow', 'oxplow', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/work_item?id=tsk5&provider=oxplow', 'oxplow', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL);",
+                    "INSERT INTO task (uri, provider, title, state, stage, native, created_at, updated_at, closed_at) VALUES
+                       ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxtask', 'a', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
+                       ('oxplow:oxplow/task?id=tsk2&provider=oxtask', 'oxtask', 'b', 'done', 'done', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
+                       ('oxplow:oxplow/task?id=tsk3&provider=oxtask', 'oxtask', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL),
+                       ('oxplow:oxplow/task?id=tsk4&provider=oxtask', 'oxtask', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', NULL),
+                       ('oxplow:oxplow/task?id=tsk5&provider=oxtask', 'oxtask', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL);",
                 )
                 .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
             })
@@ -5380,14 +5380,14 @@ def transform(input):
         // A project entity metric with a typo'd column never reaches the catalog.
         write_project_extension(
             dir.path(),
-            "metrics:\n  - key: repo.bad\n    entity: v_work_item\n    where: \"no_such_col = 1\"\n",
+            "metrics:\n  - key: repo.bad\n    entity: v_task\n    where: \"no_such_col = 1\"\n",
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
         let f = &svc.fact_store;
         assert!(f.get_spec("repo.bad").await.unwrap().is_none());
 
         // An event metric: computed live, daily, sliceable by its entity dims.
-        let done = f.get_spec("work.tasks_completed").await.unwrap().unwrap();
+        let done = f.get_spec("task.completed").await.unwrap().unwrap();
         assert_eq!(done.source_measure, None);
         assert_eq!(done.display_kind, "event");
         assert_eq!(
@@ -5418,8 +5418,8 @@ def transform(input):
             .is_err());
 
         // A state metric: captured as a fact, so its series is its history.
-        let open = f.get_spec("work.open_tasks").await.unwrap().unwrap();
-        assert_eq!(open.source_measure.as_deref(), Some("work.open_tasks"));
+        let open = f.get_spec("task.open").await.unwrap().unwrap();
+        assert_eq!(open.source_measure.as_deref(), Some("task.open"));
         assert_eq!(svc.metrics.capture_entity_states(true).await, 1);
         // Unchanged since the last capture: nothing new is written — not even
         // by a fresh process, which reads the last stored value.
@@ -5450,9 +5450,7 @@ def transform(input):
         );
         // Entity metrics are in the catalog like any other.
         let catalog = svc.metrics.catalog().await;
-        assert!(catalog
-            .iter()
-            .any(|c| c.key == "work.open_tasks" && c.enabled));
+        assert!(catalog.iter().any(|c| c.key == "task.open" && c.enabled));
     }
 
     #[tokio::test]
@@ -6046,8 +6044,8 @@ def transform(input):
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
-             dimensions:\n  - { key: acme.status, label: Status, entity: v_work_item, expr: e.state }\n\
-             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_work_item }\n",
+             dimensions:\n  - { key: acme.status, label: Status, entity: v_task, expr: e.state }\n\
+             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_task }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&svc).await;

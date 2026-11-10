@@ -1,0 +1,31 @@
+title: Tasks (panel)
+description: What the thread is working on — its open effort (with its epic), the items assigned to it next, and what it finished.
+params:
+- name: thread_id
+  label: Thread
+loaders:
+  work:
+    sql: |
+      SELECT grp, title, icon, uri, depth, active
+      FROM v_oxplow_thread_tasks
+      WHERE thread_id = :thread_id
+      ORDER BY g, ord
+view:
+  from: work
+  viz: list
+  # In the rail, In progress shows whole and the others two rows each;
+  # grown to the rail, ten. Past that, "+N more" grows the panel, then
+  # opens the Work page.
+  group:
+    by: grp
+    compact: { Up next: 2, Finished: 2 }
+    grown: { Up next: 10, Finished: 10 }
+  depth: depth
+  columns:
+  - key: title
+    label: Task
+    icon: icon
+    link:
+      kind: page
+      from: uri
+  empty: No active work

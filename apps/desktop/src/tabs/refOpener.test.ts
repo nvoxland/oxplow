@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
 
-import { commentUri, fileUri, resourceUri, streamUri, threadUri, wikiUri, workItemUri } from "../uri/uri.js";
-import { fileRef, wikiPageRef, workItemTabRef } from "./pageRefs.js";
+import { commentUri, fileUri, resourceUri, streamUri, threadUri, wikiUri, taskUri } from "../uri/uri.js";
+import { fileRef, wikiPageRef, taskTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
 // Every URI opens by one rule: as itself (its tab's id is the URI, drawn by
 // the page that renders it, or by the fallback); a thread or a stream
 // selects instead of opening a tab. The registry plays no part.
 test("a URI opens as itself, a thread's or a stream's selects", () => {
-  const item = workItemUri("oxplow", "tsk1");
-  expect(refTargetNow(item)).toEqual({ tab: workItemTabRef(item) });
+  const item = taskUri("oxtask", "tsk1");
+  expect(refTargetNow(item)).toEqual({ tab: taskTabRef(item) });
   expect(refTargetNow(wikiUri("home"))).toEqual({ tab: wikiPageRef("home") });
   expect(refTargetNow(fileUri("src/a.ts"))).toEqual({ tab: fileRef("src/a.ts") });
   expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });

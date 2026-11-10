@@ -103,7 +103,7 @@ entity that has the columns.
 A **metric** is an aggregation over an entity **or** a fact set, sliced by
 dimensions:
 
-- `count(v_work_item) where state = 'done'`
+- `count(v_task) where state = 'done'`
 - `median(v_github_pr.merged_at - opened_at)`
 - `avg(fact oxplow.coverage)`
 
@@ -121,10 +121,10 @@ What core publishes, by where it comes from. Each row names its datasets
 
 | Source | Datasets | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `task`, `task_note`, `task_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
+| work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `effort`, `effort_file`, `decision`, `claim`, `context_read` | cycle time, steering, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
 | knowledge | `wiki_page`, `comment` | freshness |
-| git | `commit`, `commit_file`, `commit_work_item`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
+| git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
 | lsp | `diagnostic` | diagnostic counts by severity |
 | tests & coverage | `test_run`, `test_case` | coverage, pass/fail |
@@ -182,11 +182,11 @@ so a dataset or page links to another page
 or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
-(`oxplow/work_item`). **`first_sentence(markdown)`** is a description's
+(`oxplow/task`). **`first_sentence(markdown)`** is a description's
 opening for a card or a list row: past headings and the list and quote marks
 that lead its line, to the first `.`, `!` or `?` that ends a sentence outside
 a code span or a link, its inline markdown kept so a `markdown` column (or a
-component's `renderMarkdown`) draws it (bundled's `work-items` query reads an
+component's `renderMarkdown`) draws it (bundled's `task-rows` query reads an
 item's this way). Other URIs are selected from their owning dataset's
 `uri` column (`.context/resources.md` "Using URIs").
 
@@ -335,7 +335,7 @@ and vocabulary replacements in an outer savepoint, so a vocabulary diagnostic
 also restores successfully compiled datasets, contracts and materialized data.
 It also restates enabled contribution descriptors. With prepared capabilities,
 capability rows and switch events join that same savepoint and vocabulary uses
-the planned work-list recognizer. Mismatched catalog identities are rejected.
+the planned task-tracker recognizer. Mismatched catalog identities are rejected.
 It makes no outer commit or runtime swap. The returned vocabulary can be exposed
 only after committed, coordinated generation publication.
 
@@ -796,8 +796,8 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_thread` | threads within a stream |
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
-| `v_work_item` | the active work list's items (`uri`, `provider`, `native_id`, `state` (the bucket), `stage` and `stage_title` (the list's own stage, as it declares it), `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxplow's tasks have no dataset of their own (`v_task` was removed) and keep their own fields in `stage` / `native`; oxplow's tasks are `work_item:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
-| `v_effort` | spans of a thread's work, linked to a work item or not (`work_item` URI; join `v_work_item` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
+| `v_task` | the active task tracker's items (`uri`, `provider`, `native_id`, `state` (the bucket), `stage` and `stage_title` (the list's own stage, as it declares it), `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxtask has no dataset of its own (`v_task` was removed) and keeps its own fields in `stage` / `native`; oxtask tasks are `task:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
+| `v_effort` | spans of a thread's work, linked to a task or not (`task` URI; join `v_task` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
@@ -807,10 +807,10 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
-| `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `work_item` |
-| `v_work_item_comment` | comments on the active list's items (`v_task_note` was removed) |
-| `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, work item, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
-| `v_work_item_link` | typed links between the active list's items (`v_task_link` was removed) |
+| `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `task` |
+| `v_task_comment` | comments on the active list's items (`v_task_note` was removed) |
+| `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, task, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
+| `v_task_link` | typed links between the active list's items (`v_task_link` was removed) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
 | `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
@@ -839,7 +839,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_effort_metric_delta` | per effort, how each metric moved (baseline → current, `crossing`). **Stored, not a live query:** the metric engine computes it (`CollectionService::refresh_effort_evidence`) and `effort_evidence.rs` refreshes it on `effort.finished` (the `effort.evidence` pump consumer) and for every open effort as the **asset** `effort_evidence` (`OpenEffortEvidence`, P7.B6: its inputs `metric_capture`, `fact`, `effort_file` — not `agent_token_usage`, which it doesn't read: token counts reach it as facts; its own tables aren't, so it can't loop) — which also recomputes every **closed** effort whose runs or files moved since its rows were stored (`effort_evidence_state.attribution_sig`: a run collected late, an adoption's restamp); readers hear the rows move as `DatasetsChanged` (V80). **A recompute reads what moved, not the effort's history** (`.context/performance.md` "Open-effort evidence"): it asks the effort's captures per producer and trigger (count, newest id), memoizes each spec on those of the producers it reads, folds a `sum` spec's new reports into a running total, and reads only the run captures for observations |
 | `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its own run captures; refreshed the same way (V80). `seq` runs oldest first, so the highest is the latest — every reader takes `ORDER BY seq DESC` as newest. Diff coverage is start snapshot vs the capture's snapshot (collection.md). |
 | `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
-| `v_commit`, `v_commit_file`, `v_commit_work_item`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_work_item` reads the indexer's work-item mention edges and the work-item → commit links (declared impacts, held effort work), for the active work list's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
+| `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, held effort work), for the active task tracker's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
 | `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `DatasetsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
@@ -879,16 +879,16 @@ An extension entity `<entity>` owned by extension `<ext>` is exposed as
   - **The authorizer enforces the read contract** (P4.3, tsk488; it only
     recorded in P4.1). The query's own SQL — a CTE body included — may
     read datasets (views) and `temp.*` tables; a stored table is refused as
-    "`work_item` is a physical table, not a published dataset; read
-    v_work_item",
+    "`task` is a physical table, not a published dataset; read
+    v_task",
     naming the datasets whose `source()` it is (from `dataset_input`), and
     never with SQLite's "no such table" (which `explain_unsynced` reads as
     an unsynced source). A table that doesn't exist at all names the
-    published dataset it most likely meant ("no such table: v_work_items; did
-    you mean `v_work_item`?", edit distance, read once the session's authorizer is
+    published dataset it most likely meant ("no such table: v_tasks; did
+    you mean `v_task`?", edit distance, read once the session's authorizer is
     off — tsk1039). An unknown column names the columns of each published
     dataset the query names, and the nearest one ("no such column: titel …;
-    did you mean `title`? v_work_item has: …"), so an agent's next query is
+    did you mean `title`? v_task has: …"), so an agent's next query is
     right without a discovery query (agents spent about one call in six
     guessing columns). `count(*)` over a view is allowed (SQLite reports
     its base table at top level after the view's own reads). **A read's
@@ -1020,7 +1020,7 @@ collectors:
           number: int          # text | int | real | bool | time
           title: { type: text, doc: PR title }
         relations:             # documented joins (not executed)
-          - { to: v_work_item, on: "v_github_pr.title LIKE '%' || v_work_item.native_id || '%'" }
+          - { to: v_task, on: "v_github_pr.title LIKE '%' || v_task.native_id || '%'" }
 ```
 
 The entry prints `{"entities": {"<name>": [ {col: value, …}, … ]}}`,
@@ -1162,7 +1162,7 @@ entities from data already in the semantic layer:
   - id: hot
     runtime: starlark          # def transform(input): return {"entities": {...}}
     entry: sources/hot.star
-    input: "SELECT uri, title FROM v_work_item WHERE json_extract(native, '$.priority') = 'high'"
+    input: "SELECT uri, title FROM v_task WHERE json_extract(native, '$.priority') = 'high'"
     entities: [...]
 ```
 
@@ -1249,7 +1249,7 @@ component (their `description:`, NULL when absent: none is made up), the same te
   - A changed column set rebuilds the table.
   - The store refuses to replace a view it doesn't own: a core view, or
     one from another extension. Extension `work` plus entity `item` can't
-    shadow `v_work_item`.
+    shadow `v_task`.
   - `drop_extension` removes an extension's tables, views and state.
 - **Permission.** An exec collector runs code, so its extension must
   declare `process.run` (and the `network` hosts and `secrets` it

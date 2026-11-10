@@ -3,4 +3,4 @@ when:
   page: review-verdicts
 expect:
   loaders:
-    review_verdicts: { rows: 0, columns: [work_item, effort, state, reviewed_at, opening] }
+    review_verdicts: { rows: 0, columns: [task, effort, state, reviewed_at, opening] }

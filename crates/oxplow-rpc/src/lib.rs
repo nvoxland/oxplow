@@ -433,7 +433,7 @@ mod tests {
     }
 
     /// P6.E1b: the UI reads tasks through the datasets and writes them with
-    /// `work_item.*` commands; the typed task RPCs are gone.
+    /// `task.*` commands; the typed task RPCs are gone.
     #[tokio::test]
     async fn the_typed_task_rpcs_are_gone() {
         let (svc, _dir) = services().await;
@@ -448,7 +448,7 @@ mod tests {
             "delete_task",
             "reorder_tasks",
             "move_task",
-            "list_work_item_efforts",
+            "list_task_efforts",
             "list_recently_finished",
             "clear_recently_finished",
         ] {

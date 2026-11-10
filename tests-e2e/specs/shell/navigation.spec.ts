@@ -10,7 +10,7 @@ const overviewTitle = (page: import("@playwright/test").Page) => page.getByTestI
 
 /// An item the test extension's overview lists, each title a link to its page.
 async function item(daemon: Parameters<typeof run>[0] & { thread: string }, title: string) {
-  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.work_item.create", { title, assignee: daemon.thread });
+  const created = await run<{ result: { uri: string } }>(daemon, "oxplow.task.create", { title, assignee: daemon.thread });
   return created.result.uri;
 }
 
@@ -104,7 +104,7 @@ test("Up and Down from a page opened from a page follow the page's rows as they 
   await expect(body).toContainText("Origin delta");
 
   // A page the page no longer lists has no Up or Down.
-  await run(daemon, "oxplow.work_item.update", { uri: delta, title: "[archived] Origin delta" });
+  await run(daemon, "oxplow.task.update", { uri: delta, title: "[archived] Origin delta" });
   await expect(page.getByTestId("page-nav-siblings").filter({ visible: true })).not.toBeVisible();
   await page.keyboard.press("Alt+ArrowDown");
   await expect(body).toContainText("Origin delta");

@@ -76,10 +76,10 @@ selectors; screenshot when looks matter, and read the image.
 3. **Work concurrently while it runs.** Explore other surfaces, file
    bugs, test features (comments, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
-   inspection: `oxplow_query_sql` over `v_work_item` / `v_effort` (a thread's
+   inspection: `oxplow_query_sql` over `v_task` / `v_effort` (a thread's
    work, an item's efforts), `list_threads` (`{"streamId":"str1"}`),
    `v_effort_observation`, `run_command` to file a task
-   (`{"name":"work_item.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
+   (`{"name":"task.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
    no `native.thread` = backlog).
 4. **Review what landed** through oxplow itself: Git Dashboard →
    commit pages (zones/treemap/co-change), the Tasks page, per-effort
@@ -188,7 +188,7 @@ Drive these like a user would, not just the agent terminal:
 ## Task discipline
 
 - **Every bug/feature you find → an oxplow task** (UI: ⇧⌘N anywhere,
-  or "Save and Another" for batches; or `run_command work_item.create`
+  or "Save and Another" for batches; or `run_command task.create`
   over IPC). Title =
   symptom; description = repro + root-cause notes from your own
   source reading + `## Acceptance criteria` including tests. Tasks

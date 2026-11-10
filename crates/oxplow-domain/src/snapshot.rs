@@ -14,8 +14,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{EffortId, StreamId, ThreadId};
+use crate::tasks::ActiveSource;
 use crate::tree_diff::FileChange;
-use crate::work_items::ActiveSource;
 
 /// Why a snapshot take happened: one row of the operation log each
 /// (`snapshot_op.trigger`) and the `trigger` of `snapshot.taken`.

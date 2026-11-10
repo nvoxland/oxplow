@@ -647,7 +647,7 @@ mod tests {
              panels:\n  - {{ id: inbox, title: Inbox, scope: project, body: open }}\n\
              resources:\n  - {{ name: pr, label: Pull request, params: {{ id: {{ required: true, pattern: '^[0-9]+$' }} }}, resolve: prs, icon: git-pull-request }}\n\
              custom_components:\n  - {{ id: chart }}\n\
-             ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/work_item, placement: ref-chip, label: title }}\n"
+             ui:\n  mounts:\n    - {{ page: open, at: oxplow/diff.file-header }}\n    - {{ page: open, at: oxplow/diff.file-header }}\n  decorators:\n    - {{ dataset: prs, resource: oxplow/task, placement: ref-chip, label: title }}\n"
         )
     }
 
@@ -657,7 +657,7 @@ mod tests {
         write(
             root,
             &format!("{dir}/datasets/prs.sql"),
-            "SELECT 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow' AS uri, 'One' AS title",
+            "SELECT 'oxplow:oxplow/task?id=tsk1&provider=oxtask' AS uri, 'One' AS title",
         );
         write(
             root,
@@ -868,10 +868,10 @@ mod tests {
         ext.ui
             .replacements
             .push(crate::extension::extensions::replacements::UiReplacement {
-                id: "tracker/work_item.board".into(),
+                id: "tracker/task.board".into(),
                 extension: "tracker".into(),
-                target: "work_item.board".into(),
-                capability: "work_items".into(),
+                target: "task.board".into(),
+                capability: "task_tracker".into(),
                 bound_to_provider: false,
                 page: "tracker/board".into(),
                 version: 1,
@@ -884,7 +884,7 @@ mod tests {
             .expect("described");
         assert_eq!(
             d.id.to_string(),
-            "oxplow:oxplow/replacement?replacement=tracker/work_item.board"
+            "oxplow:oxplow/replacement?replacement=tracker/task.board"
         );
         assert_eq!(d.id.problem(), None);
         assert_eq!((d.trigger.clone(), d.global.clone()), (RunsOn::Mount, None));
@@ -1115,7 +1115,7 @@ mod ordering_tests {
             yaml.push_str("effects:\n");
             for (id, after) in effects {
                 yaml.push_str(&format!(
-                    "  - {{ id: {id}, summary: s, on: [work_item.state_changed], entry: e.star, after: [{after}] }}\n"
+                    "  - {{ id: {id}, summary: s, on: [task.state_changed], entry: e.star, after: [{after}] }}\n"
                 ));
             }
         }
@@ -1123,7 +1123,7 @@ mod ordering_tests {
             yaml.push_str("collectors:\n");
             for (id, after) in collectors {
                 yaml.push_str(&format!(
-                    "  - {{ id: {id}, runtime: starlark, entry: c.star, on: [work_item.state_changed], after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
+                    "  - {{ id: {id}, runtime: starlark, entry: c.star, on: [task.state_changed], after: [{after}], entities: [{{ name: {id}, key: k, columns: {{ k: text }} }}] }}\n"
                 ));
             }
         }

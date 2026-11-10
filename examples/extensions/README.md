@@ -11,9 +11,9 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 |---|---|
 | [github](github/) | An outside data source: an exec collector syncing pull requests with a credential kept in the keychain, a resource kind (`[[pr:12]]`), a page and a custom component. |
 | [prompt-efforts](prompt_efforts/) | Replacing a core policy: an effort policy script that opens one effort per prompt. |
-| [task-views](task_views/) | Replacing core views: the Board, the Tasks list and the work-item editor, for any work-items provider. |
+| [task-views](task_views/) | Replacing core views: the Board, the Tasks list and the task editor, for any task tracker provider. |
 | [triage](triage/) | Data, AI and workflow state together: a collector that classifies TODO comments with a model, a durable per-TODO decision in private state, a custom board with forms, and a summary job. |
-| [effort-review](effort_review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the work item and exported as a model. |
+| [effort-review](effort_review/) | A cancellable AI job over collected evidence: on each finished effort, a model reads its tests, diff coverage, changed functions and findings through a tool, the review streams and can be cancelled, and it is commented on the task and exported as a model. |
 | [schema-review](schema_review/) | A review policy of its own: a collector's facts about migrations, joined with oxplow's test, coverage and code-analysis evidence into the effort's verdict, in place of oxplow-bundled's. |
 | [session-history](session_history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit_history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
@@ -27,7 +27,7 @@ that run through public commands and the SDK only:
 - **AI review over evidence** (effort-review). An effect starts a job on
   `effort.finished`; the job's tool reads the effort's evidence; the
   answer streams into `v_job_run_output`; oxplow's Jobs command cancels it and
-  the partial review is kept; an effect comments it on the work item.
+  the partial review is kept; an effect comments it on the task.
   Test: `the_effort_review_example_reviews_evidence_and_can_be_cancelled`.
 - **A durable workflow with its own UI** (triage). A decision survives a
   restart, a board whose extension is disabled and enabled again, and an
@@ -106,7 +106,7 @@ Still open:
 - **No diff text** in any `v_*` dataset: a review sees per-file and
   per-function statistics, not the hunks.
 - **Not all evidence can be made in a fixture**: `setup` reaches what
-  oxplow's commands make (work items, efforts, test runs), not collected
+  oxplow's commands make (tasks, efforts, test runs), not collected
   reports like diff coverage, so that still needs a Rust test.
 - **`extension test` needs the folder under `.oxplow/extensions/`.**
 - **Names:** an extension's command namespace is its name with `-` as `_`

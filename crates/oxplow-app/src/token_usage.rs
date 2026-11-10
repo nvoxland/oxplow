@@ -26,7 +26,7 @@
 //! **A model fact's `subject` is `oxplow:oxplow/ai_model?name=<name>`** (`oxplow:oxplow/ai_model?name=claude-opus-4-8`,
 //! `build::ai_model_ref`): the model's name as its harness reports it. It is
 //! not the `model` ref kind, which names a published view
-//! (`oxplow:oxplow/dataset?dataset=v_work_item`). `subject_kind` is `ai_model`.
+//! (`oxplow:oxplow/dataset?dataset=v_task`). `subject_kind` is `ai_model`.
 //!
 //! Each harness reads its own transcript (`AgentHarness::turns`): Claude's
 //! is read; Codex's and opencode's formats aren't yet. We track
@@ -703,7 +703,7 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_tasks::work_item_ref;
+    use oxplow_oxtask::task_ref;
     use std::io::Write;
 
     const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
@@ -1359,34 +1359,34 @@ mod tests {
         // effort (the same resolution the run-ledger auto-claim uses), so
         // `captures_for_effort` — the T-D fact-attribution read — picks it up.
         use oxplow_domain::Timestamp;
-        use oxplow_tasks::TaskId;
-        use oxplow_tasks::TaskStore;
-        use oxplow_tasks::{Task, TaskActorKind, TaskAuthor, TaskPriority, TaskStatus};
+        use oxplow_oxtask::OxtaskId;
+        use oxplow_oxtask::OxtaskStore;
+        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
         let (svc, _dir, thread) = service_fixture().await;
         // One open effort on the thread → the unambiguous single-open case.
         let now = Timestamp::now();
         let task_id = svc
             .task_store
-            .insert(&Task {
-                id: TaskId::placeholder(),
+            .insert(&Oxtask {
+                id: OxtaskId::placeholder(),
                 parent_id: None,
                 title: "t".into(),
                 description: String::new(),
-                status: TaskStatus::InProgress,
-                priority: TaskPriority::Medium,
-                created_by: TaskActorKind::User,
+                status: OxtaskStatus::InProgress,
+                priority: OxtaskPriority::Medium,
+                created_by: OxtaskActorKind::User,
                 created_at: now,
                 updated_at: now,
                 completed_at: None,
                 deleted_at: None,
                 note_count: 0,
-                author: Some(TaskAuthor::User),
+                author: Some(OxtaskAuthor::User),
             })
             .await
             .unwrap();
         let effort = svc
             .effort_store
-            .start(&work_item_ref(task_id), &thread, None)
+            .start(&task_ref(task_id), &thread, None)
             .await
             .unwrap();
 

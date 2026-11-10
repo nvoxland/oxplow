@@ -602,8 +602,8 @@ commit into the unified `page_ref` graph (see
   file and the commit's object for every shared file is the object the
   effort's end-snapshot bytes would be (`Vcs::object_at` against
   `ObjectStore::id_of`; a partial commit holds it too). It's linked by a
-  `(work item URI) -- committed --> (commit URI)` edge — the shape of
-  a declared impact, the effort in `source_extra` — which `v_commit_work_item`
+  `(task URI) -- committed --> (commit URI)` edge — the shape of
+  a declared impact, the effort in `source_extra` — which `v_commit_task`
   (v2) and the commit's backlinks read. The other order (committed, then
   the task closed) is the `effort.commits` reaction to `effort.finished`,
   over the commits since the effort started. An effort whose end-snapshot

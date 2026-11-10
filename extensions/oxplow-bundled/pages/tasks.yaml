@@ -1,10 +1,10 @@
 title: Tasks
-description: "The work items assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per stage of the list, drag a card to move it. The backlog is the Task List's."
+description: "The tasks assigned to a thread, its stream, you, nobody or anyone, as a kanban board: a column per stage of the list, drag a card to move it. The backlog is the Task List's."
 icon: columns-3
 category: Work
-keywords: board kanban work items columns state
+keywords: board kanban tasks columns state
 needs:
-- work_items
+- task_tracker
 # The board's filters are its view (the tab's `#`): the board draws them
 # in its own toolbar, so the page has no rail.
 params:
@@ -42,7 +42,7 @@ loaders:
       SELECT CASE WHEN :show = 'thread' AND :thread_id IS NULL THEN 'all' ELSE :show END AS scope,
              uri('oxplow/page', 'page', 'new-task') AS new_task
   items:
-    page: oxplow/work-items
+    page: oxplow/task-rows
     loader: items
     params:
       show: { from: row.scope }
@@ -68,8 +68,8 @@ loaders:
   # The list's stages: the board's columns (but its backlog and canceled
   # ones, the Task List's) and a card's Mark entries.
   stages:
-    page: oxplow/work-item-stages
-    loader: work_item_stages
+    page: oxplow/task-stages
+    loader: task_stages
   # How many items each stage has, shown or not.
   counts:
     sql: |
@@ -95,12 +95,12 @@ loaders:
       SELECT uri('oxplow/person'), 'You'
   # The list's own choice fields, for a card's menu.
   fields:
-    page: oxplow/work-item-fields
-    loader: work_item_fields
-# Another extension may stand in for the board (`work_item.board`: `scope`
+    page: oxplow/task-fields
+    loader: task_fields
+# Another extension may stand in for the board (`task.board`: `scope`
 # from the row, `thread_id`, `stream_id`).
 view:
   id: board
-  replaceable: work_item.board
+  replaceable: task.board
   component:
     id: board

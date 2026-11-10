@@ -1,0 +1,22 @@
+# A thread's work: the items assigned to it, then the ones it finished —
+# a closed item is nobody's, so it's the thread's when one of its efforts
+# worked it — newest first by when they closed. Each shows its stage as
+# the list names it.
+given:
+  - { command: oxplow.task.create, input: { title: older done, assignee: thr1 }, bind: older }
+  - { command: oxplow.task.create, input: { title: newer done, assignee: thr1 }, bind: newer }
+  - { command: oxplow.task.create, input: { title: still open, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: closed elsewhere }, bind: elsewhere }
+  - { command: oxplow.task.transition, input: { uri: $older.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $older.uri, to: done }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $newer.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $newer.uri, to: done }, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $elsewhere.uri, to: done } }
+when: { page: oxplow/thread-tasks, params: { thread: thr1 } }
+expect:
+  loaders:
+    thread_tasks:
+      rows:
+        - { title: still open, state: todo, stage: Ready }
+        - { title: newer done, state: done, stage: Done }
+        - { title: older done, state: done, stage: Done }
