@@ -486,11 +486,12 @@ mod tests {
         // Two takes, each logged as the store does (its files, then its
         // op): (path, first change, last change). `None` change times are a
         // capture the watcher gave none for.
-        for (snapshot, captured, files) in [
-            (1, 50, vec![("d.rs", None, None)]),
+        for (snapshot, captured, op, files) in [
+            (1, 50, ("quiet", None), vec![("d.rs", None, None)]),
             (
                 2,
                 61,
+                ("quiet", None),
                 vec![
                     ("a.rs", Some(10), Some(12)),
                     ("b.rs", Some(40), Some(45)),
@@ -498,6 +499,9 @@ mod tests {
                     ("e.rs", Some(20), Some(20)),
                 ],
             ),
+            // Turn 1's end take, landing after it closed while turn 2 runs,
+            // with no change time: both turns', and shared for both.
+            (3, 70, ("turn_end", Some(1)), vec![("f.rs", None, None)]),
         ] {
             let c = at(captured);
             seed += &format!(
@@ -512,9 +516,11 @@ mod tests {
                     l = time(*last),
                 );
             }
+            let (trigger, turn) = op;
             seed += &format!(
-                "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, at, elapsed_ms, file_count)
-                   VALUES (1, {snapshot}, 'quiet', '{c}', 0, {n});",
+                "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, turn_id, at, elapsed_ms, file_count)
+                   VALUES (1, {snapshot}, '{trigger}', {t}, '{c}', 0, {n});",
+                t = turn.map_or("NULL".to_string(), |t: i64| t.to_string()),
                 n = files.len(),
             );
         }
@@ -548,8 +554,10 @@ mod tests {
                 row(1, "b.rs", "shared"),
                 row(1, "d.rs", "shared"),
                 row(1, "e.rs", "claimed"),
+                row(1, "f.rs", "shared"),
                 row(2, "b.rs", "shared"),
                 row(2, "d.rs", "shared"),
+                row(2, "f.rs", "shared"),
                 // e.rs changed at 20 s, before turn 2 started.
             ]
         );

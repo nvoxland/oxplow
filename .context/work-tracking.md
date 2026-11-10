@@ -50,8 +50,11 @@ take that changed nothing logs none. A file is the turn's when the take
 captured it after the turn began, while it ran or within a minute after
 it ended, and the watcher saw it change inside the turn's window; a
 capture with no change time (the startup sweep's) counts only while the
-turn ran or in the turn's own end take. A file changed before the prompt
-is not the turn's, even when the turn's end take captured it. Computed per
+turn ran or in the turn's own end take. A file the watcher saw change
+before the prompt is not the turn's, even when the turn's end take
+captured it. `shared` for a capture with no change time also looks at the
+minute before it (another turn's end take lands up to a minute after that
+turn closed). Computed per
 read, the join over every turn and file took tens of seconds whenever a
 query named turns by anything but a constant id; over the table a filter
 on a turn, a request's turns or a stream and path reaches an index. Each file says how sure it is:
@@ -335,8 +338,7 @@ or operational limits, not a view of what good work is:
 - Function metrics, clone detection and its `min_lines` / `min_nodes`
   floors, diff-coverage math, zone matching, `threshold_state`.
 - Advisory muting after three deliveries, stall detection (15 / 5
-  minutes), contribution disabling after three failures, steering and
-  token-waste attribution.
+  minutes), contribution disabling after three failures.
 
 **Knobs.** An extension's SQL reads its own configuration
 (`config('/pointer')`, `.context/extensions-manifest.md` "Configuration in SQL"),

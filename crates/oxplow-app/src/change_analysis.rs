@@ -339,8 +339,8 @@ pub enum ChangeTarget {
         turn_id: String,
     },
     /// A request on one stream: from the last take at or before its first
-    /// turn there started to the first take at or after its last one
-    /// ended (the working tree while one runs), limited to the files its
+    /// turn there started to where its last one ended ([`end_take`]; the
+    /// working tree while one runs), limited to the files its
     /// turns changed (`v_turn_file`, claimed or sole). `stream_id`
     /// defaults to the stream of the request's first turn; a request can
     /// span streams, so it's keyed by both.
@@ -1368,8 +1368,9 @@ pub(crate) async fn request_files(
             let mut stmt = c
                 .prepare(
                     "SELECT DISTINCT f.path FROM v_turn_file f
-                       JOIN agent_turn t ON t.id = f.turn_id
-                      WHERE t.request_id = ?1 AND f.stream_id = ?2
+                      WHERE f.turn_id IN (SELECT id FROM agent_turn WHERE request_id = ?1)
+                        -- `+`: by the turns' key, not a scan of the stream's.
+                        AND +f.stream_id = ?2
                         AND f.confidence IN ('claimed', 'sole')",
                 )
                 .map_err(oxplow_db::map_sql_err)?;

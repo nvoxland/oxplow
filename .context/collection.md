@@ -231,11 +231,6 @@ hook + MCP wiring):
   judges the run's own coverage, tsk506) and then returns the thread's
   **undelivered** nudges; one that
   lands later goes out on the thread's next tool call.
-  **Landed commits also feed the wasted-token leg (tsk77):** any detected
-  commit — including `git revert`, which needs its own `detect_git_revert`
-  since the command never says "commit" — has HEAD's `This reverts commit`
-  trailers read; a reverted commit attributable to exactly one CLOSED effort
-  emits that effort's spend onto `oxplow.token_waste` (see metrics.md).
   **The legs are isolated and coverage retries (tsk79):** the analysis,
   test-run, and coverage legs each catch their own error (one leg's transient
   failure can't kill the legs after it), and the coverage leg retries once
@@ -406,11 +401,7 @@ stream) — `request_analysis` with its span and a signature of what it read
 (its turns' runs, their files, its end), `request_metric_delta`,
 `request_observation` (V22; `v_request_metric_delta`,
 `v_request_observation`) — by the `request_analysis` asset over the cube,
-`turn_file`, `metric_spec` and `agent_turn`. Due: a request with a turn
-running, one whose stored signature differs from its inputs now (a run
-reported late, a file captured after the turn closed), or one that ended
-in the last day with none stored; older requests are analyzed when asked
-for. An effort's evidence (`v_effort_metric_delta`,
+`turn_file`, `metric_spec` and `agent_turn`. Due: of the requests with a turn running or ended in the last day, one with none stored or whose stored signature differs from its inputs now (a run reported late, a file captured after the turn closed, its end take landing); older requests keep what they have and are analyzed when asked for. A finished request's file gauges are read at its snapshots: a scan that names its snapshot is placed by it (the baseline at or before the start take, the current at or before the end take, whose scan lands after the last turn ended). An effort's evidence (`v_effort_metric_delta`,
 `v_effort_observation`) is the same computation over the effort's window
 until efforts go.
 
@@ -465,10 +456,9 @@ Nudge persistence below.
 
 ## Commits get no nudge of their own
 
-`on_shell_run` detects a `git commit` (`detect_git_commit` — token-aware,
-so `git -c user.email=… commit` and `git commit --amend` match, `git add` /
-`git log --grep commit` don't) only to drive the revert/token-waste leg and to
-return early. There is **no commit-hygiene guard** (removed in tsk250): a
+`on_shell_run` looks only for test and analysis runs: a `git commit` is
+neither, so it returns at once (the revert/token-waste leg went with
+efforts, 2026-11-10). There is **no commit-hygiene guard** (removed in tsk250): a
 post-commit "these files aren't part of this effort's changed set" advisory
 used to fire here.
 

@@ -5,9 +5,10 @@
 //! through `HookIngestService::ingest`), the worktree is snapshotted with a
 //! `turn_end` take anchored to the turn, its thread and the thread's open
 //! effort, and `agent_turn.snapshot_id` points at it. "What changed this
-//! turn" is `agent_turn.start_snapshot_id` (recorded when the turn opened)
-//! → `snapshot_id` — NOT the take's op parent, which other takes during
-//! the turn (an effort closing, a commit, another thread's turn) move.
+//! turn" is found by time on the stream's snapshot line (the `turn` change
+//! kind, `change_analysis::end_take`; its files are `v_turn_file`) — NOT the
+//! take's op parent, which other takes during the turn (a commit, another
+//! thread's turn) move.
 //!
 //! **The budget.** The Stop hook is on the agent's critical path, so it
 //! waits at most `snapshotTurnBudgetMs` (default 2000). A take that runs

@@ -79,8 +79,8 @@ pub fn classify_effort_attribution(spec: &MetricSpec) -> EffortAttributionFamily
 /// `metric-deltas` advisory skips the same prefixes in its SQL.
 pub fn is_operational_metric_key(key: &str) -> bool {
     key.starts_with("agent.")
+        || key.starts_with("request.")
         || key.starts_with("effort.")
-        || key.starts_with("task.")
         || key.starts_with("task.")
 }
 
@@ -226,6 +226,7 @@ mod tests {
         assert!(is_operational_metric_key("agent.tokens.total"));
         assert!(is_operational_metric_key("effort.cycle_time_ms"));
         assert!(is_operational_metric_key("task.efforts"));
+        assert!(is_operational_metric_key("request.cycle_time_ms"));
         assert!(!is_operational_metric_key("oxplow.rust.unsafe_blocks"));
         assert!(!is_operational_metric_key("acme.custom"));
     }
