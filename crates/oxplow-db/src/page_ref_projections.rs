@@ -66,12 +66,6 @@ pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
 /// kind already discriminates wiki vs task vs file vs etc.
 pub const RT_IMPACT: &str = "impact";
 
-/// A task → the commit that holds its effort's work: the commit's
-/// version of every file they share is the effort's end version (tsk1035,
-/// `commit_links`). The effort is carried in `source_extra` as
-/// `{"effort": "eff12"}`.
-pub const RT_COMMITTED: &str = "committed";
-
 /// A task's body slice: its title and body's mentions.
 pub fn task_body_ref_types() -> Vec<String> {
     BODY_MENTIONS.all()

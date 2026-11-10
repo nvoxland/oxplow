@@ -134,7 +134,6 @@ impl AsyncEventConsumer for EffortLandingConsumer {
             let Some(complete) = landing(&svc, &ws, sha, &files).await? else {
                 continue;
             };
-            crate::commit_links::link(&svc, sha, &effort).await?;
             let env = Envelope::typed::<EffortLanded>(
                 system_source(NAME),
                 &EffortLandedV2 {

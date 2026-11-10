@@ -5,8 +5,6 @@
 //! and a restart delivers whatever was logged but not yet handled.
 //!
 //! - `effort.evidence` — rebuild the effort's evidence rows.
-//! - `effort.commits` — link the commits made since it started that hold its
-//!   work to its task (tsk1035: committed before the task closed).
 //!
 //! They hold `Services` weakly: the pump that runs them is part of it.
 
@@ -21,7 +19,6 @@ use crate::Services;
 #[derive(Clone, Copy)]
 enum Reaction {
     Evidence,
-    Commits,
 }
 
 struct EffortReactor {
@@ -31,12 +28,10 @@ struct EffortReactor {
 
 /// Register the reactors on `svc`'s pump (boot, before it spawns).
 pub fn register(svc: &Arc<Services>) {
-    for reaction in [Reaction::Evidence, Reaction::Commits] {
-        svc.event_pump.register_async(Arc::new(EffortReactor {
-            reaction,
-            services: Arc::downgrade(svc),
-        }));
-    }
+    svc.event_pump.register_async(Arc::new(EffortReactor {
+        reaction: Reaction::Evidence,
+        services: Arc::downgrade(svc),
+    }));
 }
 
 #[async_trait]
@@ -44,7 +39,6 @@ impl AsyncEventConsumer for EffortReactor {
     fn name(&self) -> &'static str {
         match self.reaction {
             Reaction::Evidence => "effort.evidence",
-            Reaction::Commits => "effort.commits",
         }
     }
 
@@ -60,7 +54,6 @@ impl AsyncEventConsumer for EffortReactor {
         let effort = crate::effort_lifecycle::effort_of(event)?;
         match self.reaction {
             Reaction::Evidence => crate::effort_evidence::refresh(&svc, effort.value()).await,
-            Reaction::Commits => crate::commit_links::link_effort(&svc, &effort).await?,
         }
         Ok(())
     }

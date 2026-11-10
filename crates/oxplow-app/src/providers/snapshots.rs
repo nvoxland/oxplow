@@ -450,6 +450,7 @@ impl SnapshotProvider for ExternalSnapshots {
                 contents: self.contents,
                 handle: Some(marked.handle),
                 changed_at: Default::default(),
+                git_oids: Default::default(),
             })
             .await
             .map_err(storage)?;

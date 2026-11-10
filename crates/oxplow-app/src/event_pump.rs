@@ -62,7 +62,6 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "config.scripts",
     "config.workspace_filter",
     "effort.claim",
-    "effort.commits",
     "effort.evidence",
     "effort.landing",
     "effort.lifecycle",

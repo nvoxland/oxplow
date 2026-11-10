@@ -597,21 +597,30 @@ commit into the unified `page_ref` graph (see
   same wikilink + inline-mention rules used by wiki bodies and
   task descriptions also apply to commit messages
   (`wi-…`, `[[architecture]]`, `[[finding:fnd-1]]`, bare 7-40 hex shas).
-- **Linked to the task by its work** (`commit_links.rs`, tsk1035). An
-  agent's commit rarely names its task (and agents name tasks by title),
-  so each new commit is checked against the efforts that closed in the
-  two weeks before it: it **holds** an effort's work when they share a
-  file and the commit's object for every shared file is the object the
-  effort's end-snapshot bytes would be (`Vcs::object_at` against
-  `ObjectStore::id_of`; a partial commit holds it too). It's linked by a
-  `(task URI) -- committed --> (commit URI)` edge — the shape of
-  a declared impact, the effort in `source_extra` — which `v_commit_task`
-  (v2) and the commit's backlinks read. The other order (committed, then
-  the task closed) is the `effort.commits` reaction to `effort.finished`,
-  over the commits since the effort started. An effort whose end-snapshot
-  bytes have expired from Local History (or were never kept) can't be
-  shown to hold anything, so it simply doesn't match; it must never error,
-  or one old effort stops the commit linking to every other.
+- **Linked to the requests that made it** (`commit_links.rs`,
+  `oxplow_db::commit_request_store`, `commit_request`). As a commit is
+  indexed, for each path it changed: the requests on the commit's stream
+  (the stream whose worktree it was indexed from) that changed the path
+  since the previous commit that held it, where the file as the work left
+  it is the commit's content. A snapshot's file row keeps the git blob id of
+  the bytes it captured (`file_snapshot.git_oid`: a git-backed row's address
+  already is one; an oxplow-stored row gets it at capture, read back from
+  the blob just written; a hashes-only take, a deleted or an oversize row
+  has none), so the match compares ids and reads no bytes, and survives
+  Local History expiry. The requests come from the turns' files
+  (`v_turn_file`, a time join with the stream's snapshot line) and each
+  turn's request, never from `request.thread_id`: a request can span
+  threads and streams. One row per (commit, path, request) with its
+  **basis** (`named`: an edit call of one of its turns named the path;
+  `reported`: the harness said a shell call changed it; `observed`: it
+  changed while the request ran and nothing else says) and its
+  **confidence** (`sole`: one request changed the path; `shared`: several
+  did, as two threads on one file). `v_commit_request` reads it both ways; a
+  commit made outside oxplow, or of a file edited again since, has no rows,
+  and a commit with no task still links to its requests. Nothing is closed
+  by a commit and no effort is read. The `task → commit` edge is **derived**
+  (`v_commit_task`): through the task's requests (`v_request_task`), from
+  the commit's message, and from a declared impact; it is not stored.
 - **Logged as `vcs.commit.indexed`** `{ commit, stream, committed_at }`,
   once per commit (dedupe key), anchored to the stream whose workspace
   found it — every commit, unlike `vcs.head.moved`, which needs a clean

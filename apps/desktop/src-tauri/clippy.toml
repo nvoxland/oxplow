@@ -93,6 +93,7 @@ disallowed-methods = [
   { path = "oxplow_db::comment_store::set_anchor_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::comment_store::set_intent_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::comment_store::set_status_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
+  { path = "oxplow_db::commit_request_store::link_commit_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::contribution_health_store::SqliteContributionHealthStore::remove", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::contribution_health_store::disable_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },
   { path = "oxplow_db::contribution_health_store::enable_tx", reason = "a thin caller's database write is a command on the bus, or a service's own ingest (.context/ipc-and-stores.md)" },

@@ -1928,6 +1928,31 @@ impl SnapshotCaptureService {
         } else {
             self.clean_head().await
         };
+        // The git blob id of each oxplow-stored row's bytes, read back from
+        // the blobs just written: what lets a commit's blob be compared with
+        // a row without reading bytes later.
+        let git_oids = if policy.keeps() {
+            let blobs = self.inner.blobs.clone();
+            let objects = self.inner.vcs.object_store(&self.inner.project_dir);
+            let stored: Vec<(String, String)> = rows
+                .iter()
+                .filter(|r| r.storage == SnapshotStorage::Oxplow)
+                .filter_map(|r| Some((r.path.clone(), r.blob_hash.clone()?)))
+                .collect();
+            tokio::task::spawn_blocking(move || {
+                stored
+                    .into_iter()
+                    .filter_map(|(path, hash)| {
+                        let bytes = blobs.read(&hash).ok()?;
+                        Some((path, objects.id_of(&bytes).0))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .await
+            .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
         let take = TakeRecord {
             stream_id: self.inner.stream_id,
             rows,
@@ -1950,6 +1975,7 @@ impl SnapshotCaptureService {
             contents: policy.keeps(),
             handle: None,
             changed_at: changed,
+            git_oids,
         };
         let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();
         let heard = take.changed_at.clone();

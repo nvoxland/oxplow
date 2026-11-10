@@ -105,8 +105,11 @@ apart past the door. An observed file
 carries the session when exactly one session had a turn running in the
 turn's window, and is `shared` (no session) when more than one did or a
 second session observes the same path; it is never assigned by overlap
-luck, and a claimed row is never touched. A commit is linked to the efforts whose changes it
-holds, by content.
+luck, and a claimed row is never touched. A commit is linked to the requests whose changes it
+holds, per path, by content (`commit_request`: basis named/reported/observed,
+confidence sole/shared; [git-integration.md](./git-integration.md)
+"Linked to the requests that made it"); the task → commit edge derives
+through the task's requests.
 
 **A policy decides** when to open, close and link, reacting to core's
 events (a checkpoint after a turn's snapshot, a commit indexed, an effort
