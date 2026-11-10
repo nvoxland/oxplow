@@ -272,9 +272,9 @@ intent:
     - name: the-directory-links-to-its-parent-folder
       input: { page: directory, params: { stream_id: 1, path: src/sub } }
       expect: its see-also link opens the parent folder
-    - name: the-agent-session-links-to-its-threads-work-and-the-efforts-it-ran
+    - name: the-agent-session-links-to-its-threads-work-and-the-requests-it-ran
       input: { page: agent-session, params: { uri: 'oxplow:oxplow/agent_session?id=ses1' } }
-      expect: its see-also links open its thread's work and the efforts it ran
+      expect: its see-also links open its thread's work and the requests it ran
     - name: the-alerts-page-links-to-extension-problems-and-collectors
       input: { page: alerts }
       expect: its see-also links open the extension problems and the collectors

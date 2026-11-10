@@ -1,6 +1,6 @@
 # The one statement of which tasks a task page shows: the ones
 # assigned to the thread, its stream, the person, nobody or anyone (a
-# closed item is nobody's: the thread's when its efforts worked it); by
+# closed item is nobody's: the thread's when its requests worked it); by
 # stage, or by bucket (its first stage); a priority or a search keeps an
 # item that matches and its epic; open items by their queue with an
 # epic's children under it, then the closed ones, done before canceled,
@@ -12,11 +12,16 @@ given:
   - { command: oxplow.task.create, input: { title: Loose item, assignee: thr1, native: { priority: low }, body: "## Why\n\nIt started here. Then more." }, bind: loose }
   - { command: oxplow.task.create, input: { title: Backlogged, stage: backlog } }
   - { command: oxplow.task.create, input: { title: Shipped, assignee: thr1 }, bind: shipped }
-  - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
-  - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done }, as: agent }
   - { command: oxplow.task.create, input: { title: Dropped, assignee: thr1 }, bind: dropped }
-  - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: in_progress }, as: agent }
-  - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: canceled }, as: agent }
+  # A closed item is the thread's when a request on the thread worked it.
+  - observe:
+      turn:
+        prompt: Ship one, drop one
+        during:
+          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $shipped.uri, to: done }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: in_progress }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $dropped.uri, to: canceled }, as: agent }
   - { command: oxplow.task.transition, input: { uri: $loose.uri, to: in_progress } }
   - { command: oxplow.task.comment, input: { uri: $loose.uri, body: Started. } }
 when: { query: task-rows, params: { show: thread, state: all, priority: any, q: "", thread_id: 1, stream_id: 1 } }

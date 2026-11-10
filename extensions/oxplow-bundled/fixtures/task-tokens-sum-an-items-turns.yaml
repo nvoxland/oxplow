@@ -1,11 +1,22 @@
-# Agent Tokens, a section of a task's page: the turns of its efforts
-# listed, their total the line above them; a turn on no effort of it isn't counted.
+# Agent Tokens, a section of a task's page: the turns of the requests that
+# worked on it listed, their total the line above them; a turn of a request
+# that did not work on it isn't counted.
 given:
-  - { command: oxplow.task.create, input: { title: Fix it, assignee: thr1 }, bind: item }
-  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
-  - observe: { token_usage: { effort: eff1, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
-  - observe: { token_usage: { effort: eff1, prompt: again, input_tokens: 99, output_tokens: 1 } }
-  - observe: { token_usage: { prompt: chat, input_tokens: 9, output_tokens: 1 } }
+  - { command: oxplow.task.create, input: { title: Fix it }, bind: item }
+  - observe: { turn: { prompt: chat } }
+  - observe:
+      turn:
+        prompt: fix it
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+  - observe:
+      turn:
+        prompt: again
+        during:
+          - { command: oxplow.task.comment, input: { uri: $item.uri, body: "more" }, as: agent }
+  - observe: { token_usage: { turn: 2, prompt: fix it, input_tokens: 1999, output_tokens: 1 } }
+  - observe: { token_usage: { turn: 3, prompt: again, input_tokens: 99, output_tokens: 1 } }
+  - observe: { token_usage: { turn: 1, prompt: chat, input_tokens: 9, output_tokens: 1 } }
 when: { part: task-tokens, params: { uri: $item.uri } }
 expect:
   loaders:

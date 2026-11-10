@@ -1,9 +1,10 @@
 title: Changes
-description: 'What changed between two points of the project: a snapshot, an effort or a turn, or any two points picked here. The renderer of `snapshot`, `effort` and `turn`.'
+description: 'What changed between two points of the project: a snapshot, an effort, a request or a turn, or any two points picked here. The renderer of `snapshot`, `effort`, `request` and `turn`.'
 icon: git-compare
 for:
 - oxplow/snapshot
 - oxplow/effort
+- oxplow/request
 - oxplow/turn
 default: true
 params:
@@ -26,26 +27,63 @@ loaders:
     sql: |
       WITH res AS (
         SELECT uri_resource(:uri) AS kind, uri_param(:uri, 'id') AS id
+      ), rq AS (
+        -- A request on the snapshot line of the stream of its first turn.
+        SELECT CAST(substr(res.id, 4) AS INTEGER) AS id, th.stream_id AS stream_id,
+               min(t.started_at) AS began, max(t.ended_at) AS ended, max(t.ended_at IS NULL) AS running
+        FROM res, v_agent_turn t JOIN v_thread th ON th.id = t.thread_id
+        WHERE res.kind = 'oxplow/request' AND t.request_id = CAST(substr(res.id, 4) AS INTEGER)
+          AND th.stream_id = (SELECT th2.stream_id FROM v_agent_turn t2 JOIN v_thread th2 ON th2.id = t2.thread_id
+                               WHERE t2.request_id = t.request_id ORDER BY t2.id LIMIT 1)
+        GROUP BY th.stream_id
       ), derived AS (
-        SELECT 'effort' AS subject, e.id AS effort_row, e.task,
+        SELECT 'effort' AS subject, e.id AS effort_row, NULL AS turn_row, NULL AS request_row, e.task,
                CASE WHEN e.start_snapshot_id IS NOT NULL THEN 'snap:' || e.start_snapshot_id ELSE '' END AS s,
                CASE WHEN e.end_snapshot_id IS NOT NULL THEN 'snap:' || e.end_snapshot_id ELSE 'working' END AS en
         FROM res, v_effort e WHERE res.kind = 'oxplow/effort' AND e.id = CAST(substr(res.id, 4) AS INTEGER)
         UNION ALL
-        SELECT 'turn', NULL, NULL, 'snap:' || t.start_snapshot_id,
-               CASE WHEN t.snapshot_id IS NOT NULL THEN 'snap:' || t.snapshot_id ELSE 'working' END
-        FROM res, v_agent_turn t WHERE res.kind = 'oxplow/turn' AND t.id = CAST(substr(res.id, 4) AS INTEGER)
-          AND t.start_snapshot_id IS NOT NULL
+        -- A turn: from the last take at or before it started to its own
+        -- turn_end take, else the last take at or before it ended.
+        SELECT 'turn', NULL, t.id, NULL, NULL,
+               coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
+                          WHERE p.stream_id = th.stream_id AND p.created_at <= t.started_at
+                          ORDER BY p.created_at DESC, p.id DESC LIMIT 1), ''),
+               CASE WHEN t.ended_at IS NULL THEN 'working'
+                    ELSE coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
+                                    WHERE p.stream_id = th.stream_id
+                                      AND (p.created_at <= t.ended_at
+                                           OR p.id IN (SELECT o.snapshot_id FROM v_snapshot_op o
+                                                        WHERE o.trigger = 'turn_end' AND o.turn_id = t.id))
+                                    ORDER BY p.created_at DESC, p.id DESC LIMIT 1), 'working') END
+        FROM res, v_agent_turn t JOIN v_thread th ON th.id = t.thread_id
+        WHERE res.kind = 'oxplow/turn' AND t.id = CAST(substr(res.id, 4) AS INTEGER)
         UNION ALL
-        SELECT 'snapshot', NULL, NULL,
+        -- A request: the same, across its turns on the stream.
+        SELECT 'request', NULL, NULL, rq.id, NULL,
+               coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
+                          WHERE p.stream_id = rq.stream_id AND p.created_at <= rq.began
+                          ORDER BY p.created_at DESC, p.id DESC LIMIT 1), ''),
+               CASE WHEN rq.running THEN 'working'
+                    ELSE coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
+                                    WHERE p.stream_id = rq.stream_id
+                                      AND (p.created_at <= rq.ended
+                                           OR p.id IN (SELECT o.snapshot_id FROM v_snapshot_op o
+                                                         JOIN v_agent_turn tt ON tt.id = o.turn_id
+                                                        WHERE o.trigger = 'turn_end' AND tt.request_id = rq.id))
+                                    ORDER BY p.created_at DESC, p.id DESC LIMIT 1), 'working') END
+        FROM rq
+        UNION ALL
+        SELECT 'snapshot', NULL, NULL, NULL, NULL,
                coalesce((SELECT 'snap:' || max(p.id) FROM v_snapshot p WHERE p.stream_id = n.stream_id AND p.id < n.id), ''),
                'snap:' || n.id
         FROM res, v_snapshot n WHERE res.kind = 'oxplow/snapshot' AND n.id = CAST(res.id AS INTEGER)
         UNION ALL
-        SELECT 'range', NULL, NULL, '', '' FROM res WHERE res.kind IS NULL
+        SELECT 'range', NULL, NULL, NULL, NULL, '', '' FROM res WHERE res.kind IS NULL
       ), chosen AS (
         SELECT CASE WHEN coalesce(:end, '') <> '' THEN 'range' ELSE d.subject END AS subject,
                CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.effort_row END AS effort_row,
+               CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.turn_row END AS turn_row,
+               CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.request_row END AS request_row,
                CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.task END AS task,
                CASE WHEN coalesce(:end, '') <> '' THEN CASE WHEN :start = 'none' THEN '' ELSE coalesce(:start, '') END ELSE d.s END AS start_rev,
                CASE WHEN coalesce(:end, '') <> '' THEN :end ELSE d.en END AS end_rev
@@ -58,6 +96,12 @@ loaders:
              (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev) AS range_change_id,
              CASE WHEN effort_row IS NOT NULL
                   THEN (SELECT c.id FROM v_change c WHERE c.kind = 'effort' AND c.target = CAST(effort_row AS TEXT))
+                  WHEN turn_row IS NOT NULL
+                  THEN coalesce((SELECT c.id FROM v_change c WHERE c.kind = 'turn' AND c.target = CAST(turn_row AS TEXT)),
+                                (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev))
+                  WHEN request_row IS NOT NULL
+                  THEN coalesce((SELECT c.id FROM v_change c WHERE c.kind = 'request' AND c.target = CAST(request_row AS TEXT)),
+                                (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev))
                   ELSE (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev) END AS change_id
       FROM chosen WHERE end_rev <> ''
     columns:
@@ -105,7 +149,7 @@ loaders:
                     ELSE substr(rev, 5, 7) END AS label
         FROM ends
       )
-      SELECT CASE WHEN :subject = 'effort' THEN 'Effort' WHEN :subject = 'turn' THEN 'Turn'
+      SELECT CASE WHEN :subject = 'effort' THEN 'Effort' WHEN :subject = 'turn' THEN 'Turn' WHEN :subject = 'request' THEN 'Request'
                   WHEN :subject = 'snapshot' THEN 'Snapshot' ELSE 'Comparison' END AS what,
              (SELECT label FROM shown WHERE role = 'from') AS from_label,
              (SELECT label FROM shown WHERE role = 'to') AS to_label,
@@ -114,6 +158,7 @@ loaders:
              CASE WHEN :in_progress THEN CASE :subject
                   WHEN 'effort' THEN 'Effort is in progress - diffing the start snapshot against the live working tree, which keeps changing until it closes.'
                   WHEN 'turn' THEN 'Turn is still running - diffing its start snapshot against the live working tree, which keeps changing until the turn ends.'
+                  WHEN 'request' THEN 'Request is still running - diffing its start snapshot against the live working tree, which keeps changing until it ends.'
                   ELSE 'Diffing against the live working tree, which keeps changing.' END END AS note
     params:
       subject:

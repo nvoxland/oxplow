@@ -1,5 +1,5 @@
 title: Task
-description: "One task, whichever list it is on: what it is and what can be done to it in the rail, and its description, the items under it, its efforts, comments and links."
+description: "One task, whichever list it is on: what it is and what can be done to it in the rail, and its description, the items under it, its requests, comments and links."
 label: '{{row.title}}'
 for: oxplow/task
 default: true
@@ -250,11 +250,11 @@ view:
       label: Asked
       format: relative
     empty: No prompt has named it.
-  # Its efforts: what has been done on it.
+  # Its requests: what has been done on it.
   - id: activity
     title: Activity
     embed:
-      page: oxplow/item-efforts
+      page: oxplow/item-requests
   - id: comments
     title: Comments
     embed:

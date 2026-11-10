@@ -42,12 +42,22 @@ loaders:
                (SELECT group_concat(label, ', ') FROM (
                   SELECT b.name AS label FROM v_branch b WHERE b.head_sha = n.sha AND b.kind = 'local'
                   UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = n.sha)) AS names,
-               (SELECT group_concat(coalesce(w.title, uri_param(e.task, 'id'), e.title, 'Unlinked work'), ', ')
-                  FROM v_effort e LEFT JOIN v_task w ON w.uri = e.task
-                 WHERE e.start_snapshot_id <= n.id AND e.end_snapshot_id = n.id) AS completed,
-               (SELECT group_concat(coalesce(w.title, uri_param(e.task, 'id'), e.title, 'Unlinked work'), ', ')
-                  FROM v_effort e LEFT JOIN v_task w ON w.uri = e.task
-                 WHERE e.start_snapshot_id <= n.id AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id > n.id)) AS in_flight,
+               -- The tasks the request of the turn that took it worked on: a turn's
+               -- end take completes the turn, any other take of a turn is in flight.
+               (SELECT group_concat(label, ', ') FROM (
+                  SELECT DISTINCT coalesce(w.title, uri_param(rt.task, 'id'), 'Unlinked work') AS label
+                  FROM v_snapshot_op o
+                  JOIN v_agent_turn t ON t.id = o.turn_id
+                  LEFT JOIN v_request_task rt ON rt.request_id = t.request_id
+                  LEFT JOIN v_task w ON w.uri = rt.task
+                  WHERE o.snapshot_id = n.id AND o.trigger = 'turn_end')) AS completed,
+               (SELECT group_concat(label, ', ') FROM (
+                  SELECT DISTINCT coalesce(w.title, uri_param(rt.task, 'id'), 'Unlinked work') AS label
+                  FROM v_snapshot_op o
+                  JOIN v_agent_turn t ON t.id = o.turn_id
+                  LEFT JOIN v_request_task rt ON rt.request_id = t.request_id
+                  LEFT JOIN v_task w ON w.uri = rt.task
+                  WHERE o.snapshot_id = n.id AND o.trigger <> 'turn_end')) AS in_flight,
                n.id = (SELECT min(id) FROM v_snapshot WHERE stream_id = :stream_id)
                  AND (SELECT count(*) FROM v_snapshot WHERE stream_id = :stream_id) < CASE WHEN :all THEN 500 ELSE 20 END AS initial
         FROM snaps n),
@@ -97,12 +107,22 @@ loaders:
                (SELECT group_concat(label, ', ') FROM (
                   SELECT b.name AS label FROM v_branch b WHERE b.head_sha = n.sha AND b.kind = 'local'
                   UNION ALL SELECT t.name FROM v_tag t WHERE t.sha = n.sha)) AS names,
-               (SELECT group_concat(coalesce(w.title, uri_param(e.task, 'id'), e.title, 'Unlinked work'), ', ')
-                  FROM v_effort e LEFT JOIN v_task w ON w.uri = e.task
-                 WHERE e.start_snapshot_id <= n.id AND e.end_snapshot_id = n.id) AS completed,
-               (SELECT group_concat(coalesce(w.title, uri_param(e.task, 'id'), e.title, 'Unlinked work'), ', ')
-                  FROM v_effort e LEFT JOIN v_task w ON w.uri = e.task
-                 WHERE e.start_snapshot_id <= n.id AND (e.end_snapshot_id IS NULL OR e.end_snapshot_id > n.id)) AS in_flight,
+               -- The tasks the request of the turn that took it worked on: a turn's
+               -- end take completes the turn, any other take of a turn is in flight.
+               (SELECT group_concat(label, ', ') FROM (
+                  SELECT DISTINCT coalesce(w.title, uri_param(rt.task, 'id'), 'Unlinked work') AS label
+                  FROM v_snapshot_op o
+                  JOIN v_agent_turn t ON t.id = o.turn_id
+                  LEFT JOIN v_request_task rt ON rt.request_id = t.request_id
+                  LEFT JOIN v_task w ON w.uri = rt.task
+                  WHERE o.snapshot_id = n.id AND o.trigger = 'turn_end')) AS completed,
+               (SELECT group_concat(label, ', ') FROM (
+                  SELECT DISTINCT coalesce(w.title, uri_param(rt.task, 'id'), 'Unlinked work') AS label
+                  FROM v_snapshot_op o
+                  JOIN v_agent_turn t ON t.id = o.turn_id
+                  LEFT JOIN v_request_task rt ON rt.request_id = t.request_id
+                  LEFT JOIN v_task w ON w.uri = rt.task
+                  WHERE o.snapshot_id = n.id AND o.trigger <> 'turn_end')) AS in_flight,
                n.id = (SELECT min(id) FROM v_snapshot WHERE stream_id = :stream_id)
                  AND (SELECT count(*) FROM v_snapshot WHERE stream_id = :stream_id) < CASE WHEN :all THEN 500 ELSE 20 END AS initial
         FROM snaps n),

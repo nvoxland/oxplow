@@ -1,5 +1,5 @@
 title: Tasks
-description: "The active task tracker's items that a task page shows, filtered once for every page. `show`: `thread` (assigned to the thread), `stream` (assigned to any of the stream's threads), `me` (assigned to the person), `pool` (assigned to nobody: what any thread may pull) or `all`. A done or canceled item is nobody's, so for those `thread` and `stream` mean an effort there worked it, and `me` and `pool` show none. `state`: `all`, `open` (any stage but a done or canceled one), one of the list's stages (`task-stages`), or a bucket (`backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled`) for its first stage. `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`state`: its bucket, `stage` and `stage_title`: the list's stage and its name for it, `summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `assignee` and `assignee_title`: who it's for — a thread's title, `You` or `Unassigned` — `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `is_open`, `not_here`, `not_mine`, `assigned`), and `ord`, the order to draw it in: open items by assignee and their queue with each epic's children under it, then done and canceled ones, the latest first."
+description: "The active task tracker's items that a task page shows, filtered once for every page. `show`: `thread` (assigned to the thread), `stream` (assigned to any of the stream's threads), `me` (assigned to the person), `pool` (assigned to nobody: what any thread may pull) or `all`. A done or canceled item is nobody's, so for those `thread` and `stream` mean a request there worked it, and `me` and `pool` show none. `state`: `all`, `open` (any stage but a done or canceled one), one of the list's stages (`task-stages`), or a bucket (`backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled`) for its first stage. `priority` (`any`, or a value of the list's `priority` field) and `q` (text in the title or any field) keep an item that matches, and its epic. Each row has what a page draws (`state`: its bucket, `stage` and `stage_title`: the list's stage and its name for it, `summary`: the description's first sentence, `prio_tone`: `danger` for urgent and `warning` for high, a row's edge, `fields`: the list's editable choice fields joined, `assignee` and `assignee_title`: who it's for — a thread's title, `You` or `Unassigned` — `parent_title`, `depth`: 1 under an epic that is shown, `comments`, `closed_at`, `done_rank`: 1 for the latest closed in its state), what its actions may do (`can_*`, `is_open`, `not_here`, `not_mine`, `assigned`), and `ord`, the order to draw it in: open items by assignee and their queue with each epic's children under it, then done and canceled ones, the latest first."
 needs:
 - task_tracker
 params:
@@ -42,11 +42,11 @@ loaders:
         FROM v_task w
         WHERE CASE WHEN w.state IN ('done', 'canceled') THEN
                 CASE :show
-                  WHEN 'thread' THEN EXISTS (SELECT 1 FROM v_effort e
-                                              WHERE e.task = w.uri AND e.thread_id = :thread_id)
-                  WHEN 'stream' THEN EXISTS (SELECT 1 FROM v_effort e
-                                              WHERE e.task = w.uri
-                                                AND e.thread_id IN (SELECT id FROM stream_thread))
+                  WHEN 'thread' THEN EXISTS (SELECT 1 FROM v_request_task rt
+                                              WHERE rt.task = w.uri AND rt.thread_id = :thread_id)
+                  WHEN 'stream' THEN EXISTS (SELECT 1 FROM v_request_task rt
+                                              WHERE rt.task = w.uri
+                                                AND rt.thread_id IN (SELECT id FROM stream_thread))
                   WHEN 'all' THEN 1
                   ELSE 0 END
               ELSE

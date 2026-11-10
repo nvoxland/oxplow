@@ -38,15 +38,15 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`:
   - What Deviated (its own dataset `v_oxplow_deviation`: each
-    effort's files against its task's title and body — a file is in
+    request's files (its turns' `v_turn_file` rows, claimed or sole)
+    against its tasks' titles and bodies — a file is in
     the area when the text names it or one of its directories at least
     two levels deep; none when the item names no area. Live, not
-    materialized: 0.2 s over all 5.5k effort files of this repo's
-    database)
+    materialized)
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `oxplow/commit.sections` and `oxplow/uncommitted.sections` slots)
-  - Struggled Here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per effort)
+  - Struggled Here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per request, read through each tool call's turn)
   - Context Read (`v_context_read`)
 
   `questions.yaml` + `README.md` (its skill)
@@ -268,8 +268,8 @@ screens and the holder's add the review and analysis:
   panel's `body` is a part.
 - **The task page** (`task`, the renderer of `oxplow/task`;
   tasks.md "One page for every item"): About, Stage and Details in its
-  rail, the description, the items under it, Activity (the `item-efforts`
-  page), Comments and Links (the `task-comments` and
+  rail, the description, the items under it, Activity (the `item-requests`
+  page: the requests that worked on it), Comments and Links (the `task-comments` and
   `task-links` parts) and its sections slot, where bundled mounts
   `task-tokens` and `item-shared-work`. With it, `task-actions` (an
   agent's Mark done / Record a block… on one item) and `link-effort`, the

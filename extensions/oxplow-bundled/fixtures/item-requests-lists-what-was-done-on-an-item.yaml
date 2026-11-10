@@ -1,0 +1,28 @@
+# What has been done on a task: the requests that worked on it, newest
+# first, each with its prompt, state, turns and the files its turns changed;
+# the task page shows it as its Activity.
+given:
+  - { command: oxplow.task.create, input: { title: Fix it }, bind: item }
+  - { command: oxplow.task.create, input: { title: Other }, bind: other }
+  - observe:
+      turn:
+        prompt: "Fix it first\nwith detail"
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+        tools:
+          - { name: Edit, kind: edit, paths: [a.rs], ok: true }
+  - observe:
+      turn:
+        prompt: Then finish it
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: done }, as: agent }
+when: { page: item-requests, params: { uri: $item.uri } }
+expect:
+  loaders:
+    requests:
+      rows:
+        - { uri: $any, prompt: Then finish it, state: finished, turns: 1, files: 0 }
+        - { uri: $any, prompt: Fix it first, state: finished, turns: 1 }
+steps:
+  - params: { uri: $other.uri }
+    expect: { loaders: { requests: { rows: 0 } } }

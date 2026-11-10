@@ -191,7 +191,7 @@ Editor and the Text view, never the default; `embed` it with a `uri` to
 draw a markdown file inside another page), `media` (an image or a PDF
 shown as itself, the default for one anywhere; the Text view stands
 aside for it), `tsv` (a TSV file as a table), `wiki-page`, `task`,
-`diff-view` for `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, and
+`diff-view` for `oxplow/snapshot`, `oxplow/effort`, `oxplow/request` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no
 `change-analysis` page.

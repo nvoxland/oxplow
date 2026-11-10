@@ -13,7 +13,7 @@ loaders:
                        FROM (SELECT count(*) AS n, coalesce(w.stage_title, w.stage) AS label,
                                     CASE w.state WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'blocked' THEN 2
                                                  WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END AS rank
-                             FROM v_task w WHERE w.uri IN (SELECT e.task FROM v_effort e WHERE e.thread_id = t.id)
+                             FROM v_task w WHERE w.uri IN (SELECT rt.task FROM v_request_task rt WHERE rt.thread_id = t.id)
                              GROUP BY w.stage ORDER BY rank, label)), '') AS work,
              uri_param(t.uri, 'id') AS thread
       FROM v_thread t

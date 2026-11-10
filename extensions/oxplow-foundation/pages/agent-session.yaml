@@ -29,17 +29,19 @@ loaders:
         from: row.thread
       conversation:
         from: row.conversation
-  # Its thread's work, and the efforts whose files it edited.
+  # Its thread's work, and the requests its turns ran.
   related:
     sql: |
       SELECT 'Thread work' AS title, uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr' || s.thread_id) AS uri,
              'The tasks of its thread' AS description, 1 AS ord
       FROM v_agent_session s WHERE s.uri = :uri
       UNION ALL
-      SELECT e.title, e.uri, 'An effort whose files this session edited', 2
-      FROM v_effort e
-      WHERE e.id IN (SELECT f.effort_id FROM v_effort_file f
-                     WHERE f.agent_session_id = (SELECT s.id FROM v_agent_session s WHERE s.uri = :uri))
+      SELECT substr(r.prompt, 1, CASE WHEN instr(r.prompt, char(10)) > 0 THEN instr(r.prompt, char(10)) - 1 ELSE length(r.prompt) END),
+             r.uri, 'A request this session ran', 2
+      FROM v_request r
+      WHERE r.id IN (SELECT t.request_id FROM v_agent_turn t
+                     WHERE t.agent_session_id = (SELECT s.id FROM v_agent_session s WHERE s.uri = :uri)
+                       AND t.request_id IS NOT NULL)
       ORDER BY ord, 1
   agent_session_conversations:
     sql: |

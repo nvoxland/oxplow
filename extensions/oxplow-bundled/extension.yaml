@@ -43,17 +43,16 @@ datasets:
       - { name: expected, type: "", doc: "Its usual partners, `, `-separated (for `usual-co-changers-absent`)." }
       - { name: dormant_days, type: "", doc: "Days since a commit last touched it (for `dormant`; 90 when never)." }
   - name: deviation
-    version: 1
-    description: "Files each effort changed outside the area its task names: a file is in the area when the item's title or body names it, or one of its directories at least two levels deep (`src/ui`). An item that names no area has none."
+    version: 2
+    description: "Files each request changed outside the area its tasks name: a file is in the area when a task's title or body names it, or one of its directories at least two levels deep (`src/ui`). A request whose tasks name no area has none."
     fields:
-      - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
+      - { name: request_id, type: INT, doc: "The request (v_request.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
-      - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
   - name: struggle
-    version: 1
-    description: "Where the agent had trouble in an effort, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
+    version: 2
+    description: "Where the agent had trouble in a request, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
     fields:
-      - { name: effort_id, type: INTEGER, doc: "Effort." }
+      - { name: request_id, type: INT, doc: "The request (v_request.id)." }
       - { name: thread_id, type: INTEGER, doc: "Thread." }
       - { name: agent_session_id, type: INTEGER, doc: "The agent session it happened in; NULL when not recorded." }
       - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
@@ -119,7 +118,7 @@ configuration:
       struggle:
         type: object
         additionalProperties: false
-        description: When the agent is said to have struggled in an effort.
+        description: When the agent is said to have struggled in a request.
         properties:
           repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
