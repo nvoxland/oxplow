@@ -1239,6 +1239,16 @@ fn record_take_tx(
             })
             .collect();
         insert_rows_tx(tx, &rows).map_err(map_sql_err)?;
+        for row in &rows {
+            if let Some((first, last)) = take.changed_at.get(&row.path) {
+                tx.execute(
+                    "UPDATE file_snapshot SET first_changed_at = ?3, last_changed_at = ?4
+                      WHERE snapshot_id = ?1 AND path = ?2",
+                    params![sid, row.path, ts_to_string(*first), ts_to_string(*last)],
+                )
+                .map_err(map_sql_err)?;
+            }
+        }
         // The tree read before the lock holds when no take landed since;
         // otherwise it is read here.
         let tree = match read_before {
@@ -1489,6 +1499,10 @@ pub struct TakeRecord {
     /// A snapshot provider's own name for the state it marked ;
     /// `None` for core's capture pipeline.
     pub handle: Option<String>,
+    /// When the watcher first and last heard each row's path change since
+    /// the previous take, by path. A row absent from it (the startup sweep,
+    /// a file with no watcher event) has no change time.
+    pub changed_at: std::collections::HashMap<String, (Timestamp, Timestamp)>,
 }
 
 /// What a take recorded.
@@ -3289,6 +3303,7 @@ mod tests {
             provider: None,
             contents: true,
             handle: None,
+            changed_at: Default::default(),
         }
     }
 

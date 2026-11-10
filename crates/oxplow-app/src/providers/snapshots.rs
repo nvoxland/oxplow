@@ -449,6 +449,7 @@ impl SnapshotProvider for ExternalSnapshots {
                 provider: Some(self.instance.id.clone()),
                 contents: self.contents,
                 handle: Some(marked.handle),
+                changed_at: Default::default(),
             })
             .await
             .map_err(storage)?;

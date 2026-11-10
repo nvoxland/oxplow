@@ -1074,6 +1074,14 @@ seeders for tests.
   (NULL for core's capture). The stream's newest op's handle is the
   parent core hands the provider's next mark (`.context/providers.md` "A
   snapshots provider").
+- **Each file row carries when it changed** (V3): `file_snapshot.first_changed_at`
+  / `last_changed_at`, the times the file watcher first and last reported
+  the path changed since the previous take (a dirty-set entry keeps them,
+  and a take that fails puts them back). NULL when the take found the
+  change itself — the startup sweep, a file no watcher event named — which
+  is then known only to lie between the two takes. They are the watcher's
+  clock, so a join to turns by them is best effort. Read on
+  `v_snapshot_file` (v3).
 - **A snapshot row carries its creating op** (P2.11): the stream listing
   (the `list_snapshots_for_stream` IPC op, `v_snapshot`) joins each snapshot's FIRST op for its
   `parent_snapshot_id`, `trigger` and `over_budget`. The diff view's
