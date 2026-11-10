@@ -1324,7 +1324,13 @@ fn record_take_tx(
     // Whoever asked for a take waits on its event (a turn's checkpoint, an
     // effort's bracket). A request nobody is anchored to that found nothing
     // is not a fact about the worktree.
-    let waited_on = take.thread_id.is_some() || take.turn_id.is_some() || take.effort_id.is_some();
+    // The same for a `git_refs` take, which runs when this stream's HEAD
+    // moved: collectors that follow a HEAD move (`where: { trigger:
+    // git_refs }`) hear it, tree changed or not.
+    let waited_on = take.thread_id.is_some()
+        || take.turn_id.is_some()
+        || take.effort_id.is_some()
+        || take.trigger == SnapshotTrigger::GitRefs;
     if unchanged && op_seq.is_none() && !waited_on {
         return Ok(Some(TakeOutcome {
             op_seq,
@@ -3586,6 +3592,19 @@ mod tests {
         assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
         // Nobody waits on these requests: no event either.
         assert_eq!(events(&db, "snapshot.taken").len(), 1);
+        // A `git_refs` take runs because this stream's HEAD moved: it logs
+        // its event (collectors follow HEAD moves by it), tree changed or not.
+        let moved = store
+            .record_take(take(1, vec![], SnapshotTrigger::GitRefs))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(moved.unchanged);
+        assert_eq!(count(&db, "SELECT count(*) FROM snapshot_op"), 1);
+        let taken = events(&db, "snapshot.taken");
+        assert_eq!(taken.len(), 2);
+        assert_eq!(taken[1]["trigger"], "git_refs");
+        assert_eq!(taken[1]["unchanged"], true);
     }
 
     /// A request that names a turn, a thread or an effort is waited on (the

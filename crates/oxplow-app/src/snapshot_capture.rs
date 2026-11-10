@@ -714,12 +714,17 @@ impl SnapshotCaptureService {
         self.inner.quiet_shutdown.notify_one();
     }
 
-    /// Spawn a listener that turns a move of this stream's refs (`moves`,
-    /// the VCS watcher's channel) into a snapshot request. It fires
-    /// whenever HEAD or any ref moves (commit, branch switch, fetch, pull,
-    /// rebase, …), so a fresh commit shows up in Local History as a
-    /// snapshot row tagged with the new HEAD even when the worktree
-    /// itself didn't change between snapshots.
+    /// Spawn a listener that turns a move of this stream's HEAD into a
+    /// snapshot request. `moves` is the VCS watcher's channel, which fires
+    /// for any change under the repository's `refs/` (a commit in another
+    /// worktree, a fetch, a `packed-refs` rewrite, a lock file): the listener
+    /// reads this worktree's own HEAD (branch and commit) and takes only when
+    /// it differs from the one it last saw. The first ref change after the
+    /// listener starts counts as a move, since the HEAD at start is not known
+    /// to have been recorded. A fresh commit therefore shows up in Local
+    /// History as a snapshot tagged with the new HEAD even when the worktree
+    /// itself didn't change between snapshots, and however many file or ref
+    /// events the commit made, it is one take.
     pub fn spawn_git_refs_listener(
         &self,
         moves: &crate::ref_moves::RefMoves,
@@ -727,13 +732,23 @@ impl SnapshotCaptureService {
         let mut rx = moves.subscribe();
         let this = self.clone();
         tokio::spawn(async move {
-            // A missed move may have been this stream's: the take is
-            // idempotent, so it takes.
+            let mut seen: Option<(Option<String>, Option<String>)> = None;
+            // A missed move may have been this stream's: reading HEAD
+            // decides, so it is looked at as if it were.
             while let Some(moved) = rx.recv().await {
-                if moved.may_concern(this.inner.stream_id) {
-                    if let Err(e) = this.request_snapshot_for_git_refs().await {
-                        debug!(error = %e, "snapshot: git-refs trigger failed");
-                    }
+                if !moved.may_concern(this.inner.stream_id) {
+                    continue;
+                }
+                let Ok(head) = this.inner.vcs.head(&this.inner.project_dir).await else {
+                    continue;
+                };
+                let head = (head.branch, head.revision);
+                if seen.as_ref() == Some(&head) {
+                    continue; // another worktree's ref, a fetch, a lock file
+                }
+                seen = Some(head);
+                if let Err(e) = this.request_snapshot_for_git_refs().await {
+                    debug!(error = %e, "snapshot: git-refs trigger failed");
                 }
             }
         })
@@ -2971,6 +2986,111 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         panic!("the lagged listener never took");
+    }
+
+    /// A repo with one commit holding `tracked.txt`.
+    fn repo_with_one_commit(
+        dir: &std::path::Path,
+    ) -> (git2::Repository, git2::Oid, std::path::PathBuf) {
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "t").unwrap();
+        cfg.set_str("user.email", "t@example.com").unwrap();
+        std::fs::write(dir.join(".gitignore"), ".oxplow\n").unwrap();
+        let tracked = dir.join("tracked.txt");
+        std::fs::write(&tracked, "v1").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        idx.add_path(std::path::Path::new(".gitignore")).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        drop(tree);
+        (repo, head, tracked)
+    }
+
+    /// A ref that moved somewhere else in the repository (another worktree's
+    /// commit, a fetch, a lock file) fires this stream's ref channel too, but
+    /// its own HEAD did not move: it takes nothing.
+    #[tokio::test]
+    async fn a_ref_moved_elsewhere_in_the_repository_causes_no_take_on_this_stream() {
+        let project = tempdir().unwrap();
+        let (_repo, _head, tracked) = repo_with_one_commit(project.path());
+        let (svc, store) = svc_for(project.path()).await;
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        // The first ref change after the start counts as a move: it takes.
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        moves.moved(TEST_STREAM);
+        wait_for_ops(&store, Duration::from_secs(5), |ops| !ops.is_empty()).await;
+        let before = store.list_ops(TEST_STREAM, 20).await.unwrap().len();
+        assert_eq!(before, 1);
+        // Edits wait for a take of their own; refs move elsewhere three times.
+        let waiting = project.path().join("waiting.txt");
+        std::fs::write(&waiting, "x").unwrap();
+        svc.mark_dirty(waiting, WatchEventKind::Other);
+        for _ in 0..3 {
+            moves.moved(TEST_STREAM);
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let ops = store.list_ops(TEST_STREAM, 20).await.unwrap();
+        assert_eq!(ops.len(), before, "{ops:?}");
+        assert!(store.list_for_path("waiting.txt").await.unwrap().is_empty());
+    }
+
+    /// A commit in this worktree is one take, stamped with the new HEAD,
+    /// however many ref events it made.
+    #[tokio::test]
+    async fn a_commit_in_this_worktree_gives_one_take_stamped_with_the_new_head() {
+        let project = tempdir().unwrap();
+        let (repo, head1, tracked) = repo_with_one_commit(project.path());
+        let (svc, store) = svc_for(project.path()).await;
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        let first = svc
+            .request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        // Listening has begun: one unrelated ref event is its first.
+        moves.moved(TEST_STREAM);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let quiet_ops = store.list_ops(TEST_STREAM, 20).await.unwrap().len();
+        assert_eq!(quiet_ops, 1, "an unchanged first event logs no op");
+
+        let sig = repo.signature().unwrap();
+        let parent = repo.find_commit(head1).unwrap();
+        let tree = parent.tree().unwrap();
+        let head2 = repo
+            .commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+            .unwrap();
+        for _ in 0..5 {
+            moves.moved(TEST_STREAM);
+        }
+        let want = Some(Revision::git(head2.to_string()));
+        for _ in 0..100 {
+            if store.get_snapshot_revision(first).await.unwrap() == want {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(store.get_snapshot_revision(first).await.unwrap(), want);
+        let triggers: Vec<SnapshotTrigger> = store
+            .list_ops(TEST_STREAM, 20)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|o| o.trigger)
+            .collect();
+        assert_eq!(
+            triggers,
+            vec![SnapshotTrigger::HeadMoved, SnapshotTrigger::Startup]
+        );
     }
 
     #[tokio::test]

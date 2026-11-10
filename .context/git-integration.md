@@ -262,7 +262,9 @@ loading spinner) by:
 
 - The Directory page's loaders (`v_file`, `v_branch`, `v_change` follow it).
 - `SnapshotCapture::spawn_git_refs_listener` — requests a snapshot for
-  the stream, so every commit lands a snapshot row stamped with the new
+  the stream **only when this worktree's own HEAD moved** (branch or
+  commit differs from the one it last saw; the first ref change after
+  start counts), so every commit lands a snapshot row stamped with the new
   HEAD (`snapshot.revision`/`branch`) even when the worktree
   didn't change. Beyond Local History, those rows are the **anchor
   points for metric ancestry** (tsk97/tsk102): a dirty test run's code
@@ -654,7 +656,12 @@ they came from the in-app commit affordance or an external
 
 `SnapshotCaptureService::spawn_git_refs_listener` (wired from the
 desktop boot in `apps/desktop/src-tauri/src/main.rs`) subscribes to
-the ref moves (`RefMoves`) of its stream. On each event it drains
+the ref moves (`RefMoves`) of its stream. The channel fires for any change
+under the repository's `refs/` (a commit in another worktree, a fetch, a
+`packed-refs` rewrite, a lock file), so the listener reads the worktree's
+own HEAD and acts only when it differs from the one it last saw; the commit
+indexer, the branch reconciler and the branch list still hear every ref.
+When HEAD moved it drains
 any pending dirty paths via `request_snapshot(SnapshotSourceKind::GitRefs)`,
 then — if the worktree is clean and HEAD differs from the latest
 snapshot's `revision` — **re-stamps the latest snapshot's
