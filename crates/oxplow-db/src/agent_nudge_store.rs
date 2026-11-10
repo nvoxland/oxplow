@@ -110,11 +110,13 @@ fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
 const SELECT_COLS: &str =
     "id, thread_id, effort_id, kind, message, trigger, created_at, turn_id, delivered_at, audience";
 
-/// Where a one-shot mark is kept: a thread, or one of its efforts.
+/// Where a one-shot mark is kept: a thread, one of its efforts, or one of
+/// its requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OnceScope {
     pub thread: i64,
     pub effort: Option<i64>,
+    pub request: Option<i64>,
 }
 
 impl OnceScope {
@@ -122,6 +124,7 @@ impl OnceScope {
         Self {
             thread,
             effort: None,
+            request: None,
         }
     }
 
@@ -129,6 +132,17 @@ impl OnceScope {
         Self {
             thread,
             effort: Some(effort),
+            request: None,
+        }
+    }
+
+    /// A request of the thread: a mark here is fresh for the next request,
+    /// and deliveries are counted within it.
+    pub fn request(thread: i64, request: i64) -> Self {
+        Self {
+            thread,
+            effort: None,
+            request: Some(request),
         }
     }
 }
@@ -141,6 +155,11 @@ pub struct SqliteAgentNudgeStore {
 impl SqliteAgentNudgeStore {
     pub fn new(db: Database) -> Self {
         Self { db }
+    }
+
+    /// The database the marks and nudges live in.
+    pub fn database(&self) -> &Database {
+        &self.db
     }
 
     /// Insert a nudge row. Returns the new row id, or `None` when a nudge
@@ -196,16 +215,17 @@ impl SqliteAgentNudgeStore {
     }
 
     /// How many `kind` nudges reached the agent in `scope`: within the
-    /// effort, or anywhere on the thread.
+    /// request, or the effort, or anywhere on the thread.
     pub async fn delivered(&self, scope: OnceScope, kind: &str) -> Result<i64, DomainError> {
         let kind = kind.to_string();
         self.db
             .call(move |conn| {
                 conn.query_row(
                     "SELECT count(*) FROM agent_nudge
-                      WHERE thread_id = ?1 AND (?2 IS NULL OR effort_id = ?2) AND kind = ?3
+                      WHERE thread_id = ?1 AND (?2 IS NULL OR effort_id = ?2)
+                        AND (?4 IS NULL OR request_id = ?4) AND kind = ?3
                         AND audience = 'agent' AND delivered_at IS NOT NULL",
-                    params![scope.thread, scope.effort, kind],
+                    params![scope.thread, scope.effort, kind, scope.request],
                     |r| r.get(0),
                 )
             })
@@ -250,8 +270,8 @@ impl SqliteAgentNudgeStore {
                 conn.query_row(
                     "SELECT EXISTS (SELECT 1 FROM once_mark
                       WHERE thread_id = ?1 AND coalesce(effort_id, 0) = coalesce(?2, 0)
-                        AND mark = ?3)",
-                    params![scope.thread, scope.effort, mark],
+                        AND coalesce(request_id, 0) = coalesce(?4, 0) AND mark = ?3)",
+                    params![scope.thread, scope.effort, mark, scope.request],
                     |r| r.get(0),
                 )
             })
@@ -314,9 +334,12 @@ pub fn record_tx(
     let now = ts_to_string(Timestamp::now());
     conn.query_row(
         "INSERT INTO agent_nudge
-           (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause, audience)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT (cause, kind, coalesce(effort_id, 0)) WHERE cause IS NOT NULL DO NOTHING
+           (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause, audience,
+            request_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                 (SELECT t.request_id FROM agent_turn t WHERE t.id = ?7))
+         ON CONFLICT (cause, kind, coalesce(effort_id, 0), coalesce(request_id, 0))
+           WHERE cause IS NOT NULL DO NOTHING
          RETURNING id",
         params![
             thread_val,
@@ -377,13 +400,16 @@ pub fn claim_once_tx(
 ) -> Result<bool, DomainError> {
     let n = conn
         .execute(
-            "INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (thread_id, coalesce(effort_id, 0), mark) DO NOTHING",
+            "INSERT INTO once_mark (thread_id, effort_id, mark, fired_at, request_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (thread_id, coalesce(effort_id, 0), coalesce(request_id, 0), mark)
+             DO NOTHING",
             params![
                 scope.thread,
                 scope.effort,
                 mark,
-                ts_to_string(Timestamp::now())
+                ts_to_string(Timestamp::now()),
+                scope.request
             ],
         )
         .map_err(crate::database::map_sql_err)?;
@@ -744,5 +770,29 @@ mod tests {
         assert!(store.list_for_effort(&effort).await.unwrap().is_empty());
         // Thread-scoped lookup also empty (the row is gone, not orphaned).
         assert!(store.list_for_thread(&thread).await.unwrap().is_empty());
+    }
+
+    /// A mark in a request's scope is fresh for the next request, and the
+    /// thread's and an effort's are separate from both.
+    #[tokio::test]
+    async fn once_marks_are_per_request() {
+        let (store, _thread, _effort) = fixture().await;
+        store
+            .db
+            .transaction(|tx| {
+                tx.execute_batch("INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1);")
+                    .map_err(crate::database::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let (one, two) = (OnceScope::request(1, 1), OnceScope::request(1, 2));
+        assert!(store.claim_once(one, "acme/hint").await.unwrap());
+        assert!(!store.claim_once(one, "acme/hint").await.unwrap());
+        assert!(store.claim_once(two, "acme/hint").await.unwrap());
+        assert!(store.has_fired(one, "acme/hint").await.unwrap());
+        assert!(!store
+            .has_fired(OnceScope::thread(1), "acme/hint")
+            .await
+            .unwrap());
     }
 }

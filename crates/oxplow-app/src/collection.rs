@@ -2484,15 +2484,16 @@ impl CollectionService {
         }) {
             return Ok(None);
         }
-        // Nudges below are effort-RELATIVE (key/dedup per effort), so they only
-        // run with a single open effort. The runs above are already recorded.
-        let Some(effort) = effort_opt else {
+        // The nudge below is paced per request (its turn's), else per effort.
+        // The runs above are already recorded.
+        let request = self.request_of_turn(origin.turn()).await;
+        if request.is_none() && effort_opt.is_none() {
             return Ok(None);
-        };
+        }
         // Nudge: the agent ran tests but this run regenerated no report
         // oxplow could parse for the effort (so the effort gets a
         // command-only test-run and no coverage). Steer it to the
-        // report-emitting command — at most once per effort. This is
+        // report-emitting command — at most once per request. This is
         // tool-agnostic: it keys only on "test run detected" + "no fresh
         // report", never on which tool ran; the command it names comes
         // from the project's own config.
@@ -2504,7 +2505,10 @@ impl CollectionService {
         let ran_the_runner = reads.unread.is_empty()
             && test_run_segment(bash.command, &test_patterns)
                 .is_some_and(|run| names_configured_runner(&cfg, &run));
-        if !produced_report && !ran_the_runner && self.mark_nudged(&effort).await {
+        if !produced_report
+            && !ran_the_runner
+            && self.mark_nudged(thread, request, effort_opt.as_ref()).await
+        {
             let msg = if reads.unread.is_empty() {
                 let root = self.worktree(thread).await;
                 report_nudge_message(&cfg, !self.report_collectors(&root).is_empty())
@@ -2513,7 +2517,7 @@ impl CollectionService {
             };
             self.persist_nudge(
                 thread,
-                Some(&effort),
+                effort_opt.as_ref(),
                 Raised::agent("report-less-run", &msg, bash.command),
                 origin,
             )
@@ -2625,16 +2629,46 @@ impl CollectionService {
         }
     }
 
-    /// Record that `effort` has been nudged about a report-less run.
-    /// `true` the first time (caller should nudge), `false` afterwards —
-    /// durably (`once_mark`), so a restart doesn't repeat it. A failed
-    /// write reads as "already nudged": don't nag on an error.
-    async fn mark_nudged(&self, effort: &Effort) -> bool {
+    /// The request of turn `turn` (none: no turn, or one recorded before
+    /// requests were).
+    async fn request_of_turn(&self, turn: Option<i64>) -> Option<i64> {
+        let turn = turn?;
         self.nudges
-            .claim_once(
-                oxplow_db::OnceScope::effort(effort.thread_id.value(), effort.id.value()),
-                "report-less-run",
-            )
+            .database()
+            .read(move |c| {
+                use rusqlite::OptionalExtension as _;
+                c.query_row(
+                    "SELECT request_id FROM agent_turn WHERE id = ?1",
+                    [turn],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .optional()
+                .map(Option::flatten)
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .ok()
+            .flatten()
+    }
+
+    /// Record that the request (else the open effort) has been nudged about
+    /// a report-less run. `true` the first time (caller should nudge),
+    /// `false` afterwards — durably (`once_mark`), so a restart doesn't
+    /// repeat it; the next request is fresh. A failed write reads as
+    /// "already nudged": don't nag on an error.
+    async fn mark_nudged(
+        &self,
+        thread: &ThreadId,
+        request: Option<i64>,
+        effort: Option<&Effort>,
+    ) -> bool {
+        let scope = match (request, effort) {
+            (Some(r), _) => oxplow_db::OnceScope::request(thread.value(), r),
+            (None, Some(e)) => oxplow_db::OnceScope::effort(thread.value(), e.id.value()),
+            (None, None) => return false,
+        };
+        self.nudges
+            .claim_once(scope, "report-less-run")
             .await
             .unwrap_or(false)
     }
@@ -7760,6 +7794,45 @@ mod tests {
                 )
                 .await
                 .unwrap());
+        }
+
+        /// The report-less-run nudge is once per request: a second report-less
+        /// run in the same request says nothing, and the next request is
+        /// nudged again.
+        #[tokio::test]
+        async fn the_report_less_run_nudge_fires_once_per_request() {
+            let h = build(None).await;
+            let thread = h.thread.value();
+            h.service
+                .nudges
+                .database()
+                .transaction(move |tx| {
+                    tx.execute_batch(&format!(
+                        "INSERT INTO request (id, thread_id) VALUES (71, {thread}), (72, {thread});
+                         INSERT INTO agent_turn (id, thread_id, prompt, started_at, request_id) VALUES
+                           (701, {thread}, 'p', 'a', 71), (702, {thread}, 'p', 'a', 71),
+                           (703, {thread}, 'p', 'a', 72);"
+                    ))
+                    .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap();
+            let run = |turn: i64| {
+                let h = &h;
+                async move {
+                    h.service
+                        .on_shell_run(
+                            &h.thread,
+                            bash_payload("bun test --watch false", 0),
+                            crate::collection::RunOrigin::Command { turn: Some(turn) },
+                        )
+                        .await
+                        .unwrap()
+                }
+            };
+            assert!(run(701).await.is_some(), "the first run in request 71");
+            assert!(run(702).await.is_none(), "once per request, whichever turn");
+            assert!(run(703).await.is_some(), "the next request is nudged again");
         }
 
         /// tsk893: when the run's reports weren't read because a collector

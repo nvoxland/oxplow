@@ -2107,8 +2107,8 @@ advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
 answered reaches the agent on the thread's next tool call or prompt.
 Nothing is taken for a session whose harness lacks the hook's channel:
 its nudges stay undelivered rather than being stamped and lost. **One-shot marks
-are durable** (`claim_once`, per effort or per thread): the report-less
-nudge fires once per effort, an advisory once per its `once_per` scope,
+are durable** (`claim_once`, per request, effort or thread): the report-less
+nudge fires once per request, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
 `effort-nudges` page ("Agent Nudges", `oxplow/changes.sections` slot).
 

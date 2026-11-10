@@ -1951,10 +1951,10 @@ mod tests {
     /// effort's task; a turn outside the window, or an effort with no task,
     /// links nothing.
     #[test]
-    fn v90_backfills_request_tasks_from_efforts() {
+    fn v23_backfills_request_tasks_from_efforts() {
         let mut conn = Connection::open_in_memory().unwrap();
         embedded::migrations::runner()
-            .set_target(refinery::Target::Version(89))
+            .set_target(refinery::Target::Version(22))
             .run(&mut conn)
             .unwrap();
         conn.execute_batch(

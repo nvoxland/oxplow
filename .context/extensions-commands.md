@@ -319,11 +319,11 @@ mechanism; what to say, and when, is SQL in the extension.
 advisories:
   - id: low-coverage
     on: post-tool-use        # or prompt, or turn-end
-    once_per: effort         # effort (default) | thread | session | day | row (needs a `key` column) | turn
+    once_per: request        # request (default) | effort | thread | session | day | row (needs a `key` column) | turn
     audience: agent          # agent (default) | person
     heading: "# Optional heading line"
-    query: |                 # :thread_id, :stream_id, :turn_id, :effort_id
-      SELECT '...' AS message FROM v_effort_observation WHERE effort_id = :effort_id ...
+    query: |                 # :thread_id, :stream_id, :turn_id, :request_id, :effort_id
+      SELECT '...' AS message FROM v_request_metric_delta WHERE request_id = :request_id ...
 ```
 
 - **Triggers.** `post-tool-use` runs on each `agent.tool.finished`
@@ -333,16 +333,23 @@ advisories:
   next hears from oxplow. A turn's end is the one point every harness
   reaches, blocked or not.
 - **Params.** Every query may use `:thread_id`, `:stream_id`, `:turn_id`
-  (NULL at a prompt) and `:effort_id` (NULL when the thread has no effort
+  (NULL at a prompt), `:request_id` (the request of the turn the trigger
+  belongs to: a tool call's turn, the ending turn, at a prompt the turn it
+  opened or went into; the thread's newest when none is named) and
+  `:effort_id` (NULL when the thread has no effort
   — for an event, the effort it was anchored to; at a turn's end, the one
   holding the turn's end; at a prompt, the open one).
-- **Repeat rules.** `once_per: effort` fires once per effort and doesn't
-  run without one; `thread` once per thread; `session` once per agent
+- **Repeat rules.** `once_per: request` (the default) fires once per
+  request on the thread and doesn't run without one: the next request is
+  fresh, and the mute rule (a hint still firing after three deliveries is
+  muted and raised to the person) counts deliveries within the request;
+  `effort` fires once per effort and doesn't run without one (efforts go
+  away; use `request`); `thread` once per thread; `session` once per agent
   session on the thread (the latest turn's harness session; doesn't run
   without one); `day` once per thread per UTC day; `row` once per `key`
   on the thread (a query wanting once per effort per row puts
   `:effort_id` in its key, as `threshold-crossed` does); `turn` whenever
-  it has rows. Marks live in `once_mark`, per effort or thread.
+  it has rows. Marks live in `once_mark`, per request, effort or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
   raised in Alerts ("Notices", `apps/desktop/src/hints.ts`) until
   the person dismisses one (`oxplow.hint.dismiss`, the row's right-click)
@@ -377,10 +384,10 @@ advisories:
   binding the thread's stream into the scope.
 - `oxplow_validate_extension` dry-runs each advisory with every param NULL and
   checks it returns `message` (and `key` for `once_per: row`).
-- oxplow-bundled ships one hint, oxtask's: `untracked-work` (turn-end,
-  `once_per: row` keyed on the request, while oxtask is the active
-  tracker: the thread's latest request changed files and the thread has no
-  task in progress; the `track-work` skill says what to do). The earlier
+- oxplow-bundled ships one hint, oxtask's: `untracked-work` (post-tool-use,
+  `once_per: request`, while oxtask is the active tracker: the request has
+  a recorded edit and no linked task, and the thread has no task in
+  progress; the `track-work` skill says what to do). The earlier
   outcome hints (`large-uncommitted`, `landed-in-progress`, the two
   shared-files hints (requests on different threads changed one file
   within `sharedFiles.windowMinutes`; see work-tracking.md "Cross-thread
