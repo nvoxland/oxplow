@@ -8,5 +8,6 @@ SELECT CAST(uri('oxplow/request', 'id', 'req' || rt.request_id) AS TEXT) AS requ
        rt.at,
        CAST((SELECT COUNT(*) FROM source('agent_turn') t WHERE t.request_id = rt.request_id) AS INT) AS turns,
        CAST((SELECT MIN(t.started_at) FROM source('agent_turn') t WHERE t.request_id = rt.request_id) AS TEXT) AS started_at,
-       CAST((SELECT MAX(t.ended_at) FROM source('agent_turn') t WHERE t.request_id = rt.request_id) AS TEXT) AS last_ended_at
+       CAST((SELECT MAX(t.ended_at) FROM source('agent_turn') t WHERE t.request_id = rt.request_id) AS TEXT) AS last_ended_at,
+       CAST(rt.request_id AS INT) AS request_id
   FROM source('request_task') rt

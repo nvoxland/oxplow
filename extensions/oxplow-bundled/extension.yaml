@@ -192,28 +192,29 @@ implementations:
   - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work], description: "The task tracker that oxplow keeps itself." }
 advisories:
   # oxtask's opinion (the `track-work` skill): an agent tracks what it works
-  # on as tasks. A request on the thread that changed files (an edit or a
-  # shell call claimed them, or only its turn ran) while the thread has no
-  # task in progress is reminded once, at a turn's end, heard at the next
-  # prompt. Only while oxtask is the active task tracker.
+  # on as tasks. At the first edit of a request (a file an edit call named or
+  # the harness reported a shell call changed), while the thread has no task
+  # in progress and the request has no task linked (an agent that took a
+  # task, edited and moved it to done did everything right), the agent is
+  # reminded once per request, in the same turn. Only while oxtask is the
+  # active task tracker.
   - id: untracked-work
-    on: turn-end
+    on: post-tool-use
     once_per: row
     query: |
-      WITH last AS (
-        SELECT request FROM v_agent_turn
-        WHERE thread_id = :thread_id AND request IS NOT NULL
-        ORDER BY id DESC LIMIT 1
+      WITH cur AS (
+        SELECT t.request_id FROM v_agent_turn t
+        WHERE t.id = :turn_id AND t.request_id IS NOT NULL
       )
-      SELECT last.request AS key,
+      SELECT CAST(cur.request_id AS TEXT) AS key,
              'This request changed files, and no task is in progress on this thread. If it is '
              || 'work the person will want to see on the Work panel, take or file its task and '
              || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
-      FROM last
+      FROM cur
       WHERE EXISTS (SELECT 1 FROM v_capability_provider
                      WHERE capability = 'task_tracker' AND provider = 'oxtask' AND active = 1)
-        AND EXISTS (SELECT 1 FROM v_agent_turn t JOIN v_turn_file f ON f.turn_id = t.id
-                     WHERE t.thread_id = :thread_id AND t.request = last.request
-                       AND f.confidence IN ('claimed', 'sole'))
+        AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
+                     WHERE t.request_id = cur.request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = cur.request_id)
         AND NOT EXISTS (SELECT 1 FROM v_task w JOIN v_thread th ON th.uri = w.assignee
                          WHERE th.id = :thread_id AND w.state = 'in_progress')

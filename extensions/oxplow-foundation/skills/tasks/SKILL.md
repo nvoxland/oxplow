@@ -62,7 +62,7 @@ moves it within its queue. That queue order is core's, whatever list
 holds the items. A controller thread routes work this way: assign items
 to the threads that should do them, in the order they should do them.
 A done or canceled item is nobody's (closing it releases it); who worked
-on it is its efforts.
+on it is its requests (`v_request_task`, below).
 
 ## Changing items
 
@@ -98,13 +98,23 @@ Link types:
   items assigned to the thread (an epic with its ready descendants, or the
   ready items), else the pool (`role: pool`), most pressing first.
 - `oxplow_thread_tasks { thread }` — what is assigned to a thread and what
-  its efforts finished, with their efforts.
+  it finished, with the requests that worked on each.
 - `oxplow_query_sql` over `v_task` (`uri`, `title`, `body`, `state` — the
   bucket — `stage`, `stage_title`, `native`, `parent_uri`, `assignee` — a thread's or the
   person's uri, NULL for nobody — `rank`, `closed_at`), `v_task_link` and
   `v_task_comment` for anything else (`assignee` joins `v_thread` on its `uri`): a queue in order is
   `WHERE assignee = … ORDER BY rank IS NULL, rank, created_at`.
 
-What's been done on an item is its efforts: `v_effort` where `task`
-is the item's uri (`started_at`, `ended_at`, `summary`). The files each
-effort changed are `v_effort_file` (`effort_id` is `v_effort.id`).
+What's been done on an item is its requests: `v_request_task` where `task`
+is the item's uri says which requests worked on it and on what evidence
+(`basis`: `prompt` — a person's prompt named it; `command` — the agent
+filed, updated or commented on it; `transition` — the agent moved it between
+stages; `assigned` — it was in progress and assigned to the thread when a
+turn ended, the weakest), with the request's turn count and times. Join
+`request_id` to `v_request` (its state, prompt, tokens) and `v_commit_request`
+(the commits it made); a thread's tasks by request are `WHERE thread_id = …`.
+
+The older record is its efforts, which the Item Efforts page still reads:
+`v_effort` where `task` is the item's uri (`started_at`, `ended_at`,
+`summary`); the files each effort changed are `v_effort_file` (`effort_id`
+is `v_effort.id`).

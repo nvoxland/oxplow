@@ -14,5 +14,6 @@ SELECT t.id, t.thread_id, t.agent_session_id, t.prompt, t.answer, t.session_id, 
                  ELSE uri('oxplow/turn', 'id', 'trn' || t.cause_turn_id) END AS TEXT) AS cause_turn,
        t.cause_ref, t.cause_basis, t.sender, t.outcome, t.error, t.question,
        CAST(CASE WHEN t.request_id IS NULL THEN NULL
-                 ELSE uri('oxplow/request', 'id', 'req' || t.request_id) END AS TEXT) AS request
+                 ELSE uri('oxplow/request', 'id', 'req' || t.request_id) END AS TEXT) AS request,
+       CAST(t.request_id AS INT) AS request_id
   FROM source('agent_turn') t

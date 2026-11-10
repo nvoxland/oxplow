@@ -445,6 +445,7 @@ fn dispatching(
             if let Some(item) = written_ref(verb, &input, &result) {
                 let closed = state.is_some_and(Bucket::is_closed);
                 // Filed for someone: assigned, unless it was filed closed.
+                let named = assignee.is_some();
                 if let (Some(to), false) = (assignee, closed) {
                     events.push(assigned(&source, &item, None, Some(to), None));
                 }
@@ -454,9 +455,10 @@ fn dispatching(
                     events.push(assigned(&source, &item, Some(from.clone()), None, None));
                 }
                 // An agent that starts a task takes it: it's assigned to the
-                // agent's thread, from whoever had it. A person's start
-                // assigns nothing.
-                let started = moved == Some(Bucket::InProgress) && verb != "create";
+                // agent's thread, from whoever had it — one it files straight
+                // into progress too, unless it names whose it is. A person's
+                // start assigns nothing.
+                let started = moved == Some(Bucket::InProgress) && !(verb == "create" && named);
                 if let (true, Some(thread)) = (started, agent_thread(&invocation)) {
                     let mine = oxplow_domain::uri::build::thread_uri(thread);
                     if prior.assignee.as_deref() != Some(mine.as_str()) {
@@ -2443,6 +2445,16 @@ mod tests {
             )
             .await
             .unwrap();
+        // Moving a task is its own evidence: the first task is finished.
+        svc.commands
+            .run(
+                &agent,
+                NAME,
+                json!({ "uri": task_ref(fx.task), "to": "done" }),
+                false,
+            )
+            .await
+            .unwrap();
         // A person's command in the same open turn is in no request.
         svc.commands
             .run(
@@ -2473,14 +2485,70 @@ mod tests {
             .unwrap();
         let (first, second) = (task_ref(fx.task), task_ref(named));
         let mut expected = vec![
-            (first.clone(), "assigned".to_string()),
-            (first, "prompt".to_string()),
+            (first.clone(), "prompt".to_string()),
+            (first, "transition".to_string()),
             (second.clone(), "command".to_string()),
             (second, "prompt".to_string()),
         ];
         expected.sort();
         assert_eq!(rows, expected);
         assert!(rows.iter().all(|(t, _)| *t != task_ref(by_person)));
+    }
+
+    /// An agent that files a task straight into progress, naming no one,
+    /// takes it like a start; a person's, or one that names an assignee,
+    /// does not.
+    #[tokio::test]
+    async fn an_agents_create_in_progress_is_taken_by_its_thread() {
+        let fx = crate::test_fixtures::services_with_effort().await;
+        let agent = Actor::Agent {
+            session_id: None,
+            thread_id: Some(fx.thread),
+            stream_id: Some(StreamId::new(1)),
+        };
+        let mine = oxplow_domain::uri::build::thread_uri(fx.thread);
+        let assignee_of = |out: &serde_json::Value| {
+            let uri = out["uri"].as_str().unwrap().to_string();
+            let svc = fx.svc.clone();
+            async move {
+                svc.db
+                    .read(move |c| {
+                        c.query_row("SELECT assignee FROM v_task WHERE uri = ?1", [uri], |r| {
+                            r.get::<_, Option<String>>(0)
+                        })
+                        .map_err(oxplow_db::map_sql_err)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        let by_agent = fx
+            .svc
+            .commands
+            .run(
+                &agent,
+                CREATE,
+                json!({ "title": "mine", "stage": "in_progress" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            assignee_of(&by_agent.result).await.as_deref(),
+            Some(mine.as_str())
+        );
+        let by_person = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "theirs", "stage": "in_progress" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(assignee_of(&by_person.result).await, None);
     }
 
     /// Thread 9, another open thread in stream 1, as its agent.

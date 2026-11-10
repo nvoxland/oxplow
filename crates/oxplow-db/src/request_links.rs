@@ -10,8 +10,12 @@ use crate::database::{map_sql_err, ts_to_string};
 
 /// A person's prompt in the request named the task.
 pub const BASIS_PROMPT: &str = "prompt";
-/// The agent ran a task command on it in a turn.
+/// The agent ran a task command on it in a turn (a comment, an update, a
+/// filing).
 pub const BASIS_COMMAND: &str = "command";
+/// The agent moved it between stages in a turn (`oxplow.task.transition`):
+/// the evidence a request worked it through.
+pub const BASIS_TRANSITION: &str = "transition";
 /// It was in progress and assigned to the thread when a turn ended.
 pub const BASIS_ASSIGNED: &str = "assigned";
 

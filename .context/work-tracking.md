@@ -93,7 +93,7 @@ its previous effort's end, and closing can cut the span at a past point.
 
 **A task's requests are core's too** (`request_task`, `.context/tasks.md`
 "A task's requests"): which requests worked on a task, each link with its
-basis (`prompt`, `command`, `assigned`).
+basis (`prompt`, `command`, `transition`, `assigned`).
 
 **Attribution is core's, from observation:** files are *claimed* (an edit
 tool named them, `claim_basis` `named`, or the harness said a shell call
@@ -123,8 +123,11 @@ events (a checkpoint after a turn's snapshot, a commit indexed, an effort
 landed by a commit, a task changing state). The default:
 
 1. An item started on a thread links that thread's effort, opening one if
-   none is open; an agent that starts an item not assigned to its thread
-   takes it (assigned there first). A descendant refines the link (epic, then child), an
+   none is open. An agent that starts an item (`oxplow.task.transition` to
+   in progress), or files one straight into progress naming no assignee
+   (`create`), takes it: the command assigns it to the agent's thread in
+   its own transaction, whoever had it; the policy composes nothing for it.
+   A descendant refines the link (epic, then child), an
    ancestor leaves it; an unrelated item closes the effort and opens the next; the
    linked item going done or canceled closes it.
 2. A turn that changed the worktree, and ran at least one tool that isn't
@@ -203,9 +206,9 @@ none.
 above composed as calls (it reads first, then composes). Rule 1: the
 thread is the event's (the agent that moved the item), else the thread
 it's assigned to (`v_task.assignee`); a person moving an unassigned
-item opens nothing. An agent's start of an item not assigned to its
-thread composes `oxplow.task.assign` to that thread first. A
-descendant of the linked item refines the link; an ancestor leaves it. A
+item opens nothing. An agent's start of an item is taken by the command
+itself (assigned to its thread, [tasks.md](./tasks.md) "Assignment"), not
+composed by the policy. A descendant of the linked item refines the link; an ancestor leaves it. A
 task's status no longer opens or closes an effort anywhere else.
 
 Rule 2 reads **`thread.checkpoint@2 { thread, turn, reason, snapshot,
@@ -225,7 +228,7 @@ the thread has none open; a later item start links it (rule 1).
 Who is going to work on an item is its assignee — a thread, the person or
 nobody (`v_task.assignee`; `oxplow.task.assign`, core's for
 every list, [tasks.md](./tasks.md) "Assignment") — and there is
-no second one. Who worked on it is its efforts. A done item is nobody's,
+no second one. Who worked on it is its requests (`v_request_task`, below). A done item is nobody's,
 and a closed thread's items go back to nobody. Two threads may
 still work on the same thing, and nothing refuses it (below, "No
 gates"). It is made visible, all of it bundled over existing datasets
@@ -288,7 +291,12 @@ datasets, a trigger, pacing, and an audience.
   cost.
 - Trigger on outcomes the person feels (work too large to review, work
   landed while its item still says in progress), never on tracker usage
-  ("fewer tasks filed"), which invites filing to satisfy a number.
+  ("fewer tasks filed"), which invites filing to satisfy a number. What a
+  task tracker wants of its agent (oxtask's `untracked-work` reminder to
+  take a task before editing) is that tracker's opinion and lives in the
+  tracker's extension (`oxplow-bundled`), not in core's hints; it fires
+  once per request, after the first edit, only while no task is in
+  progress on the thread and none is linked to the request.
 
 ## Review: evidence in core, policy in extensions
 
@@ -440,9 +448,10 @@ The four in progress:
   (`oxplow.stream.archive`, end snapshot first); `oxplow.effort.report` is optional and
   never creates an effort, and the summary defaults to the last turn's
   final message. "Waiting on you" is derived; `await_user` is gone.
-  The Work panel shows the thread's open effort even when unlinked (In
-  progress) and its closed ones (Finished, which opens Thread activity);
-  the Thread activity page lists the thread's turns under the effort each
+  (Today the Work panel shows tasks, not efforts: In progress with what
+  the thread's latest request is doing, Up next, and Finished — the done
+  tasks the thread was working, `v_request_task` basis assigned or
+  transition.) The Thread activity page lists the thread's turns under the effort each
   fell in, with question-only turns "Between efforts"; an effort's page
   header renames, links, unlinks and closes it.
   Hints, first cut: advisories gain a `turn-end` trigger, every param

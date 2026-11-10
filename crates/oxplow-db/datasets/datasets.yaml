@@ -150,23 +150,35 @@
     - { accepted_values: { column: basis, values: [named, reported, observed] } }
     - { accepted_values: { column: confidence, values: [sole, shared] } }
 - name: request_task
-  version: 2
+  version: 3
   description: "The tasks each request worked on, observed, each link with the evidence it rests on: a person's prompt named the task, the agent ran a task command on it in a turn, or it was in progress and assigned to the thread when a turn of the request ended. Nothing here opens, closes or moves a task. One row per (request, task, basis); a request may link several tasks and a task several requests. A task's requests: `WHERE task = <task uri>`."
   relationships: [{ from: request, to: request.uri }]
   fields:
     - { name: "request", type: "TEXT", doc: "The request (`v_request.uri`)." }
     - { name: "task", type: "TEXT", doc: "The task's URI; it may dangle if its tracker dropped it." }
-    - { name: "basis", type: "TEXT", doc: "`prompt` (a person's prompt in the request named the task), `command` (the agent ran a task command on it in a turn), `assigned` (in progress and assigned to the thread when a turn of the request ended: the weakest)." }
+    - { name: "basis", type: "TEXT", doc: "`prompt` (a person's prompt in the request named the task), `command` (the agent filed, updated or commented on it in a turn), `transition` (the agent moved it between stages in a turn), `assigned` (in progress and assigned to the thread when a turn of the request ended: the weakest)." }
     - { name: "turn", type: "TEXT", doc: "The turn the evidence was recorded in (`v_agent_turn.uri`)." }
     - { name: "thread_id", type: "INT", doc: "That turn's thread (`v_thread.id`): a thread's tasks by request, `WHERE thread_id = <id>`. NULL when no turn was named." }
     - { name: "at", type: "TEXT", doc: "When the link was recorded (RFC 3339)." }
     - { name: "turns", type: "INT", doc: "How many turns the request has so far." }
     - { name: "started_at", type: "TEXT", doc: "When the request's first turn started." }
     - { name: "last_ended_at", type: "TEXT", doc: "When its latest turn ended; NULL while one runs." }
+    - { name: "request_id", type: "INT", doc: "The request's id (`v_request.id`), to join without a URI." }
   tests:
     - { not_null: request }
     - { not_null: task }
-    - { accepted_values: { column: basis, values: [prompt, command, assigned] } }
+    - { accepted_values: { column: basis, values: [prompt, command, transition, assigned] } }
+- name: tool_call_path
+  version: 1
+  description: "The files each tool call named or the harness reported it changed, one row per (call, path): `named` by an edit tool's own input, `reported` by the harness's statement that a shell call changed it (Claude Code's `bashEditDiff`). A shell call that reported nothing has no row: its absence says nothing."
+  fields:
+    - { name: "call_id", type: "INT", doc: "The tool call (`v_tool_call.id`)." }
+    - { name: "turn_id", type: "INT", doc: "The turn the call ran in (`v_agent_turn.id`)." }
+    - { name: "path", type: "TEXT", doc: "The path, worktree-relative when inside it." }
+    - { name: "basis", type: "TEXT", doc: "`named` or `reported`." }
+  tests:
+    - { not_null: call_id }
+    - { accepted_values: { column: basis, values: [named, reported] } }
 - name: request_metric_delta
   version: 1
   description: "How each metric moved during a request on one stream (before → after), computed by oxplow's metric engine over the request's window — the span of its turns there, the files they changed (claimed or sole) and the captures they made — and stored; refreshed while it runs and when what it reads moves. A request's: `WHERE request_id = <id>`."
@@ -245,7 +257,7 @@
     - { not_null: turn_id }
     - { unique: turn_id }
 - name: agent_turn
-  version: 18
+  version: 19
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   relationships: [{ from: request, to: request.uri }]
   fields:
@@ -275,6 +287,7 @@
     - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v15)" }
     - { name: "question", type: "TEXT", doc: "The question the turn's final message ended on (its last line, when the message ends in a question mark): what the thread waits on the person for. NULL when it ended on none, did not complete, or closed before this was recorded. (v16)" }
     - { name: "request", type: "TEXT", doc: "The request the turn belongs to (its `uri`, v_request): the turn that started something and every turn that followed from it (a background job's report, a subagent's hand-back), joined by cause when the turn opened. The request of `cause_turn`, else one this turn started. Work recorded against a turn (tool calls, tokens, test runs, jobs) is its request's. NULL for a turn recorded before requests were. (v17; v18: a URI, not an id)" }
+    - { name: "request_id", type: "INT", doc: "The request's id (`v_request.id`), to join without a URI. NULL for a turn recorded before requests were." }
   tests:
     - { not_null: id }
     - { unique: id }
