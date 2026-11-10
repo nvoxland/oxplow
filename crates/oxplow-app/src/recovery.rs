@@ -1,6 +1,7 @@
 //! Daemon recovery on startup.
 //!
-//! Closes any `agent_turn` rows the previous boot left open. The pane
+//! Closes any `agent_turn` rows the previous boot left open (and loses the
+//! jobs with no report: their processes are gone too). The pane
 //! that owned them is dead, so the turn can't ever `Stop` on its own
 //! and the row would otherwise pin the work panel to a phantom
 //! in-progress entry. It closes turns, not `agent_session` rows: a
@@ -25,11 +26,12 @@ use oxplow_domain::DomainError;
 #[derive(Clone)]
 pub struct RecoveryService {
     turns: Arc<dyn AgentTurnStore>,
+    db: oxplow_db::Database,
 }
 
 impl RecoveryService {
-    pub fn new(turns: Arc<dyn AgentTurnStore>) -> Self {
-        Self { turns }
+    pub fn new(turns: Arc<dyn AgentTurnStore>, db: oxplow_db::Database) -> Self {
+        Self { turns, db }
     }
 
     /// Close orphaned `agent_turn` rows. Returns the count so callers can
@@ -42,14 +44,30 @@ impl RecoveryService {
                 .await?;
             closed_turns += 1;
         }
-        info!(closed_turns, "daemon recovery complete");
-        Ok(RecoveryReport { closed_turns })
+        // Their jobs go with them: a job with no report now never will
+        // (a request would read `waiting_on_work` until its session
+        // resumed).
+        let lost_jobs = self
+            .db
+            .transaction(|tx| {
+                oxplow_db::agent_job_store::lose_all_unreported_tx(
+                    tx,
+                    oxplow_domain::Timestamp::now(),
+                )
+            })
+            .await?;
+        info!(closed_turns, lost_jobs, "daemon recovery complete");
+        Ok(RecoveryReport {
+            closed_turns,
+            lost_jobs,
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct RecoveryReport {
     pub closed_turns: usize,
+    pub lost_jobs: usize,
 }
 
 #[cfg(test)]
@@ -116,7 +134,7 @@ mod tests {
         };
         turns.open(&turn).await.unwrap();
 
-        let svc = RecoveryService::new(turns.clone());
+        let svc = RecoveryService::new(turns.clone(), db.clone());
         let report = svc.run().await.unwrap();
         assert_eq!(report.closed_turns, 1);
 
@@ -124,11 +142,55 @@ mod tests {
         assert!(still_open.is_empty());
     }
 
+    /// A job with no report when oxplow starts is lost with its process; a
+    /// reported one is left alone.
+    #[tokio::test]
+    async fn jobs_with_no_report_are_lost_at_start() {
+        let db = Database::in_memory();
+        db.transaction(|tx| {
+            tx.execute_batch(
+                "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                   VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/p', 'a', 'a');
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 'T', 'a', 'a');
+                 INSERT INTO agent_job (thread_id, harness_job_id, seen_at) VALUES (1, 'running', 'a');
+                 INSERT INTO agent_job (thread_id, harness_job_id, seen_at, reported_at) VALUES (1, 'done', 'a', 'b');",
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let turns = Arc::new(SqliteAgentTurnStore::new(db.clone()));
+        let report = RecoveryService::new(turns.clone(), db.clone())
+            .run()
+            .await
+            .unwrap();
+        assert_eq!(report.lost_jobs, 1);
+        let lost: Vec<(String, bool)> = db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT harness_job_id, lost_at IS NOT NULL FROM agent_job ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            lost,
+            vec![("running".to_string(), true), ("done".to_string(), false)]
+        );
+    }
+
     #[tokio::test]
     async fn idempotent_when_nothing_to_recover() {
         let db = Database::in_memory();
         let turns = Arc::new(SqliteAgentTurnStore::new(db.clone()));
-        let svc = RecoveryService::new(turns);
+        let svc = RecoveryService::new(turns, db.clone());
         let report = svc.run().await.unwrap();
         assert_eq!(report.closed_turns, 0);
     }

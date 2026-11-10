@@ -163,6 +163,17 @@ pub fn lose_unreported_tx(
     .map_err(map_sql_err)
 }
 
+/// Every unreported job of every session, at oxplow's start: the processes
+/// that owned them are gone (oxplow relaunches its agents), so none will
+/// report. They are `lost`, as a session's end loses them.
+pub fn lose_all_unreported_tx(conn: &Connection, at: Timestamp) -> Result<usize, DomainError> {
+    conn.execute(
+        "UPDATE agent_job SET lost_at = ?1 WHERE reported_at IS NULL AND lost_at IS NULL",
+        params![ts_to_string(at)],
+    )
+    .map_err(map_sql_err)
+}
+
 /// Job `job` reported back at `at`, in turn `turn`, with how it ended.
 /// A job reports once: a second report (a hand-back, then its notice)
 /// keeps the first's turn and time and fills only what the first lacked.

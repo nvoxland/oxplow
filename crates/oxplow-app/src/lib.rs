@@ -1092,7 +1092,7 @@ impl Services {
             event_bus.clone(),
         )
         .with_event_pump(event_pump.clone());
-        let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone());
+        let recovery_svc = recovery::RecoveryService::new(agent_turn_store.clone(), db.clone());
 
         let pty = oxplow_pty::PtyManager::spawn();
         // Lazily-built per-(stream, language) LSP proxies. Spawn cost
