@@ -247,10 +247,10 @@ export function filtersOf(view: Record<string, string> | null, params: Record<st
   return { show: pick("show", "thread"), priority: pick("priority", "any"), q: pick("q", "") };
 }
 
-/** Task List at the closed items of the board's scope: where Done's
- *  "more" goes. */
-export function moreRef(f: Filters): string {
-  return `oxplow:oxplow/page?page=task-list#show=${encodeURIComponent(f.show)}&state=done`;
+/** Task List at the done items (all of them: it lists whoever they were
+ *  for): where Done's "more" goes. */
+export function moreRef(): string {
+  return "oxplow:oxplow/page?page=task-list#state=done";
 }
 
 function truthy(v: unknown): boolean {

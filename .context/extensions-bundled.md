@@ -335,14 +335,17 @@ screens and the holder's add the review and analysis:
   card's menu assigns it (the stream's open threads, You, Nobody; the
   page's `assignees` loader).
   **Task List** (`task-list`, each row its title over its description's
-  first sentence, an urgent or high item's coloured `edge`) is the items in one stage (`State`, its
-  options the stages, `todo` — the first to-do stage — unless asked; Done's
-  link asks for done), its filters in the rail, with a quick add at the
-  rail's bottom (a title, in the stage it shows — the first to-do stage for
-  a started or closed one — assigned to whom it shows), with the drag and
+  first sentence, an urgent or high item's coloured `edge`, who it's
+  assigned to when anyone) is the list's items in one stage, whoever
+  they're for — it lists tasks; assignment is the board's and the Work
+  panel's (`State`, its options the stages, `todo` — the first to-do stage
+  — unless asked; Done's link asks for done), its filters in the rail
+  (State, Priority, Search), with a quick add at the rail's bottom (a
+  title, in the stage it shows — the first to-do stage for a started or
+  closed one — for nobody), with the drag and
   bulk actions (Mark ▸ the stages and Assign to ▸ the stream's threads and
   You, each one action with `options_from`; Unassign), and the agents' answers about what is in
-  progress, in the backlog, in the pool or finished. The pure half of the
+  progress, in the backlog, ready or finished. The pure half of the
   board (`src/board/model.ts`; a card's description is the query's
   `summary`, `first_sentence(body)`) is tested from the desktop suite
   (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.

@@ -3,6 +3,6 @@
 given:
   - { command: oxplow.work_item.create, input: { title: Next up, assignee: thr1 } }
   - { command: oxplow.capability.choose, input: { capability: work_items, provider: none }, confirmed: true }
-when: { page: task-list, params: { thread_id: 1 } }
+when: { page: task-list, params: { stream_id: 1 } }
 expect:
   inactive: $any

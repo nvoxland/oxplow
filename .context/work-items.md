@@ -263,10 +263,11 @@ this thread, its stream, you, nobody, or anyone; for a closed item, the
 thread or stream whose efforts worked it), priority and search are its
 toolbar, the tab's view. The **Task List** (`task-list`) is the items in
 one stage (its State filter lists the list's stages; `todo`, the default,
-is the first to-do stage), closed ones latest first, in the same scopes,
-with a quick add in its rail that files a title in the stage it shows
-(the first to-do stage for a started or closed one), assigned to whom it
-shows. A row's Mark ▸ and Assign to ▸ are one action each over a loader
+is the first to-do stage), closed ones latest first, whoever they're
+assigned to — it lists tasks and never filters by assignment, but each
+row names its assignee when it has one — with a quick add in its rail
+that files a title in the stage it shows (the first to-do stage for a
+started or closed one), for nobody. A row's Mark ▸ and Assign to ▸ are one action each over a loader
 (`options_from`: the stages; the stream's open threads and You), the
 row's own checked; Unassign stays its own. **New Item** files on the active
 list: title, body, a starting stage (the list's backlog, to-do and blocked

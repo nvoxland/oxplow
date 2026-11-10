@@ -127,7 +127,7 @@ function start(c: Component) {
         section.append(head, list);
         if (col.more > 0) {
           const more = el("button", { type: "button", class: "ox-link more" }, moreLabel(col));
-          more.addEventListener("click", () => void c.navigate(moreRef(filters())));
+          more.addEventListener("click", () => void c.navigate(moreRef()));
           section.append(more);
         }
         dropZone(section, list, col.stage);

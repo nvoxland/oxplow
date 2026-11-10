@@ -97,8 +97,8 @@ test("the filters are the tab's view, else what the page ran with, else the defa
   expect(filtersOf(null, {})).toEqual({ show: "thread", priority: "any", q: "" });
 });
 
-test("Done's more opens Task List at the closed items of the same scope", () => {
-  expect(moreRef({ show: "stream", priority: "any", q: "" })).toBe("oxplow:oxplow/page?page=task-list#show=stream&state=done");
+test("Done's more opens Task List at the done items", () => {
+  expect(moreRef()).toBe("oxplow:oxplow/page?page=task-list#state=done");
 });
 
 const EPIC = "oxplow:oxplow/work_item?id=tsk1&provider=oxplow";

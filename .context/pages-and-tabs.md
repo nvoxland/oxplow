@@ -861,10 +861,10 @@ margin; an embed or a slot takes its title from the page it shows):
   `priority`, `q`; `thread_id`, `stream_id`): a custom page, its `board`
   component node (the `work_item.board` replaceable) drawing its own
   toolbar, a column per stage of the list (but backlog and canceled) and each
-  card's menu; no rail. `task-list` (filters `show` — assigned to this
-  thread, its stream, me, nobody or anyone — `state`, one of the list's
-  stages, `todo` (its first to-do stage) by default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
-  `oxplow.work_item.create` (a title, in the stage and for whom the list shows), its view a
+  card's menu; no rail. `task-list` (every item, whoever it's assigned to,
+  each row naming its assignee; filters `state`, one of the list's stages,
+  `todo` (its first to-do stage) by default, `priority`, `q`): its `rail:` a quick-add `form` (drawn at the rail's bottom) over
+  `oxplow.work_item.create` (a title, in the stage the list shows, for nobody), its view a
   `list` (the `work_item.list` replaceable; drag to reorder or nest; marked rows
   get bulk Mark (a select of the stages), priority, Assign to (the threads
   and You), Unassign and Delete) and New Task… in the nav bar. Both read
