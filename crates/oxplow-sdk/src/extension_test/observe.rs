@@ -1145,7 +1145,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         decision: None,
         tool: None,
         subagent: None,
-        peer: None,
+        harness_turn: None,
     };
     let ingest = |env: HookEnvelope| async move {
         svc.hook_ingest
@@ -1178,17 +1178,31 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         None => None,
     };
     let mut prompt = envelope(HookKind::UserPromptSubmit, json!({}));
-    // No prompt (`prompt: null`) is a subagent's or a peer's hand-back.
-    prompt.prompt = match body.get("prompt") {
+    // A `peer` is another session's message and a `subagent` with no
+    // prompt (`prompt: null`) a subagent's hand-back; else a person's words.
+    let text = match body.get("prompt") {
         Some(Value::Null) => None,
         Some(p) => Some(p.as_str().unwrap_or_default().to_string()),
         None => Some("Work on it".to_string()),
     };
-    if let Some(sub) = body.get("subagent") {
-        prompt.subagent =
-            Some(serde_json::from_value(sub.clone()).map_err(|e| format!("`turn.subagent`: {e}"))?);
-    }
-    prompt.peer = body.get("peer").and_then(Value::as_str).map(str::to_string);
+    let subagent: Option<oxplow_domain::agent::tool::Subagent> = match body.get("subagent") {
+        Some(sub) => {
+            Some(serde_json::from_value(sub.clone()).map_err(|e| format!("`turn.subagent`: {e}"))?)
+        }
+        None => None,
+    };
+    prompt.prompt = match (body.get("peer").and_then(Value::as_str), subagent, text) {
+        (Some(from), _, text) => Some(oxplow_domain::agent::observe::Prompt::PeerMessage {
+            from: from.to_string(),
+            socket: None,
+            text: text.unwrap_or_default(),
+        }),
+        (None, Some(subagent), None) => Some(oxplow_domain::agent::observe::Prompt::Handback {
+            subagent,
+            text: String::new(),
+        }),
+        (None, _, text) => text.map(oxplow_domain::agent::observe::Prompt::person),
+    };
     ingest(prompt).await?;
     for step in body
         .get("during")

@@ -1133,8 +1133,8 @@ Each hook POSTs to `/hook/<event>` with the session's bearer. The route
 (`handle_hook_inner`) dumps it when `OXPLOW_HOOK_DEBUG=<file>` is set (one
 JSON line per hook: `event`, `thread`, `at`, `payload` — how to learn a
 harness's real payload shapes before depending on them), maps the prompt
-(`AgentHarness::prompt`: a person's or a subagent's hand-back) and tool
-call with the bearer's harness, runs the policy on a `PreToolUse`, hands
+(`AgentHarness::prompt`, below) and its turn id (`AgentHarness::harness_turn_id`:
+Claude Code's `prompt_id`) and the tool call with the bearer's harness, runs the policy on a `PreToolUse`, hands
 one `HookEnvelope` to `HookIngestService::ingest`
 (`crates/oxplow-app/src/hook_ingest.rs`), and answers: context after a
 `PostToolUse` or a person's `UserPromptSubmit`, a deny, or an ack. An
@@ -1159,11 +1159,28 @@ once, so no rule ties every change to the right work exactly. The anchor
 stays thread-scoped (the thread's own open effort), because that says
 more than the stream would even when it's sometimes wrong.
 
-- **Prompt** → `agent.prompt.submitted` (`reprompt: true` inside an open
-  turn), its text in `event_content` (`oxplow_read` on `event:<id>#prompt`); with
-  no turn open it opens one (`agent.turn.started`). A subagent's hand-back
-  logs no prompt, opens a turn with none if needed and finishes the
-  subagent.
+- **Prompt** → with no turn open, a turn opens (`agent.turn.started@3 {
+  turn, thread, session?, source, cause_turn? }`), recording **what opened
+  it** as the harness read the prompt (`Prompt`, `crates/oxplow-domain/src/agent/observe.rs`):
+  `source` is `person`, `background_job` (a job the agent started in the
+  background reported back: Claude Code's `<task-notification>`, which
+  names the `<tool-use-id>` that started it), `subagent` (a hand-back),
+  `peer` (another session's message) or `unknown` (a prompt hook with no
+  prompt). The turn keeps the text it was opened with, whoever's words
+  they are (`agent_turn.prompt`; only `source = 'person'` is a person's),
+  the harness's turn id, and **what it goes on with**: `cause_turn_id`,
+  the turn whose tool call started the job (found by the tool events'
+  dedupe key, `<session>:<call>:requested`) or in which the subagent
+  started (its `agent.subagent.started`), `cause_basis` `reported`;
+  `cause_ref`, the harness's own name for it (the call id, the subagent
+  id, the sender's socket); `sender` on a peer's turn. Core never reads a
+  harness's tags: the adapter classifies. Only a person's prompt (or one
+  the harness named nothing of) logs `agent.prompt.submitted`
+  (`reprompt: true` inside an open turn), its text in `event_content`
+  (`oxplow_read` on `event:<id>#prompt`); a hand-back finishes the
+  subagent, a peer's message logs `agent.peer_message.received`. One of
+  these arriving inside an open turn opens nothing. Pinned by
+  `a_turn_records_what_opened_it_and_the_turn_it_goes_on_with`.
 - **PreToolUse** → `agent.tool.requested` with the policy's `decision`;
   **PostToolUse** → `agent.tool.finished`. Paths, detail, `ok` and
   `exit_code` are computed here against the thread's worktree; input and
@@ -1566,14 +1583,15 @@ open (no hook field was found).
 **Native messaging stays native, and is observed:** Claude Code's inbound
 cross-session message arrives as a prompt wrapped in
 `<cross-session-message from="<socket>" from-name="<session name>" …>`.
-The Claude harness's `prompt` reads it as `Prompt::PeerMessage { from }`
-(the session name, else the socket), not the person's words, as it reads
-a subagent's hand-back. The control plane passes it as
-`HookEnvelope.peer`; the ingest opens a turn with an empty prompt when
-none is open (none if one is), logs `agent.peer_message.received@2
-{ thread, turn, from }` (no `agent.prompt.submitted`) and sets the
-session running. `v_agent_turn.from_peer` names the sender of a turn it
-opened, and Thread Activity titles that turn "Message from …". Pinned by
+The Claude harness's `prompt` reads it as `Prompt::PeerMessage { from,
+socket, text }` (the session name, else the socket), not the person's
+words, as it reads a subagent's hand-back. The control plane passes it as
+`HookEnvelope.prompt`; the ingest opens a turn with source `peer` and the
+message as its text when none is open (none if one is), logs
+`agent.peer_message.received@2 { thread, turn, from }` (no
+`agent.prompt.submitted`) and sets the session running.
+`v_agent_turn.sender` names the sender of a turn it opened (its socket in
+`cause_ref`), and Thread Activity titles that turn "Message from …". Pinned by
 `a_peers_message_opens_a_turn_with_no_prompt`, `a_peers_message_is_not_a_persons_prompt`
 and the recorded `claude/peer_message.jsonl`
 (`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's

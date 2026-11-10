@@ -1509,7 +1509,6 @@ export function userInterruptEnvelope(sessionId: string, threadId: string, strea
     agent_session_id: sessionId,
     session_id: null,
     payload_json: JSON.stringify({ source: "user-escape" }),
-    prompt: null,
     decision: null,
   };
 }

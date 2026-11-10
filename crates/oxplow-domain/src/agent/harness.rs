@@ -281,6 +281,11 @@ pub trait AgentHarness: Send + Sync {
             .and_then(|p| p.as_str())
             .map(|text| Prompt::Person { text: text.into() })
     }
+    /// The harness's own id of the turn a prompt hook opens (Claude Code's
+    /// `prompt_id`); `None` for a harness that names none (the default).
+    fn harness_turn_id(&self, _body: &serde_json::Value) -> Option<String> {
+        None
+    }
     /// The subagent a `SubagentStart` / `SubagentStop` hook names; none for
     /// a harness that reports no subagents (the default).
     async fn subagent(&self, _body: &serde_json::Value) -> Option<Subagent> {

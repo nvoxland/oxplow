@@ -986,7 +986,14 @@ turn opened (set in the open transaction); `snapshot_id` is the snapshot
 the worktree was at when it ended — set in the `turn_end` take's
 transaction (`record_take` stamps it whenever the take carries a
 `turn_id`). The turn's changes are start → end, like an effort's. `agent_turn.task_id` is gone (nothing ever set
-it). `agent_turn` open/close log `agent.turn.started@2` /
+it). **What opened a turn** (V2): `source` (`person`, `background_job`,
+`subagent`, `peer`, `unknown`; NULL for a turn recorded before, until the
+one-time conversion), `harness_turn_id`, `cause_turn_id` (FK to the turn it
+goes on with), `cause_ref`, `cause_basis` (`reported`, `matched`) and
+`sender`, set in the open transaction (`open_turn_tx` takes a
+`TurnOpening`); `prompt` is the text that opened it, whatever its source.
+V2 also rewrote the logged `agent.turn.started@2` rows to `@3`
+(`source: unknown`). `agent_turn` open/close log `agent.turn.started@3` /
 `agent.turn.ended@3` in the same transaction as the row change;
 `event_log` has a `turn_id` index. `SqliteAgentTurnStore::
 stream_has_open_turn` answers "is an agent mid-turn on this worktree?".
@@ -1067,7 +1074,7 @@ seeders for tests.
   (NULL for core's capture). The stream's newest op's handle is the
   parent core hands the provider's next mark (`.context/providers.md` "A
   snapshots provider").
-- **Each file row carries when it changed** (V90): `file_snapshot.first_changed_at`
+- **Each file row carries when it changed** (V3): `file_snapshot.first_changed_at`
   / `last_changed_at`, the times the file watcher first and last reported
   the path changed since the previous take (a dirty-set entry keeps them,
   and a take that fails puts them back). NULL when the take found the

@@ -127,7 +127,8 @@ pub fn turn_summaries_tx(
         .prepare(&format!(
             "SELECT t.agent_session_id, count(*),
                     (SELECT p.prompt FROM agent_turn p
-                      WHERE p.agent_session_id = t.agent_session_id AND p.prompt <> ''
+                      WHERE p.agent_session_id = t.agent_session_id AND p.source = 'person'
+                        AND p.prompt <> ''
                       ORDER BY p.id DESC LIMIT 1)
                FROM agent_turn t
               WHERE t.agent_session_id IN ({list})
@@ -606,16 +607,22 @@ mod tests {
             at(3),
         )
         .unwrap();
-        for (session, prompt) in [
-            (a.id, "first"),
-            (a.id, "second"),
-            (a.id, ""),
-            (b.id, "only"),
+        // A hand-back's text is no person's prompt: the last one is a's
+        // second.
+        for (session, prompt, source) in [
+            (a.id, "first", "person"),
+            (a.id, "second", "person"),
+            (
+                a.id,
+                "<agent-message from=\"x\">done</agent-message>",
+                "subagent",
+            ),
+            (b.id, "only", "person"),
         ] {
             conn.execute(
-                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at)
-                 VALUES (1, ?1, ?2, '2026-10-10T10:00:00Z')",
-                params![session.value(), prompt],
+                "INSERT INTO agent_turn (thread_id, agent_session_id, prompt, started_at, source)
+                 VALUES (1, ?1, ?2, '2026-10-10T10:00:00Z', ?3)",
+                params![session.value(), prompt, source],
             )
             .unwrap();
         }

@@ -47,10 +47,11 @@ use thiserror::Error;
 
 use oxplow_db::agent_stores::{
     activity_anchors_tx, close_turn_tx, last_status_tx, log_status_tx, open_harness_turn_ids_tx,
-    open_turn_ids_in_tx, open_turn_tx, TurnEnd,
+    open_turn_ids_in_tx, open_turn_tx, TurnEnd, TurnOpening,
 };
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::{event_content_store, Database};
+use oxplow_domain::agent::observe::Prompt;
 use oxplow_domain::agent::tool::{Subagent, ToolKind, ToolUse};
 use oxplow_domain::events::schema::{
     AgentContextCompacted, AgentContextCompactedV2, AgentPeerMessageReceived,
@@ -67,7 +68,7 @@ use oxplow_domain::{
 };
 
 use crate::events::{EventBus, OxplowEvent};
-use oxplow_domain::hook::{TurnOutcome, TurnRun};
+use oxplow_domain::hook::{TurnOutcome, TurnRun, TurnSource};
 
 /// The Stop-body key a transport puts a turn's own token counts under
 /// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
@@ -103,10 +104,14 @@ pub struct HookEnvelope {
     /// The harness's own session id.
     pub session_id: Option<String>,
     pub payload_json: String,
-    /// UserPromptSubmit: the text the person submitted — stored with its
-    /// `agent.prompt.submitted` (every prompt, a re-prompt too) and on the
-    /// turn it opens.
-    pub prompt: Option<String>,
+    /// UserPromptSubmit: what the prompt is, as its harness read it — who
+    /// opened the turn (a person, a background job, a subagent handing
+    /// back, another session) and the text delivered, stored on the turn
+    /// it opens; a person's is logged with `agent.prompt.submitted` too
+    /// (every prompt, a re-prompt too). In-process only, as `tool` is.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub prompt: Option<Prompt>,
     /// PreToolUse only: the policy's verdict (`None` reads as allowed).
     #[serde(default)]
     pub decision: Option<ToolDecision>,
@@ -118,18 +123,16 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub tool: Option<ToolUse>,
-    /// The subagent the hook is about, as its harness read it: a
-    /// `SubagentStart` / `SubagentStop`'s, or — on a `UserPromptSubmit`
-    /// with no `prompt` — the subagent handing its report back. In-process
-    /// only, as `tool` is.
+    /// The subagent a `SubagentStart` / `SubagentStop` is about, as its
+    /// harness read it. In-process only, as `tool` is.
     #[serde(skip)]
     #[specta(skip)]
     pub subagent: Option<Subagent>,
-    /// On a `UserPromptSubmit` with no `prompt`: the name of the other
-    /// agent session whose message this prompt is. In-process only.
+    /// On a `UserPromptSubmit`: the harness's own id of the turn it opens
+    /// (Claude Code's `prompt_id`). In-process only.
     #[serde(skip)]
     #[specta(skip)]
-    pub peer: Option<String>,
+    pub harness_turn: Option<String>,
     /// The name its harness gives the session's conversation, when the
     /// hook says (Claude's `session_title` on a prompt). In-process only.
     #[serde(skip)]
@@ -580,39 +583,81 @@ fn record_tx(
     applied.turn = open_turn_ids_in_tx(conn, thread, slot)?.first().copied();
     match env.kind {
         // A subagent handing its report back: the agent goes on working on
-        // it — a turn, if none is open, with no person's prompt — and the
-        // subagent has finished.
-        HookKind::UserPromptSubmit if env.prompt.is_none() && env.subagent.is_some() => {
+        // it — a turn, if none is open, that goes on with the one the
+        // subagent started in — and the subagent has finished.
+        HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::Handback { .. })) => {
+            let Some(Prompt::Handback { subagent, text }) = &env.prompt else {
+                unreachable!("matched above")
+            };
             if applied.turn.is_none() {
-                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, "", session, now)?);
+                let cause = subagent_turn_tx(conn, slot, session, &subagent.id)?;
+                let opening = TurnOpening {
+                    harness_turn: env.harness_turn.as_deref(),
+                    cause_ref: Some(subagent.id.as_str()),
+                    ..TurnOpening::new(TurnSource::Subagent, text).caused_by(cause)
+                };
+                applied.turn = Some(open_turn_tx(
+                    conn, ev, thread, slot, &opening, session, now,
+                )?);
                 applied.opened_turn = true;
             }
-            if let Some(subagent) = &env.subagent {
-                log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
-            }
+            log_subagent_tx(conn, ev, thread, slot, session, subagent, None)?;
             status = Some((AgentStatusState::Running, None));
         }
         // Another session's message: the agent goes on working on it — a
-        // turn, if none is open, with no person's prompt — and it is
-        // logged with who sent it.
-        HookKind::UserPromptSubmit if env.prompt.is_none() && env.peer.is_some() => {
+        // turn, if none is open, that says who sent it — and it is logged
+        // with who sent it.
+        HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::PeerMessage { .. })) => {
+            let Some(Prompt::PeerMessage { from, socket, text }) = &env.prompt else {
+                unreachable!("matched above")
+            };
             if applied.turn.is_none() {
-                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, "", session, now)?);
+                let opening = TurnOpening {
+                    harness_turn: env.harness_turn.as_deref(),
+                    cause_ref: socket.as_deref(),
+                    sender: Some(from.as_str()),
+                    ..TurnOpening::new(TurnSource::Peer, text)
+                };
+                applied.turn = Some(open_turn_tx(
+                    conn, ev, thread, slot, &opening, session, now,
+                )?);
                 applied.opened_turn = true;
             }
-            if let Some(from) = &env.peer {
-                let envelope = ev
-                    .typed::<AgentPeerMessageReceived>(&AgentPeerMessageReceivedV2 {
-                        thread: thread.to_string(),
-                        turn: applied.turn.map(|t| t.to_string()),
-                        from: from.clone(),
-                    })
-                    .with_anchors(activity_anchors_tx(conn, thread, slot)?)
-                    .with_subject([applied
-                        .turn
-                        .map(turn_uri)
-                        .unwrap_or_else(|| thread_uri(thread))]);
-                ev.append(conn, &envelope)?;
+            let envelope = ev
+                .typed::<AgentPeerMessageReceived>(&AgentPeerMessageReceivedV2 {
+                    thread: thread.to_string(),
+                    turn: applied.turn.map(|t| t.to_string()),
+                    from: from.clone(),
+                })
+                .with_anchors(activity_anchors_tx(conn, thread, slot)?)
+                .with_subject([applied
+                    .turn
+                    .map(turn_uri)
+                    .unwrap_or_else(|| thread_uri(thread))]);
+            ev.append(conn, &envelope)?;
+            status = Some((AgentStatusState::Running, None));
+        }
+        // A job the agent started in the background reported back: the
+        // agent goes on working on it — a turn, if none is open, that goes
+        // on with the one whose tool call started the job. No person spoke.
+        HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::BackgroundJob { .. })) => {
+            let Some(Prompt::BackgroundJob { call, text }) = &env.prompt else {
+                unreachable!("matched above")
+            };
+            if applied.turn.is_none() {
+                let cause = match call {
+                    Some(call) => tool_call_turn_tx(conn, session, call)?,
+                    None => None,
+                };
+                let opening = TurnOpening {
+                    harness_turn: env.harness_turn.as_deref(),
+                    cause_ref: call.as_deref(),
+                    ..TurnOpening::new(TurnSource::BackgroundJob, text).caused_by(cause)
+                };
+                applied.turn = Some(open_turn_tx(
+                    conn, ev, thread, slot, &opening, session, now,
+                )?);
+                applied.opened_turn = true;
             }
             status = Some((AgentStatusState::Running, None));
         }
@@ -633,13 +678,24 @@ fn record_tx(
             }
         }
         HookKind::UserPromptSubmit => {
+            // A person's prompt, or one the harness said nothing of.
             let reprompt = applied.turn.is_some();
+            let said = env.prompt.as_ref().map(Prompt::text);
             if !reprompt {
-                let prompt = env.prompt.as_deref().unwrap_or_default();
-                applied.turn = Some(open_turn_tx(conn, ev, thread, slot, prompt, session, now)?);
+                let source = env
+                    .prompt
+                    .as_ref()
+                    .map_or(TurnSource::Unknown, Prompt::source);
+                let opening = TurnOpening {
+                    harness_turn: env.harness_turn.as_deref(),
+                    ..TurnOpening::new(source, said.unwrap_or_default())
+                };
+                applied.turn = Some(open_turn_tx(
+                    conn, ev, thread, slot, &opening, session, now,
+                )?);
                 applied.opened_turn = true;
             }
-            let text = env.prompt.as_deref().filter(|p| !p.is_empty());
+            let text = said.filter(|p| !p.is_empty());
             let payload = AgentPromptSubmittedV2 {
                 thread: thread.to_string(),
                 turn: applied.turn.map(|t| t.to_string()),
@@ -1072,6 +1128,50 @@ fn subagent_key(
     format!("subagent-event/{who}/{id}/{phase}")
 }
 
+/// The turn in which this session's tool call `call` was made: the turn
+/// anchor of its logged request (else its finish), found by the dedupe key
+/// the tool events carry.
+fn tool_call_turn_tx(
+    conn: &rusqlite::Connection,
+    session: Option<&str>,
+    call: &str,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let who = session.unwrap_or("-");
+    conn.query_row(
+        "SELECT turn_id FROM event_log
+          WHERE dedupe_key IN (?1, ?2) AND turn_id IS NOT NULL
+          ORDER BY seq LIMIT 1",
+        rusqlite::params![
+            format!("{who}:{call}:requested"),
+            format!("{who}:{call}:finished")
+        ],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|t| t.map(AgentTurnId::new))
+    .map_err(oxplow_db::map_sql_err)
+}
+
+/// The turn in which subagent `id` of this session started: the turn
+/// anchor of its logged start.
+fn subagent_turn_tx(
+    conn: &rusqlite::Connection,
+    slot: Option<oxplow_domain::AgentSessionId>,
+    session: Option<&str>,
+    id: &str,
+) -> Result<Option<AgentTurnId>, DomainError> {
+    use rusqlite::OptionalExtension as _;
+    conn.query_row(
+        "SELECT turn_id FROM event_log WHERE dedupe_key = ?1 AND turn_id IS NOT NULL",
+        rusqlite::params![subagent_key(slot, session, id, "started")],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .map(|t| t.map(AgentTurnId::new))
+    .map_err(oxplow_db::map_sql_err)
+}
+
 fn subagent_ref(s: &Subagent) -> SubagentRef {
     SubagentRef {
         id: s.id.clone(),
@@ -1405,11 +1505,11 @@ mod tests {
             prompt: body
                 .get("prompt")
                 .and_then(|p| p.as_str())
-                .map(str::to_string),
+                .map(Prompt::person),
             decision: None,
             tool: crate::test_fixtures::claude_tool(kind, &body),
             subagent: None,
-            peer: None,
+            harness_turn: None,
         }
     }
 
@@ -1479,12 +1579,18 @@ mod tests {
     /// A subagent hook from `sid`: a start or stop naming `id`, or (with
     /// `UserPromptSubmit`) its hand-back.
     fn subagent_hook(kind: HookKind, tid: ThreadId, sid: &str, id: &str) -> HookEnvelope {
+        let subagent = Subagent {
+            id: id.into(),
+            kind: Some("general-purpose".into()),
+        };
+        // A prompt from a subagent is its hand-back.
+        let handback = kind == HookKind::UserPromptSubmit;
         HookEnvelope {
-            prompt: None,
-            subagent: Some(Subagent {
-                id: id.into(),
-                kind: Some("general-purpose".into()),
+            prompt: handback.then(|| Prompt::Handback {
+                subagent: subagent.clone(),
+                text: format!("<agent-message from=\"{id}\">done</agent-message>"),
             }),
+            subagent: (!handback).then_some(subagent),
             ..hook(kind, tid, Some(sid), json!({}))
         }
     }
@@ -1850,9 +1956,18 @@ mod tests {
         assert_eq!(of_type(&events, "agent.subagent.started").len(), 1);
         assert_eq!(of_type(&events, "agent.subagent.finished").len(), 1);
         let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
-        let mut prompts: Vec<String> = all.iter().map(|t| t.prompt.clone()).collect();
-        prompts.sort();
-        assert_eq!(prompts, ["", "go"]);
+        let mut sources: Vec<_> = all.iter().map(|t| (t.source, t.prompt.clone())).collect();
+        sources.sort_by_key(|(_, p)| p.clone());
+        assert_eq!(
+            sources,
+            [
+                (
+                    Some(TurnSource::Subagent),
+                    "<agent-message from=\"afd\">done</agent-message>".to_string()
+                ),
+                (Some(TurnSource::Person), "go".to_string()),
+            ]
+        );
         assert_eq!(
             status(&svc, tid).await.map(|s| s.state),
             Some(AgentStatusState::Idle)
@@ -1866,8 +1981,13 @@ mod tests {
     async fn a_peers_message_opens_a_turn_with_no_prompt() {
         let (svc, tid) = fixture().await;
         let peer = |from: &str| HookEnvelope {
-            prompt: None,
-            peer: Some(from.into()),
+            prompt: Some(Prompt::PeerMessage {
+                from: from.into(),
+                socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                text: format!(
+                    "<cross-session-message from-name=\"{from}\">hi</cross-session-message>"
+                ),
+            }),
             ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
         };
         svc.ingest(peer("oxplow-main")).await.unwrap();
@@ -1877,7 +1997,8 @@ mod tests {
         );
         let all = turns(&svc).list_for_thread(&tid, 10).await.unwrap();
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].prompt, "");
+        assert_eq!(all[0].source, Some(TurnSource::Peer));
+        assert!(all[0].prompt.contains(">hi</"), "the message is kept");
         svc.ingest(peer("oxplow-other")).await.unwrap();
         assert_eq!(
             turns(&svc).list_for_thread(&tid, 10).await.unwrap().len(),
@@ -1905,7 +2026,7 @@ mod tests {
         let from: Option<String> = svc
             .db
             .read(|c| {
-                c.query_row("SELECT from_peer FROM v_agent_turn", [], |r| r.get(0))
+                c.query_row("SELECT sender FROM v_agent_turn", [], |r| r.get(0))
                     .map_err(oxplow_db::map_sql_err)
             })
             .await
@@ -2496,11 +2617,11 @@ mod tests {
             agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
-            prompt: prompt.map(str::to_string),
+            prompt: prompt.map(Prompt::person),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(envelope(HookKind::UserPromptSubmit, Some("p")))
             .await
@@ -2528,11 +2649,11 @@ mod tests {
             agent_session_id: None,
             session_id: None,
             payload_json: "{}".into(),
-            prompt: prompt.map(str::to_string),
+            prompt: prompt.map(Prompt::person),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         let ran_on = || {
             let db = svc.db.clone();
@@ -2604,7 +2725,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(env).await.unwrap();
         // Spot-check via stores.
@@ -2631,7 +2752,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(prompt_env).await.unwrap();
         let stop = HookEnvelope {
@@ -2647,7 +2768,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(stop).await.unwrap();
         assert!(turns(&svc).list_open(&tid).await.unwrap().is_empty());
@@ -2671,7 +2792,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2688,7 +2809,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2730,7 +2851,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2747,7 +2868,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         });
         // The caller gives up while the take is under way: the ingest's
         // future is dropped.
@@ -2776,11 +2897,11 @@ mod tests {
             agent_session_id: None,
             session_id: None,
             payload_json: payload.to_string(),
-            prompt: prompt.map(str::to_string),
+            prompt: prompt.map(Prompt::person),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         svc.ingest(hook(HookKind::UserPromptSubmit, Some("p"), json!({})))
             .await
@@ -2832,7 +2953,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2857,7 +2978,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         })
         .await
         .unwrap();
@@ -2884,7 +3005,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();
@@ -3272,5 +3393,147 @@ mod tests {
             status(&svc, tid).await.unwrap().state,
             AgentStatusState::Running
         );
+    }
+
+    /// A turn says what opened it — a person, a background job reporting
+    /// back, a subagent handing back, or a prompt the harness said nothing
+    /// of — keeps the text it was opened with, and names the turn it goes
+    /// on with when the harness named the call or the subagent.
+    #[tokio::test]
+    async fn a_turn_records_what_opened_it_and_the_turn_it_goes_on_with() {
+        let (svc, tid) = fixture().await;
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let job = |call: &str| HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some(call.into()),
+                text: format!("<task-notification>{call}</task-notification>"),
+            }),
+            harness_turn: Some(format!("p-{call}")),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        svc.ingest(HookEnvelope {
+            harness_turn: Some("p1".into()),
+            ..hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({"prompt": "go"}),
+            )
+        })
+        .await
+        .unwrap();
+        let bash = json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9", "run_in_background": true}, "tool_use_id": "toolu_bg"});
+        svc.ingest(hook(HookKind::PreToolUse, tid, Some("h1"), bash.clone()))
+            .await
+            .unwrap();
+        svc.ingest(hook(HookKind::PostToolUse, tid, Some("h1"), bash))
+            .await
+            .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(job("toolu_bg")).await.unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"))
+            .await
+            .unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(job("toolu_gone")).await.unwrap();
+        svc.ingest(stop()).await.unwrap();
+        svc.ingest(HookEnvelope {
+            prompt: None,
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+
+        type Row = (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        );
+        let rows: Vec<Row> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT source, prompt, cause_turn, cause_basis, cause_ref, harness_turn_id
+                           FROM v_agent_turn ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    })
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let first = "oxplow:oxplow/turn?id=trn1".to_string();
+        let reported = Some("reported".to_string());
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "person".into(),
+                    "go".into(),
+                    None,
+                    None,
+                    None,
+                    Some("p1".into())
+                ),
+                (
+                    "background_job".into(),
+                    "<task-notification>toolu_bg</task-notification>".into(),
+                    Some(first.clone()),
+                    reported.clone(),
+                    Some("toolu_bg".into()),
+                    Some("p-toolu_bg".into()),
+                ),
+                (
+                    "subagent".into(),
+                    "<agent-message from=\"afd\">done</agent-message>".into(),
+                    Some(first),
+                    reported,
+                    Some("afd".into()),
+                    None,
+                ),
+                (
+                    "background_job".into(),
+                    "<task-notification>toolu_gone</task-notification>".into(),
+                    None,
+                    None,
+                    Some("toolu_gone".into()),
+                    Some("p-toolu_gone".into()),
+                ),
+                ("unknown".into(), "".into(), None, None, None, None),
+            ]
+        );
+        // Only a person's prompt (or one nobody named) is a prompt submitted.
+        let events = logged(&svc).await;
+        assert_eq!(of_type(&events, "agent.prompt.submitted").len(), 2);
+        let started = of_type(&events, "agent.turn.started");
+        assert_eq!(started[1].envelope.payload["source"], "background_job");
+        assert_eq!(started[1].envelope.payload["cause_turn"], "trn1");
     }
 }

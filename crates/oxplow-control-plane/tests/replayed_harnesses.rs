@@ -235,8 +235,9 @@ async fn a_session_that_never_waited_fails_the_permission_check() {
 }
 
 /// Claude Code's background subagent, recorded: its own call carries its
-/// id, it starts and finishes once, its hand-back opens a turn with no
-/// person's prompt, and the session resumes the parent.
+/// id, it starts and finishes once, its hand-back opens a turn of the
+/// subagent's that goes on with the one it started in, and the session
+/// resumes the parent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_claude_code_subagent_is_attributed() {
     let r = replayed("claude/subagent.jsonl", "claude").await;
@@ -257,11 +258,37 @@ async fn a_recorded_claude_code_subagent_is_attributed() {
         .list_for_thread(&r.thread, 10)
         .await
         .unwrap();
-    let mut prompts: Vec<_> = turns.iter().map(|t| t.prompt.clone()).collect();
-    prompts.sort();
+    // The hand-back's turn is the subagent's, its text kept, and it goes on
+    // with the turn the subagent started in.
+    use oxplow_domain::hook::TurnSource;
+    let mut turns = turns;
+    turns.sort_by_key(|t| t.id.value());
     assert_eq!(
-        prompts,
-        ["", "use a Task subagent to count the lines in claude.txt"]
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [Some(TurnSource::Person), Some(TurnSource::Subagent)]
+    );
+    let first = turns
+        .iter()
+        .find(|t| t.source == Some(TurnSource::Person))
+        .unwrap();
+    assert_eq!(
+        first.prompt,
+        "use a Task subagent to count the lines in claude.txt"
+    );
+    let handback = turns
+        .iter()
+        .find(|t| t.source == Some(TurnSource::Subagent))
+        .unwrap();
+    assert!(
+        handback.prompt.starts_with("<agent-message"),
+        "{}",
+        handback.prompt
+    );
+    let started = events_of(&r, "agent.turn.started").await;
+    let cause: Vec<_> = started.iter().map(|p| p["cause_turn"].clone()).collect();
+    assert_eq!(
+        cause,
+        [serde_json::Value::Null, first.id.to_string().into()]
     );
     assert_eq!(resume_of(&r).await, "56cfaf9b-c90e-4ffd-9689-bd94f89e2426");
 }
@@ -283,6 +310,12 @@ async fn a_recorded_claude_code_peer_message_opens_a_turn_of_its_own() {
         .await
         .unwrap();
     assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].prompt, "");
+    assert_eq!(turns[0].source, Some(oxplow_domain::hook::TurnSource::Peer));
+    assert!(
+        turns[0]
+            .prompt
+            .contains("You can mark the ticket done now."),
+        "the message is kept"
+    );
     assert_eq!(turns[0].answer.as_deref(), Some("Marked it done."));
 }

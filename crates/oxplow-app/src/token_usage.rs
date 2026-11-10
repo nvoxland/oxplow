@@ -761,7 +761,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         }
     }
 
@@ -780,7 +780,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();

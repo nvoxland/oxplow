@@ -105,6 +105,8 @@ pub struct AgentTurn {
     /// `turn_end` take); `None` while running.
     #[specta(type = Option<crate::JsNumber>)]
     pub snapshot_id: Option<i64>,
+    /// What opened it; `None` for a turn recorded before sources were.
+    pub source: Option<TurnSource>,
 }
 
 /// What a turn ran on and how full its context was, as its harness
@@ -121,6 +123,71 @@ pub struct TurnRun {
     pub context_tokens: Option<i64>,
     /// The model's context window, in tokens.
     pub context_window: Option<i64>,
+}
+
+/// What opened a turn (`agent_turn.source`), as its harness read the
+/// prompt hook. Only `person` is a person's words; the others are what the
+/// harness delivered to the agent on its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnSource {
+    /// A person's prompt.
+    Person,
+    /// A job the agent started in the background reported back (Claude
+    /// Code's task notification: a background shell or subagent finished).
+    BackgroundJob,
+    /// A subagent handed its report back to its session.
+    Subagent,
+    /// Another agent session's message.
+    Peer,
+    /// The harness opened a turn and said nothing of why.
+    Unknown,
+}
+
+impl TurnSource {
+    /// Its stored spelling (`agent_turn.source`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TurnSource::Person => "person",
+            TurnSource::BackgroundJob => "background_job",
+            TurnSource::Subagent => "subagent",
+            TurnSource::Peer => "peer",
+            TurnSource::Unknown => "unknown",
+        }
+    }
+
+    /// The source a stored spelling names; `None` for a turn recorded
+    /// before sources were (NULL) or an unknown spelling.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "person" => TurnSource::Person,
+            "background_job" => TurnSource::BackgroundJob,
+            "subagent" => TurnSource::Subagent,
+            "peer" => TurnSource::Peer,
+            "unknown" => TurnSource::Unknown,
+            _ => return None,
+        })
+    }
+}
+
+/// How a turn's cause is known (`agent_turn.cause_basis`): the harness
+/// named it (`reported`), or oxplow matched it from what it saw
+/// (`matched`). Best effort either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum CauseBasis {
+    Reported,
+    Matched,
+}
+
+impl CauseBasis {
+    /// Its stored spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CauseBasis::Reported => "reported",
+            CauseBasis::Matched => "matched",
+        }
+    }
 }
 
 /// How a turn ended (`agent.turn.ended`).

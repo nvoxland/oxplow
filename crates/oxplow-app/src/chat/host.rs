@@ -11,6 +11,7 @@ use oxplow_domain::{AgentStatusState, HookKind, StreamId, ThreadId};
 use oxplow_runtime::policy::PolicyDecision;
 use tracing::warn;
 
+use oxplow_domain::agent::observe::Prompt;
 use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::hook::TurnRun;
 
@@ -136,11 +137,11 @@ impl ServicesChatHost {
             agent_session_id: Some(self.session),
             session_id: Some(session_id.to_string()),
             payload_json: payload.to_string(),
-            prompt,
+            prompt: prompt.map(Prompt::from),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         }
     }
 
@@ -455,7 +456,7 @@ impl ChatHost for ServicesChatHost {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         // Its open turn ends interrupted; the agent is gone either way, so
         // the session reads stopped even when no turn was running.

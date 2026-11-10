@@ -326,7 +326,7 @@ mod tests {
                 decision: None,
                 tool: None,
                 subagent: None,
-                peer: None,
+                harness_turn: None,
             })
             .await
             .unwrap();
@@ -357,7 +357,7 @@ mod tests {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         f.svc
             .hook_ingest

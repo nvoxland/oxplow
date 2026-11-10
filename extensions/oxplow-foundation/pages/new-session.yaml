@@ -40,7 +40,7 @@ loaders:
                (s.closed_at IS NOT NULL AND s.here AND s.closed_reason = 'closed') AS reopenable,
                coalesce(s.closed_at, s.updated_at) AS at,
                (SELECT count(*) FROM v_agent_turn t WHERE t.agent_session_id = s.id) AS turns,
-               (SELECT t.prompt FROM v_agent_turn t WHERE t.agent_session_id = s.id ORDER BY t.id DESC LIMIT 1) AS last_prompt
+               (SELECT t.prompt FROM v_agent_turn t WHERE t.agent_session_id = s.id AND t.source = 'person' ORDER BY t.id DESC LIMIT 1) AS last_prompt
         FROM sessions s
       ),
       convs AS (

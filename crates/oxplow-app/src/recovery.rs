@@ -116,6 +116,7 @@ mod tests {
             ended_at: None,
             start_snapshot_id: None,
             snapshot_id: None,
+            source: Some(oxplow_domain::hook::TurnSource::Person),
         };
         turns.open(&turn).await.unwrap();
 

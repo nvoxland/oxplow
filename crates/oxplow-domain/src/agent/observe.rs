@@ -23,9 +23,12 @@ pub enum HookAnswer {
     Context { event: HookKind, text: String },
 }
 
-/// What a prompt hook (`UserPromptSubmit`) is, as its harness reads it.
-/// On the wire, `{ "kind": "person", "text" }` or `{ "kind": "handback",
-/// "subagent" }` or `{ "kind": "peer_message", "from" }`.
+/// What a prompt hook (`UserPromptSubmit`) is, as its harness reads it:
+/// who opened the turn, and the text the harness delivered. On the wire,
+/// `{ "kind": "person", "text" }`, `{ "kind": "handback", "subagent",
+/// "text"? }`, `{ "kind": "peer_message", "from", "socket"?, "text"? }` or
+/// `{ "kind": "background_job", "call"?, "text" }`. The harness alone knows
+/// its own wrapping; core never reads the text for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Prompt {
@@ -36,12 +39,71 @@ pub enum Prompt {
     /// agent goes on working — not a person's words.
     Handback {
         subagent: crate::agent::tool::Subagent,
+        /// The prompt as the harness delivered it.
+        #[serde(default)]
+        text: String,
     },
     /// Another agent session's message to this one (Claude Code's
     /// cross-session message, which arrives as a prompt): the agent acts
     /// on it, and it is not a person's words. `from` is the sender's own
-    /// name for its session.
-    PeerMessage { from: String },
+    /// name for its session; `socket`, the address it sent from.
+    PeerMessage {
+        from: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        socket: Option<String>,
+        /// The prompt as the harness delivered it.
+        #[serde(default)]
+        text: String,
+    },
+    /// A job the agent started in the background reported back (Claude
+    /// Code's task notification). `call` is the harness's id of the tool
+    /// call that started the job, when it names one.
+    BackgroundJob {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<String>,
+        text: String,
+    },
+}
+
+impl Prompt {
+    /// A person's prompt of `text`.
+    pub fn person(text: impl Into<String>) -> Self {
+        Prompt::Person { text: text.into() }
+    }
+
+    /// The text that opened the turn, as the harness delivered it.
+    pub fn text(&self) -> &str {
+        match self {
+            Prompt::Person { text }
+            | Prompt::Handback { text, .. }
+            | Prompt::PeerMessage { text, .. }
+            | Prompt::BackgroundJob { text, .. } => text,
+        }
+    }
+
+    /// Who opened the turn.
+    pub fn source(&self) -> crate::hook::TurnSource {
+        use crate::hook::TurnSource;
+        match self {
+            Prompt::Person { .. } => TurnSource::Person,
+            Prompt::Handback { .. } => TurnSource::Subagent,
+            Prompt::PeerMessage { .. } => TurnSource::Peer,
+            Prompt::BackgroundJob { .. } => TurnSource::BackgroundJob,
+        }
+    }
+}
+
+/// An in-process caller's plain text is a person's prompt.
+impl From<&str> for Prompt {
+    fn from(text: &str) -> Self {
+        Prompt::person(text)
+    }
+}
+
+impl From<String> for Prompt {
+    fn from(text: String) -> Self {
+        Prompt::person(text)
+    }
 }
 
 /// Summed usage across a chunk of transcript.

@@ -1,5 +1,5 @@
 title: Session transcript
-description: "What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and whether it was a subagent's hand-back."
+description: "What happened in an agent session, oldest first, 50 a page — each turn's prompt and answer, how many tool calls it made and what opened it: a person's prompt, a subagent's hand-back, a background job reporting back or another session's message."
 params:
 - name: session
   label: Session (`ses3`)
@@ -20,7 +20,8 @@ loaders:
       items AS (
         SELECT t.uri AS uri,
                t.started_at AS at,
-               CASE WHEN trim(t.prompt) = '' THEN 'hand-back' ELSE 'turn' END AS kind,
+               CASE t.source WHEN 'subagent' THEN 'hand-back' WHEN 'background_job' THEN 'background job'
+                             WHEN 'peer' THEN 'message' ELSE 'turn' END AS kind,
                t.ended_at AS ended_at,
                t.prompt AS prompt,
                coalesce(t.answer, '') AS answer,
