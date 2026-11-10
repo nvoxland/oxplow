@@ -147,11 +147,29 @@ mod tests {
             })
             .await
             .unwrap();
+        // Nothing changed in the turn: its end take answered the stream's
+        // current snapshot and logged no operation, only its event.
         let ops = svc.snapshot_store.list_ops(stream, 5).await.unwrap();
-        assert_eq!(ops[0].trigger, SnapshotTrigger::TurnEnd);
-        assert_eq!(ops[0].turn_id, Some(turn.value()));
+        assert!(ops.iter().all(|o| o.trigger != SnapshotTrigger::TurnEnd));
         let ended = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
         assert_eq!(ended.snapshot_id, Some(ops[0].snapshot_id));
+        let takes = turn_end_events(svc, turn.value()).await;
+        assert_eq!(takes.len(), 1);
+        assert_eq!(takes[0].envelope.payload["unchanged"], true);
+    }
+
+    /// The `snapshot.taken` events a turn's end take logged.
+    async fn turn_end_events(svc: &crate::Services, turn: i64) -> Vec<oxplow_domain::StoredEvent> {
+        svc.event_log_store
+            .read_after(0, 10_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| {
+                e.envelope.event_type == "snapshot.taken"
+                    && e.envelope.anchors.turn_id == Some(turn)
+            })
+            .collect()
     }
 
     #[tokio::test]
@@ -190,18 +208,19 @@ mod tests {
             .await
             .unwrap();
 
+        // The effort's end take captured the edit; Stop found nothing new, so
+        // the turn's end take logged an event but no operation.
         let ops = svc.snapshot_store.list_ops(stream, 5).await.unwrap();
         let op = &ops[0];
-        assert_eq!(op.trigger, SnapshotTrigger::TurnEnd);
-        assert_eq!(op.turn_id, Some(turn.value()));
-        assert_eq!(op.thread_id, Some(f.thread));
-        assert_eq!(op.effort_id, Some(f.effort));
-        assert_eq!(op.budget_ms, Some(2000));
-        assert_eq!(
-            op.parent_snapshot_id,
-            Some(op.snapshot_id),
-            "nothing new at Stop"
-        );
+        assert_eq!(op.trigger, SnapshotTrigger::EffortEnd);
+        let takes = turn_end_events(svc, turn.value()).await;
+        assert_eq!(takes.len(), 1);
+        let take = &takes[0].envelope;
+        assert_eq!(take.payload["unchanged"], true);
+        assert_eq!(take.payload["snapshot"], op.snapshot_id);
+        assert_eq!(take.payload["budget_ms"], 2000);
+        assert_eq!(take.anchors.thread_id, Some(f.thread));
+        assert_eq!(take.anchors.effort_id, Some(f.effort));
         let ended = svc.agent_turn_store.get(&turn).await.unwrap().unwrap();
         assert_eq!(ended.snapshot_id, Some(op.snapshot_id));
         // The turn's diff is start → end, and it has the edit.
@@ -218,14 +237,7 @@ mod tests {
             .ingest(envelope(HookKind::Stop, f.thread))
             .await
             .unwrap();
-        let after = svc.snapshot_store.list_ops(stream, 10).await.unwrap();
-        assert_eq!(
-            after
-                .iter()
-                .filter(|o| o.turn_id == Some(turn.value()))
-                .count(),
-            1
-        );
+        assert_eq!(turn_end_events(svc, turn.value()).await.len(), 1);
 
         // The turn's own events carry the anchor too — the status its
         // prompt set (running) and the one its Stop set (idle).

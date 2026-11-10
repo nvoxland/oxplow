@@ -1291,8 +1291,8 @@
     - { unique: id }
     - { not_null: path }
 - name: snapshot_op
-  version: 4
-  description: "The snapshot operation log: one row per take (why it ran, what it is anchored to, the snapshot it left the worktree at and its parent). A take that changed nothing points at its parent."
+  version: 5
+  description: "The snapshot operation log: one row per take that captured files (why it ran, what it is anchored to, the snapshot it left the worktree at and its parent). A request that found nothing waiting logs no row: it answers the stream's current snapshot, which is the newest row's. (A snapshot provider's mark is the exception: it logs a row for the state it marked, changed or not.)"
   fields:
     - { name: "seq", type: "INTEGER", doc: "Operation order within the project." }
     - { name: "stream_id", type: "INTEGER", doc: "Stream (worktree) the take ran on." }
@@ -1306,7 +1306,7 @@
     - { name: "elapsed_ms", type: "INTEGER", doc: "How long the take took." }
     - { name: "budget_ms", type: "INTEGER", doc: "The caller's time budget, if it had one." }
     - { name: "over_budget", type: "INTEGER", doc: "1 when elapsed_ms exceeded budget_ms." }
-    - { name: "file_count", type: "INTEGER", doc: "File rows recorded (0 when nothing changed)." }
+    - { name: "file_count", type: "INTEGER", doc: "File rows recorded (0 only for a provider's mark that changed nothing, and a `head_moved` restamp)." }
     - { name: "provider", type: "TEXT", doc: "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)" }
     - { name: "contents", type: "INTEGER", doc: "1 when the take kept file contents; 0 when it recorded identities only ('Track changes only'): a read of that snapshot answers 'no contents', not 'expired'. (v2)" }
     - { name: "handle", type: "TEXT", doc: "A snapshot provider's own name for the state the take marked, which core hands back to it as the next mark's parent; NULL for takes by oxplow's own capture. (v3)" }

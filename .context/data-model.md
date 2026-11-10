@@ -1074,11 +1074,18 @@ seeders for tests.
   (the `changes` page's `max(id) < N` on the stream), falling
   back to the next-smaller id only for a snapshot no op created; Local
   History shows the trigger and marks an over-budget take "slow".
-- **Every take records an op**, including one that found nothing new:
-  its op points at the unchanged snapshot (`parent = snapshot`,
-  `file_count = 0`, `snapshot.taken.unchanged = true`) and no new
-  snapshot row is written. Rows whose tree equals the parent's
-  `tree_hash` are dropped in the same transaction (unchanged).
+- **An op is a take that captured files.** A request that found nothing
+  waiting (or rows whose tree equals the parent's `tree_hash`, dropped
+  in the same transaction) answers the stream's current snapshot and
+  writes no snapshot row and no op: an empty take is not a fact about the
+  worktree. When the request names a turn, thread or effort (a turn's
+  end, an effort's bracket) it still logs `snapshot.taken` with
+  `unchanged = true` and `file_count = 0`, since `thread.checkpoint` and
+  the brackets wait on it, and the turn's `snapshot_id` still points at
+  the current snapshot. A request nobody is anchored to (the quiet,
+  startup and git-refs takes) logs nothing. A snapshot provider's mark
+  keeps its op, changed or not, for the `handle` it names.
+  `TakeOutcome.op_seq` is `None` for a request that logged no op.
 - `trigger` ∈ `turn_end, quiet, effort_start, effort_end, startup,
   manual, git_refs, head_moved, run_measured` (`oxplow_domain::snapshot::
   SnapshotTrigger`). The ops backfilled for snapshots taken before the op

@@ -2913,9 +2913,8 @@ mod tests {
             Some(Revision::git(head2_oid.to_string()))
         );
 
-        // The op log tells the story, newest first: the second git-refs
-        // take (unchanged), the head move, the first git-refs take
-        // (unchanged), the startup take.
+        // The op log tells the story, newest first: the head move, then the
+        // startup take. The git-refs takes found nothing and logged none.
         let triggers: Vec<SnapshotTrigger> = store
             .list_ops(TEST_STREAM, 10)
             .await
@@ -2925,12 +2924,7 @@ mod tests {
             .collect();
         assert_eq!(
             triggers,
-            vec![
-                SnapshotTrigger::GitRefs,
-                SnapshotTrigger::HeadMoved,
-                SnapshotTrigger::GitRefs,
-                SnapshotTrigger::Startup,
-            ]
+            vec![SnapshotTrigger::HeadMoved, SnapshotTrigger::Startup]
         );
     }
 
@@ -2998,10 +2992,11 @@ mod tests {
         svc.shutdown();
     }
 
+    /// A take that captured files logs one op, anchored to its trigger; what
+    /// the renderer hears of it is `ui.push`'s (from the logged event). A
+    /// request on a clean worktree answers the current snapshot and logs none.
     #[tokio::test]
-    /// Each take records its own op, anchored to its trigger; what the
-    /// renderer hears of it is `ui.push`'s (from the logged event).
-    async fn each_take_records_its_own_anchored_op() {
+    async fn a_take_that_captured_files_logs_one_anchored_op_and_a_clean_request_logs_none() {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
         std::fs::write(&a, "one").unwrap();
@@ -3012,7 +3007,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // Nothing dirty: an op on the same snapshot.
+        // Nothing dirty: the current snapshot, and no op.
         let again = svc
             .request_snapshot(TakeRequest {
                 trigger: SnapshotTrigger::EffortEnd,
@@ -3026,11 +3021,31 @@ mod tests {
             .unwrap();
         assert_eq!(again, Some(first));
         let ops = store.list_ops(TEST_STREAM, 5).await.unwrap();
+        assert_eq!(ops.len(), 1, "{ops:?}");
+        assert_eq!(ops[0].trigger, SnapshotTrigger::Startup);
+        assert_eq!(ops[0].snapshot_id, first);
+        // A take that captures a file logs its op with who asked.
+        std::fs::write(&a, "two").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        let second = svc
+            .request_snapshot(TakeRequest {
+                trigger: SnapshotTrigger::EffortEnd,
+                thread_id: None,
+                turn_id: None,
+                effort_id: None,
+                budget: Some(Duration::from_secs(5)),
+                provider: None,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(second, first);
+        let ops = store.list_ops(TEST_STREAM, 5).await.unwrap();
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0].trigger, SnapshotTrigger::EffortEnd);
         assert_eq!(
             (ops[0].snapshot_id, ops[0].parent_snapshot_id),
-            (first, Some(first))
+            (second, Some(first))
         );
         assert_eq!(ops[0].budget_ms, Some(5000));
         assert!(!ops[0].over_budget);
