@@ -10,14 +10,35 @@ use serde_json::{json, Value};
 
 use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
-/// Three edits of a file, nothing else.
-async fn three_edits(fx: &crate::test_fixtures::EffortFixture) {
+/// Three edits of a file in one turn of a request, nothing else.
+async fn three_edits(fx: &ThreadFixture) {
+    let thread = fx.thread.value();
+    let turn: i64 = fx
+        .svc
+        .db
+        .transaction(move |c| {
+            c.execute(
+                "INSERT INTO request (thread_id) VALUES (?1)",
+                rusqlite::params![thread],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            let request = c.last_insert_rowid();
+            c.execute(
+                "INSERT INTO agent_turn (thread_id, prompt, request_id, started_at)
+                 VALUES (?1, 'p', ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                rusqlite::params![thread, request],
+            )
+            .map_err(oxplow_db::map_sql_err)?;
+            Ok(c.last_insert_rowid())
+        })
+        .await
+        .unwrap();
     for _ in 0..3 {
         fx.svc
             .tool_call_store
             .record(oxplow_db::NewToolCall {
-                thread_id: fx.thread.value(),
-                effort_id: Some(fx.effort.value()),
+                thread_id: thread,
+                turn_id: Some(turn),
                 tool: "edit".into(),
                 kind: "edit".into(),
                 path: Some("src/warm.rs".into()),
@@ -73,7 +94,7 @@ async fn set_threshold(fx: &ThreadFixture, edits: i64) {
 /// struggle at the default of five, and are once the project sets three.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_project_setting_changes_a_bundled_datasets_result() {
-    let fx = crate::test_fixtures::services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     three_edits(&fx).await;
     assert_eq!(struggles(&fx).await, json!([]), "the default is five");
 
@@ -86,7 +107,7 @@ async fn a_project_setting_changes_a_bundled_datasets_result() {
 /// read it by itself: no restart and no explicit activation.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_settings_change_republishes_the_datasets_that_read_it() {
-    let fx = crate::test_fixtures::services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     three_edits(&fx).await;
     fx.svc.extension_activation.spawn(&fx.svc);
     set_threshold(&fx, 3).await;

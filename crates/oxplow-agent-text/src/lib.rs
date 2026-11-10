@@ -77,7 +77,7 @@ macro_rules! skill {
 /// (`SKILL_BODY_LIMIT`): loading one costs the whole file, so the detail
 /// lives in references the agent opens when it needs them.
 const OXPLOW_SKILLS: &[SkillFiles] = &[
-    skill!("oxplow-runtime", ["efforts", "commands"]),
+    skill!("oxplow-runtime", ["commands"]),
     skill!("oxplow-wiki-capture", ["search-existing", "write-page"]),
     skill!("oxplow-mermaid", ["syntax"]),
     skill!("oxplow-collection", ["custom-parsers"]),

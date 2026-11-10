@@ -653,7 +653,10 @@ mod tests {
         assert_eq!(consumer.after_for("snapshot.taken"), Vec::<String>::new());
         assert_eq!(
             consumer.after(),
-            vec!["effort.evidence".to_string()],
+            vec![
+                "effort.evidence".to_string(),
+                "token_usage.turns".to_string()
+            ],
             "every predecessor, for ordering"
         );
         assert!(consumer.handles("effort.retitled"));

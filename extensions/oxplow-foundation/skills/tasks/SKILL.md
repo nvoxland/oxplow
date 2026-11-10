@@ -113,6 +113,9 @@ stages; `assigned` — it was in progress and assigned to the thread when a
 turn ended, the weakest), with the request's turn count and times. Join
 `request_id` to `v_request` (its state, prompt, tokens) and `v_commit_request`
 (the commits it made); a thread's tasks by request are `WHERE thread_id = …`.
+A request's turns are `v_agent_turn WHERE request_id = …`, and the files they
+changed `v_turn_file` over those turns (`confidence` `claimed` or `sole` is
+the turn's own; `shared` another turn could have made).
 
 The older record is its efforts, which the Item Efforts page still reads:
 `v_effort` where `task` is the item's uri (`started_at`, `ended_at`,
