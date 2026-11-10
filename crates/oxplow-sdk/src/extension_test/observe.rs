@@ -1207,6 +1207,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         (Some(from), _, text) => Some(oxplow_domain::agent::observe::Prompt::PeerMessage {
             from: from.to_string(),
             socket: None,
+            message: text.clone(),
             text: text.unwrap_or_default(),
         }),
         (None, Some(subagent), None) => Some(oxplow_domain::agent::observe::Prompt::Handback {

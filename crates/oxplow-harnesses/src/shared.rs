@@ -348,6 +348,7 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
             .and_then(|t| t.as_str())
             .map(str::to_string),
         duration_ms: body.get("duration_ms").and_then(|d| d.as_u64()),
+        sent: None,
         ok,
         exit_code,
         question,

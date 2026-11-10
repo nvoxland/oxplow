@@ -89,6 +89,7 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
         question: None,
         plan: None,
         subagent: None,
+        sent: None,
     })
 }
 

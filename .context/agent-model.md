@@ -1752,7 +1752,20 @@ message as its text when none is open (none if one is), logs the
 delivery (`agent.prompt.submitted`, `source: peer`, `sender`) and sets the
 session running.
 `v_agent_turn.sender` names the sender of a turn it opened (its socket in
-`cause_ref`), and Thread Activity titles that turn "Message from …". Pinned by
+`cause_ref`), and Thread Activity titles that turn "Message from …".
+**The receiving turn is matched to the turn that sent it** (V15,
+`agent_message`, `oxplow_db::agent_message_store`): the Claude adapter reads
+a `SendMessage` call's recipient and text (`ToolUse.sent`), recorded with
+its turn when the call is requested; on receipt the adapter gives the
+message without its wrapping (`Prompt::PeerMessage.message`), and the one
+unmatched send of the same text (content hash) in the last ten minutes is
+the cause (`cause_basis` `matched`): the receiving turn joins the sender's
+request, across threads. No send, or two of the same text, links nothing,
+and the turn starts its own request. Known limits: a message read by a busy
+session between tool calls opens no turn (no hook was seen to fire for it);
+a held message expires after five minutes unacknowledged, so a send does
+not prove a receipt; a sender outside oxplow is known by its name and
+socket only. Pinned by `a_peers_message_is_matched_to_the_turn_that_sent_it`. Pinned by
 `a_peers_message_opens_a_turn_of_its_own_with_its_text`, `a_peers_message_is_not_a_persons_prompt`
 and the recorded `claude/peer_message.jsonl`
 (`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's

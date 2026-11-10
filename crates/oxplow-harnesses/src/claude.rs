@@ -176,8 +176,23 @@ impl AgentHarness for Claude {
         Ok(())
     }
 
+    /// A call as Claude Code names it; a `SendMessage` also says what it
+    /// sends to whom.
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
-        claude_shaped_tool_use(body)
+        let mut call = claude_shaped_tool_use(body)?;
+        if call.name == "SendMessage" {
+            let input = body.get("tool_input");
+            let field = |k: &str| {
+                input
+                    .and_then(|i| i.get(k))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            };
+            call.sent = field("to")
+                .zip(field("message"))
+                .map(|(to, text)| oxplow_domain::agent::tool::SentMessage { to, text });
+        }
+        Some(call)
     }
 
     async fn turns(&self, transcript: &str) -> Vec<Turn> {
@@ -202,6 +217,7 @@ impl AgentHarness for Claude {
             return Some(Prompt::PeerMessage {
                 from: peer.from.into(),
                 socket: peer.socket.map(str::to_string),
+                message: peer.message.map(str::to_string),
                 text: text.into(),
             });
         }
@@ -319,14 +335,20 @@ struct PeerFrom<'a> {
     from: &'a str,
     /// The address it sent from (`uds:/tmp/cc-socks/<n>.sock`).
     socket: Option<&'a str>,
+    /// The message inside the wrapping.
+    message: Option<&'a str>,
 }
 
 /// Who sent a cross-session message: the prompt is one wrapped in
 /// `<cross-session-message from="<socket>" from-name="<session name>" …>`.
 fn peer_message_from(text: &str) -> Option<PeerFrom<'_>> {
-    let (tag, _) = text
+    let (tag, rest) = text
         .strip_prefix("<cross-session-message")?
         .split_once('>')?;
+    let message = rest
+        .rsplit_once("</cross-session-message>")
+        .map(|(body, _)| body.trim())
+        .filter(|body| !body.is_empty());
     let attr = |name: &str| {
         let (_, rest) = tag.split_once(&format!(" {name}=\""))?;
         rest.split_once('"')
@@ -337,6 +359,7 @@ fn peer_message_from(text: &str) -> Option<PeerFrom<'_>> {
     Some(PeerFrom {
         from: attr("from-name").or(socket)?,
         socket,
+        message,
     })
 }
 
@@ -982,6 +1005,7 @@ mod tests {
             Some(Prompt::PeerMessage {
                 from: "oxplow-main".into(),
                 socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                message: Some("hi".into()),
                 text: named["prompt"].as_str().unwrap().into(),
             })
         );
@@ -993,6 +1017,7 @@ mod tests {
             Some(Prompt::PeerMessage {
                 from: "uds:/tmp/cc-socks/21663.sock".into(),
                 socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                message: Some("hi".into()),
                 text: unnamed["prompt"].as_str().unwrap().into(),
             })
         );
@@ -1003,6 +1028,30 @@ mod tests {
             crate::test_launch::block(h.prompt(&quoted)),
             Some(Prompt::Person { .. })
         ));
+    }
+
+    /// A `SendMessage` call says what it sends to whom, so the turn that
+    /// receives it can be matched to this one.
+    #[test]
+    fn a_send_message_call_says_what_it_sends() {
+        let h = harness("oxplow:claude-code", "claude");
+        let call = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "tool_name": "SendMessage", "tool_use_id": "t1",
+            "tool_input": {"to": "oxplow-bugfixes", "summary": "s", "message": "merge main first"}
+        })))
+        .unwrap();
+        assert_eq!(
+            call.sent,
+            Some(oxplow_domain::agent::tool::SentMessage {
+                to: "oxplow-bugfixes".into(),
+                text: "merge main first".into()
+            })
+        );
+        let other = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "tool_name": "Bash", "tool_input": {"command": "ls"}
+        })))
+        .unwrap();
+        assert_eq!(other.sent, None);
     }
 
     /// A Stop names the work it left running (`background_tasks`, the

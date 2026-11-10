@@ -46,6 +46,7 @@ use specta::Type;
 use thiserror::Error;
 
 use oxplow_db::agent_job_store::{self, JobSighting};
+use oxplow_db::agent_message_store;
 use oxplow_db::agent_stores::{
     activity_anchors_tx, close_turn_tx, last_status_tx, log_status_tx, open_harness_turn_ids_tx,
     open_turn_ids_in_tx, open_turn_tx, turn_by_harness_id_tx, TurnEnd, TurnOpening,
@@ -639,8 +640,20 @@ fn record_tx(
         // Another session's message: the agent goes on working on it — a
         // turn, if none is open, that says who sent it.
         HookKind::UserPromptSubmit if matches!(env.prompt, Some(Prompt::PeerMessage { .. })) => {
-            let Some(Prompt::PeerMessage { from, socket, text }) = &env.prompt else {
+            let Some(Prompt::PeerMessage {
+                from,
+                socket,
+                message,
+                text,
+            }) = &env.prompt
+            else {
                 unreachable!("matched above")
+            };
+            // The turn that sent it, when exactly one recent send of the same
+            // text matches (`matched`: the harness names no link).
+            let sent = match message {
+                Some(message) => agent_message_store::find_sent_tx(conn, message, now)?,
+                None => None,
             };
             if applied.turn.is_none() {
                 let opening = TurnOpening {
@@ -648,11 +661,15 @@ fn record_tx(
                     cause_ref: socket.as_deref(),
                     sender: Some(from.as_str()),
                     ..TurnOpening::new(TurnSource::Peer, text)
+                        .caused_by(sent.map(|(_, turn)| turn), CauseBasis::Matched)
                 };
                 applied.turn = Some(open_turn_tx(
                     conn, ev, thread, slot, &opening, session, now,
                 )?);
                 applied.opened_turn = true;
+            }
+            if let (Some((row, _)), Some(turn)) = (sent, applied.turn) {
+                agent_message_store::mark_received_tx(conn, row, turn)?;
             }
             status = Some((AgentStatusState::Running, None));
         }
@@ -1513,6 +1530,19 @@ fn log_tool_tx(
             allowed: true,
             reason: None,
         });
+        // A message the call sends to another session, so its receipt can be
+        // matched to this turn.
+        if let (true, Some(sent)) = (decision.allowed, &tool.sent) {
+            agent_message_store::record_sent_tx(
+                conn,
+                thread,
+                row.session,
+                anchors.turn_id.map(AgentTurnId::new),
+                &sent.to,
+                &sent.text,
+                Timestamp::now(),
+            )?;
+        }
         ev.typed::<AgentToolRequested>(&AgentToolRequestedV4 {
             tool: tool.name.clone(),
             kind: tool.kind,
@@ -2190,6 +2220,7 @@ mod tests {
             prompt: Some(Prompt::PeerMessage {
                 from: from.into(),
                 socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
+                message: Some("hi".into()),
                 text: format!(
                     "<cross-session-message from-name=\"{from}\">hi</cross-session-message>"
                 ),
@@ -4562,6 +4593,96 @@ mod tests {
         assert_eq!(
             read("SELECT first_turn_id FROM request ORDER BY id").await,
             [1, 2, 5, 7].map(Some).to_vec()
+        );
+    }
+
+    /// Another session's message is matched to the turn that sent it — the
+    /// one recent send of the same text — and joins that turn's request;
+    /// two sends of the same text match neither, and a message no session
+    /// here sent starts its own request.
+    #[tokio::test]
+    async fn a_peers_message_is_matched_to_the_turn_that_sent_it() {
+        let (svc, tid) = fixture().await;
+        let sender = first_session();
+        let receiver = open_session(&svc, tid).await;
+        let send = |text: &str| {
+            hook_in(
+                HookKind::PreToolUse,
+                tid,
+                sender,
+                Some("s1"),
+                json!({"tool_name": "SendMessage", "tool_use_id": format!("t-{text}"),
+                       "tool_input": {"to": "oxplow-bugfixes", "message": text}}),
+            )
+        };
+        let receive = |text: &str| {
+            HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: "oxplow-main".into(),
+                socket: None,
+                message: Some(text.into()),
+                text: format!("<cross-session-message from-name=\"oxplow-main\">\n{text}\n</cross-session-message>"),
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, tid, receiver, Some("r1"), json!({}))
+        }
+        };
+        let stop = |ses, sid| {
+            hook_in(
+                HookKind::Stop,
+                tid,
+                ses,
+                Some(sid),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        // Turn 1 (the sender's) sends one message, and another twice.
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "tell bugfixes"}),
+        ))
+        .await
+        .unwrap();
+        for text in ["merge main first", "twice", "twice"] {
+            svc.ingest(send(text)).await.unwrap();
+        }
+        svc.ingest(stop(sender, "s1")).await.unwrap();
+        for text in ["merge main first", "twice", "from nowhere"] {
+            svc.ingest(receive(text)).await.unwrap();
+            svc.ingest(stop(receiver, "r1")).await.unwrap();
+        }
+        type Row = (Option<String>, Option<String>, Option<String>);
+        let rows: Vec<Row> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT cause_turn, cause_basis, request FROM v_agent_turn ORDER BY id",
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let req = |n: i64| Some(format!("oxplow:oxplow/request?id=req{n}"));
+        assert_eq!(
+            rows,
+            vec![
+                (None, None, req(1)),
+                (
+                    Some("oxplow:oxplow/turn?id=trn1".into()),
+                    Some("matched".into()),
+                    req(1)
+                ),
+                (None, None, req(2)),
+                (None, None, req(3)),
+            ]
         );
     }
 }

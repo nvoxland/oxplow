@@ -52,6 +52,10 @@ pub enum Prompt {
         from: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         socket: Option<String>,
+        /// The message itself, without the harness's wrapping: what its
+        /// sender's call sent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
         /// The prompt as the harness delivered it.
         #[serde(default)]
         text: String,

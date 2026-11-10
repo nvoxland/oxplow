@@ -95,6 +95,16 @@ pub struct Plan {
 /// One tool call, as its harness maps it: the harness's own name for the
 /// tool, and what oxplow reads of it. On the wire, these fields; one left
 /// out is empty.
+/// A message one agent session sends another, as its harness reports the
+/// call that sends it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct SentMessage {
+    /// The recipient, in the harness's words (a session's name).
+    pub to: String,
+    /// The message's text.
+    pub text: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ToolUse {
@@ -115,6 +125,9 @@ pub struct ToolUse {
     /// How long it ran, in milliseconds, as the harness timed it (Claude
     /// Code's PostToolUse `duration_ms`), on a finished call.
     pub duration_ms: Option<u64>,
+    /// A message the call sends to another agent session (Claude Code's
+    /// `SendMessage`): who to, and its text as the receiver will see it.
+    pub sent: Option<SentMessage>,
     /// Whether it succeeded, when the harness said (a finished call).
     pub ok: Option<bool>,
     /// A shell call's exit code, when the harness said.
