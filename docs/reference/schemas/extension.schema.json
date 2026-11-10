@@ -2419,7 +2419,7 @@
           "type": "string"
         },
         "once_per": {
-          "default": "effort",
+          "default": "request",
           "allOf": [
             {
               "$ref": "#/definitions/AdvisoryOncePer"
@@ -2480,7 +2480,12 @@
       "description": "How often the same advisory may reach the agent.",
       "oneOf": [
         {
-          "description": "Once per effort, the first time the query returns rows.",
+          "description": "Once per request on the thread, the first time the query returns\nrows (the request of the turn the trigger belongs to): the next\nrequest is fresh. The default.",
+          "type": "string",
+          "const": "request"
+        },
+        {
+          "description": "Once per effort, the first time the query returns rows. Efforts go\naway; use `request`.",
           "type": "string",
           "const": "effort"
         },
