@@ -11,6 +11,7 @@ fn envelope(fx: &EffortFixture, kind: HookKind, body: serde_json::Value) -> Hook
     HookEnvelope {
         session_title: None,
         turn_run: None,
+        reading: Default::default(),
         kind,
         thread_id: Some(fx.thread),
         stream_id: None,

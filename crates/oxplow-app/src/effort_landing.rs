@@ -316,6 +316,7 @@ mod tests {
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::hook::HookKind::UserPromptSubmit,
                 thread_id: Some(f.thread),
                 stream_id: None,
@@ -347,6 +348,7 @@ mod tests {
         let submit = |kind| crate::hook_ingest::HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(f.thread),
             stream_id: None,

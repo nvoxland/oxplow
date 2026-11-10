@@ -1072,6 +1072,7 @@ mod tests {
             .ingest(crate::hook_ingest::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(fx.thread),
                 stream_id: None,

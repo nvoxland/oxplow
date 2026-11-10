@@ -74,11 +74,6 @@ use oxplow_domain::hook::{CauseBasis, TurnOutcome, TurnRun, TurnSource};
 /// (ACP's prompt response); they ride `agent.turn.ended@2 { usage }`.
 pub const TURN_USAGE_KEY: &str = "oxplow_turn_usage";
 
-/// The Stop-body key holding the agent's final message for the turn
-/// (Claude's own field; ACP sends its transcript's last agent message
-/// under it): kept as the turn's `answer`.
-pub const LAST_ASSISTANT_MESSAGE: &str = "last_assistant_message";
-
 /// What the agent policy decided about a tool call (PreToolUse), carried
 /// on the envelope so the log records it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -144,6 +139,12 @@ pub struct HookEnvelope {
     #[serde(skip)]
     #[specta(skip)]
     pub turn_run: Option<TurnRun>,
+    /// What the body means, as its harness read it (the transcript, a
+    /// final message, a notification's wait, a compaction, a session's
+    /// end): core reads no harness's body keys. In-process only.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub reading: oxplow_domain::hook::HookReading,
 }
 
 #[derive(Debug, Error)]
@@ -554,8 +555,8 @@ fn record_tx(
         ..Applied::default()
     };
     let mut status = None;
-    let starts = starts_session(env.kind, &body);
-    let transcript_path = body.get("transcript_path").and_then(|p| p.as_str());
+    let starts = starts_session(env.kind, &env.reading);
+    let transcript_path = env.reading.transcript.as_deref();
     if starts {
         // The process that owned any open turn is gone: they end
         // interrupted, before the session start that resets the thread.
@@ -731,8 +732,9 @@ fn record_tx(
                     SubagentPhase::Started
                 } else {
                     SubagentPhase::Finished(
-                        body.get(LAST_ASSISTANT_MESSAGE)
-                            .and_then(|v| v.as_str())
+                        env.reading
+                            .final_message
+                            .as_deref()
                             .filter(|s| !s.trim().is_empty()),
                     )
                 };
@@ -830,16 +832,12 @@ fn record_tx(
         HookKind::Notification => {
             // A permission prompt (or a form to fill) waits on the person;
             // an idle reminder says nothing new.
-            let waits = matches!(
-                body.get("notification_type").and_then(|t| t.as_str()),
-                Some("permission_prompt" | "elicitation_dialog" | "agent_needs_input")
-            );
-            if waits {
-                let message = body
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Waiting on you")
-                    .to_string();
+            if env.reading.waits_on_person {
+                let message = env
+                    .reading
+                    .notice
+                    .clone()
+                    .unwrap_or_else(|| "Waiting on you".to_string());
                 status = Some((AgentStatusState::AwaitingUser, Some(message)));
             }
         }
@@ -858,9 +856,10 @@ fn record_tx(
         HookKind::Interrupt if applied.turn.is_none() => {}
         HookKind::Stop | HookKind::Interrupt => {
             let (answer, outcome) = if env.kind == HookKind::Stop {
-                let said = body
-                    .get(LAST_ASSISTANT_MESSAGE)
-                    .and_then(|v| v.as_str())
+                let said = env
+                    .reading
+                    .final_message
+                    .as_deref()
                     .filter(|s| !s.trim().is_empty());
                 (
                     said,
@@ -962,7 +961,7 @@ fn record_tx(
                 if let Some(sid) = ended {
                     // The harness said so itself before its process went.
                     if !(exited && already_ended_tx(conn, slot)?) {
-                        end_session_tx(conn, ev, thread, &row, sid, &body, now)?;
+                        end_session_tx(conn, ev, thread, &row, sid, &env.reading, now)?;
                     }
                 }
             }
@@ -1052,8 +1051,8 @@ fn asked_of(tool: &ToolUse) -> String {
 /// Whether this hook is a harness process starting (or resuming) a
 /// session: a `SessionStart`, except the one a context compaction posts
 /// mid-turn (Claude's `source: "compact"` keeps the same process and turn).
-fn starts_session(kind: HookKind, body: &serde_json::Value) -> bool {
-    kind == HookKind::SessionStart && body.get("source").and_then(|s| s.as_str()) != Some("compact")
+fn starts_session(kind: HookKind, reading: &oxplow_domain::hook::HookReading) -> bool {
+    kind == HookKind::SessionStart && !reading.compaction
 }
 
 /// Close every open turn of agent session `session` on the thread; returns
@@ -1162,10 +1161,10 @@ fn end_session_tx(
     thread: ThreadId,
     row: &ThreadRow,
     session: &str,
-    body: &serde_json::Value,
+    reading: &oxplow_domain::hook::HookReading,
     now: Timestamp,
 ) -> Result<(), DomainError> {
-    let reason = body.get("reason").and_then(|r| r.as_str());
+    let reason = reading.end_reason.as_deref();
     let env = ev
         .typed::<AgentSessionEnded>(&AgentSessionEndedV2 {
             session: session.to_string(),
@@ -1175,7 +1174,7 @@ fn end_session_tx(
         .with_anchors(activity_anchors_tx(conn, thread, row.session)?)
         .with_subject(session_subject(thread, row.session));
     ev.append(conn, &env)?;
-    if let Some(id) = row.session.filter(|_| reason == Some("clear")) {
+    if let Some(id) = row.session.filter(|_| reading.clears_conversation) {
         oxplow_db::agent_session_store::unbind_tx(conn, id, Some(session), now)?;
     }
     Ok(())
@@ -1708,6 +1707,7 @@ mod tests {
                 .and_then(|p| p.as_str())
                 .map(Prompt::person),
             decision: None,
+            reading: crate::test_fixtures::claude_reading(&body),
             tool: crate::test_fixtures::claude_tool(kind, &body),
             subagent: None,
             harness_turn: None,
@@ -1897,6 +1897,7 @@ mod tests {
         let prompt = |id: &str, title: Option<&str>| HookEnvelope {
             session_title: title.map(str::to_string),
             turn_run: None,
+            reading: Default::default(),
             ..hook(
                 HookKind::UserPromptSubmit,
                 tid,
@@ -2820,6 +2821,7 @@ mod tests {
         let envelope = |kind, prompt: Option<&str>| HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2852,6 +2854,7 @@ mod tests {
         let envelope = |kind, prompt: Option<&str>, turn_run| HookEnvelope {
             session_title: None,
             turn_run,
+            reading: Default::default(),
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2928,6 +2931,7 @@ mod tests {
         let envelope = |kind, prompt: Option<&str>, turn_run| HookEnvelope {
             session_title: None,
             turn_run,
+            reading: Default::default(),
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -2993,6 +2997,7 @@ mod tests {
         let env = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -3020,6 +3025,7 @@ mod tests {
         let prompt_env = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -3036,6 +3042,7 @@ mod tests {
         let stop = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -3060,6 +3067,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -3077,6 +3085,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Interrupt,
             thread_id: Some(tid),
             stream_id: None,
@@ -3119,6 +3128,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: Some(tid),
             stream_id: None,
@@ -3136,6 +3146,7 @@ mod tests {
         let stop = svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -3169,6 +3180,7 @@ mod tests {
         let hook = |kind, prompt: Option<&str>, payload: serde_json::Value| HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: crate::test_fixtures::claude_reading(&payload),
             kind,
             thread_id: Some(tid),
             stream_id: None,
@@ -3221,6 +3233,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Stop,
             thread_id: Some(tid),
             stream_id: None,
@@ -3246,6 +3259,7 @@ mod tests {
         svc.ingest(HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::UserPromptSubmit,
             thread_id: None,
             stream_id: None,
@@ -3273,6 +3287,7 @@ mod tests {
             svc.ingest(HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: HookKind::UserPromptSubmit,
                 thread_id: Some(tid),
                 stream_id: None,
@@ -3448,7 +3463,7 @@ mod tests {
             HookKind::Stop,
             tid,
             None,
-            json!({ LAST_ASSISTANT_MESSAGE: "Done with the parser.\n\nShould I also fix the lexer?" }),
+            json!({ "last_assistant_message": "Done with the parser.\n\nShould I also fix the lexer?" }),
         ))
         .await
         .unwrap();
@@ -3467,7 +3482,7 @@ mod tests {
             HookKind::Stop,
             tid,
             None,
-            json!({ LAST_ASSISTANT_MESSAGE: "All done." }),
+            json!({ "last_assistant_message": "All done." }),
         ))
         .await
         .unwrap();

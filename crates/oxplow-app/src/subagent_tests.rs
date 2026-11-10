@@ -17,6 +17,7 @@ fn envelope(
     HookEnvelope {
         session_title: None,
         turn_run: None,
+        reading: crate::test_fixtures::claude_reading(&body),
         kind,
         thread_id: Some(fx.thread),
         stream_id: None,

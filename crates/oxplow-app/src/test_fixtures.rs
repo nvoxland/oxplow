@@ -493,6 +493,15 @@ pub fn claude_tool(
     futures::executor::block_on(claude.tool_use(body))
 }
 
+/// A hook body's meaning as the hook route reads it
+/// (`AgentHarness::reading` of the bearer's harness), for a test posting
+/// Claude Code's bodies.
+pub fn claude_reading(body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+    let claude =
+        oxplow_harnesses::built_in("oxplow:claude-code", "claude", "Claude").expect("the built-in");
+    claude.reading(body)
+}
+
 /// Keep the section of reference doc `doc` (repo-relative) between
 /// `<!-- {name}:begin … -->` and `<!-- {name}:end -->` equal to
 /// `generated`: `OXPLOW_BLESS=1` rewrites it, else a stale one fails.

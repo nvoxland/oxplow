@@ -260,6 +260,30 @@ fn reported_files(body: &serde_json::Value) -> Vec<String> {
     out
 }
 
+/// A hook body's meaning in Claude Code's shape (what Claude sends, and
+/// what opencode's bridge translates its events to).
+pub fn claude_shaped_reading(body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+    let text = |k: &str| {
+        body.get(k)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let end_reason = text("reason");
+    oxplow_domain::hook::HookReading {
+        transcript: text("transcript_path"),
+        final_message: text("last_assistant_message"),
+        waits_on_person: matches!(
+            body.get("notification_type").and_then(|t| t.as_str()),
+            Some("permission_prompt" | "elicitation_dialog" | "agent_needs_input")
+        ),
+        notice: text("message"),
+        compaction: body.get("source").and_then(|s| s.as_str()) == Some("compact"),
+        clears_conversation: end_reason.as_deref() == Some("clear"),
+        end_reason,
+    }
+}
+
 /// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
 /// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
 /// Claude Code sends, and what opencode's bridge translates its calls to.

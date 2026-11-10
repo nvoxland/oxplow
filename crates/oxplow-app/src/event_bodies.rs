@@ -117,6 +117,7 @@ mod tests {
             .ingest(HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: HookKind::PostToolUse,
                 thread_id: Some(f.thread),
                 stream_id: None,
@@ -178,6 +179,7 @@ mod tests {
                 .ingest(HookEnvelope {
                     session_title: None,
                     turn_run: None,
+                    reading: Default::default(),
                     kind: HookKind::UserPromptSubmit,
                     thread_id: Some(f.thread),
                     stream_id: None,

@@ -406,6 +406,18 @@ async fn handle_hook_inner(
         )
         .await;
     }
+    // What the body means, as the bearer's harness reads it.
+    let reading = body_value
+        .as_ref()
+        .and_then(|body| {
+            ctx.services
+                .harnesses
+                .get(&principal.harness)
+                .ok()
+                .map(|h| h.reading(body))
+        })
+        .unwrap_or_default();
+
     if matches!(
         event.as_str(),
         "SessionStart"
@@ -452,6 +464,7 @@ async fn handle_hook_inner(
         let envelope = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: reading.clone(),
             kind,
             thread_id,
             stream_id,
@@ -541,6 +554,7 @@ async fn handle_hook_inner(
             let envelope = HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: reading.clone(),
                 kind,
                 thread_id,
                 stream_id,
@@ -575,6 +589,7 @@ async fn handle_hook_inner(
     let envelope = HookEnvelope {
         session_title,
         turn_run,
+        reading,
         kind,
         thread_id,
         stream_id,

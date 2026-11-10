@@ -751,6 +751,7 @@ mod tests {
         crate::HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: crate::test_fixtures::claude_reading(&body),
             kind: oxplow_domain::HookKind::Stop,
             thread_id: Some(thread),
             stream_id: None,
@@ -770,6 +771,7 @@ mod tests {
             .ingest(crate::HookEnvelope {
                 session_title: None,
                 turn_run: None,
+                reading: Default::default(),
                 kind: oxplow_domain::HookKind::UserPromptSubmit,
                 thread_id: Some(thread),
                 stream_id: None,

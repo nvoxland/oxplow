@@ -567,6 +567,12 @@ impl TerminalSessionRegistry {
                             let exit = crate::hook_ingest::HookEnvelope {
                                 session_title: None,
                                 turn_run: None,
+                                // The pane's process exited: the end the
+                                // session's harness would not have reported.
+                                reading: oxplow_domain::hook::HookReading {
+                                    end_reason: Some("exit".into()),
+                                    ..Default::default()
+                                },
                                 kind: oxplow_domain::HookKind::SessionEnd,
                                 thread_id: Some(pane.thread),
                                 stream_id: None,

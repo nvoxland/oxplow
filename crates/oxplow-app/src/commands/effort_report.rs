@@ -390,6 +390,9 @@ mod tests {
                         .ingest(crate::hook_ingest::HookEnvelope {
                             session_title: None,
                             turn_run: None,
+                            reading: crate::test_fixtures::claude_reading(
+                                &serde_json::from_str(body).unwrap(),
+                            ),
                             kind,
                             thread_id: Some(thread),
                             stream_id: None,
