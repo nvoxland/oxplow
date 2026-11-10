@@ -996,7 +996,7 @@ at all apart by the text oxplow had written into `answer`, cleared that
 text, and rewrote `agent.turn.ended@3` rows to `@4` (an expired payload
 only its version). The new enum-like columns of V2–V7 carry no CHECK:
 Rust owns their values, and a CHECK could only grow by rebuilding the
-table. **The question it ended on** (V10, `question`) is set in the close transaction. `agent_turn` open/close log
+table. **Requests** (V11): `request` (`thread_id`, `first_turn_id`) and `agent_turn.request_id`, set when the turn opens. **The question it ended on** (V10, `question`) is set in the close transaction. `agent_turn` open/close log
 `agent.turn.started@3` / `agent.turn.ended@5` in the same transaction as
 the row change; **background jobs** (V7, `agent_job`) are written beside
 them by the hook ingest ([agent-model.md](./agent-model.md) "Background

@@ -37,6 +37,9 @@ snapshots, the tool calls with their time windows, test runs and tokens
 ([agent-model.md](./agent-model.md) "Hook ingest and recording"). Only a
 person's prompt is a person's words: since 2026-10-28, 41% of turns were
 opened by one, 41% by a background job's report, 13% by another session.
+A **request** is the turn that started something and every turn that
+followed from it, joined by those cause links when each turn opens
+([agent-model.md](./agent-model.md) "Requests").
 Nothing here depends on how many threads or agents share a stream.
 
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent

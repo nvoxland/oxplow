@@ -4423,4 +4423,97 @@ mod tests {
             .collect();
         assert_eq!(turns, vec![Some(1), Some(1), Some(1)]);
     }
+
+    /// A turn joins its request when it opens: a person's prompt starts
+    /// one; a job's report joins the request of the turn that started the
+    /// job — also when a person's prompt came between, and two jobs deep; a
+    /// subagent's hand-back joins its spawner's; a prompt the harness said
+    /// nothing of starts its own; a re-prompt opens no turn and starts none.
+    #[tokio::test]
+    async fn a_turn_joins_its_request_when_it_opens() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let start_job = |call: &str| {
+            hook(
+                HookKind::PreToolUse,
+                tid,
+                Some("h1"),
+                json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9", "run_in_background": true},
+                       "tool_use_id": call}),
+            )
+        };
+        let notice = |call: &str| HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some(call.into()),
+                job: Some(format!("job-{call}")),
+                status: Some("completed".into()),
+                summary: None,
+                text: format!("<task-notification>{call}</task-notification>"),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        for env in [
+            prompt("one"),
+            start_job("a"),
+            stop(),
+            prompt("two"),
+            stop(),
+            notice("a"),
+            start_job("b"),
+            stop(),
+            notice("b"),
+            prompt("a re-prompt"),
+            stop(),
+            prompt("five"),
+            subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"),
+            stop(),
+            subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"),
+            stop(),
+            HookEnvelope {
+                prompt: None,
+                ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+            },
+            stop(),
+        ] {
+            svc.ingest(env).await.unwrap();
+        }
+        let read = |sql: &'static str| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| {
+                    let mut stmt = c.prepare(sql).map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| r.get::<_, Option<i64>>(0))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            read("SELECT request_id FROM v_agent_turn ORDER BY id").await,
+            [1, 2, 1, 1, 3, 3, 4].map(Some).to_vec()
+        );
+        assert_eq!(
+            read("SELECT first_turn_id FROM request ORDER BY id").await,
+            [1, 2, 5, 7].map(Some).to_vec()
+        );
+    }
 }
