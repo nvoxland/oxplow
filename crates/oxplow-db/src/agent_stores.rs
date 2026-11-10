@@ -551,6 +551,9 @@ pub fn close_turn_tx(
         return Ok(None);
     };
     let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
+    // The tasks in progress for this thread as the turn ended are ones its
+    // request worked on (the weakest basis).
+    crate::request_links::link_assigned_tx(conn, thread, id, end.at)?;
     let env = ev
         .typed::<AgentTurnEnded>(&AgentTurnEndedV5 {
             turn: id.to_string(),

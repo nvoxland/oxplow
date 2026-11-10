@@ -49,6 +49,7 @@ pub mod panel_layout_store;
 pub mod proposal_store;
 pub mod provider_collector_store;
 pub mod replaceable_store;
+pub mod request_links;
 pub mod resource_store;
 pub mod search_store;
 pub mod semantic_layer;
