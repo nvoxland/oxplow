@@ -457,8 +457,9 @@ to the tests (a compile error, a timeout, a pipe cut short); naming the
 runner again adds nothing, so no nudge fires and the effort's one nudge
 stays for a run that needs it.
 
-**Anti-nag:** the nudge fires at most once per effort — a durable one-shot
-mark (`once_mark`, `claim_once`), so a daemon restart doesn't re-arm
+**Anti-nag:** the nudge fires at most once per request (else per effort when
+the run has no request) — a durable one-shot
+mark (`once_mark`, `claim_once`; the next request is fresh), so a daemon restart doesn't re-arm
 it. The *fired* nudge itself is persisted for review and delivery — see
 Nudge persistence below.
 

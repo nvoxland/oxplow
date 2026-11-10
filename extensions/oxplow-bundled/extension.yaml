@@ -200,21 +200,16 @@ advisories:
   # active task tracker.
   - id: untracked-work
     on: post-tool-use
-    once_per: row
+    once_per: request
     query: |
-      WITH cur AS (
-        SELECT t.request_id FROM v_agent_turn t
-        WHERE t.id = :turn_id AND t.request_id IS NOT NULL
-      )
-      SELECT CAST(cur.request_id AS TEXT) AS key,
-             'This request changed files, and no task is in progress on this thread. If it is '
+      SELECT 'This request changed files, and no task is in progress on this thread. If it is '
              || 'work the person will want to see on the Work panel, take or file its task and '
              || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
-      FROM cur
-      WHERE EXISTS (SELECT 1 FROM v_capability_provider
+      WHERE :request_id IS NOT NULL
+        AND EXISTS (SELECT 1 FROM v_capability_provider
                      WHERE capability = 'task_tracker' AND provider = 'oxtask' AND active = 1)
         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
-                     WHERE t.request_id = cur.request_id)
-        AND NOT EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = cur.request_id)
+                     WHERE t.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = :request_id)
         AND NOT EXISTS (SELECT 1 FROM v_task w JOIN v_thread th ON th.uri = w.assignee
                          WHERE th.id = :thread_id AND w.state = 'in_progress')

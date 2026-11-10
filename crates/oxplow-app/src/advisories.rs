@@ -15,7 +15,13 @@ use crate::event_pump::AsyncEventConsumer;
 use crate::extension::extensions::{AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension};
 
 /// The params every advisory query may use.
-pub const PARAMS: &[&str] = &["thread_id", "stream_id", "turn_id", "effort_id"];
+pub const PARAMS: &[&str] = &[
+    "thread_id",
+    "stream_id",
+    "turn_id",
+    "request_id",
+    "effort_id",
+];
 
 /// The turn-end consumer's name (its checkpoint key; what callers settle on).
 pub const TURN_END: &str = "advisories.turn_end";
@@ -44,6 +50,9 @@ pub struct AdvisoryScope {
     pub thread: i64,
     pub stream: Option<i64>,
     pub turn: Option<i64>,
+    /// The request of the turn the trigger belongs to (a prompt's: the turn
+    /// it opened or went into).
+    pub request: Option<i64>,
     pub effort: Option<i64>,
     pub session: Option<String>,
 }
@@ -55,6 +64,7 @@ impl AdvisoryScope {
             ("thread_id".into(), SqlCell::Int(self.thread)),
             ("stream_id".into(), cell(self.stream)),
             ("turn_id".into(), cell(self.turn)),
+            ("request_id".into(), cell(self.request)),
             ("effort_id".into(), cell(self.effort)),
         ]
     }
@@ -63,12 +73,14 @@ impl AdvisoryScope {
         OnceScope::thread(self.thread)
     }
 
-    /// The effort, else the thread: where deliveries are counted for
-    /// muting, and a muted hint stays muted.
+    /// The request, else the effort, else the thread: where deliveries are
+    /// counted for muting, and a muted hint stays muted. A new request
+    /// starts fresh.
     fn work_scope(&self) -> OnceScope {
-        match self.effort {
-            Some(e) => OnceScope::effort(self.thread, e),
-            None => self.thread_scope(),
+        match (self.request, self.effort) {
+            (Some(r), _) => OnceScope::request(self.thread, r),
+            (None, Some(e)) => OnceScope::effort(self.thread, e),
+            (None, None) => self.thread_scope(),
         }
     }
 
@@ -82,6 +94,10 @@ impl AdvisoryScope {
         once_per: AdvisoryOncePer,
     ) -> Result<Option<(OnceScope, String)>, ()> {
         Ok(match once_per {
+            AdvisoryOncePer::Request => match self.request {
+                Some(r) => Some((OnceScope::request(self.thread, r), id.to_string())),
+                None => return Err(()),
+            },
             AdvisoryOncePer::Effort => match self.effort {
                 Some(e) => Some((OnceScope::effort(self.thread, e), id.to_string())),
                 None => return Err(()),
@@ -348,6 +364,7 @@ async fn for_thread_in_generation(
         thread: thread.value(),
         stream: stream.map(|s| s.value()),
         turn: cause.and_then(|c| c.anchors.turn_id),
+        request: request_of(&svc.sql, thread, cause.and_then(|c| c.anchors.turn_id)).await,
         effort: effort.as_ref().map(|e| e.id.value()),
         session: session_of(&svc.sql, thread).await,
     };
@@ -374,6 +391,32 @@ async fn for_thread_in_generation(
             .await;
     }
     hits
+}
+
+/// The request a trigger belongs to: that of `turn` when the trigger names
+/// one (a tool call's, a turn end's), else of the thread's newest turn (a
+/// prompt's: the turn it opened or went into).
+async fn request_of(
+    sql: &crate::sql_gateway::SqlGateway,
+    thread: &oxplow_domain::ThreadId,
+    turn: Option<i64>,
+) -> Option<i64> {
+    let (query, arg) = match turn {
+        Some(t) => ("SELECT request_id FROM v_agent_turn WHERE id = ?1", t),
+        None => (
+            "SELECT request_id FROM v_agent_turn WHERE thread_id = ?1 ORDER BY id DESC LIMIT 1",
+            thread.value(),
+        ),
+    };
+    let rows = sql
+        .query_sql(query, vec![SqlCell::Int(arg)], None)
+        .await
+        .ok()?
+        .rows;
+    match rows.first().and_then(|r| r.first()) {
+        Some(SqlCell::Int(id)) => Some(*id),
+        _ => None,
+    }
 }
 
 /// The harness session of the thread's latest turn, if it reported one.
@@ -485,7 +528,20 @@ mod tests {
             thread: 1,
             stream: Some(1),
             turn: None,
+            request: None,
             effort: Some(effort),
+            session: None,
+        }
+    }
+
+    /// The scope of request `id` on thread 1 (no effort).
+    fn on_request(request: i64) -> AdvisoryScope {
+        AdvisoryScope {
+            thread: 1,
+            stream: Some(1),
+            turn: None,
+            request: Some(request),
+            effort: None,
             session: None,
         }
     }
@@ -500,6 +556,7 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 't', '2026-01-01', '2026-01-01');
+                 INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1);
                  INSERT INTO effort (id, task, thread_id, started_at, ended_at) VALUES
                    (1, 'oxplow:oxplow/task?id=A-1&provider=issues', 1, '2026-01-01', '2026-01-01'),
                    (2, 'oxplow:oxplow/task?id=A-2&provider=issues', 1, '2026-01-01', '2026-01-01'),
@@ -552,6 +609,69 @@ mod tests {
             .run(l, e, AdvisoryOn::PostToolUse, &on(1))
             .await
             .is_empty());
+    }
+
+    /// A once-per-request hint fires once in a request and again in the next
+    /// (`:request_id` is bound); a hint that keeps firing is muted in the
+    /// request it reached the agent three times in, and a new request
+    /// starts fresh.
+    #[tokio::test]
+    async fn once_per_request_fires_once_per_request_and_mutes_per_request() {
+        let (l, runner) = setup().await;
+        let e = vec![ext(vec![adv(
+            "per-request",
+            AdvisoryOn::PostToolUse,
+            AdvisoryOncePer::Request,
+            "SELECT 'request ' || :request_id AS message",
+        )])];
+        let (l, e, runner) = (&l, &e, &runner);
+        let run = |r: i64| async move {
+            runner
+                .run(l, e, AdvisoryOn::PostToolUse, &on_request(r))
+                .await
+        };
+        assert_eq!(run(1).await[0].text, "request 1");
+        assert!(run(1).await.is_empty(), "once per request");
+        assert_eq!(
+            run(2).await[0].text,
+            "request 2",
+            "the next request is fresh"
+        );
+        // With no request to scope it, a once-per-request hint doesn't run.
+        assert!(runner
+            .run(l, e, AdvisoryOn::PostToolUse, &on(1))
+            .await
+            .is_empty());
+
+        // Three deliveries in request 1 mute a hint that still fires there;
+        // request 2 is unaffected.
+        let every = vec![ext(vec![adv(
+            "again",
+            AdvisoryOn::PostToolUse,
+            AdvisoryOncePer::Turn,
+            "SELECT 'm' AS message",
+        )])];
+        runner
+            .marks
+            .database()
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO agent_nudge (thread_id, kind, message, created_at, audience, delivered_at, request_id) VALUES
+                       (1, 'x/again', 'm', 'a', 'agent', 'b', 1), (1, 'x/again', 'm', 'a', 'agent', 'b', 1),
+                       (1, 'x/again', 'm', 'a', 'agent', 'b', 1);",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let first = runner
+            .run(l, &every, AdvisoryOn::PostToolUse, &on_request(1))
+            .await;
+        assert_eq!(first[0].id, MUTED_KIND);
+        let second = runner
+            .run(l, &every, AdvisoryOn::PostToolUse, &on_request(2))
+            .await;
+        assert_eq!(second[0].id, "x/again", "a new request starts fresh");
     }
 
     #[tokio::test]
@@ -627,7 +747,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: guide\nintent:\n  purpose: test\npermissions: [agent.write]\nadvisories:\n  - id: hello\n    on: post-tool-use\n    query: SELECT 'effort ' || :effort_id AS message\n",
+            "manifest: 2\nname: guide\nintent:\n  purpose: test\npermissions: [agent.write]\nadvisories:\n  - id: hello\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'effort ' || :effort_id AS message\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&f.svc).await;
@@ -669,7 +789,7 @@ mod tests {
         approved(
             &f.svc,
             "guide",
-            "  - id: hello\n    on: post-tool-use\n    query: SELECT 'hi' AS message\n",
+            "  - id: hello\n    on: post-tool-use\n    once_per: thread\n    query: SELECT 'hi' AS message\n",
         )
         .await;
         let worktree = tempfile::tempdir().unwrap();

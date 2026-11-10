@@ -320,17 +320,17 @@ pub(crate) fn build(
              \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
              \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
              \x20 # Alerts instead). Each row's `message` is what it hears; `once_per` says how\n\
-             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :effort_id. A shared\n\
+             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :request_id, :effort_id. A shared\n\
              \x20 # extension's advisories run once a person approves them.\n\
              \x20 - id: {id}\n\
              \x20   on: turn-end\n\
-             \x20   once_per: effort\n\
+             \x20   once_per: request\n\
              \x20   query: |\n\
-             \x20     SELECT printf('TODO: what the agent should hear. Here: this effort has changed %d files.',\n\
-             \x20                    count(DISTINCT f.path)) AS message\n\
-             \x20     FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id\n\
-             \x20     WHERE e.id = :effort_id AND e.ended_at IS NULL\n\
-             \x20     HAVING count(DISTINCT f.path) >= 15\n",
+             \x20     SELECT printf('TODO: what the agent should hear. Here: this request has changed %d files.',\n\
+             \x20                    count(DISTINCT p.path)) AS message\n\
+             \x20     FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id\n\
+             \x20     WHERE t.request_id = :request_id\n\
+             \x20     HAVING count(DISTINCT p.path) >= 15\n",
                     advisory = ContributionKind::Advisory.spec().title.to_lowercase()
                 ),
             )],
