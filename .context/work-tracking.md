@@ -69,6 +69,10 @@ person's line that is only a tag (a slash command, `<command-name>…`); how it 
 so a policy may react late: opening adopts the thread's activity back to
 its previous effort's end, and closing can cut the span at a past point.
 
+**A task's requests are core's too** (`request_task`, `.context/tasks.md`
+"A task's requests"): which requests worked on a task, each link with its
+basis (`prompt`, `command`, `assigned`).
+
 **Attribution is core's, from observation:** files are *claimed* (an edit
 tool named them, `claim_basis` `named`, or the harness said a shell call
 changed them, `reported`: Claude Code's `bashEditDiff`, never taking a

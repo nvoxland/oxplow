@@ -574,3 +574,31 @@ doesn't exist on the bus; the provider's **other** declared commands
 (the fake's `estimate`) do, as `<id>.<name>`. An external write can land
 at the tracker while the reply times out — the run then reports failure
 though the item changed; the sync (P7.A3) restates it.
+
+## A task's requests
+
+A task links to the requests that worked on it (`request_task`: `request_id`,
+`task_uri`, `basis`, `turn_id`, `at`; V90; the dataset `v_request_task` adds
+the request's totals so far). The links are observed, never stated, core's
+whichever task tracker is active (like assignment), and written in the
+transaction of the evidence. Nothing opens, closes or moves a task from
+them: what a task's state means is its tracker's opinion. The bases:
+
+- `prompt`: a person's prompt in the request named the task (`@`-less
+  `[oxplow uri …]` references, `uri::prompt_refs`; `log_prompt_tx`).
+- `command`: the agent ran `oxplow.task.transition|create|update|comment` on
+  it in a turn. `command.executed` of an agent actor is anchored to the turn
+  open for its session (a person's or a page's command is in no turn and
+  links nothing); `commands/record.rs`.
+- `assigned`: it was in progress and assigned to the thread when a turn of the
+  request ended (`close_turn_tx`) — the weakest.
+
+A commit linked to the request mentioning the task is not a basis yet: no
+request-to-commit link exists. With no task tracker active nothing is
+written. **Why a table and not `page_ref`:** `page_ref` is the references a
+text contains (its source restates its slice), keyed `(source, target,
+ref_type)` with no cascade; this link is evidence with a time, a basis and a
+turn, written once by ingest, which cascades with its request and joins to
+`v_request`. A prompt's mention of the task is still also a `prompt_mention`
+edge in `page_ref`.
+

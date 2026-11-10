@@ -2320,6 +2320,98 @@ mod tests {
         assert!(!out_refs.is_empty(), "the body mention was projected");
     }
 
+    /// A request links the tasks it worked on, each with its evidence: a
+    /// prompt that named two tasks, a task command the agent ran in the turn,
+    /// the task in progress for the thread when the turn ended. A person's
+    /// command links nothing, whatever turn is open.
+    #[tokio::test]
+    async fn a_request_links_the_tasks_it_worked_on_with_their_evidence() {
+        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let svc = &fx.svc;
+        let named = crate::test_fixtures::file_item(svc, json!({ "title": "named" })).await;
+        let by_person = crate::test_fixtures::file_item(svc, json!({ "title": "person" })).await;
+        let hook = |kind, prompt: Option<String>| crate::HookEnvelope {
+            session_title: None,
+            turn_run: None,
+            reading: Default::default(),
+            kind,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+            agent_session_id: Some(fx.session),
+            session_id: None,
+            payload_json: "{}".into(),
+            prompt: prompt.map(Into::into),
+            decision: None,
+            tool: None,
+            subagent: None,
+            harness_turn: None,
+        };
+        let prompt = format!(
+            "do {} and {}",
+            oxplow_domain::uri::prompt_refs::uri_mention(&task_ref(fx.task)),
+            oxplow_domain::uri::prompt_refs::uri_mention(&task_ref(named)),
+        );
+        svc.hook_ingest
+            .ingest(hook(
+                oxplow_domain::HookKind::UserPromptSubmit,
+                Some(prompt),
+            ))
+            .await
+            .unwrap();
+        let agent = Actor::Agent {
+            session_id: Some(fx.session),
+            thread_id: Some(fx.thread),
+            stream_id: Some(StreamId::new(1)),
+        };
+        svc.commands
+            .run(
+                &agent,
+                UPDATE,
+                json!({ "uri": task_ref(named), "title": "named!" }),
+                false,
+            )
+            .await
+            .unwrap();
+        // A person's command in the same open turn is in no request.
+        svc.commands
+            .run(
+                &Actor::Human,
+                UPDATE,
+                json!({ "uri": task_ref(by_person), "title": "person!" }),
+                false,
+            )
+            .await
+            .unwrap();
+        svc.hook_ingest
+            .ingest(hook(oxplow_domain::HookKind::Stop, None))
+            .await
+            .unwrap();
+        let rows: Vec<(String, String)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT task_uri, basis FROM request_task ORDER BY task_uri, basis")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let (first, second) = (task_ref(fx.task), task_ref(named));
+        let mut expected = vec![
+            (first.clone(), "assigned".to_string()),
+            (first, "prompt".to_string()),
+            (second.clone(), "command".to_string()),
+            (second, "prompt".to_string()),
+        ];
+        expected.sort();
+        assert_eq!(rows, expected);
+        assert!(rows.iter().all(|(t, _)| *t != task_ref(by_person)));
+    }
+
     /// Thread 9, another open thread in stream 1, as its agent.
     async fn other_threads_agent(fx: &crate::test_fixtures::EffortFixture) -> Actor {
         fx.svc

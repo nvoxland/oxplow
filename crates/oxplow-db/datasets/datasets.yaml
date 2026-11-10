@@ -121,6 +121,22 @@
   tests:
     - { not_null: id }
     - { unique: id }
+- name: request_task
+  version: 1
+  description: "The tasks each request worked on, observed, each link with the evidence it rests on: a person's prompt named the task, the agent ran a task command on it in a turn, or it was in progress and assigned to the thread when a turn of the request ended. Nothing here opens, closes or moves a task. One row per (request, task, basis); a request may link several tasks and a task several requests. A task's requests: `WHERE task = <task uri>`."
+  fields:
+    - { name: "request", type: "TEXT", doc: "The request (`v_request.uri`)." }
+    - { name: "task", type: "TEXT", doc: "The task's URI; it may dangle if its tracker dropped it." }
+    - { name: "basis", type: "TEXT", doc: "`prompt` (a person's prompt in the request named the task), `command` (the agent ran a task command on it in a turn), `assigned` (in progress and assigned to the thread when a turn of the request ended: the weakest)." }
+    - { name: "turn", type: "TEXT", doc: "The turn the evidence was recorded in (`v_agent_turn.uri`)." }
+    - { name: "at", type: "TEXT", doc: "When the link was recorded (RFC 3339)." }
+    - { name: "turns", type: "INT", doc: "How many turns the request has so far." }
+    - { name: "started_at", type: "TEXT", doc: "When the request's first turn started." }
+    - { name: "last_ended_at", type: "TEXT", doc: "When its latest turn ended; NULL while one runs." }
+  tests:
+    - { not_null: request }
+    - { not_null: task }
+    - { accepted_values: { column: basis, values: [prompt, command, assigned] } }
 - name: turn_activity
   version: 3
   description: "What happened inside each turn, counted from the events anchored to it: the compactions of the agent's context, the prompts delivered to it (the one that opened it and any that landed in it while it ran), how many of those a person typed, and where its time went once it ended: in tool calls, waiting on the person, or the rest (the model's own time, mostly). One row per turn (v_agent_turn), kept apart from it."
