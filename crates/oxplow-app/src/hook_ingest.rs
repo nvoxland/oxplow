@@ -738,6 +738,13 @@ fn record_tx(
                 };
                 let started = matches!(phase, SubagentPhase::Started);
                 log_subagent_tx(conn, ev, thread, slot, session, subagent, Some(phase))?;
+                // A subagent that stopped has finished its job (a background
+                // one's hand-back may still come: it fills the report's turn).
+                if !started {
+                    if let Some(job) = agent_job_store::find_tx(conn, thread, slot, &subagent.id)? {
+                        agent_job_store::reported_tx(conn, job.id, applied.turn, now, None, None)?;
+                    }
+                }
                 if started {
                     // A harness that names the turn that spawned it (Codex's
                     // `rootTurnId`) is believed over the turn open now.
@@ -1474,7 +1481,7 @@ fn log_tool_tx(
             .as_deref()
             .map(|id| tool_key(session, id, phase))
     };
-    let anchors = activity_anchors_tx(conn, thread, row.session)?;
+    let mut anchors = activity_anchors_tx(conn, thread, row.session)?;
     // Who in the session made the call: the harness's word, else the
     // subagent call it falls inside. A subagent call itself is the
     // session's own.
@@ -1482,9 +1489,21 @@ fn log_tool_tx(
         Some(s) => Some(s.clone()),
         None if tool.kind == ToolKind::Subagent => None,
         None => bracketing_subagent_tx(conn, anchors.turn_id)?,
+    };
+    // A subagent's call is the work of the turn that started it, not of
+    // whatever turn is open when it lands (a background subagent goes on
+    // after its spawner's turn ended).
+    if let Some(job) = subagent
+        .as_ref()
+        .map(|s| agent_job_store::find_tx(conn, thread, row.session, &s.id))
+        .transpose()?
+        .flatten()
+    {
+        if let Some(turn) = job.started_turn {
+            anchors.turn_id = Some(turn.value());
+        }
     }
-    .as_ref()
-    .map(subagent_ref);
+    let subagent = subagent.as_ref().map(subagent_ref);
     let subject = anchors
         .turn_id
         .map(|t| turn_uri(AgentTurnId::new(t)))
@@ -4369,5 +4388,180 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(row, (1, 2, 1));
+    }
+
+    /// A subagent's job ends when it stops, not only with a hand-back; and
+    /// its calls are the work of the turn that started it, also when they
+    /// land after that turn ended or while another turn runs.
+    #[tokio::test]
+    async fn a_subagents_stop_ends_its_job_and_its_calls_keep_their_turn() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let call_by = |agent: &str, id: &str| {
+            hook(
+                HookKind::PostToolUse,
+                tid,
+                Some("h1"),
+                json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": id,
+                       "agent_id": agent, "agent_type": "general-purpose"}),
+            )
+        };
+        // Turn 1: a foreground subagent runs and stops; a background one
+        // starts.
+        svc.ingest(prompt("one")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "fg"))
+            .await
+            .unwrap();
+        svc.ingest(call_by("fg", "t1")).await.unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStop, tid, "h1", "fg"))
+            .await
+            .unwrap();
+        svc.ingest(subagent_hook(HookKind::SubagentStart, tid, "h1", "bg"))
+            .await
+            .unwrap();
+        svc.ingest(stop()).await.unwrap();
+        // The background one works on after turn 1, and into turn 2.
+        svc.ingest(call_by("bg", "t2")).await.unwrap();
+        svc.ingest(prompt("two")).await.unwrap();
+        svc.ingest(call_by("bg", "t3")).await.unwrap();
+        svc.ingest(stop()).await.unwrap();
+        let read = |sql: &'static str| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| {
+                    let mut stmt = c.prepare(sql).map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+                        })
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            read("SELECT harness_job_id, state FROM v_agent_job ORDER BY id").await,
+            vec![
+                ("fg".to_string(), Some("reported".to_string())),
+                ("bg".to_string(), Some("running".to_string())),
+            ]
+        );
+        let events = logged(&svc).await;
+        let turns: Vec<_> = of_type(&events, "agent.tool.finished")
+            .iter()
+            .map(|e| e.envelope.anchors.turn_id)
+            .collect();
+        assert_eq!(turns, vec![Some(1), Some(1), Some(1)]);
+    }
+
+    /// A turn joins its request when it opens: a person's prompt starts
+    /// one; a job's report joins the request of the turn that started the
+    /// job — also when a person's prompt came between, and two jobs deep; a
+    /// subagent's hand-back joins its spawner's; a prompt the harness said
+    /// nothing of starts its own; a re-prompt opens no turn and starts none.
+    #[tokio::test]
+    async fn a_turn_joins_its_request_when_it_opens() {
+        let (svc, tid) = fixture().await;
+        let prompt = |text: &str| {
+            hook(
+                HookKind::UserPromptSubmit,
+                tid,
+                Some("h1"),
+                json!({ "prompt": text }),
+            )
+        };
+        let stop = || {
+            hook(
+                HookKind::Stop,
+                tid,
+                Some("h1"),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let start_job = |call: &str| {
+            hook(
+                HookKind::PreToolUse,
+                tid,
+                Some("h1"),
+                json!({"tool_name": "Bash", "tool_input": {"command": "sleep 9", "run_in_background": true},
+                       "tool_use_id": call}),
+            )
+        };
+        let notice = |call: &str| HookEnvelope {
+            prompt: Some(Prompt::BackgroundJob {
+                call: Some(call.into()),
+                job: Some(format!("job-{call}")),
+                status: Some("completed".into()),
+                summary: None,
+                text: format!("<task-notification>{call}</task-notification>"),
+            }),
+            ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+        };
+        for env in [
+            prompt("one"),
+            start_job("a"),
+            stop(),
+            prompt("two"),
+            stop(),
+            notice("a"),
+            start_job("b"),
+            stop(),
+            notice("b"),
+            prompt("a re-prompt"),
+            stop(),
+            prompt("five"),
+            subagent_hook(HookKind::SubagentStart, tid, "h1", "afd"),
+            stop(),
+            subagent_hook(HookKind::UserPromptSubmit, tid, "h1", "afd"),
+            stop(),
+            HookEnvelope {
+                prompt: None,
+                ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
+            },
+            stop(),
+        ] {
+            svc.ingest(env).await.unwrap();
+        }
+        let read = |sql: &'static str| {
+            let db = svc.db.clone();
+            async move {
+                db.read(move |c| {
+                    let mut stmt = c.prepare(sql).map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| r.get::<_, Option<i64>>(0))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(
+            read("SELECT request_id FROM v_agent_turn ORDER BY id").await,
+            [1, 2, 1, 1, 3, 3, 4].map(Some).to_vec()
+        );
+        assert_eq!(
+            read("SELECT first_turn_id FROM request ORDER BY id").await,
+            [1, 2, 5, 7].map(Some).to_vec()
+        );
     }
 }

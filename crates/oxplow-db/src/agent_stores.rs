@@ -367,6 +367,46 @@ impl<'a> TurnOpening<'a> {
     }
 }
 
+/// Turn `turn` joins its request: the request of `cause`, the turn it goes
+/// on with, when that has one; else a request it starts. The cause always
+/// opened first, so its request is known now.
+fn join_request_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    turn: AgentTurnId,
+    cause: Option<AgentTurnId>,
+) -> Result<i64, DomainError> {
+    let joined: Option<i64> = match cause {
+        Some(cause) => conn
+            .query_row(
+                "SELECT request_id FROM agent_turn WHERE id = ?1",
+                [cause.value()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?
+            .flatten(),
+        None => None,
+    };
+    let request = match joined {
+        Some(request) => request,
+        None => {
+            conn.execute(
+                "INSERT INTO request (thread_id, first_turn_id) VALUES (?1, ?2)",
+                params![thread.value(), turn.value()],
+            )
+            .map_err(map_sql_err)?;
+            conn.last_insert_rowid()
+        }
+    };
+    conn.execute(
+        "UPDATE agent_turn SET request_id = ?2 WHERE id = ?1",
+        params![turn.value(), request],
+    )
+    .map_err(map_sql_err)?;
+    Ok(request)
+}
+
 /// Open a turn in agent session `agent_session` on `thread` and log
 /// `agent.turn.started`, in the caller's transaction (`session` is the
 /// harness's own session id). The turn starts at its stream's current snapshot.
@@ -401,6 +441,7 @@ pub fn open_turn_tx(
     )
     .map_err(map_sql_err)?;
     let id = AgentTurnId::new(conn.last_insert_rowid());
+    join_request_tx(conn, thread, id, opening.cause_turn)?;
     if let Some(stream) = anchors.stream_id {
         // Its diff runs from here to the snapshot it ends at.
         let start =

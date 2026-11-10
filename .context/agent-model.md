@@ -1514,6 +1514,11 @@ on with at once, with no projection lag:
   by one `tool_key`), else the job's record does; `cause_turn_id` and
   `cause_basis` are the job's start and its basis. Its `cause_ref` is the
   job's id.
+- **A subagent's stop ends its job** (its `SubagentStop`; a background
+  one's hand-back may come after and fills the report's turn). **Its tool
+  calls are the work of the turn that started it** (their turn anchor is
+  the job's started turn), also when they land after that turn ended or
+  while another turn runs.
 - **Lost** (`lost_at`, oxplow's own fact, not the harness's status) when
   its agent session ends, restarts or is closed before it reported: its
   process is gone. A tool call still running then is `abandoned` too (by
@@ -1525,6 +1530,25 @@ Claude Code's ids line up: the notice's `<task-id>`, the Stop's
 `running` (`v_agent_job.state`): that is what a request is waiting on.
 Pinned also by `a_jobs_start_basis_resumed_runs_and_lost_jobs`. Pinned by
 `a_background_job_is_a_record_from_start_to_report`.
+
+### Requests
+
+**A request is the turn that started something and every turn that
+followed from it** (`request`, `agent_turn.request_id`, V11): a background
+job's report and a subagent's hand-back go on with the turn their job
+started in, so they join its request. A turn joins its request when it
+opens (`open_turn_tx` → `join_request_tx`): its cause turn's request, else
+a request it starts (`request.first_turn_id`; who started it is that
+turn's `source`). The cause always opened first, so membership is known at
+once and never changes after. Every new turn has one; a re-prompt opens no
+turn and joins nothing.
+
+**Identity and membership are stored; everything that adds up or changes
+is derived.** Work recorded against a turn — tool calls (a subagent's are
+its starting turn's), tokens, test runs, jobs — is its request's through
+`agent_turn.request_id`: no event anchor or other row repeats it. A
+cross-session message starts its own request until it is matched to the
+turn that sent it. Pinned by `a_turn_joins_its_request_when_it_opens`.
 
 ### Native features: observed, set, left native
 

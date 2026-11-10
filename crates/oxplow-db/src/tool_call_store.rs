@@ -377,7 +377,10 @@ mod tests {
             ("finished", 10, 30),
             ("finished", 20, 40),
             ("denied", 45, 45),
+            // Finished after the turn ended (an interrupt): cut at its end.
+            ("finished", 50, 70),
         ] {
+            let at = |s: u32| format!("2026-01-01T00:{:02}:{:02}.000000Z", s / 60, s % 60);
             seed += &format!(
                 "INSERT INTO agent_tool_call (thread_id, turn_id, tool, at, kind, state, started_at, ended_at)
                    VALUES (1, 1, 'Bash', '{e}', 'shell', '{state}', '{s}', '{e}');",
@@ -388,6 +391,8 @@ mod tests {
         for (i, (state, when)) in [
             ("running", 0),
             ("awaiting_user", 42),
+            // Its detail changes: still one wait.
+            ("awaiting_user", 44),
             ("running", 50),
             ("awaiting_user", 55),
         ]
@@ -418,8 +423,8 @@ mod tests {
             })
             .await
             .unwrap();
-        // Tools 10–40 (30 s); waits 42–50 and 55–60 (13 s); the rest is
-        // 60 less the 43 s either covered.
-        assert_eq!(row, (60_000, 30_000, 2, 13_000, 17_000));
+        // Tools 10–40 and 50–60 (40 s); waits 42–50 and 55–60 (13 s); the
+        // rest is 60 less the 48 s either covered.
+        assert_eq!(row, (60_000, 40_000, 2, 13_000, 12_000));
     }
 }
