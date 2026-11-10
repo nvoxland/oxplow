@@ -29710,5 +29710,57 @@
       ],
       "key": []
     }
+  },
+  "turn_file": {
+    "1": {
+      "columns": [
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "The turn (v_agent_turn.id)."
+        },
+        {
+          "name": "turn",
+          "type": "TEXT",
+          "doc": "The turn's URI."
+        },
+        {
+          "name": "stream_id",
+          "type": "INTEGER",
+          "doc": "The stream whose worktree it changed in."
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "doc": "The file, relative to the worktree."
+        },
+        {
+          "name": "first_changed_at",
+          "type": "TEXT",
+          "doc": "When it first changed in the turn, as the watcher saw it; its capture time when the watcher gave none (RFC 3339)."
+        },
+        {
+          "name": "last_changed_at",
+          "type": "TEXT",
+          "doc": "When it last changed in the turn (RFC 3339)."
+        },
+        {
+          "name": "timed",
+          "type": "INT",
+          "doc": "1 when every capture of it carried the watcher's change times; 0 when only a capture places it."
+        },
+        {
+          "name": "claim",
+          "type": "TEXT",
+          "doc": "How a call of the turn claimed it: `named` (an edit tool named it) or `reported` (the harness reported a shell call changed it); NULL when no call did."
+        },
+        {
+          "name": "confidence",
+          "type": "TEXT",
+          "doc": "How sure the attribution is: `claimed` (a call of the turn named or reported it), `shared` (no claim, and another turn ran on the stream while it changed), `sole` (no claim, and this was the only turn running)."
+        }
+      ],
+      "key": []
+    }
   }
 }

@@ -148,6 +148,21 @@
     - { not_null: request }
     - { not_null: task }
     - { accepted_values: { column: basis, values: [prompt, command, assigned] } }
+- name: turn_file
+  version: 1
+  description: "The files that changed during each turn, joined by time between the turn and its stream's snapshot line (no snapshots the turn owns). Several writers can change one worktree at once, so it is best effort: each file says how sure it is. A file belongs to a turn when a take captured it after the turn started (and within a minute of its end) and the watcher saw it change inside the turn's window, or, with no change time, the capture alone says so. A file changed before the prompt is not the turn's, even when its end take captured it."
+  fields:
+    - { name: "turn_id", type: "INTEGER", doc: "The turn (v_agent_turn.id)." }
+    - { name: "turn", type: "TEXT", doc: "The turn's URI." }
+    - { name: "stream_id", type: "INTEGER", doc: "The stream whose worktree it changed in." }
+    - { name: "path", type: "TEXT", doc: "The file, relative to the worktree." }
+    - { name: "first_changed_at", type: "TEXT", doc: "When it first changed in the turn, as the watcher saw it; its capture time when the watcher gave none (RFC 3339)." }
+    - { name: "last_changed_at", type: "TEXT", doc: "When it last changed in the turn (RFC 3339)." }
+    - { name: "timed", type: "INT", doc: "1 when every capture of it carried the watcher's change times; 0 when only a capture places it." }
+    - { name: "claim", type: "TEXT", doc: "How a call of the turn claimed it: `named` (an edit tool named it) or `reported` (the harness reported a shell call changed it); NULL when no call did." }
+    - { name: "confidence", type: "TEXT", doc: "How sure the attribution is: `claimed` (a call of the turn named or reported it), `shared` (no claim, and another turn ran on the stream while it changed), `sole` (no claim, and this was the only turn running)." }
+  tests:
+    - { not_null: turn_id }
 - name: turn_activity
   version: 3
   description: "What happened inside each turn, counted from the events anchored to it: the compactions of the agent's context, the prompts delivered to it (the one that opened it and any that landed in it while it ran), how many of those a person typed, and where its time went once it ended: in tool calls, waiting on the person, or the rest (the model's own time, mostly). One row per turn (v_agent_turn), kept apart from it."

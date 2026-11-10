@@ -40,6 +40,21 @@ opened by one, 41% by a background job's report, 13% by another session.
 A **request** is the turn that started something and every turn that
 followed from it, joined by those cause links when each turn opens
 ([agent-model.md](./agent-model.md) "Requests").
+
+**A turn's file changes are a join by time** (`v_turn_file`), not
+snapshots the turn owns: snapshots are the worktree's own record, and
+several writers (agents, the person, outside tools) can change one
+worktree at once. A file is the turn's when a take captured it after the
+turn began and the watcher saw it change inside the turn's window (a
+capture with no change time — the startup sweep's — is placed by the
+capture alone). A file changed before the prompt is not the turn's, even
+when the turn's end take captured it. Each file says how sure it is:
+`claimed` (a call of the turn named it, or its harness reported a shell
+call changed it: `agent_tool_call_path`), `shared` (another turn ran on
+the stream while it changed), `sole`. `thread.checkpoint`'s `changed` is
+whether the turn has any; the `turn` change kind of change analysis finds
+its two snapshots by time. The turn's own `start_snapshot_id` /
+`snapshot_id` remain only for `effort.observe`, and go with efforts.
 Nothing here depends on how many threads or agents share a stream.
 
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent

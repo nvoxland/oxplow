@@ -111,12 +111,19 @@ impl EventConsumer for ToolCallProjection {
                 conn,
                 &call,
                 env.cause.as_ref().map(|c| c.as_str()),
+            )?;
+            // The files it changed, every one, as its finish reports them.
+            oxplow_db::tool_call_store::record_paths_tx(
+                conn,
+                env.id.as_str(),
+                &call.kind,
+                &paths(event),
             )
         } else {
             let denied = str_field(event, "decision") == Some("denied");
             oxplow_db::tool_call_store::record_request_tx(conn, &call, env.id.as_str(), denied)
+                .map(|_| ())
         }
-        .map(|_| ())
     }
 }
 

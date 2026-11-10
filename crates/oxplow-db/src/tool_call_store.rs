@@ -199,6 +199,32 @@ pub fn record_finish_tx(
     Ok(n == 1)
 }
 
+/// The files call `call` (its `agent.tool.finished` event, else its
+/// request) names or reports, with their basis: `named` by an edit tool,
+/// `reported` by the harness for a shell call. A call of another kind (a
+/// read, a search) changes no file and records none.
+pub fn record_paths_tx(
+    conn: &rusqlite::Connection,
+    event: &str,
+    kind: &str,
+    paths: &[&str],
+) -> Result<(), DomainError> {
+    let basis = match kind {
+        "edit" => "named",
+        "shell" => "reported",
+        _ => return Ok(()),
+    };
+    for path in paths {
+        conn.execute(
+            "INSERT OR IGNORE INTO agent_tool_call_path (call_id, path, basis)
+             SELECT id, ?2, ?3 FROM agent_tool_call WHERE event_id = ?1 OR request_event_id = ?1",
+            rusqlite::params![event, path, basis],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// What owned the calls left running: the turn that ended, or the agent
 /// session that ended (a call made with no turn open, a background
 /// subagent's after the Stop, has only its session).
@@ -426,5 +452,89 @@ mod tests {
         // Tools 10–40 and 50–60 (40 s); waits 42–50 and 55–60 (13 s); the
         // rest is 60 less the 48 s either covered.
         assert_eq!(row, (60_000, 40_000, 2, 13_000, 12_000));
+    }
+
+    /// A turn's files are joined by time: a file the watcher saw change
+    /// inside the turn is the turn's — `claimed` when a call of the turn
+    /// named it, `shared` when another turn on the stream ran then, else
+    /// `sole`; a file changed before the prompt is not, even when the turn's
+    /// end take captured it; a capture with no change time is placed by the
+    /// capture alone.
+    #[tokio::test]
+    async fn a_turns_files_are_joined_by_time_with_their_confidence() {
+        let db = Database::in_memory();
+        let at = |s: i64| {
+            let s = s + 600;
+            format!("2026-01-01T00:{:02}:{:02}.000000Z", s / 60, s % 60)
+        };
+        let mut seed = format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{a}', '{a}');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+               VALUES (1, 1, 'one', '{a}', '{a}'), (2, 1, 'two', '{a}', '{a}');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at)
+               VALUES (1, 1, 'go', '{t1s}', '{t1e}'), (2, 2, 'go too', '{t2s}', '{t2e}');
+             INSERT INTO agent_tool_call (id, thread_id, turn_id, tool, at, kind, state)
+               VALUES (1, 1, 1, 'Edit', '{t1s}', 'edit', 'finished');
+             INSERT INTO agent_tool_call_path (call_id, path, basis) VALUES (1, 'e.rs', 'named');",
+            a = at(-600),
+            t1s = at(0),
+            t1e = at(60),
+            t2s = at(30),
+            t2e = at(90),
+        );
+        // (path, first change, last change, captured): `None` change times
+        // are a capture the watcher gave none for.
+        for (path, first, last, captured) in [
+            ("a.rs", Some(10), Some(12), 61),
+            ("b.rs", Some(40), Some(45), 61),
+            ("c.rs", Some(-5), Some(-5), 61),
+            ("d.rs", None, None, 50),
+            ("e.rs", Some(20), Some(20), 61),
+        ] {
+            let time = |t: Option<i64>| t.map_or("NULL".to_string(), |t| format!("'{}'", at(t)));
+            seed += &format!(
+                "INSERT INTO file_snapshot (stream_id, path, captured_at, first_changed_at, last_changed_at)
+                   VALUES (1, '{path}', '{c}', {f}, {l});",
+                c = at(captured),
+                f = time(first),
+                l = time(last),
+            );
+        }
+        db.transaction(move |tx| {
+            tx.execute_batch(&seed)
+                .map_err(crate::database::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let rows: Vec<(i64, String, String)> = db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT turn_id, path, confidence FROM v_turn_file ORDER BY turn_id, path",
+                    )
+                    .map_err(crate::database::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(crate::database::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(crate::database::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let row = |t: i64, p: &str, c: &str| (t, p.to_string(), c.to_string());
+        assert_eq!(
+            rows,
+            vec![
+                // a.rs changed at 10 s, before turn 2 started: turn 1's alone.
+                row(1, "a.rs", "sole"),
+                row(1, "b.rs", "shared"),
+                row(1, "d.rs", "shared"),
+                row(1, "e.rs", "claimed"),
+                row(2, "b.rs", "shared"),
+                row(2, "d.rs", "shared"),
+                // e.rs changed at 20 s, before turn 2 started.
+            ]
+        );
     }
 }

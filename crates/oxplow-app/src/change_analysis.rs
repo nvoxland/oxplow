@@ -820,17 +820,54 @@ async fn resolve(
                 .get(&tid)
                 .await?
                 .ok_or(DomainError::NotFound)?;
-            let end = turn.snapshot_id.ok_or(DomainError::NotFound)?;
-            let start = turn.start_snapshot_id.ok_or_else(|| {
-                invalid(format!(
-                    "turn {turn_id} began before the stream had a snapshot, so there's nothing to diff from"
-                ))
-            })?;
+            let ended = turn.ended_at.ok_or(DomainError::NotFound)?;
             let thread = svc
                 .thread_store
                 .get(&turn.thread_id)
                 .await?
                 .ok_or(DomainError::NotFound)?;
+            // The turn's two points on its stream's snapshot line, by time:
+            // the last take at or before it began, the first at or after it
+            // ended (else the latest). The turn owns no snapshot.
+            let stream = thread.stream_id.value();
+            let (began, ended) = (
+                oxplow_db::ts_to_string(turn.started_at),
+                oxplow_db::ts_to_string(ended),
+            );
+            let (start, end) = svc
+                .db
+                .read(move |c| {
+                    use rusqlite::OptionalExtension as _;
+                    let start: Option<i64> = c
+                        .query_row(
+                            "SELECT id FROM snapshot WHERE stream_id = ?1 AND created_at <= ?2
+                              ORDER BY created_at DESC, id DESC LIMIT 1",
+                            rusqlite::params![stream, began],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let end: Option<i64> = c
+                        .query_row(
+                            "SELECT id FROM snapshot WHERE stream_id = ?1
+                              ORDER BY created_at >= ?2 DESC,
+                                       CASE WHEN created_at >= ?2 THEN created_at END ASC,
+                                       created_at DESC, id DESC
+                              LIMIT 1",
+                            rusqlite::params![stream, ended],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok((start, end))
+                })
+                .await?;
+            let end = end.ok_or(DomainError::NotFound)?;
+            let start = start.ok_or_else(|| {
+                invalid(format!(
+                    "turn {turn_id} began before the stream had a snapshot, so there's nothing to diff from"
+                ))
+            })?;
             (
                 thread.stream_id,
                 "turn",
@@ -1950,9 +1987,12 @@ mod tests {
             .svc
             .db
             .transaction(move |c| {
+                // A turn that began at the first take and ended at the last:
+                // its points on the line are found by time.
                 c.execute(
-                    "INSERT INTO agent_turn (thread_id, prompt, started_at, start_snapshot_id, snapshot_id)
-                     VALUES (1, 'p', '2026-01-01T00:00:00.000000Z', ?1, ?2)",
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at, ended_at)
+                     VALUES (1, 'p', (SELECT created_at FROM snapshot WHERE id = ?1),
+                                     (SELECT created_at FROM snapshot WHERE id = ?2))",
                     rusqlite::params![start, end],
                 )
                 .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?;
@@ -2011,10 +2051,13 @@ mod tests {
             .svc
             .db
             .transaction(move |c| {
+                // A turn that began at the first take and ended at the last
+                // (or is still running): its points are found by time.
                 let ins = |snap: Option<i64>| {
                     c.execute(
-                        "INSERT INTO agent_turn (thread_id, prompt, started_at, start_snapshot_id, snapshot_id)
-                         VALUES (1, 'p', '2026-01-01T00:00:00.000000Z', ?1, ?2)",
+                        "INSERT INTO agent_turn (thread_id, prompt, started_at, ended_at)
+                         VALUES (1, 'p', (SELECT created_at FROM snapshot WHERE id = ?1),
+                                         (SELECT created_at FROM snapshot WHERE id = ?2))",
                         rusqlite::params![start, snap],
                     )
                     .map(|_| c.last_insert_rowid())

@@ -2,11 +2,12 @@
 //! turn's end take lands (`snapshot.taken` with `trigger: turn_end`,
 //! logged even when the take outruns the Stop hook's budget), log
 //! `thread.checkpoint` with what an effort policy needs and nothing it
-//! would have to dig for: whether the worktree differs from where the turn
-//! began, and how many of the turn's tool calls could have changed it.
+//! would have to dig for: whether files changed during the turn, and how
+//! many of the turn's tool calls could have changed them.
 //!
-//! "Changed" compares the turn's start snapshot with the take's: snapshots
-//! are content-addressed, so an unchanged tree is the same id. Which tools
+//! "Changed" is whether any file changed during the turn: its files joined
+//! by time with the stream's snapshot line (`v_turn_file`), so a file
+//! changed before the prompt doesn't count. Which tools
 //! can change the worktree is harness knowledge kept here, so a policy
 //! never reads tool names.
 
@@ -45,28 +46,24 @@ pub struct ThreadCheckpointConsumer {
 }
 
 impl ThreadCheckpointConsumer {
-    /// The turn's thread and start snapshot, if the turn exists.
-    async fn turn(
-        &self,
-        turn: AgentTurnId,
-    ) -> Result<Option<(ThreadId, Option<i64>)>, DomainError> {
+    /// The turn's thread and whether files changed during it (the turn's
+    /// files joined by time, `v_turn_file`), if the turn exists.
+    async fn turn(&self, turn: AgentTurnId) -> Result<Option<(ThreadId, bool)>, DomainError> {
         let rows = self
             .sql
             .query_sql(
-                "SELECT thread_id, start_snapshot_id FROM v_agent_turn WHERE id = ?1",
+                "SELECT t.thread_id,
+                        EXISTS (SELECT 1 FROM v_turn_file f WHERE f.turn_id = t.id)
+                   FROM v_agent_turn t WHERE t.id = ?1",
                 vec![SqlCell::Int(turn.value())],
                 None,
             )
             .await?
             .rows;
         Ok(rows.into_iter().next().and_then(|row| match &row[..] {
-            [SqlCell::Int(thread), start] => Some((
-                ThreadId::new(*thread),
-                match start {
-                    SqlCell::Int(s) => Some(*s),
-                    _ => None,
-                },
-            )),
+            [SqlCell::Int(thread), SqlCell::Int(changed)] => {
+                Some((ThreadId::new(*thread), *changed != 0))
+            }
             _ => None,
         }))
     }
@@ -111,7 +108,7 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
             return Ok(());
         }
         let turn = AgentTurnId::new(turn);
-        let Some((thread, start)) = self.turn(turn).await? else {
+        let Some((thread, changed)) = self.turn(turn).await? else {
             return Ok(());
         };
         let env = Envelope::typed::<ThreadCheckpoint>(
@@ -121,7 +118,7 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
                 turn: turn.to_string(),
                 reason: CheckpointReason::TurnEnd,
                 snapshot,
-                changed: start != Some(snapshot),
+                changed,
                 writing_tools: self.writing_tools(turn).await?,
             },
         )
