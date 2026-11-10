@@ -85,7 +85,7 @@
     - { unique: id }
     - { relationships: { column: agent_session_id, to: agent_session, field: id } }
 - name: agent_turn
-  version: 13
+  version: 14
   description: "Agent turns: what opened each one (a person's prompt, a background job reporting back, a subagent handing back, another session's message: `source`) and the agent's answer, per thread and agent session. start_snapshot_id → snapshot_id is what the turn changed (the snapshot the worktree was at when it opened and when it ended)."
   fields:
     - { name: "id", type: "INTEGER", doc: "Turn id." }
@@ -110,7 +110,8 @@
     - { name: "cause_ref", type: "TEXT", doc: "The harness's own name for the cause: the tool call id that started the job, the subagent's id, the sender's socket. NULL when it gave none. (v12)" }
     - { name: "cause_basis", type: "TEXT", doc: "How `cause_turn` is known: `reported` (the harness named it) or `matched` (oxplow matched it from what it saw). NULL with no cause turn. Best effort either way. (v12)" }
     - { name: "sender", type: "TEXT", doc: "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)" }
-    - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery). NULL while running. (v13)" }
+    - { name: "outcome", type: "TEXT", doc: "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery). NULL while running. (v13)" }
+    - { name: "error", type: "TEXT", doc: "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v14)" }
     - { name: "left_running", type: "TEXT", doc: "JSON array of the jobs and subagents still running when the turn ended (`{id, kind?, description?}`, the id the report back names), as its harness reported (Claude Code's Stop `background_tasks`); `[]` for none; NULL when the harness said nothing or while running. (v13)" }
   tests:
     - { not_null: id }

@@ -1892,8 +1892,52 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(events[2], (4, "session_ended".to_string()));
-        assert!(events.iter().all(|(v, _)| *v == 4));
+        // V90 later takes every logged end to @5.
+        assert_eq!(events[2], (5, "session_ended".to_string()));
+        assert!(events.iter().all(|(v, _)| *v == 5));
+    }
+
+    /// V90 lets a turn end `errored` with the harness's words in `error`,
+    /// keeps the outcomes already stored, and takes logged ends to @5.
+    #[test]
+    fn v90_adds_the_errored_outcome_and_keeps_stored_ones() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(6))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        conn.execute(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at, outcome)
+             VALUES (1, 1, 'p', 'a', 'interrupted')",
+            [],
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        conn.execute(
+            "INSERT INTO agent_turn (id, thread_id, prompt, started_at, outcome, error)
+             VALUES (2, 1, 'p', 'a', 'errored', 'APIError: overloaded')",
+            [],
+        )
+        .unwrap();
+        let rows: Vec<(i64, String, Option<String>)> = conn
+            .prepare("SELECT id, outcome, error FROM agent_turn ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, "interrupted".to_string(), None),
+                (
+                    2,
+                    "errored".to_string(),
+                    Some("APIError: overloaded".to_string())
+                ),
+            ]
+        );
     }
 
     /// V6 gives each recorded call (a finished one) its request — its finish

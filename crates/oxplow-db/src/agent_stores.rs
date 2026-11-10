@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use oxplow_domain::events::schema::{
-    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV4, AgentTurnStarted, AgentTurnStartedV3,
+    AgentStatusChanged, AgentTurnEnded, AgentTurnEndedV5, AgentTurnStarted, AgentTurnStartedV3,
     EventType,
 };
 use oxplow_domain::events::Anchors;
@@ -410,6 +410,8 @@ pub struct TurnEnd<'a> {
     pub context_window: Option<i64>,
     /// The work still running when it ended, when its harness said.
     pub left_running: Option<&'a [oxplow_domain::hook::RunningWork]>,
+    /// The harness's own words for an error that ended it.
+    pub error: Option<&'a str>,
 }
 
 impl TurnEnd<'_> {
@@ -425,6 +427,7 @@ impl TurnEnd<'_> {
             context_tokens: None,
             context_window: None,
             left_running: None,
+            error: None,
         }
     }
 }
@@ -447,7 +450,7 @@ pub fn close_turn_tx(
         .query_row(
             "UPDATE agent_turn SET ended_at = ?2, answer = COALESCE(?3, answer),
                     model = ?4, effort = ?5, context_tokens = ?6, context_window = ?7,
-                    outcome = ?8, left_running = ?9
+                    outcome = ?8, left_running = ?9, error = ?10
               WHERE id = ?1 AND ended_at IS NULL
               RETURNING thread_id, agent_session_id",
             params![
@@ -459,7 +462,8 @@ pub fn close_turn_tx(
                 end.context_tokens,
                 end.context_window,
                 end.outcome.as_str(),
-                left_running
+                left_running,
+                end.error
             ],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
@@ -470,13 +474,14 @@ pub fn close_turn_tx(
     };
     let (thread, session) = (ThreadId::new(thread), session.map(AgentSessionId::new));
     let env = ev
-        .typed::<AgentTurnEnded>(&AgentTurnEndedV4 {
+        .typed::<AgentTurnEnded>(&AgentTurnEndedV5 {
             turn: id.to_string(),
             thread: thread.to_string(),
             outcome: end.outcome,
             transcript_path: end.transcript_path.map(str::to_string),
             usage: end.usage.clone(),
             left_running: end.left_running.map(<[_]>::to_vec),
+            error: end.error.map(str::to_string),
         })
         .with_anchors(Anchors {
             turn_id: Some(id.value()),

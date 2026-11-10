@@ -1193,13 +1193,16 @@ more than the stream would even when it's sometimes wrong.
   with no start. Readers that mean "a tool that ran" leave out `denied`
   (`thread.checkpoint`'s `writing_tools`).
 - **Stop / Interrupt** close the session's open turns
-  (`agent.turn.ended@4`, with Claude's `transcript_path`), then the
+  (`agent.turn.ended@5`, with Claude's `transcript_path`), then the
   turn-end snapshot ("Snapshot tracking"). **A turn stores how it ended**
   (`agent_turn.outcome`, the event's `outcome`): `completed` (a Stop),
-  `interrupted` (the person), `session_ended` (its harness session ended
+  `interrupted` (the person, or the harness reported an abort),
+  `errored` (the harness ended it with an error: `TurnRun.outcome`, and
+  its words, `name: message`, in `agent_turn.error` /
+  `TurnRun.error`, never in `answer`), `session_ended` (its harness session ended
   with it open), `session_restarted` (a new harness process started with
   it open), `session_closed` (oxplow closed the agent session), `restart`
-  (oxplow's recovery). `answer` is only ever the agent's own words: NULL
+  (oxplow's recovery). A Stop whose harness names no outcome is `completed`. `answer` is only ever the agent's own words: NULL
   when it said nothing. A Stop also stores **what the turn left running**
   (`agent_turn.left_running`, `TurnRun.left_running`: Claude Code's Stop
   `background_tasks`, the running ones, `{ id, kind, description }` with
@@ -1350,6 +1353,24 @@ keeping an `awaiting_user` the turn set — and acks `{}`. Without
 `oxplow.effort.report`, an effort's summary is its last turn's answer.
 
 ### Subagents
+
+**What opencode reports and what oxplow reads** (the bridge,
+`opencode-hooks.js`; `OPENCODE_FACTS` in `opencode.rs` is this table and a
+test keeps the two equal; read from 1.17.4's source, not yet from
+recordings: compaction, question and the order of `session.error` before
+`session.idle` still need one):
+
+| Fact | opencode reports | oxplow reads |
+|---|---|---|
+| A subagent starts | `session.created` with `info.parentID` | `SubagentStart` for the parent, `agent_id` the child session |
+| A subagent ends | `session.idle` / `session.error` of the child | `SubagentStop` with the child's last message (and the error) |
+| A subagent's result returns | a synthetic `<task id="…" state="…">` part on a new user message | `Prompt::Handback` from the child, not the person |
+| A turn's id | the user message id | `harness_turn_id` (`message_id`) |
+| An aborted turn | `session.error` `MessageAbortedError`, then `session.idle` | `TurnRun.outcome` `interrupted` |
+| An errored turn | `session.error` with another error, then `session.idle` | `TurnRun.outcome` `errored`, `TurnRun.error` `name: message` |
+| What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
+| A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
+
 
 **Who in a session acted.** A subagent (Claude Code's `Agent`/`Task`, an
 opencode child session, a Codex collab agent) is not a session: it has
@@ -1789,7 +1810,7 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
   finishes in the background and its op and `snapshot.taken` record
   `over_budget`. The clock starts before the per-stream take lock.
 - **Turn events.** `agent.turn.started@3 { source, cause_turn? }` /
-  `agent.turn.ended@4 { outcome, left_running? }` (outcome as above), in
+  `agent.turn.ended@5 { outcome, left_running?, error? }` (outcome as above), in
   the same transaction as the `agent_turn` row.
 - **Quiet period.** The worktree's snapshots do not depend on turns: a
   watcher change arms a deadline (`DEFAULT_QUIET_PERIOD`, 3 s, debounced);
@@ -1858,7 +1879,7 @@ app-server client"). Details: [metrics.md](./metrics.md)
 
 **Per-turn rows (the transcript).** For a harness with `transcript`
 (Claude Code), the `token_usage.turns` reactor (`TurnTokensConsumer`,
-`crates/oxplow-app/src/token_usage.rs`) reacts to `agent.turn.ended@4`
+`crates/oxplow-app/src/token_usage.rs`) reacts to `agent.turn.ended@5`
 with `TokenUsageService::on_stop`; nothing is parsed in the hook. It reads
 the per-session cursor (`agent_token_cursor`), takes only the complete
 lines past it, and the harness's `turns(tail)` splits them into one

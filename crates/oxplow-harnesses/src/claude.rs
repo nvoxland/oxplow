@@ -39,7 +39,7 @@ use oxplow_domain::agent::observe::{
 use oxplow_domain::agent::text::AgentText;
 use oxplow_domain::agent::tool::{Subagent, ToolUse};
 use oxplow_domain::events::schema::TokenKind;
-use oxplow_domain::hook::{RunningWork, TurnRun};
+use oxplow_domain::hook::TurnRun;
 
 use super::shared::{
     claude_shaped_tool_use, in_shell, program_and_guard, resume_or_fresh, runtime, setting,
@@ -281,13 +281,14 @@ impl AgentHarness for Claude {
             None => None,
         };
         let (model, context_tokens) = last.unzip();
-        let left_running = left_running(body);
+        let left_running = super::shared::left_running(body);
         (model.is_some() || effort.is_some() || left_running.is_some()).then_some(TurnRun {
             model,
             effort,
             context_tokens,
             context_window: None,
             left_running,
+            ..TurnRun::default()
         })
     }
 
@@ -307,32 +308,6 @@ fn handback_from(text: &str) -> Option<&str> {
     rest.split_once('"')
         .map(|(id, _)| id)
         .filter(|id| !id.is_empty())
-}
-
-/// What a Stop's turn left running: its `background_tasks`, the ones not
-/// reported as finished (`status` other than `running` is left out). `None`
-/// when the body has no list.
-fn left_running(body: &serde_json::Value) -> Option<Vec<RunningWork>> {
-    let tasks = body.get("background_tasks")?.as_array()?;
-    let text = |t: &serde_json::Value, key: &str| {
-        t.get(key)
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    };
-    Some(
-        tasks
-            .iter()
-            .filter(|t| text(t, "status").is_none_or(|s| s == "running"))
-            .filter_map(|t| {
-                Some(RunningWork {
-                    id: text(t, "id")?,
-                    kind: text(t, "type"),
-                    description: text(t, "description"),
-                })
-            })
-            .collect(),
-    )
 }
 
 /// Who sent a cross-session message.

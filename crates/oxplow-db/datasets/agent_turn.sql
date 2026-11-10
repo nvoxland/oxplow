@@ -12,5 +12,5 @@ SELECT t.id, t.thread_id, t.agent_session_id, t.prompt, t.answer, t.session_id, 
        t.source, t.harness_turn_id,
        CAST(CASE WHEN t.cause_turn_id IS NULL THEN NULL
                  ELSE uri('oxplow/turn', 'id', 'trn' || t.cause_turn_id) END AS TEXT) AS cause_turn,
-       t.cause_ref, t.cause_basis, t.sender, t.outcome, t.left_running
+       t.cause_ref, t.cause_basis, t.sender, t.outcome, t.error, t.left_running
   FROM source('agent_turn') t

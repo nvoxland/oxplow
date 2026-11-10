@@ -1241,6 +1241,136 @@
         }
       ],
       "key": []
+    },
+    "14": {
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "doc": "Turn id."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "Thread the turn ran in."
+        },
+        {
+          "name": "agent_session_id",
+          "type": "INTEGER",
+          "doc": "The agent session it ran in (v_agent_session.id); NULL for a turn no session claims (a hook from an agent oxplow didn't start)."
+        },
+        {
+          "name": "prompt",
+          "type": "TEXT",
+          "doc": "The text that opened the turn, as the harness delivered it: a person's words only when `source` is `person`. (v12: every source's text)"
+        },
+        {
+          "name": "answer",
+          "type": "TEXT",
+          "doc": "The agent's final message, once the turn ended; NULL when it said nothing (an interrupted turn, one its session left open). (v13: only the agent's words)"
+        },
+        {
+          "name": "session_id",
+          "type": "TEXT",
+          "doc": "The harness session id, when it reported one."
+        },
+        {
+          "name": "started_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        },
+        {
+          "name": "ended_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp; NULL while running."
+        },
+        {
+          "name": "start_snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn opened (v_snapshot.id); NULL if the stream had none yet."
+        },
+        {
+          "name": "snapshot_id",
+          "type": "INTEGER",
+          "doc": "Snapshot the worktree was at when the turn ended (v_snapshot.id); NULL while running."
+        },
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
+        },
+        {
+          "name": "transcript_page",
+          "type": "TEXT",
+          "doc": "The session's transcript page shown from this turn (`oxplow:oxplow/page?page=session-transcript&session=ses2#turn=trn7`: the session in its `?`, the turn its view): where a turn opens. NULL for a turn no session claims. (v4; v10: bare ids, the turn in the view; v11: a page URI)"
+        },
+        {
+          "name": "model",
+          "type": "TEXT",
+          "doc": "The model the turn ran on, as its harness reported it with the turn's end; NULL while running, or when the harness said nothing (opencode). (v5)"
+        },
+        {
+          "name": "effort",
+          "type": "TEXT",
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+        },
+        {
+          "name": "context_tokens",
+          "type": "INTEGER",
+          "doc": "Tokens in the agent's context when the turn ended (input plus cache reads and writes of the turn's last request), as its harness reported it with the turn's end; NULL while running, or when the harness said nothing. (v6)"
+        },
+        {
+          "name": "context_window",
+          "type": "INTEGER",
+          "doc": "The size of the model's context window, in tokens, as its harness reported it; NULL while running, or when it said nothing (Claude Code never does). context_tokens / context_window is how full the context was. (v6)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "What opened the turn, as its harness read the prompt: `person`, `background_job` (a job the agent started in the background reported back), `subagent` (a subagent handed its report back), `peer` (another agent session's message), `unknown` (the harness said nothing of why). NULL for a turn recorded before sources were. (v12)"
+        },
+        {
+          "name": "harness_turn_id",
+          "type": "TEXT",
+          "doc": "The harness's own id of the turn (Claude Code's `prompt_id`); NULL when it names none. (v12)"
+        },
+        {
+          "name": "cause_turn",
+          "type": "TEXT",
+          "doc": "The turn whose work this one goes on with (its `uri`): the one whose tool call started the background job, or in which the subagent started. NULL when there is none or it isn't known. (v12)"
+        },
+        {
+          "name": "cause_ref",
+          "type": "TEXT",
+          "doc": "The harness's own name for the cause: the tool call id that started the job, the subagent's id, the sender's socket. NULL when it gave none. (v12)"
+        },
+        {
+          "name": "cause_basis",
+          "type": "TEXT",
+          "doc": "How `cause_turn` is known: `reported` (the harness named it) or `matched` (oxplow matched it from what it saw). NULL with no cause turn. Best effort either way. (v12)"
+        },
+        {
+          "name": "sender",
+          "type": "TEXT",
+          "doc": "On a `peer` turn, the name the other agent session gave itself (Claude Code's cross-session message), else its socket. NULL for any other turn. (v12: replaces `from_peer`)"
+        },
+        {
+          "name": "outcome",
+          "type": "TEXT",
+          "doc": "How the turn ended: `completed` (the agent stopped), `interrupted` (the person interrupted it, or the harness reported an abort), `errored` (the harness ended it with an error; `error` holds its words), `session_ended` (its harness session ended mid-turn), `session_restarted` (a new harness process started with it open), `session_closed` (oxplow closed the agent session), `restart` (oxplow's own recovery). NULL while running. (v13)"
+        },
+        {
+          "name": "error",
+          "type": "TEXT",
+          "doc": "The harness's own words for the error that ended the turn (`name: message`); NULL unless `outcome` is `errored`. (v14)"
+        },
+        {
+          "name": "left_running",
+          "type": "TEXT",
+          "doc": "JSON array of the jobs and subagents still running when the turn ended (`{id, kind?, description?}`, the id the report back names), as its harness reported (Claude Code's Stop `background_tasks`); `[]` for none; NULL when the harness said nothing or while running. (v13)"
+        }
+      ],
+      "key": []
     }
   },
   "ai_call": {

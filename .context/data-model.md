@@ -987,13 +987,15 @@ goes on with), `cause_ref`, `cause_basis` (`reported`, `matched`) and
 `TurnOpening`); `prompt` is the text that opened it, whatever its source.
 V2 also rewrote the logged `agent.turn.started@2` rows to `@3`
 (`source: unknown`). **How it ended** (V4): `outcome` (`completed`,
-`interrupted`, `session_ended`, `session_restarted`, `session_closed`,
-`restart`) and `left_running` (JSON, the work a Stop reported still
-running), set in the close transaction; V4 gave ended turns the outcome
+`interrupted`, `errored` (V90), `session_ended`, `session_restarted`,
+`session_closed`, `restart`), `error` (V90: the harness's words for an
+`errored` end) and `left_running` (JSON, the work a Stop reported still
+running), set in the close transaction; V90 rewrote logged
+`agent.turn.ended@4` rows to `@5`; V4 gave ended turns the outcome
 their event logged, told the three ends logged `interrupted` apart by the
 text oxplow had written into `answer`, cleared that text, and rewrote
 `agent.turn.ended@3` rows to `@4`. `agent_turn` open/close log
-`agent.turn.started@3` / `agent.turn.ended@4` in the same transaction as
+`agent.turn.started@3` / `agent.turn.ended@5` in the same transaction as
 the row change;
 `event_log` has a `turn_id` index.
 
