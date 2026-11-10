@@ -1563,6 +1563,15 @@ turn and joins nothing. A request's address is
 resolving to `v_request`: who started it, with what, when); a turn's
 `v_agent_turn.request` is that URI. It has no page of its own yet.
 
+**What a request holds and where it stands are read live** (`v_request`):
+its turns, threads, last activity, tool calls, tokens, running jobs, and
+`state` — `running` (a turn is open), `waiting_on_work` (a job it started
+has not reported, its session alive), `waiting_on_person` (its last turn
+ended on a question and nothing has started on that thread since),
+`finished`. Its time split sums `v_turn_activity` over its turns; its files
+come with the turns' changes. Pinned by
+`a_requests_state_and_totals_are_read_from_its_turns`.
+
 **Identity and membership are stored; everything that adds up or changes
 is derived.** Work recorded against a turn — tool calls (a subagent's are
 its starting turn's), tokens, test runs, jobs — is its request's through
