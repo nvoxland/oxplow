@@ -1081,15 +1081,6 @@ impl EventType for AgentTurnEnded {
     const TYPE: &'static str = "agent.turn.ended";
     const V: u32 = 5;
     type Payload = AgentTurnEndedV5;
-    fn upcast(from_v: u32, payload: Value) -> Result<Value, DomainError> {
-        match from_v {
-            // v4 is v5 with no error.
-            4 => Ok(payload),
-            _ => Err(DomainError::Invalid(format!(
-                "agent.turn.ended@{from_v} has no upcast"
-            ))),
-        }
-    }
 }
 
 /// Where a large or sensitive body lives: `event_content.hash` (xxh3-128

@@ -598,7 +598,7 @@ and answers a `Launch` (`{ spec: { kind: pty, command, env }, transcript_missing
 deny | context, … }`) → `{ body }`; `refresh_text { roots, text }` → `{}`;
 `turns { transcript }` → `{ turns }`; `prompt { body }` → `{ prompt: { kind:
 person, text } | { kind: handback, subagent, text? } | { kind: peer_message,
-from, socket?, text? } | { kind: background_job, call?, text } | null }` and `subagent {
+from, socket?, text? } | { kind: background_job, call?, job?, status?, summary?, text } | null }` and `subagent {
 body }` → `{ subagent }` (a `SubagentStart`/`SubagentStop`'s), both its
 `subagents` feature (without it a prompt is a person's); `token_readings { records }` (one
 export's) → `{ readings }`. An optional verb it doesn't declare answers

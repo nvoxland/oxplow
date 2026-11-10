@@ -58,6 +58,8 @@ pub trait ChatHost: Send + Sync + 'static {
     ) {
         self.turn_started(thread, session_id, prompt).await;
     }
+    /// The agent named the turn in flight (after it opened): keep its id.
+    async fn turn_identified(&self, _thread: &ThreadId, _session_id: &str, _harness_turn: &str) {}
     /// A tool call began (its request): recorded open until it finishes.
     async fn tool_started(&self, _thread: &ThreadId, _session_id: &str, _tool: &ToolUse) {}
     /// A tool call finished: record it. What it leaves for the agent
@@ -273,6 +275,19 @@ impl ChatHost for ServicesChatHost {
         );
         env.harness_turn = harness_turn.map(str::to_string);
         self.ingest(&svc, env).await;
+    }
+
+    async fn turn_identified(&self, thread: &ThreadId, _session_id: &str, harness_turn: &str) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        if let Err(err) = svc
+            .hook_ingest
+            .identify_turn(*thread, self.session, harness_turn.to_string())
+            .await
+        {
+            warn!(?err, "chat: naming the turn failed");
+        }
     }
 
     async fn tool_started(&self, thread: &ThreadId, session_id: &str, tool: &ToolUse) {

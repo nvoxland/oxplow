@@ -569,7 +569,18 @@ impl Actor {
             Incoming::Waiting(question) => self.host.awaiting_user(self.thread(), question).await,
             // A replayed history's children were recorded as they ran.
             Incoming::Subagent { .. } | Incoming::ChildCall { .. } if self.replaying => {}
-            Incoming::TurnStarted(id) => self.harness_turn = Some(id),
+            Incoming::TurnStarted(id) if self.replaying => self.harness_turn = Some(id),
+            Incoming::TurnStarted(id) => {
+                // A turn oxplow's own prompt opened is already recorded: it
+                // takes the id now; one the person typed in the agent's UI
+                // is recorded with it.
+                if self.turn.is_some() {
+                    self.host
+                        .turn_identified(self.thread(), &self.session_id, &id)
+                        .await;
+                }
+                self.harness_turn = Some(id);
+            }
             Incoming::Subagent {
                 change,
                 id,

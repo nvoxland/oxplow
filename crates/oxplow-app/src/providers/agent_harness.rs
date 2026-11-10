@@ -15,7 +15,8 @@
 //! - `token_readings { records }` → `{ readings }`, one export's records at
 //!   once;
 //! - `prompt { body }` → `{ prompt }` (`{ kind: person, text }` or
-//!   `{ kind: handback, subagent }` or `{ kind: peer_message, from }`, `null` for none) and `subagent { body }`
+//!   `{ kind: handback, subagent }` or `{ kind: peer_message, from }` or
+//!   `{ kind: background_job, call?, job?, status?, summary?, text }`, `null` for none) and `subagent { body }`
 //!   → `{ subagent }` (a `SubagentStart` / `SubagentStop`'s), its
 //!   `subagents` feature.
 //!

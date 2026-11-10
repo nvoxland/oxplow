@@ -256,6 +256,25 @@ pub fn open_harness_turn_ids_tx(
     Ok(rows.into_iter().map(AgentTurnId::new).collect())
 }
 
+/// Give the open turn of `session` (on `thread`) the harness's own id for
+/// it, when it has none yet: a harness that names a turn only after the
+/// prompt that opened it was recorded (Codex's `turn/started`).
+pub fn set_harness_turn_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: oxplow_domain::AgentSessionId,
+    harness_turn: &str,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE agent_turn SET harness_turn_id = ?3
+          WHERE thread_id = ?1 AND agent_session_id = ?2
+            AND ended_at IS NULL AND harness_turn_id IS NULL",
+        rusqlite::params![thread.value(), session.value(), harness_turn],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
+}
+
 /// The thread's turn the harness itself called `harness_turn` (its own id
 /// for the turn), newest first when several share it.
 pub fn turn_by_harness_id_tx(
@@ -1112,6 +1131,48 @@ mod tests {
                 assert_eq!(per_session, 2);
             }
         }
+    }
+
+    /// A turn the harness names only after it opened takes the id once, and
+    /// `turn_by_harness_id_tx` then finds it; a closed turn is left alone.
+    #[tokio::test]
+    async fn a_turn_named_after_it_opened_takes_the_harness_id() {
+        let (db, tid) = fixture().await;
+        let session = db
+            .transaction(move |tx| {
+                crate::agent_session_store::insert_tx(
+                    tx,
+                    &oxplow_domain::agent_session::NewAgentSession::terminal(tid, "codex"),
+                    Timestamp::from_unix_ms(1),
+                )
+            })
+            .await
+            .unwrap()
+            .id;
+        let store = SqliteAgentTurnStore::new(db.clone());
+        let turn = AgentTurn {
+            id: AgentTurnId::placeholder(),
+            thread_id: tid,
+            agent_session_id: Some(session),
+            prompt: "go".into(),
+            answer: None,
+            session_id: Some("s1".into()),
+            started_at: Timestamp::now(),
+            ended_at: None,
+            start_snapshot_id: None,
+            snapshot_id: None,
+            source: Some(oxplow_domain::hook::TurnSource::Person),
+        };
+        let id = store.open(&turn).await.unwrap();
+        let found = db
+            .transaction(move |tx| {
+                set_harness_turn_tx(tx, tid, session, "cx1")?;
+                set_harness_turn_tx(tx, tid, session, "cx2")?;
+                turn_by_harness_id_tx(tx, tid, "cx1")
+            })
+            .await
+            .unwrap();
+        assert_eq!(found, Some(id));
     }
 
     #[tokio::test]
