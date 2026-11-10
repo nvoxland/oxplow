@@ -14,7 +14,7 @@ Slots, replacements, commands in core menus and decorators: how an extension ext
     `Extension.ui.page_slots`.
   - The mounted page runs as an embed: its params come by name from the
     host's params, else from the first row of the host's loaders. So the
-    changes page (`diff-view`) offers `change_id` and `effort_id` from its
+    changes page (`diff-view`) offers `change_id` from its
     loader row; the task page offers `uri`; the diff page offers
     `path` in its `file-header` slot (bundled's co-change page mounts
     there). The host draws each mounted page as a section titled by its
@@ -65,7 +65,7 @@ loaders' first rows and params are what a mount can take):
 
 | Slot | Host page | Params a mount may take |
 |---|---|---|
-| `oxplow/diff-view.sections` | the Changes page (an effort's or a range's diff; nodes `effort`, `header`, `description`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`effort_id`, `change_id`, …) |
+| `oxplow/diff-view.sections` | the Changes page (a request's, a turn's or a range's diff; nodes `header`, `description`, `concurrent`, `files`, `extensions`) | `uri`, `start`, `end`, `stream_id`, and the page's row (`change_id`, …) |
 | `oxplow/task-detail.sections` | the Task page (nodes `state`, `fields`, `body`, `info`, `links`, `comments`, `activity`) | `uri`, `thread_id`, `stream_id` |
 | `oxplow/commit.sections` | a commit's page (nodes `detail`, `files`) | `uri`, `sha`, `stream_id`, and `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes (nodes `commit`, `files`; `at: { before: commit }` puts a strip above everything) | `stream_id`, and `change_id` (the page's row) |

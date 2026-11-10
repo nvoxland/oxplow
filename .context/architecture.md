@@ -124,7 +124,7 @@ machine until that person deploys it there.
 - **Not gated:** pure in-process Starlark/jq transforms without privileged
   host access, and the user's own global-scope config. Everything else
   runs under its extension's permissions: model-calling collectors,
-  scripted effort policies, effects, declared AI providers and components
+  effects, declared AI providers and components
   that invoke commands. Every script runs in its own worker process,
   killed and reaped past its time budget or memory cap, or when its run
   is cancelled ([collection.md](./collection.md) "Containing scripts").
@@ -155,7 +155,7 @@ The core app is a **skeleton**: the controls you steer with, plus a data
 layer everything else builds on.
 
 - **Controls in core, instruments in extensions.** Core keeps streams,
-  threads, tasks and efforts, agent surfaces (terminal harnesses), comments, wiki, diff and file drill-down, and the
+  threads, tasks and requests, agent surfaces (terminal harnesses), comments, wiki, diff and file drill-down, and the
   page graph (rail, launcher, tabs). Anything that **measures or
   visualizes** is an extension ([extensions.md](./extensions.md)).
 - **All data goes through the [semantic layer](./semantic-layer.md).**
@@ -171,10 +171,10 @@ layer everything else builds on.
   [extensions.md](./extensions.md) for why.
 - **Exceptions over trends.** Humans reviewing agent work act on
   decisions and deviations, not on totals. Shipped pages are live
-  exception lists at the effort boundary, not dashboards.
+  exception lists at the request boundary, not dashboards.
 - **Stop investing in commodity surfaces.** Session lists, worktree per
   session and diff review now ship free with every major agent vendor's
-  app. Maintain them; put new effort into the semantic layer and
+  app. Maintain them; put new work into the semantic layer and
   verification.
 
 ## Current app shape

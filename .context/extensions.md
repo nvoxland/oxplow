@@ -13,7 +13,7 @@ them"):
 |---|---|
 | extension | the package: a folder with an `extension.yaml` |
 | contribution | one thing an extension declares (a page, collector, command, effect, provider …) |
-| capability | a swappable slot a project chooses an implementation of (`task_tracker`, `effort_policy`, `snapshots`; `vcs` is fixed) — [work-tracking.md](./work-tracking.md) "Capabilities" |
+| capability | a swappable slot a project chooses an implementation of (`task_tracker`, `snapshots`; `vcs` is fixed) — [work-tracking.md](./work-tracking.md) "Capabilities" |
 | provider | whatever implements a capability. Qualify it where it isn't obvious: an **external provider** is a process speaking the provider protocol ([providers.md](./providers.md)); an **AI provider** is API model access ([ai-providers.md](./ai-providers.md)) |
 | scope | what a contribution may call on the host (`sql.read`, `threads.write`) — [commands.md](./commands.md) "Scopes" |
 | access | `view` / `read` / `record` / `write`: what a command or a scope may do |

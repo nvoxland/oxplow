@@ -25,10 +25,10 @@ extensions may share a name) is the one place those facts live.
 its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
 `oxplow/<kind>` with the kind's own name as the key param,
 `oxplow:oxplow/<kind>?<kind>=<namespace>/<id>`
-— `oxplow:oxplow/job?job=effort_review/review`,
+— `oxplow:oxplow/job?job=review/review`,
 `oxplow:oxplow/collector?collector=triage/todos`,
 `oxplow:oxplow/page?page=github/pr`,
-`oxplow:oxplow/dataset?dataset=effort_review/reviews` — or,
+`oxplow:oxplow/dataset?dataset=review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
 command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
@@ -157,7 +157,7 @@ dataset references and withholds contributions before catalog publication.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
-- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=effort_review/reviews`). An
+- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=review/reviews`). An
   import of a globally named kind (`oxplow:oxplow/command?command=acme.pr.merge`) is of
   whichever extension declares that name.
   An import has a consumer-local binding name, a positive integer contract
@@ -213,7 +213,7 @@ an ordinary `ref('<producer>/<dataset>')`, retaining lineage and native contract
 checks; a page loader's becomes its quoted published view. An
 unavailable import withholds the page (and its slot mounts), and
 `extension test` skips the examples that run it. SQL grants still apply.
-`examples/extensions/effort-review` (producer: `exports` its `reviews`
+a review extension under `examples/extensions/` (producer: `exports` its `reviews`
 dataset) and `examples/extensions/review-badges` (consumer: an optional
 import read by its pages and a slot mount) are the working pair; the
 review-badges test in `crates/oxplow-sdk/tests/examples.rs` covers available,
@@ -494,7 +494,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >     deployments": boot deploys nothing);
 >   - Explore Data (oxplow-bundled's custom page, with Save as Page);
 >   - **bundled extensions** (compiled in, read-only, reserved names).
->     `oxplow-bundled` holds the effort review packet and the analytics
+>     `oxplow-bundled` holds the request review packet and the analytics
 >     pages; core works with it disabled;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
@@ -531,7 +531,7 @@ over a database file); adversarial and concurrency coverage is still to do.
   and `effects:` (extensions-events.md "Effects"), through one swappable vocabulary. A change
   is reviewed by its impact — rows, collector outputs, effects'
   reactions — at any revision, on the CLI (`extension check --impact`)
-  and in an effort's review (extensions-deploy.md "Reviewing by impact"). Datasets declare keys and may materialize on a
+  and in a request's review (extensions-deploy.md "Reviewing by impact"). Datasets declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
   Changes go live with `oxplow.extension.deploy` (extensions-deploy.md "Sources and deployments").
 
@@ -540,7 +540,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 - **Controls in core, instruments in extensions.** Core supplies the page
   and reference graph, stream/thread shell,
   agent surfaces, diff and inspection primitives, the semantic layer, and
-  safe host services. Tasks, knowledge storage, and effort policy have
+  safe host services. Tasks and knowledge storage have
   selectable implementations, including none where supported. Collected
   evidence and analysis mechanisms are shared infrastructure; particular
   workflow policies and presentations belong in extensions. The
@@ -560,7 +560,7 @@ over a database file); adversarial and concurrency coverage is still to do.
   scoped bridge instead; arbitrary app-window code remains outside that
   contract.
 - **Presentations are policy.** Bundled pages provide useful starting
-  views, including exceptions at an effort boundary. Trends, reports and
+  views, including exceptions at a request boundary. Trends, reports and
   domain-specific dashboards are equally valid extension presentations;
   the semantic data and metrics are reusable independently of a view.
 
@@ -581,7 +581,7 @@ requires: [tracker]      # optional: other extensions it needs on (extensions-de
 build: { run: bun run build, output: dist, exclude: [node_modules] } # optional: built at deploy (extensions-deploy.md "Builds")
 intent:                  # required
   purpose: What question it answers, or what job it does
-  origin: oxplow:oxplow/effort?id=eff42   # the thread/effort URI that created it, or null
+  origin: oxplow:oxplow/request?id=req42   # the thread/request URI that created it, or null
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
 # kinds

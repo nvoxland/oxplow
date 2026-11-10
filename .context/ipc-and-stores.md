@@ -472,9 +472,8 @@ is one transaction (`record_take`: the snapshot row, its file rows, a
 is an ancestry chain (see data-model.md "Takes and the operation log").
 Rows returned by `listSnapshotsForStream` carry their creating op's
 `parent_snapshot_id` / `trigger` / `over_budget`, and exclude the
-first-ever baseline (nothing to diff against). Efforts anchor to
-snapshots through `effort.start_snapshot_id` / `end_snapshot_id` and
-agent turns through `agent_turn.start_snapshot_id` / `snapshot_id`.
+first-ever baseline (nothing to diff against). Agent
+turns anchor to snapshots through `agent_turn.start_snapshot_id` / `snapshot_id`.
 Unlike other stores it doesn't expose a `subscribe()`; the renderer
 hears a take that recorded something as `SnapshotTaken`, which the
 `ui.push` consumer derives from the logged `snapshot.taken@3` (and a
@@ -495,10 +494,6 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   captured file row. The old `get_snapshot_summary` /
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
   through the `diff` RPC (`Trees`, `.context/vcs.md`).
-- `readTaskEfforts(taskId)` (`tasks.ts`) — a task's efforts from
-  `v_effort` (`task = oxplow:oxplow/task?id=<id>&provider=oxtask`), newest first, each
-  with its changed files (`get_effort_files`). Used by the task page's
-  Activity timeline and the "Show in history" jump.
 
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
@@ -707,20 +702,20 @@ store, runtime, IPC, and UI are tool-agnostic.
 The collection subsystem (`.context/collection.md`) follows the same
 7-layer shape with a couple of slice patterns worth calling out:
 
-- **Stored once, read as a dataset.** The `effort_evidence` asset computes
-  each effort's observations and stores them (`v_effort_observation`); the
+- **Stored once, read as a dataset.** The `request_analysis` asset computes
+  each request's observations and stores them (`v_request_observation`); the
   panel and an agent's `oxplow_query_sql` read the dataset
-  (`SqliteEffortEvidenceStore::list_observations`). Mutations are the
+  (`SqliteRequestAnalysisStore`). Mutations are the
   `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
   (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
-  `DatasetsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
+  `DatasetsChanged` (P8.A2: the bespoke observations-changed event had no
   listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`
   (`crates/oxplow-app/src/collection.rs`) owns the orchestration
-  (effort resolution, coverage parse via `oxplow-coverage`, changed-line
+  (request resolution, coverage parse via `oxplow-coverage`, changed-line
   diff, freshness pin) and is called from both the MCP tools and the
-  control-plane PostToolUse hook; the evidence store
-  (`SqliteEffortEvidenceStore`) stays a thin typed read/write surface.
+  control-plane PostToolUse hook; the analysis store
+  (`SqliteRequestAnalysisStore`) stays a thin typed read/write surface.
 
 ## Agent nudges
 
@@ -731,11 +726,9 @@ post-tool-use advisories). A standard 7-layer instance backed by
 schema in [data-model.md](./data-model.md), migration `V33`).
 
 - **IPC** (UI-only — the agent never reads nudges back):
-  `list_nudges_for_thread(threadId)`. Per-effort nudges are read through
-  `v_agent_nudge` (the oxplow-bundled `effort-nudges` page)
-  (`crates/oxplow-rpc/src/commands/effort.rs`, adapters in
-  `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
-  `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).
+  `list_nudges_for_thread(threadId)`. Per-request nudges are read through
+  `v_agent_nudge`. The IPC is registered in the
+  `rpc_dispatch!` registry and the surface-parity manifest as `ui()`.
   There are no write IPCs — nudges are written exclusively by the service
   inside `on_shell_run`, best-effort (a persistence error is logged,
   never fails the hook).
@@ -751,7 +744,7 @@ cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
 one `source_uri` like a task's accumulates
 rows from different owners (the item's body, link and comment slices,
-restated from the task interface, and the effort store's edges),
+restated from the task interface),
 each owning a slice keyed by `ref_type`.
 
 The pattern that lets writers co-own a source without trampling
@@ -761,7 +754,7 @@ each other:
    turn each writer's domain rows into `Vec<PageRefEdge>`. Each
    helper also exposes a small list of the `ref_type`s it owns
    (`task_body_ref_types()`, `task_comment_ref_types()`,
-   the `task_link:` prefix, `effort_ref_types()`).
+   the `task_link:` prefix).
 2. **Slice-replace** at the store
    (`SqlitePageRefStore::replace_source_for_ref_types`) takes
    `(source, ref_types, edges)` and atomically

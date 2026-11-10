@@ -179,7 +179,7 @@ Make oxplow’s purpose and extension vocabulary precise, with shared contributi
 
 Status: documentation completed in this change.
 
-Scope: Clarify that developers start from descriptions and connected data while agents implement; code is an evidence drill-down. Put collection, metrics, dimensions, personal customization and sharing at the center. Correct stale mandatory filing, task-to-effort, fixed-agent/thread, wiki, and history descriptions. Distinguish shipped guards from future targets.
+Scope: Clarify that developers start from descriptions and connected data while agents implement; code is an evidence drill-down. Put collection, metrics, dimensions, personal customization and sharing at the center. Correct stale mandatory filing, fixed-agent/thread, wiki, and history descriptions. Distinguish shipped guards from future targets.
 
 Acceptance: README, landing copy, architecture vision, onboarding and affected guides agree with current code and the clarified purpose. Current security limitations are factual; target plans are explicitly future. Historical release notes retain their historical meaning.
 
@@ -215,7 +215,7 @@ Status: done. `EventView` (`oxplow_domain::events::view`) is the one
 event an extension sees: every field (`id, type, v, seq, at, source,
 subject, anchors, payload, cause`), `null` where absent, at the type's
 newest version. Collectors (derived, fact, and exec on stdin), effects,
-the effort policy, a provider's `react`, paced runs, review dry runs,
+a provider's invoke, paced runs, review dry runs,
 `extension test` examples and `oxplow_preview_collector` all build it the same
 way; fixtures go through `EventView::fixture`, which refuses an event
 that couldn't happen and carries an older `v` forward. There is no
@@ -223,20 +223,20 @@ legacy adapter: the envelope is a superset of every earlier shape, so
 shipped scripts read the same fields. Stored events and payload
 versioning are unchanged.
 
-Scope: Introduce a common extension-facing projection of event identity, type/version, sequence, timestamp, source, subject, anchors and payload. Adapt collectors, effects, effort policy, fixtures and development tools to it. Preserve event storage semantics and payload versioning.
+Scope: Introduce a common extension-facing projection of event identity, type/version, sequence, timestamp, source, subject, anchors and payload. Adapt collectors, effects, fixtures and development tools to it. Preserve event storage semantics and payload versioning.
 
 Acceptance: The same event produces equivalent envelopes in every supported execution and test path. Optional fields are explicit; absent values are not fabricated. Version mismatch and invalid anchor/subject handling are discoverable. Stored historical events and legacy scripts have documented compatibility adapters.
 
 Validation: Use a shared fixture with provenance and anchors across collector/effect/policy/dev-host paths and replay historical versions. Compare exact supported fields and failure behavior.
 
-Starting points: `crates/oxplow-app/src/effects.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-app/src/effort_policy_script.rs`, `crates/oxplow-sdk/src/extension_test/mod.rs`.
+Starting points: `crates/oxplow-app/src/effects.rs`, `crates/oxplow-app/src/collector_runner.rs`, `crates/oxplow-sdk/src/extension_test/mod.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
 #### Make SQL completeness and collection freshness explicit
 
 Status: done. `sql.read` refuses gateway truncation across commands,
-effects, effort policies and provider host calls, and pages on request
+effects and provider host calls, and pages on request
 (`page: { limit, offset }` → `{ rows, more, next_offset }`); a
 collector's `input` is complete or declares its `limit` and reads
 `input.complete`. Every gateway result carries `generation` and the
@@ -344,7 +344,7 @@ Give authors reusable data, analysis, AI, actions, state, identity, and job serv
 Status: done. `oxplow_domain::run::RunContext` (built by `run_context.rs`)
 carries identity, version and generation, actor, anchors, subject,
 cause, mode, budget, cancel, trace, usage and authority through the bus,
-scope calls, collectors, effects, the effort policy and provider invokes
+scope calls, collectors, effects and provider invokes
 (on the wire). Upcasts, report parsers, scripted AI providers and the MCP
 adapter's mappings still run on their own fixed budgets.
 
@@ -354,7 +354,7 @@ Acceptance: All migrated hosts preserve provenance and cancellation through nest
 
 Validation: Compare provenance from representative collector, effect, policy, provider and UI actions; cancel nested work; test missing context and expired handles.
 
-Starting points: `crates/oxplow-script/src/lib.rs`, `crates/oxplow-script/src/scope.rs`, `crates/oxplow-app/src/scope_calls.rs`, `crates/oxplow-app/src/effort_policy_script.rs`.
+Starting points: `crates/oxplow-script/src/lib.rs`, `crates/oxplow-script/src/scope.rs`, `crates/oxplow-app/src/scope_calls.rs`.
 
 Prerequisites: Normalize contribution descriptors and public extension terminology.
 
@@ -645,7 +645,7 @@ Prerequisites: Use one versioned event envelope across runtime and authoring; Co
 #### Separate reusable analysis evidence from default review policy
 
 Status: done. Core keeps evidence; the judgements it still made moved to
-the default extensions: struggle is oxplow-bundled's `struggle`, and per-effort
+the default extensions: struggle is oxplow-bundled's `struggle`, and per-request
 test outcome an oxplow-foundation collector. A value at a metric
 threshold hasn't crossed it, on the server and the Metrics page alike.
 `examples/extensions/schema-review` is the alternative review. The
@@ -740,7 +740,7 @@ the fingerprint re-baseline. The old `metric_scaffold` project-config path,
 
 Scope: Update the old gauge authoring task to the current collector/fact/measure/metric/dimension model. Exercise files, AST queries and code metrics through the public authoring path, then join the resulting data with another entity and present it in a page with reference drill-down.
 
-Acceptance: A non-bundled fixture created through current SDK/agent tools produces correct facts and dimensioned aggregate values across changes. A developer can connect custom collection to existing effort/test/code evidence without a new core command. Stale inputs, truncation and invalid dimensions report clear errors. Obsolete scaffold_metric/gauges assumptions are removed.
+Acceptance: A non-bundled fixture created through current SDK/agent tools produces correct facts and dimensioned aggregate values across changes. A developer can connect custom collection to existing request/test/code evidence without a new core command. Stale inputs, truncation and invalid dimensions report clear errors. Obsolete scaffold_metric/gauges assumptions are removed.
 
 Validation: Use a small source corpus, edit it between captures, validate/run the collector and page, and assert semantic query totals, dimension filtering, freshness and drill-down refs.
 
@@ -752,12 +752,12 @@ Prerequisites: Compose declared host services through the shared context.
 
 Status: done. Three trials, tested through public commands and the SDK
 only (`examples/extensions/README.md` lists them, the tests and the
-friction found): effort-review (a job started by an effect on
-`effort.finished`, its tool reading an effort's evidence, streamed,
+friction found): a review extension (a job started by an effect when
+a piece of work finished, its tool reading that work's evidence, streamed,
 cancelled through `oxplow.job.cancel`, commented on the task and
 exported as a dataset); triage's workflow state surviving restart
 and an edited bundle (`crates/oxplow-sdk/tests/trials.rs`, the
-browser spec); review-badges importing effort-review's dataset and
+browser spec); review-badges importing the review extension's dataset and
 degrading when it is disabled, missing or exports another version.
 Shared services added for them: a job's intent key as its subject
 (snapshot `intentKey`, `v_job_run.intent_key`), a command fixture's `expect:

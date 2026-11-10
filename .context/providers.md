@@ -2,8 +2,8 @@
 
 An external provider is a program oxplow talks to — an issue tracker's bridge, a
 docs system's — that implements one of oxplow's capabilities outside the
-app (P5.D): one core gives a provider contract (the task tracker, the effort
-policy; "What a provider may implement"). This doc
+app (P5.D): one core gives a provider contract (the task tracker, the agent harness,
+snapshots, knowledge, a filesystem; "What a provider may implement"). This doc
 covers the protocol (D1), the fake provider (D2), what a provider may
 implement, the host with its permission and spawn rules (D3), instances with health (D4), the
 conformance kit with `oxplow extension test` (D5), which trackers are
@@ -69,7 +69,7 @@ rows), `key` naming the idempotency key of the `invoke` it serves so the
 call is recorded with that run. `Instance::invoke(run, …)` registers the
 run under the key for the call's length (`HostCalls::begin`), whichever
 verb it is — a command, a task, knowledge, snapshot or harness
-verb, an effort policy's `react`. Refused (`InvalidInput` at `/scope`)
+verb. Refused (`InvalidInput` at `/scope`)
 for one it doesn't need or that isn't there, and for one naming no
 `invoke` under way: nothing a provider does of oxplow is outside a run.
 
@@ -173,23 +173,6 @@ Two notifications drive it from a test: `fake/changed { collectors? }`
 `fake/exit` (it exits 3 on its own).
 `tests/stdio.rs` pins all of it through a `Peer`, validating the streamed
 notifications against the goldens.
-
-**As an effort policy** (`OXPLOW_FAKE_CAPABILITY=effort_policy`; unset or
-`task_tracker` is the task tracker, anything else exits 2) it declares
-`policy_declarations()` — the `effort_policy` capability, its one verb
-`react` (`confirm: never`, `access: record`), no event types or
-collectors, the same `team` config — and keeps no items (`discover` is
-empty, any other verb `InvalidInput`). `react { event }` (the event
-envelope, extensions-events.md "The event envelope") answers as an
-effect's script does: an item moved to `in_progress` with a thread in
-its anchors opens an effort on that thread linked to the item
-(`oxplow.effort.open`); one moved to `done` or `canceled` reads its open
-efforts through `host/call` (`sql.read` over `v_effort`, named with the
-invoke's key) and closes each (`oxplow.effort.close`, `switch`);
-anything else is `{ skip }`. It counts the `react`s it answered in its
-state (`reacts`), so a test can see a policy that wasn't chosen was asked
-nothing. The `bogus-react` hook makes `react` compose a command that
-doesn't exist.
 
 **As a snapshots provider** (`OXPLOW_FAKE_CAPABILITY=snapshots`, with
 `OXPLOW_FAKE_FEATURES=contents` for the feature of that name, which is
@@ -440,8 +423,8 @@ isn't its contract's shape (`ProviderContract::data`, a JSON Schema: an
 agent harness's environment markers and settings) or
 any `data` when the contract asks for none, lack a verb its contract requires
 for the features it declares, declare a verb that isn't `confirm: never`
-and `access: record` (core's call of it — `task.<verb>`, the effort
-policy's dispatcher — is what a person confirms and what is gated), or
+and `access: record` (core's call of it — `task.<verb>` —
+is what a person confirms and what is gated), or
 declare an event type its contract doesn't let it emit.
 
 ## What a provider may implement
@@ -454,22 +437,21 @@ a verb runs as (so an inverse naming a verb undoes through it), the event
 types it may emit, what its collectors stream, the URIs an instance owns,
 and whether it keeps items.
 
-| | `task_tracker` | `effort_policy` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
-|---|---|---|---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `react` | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` | `stat`, `read`, `list`; `write` ← writable |
-| verbs run as | `oxplow.task.<verb>` | the dispatcher's call (nothing undoes it) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (an effort's brackets, a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
-| declares as `data` | nothing | nothing | `env_markers`, `settings` | nothing | nothing | nothing |
-| may emit | `task.recorded@3` | nothing | nothing | nothing | `knowledge.page.recorded@2` | nothing |
-| collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` | nothing |
-| owns URIs | `oxplow/task` with `provider=<instance>` | none | none | none | `oxplow/wiki` (no `provider` param: the active store's) | none (its id is the `filesystem` param of the file URIs it serves) |
-| keeps items (`fields`, `idPattern`) | yes | no | no | no | no | no |
+| | `task_tracker` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
+|---|---|---|---|---|---|
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` | `stat`, `read`, `list`; `write` ← writable |
+| verbs run as | `oxplow.task.<verb>` | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
+| declares as `data` | nothing | `env_markers`, `settings` | nothing | nothing | nothing |
+| may emit | `task.recorded@3` | nothing | nothing | `knowledge.page.recorded@2` | nothing |
+| collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` | nothing |
+| owns URIs | `oxplow/task` with `provider=<instance>` | none | none | `oxplow/wiki` (no `provider` param: the active store's) | none (its id is the `filesystem` param of the file URIs it serves) |
+| keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
 turns a started instance into the capability's implementation and takes
 it out again. `Services` builds one per capability and hands them to the
 `ProviderRegistry`: `tasks::TaskTrackerHost` registers an
-`ExternalTaskTracker` in `Services.tasks`; the effort policy's
-registers an external policy in `Services.effort_policies`; the agent
+`ExternalTaskTracker` in `Services.tasks`; the agent
 harness's (`agent_harness::HarnessHost`) registers an `ExternalHarness` in
 `Services.harnesses` under the instance id, beside the built-ins (a
 catalog reload keeps it); the snapshots' (`snapshots::SnapshotsHost`)
@@ -518,7 +500,7 @@ page out).
 (`snapshot`, `file_snapshot`, `snapshot_op`, `snapshot.taken`), so
 change entries, tree hashes, retention and every reader treat its
 snapshots as core's own. A mark is `mark { stream, worktree, trigger,
-thread?, turn?, effort?, budget_ms?, parent }` → `{ handle, unchanged,
+thread?, turn?, budget_ms?, parent }` → `{ handle, unchanged,
 file_count, branch?, revision? }`; then, unless it's unchanged from a
 parent it named, `changed { stream, from, to }` → `{ changes: [{ path,
 kind: added | modified | deleted, identity?, size? }] }`; then one
@@ -677,9 +659,7 @@ into the trace of the run whose key it
 names (`ProviderRegistry::run_op` registers the run's
 `Invocation::trace` under its key, and `ExternalTaskTracker` the
 `task.<verb>` run's, from `VerbCall::trace`) — so the run's audit
-row records it. An effort policy's `react` is no command run: its reads
-count nowhere.
-The conformance kit has no project: it answers `host/call` like any
+row records it.The conformance kit has no project: it answers `host/call` like any
 other request.
 
 **Instances** (§10.3; project scope). An instance is
@@ -1289,16 +1269,6 @@ audit row (and undo dispatches again), its verbs aren't on the bus but
 its extension's `tracker.item.estimate` is, run on the instance its `uri`
 names; a verb's input is checked against its declared schema
 and a parent or link target of another provider is refused.
-The fake as an effort policy (`write_policy_extension`, a `steward`
-extension that `needs: [sql.read]`) is chosen as
-`activeProviders.effort_policy`: it is listed under the capability in
-`v_capability_provider` while it runs; a task its thread's agent starts
-opens an effort linked to it, logged with source
-`effect:effort_policy:fake`, and finishing the task closes it; with
-`oxplow` or `none` chosen it answers no `react`; a `bogus-react` call
-runs nothing and the item's move stands; and once stopped the choice
-resolves to `none` and starting a task opens nothing.
-
 **Its commands appear in core menus** by their own `ui`: one about a
 URI's kind (`ui.about: task`) is on that URI's page menu and its
 rows' right-click menus (`refOffers`).
@@ -1406,11 +1376,7 @@ and the throwaway host the conformance suite runs in
   copy of the extension, `Services::in_memory` over it, the provider
   enabled there with the fixture config, then its
   capability's suite: `task_tracker_conformance::suite` against its
-  `ExternalTaskTracker`, or — the instance made the project's effort policy —
-  `effort_policy_conformance::suite` (an agent starting an item on its
-  thread opens an effort linked to it, finishing it closes it, each run as
-  `effect:effort_policy:<id>`), which the built-in passes too; or — the
-  instance made the project's snapshots, the captures following it —
+  `ExternalTaskTracker`, or — the instance made the project's snapshots, the captures following it —
   `snapshot_conformance::suite` on the primary stream (round-trip, an
   unchanged mark keeps its snapshot, diffs with deletions, turn-end
   anchoring, the budget recorded), which both built-ins pass too; or —

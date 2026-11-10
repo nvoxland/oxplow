@@ -3,7 +3,7 @@
 ## Find the data
 
 - `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_task`,
-  `v_effort`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
+  `v_request`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
   `v_capture`, `v_fact`, …) with its doc, and `v_field` documents
   every field (column): `SELECT view, name, sql_type, doc FROM v_field WHERE
   view = 'v_task'`. **Read them first**; don't guess column names.
@@ -50,17 +50,17 @@
 
 ## Refs in scripts and SQL
 
-Everything in oxplow has one identity, its URI (`oxplow:oxplow/effort?id=eff12`,
+Everything in oxplow has one identity, its URI (`oxplow:oxplow/request?id=req12`,
 `oxplow:oxplow/task?id=<id>&provider=oxtask`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/todos`).
 Carry URIs; never assemble or dissect them:
 
-- **In SQL**, select the dataset's `uri` column (`v_effort.uri`,
+- **In SQL**, select the dataset's `uri` column (`v_request.uri`,
   `v_thread.uri`, `v_task.uri`, …) — each an
-  oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
+  oxplow URI (`oxplow:oxplow/request?id=req12`) — and compare URIs to URIs:
   `WHERE uri = :uri`. To build one, `uri(resource, key1, value1, …)`:
-  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
+  `uri('oxplow/thread', 'id', json_extract(e.payload, '$.thread'))` (an event
   payload field named for one resource holds a bare id); to read a param back,
-  `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'eff' || id` or `substr(uri, …)`.
+  `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'req' || id` or `substr(uri, …)`.
 - **A description's opening line** for a row or a card is
   `first_sentence(body)`: the first sentence past headings, its inline
   markdown kept — show it with `format: markdown` (or a component's
@@ -70,7 +70,7 @@ Carry URIs; never assemble or dissect them:
   measure, not for every measure. Use it on every `v_fact`/`v_capture` read
   of the query.
 - **A field named for one resource is a bare id, not a URI**: a command
-  input `thread` is `thr3`, `effort` is `eff12`, `comment` is the integer `7`.
+  input `thread` is `thr3`, `comment` is the integer `7`.
   Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
   same in an action's input. A URI goes only where a field can name anything
   (`uri`, `target`, `subject`) and for tasks.
@@ -80,9 +80,9 @@ Carry URIs; never assemble or dissect them:
   (params escaped and sorted, a NULL value left out).
 - **In a script**, build with `uri.build("oxplow/file", path = f["path"])`
   and read with `uri.parse(r)` (`{ resource, params, view }`) /
-  `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/effort")` (which
+  `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/request")` (which
   refuses a URI of another resource) / `uri.resource(r)` / `uri.is_uri(v)`.
-  Never `"oxplow:oxplow/effort?id=" + id` or slicing a URI.
+  Never `"oxplow:oxplow/request?id=" + id` or slicing a URI.
 - **In a page action's input**, pass a row's uri column
   (`{ uri: "{{row.uri}}" }`), not a URI rebuilt from an id.
 - **A URI may dangle.** The thing it names can be deleted, or its
@@ -167,7 +167,7 @@ the binding:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=effort_review/reviews", version: 1, optional: true }
+  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=my_review/reviews", version: 1, optional: true }
 ```
 
 ```sql
@@ -179,7 +179,7 @@ SELECT task, review FROM import_ref('reviews')
   mounts the page) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
 - `$OXPLOW_BIN extension check` prints how each import resolved
-  (``import `reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available``, or
+  (``import `reviews` → oxplow:oxplow/dataset?dataset=my_review/reviews v2: available``, or
   why not).
 - The producer bumping its dataset's version is a break: your import of
   the old version goes unavailable until you change it. Leave `version`

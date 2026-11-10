@@ -1,12 +1,12 @@
 ---
 name: oxplow-collection
-description: Standing rules for oxplow's effort-scoped collection (which tests ran + diff coverage). Loads when running tests, when the user asks about test coverage or "what tests ran", and on oxplow's `configure` slash command. Keeps the runs you make visible to oxplow without bit-rot after a one-time configure.
+description: Standing rules for oxplow's turn- and request-scoped collection (which tests ran + diff coverage). Loads when running tests, when the user asks about test coverage or "what tests ran", and on oxplow's `configure` slash command. Keeps the runs you make visible to oxplow without bit-rot after a one-time configure.
 ---
 
-# Collection — keep coverage flowing per effort
+# Collection — keep coverage flowing per request
 
-oxplow attaches **observations** to each effort: which tests ran,
-and diff coverage on the lines the effort changed. Collection is mostly
+oxplow attaches **observations** to each turn, and through it to its
+request: which tests ran, and diff coverage on the lines the work changed. Collection is mostly
 automatic; your job is small and is about making sure the data exists,
 **not** producing numbers.
 
@@ -14,7 +14,7 @@ automatic; your job is small and is about making sure the data exists,
 
 Which tests you run, and when, is up to you and the project — oxplow
 doesn't ask for any. What it needs is to **see the runs you do make**,
-so their results and coverage attach to the effort. The project's
+so their results and coverage attach to the request. The project's
 commands are in the `testing:` block of `.oxplow/project.yaml`, and its report
 collectors in the project's own extension, `.oxplow/extensions/project/extension.yaml`.
 
@@ -26,7 +26,7 @@ collectors in the project's own extension, `.oxplow/extensions/project/extension
       report without coverage instrumentation and takes a filter — for
       quick, focused runs.
     - **`command`** is the full run with coverage. Diff coverage for the
-      effort comes only from this one.
+      request comes only from this one.
 
     If the project declares no `fastCommand`, `command` is the
     report-emitting run. If that's too slow to use the way you want, say
@@ -34,18 +34,18 @@ collectors in the project's own extension, `.oxplow/extensions/project/extension
     test runner, which oxplow can't see.
 - **Run it in the FOREGROUND, never backgrounded.** The PostToolUse hook fires
   when the Bash call *returns*; a backgrounded run returns at launch (before
-  the reports regenerate), so its reports are never ingested and the effort
+  the reports regenerate), so its reports are never ingested and the Tests
   panel stays empty.
 
 ## How collection works (so you don't double-do it)
 
 - **Test runs are observed automatically (foreground only).** When you run the
   tests via Bash, oxplow's PostToolUse hook records a `test-run` observation
-  against the effort (command + exit code, + the parsed suite tree). You don't
-  report it: the run is the effort whose tool call ran it.
+  against the turn (command + exit code, + the parsed suite tree). You don't
+  report it: the run is the turn whose tool call ran it.
 - **Individual tests + coverage are parsed by oxplow, not you.** Each
   report collector (`collectors:` with `records:` in the project's extension — JUnit → per-test
-  tree; lcov / cobertura / jacoco → diff coverage over the effort's
+  tree; lcov / cobertura / jacoco → diff coverage over the
   changed lines) reads its report after a run that wrote it — so in a
   polyglot repo each stack's report lights up on its own run. **Never read a
   report and type the numbers/test names** — that would make them

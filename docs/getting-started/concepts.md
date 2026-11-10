@@ -46,7 +46,7 @@ summary to its supporting evidence.
 Collectors bring information into oxplow's shared data model. Extensions
 can add their own entities and facts, then join them to existing data.
 **Measures** describe collected numbers; **metrics** aggregate them;
-**dimensions** let you compare them by project, stream, effort, or other
+**dimensions** let you compare them by project, stream, request, or other
 relevant categories. See [Metrics](../guide/metrics.md).
 
 A **page** queries that data and presents it as tables, charts and forms,
@@ -80,20 +80,21 @@ answered without creating a page. See [Wiki pages](../guide/wiki.md).
 
 ## Change Analysis
 
-A **change** can be a commit, uncommitted work, or the work within an
-effort. Built-in analysis and bundled pages help explain what changed
+A **change** can be a commit, uncommitted work, or the work of a
+request. Built-in analysis and bundled pages help explain what changed
 and where to look, with links to files and diffs. The presentation is
 customizable; see [Change Analysis](../guide/change-analysis.md).
 
-## Effort and snapshot
+## Request and snapshot
 
 **Snapshots** record observed working-tree state, including changes made
 outside an explicit task. Agent turn boundaries and background capture
 provide evidence of what changed.
 
-Optional effort policies group activity into an **effort** and can link
-it to tasks. An effort is not simply a task's open-and-close cycle, and
-committing its work does not automatically mark the task done. See
+A **request** is the turn that started something plus every turn that
+followed from it. It can link to tasks and commits. A request is not
+simply a task's open-and-close cycle, and committing its work does not
+automatically mark the task done. See
 [Local History](../guide/local-history.md).
 
 ## Backlinks

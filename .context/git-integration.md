@@ -26,8 +26,8 @@ the wiki scan) waits for them, so a change is in what it read or heard after.
 
 Every stream then sweeps, one at a time with the primary first (`boot::sweep_all`), so
 what changed in any worktree while oxplow was off is in a snapshot soon after start.
-Each stream's effort-start gate holds until its own sweep ends. A stream made after
-boot needs none: nothing can have changed while oxplow was off. A worktree stream's
+A stream made after
+boot needs no sweep: nothing can have changed while oxplow was off. A worktree stream's
 history is sparse, so its sweep records only real changes (`data-model.md`).
 
 ### Batches, and events as hints (the `FsWatcher` contract)
@@ -57,9 +57,9 @@ Each picks when it reads, per consumer:
 
 - `next_batch()`: at once. **Snapshot capture uses this** so its
   in-memory dirty set is always current the instant a snapshot is
-  requested (a 250ms wait let an edit's watch event lag the
-  effort-completion snapshot, so genuinely-edited files showed up as
-  `claimed_but_not_changed` in the effort file-review).
+  requested (a 250ms wait let an edit's watch event lag a
+  turn's end snapshot, so a file the turn genuinely edited was missing from
+  the turn's files).
 - `next_batch_after(window)`: a burst as one batch. This is what the
   general-purpose, UI-facing consumers use, so a `git checkout` or save-storm
   fires one round of notifications instead of one per touched file.
@@ -563,7 +563,7 @@ branch status (the Git page has those).
 Neither hook comments on a commit. The Stop hook emits no commit
 directives, and the PostToolUse Bash hook doesn't look for `git commit` at
 all — the **commit-hygiene nudge** that used to flag
-committed files outside the open effort's changed set was removed. It
+committed files outside the work's changed set was removed. It
 second-guessed a decision the committing actor had already made (nothing to
 disentangle: one commit, one actor), and it hardcoded a `docs/` warning
 about this repo's own auto-deploy workflow, which oxplow can't assume of any
@@ -618,22 +618,13 @@ commit into the unified `page_ref` graph (see
   did, as two threads on one file). `v_commit_request` reads it both ways; a
   commit made outside oxplow, or of a file edited again since, has no rows,
   and a commit with no task still links to its requests. Nothing is closed
-  by a commit and no effort is read. The `task → commit` edge is **derived**
+  by a commit. The `task → commit` edge is **derived**
   (`v_commit_task`): through the task's requests (`v_request_task`), from
   the commit's message, and from a declared impact; it is not stored.
 - **Logged as `vcs.commit.indexed`** `{ commit, stream, committed_at }`,
   once per commit (dedupe key), anchored to the stream whose workspace
   found it — every commit, unlike `vcs.head.moved`, which needs a clean
-  worktree. The `effort.landing` consumer (`effort_landing.rs`) compares
-  it with each **open** effort on that stream by content: the effort's
-  files — recorded, plus what its thread's running turn has changed so far
-  (a mid-turn commit comes before those are observed) — as they are in the
-  worktree now, against the commit's version of each. It holds the effort
-  when it touches one of them and has every file it touches as the effort
-  left it, and holds it whole (`complete`) when that's true of all of
-  them. Either way it logs `effort.landed { effort, commit, complete }`
-  and links a linked effort's item to the commit; the effort policy closes
-  on a complete landing (`.context/work-tracking.md`, rule 3).
+  worktree.
 
 Idempotent. Each commit is keyed by its full sha, and a one-row
 existence probe before re-diffing skips already-indexed commits, so

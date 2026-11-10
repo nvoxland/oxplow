@@ -37,7 +37,7 @@ name: review            # must equal the folder name
 description: Pages for reviewing agent work
 intent:                 # required: what it is for, and how to know it works
   purpose: Show what is waiting on the reviewer in this stream
-  origin: oxplow:oxplow/effort?id=eff42  # the effort you are working under, or null
+  origin: oxplow:oxplow/request?id=req42  # the request you are working under, or null
   examples:
     - name: one blocked task
       input: { page: waiting-on-me, params: { stream_id: 1 } }
@@ -116,7 +116,7 @@ examples.
 presets? }]`. A param binds by name into SQL (`:name`), command args
 (`{ param: name }`) and `{{param.name}}` templates. Its value is the
 caller's, else the viewer's context, else `default`. **`stream_id`,
-`thread_id`, `effort_id` and `uri` are filled in from what the person is
+`thread_id`, `request_id` and `uri` are filled in from what the person is
 looking at.** Don't hardcode ids.
 
 - `type`: `text` (default), `choice` (`options: [{ value, label, icon? }]`, an `icon` one oxplow draws or `assets/<name>.svg` in the extension, with a

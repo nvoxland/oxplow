@@ -10,6 +10,8 @@ categories:
 
 <!-- more -->
 
+> Efforts were removed on 2026-11-10. This post is kept as written; where it says "effort", read the requests and turns that replaced them.
+
 Playing with 0.1 for a while, the "be like an IDE" was feeling very confining. The problem is that we are not the same "code first" application that an IDE was designed for with all the tools in reach.
 
 Instead, we are more of an explorer--more of a web of data and information.

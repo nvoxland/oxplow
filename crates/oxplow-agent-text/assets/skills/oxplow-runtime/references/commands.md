@@ -5,7 +5,7 @@
   `oxplow.config.unset { key }`. Keys that run a program or pick the model
   (`agents`, `lsp`, `testing`, `ai`, `agentModels`,
   `extensions`, `agentPromptAppend`, …) need the person's confirmation.
-- Efforts `effort.*`; tasks `task.*` (when a list is active); test
+- Tasks `task.*` (when a list is active); test
   evidence `oxplow.test.record_run`, `oxplow.collector.sync`; comments
   `oxplow.knowledge.reply_comment`, ….
 

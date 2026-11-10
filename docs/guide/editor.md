@@ -71,7 +71,7 @@ mermaid file (`.mmd` or `.mermaid`) has a **Diagram** mode.
 The chrome carries a per-snapshot history dropdown that lists
 every local snapshot of the open file, in descending order,
 labeled with the pinned commit (or `uncommitted`) and any
-in-flight / just-completed effort. Pick an entry to jump to
+in-flight / just-completed request. Pick an entry to jump to
 the snapshot detail page scoped to that file — see
 [Local History](local-history.md#file-page-integration).
 
@@ -117,7 +117,7 @@ servers as the editor, so answers stay consistent.
 
 ## Change Analysis
 
-A section on the commit, Uncommitted, and effort diff pages that
+A section on the commit, Uncommitted, and request diff pages that
 ranks a change's files by review priority and shows per-function
 before/after metrics. See [Change Analysis](change-analysis.md).
 
@@ -126,7 +126,7 @@ before/after metrics. See [Change Analysis](change-analysis.md).
 Duplicate-block detection runs as a Rust tree-sitter scanner in the
 background for each change oxplow analyzes, and the results are stored
 in the project database. It shows up in
-[Change Analysis](change-analysis.md) on the effort diff, Uncommitted,
+[Change Analysis](change-analysis.md) on the request diff, Uncommitted,
 and commit pages. The Quality page lists recent duplicate blocks too.
 An individual block opens side by side with its copy.
 

@@ -7,7 +7,7 @@ description: Author and read oxplow metrics — durable, BI-reportable numbers t
 
 oxplow's metric substrate is **dimensional / BI-shaped**: collectors record durable,
 atomic **facts** on declared **measures**; **metrics** are read-time *specs* that
-aggregate those facts. Facts outlive the effort, are branch/git-version stamped,
+aggregate those facts. Facts outlive the turn that recorded them, are branch/git-version stamped,
 and a metric charts on the **Metrics** page with **no UI work**. When the user
 asks to track/measure/chart something, author a metric.
 

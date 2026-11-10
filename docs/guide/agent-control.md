@@ -23,7 +23,7 @@ tool calls, status, snapshots, test evidence, and usage can be associated
 with the session and thread that produced them.
 
 At turn end, oxplow records the turn and requests a snapshot. Optional
-effort policies group the observed activity. Guidance is advisory:
+oxplow groups the activity into requests. Guidance is advisory:
 there is no filing-before-editing gate or in-progress-task Stop audit.
 
 ## Writer boundary
@@ -54,7 +54,7 @@ non-writer threads too; it needs an active knowledge store to retain it.
 - Available agent harnesses and defaults for new sessions.
 - Which sessions a thread uses; a thread can have none or several.
 - Which thread is the stream's writer.
-- Optional task, effort-policy, and knowledge implementations.
+- Optional task and knowledge implementations.
 - Which permissions a repository-supplied extension gets: you approve them
   when you deploy it, and a deploy that adds one asks again.
 

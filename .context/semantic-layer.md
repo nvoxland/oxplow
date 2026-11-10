@@ -119,7 +119,7 @@ What core publishes, by where it comes from. Each row names its datasets
 
 | Source | Datasets | Facts |
 |---|---|---|
-| work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `effort`, `effort_file`, `context_read` | cycle time, steering, lifecycle |
+| work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `request`, `request_task`, `context_read` | cycle time, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
 | knowledge | `wiki_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
@@ -131,7 +131,7 @@ What core publishes, by where it comes from. Each row names its datasets
 | ai | `ai_call` | tokens, latency |
 | usage | `page_visit` | — |
 | ui | `op_error` (operations that failed in front of the person, from `ui.op_failed` events) | — |
-| metrics | `measure`, `dimension`, `metric_spec`, `metric_catalog`, `capture`, `fact`, `effort_metric_delta`; series through `metric_grid()`, offenders through `metric_findings()` | — |
+| metrics | `measure`, `dimension`, `metric_spec`, `metric_catalog`, `capture`, `fact`, `request_metric_delta`; series through `metric_grid()`, offenders through `metric_findings()` | — |
 | the log and the registry | `event`, `event_content`, `event_checkpoint`, `event_dead_letter`; `dataset`, `field`, `dataset_lineage`, `dataset_test` | — |
 
 Live-only for now — read over LSP or git when asked, not stored, so no
@@ -177,7 +177,7 @@ Every connection registers three scalar functions for URIs
 a canonical URI — the params sorted and escaped, a NULL value left out —
 so a dataset or page links to another page
 (`uri('oxplow/page', 'page', 'oxplow/job-run-output', 'job_run', uri)`)
-or builds a record's URI (`uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))`) without
+or builds a record's URI (`uri('oxplow/request', 'id', json_extract(e.payload, '$.request'))`) without
 concatenating a prefix; `uri_param(uri, key)` reads one param back (NULL when
 the URI lacks it or isn't one) and `uri_resource(uri)` its resource
 (`oxplow/task`). **`first_sentence(markdown)`** is a description's
@@ -624,7 +624,7 @@ rows are read when a query names the dataset.
   check) asks for it. `v_commit` and `v_commit_file` by `sha` (the full
   id): `commit_indexer::ensure_commit` runs the workspace's scan first, so
   a commit not yet reached is new history, indexed and logged
-  (`vcs.commit.indexed`, which lands efforts); one still missing is past
+  (`vcs.commit.indexed`); one still missing is past
   the horizon, stored and linked but not logged; one git doesn't know
   reads no rows. `v_change` by `kind` and `target`
   (`change_analysis::request`): the row is created now and its analysis
@@ -755,7 +755,7 @@ unknown, so it never matches; nor does a new binary.
 An input may name **another asset** instead of a table: the asset then
 recomputes after that one does — each recompute the other finishes marks
 it dirty — and never while that one is pending (recomputes asked for but
-not yet done); its first build waits for the other's. `effort_evidence`
+not yet done); its first build waits for the other's. `request_analysis`
 reads `metric_cube` this way rather than `metric_capture` and `fact`, so
 its series reads are cube-served: racing the cube's backfill at startup,
 every one missed and folded a measure's whole history (gigabytes).
@@ -766,14 +766,14 @@ instead — a collector or a pump consumer, at-least-once and checkpointed.
 
 A **snapshot blob named by a table row** counts as a table input (tsk862):
 content-addressed, it never changes under its name, so a recompute after the
-row lands reads what any later one would. `effort_evidence`'s diff coverage
-reads the blobs of the effort's start snapshot and of the snapshot a
+row lands reads what any later one would. `request_analysis`'s diff coverage
+reads the blobs of the request's start snapshot and of the snapshot a
 coverage capture is pinned to. A blob can only go away (collected), and the
 asset then says so on its next recompute — the diff gives no row — rather
 than reading something else. A working tree is never such an input.
 
 The metric cube is the first asset (inputs `metric_capture`, `fact`; read
-by `effort_evidence`): see
+by `request_analysis`): see
 [metrics.md](./metrics.md). What a burst costs it is in
 [performance.md](./performance.md).
 
@@ -801,16 +801,15 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
 | `v_snapshot_file` | every captured version of a file (`file_snapshot`): its snapshot, stream, path, storage class, size and `content_hash`. A snapshot records only what changed since the stream's previous one, so a file's history is its rows, and `kind` (v2) says what the snapshot did to the path: `added`, `modified`, `deleted`, or NULL when the row changed nothing (P11), and `first_changed_at` / `last_changed_at` (v3) say when the file watcher first and last reported the file changed since the previous take, NULL when the take found the change itself (the startup sweep, a file with no watcher event) |
-| `v_snapshot_op` | the snapshot operation log: one row per take (a new snapshot or an unchanged tree) with `parent_snapshot_id`, `trigger`, thread / turn / effort anchors, `elapsed_ms`, `budget_ms`, `over_budget` (V97) |
+| `v_snapshot_op` | the snapshot operation log: one row per take (a new snapshot or an unchanged tree) with `parent_snapshot_id`, `trigger`, thread / turn anchors, `elapsed_ms`, `budget_ms`, `over_budget` (V97) |
 | `v_measure` | fact-type catalog |
 | `v_capture` | the scan/run that produced facts |
 | `v_fact` | atomic measurements, joined to `measure_key` and capture context |
-| `v_effort_file` | files each effort changed, with change kind, `source` (`claimed` by an edit tool or `observed` changing in one of its thread's turns, v2) and the effort's `task` |
 | `v_task_comment` | comments on the active list's items (`v_task_note` was removed) |
 | `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, task, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
 | `v_task_link` | typed links between the active list's items (`v_task_link` was removed) |
 | `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
-| `v_token_usage` | model tokens per thread / effort / model, with each turn's prompt (V74, `prompt` V82) |
+| `v_token_usage` | model tokens per thread / request / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [DATA_DATASET_X.md](./DATA_DATASET_X.md) "event_log"); `payload_expired_at` since V102) |
 | `v_extension_run` | one row per finished run of extension code (V48; [DATA_DATASET_X.md](./DATA_DATASET_X.md) "extension_run"): `run_id`, `parent_run_id`, `extension`, `contribution`, `kind`, `version`, `generation`, `actor_kind`, `actor`, the anchors, `cause_event_id`, `mode`, `started_at`, `finished_at`, `outcome`, `error`, `wall_ms`, `cpu_ms`, `peak_bytes`, `ai_calls`, `scopes`, `decisions`, `latest` (1 on a contribution's most recent run). `v_effect_run`, `v_collector_run` and `v_ai_call` name theirs in `run_id`. Kept 90 days |
@@ -828,21 +827,18 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_turn_activity` | per turn, from the events anchored to it and its tool calls: `compactions`, `deliveries` (every prompt delivered in it), `person_prompts` (those a person typed), and where its time went once it ended — `tool_ms` (the union of its calls' intervals), `waits` / `wait_ms` (its waits on the person), `other_ms` (the rest, the union of both taken out, so nothing counts twice; mostly the model's time); kept apart from `v_agent_turn`, which many pages read whole. The session transcript shows the split per turn |
 | `v_tool_call` | every agent tool call, from its request to its finish (`state`: `running`, `finished`, `denied`, `abandoned`; `started_at`, `ended_at`, `duration_ms`, `call_id`; v5): the `tool_call.project` pump consumer's projection of `agent.tool.requested` / `agent.tool.finished` / `agent.turn.ended` (one row per call; the call as its harness mapped it, `oxplow-app/src/tool_calls.rs`; paths worktree-relative; a shell call's `ok` is NULL when its harness reports no exit code). `tool` is the harness's own name, `kind` oxplow's (V42; v3) (V77; `turn_id`, `event_id` since V102) |
 | `v_context_read` | reads (`kind = 'read'`) of `.context/*.md` (V77) |
-| `v_oxplow_struggle` | oxplow-bundled's dataset (review policy, not core): per effort, a file edited 5+ times, or 3+ failed shell commands, by kind (`subject` `shell`), over `v_tool_call` |
 | `v_ai_call` | oxplow's own model calls: role, provider, model, caller, tokens, latency, ok/error, a recorded computation's `input_hash`, and its `uri` (`ai_call:<id>`, whose bodies `oxplow_read` gives) (V78, V118; see [ai-providers.md](./ai-providers.md)) |
 | `v_ai_result` | recorded AI computations (`classify` / `score` / `summarize` / `extract`), keyed by input hash, model and prompt version, with the output, tokens and the computing call (V118; [ai-providers.md](./ai-providers.md) "Recorded computations") |
 | `v_metric_spec` | metric definitions: aggregation, direction, target / warn / fail (enabled lives in project.yaml) (V80) |
-| `v_agent_nudge` | guidance oxplow sent the agent mid-effort (V80; `turn_id`, `delivered_at` since V102) |
+| `v_agent_nudge` | guidance oxplow sent the agent mid-request (V80; `turn_id`, `delivered_at` since V102) |
 | `v_code_quality_scan`, `v_code_quality_finding` | code-quality scans and their findings (duplicate blocks, with the peer in `extra_json`) (V80) |
 | `v_dashboard`, `v_dashboard_item` | user dashboards and their tiles (V80) |
 | `v_terminal` | a stream's terminals: shells in its worktree, with the `uri` their PTY is keyed by (V106) |
-| `v_effort_metric_delta` | per effort, how each metric moved (baseline → current, `crossing`). **Stored, not a live query:** the metric engine computes it (`CollectionService::refresh_effort_evidence`) and `effort_evidence.rs` refreshes it on `effort.finished` (the `effort.evidence` pump consumer) and for every open effort as the **asset** `effort_evidence` (`OpenEffortEvidence`, P7.B6: its inputs `metric_capture`, `fact`, `effort_file` — not `agent_token_usage`, which it doesn't read: token counts reach it as facts; its own tables aren't, so it can't loop) — which also recomputes every **closed** effort whose runs or files moved since its rows were stored (`effort_evidence_state.attribution_sig`: a run collected late, an adoption's restamp); readers hear the rows move as `DatasetsChanged` (V80). **A recompute reads what moved, not the effort's history** (`.context/performance.md` "Open-effort evidence"): it asks the effort's captures per producer and trigger (count, newest id), memoizes each spec on those of the producers it reads, folds a `sum` spec's new reports into a running total, and reads only the run captures for observations |
-| `v_request_metric_delta`, `v_request_observation` | per request and stream, how each metric moved over the request's window and the runs its turns made, stored by the `request_analysis` asset (collection.md "A request's analysis"); `seq` runs oldest first |
-| `v_effort_observation` | per effort, test runs / diff coverage / analysis rebuilt from its own run captures; refreshed the same way (V80). `seq` runs oldest first, so the highest is the latest — every reader takes `ORDER BY seq DESC` as newest. Diff coverage is start snapshot vs the capture's snapshot (collection.md). |
+| `v_request_metric_delta`, `v_request_observation` | per request and stream, how each metric moved over the request's window (`crossing`) and the test runs, diff coverage and analysis its turns made, stored by the `request_analysis` asset (collection.md "A request's analysis"); `seq` runs oldest first, so the highest is the latest: every reader takes `ORDER BY seq DESC` as newest. Diff coverage is the request's start snapshot against the snapshot of the run's capture (collection.md) |
 | `v_change`, `v_change_file` (a `working` change's files say `staged` and `untracked`, restated by `change_reactor::watch_working_files` at boot and whenever the stream's refs or index move), `v_change_function`, `v_change_import`, `v_change_duplicate` | stored change analysis (see "Change analysis" below) (V81) |
-| `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, held effort work), for the active task tracker's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
+| `v_commit`, `v_commit_file`, `v_commit_task`, `v_branch`, `v_tag` | history, branches and tags (V85, V113). The commit indexer (`commit_indexer.rs`, run at boot and on each ref move, `RefMoves`) stores the commits reachable from **every stream's** head — new history whole, up to a 5000-commit horizon (`IndexDepth`), and any older commit a query names by `sha` ("Made on demand") — through the VCS capability (`Vcs::log`/`revision`, `.context/vcs.md`) — with their files (first-parent diff) as it projects them into `page_ref`; `v_commit.parents` (JSON, v2) lets a stream's history be a recursive read from its branch's head. `v_commit_task` reads the indexer's task mention edges and the task → commit links (declared impacts, the requests that worked on the task and made the commit), for the active task tracker's items. `refresh_refs` restates `v_branch` (`is_default`, v2) and `v_tag` from `Vcs::branches`/`tags` and maps each local branch to the stream checked out on it. The desktop's history panel, dashboard lists, branch picker and new-stream form read these datasets (`apps/desktop/src/vcsHistory.ts`) |
 | `v_test_case_stat` | each test's summary per stream, branch and producer (V139, tsk733): last status and duration, runs, failures, flips, last failed / passed, max and mean duration — updated with every run, the home of per-test history since a run writes change-only per-case facts |
-| `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `effort_id` (v2) is the capture's own: the effort of the tool call that ran it. A run that only reported counts (`oxplow.test.record_run`) has no cases |
+| `v_test_run`, `v_test_case` | test runs (V87), views only. A run IS its `metric_capture` (producer `tests`, or `test-run` for a run that measured nothing), and both views read its verbatim `test-detail` payload in `detail_json`: counts from the payload, cases by `json_each` over `suites[].cases[]`. Cases come from the payload, not the `oxplow.test_case` facts, because those are skipped while every tests metric is disabled. `turn_id` is the capture's own: the turn of the tool call that ran it, which puts the run in that turn's request. A run that only reported counts (`oxplow.test.record_run`) has no cases |
 | `v_diagnostic` | what the language servers have published, right now (V86). `lsp_diagnostics.rs` subscribes to the LSP session broadcast and replaces a file's rows per `(stream, language, path)` on each `textDocument/publishDiagnostics` (paths repo-relative, positions 1-based, a URI outside the worktree dropped). Live state: the table is cleared at boot and a server's rows when it restarts, crashes or stops. Only files a server has published appear (usually the open ones, not the whole repo). A view re-runs on `DatasetsChanged` when rows commit; at most every 500 ms per stream, from the first change (so a server that publishes continuously can't starve it), `code.diagnostics.changed@2` is logged per changed file (P5.C5) |
 | `v_symbol` / `v_symbol_capture` | the definitions oxplow's own tree-sitter extraction finds in each stream's files, in every supported language, no language server needed (V62) — the current tree, restated per changed file at each snapshot by the `symbols.collect` pump consumer (`uri` `oxplow:oxplow/symbol?path=<path>&symbol=<id>`, no revision, unique per stream; `kind` from one vocabulary; `container` `::`-joined; `signature` the parameter types in overloading languages; the name's `line`/`col` and the whole symbol's `start_*`..`end_*`), and what each snapshot's collection covered (`files_collected`, `files_failed`: content unreadable at the snapshot). Details: language-support.md "Symbols" |
 
@@ -1086,8 +1082,7 @@ that metrics name runs only while one of them is on.
 `collector.triggers` consumer (below). For a fact collector:
 `snapshot.taken` runs a delta collector only when the take recorded
 files (not `unchanged`, `file_count > 0`) and a whole-tree one on every
-take — an unchanged take after a ref move has a new revision to restate; `effort.finished` runs it over the
-effort's end snapshot; any other type over the stream's latest snapshot.
+take — an unchanged take after a ref move has a new revision to restate; any other type over the stream's latest snapshot.
 `every:` collectors run from the scheduler as the system through
 `oxplow.collector.sync`. **`oxplow.collector.sync { collector }` is the one manual run
 for every collector** — it replaced `source.sync` and `metric.run`; for a
@@ -1133,7 +1128,7 @@ lacks never matches**, so `where: { trigger: git_refs }` skips every event
 type without a `trigger` field:
 
 - **Input.** The `input` SQL binds the event's anchors by name
-  (`:stream_id`, `:snapshot_id`, `:effort_id`, `:thread_id`, `:turn_id`,
+  (`:stream_id`, `:snapshot_id`, `:thread_id`, `:turn_id`,
   integers, and the event itself — `:event_id` its id, `:event_seq` its
   seq; NULL when absent), and the script gets the event envelope as
   `input.event` ([extensions-events.md](./extensions-events.md) "The event envelope").
@@ -1151,9 +1146,9 @@ type without a `trigger` field:
   consumers (extensions-events.md "Ordering"); collectors of one event run level
   by level. An event waits on the core consumers named by the collectors
   **it triggers** (`after_for(event_type)`); a target nothing declares is a
-  load error: an `effort.finished` event waits
-  for `change.analyze` because `effort_churn` names it, while a
-  `snapshot.taken` event doesn't (tsk711). `on: [collector.synced]` is
+  load error: an event waits
+  for `change.analyze` when a collector it triggers names it, while a
+  `snapshot.taken` event doesn't. `on: [collector.synced]` is
   refused at parse.
 
 **Derived collectors** (`runtime: starlark` or `jaq`, tsk323) compute
@@ -1347,10 +1342,7 @@ component (their `description:`, NULL when absent: none is made up), the same te
 
 ## Change analysis
 
-A **change** is one diff: a `commit` (vs its first parent), an `effort`
-(start snapshot → end snapshot, or → the working tree while open — limited
-to the effort's own files, `v_effort_file`, since its bracket also holds
-what other threads and the person changed), an
+A **change** is one diff: a `commit` (vs its first parent), an
 agent `turn` (by time on its stream's snapshot line: the last take at or
 before it began → where it ended, `end_take`: the latest of its own
 `turn_end` take, which can land just after it closed, and the last take
@@ -1423,13 +1415,12 @@ oxplow-bundled change cards) only read them.
   facts: only a full-tree scan may restate that metric (tsk365) — the
   oxplow-foundation's collector's, on every ref move (P7.B5,
   [code-quality.md](./code-quality.md)).
-  Closed efforts and turns scan their end snapshot: `Trees` reads any
+  Finished turns scan their end snapshot: `Trees` reads any
   revision (P5.B2).
 - **Caching.** A change is keyed by (stream, kind, target) — commit shas are
-  resolved to full ids, so `HEAD` and a short sha share one row. Commits,
-  turns and closed efforts are computed once (an effort that closes since
-  is recomputed: its head moved). `oxplow_ensure_change` reads a working tree's
-  or an open effort's stored analysis, computing it the first time.
+  resolved to full ids, so `HEAD` and a short sha share one row. Commits
+  and finished turns are computed once. `oxplow_ensure_change` reads a working tree's
+  or a live request's stored analysis, computing it the first time.
 - **Two stages.** Stage one is the file list alone:
   `refresh_files(target)` diffs through `Trees` and stores `change_file`
   (status, +/−, zone, `is_test`) — no file is parsed — stamping
@@ -1447,10 +1438,8 @@ oxplow-bundled change cards) only read them.
   `vcs.head.moved`, it first runs stage one for the stream's `working`
   change, its `range` changes headed at the working tree
   (`SqliteChangeStore::list_working_ranges`; a range between two fixed
-  revisions is immutable, computed once like a commit's) and the open
-  efforts' (one without a start snapshot is
-  skipped): only the event's thread's effort when a thread's take made
-  it, every open effort on the stream otherwise — so the lists are always
+  revisions is immutable, computed once like a commit's) and the live
+  requests' on the stream — so the lists are always
   current. `watch_working_files` restates the same working-headed lists
   on a ref or index move, and on an edit on disk: the stream's file
   watcher (250 ms debounce) calls `ref_moves.paths_moved`, and the relist looks
@@ -1461,16 +1450,12 @@ oxplow-bundled change cards) only read them.
   **paced** (`change_reactor::deep_pacing`, the same mechanism as
   collectors' — metrics.md "Pacing"): a take records core's job in
   `pending_run` (`owner` `core`, `id` `change/working/<stream>`,
-  `change/effort/<effort>` or `change/range/<stream>/<base>..<head>`) and `crate::pacing` runs `refresh_change`
+  `change/request/<stream>/<request>` or `change/range/<stream>/<base>..<head>`) and `crate::pacing` runs `refresh_change`
   once 20 s pass with no further take, at most every 2 minutes; a HEAD move
   or an `agent.turn.ended` (the moment someone looks at a turn's work)
   analyzes at once and clears the job. Each analysis records
   `change.elapsed_ms`; its duplicate scan is timed in
-  `v_code_quality_scan` (scope `change <id>`). On `effort.finished` it recomputes that effort's change
-  against its end snapshot: the effort closes before its end take, so no
-  take event reaches it while open, and an effort that edited and
-  finished within one turn would otherwise keep a stale (or no) analysis
-  — the one `effort_churn` (`after: [change.analyze]`) reads (tsk710). A
+  `v_code_quality_scan` (scope `change <id>`). A
   burst analyzes once: an event a newer qualifying one for the same
   stream supersedes is skipped. A change already being computed
   defers the event (`Busy`, retried); a failure is a dead letter naming
@@ -1484,7 +1469,6 @@ oxplow-bundled change cards) only read them.
   in-memory `ChangeStale` / `ChangeAnalyzed` / `CodeQualityScanned` and the
   invalidation loop are gone. Concurrent requests for the same change
   return it `running`.
-- An effort without a start snapshot is an error, not an empty diff.
 
 Deleted / skipped tests and removed assertions are `v_change_function`
 (deleted `is_test` rows) plus `v_change_test_file`, read by the

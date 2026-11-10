@@ -32,7 +32,7 @@ relationship holds; tsk572), `closed_at`, and core's assignment
 `v_task_link` is its links (`to_uri`, its `to_kind`, `link_type`):
 to another item of the list (`blocks`, `discovered_from`, `relates_to`,
 `duplicates`, `supersedes`, `replies_to`), or `about` any URI — what the
-item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`). A link's target
+item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/request?id=req12`). A link's target
 needn't resolve; it may name something deleted or an extension's resource
 since uninstalled (resources.md "Using URIs"),
 `v_task_comment` its comments. Core reads tasks only through
@@ -48,7 +48,7 @@ snake_case and unique, titles given, a stage in each of `todo`,
 core keeps six **buckets**, `Bucket`: `backlog` (filed, not ready),
 `todo` (ready: what an idle thread may pull), `in_progress` (started),
 `blocked` (waits on an answer), `done` and `canceled` (closed). Core acts
-on buckets only — efforts, assignment and its release, the pool, Waiting
+on buckets only — assignment and its release, the pool, Waiting
 on Me — and the screens draw the list's stages: a board's columns, a
 state picker, a Mark menu. **The first stage of a bucket is its
 default**: an input naming the bucket (`to: done`) lands there, so an
@@ -208,7 +208,7 @@ name, a built `oxplow/task` URI or `tsk` id parsing in desktop code.
   and as the Tasks page's filter chips. oxplow declares `priority` and
   a read-only `author` (who filed it). **`taskRefOfMention`** turns
   a loose id in text into a URI by the list's `idPattern` (markdown
-  `[[tsk42]]`, the effort header's link field) — none matches nothing.
+  `[[tsk42]]`) — none matches nothing.
 
 Every read returns what it read (`reads`), and a consumer re-runs it
 through `useRerunOnChange` — or `readsChanged` outside a component
@@ -228,7 +228,7 @@ current one checked, then Unassign and Delete), Stage (a form over
 (the title and the list's declared fields, over `update`). Its body is
 the description (a `markdown` viz, edited in place), the items under it
 (an epic's: each with its glyph, its description's first sentence, its
-stage and assignee), Activity (its efforts: the `item-efforts` page,
+stage and assignee), Activity (its requests: the `item-requests` page,
 embedded), Comments and Links (the `task-comments` and
 `task-links` parts, each declaring its list feature in `needs`, so a
 list without one draws its section as needing it) and the
@@ -236,8 +236,7 @@ list without one draws its section as needing it) and the
 (`task-tokens`) and Shared work (`item-shared-work`). See also: the Tasks
 board of the thread it's assigned to (else the Task List at its stage)
 and its epic. `task-actions` is the agents' page for one item (Mark
-done, Record a block…), and `link-effort` the form behind an effort's
-Link to Task…. The item's own
+done, Record a block…). The item's own
 list's extension may replace its state part (`task.detail.state`,
 decided by the page run from the item's `provider`); About's menu always offers the moves, so an item
 can always move. **Custom views** need no provider: any extension may
@@ -249,7 +248,7 @@ picks whose shows (`replacements`, Settings → Integrations).
 [extensions-slots.md](./extensions-slots.md) "Replacements" has the contracts. The `oxplow/task-detail.sections` slot gets
 `{ uri }`. Link…'s link type is free text (default `relates_to`): the
 provider names its own types, and `about` fits any URI. Its target is
-**any URI** (a task's, `oxplow:oxplow/effort?id=eff12`, `oxplow:oxplow/collector?collector=x/y`); a link row
+**any URI** (a task's, `oxplow:oxplow/request?id=req12`, `oxplow:oxplow/collector?collector=x/y`); a link row
 in Outbound has **Unlink** on its right-click menu (`oxplow.task.unlink`,
 the link's input, undoable like Link). Link rows render through the
 generic ref → page mapping (`useBacklinks.ts` `openFor` → `openRef`): a
@@ -274,7 +273,7 @@ its column to reorder it in its assignee's queue, or use its menu: Mark
 <each other stage>, the list's editable choice fields, Assign to (the stream's open
 threads, You, Nobody), Make top-level, Delete. Its scope (assigned to
 this thread, its stream, you, nobody, or anyone; for a closed item, the
-thread or stream whose efforts worked it), priority and search are its
+thread or stream whose requests worked it), priority and search are its
 toolbar, the tab's view. The **Task List** (`task-list`) is the items in
 one stage (its State filter lists the list's stages; `todo`, the default,
 is the first to-do stage), closed ones latest first, whoever they're
@@ -422,8 +421,8 @@ anchored to the actor's thread. A list logs none of them itself
 Whether the state moved: core reads the item's state as the interface
 shows it (`v_task.state`) before a transition or an update runs, and
 logs `state_changed` only when the bucket of the stage its answer
-recorded differs — a transition within a bucket moves nothing the effort
-policy acts on; it logs `edited` naming `stage` instead. A create always
+recorded differs — a transition within a bucket moves nothing the
+assignment acts on; it logs `edited` naming `stage` instead. A create always
 counts. `to` is the bucket of the stage the `task.recorded` its
 answer carries (a create with none: the stage it asked for).
 `edited` names what the command set, not a diff: a list's prior values
@@ -432,9 +431,7 @@ ones spoke oxtask (its statuses, field names and note URIs)
 and `task.transitioned` its status moves; V30 rewrote the logged
 ones into these words (a transition beside its run's `state_changed`
 dropped, the rest made `state_changed`) and they left core, with
-oxplow's `OxtaskStatus`. An item's state opens and closes no effort
-itself; the effort policy reacts to `state_changed`
-(`.context/work-tracking.md`). Effects and SDK templates react to these
+oxplow's `OxtaskStatus`. Effects and SDK templates react to these
 (`on: [task.state_changed]`, `where: { to: done }`).
 
 **Features reach the UI as a model**: `v_capability_provider`
@@ -476,7 +473,7 @@ A task field (`uri`, `parent_uri`, `target`, `task`, and
 list's is that list's item — `tsk12` is `oxplow:oxplow/task?id=tsk12&provider=oxtask` while
 oxtask is active (`commands/task.rs` `with_loose_refs`,
 before routing, over `TaskTrackers::loose_ref`, which compiles each
-list's pattern once; also `oxplow.effort.link` / `oxplow.effort.open`).
+list's pattern once).
 One that doesn't match is `Invalid` at its field, naming both shapes; an
 empty `parent_uri` is left alone (it detaches). Free-text recognition (wikilinks, commit bodies) is still
 core's. The
@@ -595,12 +592,11 @@ them: what a task's state means is its tracker's opinion. The bases:
   open for its session (a person's or a page's command is in no turn and
   links nothing); `commands/record.rs`.
 - `assigned`: it was in progress and assigned to the thread when a turn of the
-  request ended (`close_turn_tx`) — the weakest. V23 also carried what
-  efforts knew over once: the requests of a thread's turns that started inside
-  an effort's window link to its task on this basis.
+  request ended (`close_turn_tx`) — the weakest.
 
-A commit linked to the request mentioning the task is not a basis yet: no
-request-to-commit link exists. With no task tracker active nothing is
+A task's commits derive through its requests (`v_commit_request`;
+[git-integration.md](./git-integration.md) "Linked to the requests that made
+it"), not from a basis here. With no task tracker active nothing is
 written. **Why a table and not `page_ref`:** `page_ref` is the references a
 text contains (its source restates its slice), keyed `(source, target,
 ref_type)` with no cascade; this link is evidence with a time, a basis and a

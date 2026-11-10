@@ -76,13 +76,13 @@ selectors; screenshot when looks matter, and read the image.
 3. **Work concurrently while it runs.** Explore other surfaces, file
    bugs, test features (comments, search, dashboards), brief a second
    thread, or run a second stream in parallel. Useful IPC for
-   inspection: `oxplow_query_sql` over `v_task` / `v_effort` (a thread's
-   work, an item's efforts), `list_threads` (`{"streamId":"str1"}`),
-   `v_effort_observation`, `run_command` to file a task
+   inspection: `oxplow_query_sql` over `v_task` / `v_request` (a thread's
+   work, a task's requests via `v_request_task`), `list_threads` (`{"streamId":"str1"}`),
+   `v_request_observation`, `run_command` to file a task
    (`{"name":"task.create","input":{"title":…,"body":…,"state":"todo","native":{"thread":"thr1"}},"confirmed":false}`;
    no `native.thread` = backlog).
 4. **Review what landed** through oxplow itself: Git Dashboard →
-   commit pages (zones/treemap/co-change), the Tasks page, per-effort
+   commit pages (zones/treemap/co-change), the Tasks page, per-request
    "Coverage & tests"/static-analysis panels. Read the driver's final
    terminal summary.
 5. **Verify live, never trust the claim.** Rebuild + restart the
@@ -121,7 +121,7 @@ selectors; screenshot when looks matter, and read the image.
   is usually this — confirm via the daemon log / an IPC call before
   blaming the product.)
 - **IPC arg shapes.** Wire fields are **camelCase** (`streamId`,
-  `itemId`, `effortId`, `targetKind`, `targetId`); command args wrap
+  `itemId`, `targetKind`, `targetId`); command args wrap
   under their param name (`select_thread` → `{"req":{...}}`); `run_command`
   takes `{name, input, confirmed}`, and a command's own `input` is
   snake_case. A
@@ -163,12 +163,12 @@ Drive these like a user would, not just the agent terminal:
   question ("trace subsystem X end to end") and have it write a wiki
   page; verify it saved (`.oxplow/wiki/<slug>.md`) and that **⌘K BM25
   search** surfaces it across tasks/comments/wiki/files.
-- **The observed effort model.** An effort's files are claimed (an
-  edit tool named them) or observed (they changed during one of its
-  thread's turns); test runs are the effort's whose tool call ran them.
-  NOTE: a file YOU (navigator) or another writer change in the worktree
-  during the agent's turn is observed by its effort too — expect
-  attribution noise under concurrent/external writes.
+- **The observed turn model.** A turn's files (`v_turn_file`) are claimed
+  (an edit tool named them) or observed (they changed in the stream's
+  snapshot line during the turn); test runs are the turn's whose tool
+  call ran them. NOTE: a file YOU (navigator) or another writer change in
+  the worktree during the agent's turn is observed by that turn too —
+  expect attribution noise under concurrent/external writes.
 - **Cross-stream / worktree parallelism + merges.** Run agents in
   parallel across streams (a primary stream + worktree streams) to get
   more done, then integrate to the primary. Merge via the **branch
@@ -181,7 +181,7 @@ Drive these like a user would, not just the agent terminal:
   merge, commit it"), then verify. Only merge into a CLEAN, idle target
   stream — never while its agent is mid-edit there.
 - **Review surfaces.** Git Dashboard → commit pages (zones / treemap /
-  co-change), the Tasks page, per-effort "Coverage & tests" +
+  co-change), the Tasks page, per-request "Coverage & tests" +
   static-analysis + nudge panels are how a user understands what an
   agent did — read them, not only `git log`.
 

@@ -121,9 +121,7 @@ hardcoded **coverage 50/80 ramp is retired** (tsk220): the thresholds now live o
 the `oxplow.coverage.diff_pct` definition (`target: 80`, `fail_at: 50`, set in
 `collection.rs::record_coverage_metric`). To re-tune a metric's coloring, change
 its `target`/`warn_at`/`fail_at` (config or producer) — never a UI constant. (The
-legacy `EffortObservations` coverage bar still restates `80`/`50` as named
-constants documented to mirror the def; it's removed with `effort_observation` in
-tsk215.)
+coverage bar must read the def, not restate `80`/`50` as constants.)
 
 ### Comments
 
@@ -205,7 +203,7 @@ the tokens, never inline a font stack.
 | Variable        | Used for                                                          |
 |-----------------|-------------------------------------------------------------------|
 | `--font-ui`     | UI chrome — buttons, menus, labels, tabs, panel headers, sidebars |
-| `--font-prose`  | Long-form body content — `.oxplow-md` (wiki bodies, task descriptions, effort summaries, anywhere `MarkdownView` renders) |
+| `--font-prose`  | Long-form body content — `.oxplow-md` (wiki bodies, task descriptions, anywhere `MarkdownView` renders) |
 | `--font-mono`   | Code-shaped surfaces — Monaco, xterm, code blocks, blame columns, file-path chips, tabular IDs, stacktraces |
 
 The prose-vs-UI-vs-mono split mirrors Wikipedia / Metabase: sans for

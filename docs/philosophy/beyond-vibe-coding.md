@@ -54,9 +54,9 @@ The diff exists; the conversation that shaped it does not. Six
 months later, nobody knows whether the weird-looking thing in
 `auth.ts` was deliberate or a one-shot artifact.
 
-**Oxplow primitive: efforts and notes.** Activity, references and snapshots preserve evidence of the work.
-Optional effort policies group that activity and can link it to tasks;
-an effort is not a mandatory task attempt. Descriptions and summaries
+**Oxplow primitive: requests and notes.** Activity, references and snapshots preserve evidence of the work.
+Oxplow groups that activity into requests and can link them to tasks;
+a request is not a mandatory task attempt. Descriptions and summaries
 can connect the observed change to its rationale.
 
 ## Failure mode 5: no rollback

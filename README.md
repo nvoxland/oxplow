@@ -50,8 +50,8 @@ limits documented in the [extension reference](docs/reference/extensions.md).
   own tabs and context. It can have no agent session or several, using
   terminal harnesses.
 - **Work tracking and history.** Activity is recorded without requiring
-  task bookkeeping. Optional effort policies group work and link it to
-  tasks. Snapshots preserve working-tree history alongside git.
+  task bookkeeping. Oxplow groups work into requests and links
+  them to tasks. Snapshots preserve working-tree history alongside git.
 - **Code drill-down.** File, diff, history, and language-server views let
   you check the implementation behind an explanation.
 - **Shared actions.** Commands validate inputs and apply permissions,

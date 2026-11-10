@@ -7,7 +7,7 @@ after `oxplow.extension.deploy { name }`. The user can use a page
 themselves or share the extension with their team (`oxplow.extension.share`).
 
 You build them with your normal file tools. `$OXPLOW_BIN extension new <kind>
-<name> --origin <your effort ref>` scaffolds the folder with a v2 manifest,
+<name> --origin <your request ref>` scaffolds the folder with a v2 manifest,
 an intent, one example and its fixture, and a working starter for the
 kind; then edit. `$OXPLOW_BIN extension new --list-examples` names the
 working examples oxplow ships, and `new --from <example> [<name>]` copies one (with a
@@ -28,7 +28,7 @@ that exists is refused):
 - `command` — a command whose script comments on a task, on a task's Commands menu;
 - `provider` — an external provider's declarations and a stub program
   (red until you write the program); `--capability <cap>` picks what it
-  implements: `task_tracker` (the default), `effort_policy`,
+  implements: `task_tracker` (the default),
   `snapshots`, `knowledge`, `filesystem` or `agent_harness` (a harness launching agent sessions: its command runs in
   the person's terminal, so the deploy that admits it (`process`) says that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
@@ -62,10 +62,6 @@ that exists is refused):
   can cancel it (`references/jobs-and-ai.md`);
 - `component` — a custom component (private): a page with its component
   node and a web bundle on oxplow's client library;
-- `policy` — an effort policy written as a script (`implementations:`,
-  `needs: [sql.read]`) that opens an item's effort when it starts on a
-  thread and closes it when it ends; it passes the effort-policy suite
-  as written, and runs under the extension's permissions;
 - `advisory` — guidance for you: a query run at a turn's end whose rows
   reach the agent (`audience: person` raises them in Alerts instead); a
   an extension's advisories need `agent.write`;
@@ -79,7 +75,7 @@ that exists is refused):
 Words used exactly: an **extension** is the folder; a **contribution** is
 one thing it declares (a page, collector, command, effect, provider …); a
 **capability** is a swappable slot a project chooses an implementation of
-(`task_tracker`, `effort_policy`, `snapshots`); an **implementation** fills
+(`task_tracker`, `snapshots`); an **implementation** fills
 one (a built-in, a script, or a provider's instance); a **provider** is
 the process implementing a capability (an *external provider* speaks the
 provider protocol). A **need** is what a contribution says it requires (a

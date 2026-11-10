@@ -16,7 +16,7 @@ editing a file.
       .gitignore          # written by oxplow on first run
       local.sqlite        # tasks, threads, snapshots, settings
       wiki/               # wiki pages (markdown)
-      snapshots/          # per-effort file snapshots (Local History)
+      snapshots/          # file snapshots (Local History)
       runtime/            # generated agent runtime files
       lsp/                # installed LSP server binaries (appears after
                           #   an explicit install)
@@ -190,7 +190,7 @@ everything and you opt in.
 
 `metricDetailMaxPerProducer` / `metricDetailRetentionDays` only
 **compact**: they null out a run's `detail_json` — the verbatim payload
-behind the effort Tests/Coverage panel — while the capture and every one
+behind the request Tests/Coverage panel — while the capture and every one
 of its facts stay. No metric value, trend point, or count ever changes,
 which is why compaction is on by default. All you lose is the ability to
 drill into an *old* run's per-file/per-test detail.
@@ -243,7 +243,7 @@ Precedence, highest first:
    (your wiki pages get Local History even though they aren't
    committed), and anything `.oxplow/.gitignore` un-ignores with a `!`
    is watched too. That last one is why `project.yaml` shows up in
-   history and effort attribution: oxplow writes `!project.yaml` there
+   history and request attribution: oxplow writes `!project.yaml` there
    so the config is shareable. Negate another file yourself and it
    becomes visible the same way.
 2. An `include` match is **kept**, overriding both `exclude` and
@@ -264,7 +264,7 @@ out of the UI immediately — no rescan, no purge.
 ### Testing (tests & coverage)
 
 The `testing` block says how your tests run; **report collectors**
-read what a run writes and attach it to each effort: the individual
+read what a run writes and attach it to each request: the individual
 tests, diff coverage and analyzer findings. Point a collector at a
 report file your test run already emits; after each test run oxplow
 sees, it reads the reports that run wrote, so a polyglot repo lights

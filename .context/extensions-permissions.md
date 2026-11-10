@@ -176,9 +176,7 @@ its scope trace.
   diverge; the host's own `read` keeps its transaction choice),
   a composer (`Composer` gets a pure child; what it calls becomes the
   run's scopes), effects (`for_effect`: the effect actor on the event's
-  thread and stream, caused by the event), the effort policy
-  (`for_policy`, its composed calls `run_in` it so `command.executed`
-  is caused by the event), entity and fact collectors (a child of the
+  thread and stream, caused by the event), entity and fact collectors (a child of the
   run that ran them, named for the collector), provider invokes (on the
   wire as `InvokeParams.context`; `host/call`s are answered only inside
   a registered run) and knowledge, snapshot and harness verbs. A page
@@ -266,7 +264,7 @@ uses):
 - **Who may declare what** (checked at load): a Starlark collector's
   `needs:` any service (`check_declared`; another runtime has no
   builtins, so `needs` there is an error); a composing script — a
-  command's `entry:`, an effect, an effort policy script — reads only
+  command's `entry:`, or an effect — reads only
   (`scope_calls::check_script_need`: it runs pure, so `ai.compute` is
   refused, naming why). A **command's** script reads the semantic layer
   (metric functions included) and not the tree: it decides what runs,
@@ -321,7 +319,7 @@ uses):
   every host that runs a Starlark script — entity collectors
   (`collector_runner::given`), fact collectors (`MetricsService::given`),
   commands (`compose_calls`), effects (`effect_triggers::run_script`,
-  `effects::run_over`) and effort policy scripts — calls
+  `effects::run_over`) — calls
   `services::decide` / `prepare` with the run, the script and its needs.
   For each service the script uses it refuses what the run's mode
   excludes (`RunContext::decide_service`: "a pure run can't use
@@ -359,8 +357,8 @@ extension may reach (its `permissions:`, approved when it was deployed —
   env, commands }`, derived from the declaration: an exec collector's
   entry, `network`, `credentials` and `env`; a collector's services
   (`services::collector_needs`: declared ∪ implied, `ai.compute` among
-  them for a model-calling script); a script's (effect, command, effort
-  policy, job, provider `host/call`) scopes from its `needs`.
+  them for a model-calling script); a script's (effect, command,
+  job, provider `host/call`) scopes from its `needs`.
 - **The grant.** `Grant { namespace, permissions }` (`grants::grant_of`):
   the extension's command namespace and its declared permissions. There is
   no approvals store and nothing hashed per program: the deployment is
@@ -369,9 +367,9 @@ extension may reach (its `permissions:`, approved when it was deployed —
 - **The authority** a run carries (`RunContext::authorized`,
   `run::Authority { declared, grant, enforcement }`,
   `grants::authority(ext, declared)`). Every extension run has one: a
-  collector, an effect, a job, a script command, a scripted effort policy,
+  collector, an effect, a job, a script command,
   a provider's `host/call`s. Core's own work has none and is allowed what
-  it does (core's built-in effort policy, core commands).
+  it does (core commands).
 - **Decisions.** `run.decide(Need)` → `Allowed`, `Denied(why)` or
   `Unenforced(why)`, recorded on the run (`v_extension_run.decisions`).
   `grant::decide` refuses what the contribution didn't declare ("not

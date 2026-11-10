@@ -103,12 +103,6 @@ check already reported is not repeated.
     `where: { to: done }`, whose `effects/on-done.star` composes
     `oxplow.task.comment`; its intent example dry-runs it on a fixture
     event;
-  - `policy` — an `implementations:` entry (`capability: effort_policy`,
-    id = the name with `_` for `-`, `needs: [sql.read]`) whose
-    `policies/<name>.star` opens an item's effort when it starts on a
-    thread and closes its open efforts (read through `scope`) when it
-    ends; its example is a checkpoint expecting `{ skip: $any }`, and it
-    passes the effort-policy suite as written;
   - `provider` — below; `extension` — the manifest only.
   It refuses an existing folder, a bad name and an origin that isn't a URI. **What
   it writes passes `check` with no warnings and `extension test` clean**
@@ -116,8 +110,8 @@ check already reported is not repeated.
   `crates/oxplow-sdk/tests/just_works.rs` holds each kind to it, through
   to loading in a real oxplow: the page's row action names a registered
   command, the collector syncs and its dataset publishes, the command runs
-  through the bus; a task tracker and an effort policy each pass the kit
-  with the fake behind their stub, the policy with its scaffolded example.
+  through the bus; a task tracker passes the kit
+  with the fake behind its stub.
 - **Recorded fresh-agent runs** (`crates/oxplow-sdk/fixtures/just-works/
   <kind>/`): `scripts/record-just-works.sh <kind>` gives `prompt.md` to
   `claude -p` in an empty git project — `--safe-mode`, so nothing but
@@ -202,10 +196,7 @@ check already reported is not repeated.
   schema. What the contract doesn't say is the SDK's starter per
   capability (`provider_starter`, `verb_input`): each verb's summary and
   input schema, the intent example and its fixture — `create` expecting
-  `{ uri: $any }` for a task tracker; `react` to a checkpoint expecting
-  `{ skip: $any }` for an effort policy, whose manifest also `needs:
-  [sql.read]` (it hears events only, and reads oxplow for what to close);
-  `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
+  `{ uri: $any }` for a task tracker; `render` of `{ kind: ack }` expecting `{ body: $any }` for an agent
   harness, whose `launch` / `tool_use` / `render` inputs are the wire's
   (`{ session, endpoints, … }`, `{ body }`, `{ answer }`) and whose
   capability `data` starts as `{ env_markers: [], settings: [] }` (`ProviderStarter.data`; null for a
@@ -271,8 +262,7 @@ check already reported is not repeated.
   `{ $exact: v }` the whole value, every key; `refused: <text>` a reason
   that contains the text. **One way to say no**: a command, an invoke or a
   command example that refuses or fails is `refused: <its reason>`. Then, per declared provider, the conformance kit
-  ([providers.md](./providers.md) "The conformance kit"), the effort
-  policy suite for a policy script, `questions.yaml` and incremental
+  ([providers.md](./providers.md) "The conformance kit"), `questions.yaml` and incremental
   datasets. `TestReport { ok, errors, warnings, skipped, root, blessed,
   ran, generation, contributes, unsupported, left }` (diagnostics, with
   `error_lines()` and the like for the rendered lines): `contributes` is the extension's
@@ -334,7 +324,7 @@ page that hosts it.
   it.
 - **In tree:** `every_page_answer_reaches_what_its_skill_names` runs it over
   oxplow's own extensions (and checks the kinds a person is offered
-  questions about: file, commit, effort, task);
+  questions about: file, commit, request, task);
   `a_page_answer_must_be_named_by_its_skill_and_run` the mechanism.
   `oxplow extension test` runs the second half for every extension's pages
   (`ran: answers`).
@@ -370,11 +360,11 @@ foundation, the one tested, and what each of those `requires:` or imports
 from, in turn — and a fixture's own `requires: [<ext>…]` (a fixture key,
 same meaning as the manifest's) adds more, on an oxplow of that fixture's
 own (an unknown name is a finding). The default extensions are not on:
-oxplow's own pages run complete without them. oxtask,
-effort policy and wiki are foundation's (always on), so a fixture that makes
-tasks, efforts or wiki pages needs nothing extra (`requires:
+oxplow's own pages run complete without them. oxtask
+and wiki are foundation's (always on), so a fixture that makes
+tasks or wiki pages needs nothing extra (`requires:
 [oxplow-bundled]` only for what bundled adds: its review pages and
-replacements), and an effort policy's conformance suite, which files work,
+replacements), and a provider's conformance suite, which files work,
 runs on an oxplow of its own — deployed in that order,
 what one requires before it (`Host::start`). Never the project's list or
 one person's `enableExtensions` / `disableExtensions`, and never a
@@ -507,7 +497,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   the calls and the end (the checkpoint counts the turn's writing tools
   from `v_tool_call`) and settled after it (the checkpoint, then what reacts
   to it). The other kinds: `event` (logged and delivered; effects react),
-  `evidence` (`EffortEvidenceStore::replace`), `commit`
+  `evidence` (a request's stored analysis, `SqliteRequestAnalysisStore`), `commit`
   (`SqliteGitStore::upsert_commit`), `change` (a change's files and
   functions, `SqliteChangeStore::store_results`; it never runs a deep
   analysis, and the materialized datasets over the commit index, like
@@ -549,7 +539,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
 - `when: { advisory: <id>, thread? }`, `expect: { lines: [..] }` — the
   extension's advisory run for a thread (the primary one when none) as
   the app runs it on its `on:` (`advisories::for_thread`, over the
-  thread's open effort), its text line by line, heading included; on an
+  thread's newest request), its text line by line, heading included; on an
   oxplow of its own, since it records what it said (`once_per`).
 - `when: { query: <slug | ext/slug>[#loader], params? }`, `expect: { rows,
   columns? }` — a query's last loader, or `<page>#<loader>`: one loader of
@@ -600,20 +590,7 @@ fixtures to it.
   extension command's is `when: { command: <id>, input, answers? }`,
   `expect: { commands?, result? }` (each compared on the keys it names:
   a read command's example checks what it answers) or `{ refuses }`;
-  `{ skip: $any }` matches any skip (`reaction_problem`, shared with the
-  policy's);
-- `when: { implementation: <id>, event: { type, payload, subject?,
-  anchors? }, answers? }`, the same `expect` but `reacts` — an
-  **effort policy script** (`implementations:` with `capability:
-  effort_policy`): the event envelope, `effects::run_over` with the answers, the
-  calls checked against the registry; appending events is an error (a
-  policy emits nothing). Naming no policy script of the extension is an
-  error naming the id. For each such script `test` also runs the
-  effort-policy suite (`policy_suite`): on a fork of the test's
-  throwaway (as a provider's suite runs), the
-  script chosen as `activeProviders.effort_policy`, then
-  `effort_policy_conformance::suite`; a finding is an error at the
-  manifest, `ran` shows `effort_policy suite`;
+  `{ skip: $any }` matches any skip (`reaction_problem`);
 - `when: { event_type, v?, payload }`, `expect: { valid: true | false,
   upcast?: <payload> }` — the payload against the extension's declared
   schema (the newest version without `v`), and its upcast;

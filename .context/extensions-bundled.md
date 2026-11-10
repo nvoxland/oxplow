@@ -6,8 +6,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 - **Bundled extensions.** There are two (see "The `oxplow-bundled` extension" for the split). `oxplow-foundation` is required: oxplow's own
   commands, AI providers and harness implementations, the default task tracker,
-  effort policy, snapshots and wiki, and the
-  measures, dimensions and metrics oxplow records itself (tokens, efforts, tests,
+  snapshots and wiki, and the
+  measures, dimensions and metrics oxplow records itself (tokens, requests, tests,
   coverage, analysis, tasks: its `measures:` / `dimensions:` / `metrics:`,
   scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
   `oxplow-bundled` holds the
@@ -61,7 +61,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   notes. Each empty state says what's *good*, e.g.
   "Nothing is waiting on you."
 
-  The slot pages above need `effort_id` / `change_id`, so they're
+  The slot pages above need a `change_id`, so they're
   parts, not in the launcher (opened there they'd show NULL-param empty
   states).
 
@@ -101,10 +101,10 @@ Each loads clean (`documented_examples_load_without_errors`):
   checks the example and proves the mounted loader reads a recorded prompt.
 - **`schema-review`** — a fact collector counting DDL per migration
   file (its own measure and dimension), and a slot page (Schema Changes)
-  joining those facts with core's `v_effort_file` to list the migration
-  files an effort changed — no core change.
+  joining those facts with core's `v_turn_file` to list the migration
+  files a request changed — no core change.
   `the_schema_review_example_joins_its_facts_with_core_evidence` runs it
-  over a real effort.
+  over a real request.
 
 ## The `oxplow-bundled` extension
 
@@ -112,7 +112,7 @@ Each loads clean (`documented_examples_load_without_errors`):
 `oxplow-foundation` (required) and `oxplow-bundled` (optional, on by default), both
 in the `oxplow` namespace so a contribution can move between them without a rename.
 Foundation is kept as small as it can be while still useful: the host's pages, the
-default capability implementations (tasks, effort policy, snapshots, knowledge)
+default capability implementations (tasks, snapshots, knowledge)
 and the measures core's change analysis records. `oxplow-bundled` is what has been
 reviewed and kept.
 
@@ -178,9 +178,9 @@ screens and the holder's add the review and analysis:
   `oxplow/diff-view.sections`, `commit.sections` and
   `uncommitted-changes.sections` slots. The duplicate scan runs in core's
   change analysis; the compare page is foundation's `duplicate-block`.
-- **Effort blocks.** `effort-tests` (coverage, untested files, test runs,
-  failed tests, analysis findings), `effort-metric-deltas`, `effort-nudges`
-  and `effort-plan`, mounted at `oxplow/diff-view.sections`.
+- **Request blocks.** Blocks for a request's tests (coverage, untested
+  files, test runs, failed tests, analysis findings), its metric deltas, its
+  nudges and its plan, mounted at `oxplow/diff-view.sections`.
   `thread-tokens`,
   `thread-plan`, `thread-shared-work` and the two handoff strips mounted
   on the old Tasks page; its board has no slot, so they mount nowhere
@@ -197,7 +197,7 @@ screens and the holder's add the review and analysis:
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
-- **Timeline.** The `timeline` page and its component (efforts, sessions,
+- **Timeline.** The `timeline` page and its component (requests, sessions,
   threads and commits on a zoomable axis; source in `src/timeline/`, built
   with the npm dependency `vis-timeline` by bundled's `package.json`). It
   moved with the rest of the person-facing screens. Foundation has no build
@@ -217,7 +217,7 @@ screens and the holder's add the review and analysis:
 - **Zones.** The `zones` page (no category) holds the questions about the zone
   rules (`v_zone`, `v_zone_unmatched`); nothing links to it.
 - **The app's screens.** foundation's `alerts`,
-  `catalog`, `changes-effort`, `comments`, `commit`,
+  `catalog`, `comments`, `commit`,
   `diff`, `directory`, `file-viewer`, `markdown` (a `.md` file drawn), `media` (an image or a PDF shown), `csv` and `tsv` (a CSV or TSV file as a table), `data-file` (a JSON or YAML file as a tree of its values), `diagram` (a mermaid file drawn), `files` (the launcher's way into `directory`), `git-dashboard`,
   `settings` (an `area` param: overview, agents, lsp, extensions, data,
   integrations, ai), `uncommitted-changes`, and more. Metrics in [metrics.md](./metrics.md).
@@ -272,12 +272,10 @@ screens and the holder's add the review and analysis:
   page: the requests that worked on it), Comments and Links (the `task-comments` and
   `task-links` parts) and its sections slot, where bundled mounts
   `task-tokens` and `item-shared-work`. With it, `task-actions` (an
-  agent's Mark done / Record a block… on one item) and `link-effort`, the
-  form behind the `effort.link_to_task` command (Link to Task… on an
-  effort).
+  agent's Mark done / Record a block… on one item).
 - **The task screens.** Two pages over one query, `task-rows` (the items
   a page shows by `show` — assigned to this thread, its stream, you,
-  nobody or anyone; a closed item, nobody's, by the efforts that worked
+  nobody or anyone; a closed item, nobody's, by the requests that worked
   it — `state` (a stage of the list, or a bucket for its first stage,
   `open` or `all`), `priority` and `q`, each row's bucket, stage and stage
   title, the gates a row's actions read and the order to draw them in),
@@ -329,11 +327,7 @@ its dataset `change_interest` (`v_oxplow_change_interest`, over
 `change_co_change`, which `change-review` reads — and the
 `file-co-change` page ("Usually Changes With", mounted at the diff
 page's `file-header` slot, `oxplow/diff.file-header`) reads `co_change_pair` for the file a diff
-shows; an
-effort's churn is its fact collector `oxplow.effort_churn`
-(`on: [effort.finished]`, `after: [change.analyze]`, reading the
-effort's change files) recording `oxplow.effort_churn_lines`.
-Full-tree duplicated lines read the tree, not tables, so they
+shows. Full-tree duplicated lines read the tree, not tables, so they
 are oxplow-foundation's collector, `oxplow.duplicate_lines`, over the
 public `duplicate_blocks(min_lines)` builtin — what any extension could
 write. What needs two revisions' trees — files, functions, imports, test
@@ -356,7 +350,7 @@ collection ingest, attribution, token ingest, page visits (the rail and
 launcher use them), the fact store and engine, the Go To page and
 bookmarks (`v_bookmark`; the rail's Go To panel is foundation's, beside its page).
 
-New in the extension: the **effort review packet**, all live exception
+New in the extension: the **request review packet**, all live exception
 pages:
 
 - Waiting on me

@@ -7,7 +7,7 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
 - **Change links.** `diff-at` (`from` path, optional `line`, `base` and
   `head` columns holding the change's labels; join `v_change`) opens that
   file's diff between the two sides (commit shas / `HEAD` → git refs,
-  `working tree` → disk, `snapshot N` → that snapshot, so an effort's
+  `working tree` → disk, `snapshot N` → that snapshot, so a request's
   change links too). `compare` takes
   a `path:start-end|peer:start-end` value (build it in SQL) plus an
   optional `head` version column and opens the side-by-side
@@ -28,9 +28,6 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   over every row it shows (`all: true`: a Clear, a Retry all) is offered
   only while there are rows (`offeredWholePage`). Those buttons close the
   section, under its rows, never over them (`PartButtons`).
-  The task page links to the effort page as
-  **Review**: on each effort's activity card, and in the details rail for
-  the newest effort.
 
 ## Pages
 
@@ -138,7 +135,7 @@ Where it lives, and what is loaded:
 - `tool: <name>`: the page is also an MCP tool `<namespace>_<tool>`, its
   input the params, its call `oxplow.page.run`. Kept for the few questions
   agents ask every session (foundation's `thread_tasks`, `next_task`,
-  `effort_summary`, `catalog`); everything else is `oxplow_find_page`,
+  `catalog`); everything else is `oxplow_find_page`,
   then `oxplow_run_page`.
 - `answers: [{ question, about?, params, skill? }]` (`PageAnswer`): the
   questions the page answers. `oxplow_find_page` scores shared words:
@@ -235,7 +232,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   checked; a run takes any text, and the query says what an unknown value
   means. An agent's page tool (`agent_tools::params_schema`) emits no
   `enum` for it, only words saying which query or loader lists them. A param named
-  `uri`, `effort_id`, `thread_id` or `stream_id` draws as a picker over
+  `uri`, `thread_id` or `stream_id` draws as a picker over
   the matching dataset, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound
   to the viewer's context (`ViewContext`, numeric ids) unless the caller
@@ -533,7 +530,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   reads "(none)".
 
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
-  (kinds: `task`, `file`, `wiki`, `effort-diff`, `commit`, `metric`,
+  (kinds: `task`, `file`, `wiki`, `commit`, `metric`,
   `page`, `diff-at`, `compare`). `page` opens any oxplow URI. The pages
   a column's links open are the page's **origin**
   (`viz/linkOrigin.ts`, `.context/pages-and-tabs.md` "Origins"): Up and

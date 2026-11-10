@@ -18,9 +18,6 @@
    `oxplow.knowledge.link { page, target }` adds one link under the page's
    Related heading; `oxplow.knowledge.delete_page { slug }` deletes a page
    (the person confirms).
-3. Optionally declare the page in `oxplow.effort.report`'s `impacts`:
-   `{ kind:"wiki", id:"<slug>", action:"created"|"updated" }`, which
-   backlinks your effort's item to the page.
 
 ## A project with no knowledge store
 

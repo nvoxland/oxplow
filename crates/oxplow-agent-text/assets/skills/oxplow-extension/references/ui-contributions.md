@@ -12,8 +12,8 @@
     `oxplow/uncommitted-changes.sections` → `change_id` (the
     `v_change*` analysis; the page's `row` loader) — `at: { before: commit }`
     puts a strip above the uncommitted page;
-  - `oxplow/diff-view.sections` (an effort's or a range's diff) →
-    `effort_id`, `change_id`, …;
+  - `oxplow/diff-view.sections` (a turn's, a request's or a range's diff) →
+    `change_id`, …;
   - `oxplow/task-detail.sections` (a task's page, whichever
     list; oxplow-bundled's, so declare `requires: [oxplow-bundled]`) → `uri`;
   - `oxplow/new-session.sections` (sections `start`, `earlier`) →

@@ -55,13 +55,14 @@ refactors — go straight to TDD.
 
 ## Tracking work
 
-oxplow infers the work ([work-tracking.md](./work-tracking.md)): it opens
-an effort when a turn changes files, links it to an item someone starts,
-and closes it when a commit lands its work. Nothing is filed or closed
-to be allowed to edit or stop, and an effort's files and test runs are
+oxplow infers the work ([work-tracking.md](./work-tracking.md)): it groups
+a turn and the turns that follow from it into a request, links the request
+to an item someone starts, and links a commit to the requests whose changes
+it holds. Nothing is filed or closed
+to be allowed to edit or stop, and a request's files and test runs are
 observed, never declared. A path in `generated.exclude`
 (`.oxplow/project.yaml`) is build output oxplow deliberately doesn't
-snapshot, so no effort owns it — e.g.
+snapshot, so no turn owns it — e.g.
 `apps/desktop/src/tauri-bridge/generated/bindings.ts`, which Tauri
 Specta rewrites on nearly every build.
 
@@ -94,7 +95,7 @@ peer message UUIDs individually. A file does not wake an idle session.
 
 ### oxplow-dev: tasks and the wiki while the task tracker is none
 
-The effort policy, snapshots and wiki are `oxplow-foundation`'s defaults, but
+Snapshots and the wiki are `oxplow-foundation`'s defaults, but
 oxtask, oxplow's own task tracker, is `oxplow-bundled`'s: disabling it
 (`disableExtensions: [oxplow-bundled]` in `.oxplow/personal.yaml`, never
 committed) leaves no task tracker, as does a project that chose none
@@ -177,7 +178,7 @@ re-enabling the extension shows everything done meanwhile. The database
 is opened as it is (`Database::open_existing`: no migrating, no dataset
 recompile under the running app; refused at another schema version).
 The running app picks up the new events with its next pump pass; with
-the task tracker none, no effort policy reacts to them. Its reads (`list`,
+the task tracker none, nothing reacts to them. Its reads (`list`,
 `show`) are oxplow's `task` table itself, not the task interface
 (which shows only the active list's items) — the one reader of oxplow's
 tables outside its implementation, on purpose.
@@ -276,7 +277,7 @@ Use the report-emitting commands below, not bare `cargo test` /
 then `bun run --cwd apps/desktop test:junit` whether or not the Rust
 suite passed, failing if either did) is the configured `testing.command` — it's the only
 test run that emits the JUnit + lcov reports oxplow parses into the
-effort's "Coverage & tests" panel.
+request's "Coverage & tests" panel.
 
 **Which check for which change:**
 
@@ -332,7 +333,7 @@ instead of running every migration, ~330 ms → a few ms). A new migration
 or dataset needs nothing: a rebuilt test binary is a new template key.
 
 **Fixtures run the production activation.** `Services::in_memory`,
-`in_memory_on_machine` and the fixtures built on them (`test_fixtures::services_with_effort`, …) are
+`in_memory_on_machine` and the fixtures built on them (`test_fixtures::services_with_thread`, …) are
 async, return `Arc<Services>`, and end with `extension_activation.initialize`
 exactly as boot does; there is no test-only way to register commands, datasets or
 providers. A test that writes extension files or changes config after setup
@@ -342,11 +343,11 @@ what was) at that point. Declared entities need no seeding: activation creates
 them empty. (`in_memory_inactive` is crate-private, for a test of what happens
 before the first generation.)
 
-**An effort needs no task, and neither does its fixture.**
-`test_fixtures::services_with_effort()` opens an effort linked to nothing
-(through `oxplow.effort.open`, so its event is logged like a real one); a test
-about oxtask takes `services_with_task_effort()` instead (an
-in-progress task, the effort linked to it; it derefs to the plain
+**A thread needs no task, and neither does its fixture.**
+`test_fixtures::services_with_thread()` gives services over a primary
+stream, its first thread and its session; a test
+about oxtask takes `services_with_task()` instead (an
+in-progress task assigned to the thread; it derefs to the plain
 fixture, so helpers take either). Reach for the task one only when the
 test reads or relies on the task.
 

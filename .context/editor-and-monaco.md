@@ -127,7 +127,7 @@ absolutely-positioned DOM overlay on the left gutter (the `BlameOverlay`
 sub-component): one `BlameLine` per line — a committed line names its
 revision, author and time; an uncommitted line names no revision and
 renders as the grey "Uncommitted" row. (Attributing lines to oxplow
-efforts was designed but never populated; that dormant branch was removed
+requests was designed but never populated; that dormant branch was removed
 in P5.B4.)
 
 Layout details:
@@ -158,7 +158,7 @@ Layout details:
 
 Refresh rule: the overlay re-fetches when the file is saved
 (`isDirty` transitions true → false). It does **not** refresh on every
-edit because attribution is relative to the last closed effort / HEAD,
+edit because attribution is relative to HEAD,
 not the buffer.
 
 ## Uncommitted-change gutter markers

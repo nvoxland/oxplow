@@ -7,7 +7,6 @@ stdin/stdout, and reads and writes through it.
 
 ```sh
 oxplow extension new provider my-tracker   # declarations, a stub program, a test config
-oxplow extension new provider my-policy --capability effort_policy
 oxplow extension new provider my-agent --capability agent_harness
 oxplow extension new provider my-shutter --capability snapshots
 oxplow extension new provider my-shelf --capability knowledge
@@ -29,7 +28,7 @@ declares the `snapshots` capability with a `contents` feature. It answers
 three verbs, each `confirm: never`, `access: record`, over inputs that
 refuse unknown keys (`read_at` only with `contents`):
 
-- `mark { stream, worktree, trigger, thread?, turn?, effort?, budget_ms?,
+- `mark { stream, worktree, trigger, thread?, turn?, budget_ms?,
   parent? }` → `{ handle, unchanged, file_count, branch?, revision? }`:
   it names the worktree's state with its own `handle`. `parent` is the
   handle of the last state it marked (`null` when there is none, and the

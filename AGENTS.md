@@ -54,7 +54,7 @@ or exact mechanics.
     `-p` of only pure crates like oxplow-config or oxplow-domain skips the
     sidecar build) and
     `bun run test:fast:ts` — quick, write the JUnit reports the
-    effort's Tests panel shows.
+    request's Tests panel shows.
   - `bun run test:collect` — the full suite with coverage, the only run
     that emits lcov for the coverage panel. See `.context/collection.md`.
   - `bun run lint:collect` — clippy with `-D warnings` (JSON to
@@ -114,7 +114,7 @@ or exact mechanics.
 | Language support — the `Language` enum, `LanguageSupport` registry, per-language specs (analysis/merge/LSP/metrics) | `.context/language-support.md` |
 | Tables, stores, tasks, sort_index, migrations | `.context/data-model.md` |
 | The agent process, Stop hook, MCP tools, write guard, agent prompt config | `.context/agent-model.md` |
-| How oxplow infers the agent's work (efforts, policies, no gates, hints) and the capabilities direction (swappable task tracker, effort policy, snapshots) | `.context/work-tracking.md` |
+| How oxplow infers the agent's work (turns and requests, no gates, hints) and the capabilities direction (swappable task tracker, snapshots) | `.context/work-tracking.md` |
 | Adding a new persisted operation (store + IPC + UI), event bus, cross-store updates | `.context/ipc-and-stores.md` |
 | Background colors, tier hierarchy, adding a new color variable | `.context/theming.md` |
 | `.git` watching, blame, branch changes, commit execution | `.context/git-integration.md` |
@@ -126,7 +126,7 @@ or exact mechanics.
 | `TerminalPane`, xterm.js setup, file-path link provider | `.context/terminal.md` |
 | LSP (session manager, document mirror, Mason installer, lsp RPCs/events, server config, MCP lsp tools) | `.context/lsp.md` |
 | Code quality scans (in-process metrics + duplication detector + findings store + Code quality panel) | `.context/code-quality.md` |
-| Effort-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
+| Request-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
 | Knowledge (the wiki) — `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the wiki write guard | `.context/knowledge.md` |

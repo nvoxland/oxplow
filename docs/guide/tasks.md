@@ -34,9 +34,9 @@ command that takes a stage also takes a bucket name, and lands on the
 first stage the list declares in that bucket.
 
 Oxplow does not automatically mark work done. A person or agent updates
-the item. The selected effort policy can link activity to an item and
-move linked to-do work into progress; see
-[Local History](local-history.md#effort).
+the item. An agent that starts an item takes it, and oxplow links the
+item to the requests that worked on it; see
+[Local History](local-history.md#turns-and-requests).
 
 ## Planning useful items
 
@@ -60,9 +60,10 @@ Agents read work through the semantic layer and change it through the
 same audited commands as the UI. Starting an item does not send a prompt
 to a coding agent or force it to continue after it stops.
 
-## Tasks and efforts
+## Tasks and requests
 
-An effort is a span of a thread's activity, optionally linked to a task. One item can have several efforts; an effort needs no item. The
-effort policy determines grouping, while core records attribution and
-evidence. Planning and recording therefore remain useful independently
-of one another.
+A request is a prompt that started something, plus every turn that
+followed from it. One item can have several requests; a request needs no
+item. Oxplow links an item to a request when the evidence is recorded:
+from the prompt, a command, a transition, or an assignment. Planning and
+recording therefore remain useful independently of one another.

@@ -186,7 +186,7 @@ needs.
 
 | Slot | Page | Param |
 |---|---|---|
-| `oxplow/diff-view.sections` | an effort's or a range's diff | `effort_id`, `change_id` |
+| `oxplow/diff-view.sections` | a request's, a turn's or a range's diff | `change_id` |
 | `oxplow/commit.sections` | a commit's page | `change_id` (the page's row) |
 | `oxplow/uncommitted-changes.sections` | Uncommitted Changes; `at: { before: commit }` puts a strip above everything | `change_id` (the page's row) |
 | `oxplow/new-session.sections` | the New Session page (sections `start`, `earlier`) | `thread_id` |
@@ -213,7 +213,7 @@ Settings → Extensions → **Disable** turns an extension off for the
 project, including the ones that ship with oxplow. Oxplow ships the required
 `oxplow-foundation` extension and the optional `oxplow-bundled` extension.
 The latter holds the Usage, Planning, Review, and Quality pages, Change
-Analysis, the effort's tests and coverage, the review packet, and the token
+Analysis, the request's tests and coverage, the review packet, and the token
 panels. With it off, oxplow is the plain workbench: the pages keep their
 file lists and diffs, and the Metrics pages and dashboards still work.
 Turning it off in Settings → Extensions changes your own choice
@@ -377,8 +377,8 @@ actions in the bar and opens a command's form in oxplow:
 oxplow.connect().then(async (component) => {
   component.applyTheme();
   const { rows } = await component.querySql(
-    "SELECT uri, title FROM v_effort WHERE started_at >= ?1", [component.viewParams.from]);
-  await component.setTitle(`Efforts since ${component.viewParams.from}`);
+    "SELECT uri, title FROM v_request WHERE started_at >= ?1", [component.viewParams.from]);
+  await component.setTitle(`Requests since ${component.viewParams.from}`);
   await component.setActions([{ id: "refresh", label: "Refresh", primary: true }]);
   component.onAction((id) => { if (id === "refresh") location.reload(); });
   // Its view params live in its tab, so Back and a bookmark keep them:
@@ -481,7 +481,7 @@ change it.
 An extension can declare a **collector**: a script that fetches records from
 somewhere else (GitHub, a team's tracker, your CI) and prints them as JSON. Oxplow
 stores them as a view like `v_github_pr` that pages can join with tasks and
-efforts.
+requests.
 
 ```yaml
 collectors:

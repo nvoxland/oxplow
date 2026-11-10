@@ -16,7 +16,7 @@ AI providers you configure, the roles that decide which model does what, the
 
 Terminal harnesses (Claude Code, Codex, opencode) remain the agents that do
 the work. But oxplow itself benefits from calling models directly: to
-classify an effort's risk, score a change, summarize a session, or answer a
+classify a request's risk, score a change, summarize a session, or answer a
 typed yes/no question cheaply. This is **oxplow's own computation**, not
 prompting a doing-agent, so it sits outside the no-automation invariant
 ([architecture.md](./architecture.md)).
@@ -103,7 +103,7 @@ ai:
 | Role | Used for |
 |---|---|
 | `main` | general reasoning: `extract` (a collector's `ai_extract`) |
-| `summarize` | summaries of sessions, efforts, changes (`summarize`) |
+| `summarize` | summaries of sessions, requests, changes (`summarize`) |
 | `decide` | typed questions with probabilities, Jev-shaped (`classify`, `score`, `decide`) |
 | `assistant` | the Assistant ("The Assistant" below); falls back to `main` and needs tool calling and streaming |
 
@@ -128,7 +128,7 @@ an id, a description, a required `fallback` built-in role and optional
 `features` (`text | tool_calling | streaming | image`). So
 `oxplow_ai::config::Role` is open: `Builtin(BuiltinRole)` or
 `Profile { extension, name }`, written as one string (`summarize`,
-`effort_review/review`) wherever a person sees it — `ai.yaml`,
+`review/review`) wherever a person sees it — `ai.yaml`,
 `project.yaml`'s `ai.roles`, Settings, `ai_call.role`, `ai_result.role`.
 
 - **Naming.** Inside its own extension an author writes the bare id (a

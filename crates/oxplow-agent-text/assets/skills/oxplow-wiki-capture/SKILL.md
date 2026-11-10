@@ -61,7 +61,7 @@ verified_files, removed_files }`. Every `[[link]]` must resolve (a dangling
 one is refused and named). `verified_files` are files you re-read against
 this body; `removed_files` are files you dropped. Open
 `references/write-page.md` for the mechanics, `oxplow.knowledge.link` /
-`delete_page`, declaring the page in an effort report, a project with no
+`delete_page`, a project with no
 knowledge store, and folding in Explore subagent notes.
 
 ## Diagrams

@@ -19,7 +19,7 @@ Remember: oxplow is a shipped product that other users run too. Fixes belong in 
 Write the report against each lens. Cite specific turns / tool calls as evidence — "in turn N I did X, which …" — not vague impressions.
 
 1. **Flow friction** — Where did the session stall, re-ask, or backtrack? Which steps felt like boilerplate vs real work?
-2. **Effort & token efficiency** — Where did you (or hooks / prompts) pull more context than needed? Where could a targeted tool have replaced a broad Read/Grep/Agent call? Where did a mistaken route burn tokens before self-correcting?
+2. **Work & token efficiency** — Where did you (or hooks / prompts) pull more context than needed? Where could a targeted tool have replaced a broad Read/Grep/Agent call? Where did a mistaken route burn tokens before self-correcting?
 3. **Correctness & verification** — Where did you assume instead of verify? Did any change ship without a reasonable test or runtime check? Were there claims ("all tests pass", "UI works") that weren't actually verified?
 4. **Agent ↔ user collaboration** — Were requests clear enough? Where did you guess instead of ask? Where did the user have to re-course-correct? Were the task notes / thread summaries useful to them?
 5. **oxplow tooling itself** — Missing MCP tools, confusing prompt instructions, noisy hooks, stop-hook behavior, task statuses, permissions friction, anything in the harness that got in the way. Be specific about *which file* to change.
@@ -33,7 +33,7 @@ For each proposed change:
 - **Evidence** — the transcript/session observation that motivated it.
 - **Proposed change** — file path(s) and a one-sentence intervention.
 - **Impact** — which of the five lenses it helps and roughly how much.
-- **Risk / cost** — anything the change breaks, or effort to implement.
+- **Risk / cost** — anything the change breaks, or cost to implement.
 
 Sort the list by impact-per-cost, highest first.
 

@@ -41,7 +41,7 @@ led to them. Collected activity and test evidence make more of that
 process available for analysis. Developers can add their own collectors
 and metrics to ask whether a workflow is improving.
 
-A metric such as time to a passing test or effort spent on rework needs
+A metric such as time to a passing test or tokens spent on rework needs
 an explicit definition and suitable collected evidence. These are
 questions the extensible data model can support, rather than a promise
 that every such metric ships configured. See [Metrics](../guide/metrics.md).

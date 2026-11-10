@@ -1,6 +1,6 @@
 ---
 name: oxplow-runtime
-description: Oxplow efforts, all optional — how oxplow tracks your work on its own, when reporting is worth it, the effort.* commands, handoffs between threads, and the command bus. Loads on the oxplow `run_command` tool with effort.* or oxplow.handoff.*, and on v_effort or v_handoff.
+description: How oxplow tracks your work on its own (turns and requests), handoffs between threads, and the command bus. Loads on the oxplow `run_command` tool with oxplow.handoff.*, and on v_request, v_agent_turn or v_handoff.
 ---
 
 # Your work in oxplow
@@ -9,11 +9,10 @@ oxplow tracks your work without your help. Nothing here is required: no
 edit or stop waits on a task, and there's nothing to close before you
 finish.
 
-- **Efforts.** An effort is a span of your thread's work. oxplow opens
-  one when a turn changes files, closes it when a commit lands its work,
-  and links it to an item you or the person start. The files you change
-  (with edit tools or a shell) and the test runs you make are recorded
-  against it. Its summary is your last answer.
+- **Recorded work.** The files you change (with edit tools or a shell)
+  and the test runs you make are recorded against your turn, and through
+  the turn against its request. A task you start (`oxplow.task.transition`
+  to in progress) or file into progress becomes yours.
 - **Turns.** Each turn records what opened it (`v_agent_turn.source`: a
   person, a background job's report, a subagent, another session) and how
   it ended; `v_turn_activity` says where its time went (tools, waiting on
@@ -35,13 +34,6 @@ finish.
 - **Hints.** oxplow may add short, advisory guidance to your next prompt
   or tool result (work grown large with nothing committed, metric movement).
 
-## Efforts
-
-`references/efforts.md`: correcting one (`oxplow.effort.update`, `link`,
-`close`, `open`, `report` with its impacts), generated files that keep
-showing among an effort's files, and reading efforts (`v_effort`,
-`v_effort_file`). A task tracker, when the project has one, has its own skill.
-
 ## Writing about work
 
 Refer to a task by its quoted title, never by id or "#N": the person
@@ -52,7 +44,7 @@ Inline code is for identifiers and snippets.
 # Commands (the one write path)
 
 State changes are **commands**. `list_commands` lists what you may run (ids
-and summaries); `list_commands { id }` (or `{ prefix: "oxplow.effort." }`)
+and summaries); `list_commands { id }` (or `{ prefix: "oxplow.handoff." }`)
 shows a command's input schema and an example input: read it before a
 command's first run and copy the example's shape. `run_command { id, input }`
 runs one. Every run is validated, policy-checked and audited; undoable runs

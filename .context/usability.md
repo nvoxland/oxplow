@@ -72,7 +72,7 @@ links. Concretely:
 ## Markdown is one component
 
 Wherever markdown is read or written — a wiki page, a task's body,
-an effort summary, a comment and its composer, a form's markdown field,
+a comment and its composer, a form's markdown field,
 a page's `markdown` viz — it is the one `Markdown` component
 (`.context/markdown.md`), so links, mermaid, code blocks with Copy,
 tables and comments behave the same everywhere. A surface never renders

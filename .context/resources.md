@@ -6,9 +6,9 @@ reads a URI, where URIs are stored, and the migration that moved every
 stored name onto them.
 
 **The words.** A **resource** is a kind of thing in oxplow — a file, a
-wiki page, an effort, a task, an extension's pull request — named
+wiki page, a request, a task, an extension's pull request — named
 `<namespace>/<name>` (`oxplow/file`, `github/pr`). A **URI** names one
-thing of a resource: `oxplow:oxplow/effort?id=eff12`. The direction is the
+thing of a resource: `oxplow:oxplow/request?id=req12`. The direction is the
 web's: a URI names the thing, a page that shows it is one **renderer** of
 it, and how that renderer shows it (a line, a filter, a pick, a mode, an
 open panel) is its **view**: the `#`, never part of the identity. A page's
@@ -20,7 +20,7 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 
 1. **The owner spells a URI; everyone else carries it.** A URI is built in
    one place per language (the builders below) and passed along verbatim.
-   Nothing concatenates one (`"oxplow:oxplow/effort?id=" + id`,
+   Nothing concatenates one (`"oxplow:oxplow/request?id=" + id`,
    `'…' || id`) or takes one apart by hand (`strip_prefix`, `split`,
    `substr`): read it with the readers.
 2. **Links are URIs, and may dangle.** Store the URI. Extensions come and
@@ -36,10 +36,10 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 
 | Where | Build | Read |
 |---|---|---|
-| Rust | `oxplow_domain::uri::build::{effort_uri, file_uri, wiki_uri, task_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `task_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{EFFORT, FILE, …}` |
-| SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/effort', 'id', 'eff' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
+| Rust | `oxplow_domain::uri::build::{request_uri, file_uri, wiki_uri, task_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `task_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{REQUEST, FILE, …}` |
+| SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/request', 'id', 'req' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
-| TS (desktop) | `uri/uri.ts` builders (`effortUri`, `wikiUri`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
+| TS (desktop) | `uri/uri.ts` builders (`wikiUri`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
 
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
@@ -59,7 +59,7 @@ saying the id it names.
 
 | Field | Bare id |
 |---|---|
-| `thread`, `from_thread`, `to_thread`, `stream`, `effort`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `eff12`, `trn4`, `req2`, `ses2`, `not3`, `hnd1`, `cmt5` |
+| `thread`, `from_thread`, `to_thread`, `stream`, `turn`, `request` (`oxplow/request`), `session` (an agent session), `note`, `handoff`, `comment` | the prefixed id: `thr3`, `str1`, `trn4`, `req2`, `ses2`, `not3`, `hnd1`, `cmt5` |
 | `snapshot`, `parent`, `start_snapshot`, `end_snapshot`, `proposal`, `supersedes`, `answer`, `run` | a JSON integer |
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
@@ -74,7 +74,7 @@ fixed, `target`, `subject`, `evidence`, comment `context_chain` /
 id is unique only with its provider. Models keep integer ids
 (`v_thread.id = 3`); SQL that feeds a fixed input reads the key from the
 row's URI (`uri_param(t.uri, 'id')`), never `'thr' || id`. In Starlark,
-build the URI (`uri.build("oxplow/effort", id = e)`) only where a bare id
+build the URI (`uri.build("oxplow/request", id = r)`) only where a bare id
 becomes a link or is compared with a dataset's `uri`.
 
 ## The grammar
@@ -134,7 +134,7 @@ oxplow:github/pr?id=12
   expectation without changing both parsers.
 
 **Key params.** A resource named by one value has a key param
-(`build::key_param`): `id` for a stored record (`effort?id=eff1`,
+(`build::key_param`): `id` for a stored record (`request?id=req1`,
 `thread?id=thr3`, `turn?id=trn1`), a word for the value's shape
 (`commit?sha=`, `wiki?slug=`, `branch?name=`, `extension?name=`,
 `ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`), and
@@ -151,10 +151,10 @@ an optional `id` names one of several, for later). A page's own params ride besi
 
 **Event sources aren't URIs.** An event's `source` says who emitted it —
 `human`, `system:<component>`, `agent:thr3`, `provider:<instance>`,
-`effect:<namespace>/<id>`, `effect:effort_policy:<id>` — built by
+`effect:<namespace>/<id>` — built by
 `uri::build::{system_source, effect_source, provider_source}` and
-`Actor::source()`, read with `effect_of_source`. A provider instance or
-an effort policy isn't a resource. Nor are a ui-preference scope's
+`Actor::source()`, read with `effect_of_source`. A provider instance
+isn't a resource. Nor are a ui-preference scope's
 `resource:<namespace>/<name>` and `component:<namespace>/<id>`.
 
 ## Resources are declared
@@ -224,7 +224,7 @@ Nothing resolves it → `resolved: false`.
 
 `ref_read::read` (`oxplow_read`, `records.read`) returns `{ uri, resource,
 row, related, content, truncated }`: the `resolve` row, the related lists
-of tasks, commits and efforts, a file's text at its `rev` (its
+of tasks, commits and requests, a file's text at its `rev` (its
 `#lines=` view), an event's or model call's body (`#part=`), a page's
 definition.
 
@@ -258,8 +258,7 @@ graph writer and the link checker never drift. The desktop's
   ref_type)`; `PageRefEdge { source, target, … }`. Every end is an
   identity (no view); a file edge's version pin rides in its columns, not
   its URI. The writers are `page_ref_projections` (wiki pages, notes,
-  handoffs, tasks' bodies, comments and links, efforts' touched files,
-  summaries and impacts, findings, commits, and agent turns: a person's
+  handoffs, tasks' bodies, comments and links, findings, commits, and agent turns: a person's
   prompt's references, `ref_type = prompt_mention`, written when the
   prompt is delivered) — each owns its source's slice.
 - **`comment`** (V99): `target_uri` (and `target_resource`), a
@@ -271,7 +270,7 @@ graph writer and the link checker never drift. The desktop's
   A hit is `{ resource, uri, stream_id, title, snippet, score }`.
 - **Everything else** stores the URI string where it stored the old ref:
   every dataset's `uri` column, `task.uri` / `parent_uri`, links,
-  efforts' `task`, handoffs, bookmarks, page
+  handoffs, bookmarks, page
   visits, ui-preference scopes, fact subjects, event subjects and payload
   fields, command inverses and pending proposals.
 

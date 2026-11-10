@@ -191,7 +191,7 @@ Editor and the Text view, never the default; `embed` it with a `uri` to
 draw a markdown file inside another page), `media` (an image or a PDF
 shown as itself, the default for one anywhere; the Text view stands
 aside for it), `tsv` (a TSV file as a table), `wiki-page`, `task`,
-`diff-view` for `oxplow/snapshot`, `oxplow/effort`, `oxplow/request` and `oxplow/turn`, and
+`diff-view` for `oxplow/snapshot`, `oxplow/request` and `oxplow/turn`, and
 `external-url`, a page over the `embed` viz, for `https` and `http`). An agent
 session's tab follows its row (`reconcileSessionTabs`). There is no
 `change-analysis` page.
@@ -336,7 +336,7 @@ defines what the person sees:
   `actions`, `alert`, `tool` (an MCP tool `<namespace>_<tool>` whose
   input is the params and whose call is `oxplow.page.run`; kept for the
   few questions agents ask every session — foundation's `thread_tasks`,
-  `next_task`, `effort_summary`, `catalog` — everything else is
+  `next_task`, `catalog` — everything else is
   `find_page` → `run_page`), `answers` (`{ question, about?, params,
   skill? }`: what agents find a page by and what `extension test`
   runs) and `badge`
@@ -834,10 +834,10 @@ margin; an embed or a slot takes its title from the page it shows):
   and Revert through `oxplow.git.cherry_pick` / `revert`) and a `tree` over
   `v_commit_file` with status icons linking each file's diff, then the
   `sections` slot; any sha git knows reads. `diff-view` (the Changes page;
-  `for` `oxplow/snapshot`, `oxplow/effort` and `oxplow/turn`, default;
+  `for` `oxplow/snapshot`, `oxplow/request` and `oxplow/turn`, default;
   params `uri`, `start`, `end`, `stream_id`; each of `start` / `end` is
   `''`, `none`, `working`, `snap:<id>` or `git:<rev>`; a picked point is a
-  pushed view change): an `embed` of `changes-effort`, a `detail` of
+  pushed view change): an `embed` naming the change's owner when it has one, a `detail` of
   the range, the description, a `list`
   of concurrent work, a `tree` of files and a `table` of extensions,
   then the `sections` slot.
@@ -1395,7 +1395,7 @@ The launcher does everything in one box:
   bar (`menuBar.ts`). Body hits come from `searchSite` (BM25 over every
   searchable kind and file contents: tasks with their comments,
   wiki pages, comments, thread notes, threads, agent sessions, turns,
-  efforts, commits, pages (dashboards among them); the thread-shaped kinds
+  requests, commits, pages (dashboards among them); the thread-shaped kinds
   include archived work); each row shows its kind's icon and name
   (`pageKindIconComponent` / `pageKindLabel`); a hit is a ref, opened through the
   ref opener (`openSearchHit` → `openRef` → `tabs/refOpener.ts`),

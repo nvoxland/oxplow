@@ -84,7 +84,7 @@ source directly: an edit changes nothing until it is deployed.
   from that folder. Its `Extension.path` is the folder's absolute path, so
   every `root.join(ext.path)` reader finds it. The file watcher never looks
   under `.oxplow/runtime/`; it does watch `.oxplow/extensions/` (an agent's
-  edits to a source are its work, snapshotted and given to its effort), and
+  edits to a source are its work, snapshotted like any edit), and
   watching never activates anything. A tree (the Uncommitted page, a diff)
   is git's view: a personal source, which `.oxplow/.gitignore` ignores, is
   no one's uncommitted work there (`WorkspaceFilter::ignore_in_trees`), a
@@ -423,7 +423,7 @@ is `unchanged`. A dataset's `downstream` is its direct readers from
 `v_dataset_lineage` (`downstream_of`) other than this extension's own
 views, by exact name. A provider's declarations are read from each
 version's files. `extension_impact::summary` is the one wording that
-`extension check --impact` and an effort's review share: collectors'
+`extension check --impact` and a request's review share: collectors'
 and providers' grants first ("now reaches x (was y)", a provider command
 added (destructive)), then what the collectors make of their inputs,
 then datasets with their readers and rows, then pages ("Page x: changed",
@@ -520,7 +520,7 @@ byte-identical after. Text output adds `impact against <rev>:` and the
 report's lines; `--json` adds `impact` (the `ImpactReport`) and
 `against` to the check's JSON.
 
-**On an effort's review.** The diff page (`oxplow/diff-view`)
+**On a request's review.** The diff page (`oxplow/diff-view`)
 has an "Extension Changes" table, empty unless the range touched
 `.oxplow/extensions/**`. Its `extensions` loader reads the live dataset
 `v_extension_change` (pinned to `base` and `head`, each a `v_change`

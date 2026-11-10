@@ -165,7 +165,7 @@ the datasets, vocabulary and contribution descriptors in one savepoint
 ## Prepared native runtime adapters
 
 `PreparedRuntimeAdapters` captures one CatalogSnapshot and constructs declared
-task, harness, effort-policy, knowledge, snapshot and model-provider
+task, harness, knowledge, snapshot and model-provider
 maps without changing running registries. It rejects enabled load errors and
 strict AI factory failures before any map publication. Script/gate objects
 are constructed but no process, handshake, network call or paid probe runs.
@@ -284,8 +284,7 @@ active, so a new unpinned reader fails the suite where it first runs.
 
 - *Pinned* (`ExtensionActivation::read`, or the pin a `RunContext` carries):
   a reader that joins declarations to another generation-owned map —
-  commands, capabilities, providers, datasets. The agent-text refresh and the
-  effort policy's owner lookup pin for exactly this. A task-local does not
+  commands, capabilities, providers, datasets. The agent-text refresh pins for exactly this. A task-local does not
   cross into `spawn_blocking`; use `ExtensionActivation::spawn_blocking`,
   which carries the caller's pins (the command router does).
 - `ExtensionCatalog::unpinned(root, reason)`: a reader whose whole answer

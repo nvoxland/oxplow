@@ -80,7 +80,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model, and `requires: [<extension>…]` for more extensions that fixture
-   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker, effort policy and wiki; a fixture that needs what `oxplow-bundled`
+   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker and wiki; a fixture that needs what `oxplow-bundled`
    adds, such as its review pages, says `requires: [oxplow-bundled]`; a name
    that isn't an extension here is an error). Any other key is an error:
    The kinds of fixture (generated from the runner's own list):
@@ -206,38 +206,35 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      write?: { path, body }, answer?, compactions?: n,
      context?: { tokens, window? } } } }` — one turn on the thread, as its
      harness's hooks report it: the prompt, the commands made `during` it
-     (an effort opened mid-turn), each tool call (a finished call; a shell
+     (a task started mid-turn), each tool call (a finished call; a shell
      test command also records a test run), the file the turn wrote (with a
      snapshot before and after, so the turn's checkpoint says `changed`) and
      the turn's end with the agent's last message. Read the result with
-     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_effort`, …).
+     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_request`, …).
      Other kinds: `{ observe: { event: { type, payload, … } } }` (an event
      oxplow logs on its own, your effects reacting), `{ observe: { evidence:
-     { effort, observations: [{ kind, metric_value?, payload? }] } } }` (an
-     effort's `test-run` and `diff-coverage` evidence) and `{ observe: {
+     { request, observations: [{ kind, metric_value?, payload? }] } } }` (a
+     request's `test-run` and `diff-coverage` evidence) and `{ observe: {
      commit: { sha, at, subject, files?: [{ path, status?, additions?,
      deletions? }] } } }` (a commit the git indexer read), `{ observe: {
      change: { kind?, target, files?: [{ path, status?, additions?,
      deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
      complexity_delta?, … }] } } }` (what the change analysis stored for a
-     change: `kind` is `commit` by default, an effort's `target` is its id
-     like `eff1`; the datasets over a change read it, and the
+     change: `kind` is `commit` by default; the datasets over a change read it, and the
      materialized datasets that read the commit index need a step of their
-     own to fill), `{ observe: { test_run: { effort, at?, cases?: [{ name,
-     status }], asserted_failed? } } }` (a test run an effort recorded: a
+     own to fill), `{ observe: { test_run: { at?, cases?: [{ name,
+     status }], asserted_failed? } } }` (a test run: a
      capture with a fact per case) and `{ observe: { snapshot: { trigger?,
      elapsed_ms?, budget_ms?, files?: [{ path, hash }] } } }` (one take in
      the stream's snapshot log; its parent is the take before it,
      `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
      col? }] } } }` (what a language server reported for a file),
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
-     (the definitions the index read from it), `{ observe: { collect: {
-     effort, collectors?: [key] } } }` (the fact collectors an effort's end
-     runs), `{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
+     (the definitions the index read from it), ``{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
      (a finished run of an extension's code), `{ observe: { health: { namespace, contribution,
      kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
-     thread?, effort?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
+     thread?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
      hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,
      a `{ project: { <project.yaml key>: … } }` given (keys of `.oxplow/project.yaml`, read again
      as core does), and a `turn` that also takes `thread`, `session`, `prompt: null` with
@@ -262,7 +259,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a job: `when: { job: <id>, intentKey, request, cancel?, setup?,
      rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
      own commands (`as: agent` for the agent of `oxplow:oxplow/thread?id=thr1`) to make
-     what its tools read: a task, an effort, a test run — run
+     what its tools read: a task, a request, a test run — run
      through your commands over `jobs.write/enqueue` and
      `jobs.read/snapshot` (declare both), its model rounds
      answered by `model.replies` (a string, or `{ text?, toolCalls?: [{
@@ -303,11 +300,6 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `result` is compared on the keys you name, so a read command's
      example checks its answer) or `{ refused: <part of the reason> }` —
      a dry run; nothing changes;
-   - an effort policy script (`implementations:`): `input: {
-     implementation: <id>, event: { type, payload, anchors? }, answers?
-     }`, `expect: { commands: [names] }` or `{ skip: <part of the
-     reason> | $any }` — a dry run; the test also runs the effort-policy
-     conformance suite over the script;
    - a provider: `when: { command, input }` (`references/providers.md`).
 
    An `event:` in an example is `{ type, v?, payload, subject?, anchors?

@@ -28,7 +28,7 @@ set. Exactly 1000 is allowed. A script that means to walk a large result
 asks for a `page: { limit, offset }` and gets `{ rows, more,
 next_offset? }` ([commands.md](./commands.md) "Scopes"). Aggregate in SQL when all matching data
 must contribute, or explicitly filter/limit a query when a subset is
-intended. Commands, effects, effort policies, provider host calls and
+intended. Commands, effects, provider host calls and
 dry runs share this check. A complete query result does not establish
 collection coverage or freshness; the row-only scope carries neither.
 
@@ -211,8 +211,8 @@ implementations:
   (`BuiltIn.provider`: `oxplow:oxtask` is `oxplow`) is declared under that
   id and no other.
 - **A process implements a capability through `providers:`**, not
-  here: a capability whose spec carries a provider contract (the task tracker, the effort policy, an agent harness) may be an external
-  provider's instance — the task tracker and the effort policy chosen by
+  here: a capability whose spec carries a provider contract (the task tracker, an agent harness) may be an external
+  provider's instance — the task tracker chosen by
   `activeProviders` like a built-in, a harness registered beside the
   built-ins under its instance id, as many as run
   ([providers.md](./providers.md) "What a provider may implement").
@@ -226,17 +226,6 @@ implementations:
   points a person's key at that URL. Its `decide_native` feature is the
   kind's. The kinds and why they're Rust over Rig are
   [ai-providers.md](./ai-providers.md) "Rust kinds over Rig".
-- **An `effort_policy` may be a script** instead: an `entry` that isn't
-  `oxplow:<name>` names a `.star` file of the extension
-  (`implementations::script_decl`, `Source::Script`). Nothing else is a
-  script.
-  - An effort policy's is effects-shaped — `transform({event})` →
-    `{ commands: [{ name, input }] } | { skip: "why" }` — takes no config,
-    and names the scopes it calls in the entry's `needs:` (only what a
-    script can, `scope_calls::CALLABLE`; checked at load, with the script
-    defining `transform`). `needs` is refused anywhere else. It runs
-    under its extension's permissions, as an effect's does; what runs is
-    what was deployed.
 - `oxplow-foundation` declares the agent harnesses (`oxplow:claude-code`,
   `oxplow:codex-cli`, `oxplow:opencode`) and the AI
   providers, one per Rust kind under the kind's name, each at its API's
@@ -247,8 +236,8 @@ implementations:
 - A required capability's default is core's own: `CapabilityRegistry::new`
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
-- `oxplow-foundation` declares the default implementations (the task tracker,
-  the effort policy and knowledge's wiki, `oxplow:wiki`), so they run with
+- `oxplow-foundation` declares the default implementations (the task tracker
+  and knowledge's wiki, `oxplow:wiki`), so they run with
   `oxplow-bundled` off; turning the list off is choosing another provider
   (or none) in Settings → Capabilities, not disabling an extension
   (`capabilities::CapabilityRegistry::resolve`, `.context/work-tracking.md`).
@@ -319,37 +308,32 @@ mechanism; what to say, and when, is SQL in the extension.
 advisories:
   - id: low-coverage
     on: post-tool-use        # or prompt, or turn-end
-    once_per: request        # request (default) | effort | thread | session | day | row (needs a `key` column) | turn
+    once_per: request        # request (default) | thread | session | day | row (needs a `key` column) | turn
     audience: agent          # agent (default) | person
     heading: "# Optional heading line"
-    query: |                 # :thread_id, :stream_id, :turn_id, :request_id, :effort_id
+    query: |                 # :thread_id, :stream_id, :turn_id, :request_id
       SELECT '...' AS message FROM v_request_metric_delta WHERE request_id = :request_id ...
 ```
 
 - **Triggers.** `post-tool-use` runs on each `agent.tool.finished`
   (`advisories.post_tool`), `prompt` on each prompt the person sends, and
-  `turn-end` on each `thread.checkpoint` (`advisories.turn_end`, after
-  `effort.observe`): evaluated when the turn ends, heard when the agent
+  `turn-end` on each `thread.checkpoint` (`advisories.turn_end`): evaluated when the turn ends, heard when the agent
   next hears from oxplow. A turn's end is the one point every harness
   reaches, blocked or not.
 - **Params.** Every query may use `:thread_id`, `:stream_id`, `:turn_id`
   (NULL at a prompt), `:request_id` (the request of the turn the trigger
   belongs to: a tool call's turn, the ending turn, at a prompt the turn it
-  opened or went into; the thread's newest when none is named) and
-  `:effort_id` (NULL when the thread has no effort
-  — for an event, the effort it was anchored to; at a turn's end, the one
-  holding the turn's end; at a prompt, the open one).
+  opened or went into; the thread's newest when none is named).
 - **Repeat rules.** `once_per: request` (the default) fires once per
   request on the thread and doesn't run without one: the next request is
   fresh, and the mute rule (a hint still firing after three deliveries is
   muted and raised to the person) counts deliveries within the request;
-  `effort` fires once per effort and doesn't run without one (efforts go
-  away; use `request`); `thread` once per thread; `session` once per agent
+  `thread` once per thread; `session` once per agent
   session on the thread (the latest turn's harness session; doesn't run
   without one); `day` once per thread per UTC day; `row` once per `key`
-  on the thread (a query wanting once per effort per row puts
-  `:effort_id` in its key, as `threshold-crossed` does); `turn` whenever
-  it has rows. Marks live in `once_mark`, per request, effort or thread.
+  on the thread (a query wanting once per request per row puts
+  `:request_id` in its key); `turn` whenever
+  it has rows. Marks live in `once_mark`, per request or thread.
 - **Audience.** `agent` hints go to the coding agent; `person` hints are
   raised in Alerts ("Notices", `apps/desktop/src/hints.ts`) until
   the person dismisses one (`oxplow.hint.dismiss`, the row's right-click)
@@ -366,9 +350,9 @@ advisories:
 - **Effectiveness.** Each evaluation is counted (`hint_stat`), and
   `v_hint_stat` puts the counts together per hint and thread: evaluated,
   fired, delivered, held, muted. An agent hint that still fires after
-  reaching the agent `MUTE_AFTER` (3) times in its effort (or its thread,
+  reaching the agent `MUTE_AFTER` (3) times in its request (or its thread,
   with none) is muted there — not evaluated again — and the person is
-  told once (a `hint-muted` nudge with what it said). A new effort starts
+  told once (a `hint-muted` nudge with what it said). A new request starts
   it fresh.
 - `crates/oxplow-app/src/advisories.rs`: `AdvisoryRunner` runs the enabled
   extensions' advisories for one trigger and scope and applies
@@ -401,14 +385,11 @@ advisories:
   Each bundled hint has an extension fixture that makes it fire and one
   that keeps it quiet (`when: { advisory: <id> }`). A count of `fired = 0` in
   `v_hint_stat` is therefore the project's state, not a broken query:
-  `threshold-crossed` needs a metric with a `warnAt`/`failAt` that an effort
-  moves past (only the coverage metric ships thresholds, and efforts
-  rarely fall under them), `landed-in-progress` needs a commit-closed effort
-  whose item is still in progress, and nothing is evaluated while
-  oxplow-bundled is disabled, since its policy and hints are the
+  a hint fires only when its query finds rows, and nothing is evaluated
+  while oxplow-bundled is disabled, since its hints are the
   extension's. A `coverage-target` row in `v_hint_stat` is residue from
   before that hint was removed. Advisories read
-  stored views (`v_effort_metric_delta`, `v_effort_observation`), never the
+  stored views (`v_request_metric_delta`, `v_request_observation`), never the
   engine directly.
 - The report-less-run nudge stays in core: it's about collection hygiene,
   not an instrument.
@@ -465,10 +446,9 @@ tool: open_work              # offered as <namespace>_open_work
 - **Typed page tools.** `oxplow-foundation/pages/` holds the pages an
   agent asks for most, each with no `category` and a `tool:`: `catalog
   { dataset? }` (every dataset with its columns), `thread_tasks { thread }` (the
-  thread's items by state, with their efforts), `next_task { thread }` (what
-  to pick up next; the bundled `/next-task` command calls it) and
-  `effort_summary { effort }` (title and summary, item, files and test runs
-  as sections). Params take bare ids (`thr3`, `eff9`).
+  thread's items by state, with their requests), `next_task { thread }` (what
+  to pick up next; the bundled `/next-task` command calls it). Params take
+  bare ids (`thr3`).
   Each reads published `v_*` datasets only, so it works with the bundled
   extension off. For history, `oxplow_vcs_log` and `oxplow_diff` are
   commands, not pages.

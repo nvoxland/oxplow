@@ -20,8 +20,8 @@ That makes it both the profiling harness *and* the correctness gate: any
 metric-path optimization must leave all series identical to the fact oracle.
 Use it for both. Every optimization below was verified this way.
 
-**It does not cover the effort-delta reads.** `cube_equivalence` walks specs and
-the cube; `effort_metric_deltas` (the effort panel) is a different read path with
+**It does not cover the request-delta reads.** `cube_equivalence` walks specs and
+the cube; the request metric deltas (the request analysis) are a different read path with
 its own queries, and the biggest single hotspot ever measured here lived in it
 (tsk239, below) while the harness reported a clean profile. A green
 `cube_equivalence` is necessary, not sufficient — profile the live app too.
@@ -82,39 +82,37 @@ Already fixed — **do not re-optimize these**:
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
   most calls no longer run it at all (tsk239/tsk242, below).
 
-## Open-effort evidence (2026-10-16)
+## Live-request evidence (2026-10-16)
 
-An effort open for days holds thousands of token reports (`otel-tokens`
-writes one per live agent about every 30 s; two efforts here held 13,459
-and 9,437 captures and 315,686 facts). The `effort_evidence` asset
-recomputes every open effort when the cube moves, and each report moved it,
-so each report meant reading the effort's whole history: `sample` put the
-daemon at 50–120% of a core with no turn in flight, in
-`refresh_effort_evidence` → `captures_for_effort` + `facts_for_captures`
+A request that runs for days holds thousands of token reports (`otel-tokens`
+writes one per live agent about every 30 s; two long-running spans of work
+here held 13,459 and 9,437 captures and 315,686 facts). The
+`request_analysis` asset recomputes every live request when the cube moves,
+and each report moved it, so each report meant reading the request's whole
+history: `sample` put the daemon at 50–120% of a core with no turn in
+flight, in the read of the span's captures and their facts
 (`row_to_capture`, `fact_row_mapper`).
 
-What a recompute reads now:
+What a recompute reads:
 
-- **The effort's captures as groups** — `effort_capture_groups`: per
-  producer and trigger, the count and the newest id. A spec's memo key holds
-  the groups of the producers it reads, so a capture of any other producer
-  (all of an agent's work is stamped with the effort) leaves it as it was and
-  reads no rows.
+- **The captures as groups**: per producer and trigger, the count and the
+  newest id. A spec's memo key holds the groups of the producers it reads,
+  so a capture of any other producer (all of an agent's work is stamped with
+  its turn) leaves it as it was and reads no rows.
 - **A `sum` spec folds** (`SumFold`): the total, the fact count and the
   newest point of the reports covered so far, with how many there were. A new
-  report is read alone (`effort_captures_after`) and added; the fold starts
-  over if a covered capture is gone (the count before the old newest id no
-  longer matches) or the spec or the effort's window changed.
-- **Observations and coverage read only the effort's run captures**
-  (`effort_captures_by_trigger`), not every report.
+  report is read alone and added; the fold starts over if a covered capture
+  is gone (the count before the old newest id no longer matches) or the spec
+  or the request's window changed.
+- **Observations and coverage read only the run captures**, not every
+  report.
 
-Measured (release, `a_long_open_effort_recomputes_in_milliseconds`,
-13,000 token reports of two facts each): reading the effort's captures and
-facts again **57.6 ms** (what each recompute did before, per effort, with
-twice the facts on the live database); a whole recompute after one more
-report **6.7 ms**. Pinned by `a_token_report_folds_into_the_total_without_
-rereading_the_effort` (one report reads one capture and two facts, and the
-fold equals a read from scratch) and `a_capture_nothing_reads_costs_no_reads`.
+Measured (release, 13,000 token reports of two facts each): reading the
+captures and facts again **57.6 ms** (what each recompute did before, per
+span, with twice the facts on the live database); a whole recompute after
+one more report **6.7 ms**. A test pins that one report reads one capture
+and two facts and that the fold equals a read from scratch, and another that
+a capture nothing reads costs no reads.
 
 ## oxplow-bundled's co-change pairs (P7.B5, 2026-10-02)
 
@@ -131,8 +129,8 @@ last-touch lookup using `idx_git_commit_file_path`.
 ## oxplow-bundled's deviation model (P7.C5, 2026-10-02)
 
 `v_oxplow_deviation` (an extension dataset with a recursive CTE over
-every effort file's directory prefixes) computes all efforts at once:
-**0.21 s** over this repo's 658 efforts / 5,484 effort files (sqlite3 on
+every request file's directory prefixes) computes all requests at once.
+Measured on its predecessor (the same query per span of work): **0.21 s** over this repo's 658 spans / 5,484 span files (sqlite3 on
 the live database, the same SQL over the physical tables). It stays a
 live view; `materialize: on_change` would recompute on every task edit
 for a read that's cheap enough as is. Revisit when a What Deviated slot
@@ -224,7 +222,7 @@ per-case facts** (tsk514), not the fold.
 
 **Where the facts are:** `oxplow.test_case` and `oxplow.test_duration` are
 87.5% of all facts (the `fact` table is 1.9 GB, its indexes another
-1.4 GB). 1,979 of the 2,044 `tests` captures are effort-stamped, which the
+1.4 GB). 1,979 of the 2,044 `tests` captures are stamped to the work that made them, which the
 opt-in `metricRetentionDays` keeps unconditionally — so no retention
 setting reclaimed them.
 
@@ -243,7 +241,7 @@ test). A seed reads what's left.
 
 ## Zero-splice producer discovery (tsk239)
 
-The effort panel asks, per measure, "which producers emit this metric's slice"
+The request analysis asks, per measure, "which producers emit this metric's slice"
 so a clean run zero-fills instead of reading blank. Answering it by scanning
 every fact of the measure cost 38% of live backend CPU — 917k rows scanned to
 return 277, with a temp b-tree because the slice key includes the open
@@ -317,24 +315,24 @@ optimizing the computation itself. The memo key is then usually obvious and
 provably correct: `capture_id → captured_at` is a function, so memoizing on it
 is right **regardless of row order** — ordering only affects hit rate.
 
-## An effort's metric deltas, memoized by what each spec reads
+## A request's metric deltas, memoized by what each spec reads
 
-`CollectionService::effort_metric_deltas` computes one delta per metric
-spec for an effort; the `effort_evidence` asset recomputes them whenever
-the metric cube moves, which an agent's token report (an `otel-tokens`
-capture every 10–15 s, stamped with the open effort) does. `delta_memo`
+The metric engine computes one delta per metric spec for a request; the
+`request_analysis` asset recomputes them whenever the metric cube moves,
+which an agent's token report (an `otel-tokens` capture every 10–15 s,
+stamped with its turn) does. `delta_memo`
 skips a spec whose inputs didn't move, so the key (`delta_inputs`) must hold
-only what the spec's delta can read: the spec, the effort's span, stream and
-claimed files, the capture token of the producers of its source measure, and
-**the effort's own captures of those producers** (the run and window
-families read their facts; the file family matches the effort's id on those
+only what the spec's delta can read: the spec, the request's span, stream and
+changed files, the capture token of the producers of its source measure, and
+**the request's own captures of those producers** (the run and window
+families read their facts; the file family matches the request on those
 producers' captures) — the coverage family instead its test-run captures. Keying
-on *all* the effort's captures made each token report invalidate every
+on *all* the request's captures made each token report invalidate every
 spec, including the file family, which reloads the producers' whole capture
 history and two whole-repo captures' facts: 10–20 s of CPU per recompute in
-a debug build, back to back. `an_effort_stamped_capture_recomputes_only_its_producers_specs`
-holds it: another producer's capture stamped to the effort recomputes
-nothing; one of the spec's own producers does.
+a debug build, back to back. A test holds it: another producer's capture
+stamped to the request recomputes nothing; one of the spec's own producers
+does.
 
 ## The renderer is not the problem (at idle)
 
@@ -784,11 +782,11 @@ map took 1.2 s, mostly allocating it). Don't go back to per-pair
 questions or pair maps; the cross product is not "tiny by construction",
 and at 50 ms it isn't worth persisting.
 
-## Effort evidence after the cube, through the shared engine (2026-10-06)
+## Request evidence after the cube, through the shared engine (2026-10-06)
 
 Right after boot the daemon went from ~150 MB to 1.7–2.2 GB: the
-`effort_evidence` asset's first build raced the cube's backfill, so every
-per-path effort delta missed the cube (`cube_series` serves only when the
+evidence asset's first build raced the cube's backfill, so every
+per-path delta missed the cube (`cube_series` serves only when the
 watermark covers every capture) and folded the measure's whole history —
 on a per-call `MetricEngine` whose fold memo was always empty. Evidence
 now reads the cube asset as its input (it recomputes after the cube,
@@ -796,12 +794,12 @@ never while it's pending; `assets.rs`), and `CollectionService` uses the
 app's one engine. A spec with `min_value`/`max_value` still can't be
 cube-served; it folds once per capture token, shared.
 
-## Effort deltas recompute only what moved (2026-10-06)
+## Deltas recompute only what moved (2026-10-06)
 
 Token counts land as captures every ~18 s, and each one, through the cube,
-recomputed every open effort's delta for every spec. `CollectionService`
-now memoizes each (effort, spec) delta on what it's computed from: the
-spec, the effort's span, start/end snapshots, stream and claimed files,
+recomputed every live span's delta for every spec. `CollectionService`
+now memoizes each (request, spec) delta on what it's computed from: the
+spec, the request's span, start/end snapshots, stream and changed files,
 its own captures, and the capture token of its source measure's
 producers. A token capture moves only the token specs' inputs; the rest
 reuse their row. A formula spec (no source measure) always recomputes.
@@ -1077,7 +1075,7 @@ committing a unit of work once (a duplicate scan stores its findings in
 one transaction). **The boot page-ref repair** (`page_ref_backfill.rs`,
 run once per projection-code hash and schema version — it used to be
 once per build, ~59 s of a thread at every restart after a dev rebuild)
-restates every task, effort, note and finding slice: it writes them in
+restates every task, note and finding slice: it writes them in
 batches of 1000 through `SqlitePageRefStore::replace_sources`, one
 transaction each. Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events

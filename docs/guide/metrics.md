@@ -21,22 +21,17 @@ The less familiar kind. If the agent does the typing and you do the
 engineering, the open
 question is whether your steering is any good. These measure that:
 
-- **Steering per effort** -- average steering events per closed
-  effort (your prompts, Stop-hook nudges, review comments). Lower
-  means the agent needed less correction.
-- **Efforts per task** -- how many attempts a task took. The
-  redo-rate signal.
-- **Time to green** -- wall-clock from an effort's first red test run
+- **Request cycle time** -- how long a request ran, from its first
+  prompt to its last activity.
+- **Time to green** -- wall-clock from a request's first red test run
   to its first green.
-- **Tokens per effort** -- the cost of a unit of work.
-- **Wasted tokens** -- token spend in efforts whose commits were
-  later reverted.
+- **Tokens per request** -- the cost of a unit of work.
 - **Cache hit ratio** -- prompt-side cache reads over total prompt
   tokens.
 
 None of these tell you whether the code is good. They tell you
-whether the collaboration is working: which tasks needed six attempts,
-where you spent tokens on work you threw away, whether a change to how
+whether the collaboration is working: which tasks needed six requests,
+which requests cost the most tokens, whether a change to how
 you brief the agent actually reduced the back-and-forth.
 
 ## The pages
@@ -66,7 +61,7 @@ Breakdowns (a metric by package, language, or model) aren't on the
 detail page. Ask your agent: it can read any metric in SQL, sliced any
 way the data allows, and build a [page](pages.md) if you want to keep
 the view. It can also
-slice a metric's history by worktree, thread, effort, task, or commit,
+slice a metric's history by worktree, thread, request, task, or commit,
 and roll it up by day, week, or month, e.g. "tokens per task per week".
 
 ## Writing your own
@@ -131,7 +126,7 @@ A metric extension, including the project's own
 
 - `measures` -- what is being counted, and how it aggregates.
 - `collectors` -- the script that produces the raw numbers, and when it
-  runs (after each snapshot, when an effort finishes, on a schedule, or
+  runs (after each snapshot, when a request finishes, on a schedule, or
   by hand). Starlark, jq, or an external program. An external program
   from the project's own extension needs the `process` permission. You approve
   it when you deploy the extension, so pulling a repo can't run something
@@ -151,7 +146,7 @@ A file with a `gauges` block doesn't load: write `collectors` instead.
 
 Test results and coverage arrive separately, through
 [collection](#collection) -- oxplow watches the test commands you
-run and parses the reports they produce, per effort.
+run and parses the reports they produce, per request.
 
 ## Metrics over your data
 
@@ -169,15 +164,15 @@ pull requests.
 
 ## Collection
 
-Test and coverage numbers are scoped to the **effort** that produced
+Test and coverage numbers are scoped to the **request** that produced
 them, so you can see which tests ran and what the diff coverage was for
 that specific piece of work. Configure it once with
 `/oxplow:configure`, which wires each test stack in the project to
 emit reports oxplow can parse.
 
-An effort's tests, coverage, metric changes, and agent nudges on its diff
+A request's tests, coverage, metric changes, and agent nudges on its diff
 page come from an extension that doesn't ship with oxplow right now.
 
 The catch worth knowing: only test runs oxplow can see get recorded.
 If your project's configured command is `make test-report`, a
-bare `pytest` produces no reports and the effort shows nothing.
+bare `pytest` produces no reports and the request shows nothing.

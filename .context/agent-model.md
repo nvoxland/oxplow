@@ -3,7 +3,7 @@
 How oxplow and a coding agent (Claude Code, Codex, opencode) meet: how a session is launched, what every agent is told, the
 tools it calls, what oxplow observes of it, and the rules that keep one
 thread from clobbering another's worktree. How oxplow turns that record
-into efforts is [work-tracking.md](./work-tracking.md); the commands an
+into requests, files and hints is [work-tracking.md](./work-tracking.md); the commands an
 agent runs are [commands.md](./commands.md).
 
 ## Key invariant
@@ -249,7 +249,7 @@ Every tool foundation declares is named below
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
 | Pages | `oxplow_show_page` (shows the person a page beside the conversation — a page with params, or a `spec` of your own, written as a page file on `oxplow:temp` and shown as `oxplow:oxplow/page?page=temp/<id>`; returns its text and whether a window opened it), `oxplow_find_page` (the pages that answer a question, best first, each with its params; `about` a uri keeps the pages that show that kind of thing and binds its uri), `oxplow_run_page` (a page's text, each node under `[node <id>]`, or its loaders' rows; `page` or an inline `spec`), `oxplow_run_page_action` (a page's action as the page acting for you; a row action on one of the node's rows); `oxplow.page.describe { uri, text?, params? }` through `run_command` (what a page file is made of and where each node comes from; `uri` is the page's file on `oxplow:extensions`, `oxplow:temp` or the worktree; a file that is no page gives no rows) — [pages-and-tabs.md](./pages-and-tabs.md) "Page files" |
 | Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
-| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxplow_next_task`, `oxplow_effort_summary`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`effort-files`, `file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
+| Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxplow_next_task`, `oxplow_catalog` (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
 | Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
@@ -265,7 +265,7 @@ but `list_commands` and `run_command` is a foundation command over a read
 scope (`oxplow.records.read`, `oxplow.sql.query`, …; [commands.md](./commands.md)
 "Scopes"), so an agent reaches it through `run_command` too; `v_scope`
 lists the scopes. An anonymous connection may call the read-only ones.
-Almost every read is a published model: an agent's thread, efforts,
+Almost every read is a published model: an agent's thread, requests,
 tasks, commits, snapshots, dashboards, diagnostics and errors are
 `v_*` rows. A tool stays a tool only where a model can't be one: file and
 revision content, live language-server answers, site search, a page's
@@ -274,7 +274,7 @@ rendering, a dry run.
 **`oxplow_read { uri }`** (`oxplow_app::ref_read`) reads anything a URI names and
 returns `{ uri, resource, row, related, content, truncated }`: the owning
 model's row, `related` lists (a task's links and comments, a
-commit's or an effort's files), and `content` for the resources whose body no
+commit's or a request's files), and `content` for the resources whose body no
 model holds — a file at a revision (`oxplow:oxplow/file?path=src/a.rs` is the working tree;
 `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`; `rev=snap:<id>` a local-history snapshot),
 an event's stored body (`oxplow:oxplow/event?id=<id>#part=input`, `part=output`, `part=prompt`, `part=summary`; the
@@ -354,7 +354,6 @@ backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplo
 `oxplow_wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
-`oxplow.effort.report` and
 `oxplow.task.create` / `update` check the `[[…]]` links in the text
 they keep (`oxplow_app::link_check`) and return `link_warnings`, so the
 agent fixes them in the same turn; `knowledge.write_page` refuses
@@ -746,8 +745,7 @@ channel (`ChatEvent`). `open_codex` reserves the session's slot under one
 lock before connecting, so concurrent opens start one observer; `close`
 marks the handle closed at once, and a closed session still winding down
 is replaced and marked not current, so it records no Interrupt over its
-successor. Closing a thread (`oxplow.thread.close`) closes its open
-effort and, once committed, stops every open session's process through
+successor. Closing a thread (`oxplow.thread.close`), once committed, stops every open session's process through
 `agent_sessions::SessionProcesses::kill`.
 
 **Host.** `chat/host.rs` `ChatHost` is the seam (tests use a recording
@@ -950,8 +948,7 @@ a turn waits for that turn's end), and **on a change**: the
 `agent.context_changes` pump consumer (`context_watch.rs`) bumps
 `Services::context_changes` when the log records a fact the context
 reads — `handoff.sent` / `handoff.settled`, `agent.session.started` /
-`.ended` (who else is in the worktree), `effort.opened` / `.closed` /
-`.finished` / `.linked` / `.retitled` — and each session watching it
+`.ended` (who else is in the worktree) — and each session watching it
 builds again. A build that changes nothing is `None` (the baselines), so
 a no-op event injects nothing; a change during a turn waits for its end.
 No polling. The launch prompt's `developerInstructions` leave the session
@@ -1033,7 +1030,7 @@ session slot, bearer or process of oxplow's:
 - A child thread's **finished tool calls** (`item/completed` of a command,
   a file change, an MCP call, …) are recorded in the parent's session as the
   subagent's (`ToolUse.subagent`, `v_tool_call.subagent_id`), so its edits
-  are claimed by the parent's effort. Only those: a child's messages,
+  are the parent's turn's. Only those: a child's messages,
   token counts, status and approval waits are its own thread's and do not
   reach the parent (a child waiting on approval does not park the parent).
   Which threads are children is learned from the parent's items, so a child's
@@ -1074,7 +1071,7 @@ it names (`paths`), a shell call's `command`, a short `detail`, the
   harness's `tool_use` may be a provider's call. A body naming no tool
   records nothing.
 - **What reads it.** The write guard (`edit`, every path), the status
-  derivation (`subagent`, `ask`, `plan`), effort file claims (`edit`), test-run collection (`shell`, its `command`
+  derivation (`subagent`, `ask`, `plan`), file claims (`edit`), test-run collection (`shell`, its `command`
   and `exit_code`), a turn's writing calls (`thread.checkpoint`, by
   `v_tool_call.kind`), the bundled struggle model, `v_context_read`, and
   `agent.tool.requested@4` / `agent.tool.finished@4`, which carry `tool`,
@@ -1168,11 +1165,11 @@ with the thread's anchors only).
 
 **One transaction per envelope** writes the state the hook changes and
 the `agent.*` events that record it, anchored to the thread's stream, the
-session, its open turn and the thread's single open effort
+session and its open turn
 (`activity_anchors_tx`). **Attribution is a best effort, by design:**
 several agents, the person and outside processes can change a worktree at
 once, so no rule ties every change to the right work exactly. The anchor
-stays thread-scoped (the thread's own open effort), because that says
+stays thread-scoped (the thread's own open turn), because that says
 more than the stream would even when it's sometimes wrong.
 
 - **Prompt** → with no turn open, a turn opens (`agent.turn.started@3 {
@@ -1307,7 +1304,7 @@ route. It is isolation only; nothing waits on tracked work
 wiki pages are written by command. Everything else is open to every
 thread: its own stream's worktree, files outside every stream, the shared
 wiki (through `oxplow.knowledge.write_page`), and oxplow's own objects —
-tasks, efforts, notes, comments. The bus's `WriteGate` asks only that
+tasks, notes, comments. The bus's `WriteGate` asks only that
 a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
 **An agent may open a sibling agent session** in its own stream
@@ -1376,8 +1373,7 @@ gates"). The ingest closes the turn, keeps `last_assistant_message` as the
 turn's `answer` (each harness's source in "Per-harness delivery";
 `hook_ingest::LAST_ASSISTANT_MESSAGE`), takes the turn-end snapshot, sets
 the status — `AwaitingUser` when the final message ends in a question,
-keeping an `awaiting_user` the turn set — and acks `{}`. Without
-`oxplow.effort.report`, an effort's summary is its last turn's answer.
+keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary is its last turn's answer.
 
 ### Subagents
 
@@ -1445,7 +1441,7 @@ pinned by synthetic notifications, not recordings):
 moreFiles }` (on 2 of 4 Bash calls in `fixtures/claude/hooks.jsonl`);
 `shared::claude_shaped_tool_use` reads `changedFiles` and `files[].filePath`
 into the call's `paths`, so `agent.tool.finished` and the tool-call row
-carry them, and the effort claim consumer claims them with basis
+carry them, and the file-claim consumer claims them with basis
 `reported`. A shell call without the field names no file. Codex, opencode
 and the ACP agents report nothing per shell call.
 
@@ -1496,7 +1492,7 @@ open in another session. A person's: an agent may open a session but not
 choose its conversation.
 
 Subagent tool calls reach the hooks like any other, so their edits and
-test runs land in the thread's effort with nothing from them: there is
+test runs land in the subagent's starting turn, and so its request, with nothing from them: there is
 no dispatch protocol or subagent skill.
 
 **What to pick up next** is the foundation page `oxplow/next-task`
@@ -1504,7 +1500,7 @@ no dispatch protocol or subagent skill.
 list is active: an epic with its ready descendants, or every ready
 non-epic item, open `blocks` links holding an item back; empty with
 nothing ready or no list. The bundled `next-task` command calls that tool and
-moves the item it picks to `in_progress`, so the effort links to it.
+moves the item it picks to `in_progress`, which assigns it to the thread.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.
 
@@ -1844,7 +1840,7 @@ Not yet covered: a recorded Claude hook carrying `session_title` (filed).
 ### Plans
 
 A plan the agent puts to the person is an `agent.plan.proposed` event
-(`{ thread, turn?, text, path? }`), anchored to the turn and effort open
+(`{ thread, turn?, text, path? }`), anchored to the turn open
 when it came. The text sits in the payload, capped at 64 KiB, so a model
 reads it. Claude Code's `ExitPlanMode` PreToolUse is mapped by the
 harness (`claude_shaped_tool_use`: `ToolUse.plan` from `tool_input.plan`
@@ -1855,10 +1851,9 @@ text is authoritative) to `Incoming::Plan`, which the chat host ingests as
 a `PlanProposed` hook with `tool.plan`; that waits on no one. opencode's
 `plan_exit` carries no text, so it records none.
 
-`v_agent_plan` (thread, effort, turn, session, `proposed_at`, `text`,
+`v_agent_plan` (thread, turn, session, `proposed_at`, `text`,
 `path`, and `event_id`, the event to read with `oxplow_read event:<id>`)
-reads them; the bundled `effort-plan` (slot `oxplow/changes.sections`) and
-`thread-plan` (slot `thread.plan.header`) pages show a plan, newest
+reads them; the bundled `thread-plan` (slot `thread.plan.header`) pages show a plan, newest
 first.
 
 **Whether the person accepted the plan is not recorded.** No hook or
@@ -1953,7 +1948,7 @@ for the transition out of working; terminal rows are unreliable
 ### Snapshot tracking
 
 oxplow keeps a content-addressed history of each worktree so what changed
-per turn and per effort is known without git. The store and its
+per turn is known without git. The store and its
 guarantees are [data-model.md](./data-model.md) "snapshot +
 file_snapshot"; this is when takes happen. Every take is a mark of the
 active snapshots implementation ([work-tracking.md](./work-tracking.md)
@@ -1967,11 +1962,10 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
   (`SnapshotCaptureRegistry`), each watching its own worktree.
 - **Turn end.** When a turn closes (Stop or interrupt, every harness
   through `HookIngestService::ingest`), `turn_snapshots::CaptureTurnSnapshots`
-  runs a `turn_end` take anchored to the turn, its thread and its open
-  effort, and `agent_turn.snapshot_id` records it. **What the turn
+  runs a `turn_end` take anchored to the turn and its thread, and `agent_turn.snapshot_id` records it. **What the turn
   changed is `agent_turn.start_snapshot_id → snapshot_id`**, the start
   recorded when the turn opened — not the take's op parent, which other
-  takes during the turn (an effort's close, a commit, another thread's
+  takes during the turn (a commit, another thread's
   turn end) move. One take per Stop, for the newest turn it closed
   (`AgentTurnStore::close` reports whether it closed anything), after the
   status is set so the UI isn't held on running.
@@ -1987,52 +1981,37 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
   when it fires with paths dirty, a `quiet` take records them, whoever
   changed them and whatever turns are open. A take another request made
   meanwhile has emptied the set, and the firing does nothing.
-- **Effort brackets.** An effort's open takes an `effort_start` snapshot
-  (`effort.start_snapshot_id`), its close an `effort_end` one
-  (`end_snapshot_id`); an unchanged tree records an op on the current
+- **No brackets.** An unchanged tree records an op on the current
   snapshot instead of a new row. Agents never flush explicitly.
 - **Boot and HEAD.** The primary stream's startup sweep
   (`enqueue_startup_diff`, then a `startup` take) records what changed
   while oxplow was down; a move of this worktree's HEAD (not a ref moving elsewhere in the repository) runs a `git_refs` take, then on
   a clean tree a `head_moved` re-stamp, and logs `vcs.head.moved@3`.
 
-### Per-effort write log
+### Files a turn changed
 
-An effort's files (`effort_file`, [data-model.md](./data-model.md)) are
-recorded as the work happens, never declared.
+A turn's files are recorded as the work happens, never declared
+([work-tracking.md](./work-tracking.md) "The record").
 
-- **Claimed: edits.** The `effort.claim` reactor
-  (`tool_call_reactors.rs`, on `agent.tool.finished`) claims every file
-  an edit names for the event's **effort anchor**, so a claim landing
-  after that effort closed still goes to it; with no anchor the thread's
-  open effort takes it. Paths are already relative to the thread's
-  worktree; an absolute path (outside it) is never claimed. `record_file`
-  is idempotent on `(effort_id, path)` with `source = 'claimed'` and
-  replaces an observation. The same event feeds `tool_call.project` (the
+- **Claimed: edits.** On `agent.tool.finished` every file an edit names
+  is a path of the tool call (`agent_tool_call_path`, basis `named`; a
+  shell call's `bashEditDiff` files are `reported`). Paths are relative
+  to the thread's worktree; an absolute path (outside it) is never
+  claimed. The same event feeds `tool_call.project` (the
   `agent_tool_call` row) and `wiki.attribution` (an edit of an indexed
   `.oxplow/wiki/<slug>.md` marks the page touched by the thread).
-- **Observed: everything else a turn changed** (shell, codegen,
-  formatters). The `effort.observe` consumer (`effort_observation.rs`,
-  after `effort.policy`, on `thread.checkpoint`) content-diffs the turn's
-  start → end snapshots (`diff_snapshots`, so an edit-then-revert doesn't
-  count) and records each changed path on the effort holding the turn,
-  unless another thread's overlapping effort claimed it
-  (`effort_store::observe_files_tx`). A path two threads changed and
-  neither claimed is observed by both; changes between turns (the
-  person's own) belong to no effort. Nothing is reconciled at close.
-- **Paths the project never snapshots belong to no effort.**
-  `EffortService::claimable_paths` drops what the stream's
-  `WorkspaceFilter` excludes (`generated.exclude` and `.gitignore`).
-- **A run is the effort its causing tool call was in.** Tests, analysis
-  and coverage are recorded whether or not an effort is open; the capture
-  is stamped with `CollectionService::resolve_owner` (the tool event's
-  effort anchor, else the thread's open effort) as
-  `metric_capture.effort_id`, and an effort that adopts a turn restamps
-  its captures. `oxplow.test.record_run` is only for counts oxplow
+- **Everything else a turn changed** (shell, codegen, formatters) comes
+  from the time join of the turn with the stream's snapshot line
+  (`v_turn_file`): no step records it per turn, and changes between
+  turns (the person's own) belong to no turn. Nothing is reconciled at
+  close.
+- **A run is the turn its causing tool call was in.** Tests, analysis
+  and coverage are recorded whether or not anything else is going on, and
+  are the turn's request's. `oxplow.test.record_run` is only for counts oxplow
   couldn't parse.
 
-Claims and observations carry the agent session where one is known
-([work-tracking.md](./work-tracking.md) "Efforts").
+Claims carry the agent session where one is known
+([work-tracking.md](./work-tracking.md) "Requests, files and assignment").
 
 ### Token usage capture
 
@@ -2057,8 +2036,7 @@ lines past it, and the harness's `turns(tail)` splits them into one
 usage and `model` of the assistant messages answering it (tool-result
 user messages fold into the current turn; a message counts once by its
 id). Each turn becomes one `agent_token_usage` row (provenance
-`observed`) on the effort the oxplow turn ran in (its anchor, else the
-thread's open one), and the cursor advances in the same transaction
+`observed`) on the oxplow turn it ran in (so on its request), and the cursor advances in the same transaction
 (`record_batch`), so a redelivered turn never reads the same bytes twice.
 **Bootstrap:** with no cursor yet (a fresh daemon, or the first Stop on a
 long transcript) it seeds the cursor at the last complete line and
@@ -2107,10 +2085,10 @@ advisories; at most `NUDGE_BUDGET`, 2000 characters, per hook), and
 answered reaches the agent on the thread's next tool call or prompt.
 Nothing is taken for a session whose harness lacks the hook's channel:
 its nudges stay undelivered rather than being stamped and lost. **One-shot marks
-are durable** (`claim_once`, per request, effort or thread): the report-less
+are durable** (`claim_once`, per request or thread): the report-less
 nudge fires once per request, an advisory once per its `once_per` scope,
 across restarts. A person reads what oxplow told the agent in the bundled
-`effort-nudges` page ("Agent Nudges", `oxplow/changes.sections` slot).
+nudges page ("Agent Nudges", `oxplow/changes.sections` slot).
 
 ### Observe conformance
 
@@ -2177,7 +2155,7 @@ revisit if Claude Code adds one.
 
 ## Related
 
-- [work-tracking.md](./work-tracking.md) — efforts, policies and hints
+- [work-tracking.md](./work-tracking.md) — requests, files, assignment and hints
   built on this record.
 - [commands.md](./commands.md) — the command bus every agent write goes
   through.

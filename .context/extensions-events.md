@@ -16,7 +16,7 @@ An extension sees an event as one shape, `EventView`
 | `at` | when it happened (RFC 3339) |
 | `source` | what emitted it: `human`, `agent:thr3`, `system:<c>`, `collector:<namespace>/<id>`, `effect:<namespace>/<id>`, `provider:<id>` |
 | `subject` | the URIs it's about |
-| `anchors` | `stream_id`, `thread_id`, `effort_id`, `turn_id`, `agent_session_id`, `snapshot_id` |
+| `anchors` | `stream_id`, `thread_id`, `turn_id`, `agent_session_id`, `snapshot_id` |
 | `payload` | its payload, carried to `v` |
 | `cause` | the id of the event that caused it |
 
@@ -51,9 +51,7 @@ reaches the extension:
 - an `on:` exec collector's stdin, `{ "event": … }` (`{}` when nothing
   triggered it);
 - an effect's `{ event }` (`effect_triggers::run_script`), a review's
-  effect dry run included;
-- the effort policy's event, and a provider's `react { event }`, keyed
-  `react:<id>`.
+  effect dry run included.
 
 An event that can't be carried to its type's newest version (its
 upcast fails) is a failed run, with the reason — on a review, that
@@ -456,9 +454,6 @@ the same keys on the entry, one parser (`collectors::parse_trigger`) and
 one matcher (`collectors::fires`, `Trigger::fires`). An effect reacts to
 every matching event, so it takes event types only: no clock, no report
 run, no pacing (`settle`, `at_most`, `idle`, `force` are a collector's).
-An effort policy's `.star` and a provider's `react` verb are the same
-script shape handed an event by the host; they are not manifest
-triggers.
 
 **Loading** (P8.D9) reads `on`/`where` through the collectors'
 `parse_trigger` (one rule for both) against core types and the
