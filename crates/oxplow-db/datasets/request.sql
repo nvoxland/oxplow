@@ -44,11 +44,12 @@ SELECT r.id, r.thread_id,
          -- An agent session whose latest turn is the request's waits on the
          -- person (a question it ended on, a permission prompt, a question
          -- tool): the status the rail shows, one mechanism.
-         WHEN EXISTS (SELECT 1 FROM ref('agent_session_status') st
-                       WHERE st.state = 'awaiting_user'
-                         AND (SELECT t.request_id FROM source('agent_turn') t
-                               WHERE t.agent_session_id = st.agent_session_id
-                               ORDER BY t.id DESC LIMIT 1) = r.id) THEN 'waiting_on_person'
+         -- Read once for every row: the subquery names no column of `r`.
+         WHEN r.id IN (SELECT (SELECT t.request_id FROM source('agent_turn') t
+                                WHERE t.agent_session_id = st.agent_session_id
+                                ORDER BY t.id DESC LIMIT 1)
+                         FROM ref('agent_session_status') st
+                        WHERE st.state = 'awaiting_user') THEN 'waiting_on_person'
          WHEN EXISTS (SELECT 1 FROM source('agent_turn') t
                        WHERE t.request_id = r.id AND t.ended_at IS NULL) THEN 'running'
          WHEN EXISTS (SELECT 1 FROM source('agent_turn') t
