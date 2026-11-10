@@ -27,7 +27,8 @@ pub enum HookAnswer {
 /// who opened the turn, and the text the harness delivered. On the wire,
 /// `{ "kind": "person", "text" }`, `{ "kind": "handback", "subagent",
 /// "text"? }`, `{ "kind": "peer_message", "from", "socket"?, "text"? }` or
-/// `{ "kind": "background_job", "call"?, "text" }`. The harness alone knows
+/// `{ "kind": "background_job", "call"?, "job"?, "status"?, "summary"?,
+/// "text" }`. The harness alone knows
 /// its own wrapping; core never reads the text for it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -57,10 +58,18 @@ pub enum Prompt {
     },
     /// A job the agent started in the background reported back (Claude
     /// Code's task notification). `call` is the harness's id of the tool
-    /// call that started the job, when it names one.
+    /// call that started the job and `job` its own id for the job (the one
+    /// a Stop's running work names), when it names them; `status` and
+    /// `summary` are how it ended, in the harness's words.
     BackgroundJob {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         call: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
         text: String,
     },
 }

@@ -4,6 +4,7 @@
 //! `rusqlite` connection pool. Migrations live in `migrations/` as
 //! plain SQL and are applied at startup via `refinery`.
 
+pub mod agent_job_store;
 pub mod agent_nudge_store;
 pub mod agent_session_store;
 pub mod agent_stores;

@@ -1408,6 +1408,35 @@ moves the item it picks to `in_progress`, so the effort links to it.
 Claude Code's `TaskCreate` is a within-turn planner and never mirrors
 oxplow's items.
 
+### Background jobs
+
+**A job is a record from first sight to report** (`agent_job`,
+`oxplow_db::agent_job_store`, `v_agent_job`). A job is work an agent
+started that runs on after the call that started it: a background shell,
+a background subagent. The hook ingest writes it in the transaction of the
+hook that shows it, so a turn opened by its report finds the turn it goes
+on with at once, with no projection lag:
+
+- **Opened by** a `SubagentStart` (kind `subagent`, started in the open
+  turn), or a Stop's running work (`TurnRun.left_running`, Claude Code's
+  `background_tasks`: started in the turn that Stop closes, as far as is
+  known). A later sight fills only what the row lacks.
+- **Reported by** its notice (`Prompt::BackgroundJob`: Claude's
+  `<task-notification>` gives the job's `<task-id>`, the starting call's
+  `<tool-use-id>`, `<status>` and `<summary>`) or a subagent's hand-back.
+  The report's turn (opened, or the open one it was delivered into) is
+  `report_turn_id`; a second report keeps the first's turn.
+- **The report's turn goes on with the job's start**: `cause_turn_id` is
+  the job's `started_turn_id`; a job first seen in its notice is found by
+  the call that started it (the tool events' dedupe key, built by one
+  `tool_key`). Its `cause_ref` is the job's id.
+
+Claude Code's ids line up: the notice's `<task-id>`, the Stop's
+`background_tasks[].id` and a subagent's `agent_id` are one id
+(`claude/subagent.jsonl`). A job with no report is `running`
+(`v_agent_job.state`): that is what a request is waiting on. Pinned by
+`a_background_job_is_a_record_from_start_to_report`.
+
 ### Native features: observed, set, left native
 
 Each harness has interactive features of its own. oxplow **observes and

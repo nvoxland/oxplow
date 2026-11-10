@@ -214,9 +214,12 @@ impl AgentHarness for Claude {
                 text: text.into(),
             });
         }
-        if let Some(call) = task_notification_call(text) {
+        if let Some(notice) = task_notification(text) {
             return Some(Prompt::BackgroundJob {
-                call,
+                call: notice.tag("tool-use-id"),
+                job: notice.tag("task-id"),
+                status: notice.tag("status"),
+                summary: notice.tag("summary"),
                 text: text.into(),
             });
         }
@@ -362,18 +365,26 @@ fn peer_message_from(text: &str) -> Option<PeerFrom<'_>> {
     })
 }
 
-/// A background job's notice: the prompt is a `<task-notification>`. The
-/// inner `Some` is the `<tool-use-id>` of the call that started the job,
-/// when it names one.
-fn task_notification_call(text: &str) -> Option<Option<String>> {
-    let body = text.trim_start().strip_prefix("<task-notification>")?;
-    let call = body
-        .split_once("<tool-use-id>")
-        .and_then(|(_, rest)| rest.split_once("</tool-use-id>"))
-        .map(|(id, _)| id.trim())
-        .filter(|id| !id.is_empty())
-        .map(str::to_string);
-    Some(call)
+/// A background job's notice: the prompt is a `<task-notification>`,
+/// whose inner tags name the job (`<task-id>`), the call that started it
+/// (`<tool-use-id>`) and how it ended (`<status>`, `<summary>`).
+struct TaskNotification<'a>(&'a str);
+
+impl TaskNotification<'_> {
+    /// The trimmed text of inner tag `name`, when present and not empty.
+    fn tag(&self, name: &str) -> Option<String> {
+        let (_, rest) = self.0.split_once(&format!("<{name}>"))?;
+        let (value, _) = rest.split_once(&format!("</{name}>"))?;
+        Some(value.trim())
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    }
+}
+
+fn task_notification(text: &str) -> Option<TaskNotification<'_>> {
+    text.trim_start()
+        .strip_prefix("<task-notification>")
+        .map(TaskNotification)
 }
 
 /// Its `claude_code.token.usage` counter (delta temporality): the `type`
@@ -1068,6 +1079,9 @@ mod tests {
             crate::test_launch::block(h.prompt(&body)),
             Some(Prompt::BackgroundJob {
                 call: Some("toolu_01NxscFzyLVJtKmaZxvCm57g".into()),
+                job: Some("a105c4271bd72a0cb".into()),
+                status: Some("completed".into()),
+                summary: Some("Agent \"Map desktop\" finished".into()),
                 text: text.into(),
             })
         );

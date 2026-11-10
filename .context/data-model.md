@@ -994,7 +994,9 @@ their event logged, told the three ends logged `interrupted` apart by the
 text oxplow had written into `answer`, cleared that text, and rewrote
 `agent.turn.ended@3` rows to `@4`. `agent_turn` open/close log
 `agent.turn.started@3` / `agent.turn.ended@4` in the same transaction as
-the row change;
+the row change; **background jobs** (V7, `agent_job`) are written beside
+them by the hook ingest ([agent-model.md](./agent-model.md) "Background
+jobs");
 `event_log` has a `turn_id` index.
 
 **Turns record the model and effort they ran on (V82).** Nullable TEXT

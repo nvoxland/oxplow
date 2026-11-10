@@ -1198,6 +1198,9 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
         (None, _, text) if job.is_some() => {
             Some(oxplow_domain::agent::observe::Prompt::BackgroundJob {
                 call: job.map(str::to_string),
+                job: None,
+                status: None,
+                summary: None,
                 text: text.unwrap_or_default(),
             })
         }
