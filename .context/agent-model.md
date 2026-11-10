@@ -1381,7 +1381,7 @@ with their subagents beneath each.
 **A session's transcript** is the foundation page `session-transcript`
 (`oxplow_run_page { page: session-transcript, params: { session, turn?, page? } }`): the session's
 turns from `v_agent_turn` oldest first with the thread's notes where
-they fall, a subagent's hand-back marked (a turn with no prompt), each
+they fall, a subagent's hand-back marked (a turn whose source is `subagent`), each
 row a turn URI. A turn URI opens it at that turn (`v_agent_turn
 .transcript_page`, built with `uri('oxplow/page', …)`). Its action **Resume in a new session**
 runs `oxplow.agent_session.open` with `resume`: a saved conversation of
@@ -1602,7 +1602,7 @@ message as its text when none is open (none if one is), logs
 `agent.prompt.submitted`) and sets the session running.
 `v_agent_turn.sender` names the sender of a turn it opened (its socket in
 `cause_ref`), and Thread Activity titles that turn "Message from …". Pinned by
-`a_peers_message_opens_a_turn_with_no_prompt`, `a_peers_message_is_not_a_persons_prompt`
+`a_peers_message_opens_a_turn_of_its_own_with_its_text`, `a_peers_message_is_not_a_persons_prompt`
 and the recorded `claude/peer_message.jsonl`
 (`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's
 collab agents are subagents ("Collab agents are subagents"). Observe

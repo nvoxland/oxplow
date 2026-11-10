@@ -28,8 +28,8 @@ loaders:
         WHERE t.thread_id = :thread_id
       )
       SELECT coalesce(e.title, CASE WHEN u.effort_id IS NULL THEN 'Between efforts' ELSE 'Work' END) AS section,
-             coalesce(nullif(u.prompt, ''),
-                      CASE WHEN u.sender IS NOT NULL THEN 'Message from ' || u.sender END,
+             coalesce(CASE WHEN u.source = 'peer' THEN 'Message from ' || coalesce(u.sender, 'another session') END,
+                      nullif(u.prompt, ''),
                       '(no prompt)') AS prompt,
              CASE WHEN u.agent_session_id IS NOT NULL THEN 'Session ' || u.agent_session_id END AS session,
              u.ran_on,
