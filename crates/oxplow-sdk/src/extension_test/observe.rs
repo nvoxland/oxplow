@@ -14,7 +14,7 @@ use super::*;
 ///   effort's `target` is its id, like `eff1`).
 /// - `test_run: { effort, at?, cases?: [{ name, status }], asserted_failed? }`:
 ///   a test run an effort recorded, as a run recorder writes it.
-/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
+/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }` (a `turn_end` take is the latest turn's):
 ///   one take in the stream's snapshot log.
 /// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
 ///   what a language server reported for a file.
@@ -887,7 +887,8 @@ pub(super) async fn observe_collect(host: &Host, body: &Value) -> Result<(), Str
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
 /// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
-/// its parent's makes no new snapshot.
+/// its parent's makes no new snapshot. A `turn_end` take is the latest
+/// turn's end take (its thread and turn), as a turn's own end take is.
 pub(super) async fn observe_snapshot(host: &Host, body: &Value) -> Result<(), String> {
     take_snapshot(host, body).await.map(|_| ())
 }
@@ -927,14 +928,36 @@ pub(super) async fn take_snapshot(
             content_hash: None,
         });
     }
+    // A turn's end take is the latest turn's: what it left the tree at.
+    let (thread_id, turn_id) = if trigger == SnapshotTrigger::TurnEnd {
+        let rows = host
+            .svc
+            .sql
+            .query_sql(
+                "SELECT thread_id, id FROM v_agent_turn ORDER BY id DESC LIMIT 1",
+                vec![],
+                None,
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .rows;
+        match rows.first().map(Vec::as_slice) {
+            Some([oxplow_db::SqlCell::Int(thread), oxplow_db::SqlCell::Int(turn)]) => {
+                (Some(oxplow_domain::ThreadId::new(*thread)), Some(*turn))
+            }
+            _ => (None, None),
+        }
+    } else {
+        (None, None)
+    };
     host.svc
         .snapshot_store
         .record_take(TakeRecord {
             stream_id: stream,
             rows,
             trigger,
-            thread_id: None,
-            turn_id: None,
+            thread_id,
+            turn_id,
             effort_id: None,
             branch: body
                 .get("branch")

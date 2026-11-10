@@ -463,8 +463,8 @@ type DeltaMemo =
 /// are its own. Every delta and observation is computed over one.
 #[derive(Debug, Clone)]
 pub struct Window {
-    /// Its identity in the memo and fold caches (`effort:<id>`,
-    /// `request:<id>@<stream>`).
+    /// Its identity in the memo and fold caches: what it covers, by URI (an
+    /// effort's; a request's with its stream).
     pub key: String,
     pub stream: Option<i64>,
     pub started_at: oxplow_domain::Timestamp,
@@ -2822,7 +2822,7 @@ impl CollectionService {
             .flatten()
             .map(|t| t.stream_id.value());
         Some(Window {
-            key: format!("effort:{}", effort.id.value()),
+            key: oxplow_domain::uri::build::effort_uri(effort.id),
             stream,
             started_at: effort.started_at,
             ended_at: effort.ended_at,

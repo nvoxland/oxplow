@@ -215,11 +215,24 @@ mod tests {
                         params![id, thread, t(from), t(to)],
                     )
                     .map_err(map_sql_err)?;
+                    // A take, logged as the store does: its file, then its op.
+                    tx.execute(
+                        "INSERT INTO snapshot (stream_id, created_at) VALUES (1, ?1)",
+                        params![t(at)],
+                    )
+                    .map_err(map_sql_err)?;
+                    let snapshot = tx.last_insert_rowid();
                     tx.execute(
                         "INSERT INTO file_snapshot (stream_id, path, blob_hash, captured_at, storage, git_oid,
-                                                    first_changed_at, last_changed_at)
-                         VALUES (1, ?1, ?2, ?3, 'git', ?2, ?3, ?3)",
-                        params![path, oid, t(at)],
+                                                    first_changed_at, last_changed_at, snapshot_id)
+                         VALUES (1, ?1, ?2, ?3, 'git', ?2, ?3, ?3, ?4)",
+                        params![path, oid, t(at), snapshot],
+                    )
+                    .map_err(map_sql_err)?;
+                    tx.execute(
+                        "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, at, elapsed_ms, file_count)
+                         VALUES (1, ?1, 'quiet', ?2, 0, 1)",
+                        params![snapshot, t(at)],
                     )
                     .map_err(map_sql_err)?;
                     if claim {

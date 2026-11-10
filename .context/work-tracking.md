@@ -44,16 +44,23 @@ followed from it, joined by those cause links when each turn opens
 **A turn's file changes are a join by time** (`v_turn_file`), not
 snapshots the turn owns: snapshots are the worktree's own record, and
 several writers (agents, the person, outside tools) can change one
-worktree at once. A file is the turn's when a take captured it after the
-turn began and the watcher saw it change inside the turn's window (a
-capture with no change time — the startup sweep's — is placed by the
-capture alone). A file changed before the prompt is not the turn's, even
-when the turn's end take captured it. Each file says how sure it is:
+worktree at once. The join is stored (`turn_file`, V21), written by a
+trigger when a take is logged (`snapshot_op`, after its file rows): a
+take that changed nothing logs none. A file is the turn's when the take
+captured it after the turn began, while it ran or within a minute after
+it ended, and the watcher saw it change inside the turn's window; a
+capture with no change time (the startup sweep's) counts only while the
+turn ran or in the turn's own end take. A file changed before the prompt
+is not the turn's, even when the turn's end take captured it. Computed per
+read, the join over every turn and file took tens of seconds whenever a
+query named turns by anything but a constant id; over the table a filter
+on a turn, a request's turns or a stream and path reaches an index. Each file says how sure it is:
 `claimed` (a call of the turn named it, or its harness reported a shell
 call changed it: `agent_tool_call_path`), `shared` (another turn ran on
 the stream while it changed), `sole`. `thread.checkpoint`'s `changed` is
-whether the turn has any; the `turn` change kind of change analysis finds
-its two snapshots by time. The turn's own `start_snapshot_id` /
+whether the turn has any; the `turn` and `request` change kinds find their
+two snapshots by time (the end is the turn's own `turn_end` take, else the
+last take at or before it ended). The turn's own `start_snapshot_id` /
 `snapshot_id` remain only for `effort.observe`, and go with efforts.
 Nothing here depends on how many threads or agents share a stream.
 

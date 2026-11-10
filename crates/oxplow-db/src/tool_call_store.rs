@@ -483,22 +483,39 @@ mod tests {
             t2s = at(30),
             t2e = at(90),
         );
-        // (path, first change, last change, captured): `None` change times
-        // are a capture the watcher gave none for.
-        for (path, first, last, captured) in [
-            ("a.rs", Some(10), Some(12), 61),
-            ("b.rs", Some(40), Some(45), 61),
-            ("c.rs", Some(-5), Some(-5), 61),
-            ("d.rs", None, None, 50),
-            ("e.rs", Some(20), Some(20), 61),
+        // Two takes, each logged as the store does (its files, then its
+        // op): (path, first change, last change). `None` change times are a
+        // capture the watcher gave none for.
+        for (snapshot, captured, files) in [
+            (1, 50, vec![("d.rs", None, None)]),
+            (
+                2,
+                61,
+                vec![
+                    ("a.rs", Some(10), Some(12)),
+                    ("b.rs", Some(40), Some(45)),
+                    ("c.rs", Some(-5), Some(-5)),
+                    ("e.rs", Some(20), Some(20)),
+                ],
+            ),
         ] {
-            let time = |t: Option<i64>| t.map_or("NULL".to_string(), |t| format!("'{}'", at(t)));
+            let c = at(captured);
             seed += &format!(
-                "INSERT INTO file_snapshot (stream_id, path, captured_at, first_changed_at, last_changed_at)
-                   VALUES (1, '{path}', '{c}', {f}, {l});",
-                c = at(captured),
-                f = time(first),
-                l = time(last),
+                "INSERT INTO snapshot (id, stream_id, created_at) VALUES ({snapshot}, 1, '{c}');"
+            );
+            let time = |t: Option<i64>| t.map_or("NULL".to_string(), |t| format!("'{}'", at(t)));
+            for (path, first, last) in &files {
+                seed += &format!(
+                    "INSERT INTO file_snapshot (stream_id, path, captured_at, first_changed_at, last_changed_at, snapshot_id)
+                       VALUES (1, '{path}', '{c}', {f}, {l}, {snapshot});",
+                    f = time(*first),
+                    l = time(*last),
+                );
+            }
+            seed += &format!(
+                "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, at, elapsed_ms, file_count)
+                   VALUES (1, {snapshot}, 'quiet', '{c}', 0, {n});",
+                n = files.len(),
             );
         }
         db.transaction(move |tx| {

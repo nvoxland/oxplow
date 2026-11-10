@@ -8,6 +8,6 @@ steps:
   - given:
       - { command: oxplow.task.create, input: { title: Doing it, stage: in_progress, assignee: thr1 } }
       - observe: { turn: { prompt: Fix the greeting, tools: [{ name: Edit, kind: edit, paths: [greeting.txt], ok: true }] } }
-      - observe: { snapshot: { files: [{ path: greeting.txt, hash: a }] } }
+      - observe: { snapshot: { trigger: turn_end, files: [{ path: greeting.txt, hash: a }] } }
   - when: { advisory: untracked-work }
     expect: { lines: [] }

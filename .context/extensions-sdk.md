@@ -514,7 +514,8 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `co_change_pair`, fill on a recompute the throwaway doesn't start),
   `test_run` (a `tests` capture and its `oxplow.test_case` facts through
   `SqliteFactStore::record_facts`) and `snapshot` (one take in the
-  snapshot log, `SqliteSnapshotStore::record_take`), `diagnostics`
+  snapshot log, `SqliteSnapshotStore::record_take`; `trigger: turn_end` makes
+  it the latest turn's end take, so its files are that turn's), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
   at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
   `run` (`extension_run_store::record_tx`; `days_ago` through
