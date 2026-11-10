@@ -1,17 +1,27 @@
-# Shared work, a section of a task's page: the item when another
-# thread has an open effort on it too, and the files both threads'
-# efforts changed.
+# Shared work, a section of a task's page: the item when requests on two
+# threads have worked on it, and the files both threads' requests changed
+# (a file only when a turn's own call named it or it was the only turn
+# changing it: a file two concurrent turns could each have changed is not
+# evidence; here each turn's edit call names it).
 given:
   - { command: oxplow.task.create, input: { title: Shared item, assignee: thr1 }, bind: item }
   - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
+  - observe: { snapshot: { files: [{ path: src/shared.rs, hash: a }] } }
 when: { part: item-shared-work, params: { uri: $item.uri } }
 expect: { loaders: { item_shared_work: { rows: 0 } } }
 steps:
   - given:
       - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
-      - { command: oxplow.effort.open, input: { thread: $beta.id, task: $item.uri } }
-      - observe: { turn: { thread: $beta.id, prompt: beta, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
+      # The second thread's agent runs a task command on the item in its
+      # turn, and the file changes again.
+      - observe:
+          turn:
+            thread: $beta.id
+            prompt: beta
+            tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }]
+            during: [{ command: oxplow.task.update, input: { uri: $item.uri, title: Shared item }, as: agent }]
+      - observe: { snapshot: { files: [{ path: src/shared.rs, hash: b }] } }
   - when: { part: item-shared-work, params: { uri: $item.uri } }
     expect:
       loaders:

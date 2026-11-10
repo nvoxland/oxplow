@@ -1,25 +1,34 @@
 title: Shared work
-description: 'Where two threads hold the same thing: a task with open efforts on both, a file both changed in the last day, an epic whose children sit on different threads.'
+description: 'Where two threads hold the same thing: a task requests on both worked on, a file both changed in the last day, an epic whose children sit on different threads.'
 category: Work
 loaders:
   shared_work:
     sql: |
-      WITH open_work AS (
-        SELECT e.id AS effort_id, e.thread_id, e.task, t.title AS thread_title,
-               e.ended_at IS NULL AS is_open
-        FROM v_effort e JOIN v_thread t ON t.id = e.thread_id
-        WHERE e.ended_at IS NULL OR julianday(e.ended_at) >= julianday('now') - 1
+      WITH live AS (
+        -- Requests running now or finished in the last day.
+        SELECT r.uri AS request
+        FROM v_request r
+        WHERE r.state <> 'finished' OR julianday(r.last_activity_at) >= julianday('now') - 1
+      ), live_turns AS (
+        SELECT l.request, t.uri AS turn, t.thread_id, th.title AS thread_title
+        FROM live l JOIN v_agent_turn t ON t.request = l.request
+        JOIN v_thread th ON th.id = t.thread_id
       ), shared AS (
+        -- A task requests running or just finished (on any basis) worked on,
+        -- from two threads.
         SELECT 'Items on two threads' AS section, w.title AS what, w.uri AS uri,
                group_concat(DISTINCT o.thread_title) AS threads,
                group_concat(DISTINCT o.thread_id) AS thread_ids
-        FROM open_work o JOIN v_task w ON w.uri = o.task
-        WHERE o.is_open
+        FROM v_request_task rt JOIN live_turns o ON o.request = rt.request
+        JOIN v_task w ON w.uri = rt.task
         GROUP BY w.uri HAVING count(DISTINCT o.thread_id) >= 2
         UNION ALL
+        -- A file two threads' turns changed; a file two concurrent turns
+        -- could each have changed (`shared`) is no evidence.
         SELECT 'Files two threads changed', f.path, NULL,
                group_concat(DISTINCT o.thread_title), group_concat(DISTINCT o.thread_id)
-        FROM v_effort_file f JOIN open_work o ON o.effort_id = f.effort_id
+        FROM v_turn_file f JOIN live_turns o ON o.turn = f.turn
+        WHERE f.confidence <> 'shared'
         GROUP BY f.path HAVING count(DISTINCT o.thread_id) >= 2
         UNION ALL
         SELECT 'Epics spread over threads', p.title, p.uri,
