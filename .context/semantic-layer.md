@@ -1350,10 +1350,19 @@ A **change** is one diff: a `commit` (vs its first parent), an `effort`
 (start snapshot → end snapshot, or → the working tree while open — limited
 to the effort's own files, `v_effort_file`, since its bracket also holds
 what other threads and the person changed), an
-agent `turn` (its `start_snapshot_id` → its end `snapshot_id` — what the
-turn changed, even across a snapshot taken mid-turn; a turn still
-running is `NotFound`; target `{"kind":"turn","turnId":"trn12"}`, P2.10,
-V101), a stream's `working` tree (vs HEAD) or a `range`: any two
+agent `turn` (by time on its stream's snapshot line: the last take at or
+before it began → where it ended, `end_take`: the latest of its own
+`turn_end` take, which can land just after it closed, and the last take
+at or before its end — never another writer's later take; what the turn
+changed, even across a snapshot taken mid-turn; a turn still running is
+`NotFound`; target `{"kind":"turn","turnId":"trn12"}`), a `request` on
+one stream (its turns there: the take before the first began → where the
+last ended, or → the working tree while one runs; limited to the files
+its turns changed, `v_turn_file` claimed or sole; target
+`{"kind":"request","requestId":"req4","streamId":"str1"}`, the stream of
+its first turn when none; keyed by request id per stream; kept current by
+`change.analyze` while it's live: a turn of it running there, or one
+ended since the stream's previous take, V19 widened the kind CHECK), a stream's `working` tree (vs HEAD) or a `range`: any two
 revisions, each spelled as a `rev` is (`working`, `snap:<id>`,
 `git:<rev>`), keyed `<base>..<head>` by the sides as resolved (a git side
 by its full sha, so `git:HEAD` and the sha share a row), the base empty

@@ -338,6 +338,18 @@ pub enum ChangeTarget {
         #[serde(rename = "turnId")]
         turn_id: String,
     },
+    /// A request on one stream: from the last take at or before its first
+    /// turn there started to the first take at or after its last one
+    /// ended (the working tree while one runs), limited to the files its
+    /// turns changed (`v_turn_file`, claimed or sole). `stream_id`
+    /// defaults to the stream of the request's first turn; a request can
+    /// span streams, so it's keyed by both.
+    Request {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "streamId", default)]
+        stream_id: Option<String>,
+    },
     /// Any two revisions, each spelled as a `rev` is (`working`,
     /// `snap:<id>`, `git:<rev>`); no base is the whole tree at `head`.
     /// Keyed `<base>..<head>` by the sides as resolved (a git side by its
@@ -520,7 +532,7 @@ pub async fn refresh_files(
         .await
         .into_local_path();
     let events_to = events_to(svc).await?;
-    let only = own_files(svc, kind, &key).await?;
+    let only = own_files(svc, kind, &key, stream).await?;
     // A working tree is also asked what git says of it: which of its files
     // are staged or untracked, how many conflict, what is in progress. That
     // also says which files to look at.
@@ -826,10 +838,10 @@ async fn resolve(
                 .get(&turn.thread_id)
                 .await?
                 .ok_or(DomainError::NotFound)?;
-            // The turn's two points on its stream's snapshot line, by time:
-            // the last take at or before it began, the first at or after it
-            // ended (else the latest). The turn owns no snapshot.
+            // The turn's two points on its stream's snapshot line: the last
+            // take at or before it began, and where it ended ([`end_take`]).
             let stream = thread.stream_id.value();
+            let turn_id_value = tid.value();
             let (began, ended) = (
                 oxplow_db::ts_to_string(turn.started_at),
                 oxplow_db::ts_to_string(ended),
@@ -847,18 +859,7 @@ async fn resolve(
                         )
                         .optional()
                         .map_err(oxplow_db::map_sql_err)?;
-                    let end: Option<i64> = c
-                        .query_row(
-                            "SELECT id FROM snapshot WHERE stream_id = ?1
-                              ORDER BY created_at >= ?2 DESC,
-                                       CASE WHEN created_at >= ?2 THEN created_at END ASC,
-                                       created_at DESC, id DESC
-                              LIMIT 1",
-                            rusqlite::params![stream, ended],
-                            |r| r.get(0),
-                        )
-                        .optional()
-                        .map_err(oxplow_db::map_sql_err)?;
+                    let end = end_take(c, stream, &ended, &[turn_id_value])?;
                     Ok((start, end))
                 })
                 .await?;
@@ -874,6 +875,43 @@ async fn resolve(
                 tid.value().to_string(),
                 Some(Revision::Snapshot(start)),
                 Revision::Snapshot(end),
+            )
+        }
+        ChangeTarget::Request {
+            request_id,
+            stream_id,
+        } => {
+            let rid = oxplow_domain::RequestId::try_from_str(&request_id)
+                .ok_or_else(|| invalid(format!("not a request id: {request_id}")))?;
+            let stream = match stream_id.as_deref() {
+                Some(s) => Some(
+                    oxplow_domain::StreamId::try_from_str(s)
+                        .ok_or_else(|| invalid(format!("not a stream id: {s}")))?
+                        .value(),
+                ),
+                None => None,
+            };
+            let req = rid.value();
+            let span = svc
+                .db
+                .read(move |c| request_span(c, req, stream))
+                .await?
+                .ok_or(DomainError::NotFound)?;
+            let start = span.start.ok_or_else(|| {
+                invalid(format!(
+                    "request {request_id} began before the stream had a snapshot, so there's nothing to diff from"
+                ))
+            })?;
+            let head = match span.end {
+                Some(end) if !span.running => Revision::Snapshot(end),
+                _ => Revision::Working,
+            };
+            (
+                oxplow_domain::StreamId::new(span.stream),
+                "request",
+                req.to_string(),
+                Some(Revision::Snapshot(start)),
+                head,
             )
         }
         ChangeTarget::Effort { effort_id } => {
@@ -957,7 +995,7 @@ async fn analyze(
             return Ok(row);
         }
     }
-    let only = own_files(svc, kind, &key).await?;
+    let only = own_files(svc, kind, &key, stream).await?;
     let from = analyzed_from(svc, stream, base.as_ref(), &head, only.as_ref()).await?;
     {
         let mut st = svc
@@ -1181,6 +1219,105 @@ fn spawn_duplicates(
     });
 }
 
+/// Where `turns` ended on `stream`'s snapshot line: the latest of their
+/// own end takes (`snapshot_op`, trigger `turn_end`, which can land just
+/// after the turn closed) and the last take at or before `ended`. A take
+/// after the end that isn't theirs is another writer's; an unchanged tree
+/// records no take, so the end is the take the tree was already at.
+fn end_take(
+    c: &rusqlite::Connection,
+    stream: i64,
+    ended: &str,
+    turns: &[i64],
+) -> Result<Option<i64>, oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let turns = serde_json::to_string(turns).unwrap_or_else(|_| "[]".into());
+    c.query_row(
+        "SELECT id FROM snapshot
+          WHERE stream_id = ?1
+            AND (created_at <= ?2
+                 OR id IN (SELECT snapshot_id FROM snapshot_op
+                            WHERE trigger = 'turn_end'
+                              AND turn_id IN (SELECT value FROM json_each(?3))))
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+        rusqlite::params![stream, ended, turns],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(oxplow_db::map_sql_err)
+}
+
+/// A request's span on one stream's snapshot line.
+struct RequestSpan {
+    stream: i64,
+    /// The last take at or before its first turn there started.
+    start: Option<i64>,
+    /// Where its turns there ended ([`end_take`]).
+    end: Option<i64>,
+    /// One of its turns there is still running.
+    running: bool,
+}
+
+/// Where request `request` sits on `stream`'s snapshot line (the stream of
+/// its first turn when none is given); `None` when it has no turn there.
+fn request_span(
+    c: &rusqlite::Connection,
+    request: i64,
+    stream: Option<i64>,
+) -> Result<Option<RequestSpan>, oxplow_domain::DomainError> {
+    use rusqlite::OptionalExtension as _;
+    let map = oxplow_db::map_sql_err;
+    let turns: Option<(i64, String, Option<String>, bool)> = c
+        .query_row(
+            "SELECT th.stream_id, min(t.started_at), max(t.ended_at),
+                    max(t.ended_at IS NULL)
+               FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+              WHERE t.request_id = ?1
+                AND th.stream_id = coalesce(?2,
+                      (SELECT th2.stream_id FROM agent_turn t2
+                         JOIN threads th2 ON th2.id = t2.thread_id
+                        WHERE t2.request_id = ?1 ORDER BY t2.id LIMIT 1))
+              GROUP BY th.stream_id",
+            rusqlite::params![request, stream],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+        .map_err(map)?;
+    let Some((stream, began, ended, running)) = turns else {
+        return Ok(None);
+    };
+    let start: Option<i64> = c
+        .query_row(
+            "SELECT id FROM snapshot WHERE stream_id = ?1 AND created_at <= ?2
+              ORDER BY created_at DESC, id DESC LIMIT 1",
+            rusqlite::params![stream, began],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map)?;
+    let turn_ids: Vec<i64> = {
+        let mut stmt = c
+            .prepare(
+                "SELECT t.id FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+                  WHERE t.request_id = ?1 AND th.stream_id = ?2",
+            )
+            .map_err(map)?;
+        let ids = stmt
+            .query_map(rusqlite::params![request, stream], |r| r.get(0))
+            .map_err(map)?
+            .collect::<Result<_, _>>()
+            .map_err(map)?;
+        ids
+    };
+    let end = end_take(c, stream, &ended.unwrap_or_default(), &turn_ids)?;
+    Ok(Some(RequestSpan {
+        stream,
+        start,
+        end,
+        running,
+    }))
+}
+
 /// An effort's own files (`v_effort_file`: claimed or observed): what its
 /// change is limited to, since its bracket also holds what other threads
 /// and the person changed. `None` for any other kind of change.
@@ -1188,8 +1325,12 @@ async fn own_files(
     svc: &crate::Services,
     kind: &str,
     key: &str,
+    stream: oxplow_domain::StreamId,
 ) -> Result<Option<std::collections::HashSet<String>>, oxplow_domain::DomainError> {
     use oxplow_db::EffortStore as _;
+    if kind == "request" {
+        return Ok(Some(request_files(svc, key, stream).await?));
+    }
     if kind != "effort" {
         return Ok(None);
     }
@@ -1201,6 +1342,36 @@ async fn own_files(
         .list_files(&oxplow_domain::EffortId::new(id))
         .await?;
     Ok(Some(files.into_iter().map(|f| f.path).collect()))
+}
+
+/// The files request `key`'s turns on `stream` changed, as `v_turn_file`
+/// joins them: the ones a call of the turn claimed, or that only its turn
+/// was running to change. A file another turn could as well have changed
+/// is not the request's.
+async fn request_files(
+    svc: &crate::Services,
+    key: &str,
+    stream: oxplow_domain::StreamId,
+) -> Result<std::collections::HashSet<String>, oxplow_domain::DomainError> {
+    let (request, stream) = (key.parse::<i64>().unwrap_or_default(), stream.value());
+    svc.db
+        .read(move |c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT DISTINCT f.path FROM v_turn_file f
+                       JOIN agent_turn t ON t.id = f.turn_id
+                      WHERE t.request_id = ?1 AND f.stream_id = ?2
+                        AND f.confidence IN ('claimed', 'sole')",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let paths = stmt
+                .query_map(rusqlite::params![request, stream], |r| r.get(0))
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<Result<_, _>>()
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(paths)
+        })
+        .await
 }
 
 /// Diff `base` → `head` in `root` (limited to `only` when given), read the
@@ -2104,6 +2275,174 @@ mod tests {
             matches!(err, oxplow_domain::DomainError::NotFound),
             "{err:?}"
         );
+    }
+
+    /// A turn ends at the take it left the tree at, not at the next take
+    /// after it: one another writer made after the turn closed is not the
+    /// turn's.
+    #[tokio::test]
+    async fn a_turn_ends_at_its_last_take_not_the_next_writers() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            root.clone(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            oxplow_domain::StreamId::new(1),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |path: &str, body: &str| {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, body).unwrap();
+            capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
+            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                effort_id: None,
+                budget: None,
+                provider: None,
+            })
+        };
+        let s0 = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        let s1 = take("src/a.rs", AFTER).await.unwrap().unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        // The turn closed after its last take.
+        let turn: i64 = f
+            .svc
+            .db
+            .transaction(move |c| {
+                c.execute(
+                    "INSERT INTO agent_turn (thread_id, prompt, started_at, ended_at)
+                     VALUES (1, 'p', (SELECT created_at FROM snapshot WHERE id = ?1),
+                             strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                    rusqlite::params![s0],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(c.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let _other = take("src/c.rs", "pub fn c() {}\n").await.unwrap().unwrap();
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Turn {
+                turn_id: oxplow_domain::AgentTurnId::new(turn).to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(c.head_revision, Some(Revision::Snapshot(s1)));
+    }
+
+    /// A request diffs from where its first turn on the stream started to
+    /// where its last one ended, limited to the files its turns changed: a
+    /// file the person changed between its turns is not the request's.
+    /// While one of its turns runs, its head is the working tree.
+    #[tokio::test]
+    async fn a_request_diffs_its_turns_span_limited_to_its_files() {
+        let f = crate::test_fixtures::services_with_effort().await;
+        let root = f.svc.layout.project_dir.clone();
+        let capture = crate::snapshot_capture::SnapshotCaptureService::new(
+            f.svc.snapshot_store.clone(),
+            f.svc.blobs.clone(),
+            root.clone(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            oxplow_domain::StreamId::new(1),
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(std::time::Duration::ZERO)
+        .with_predrain_delay(std::time::Duration::ZERO);
+        let take = |path: &str, body: &str| {
+            let full = root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, body).unwrap();
+            capture.mark_dirty(full, oxplow_fs_watch::WatchEventKind::Other);
+            capture.request_snapshot(crate::snapshot_capture::TakeRequest {
+                trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                effort_id: None,
+                budget: None,
+                provider: None,
+            })
+        };
+        let s0 = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        let s1 = take("src/a.rs", AFTER).await.unwrap().unwrap();
+        let s2 = take("src/c.rs", "pub fn c() {}\n").await.unwrap().unwrap();
+        let s3 = take("src/b.rs", "pub fn b() {}\n").await.unwrap().unwrap();
+        let (request, running) = f
+            .svc
+            .db
+            .transaction(move |c| {
+                let storage = |e: rusqlite::Error| oxplow_domain::DomainError::Storage(e.to_string());
+                let request = |c: &rusqlite::Connection| {
+                    c.execute("INSERT INTO request (thread_id) VALUES (1)", [])
+                        .map(|_| c.last_insert_rowid())
+                        .map_err(storage)
+                };
+                // Two turns of one request, each placed on the line by time:
+                // s0 -> s1, then s2 -> s3; the person's c.rs lands between.
+                let turn = |req: i64, from: i64, to: Option<i64>| {
+                    c.execute(
+                        "INSERT INTO agent_turn (thread_id, prompt, request_id, started_at, ended_at)
+                         VALUES (1, 'p', ?1, (SELECT created_at FROM snapshot WHERE id = ?2),
+                                             (SELECT created_at FROM snapshot WHERE id = ?3))",
+                        rusqlite::params![req, from, to],
+                    )
+                    .map_err(storage)
+                };
+                let done = request(c)?;
+                turn(done, s0, Some(s1))?;
+                turn(done, s2, Some(s3))?;
+                let running = request(c)?;
+                turn(running, s3, None)?;
+                Ok((done, running))
+            })
+            .await
+            .unwrap();
+
+        let c = ensure_change(
+            &f.svc,
+            ChangeTarget::Request {
+                request_id: oxplow_domain::RequestId::new(request).to_string(),
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            (c.kind.as_str(), c.target.as_str(), c.status.as_str()),
+            ("request", request.to_string().as_str(), "done")
+        );
+        assert_eq!(c.head_revision, Some(Revision::Snapshot(s3)));
+        assert_eq!(
+            rows(
+                &f.svc,
+                "SELECT path, status FROM v_change_file WHERE change_id = ?1 ORDER BY path",
+                c.id
+            )
+            .await,
+            serde_json::json!([["src/a.rs", "modified"], ["src/b.rs", "added"]])
+        );
+
+        let live = ensure_change(
+            &f.svc,
+            ChangeTarget::Request {
+                request_id: oxplow_domain::RequestId::new(running).to_string(),
+                stream_id: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(live.head_revision, Some(Revision::Working));
     }
 
     #[tokio::test]

@@ -456,7 +456,28 @@ struct DeltaInputs {
 
 /// `(effort, spec key)` → (what the delta was computed from, the delta).
 type DeltaMemo =
-    std::collections::HashMap<(i64, String), (String, Option<oxplow_db::EffortMetricDelta>)>;
+    std::collections::HashMap<(String, String), (String, Option<oxplow_db::EffortMetricDelta>)>;
+
+/// What a stored analysis covers: a span of one stream's work (an effort,
+/// or a request on one stream), the files it changed and the captures that
+/// are its own. Every delta and observation is computed over one.
+#[derive(Debug, Clone)]
+pub struct Window {
+    /// Its identity in the memo and fold caches (`effort:<id>`,
+    /// `request:<id>@<stream>`).
+    pub key: String,
+    pub stream: Option<i64>,
+    pub started_at: oxplow_domain::Timestamp,
+    /// `None` while it's live.
+    pub ended_at: Option<oxplow_domain::Timestamp>,
+    /// The take at its start: what diff coverage measures changes from.
+    pub start_snapshot_id: Option<i64>,
+    pub end_snapshot_id: Option<i64>,
+    /// The files it changed: what a file gauge's delta sums over.
+    pub files: Vec<String>,
+    /// Its own captures: what the run and window families read.
+    pub members: oxplow_db::Members,
+}
 
 #[derive(Clone)]
 pub struct CollectionService {
@@ -501,7 +522,7 @@ pub struct CollectionService {
     /// Per (effort, `sum` spec): the running total of the reports folded so
     /// far, so a new report adds to it instead of the effort's whole
     /// history being read again.
-    sum_folds: Arc<std::sync::Mutex<std::collections::HashMap<(i64, String), SumFold>>>,
+    sum_folds: Arc<std::sync::Mutex<std::collections::HashMap<(String, String), SumFold>>>,
     /// Captures and facts read to compute deltas (tests).
     #[cfg(test)]
     reads: Arc<(
@@ -2014,18 +2035,18 @@ impl CollectionService {
     /// diff_payload)`, or `None` when either snapshot is unknown, a side's
     /// bytes are gone, or no changed instrumented lines overlap.
     /// `diff_payload` is the shape the panel renders.
-    async fn diff_coverage_for_effort(
+    async fn diff_coverage(
         &self,
-        effort: &Effort,
+        window: &Window,
         measured: Option<i64>,
         abs_payload: &serde_json::Value,
     ) -> Result<Option<(f64, serde_json::Value)>, DomainError> {
-        let (Some(start), Some(measured)) = (effort.start_snapshot_id, measured) else {
+        let (Some(start), Some(measured)) = (window.start_snapshot_id, measured) else {
             return Ok(None);
         };
         // The changed lines come from both sides' bytes.
         if let Some(reason) = self.captures.no_contents_reason() {
-            tracing::info!(effort = %effort.id, "diff coverage skipped: {reason}");
+            tracing::info!(window = %window.key, "diff coverage skipped: {reason}");
             return Ok(None);
         }
         let start_tree = self.snapshots.tree_at(start).await?;
@@ -2771,15 +2792,56 @@ impl CollectionService {
         effort_id: &str,
         kind: Option<&str>,
     ) -> Vec<oxplow_db::EffortObservation> {
-        let Some(eid) = EffortId::try_from_str(effort_id) else {
-            return vec![];
-        };
-        // Coverage derives its effort-relative diff against the effort's start
-        // snapshot, so load the effort once (tsk270).
-        let effort = self.efforts.get_effort(&eid).await.ok().flatten();
-        // Every run kind is the effort's own capture: stamped with the
-        // effort of the tool call that caused it.
-        let mut caps = self.run_captures(eid.value()).await;
+        match self.effort_window(effort_id).await {
+            Some(window) => self.observations(&window, kind).await,
+            None => vec![],
+        }
+    }
+
+    /// The window an effort covers: its span, its two snapshots, its files
+    /// (`effort_file`) and the captures stamped with it at ingest.
+    pub async fn effort_window(&self, effort_id: &str) -> Option<Window> {
+        let eid = EffortId::try_from_str(effort_id)?;
+        let effort = self.efforts.get_effort(&eid).await.ok().flatten()?;
+        let files = self
+            .efforts
+            .list_files(&eid)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| f.path)
+            .collect();
+        // Its stream (via its thread): gauge captures are per-worktree
+        // scans, so the File family must not read another stream's facts
+        // (tsk43).
+        let stream = self
+            .threads
+            .get(&effort.thread_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|t| t.stream_id.value());
+        Some(Window {
+            key: format!("effort:{}", effort.id.value()),
+            stream,
+            started_at: effort.started_at,
+            ended_at: effort.ended_at,
+            start_snapshot_id: effort.start_snapshot_id,
+            end_snapshot_id: effort.end_snapshot_id,
+            files,
+            members: oxplow_db::Members::Effort(effort.id.value()),
+        })
+    }
+
+    /// The observations of `window`: one row per run of its own, oldest
+    /// first (see [`Self::effort_observations_from_metrics`]).
+    pub async fn observations(
+        &self,
+        window: &Window,
+        kind: Option<&str>,
+    ) -> Vec<oxplow_db::EffortObservation> {
+        // Every run kind is the window's own capture.
+        let mut caps = self.run_captures(&window.members).await;
         // Oldest first: the order they ran in.
         caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut out = Vec::new();
@@ -2811,14 +2873,11 @@ impl CollectionService {
             // report-less runs — no `total` — stay off the panel, as before).
             let (payload_json, metric_value) = match obs_kind {
                 "diff-coverage" => {
-                    let derived = match effort.as_ref() {
-                        Some(eff) => self
-                            .diff_coverage_for_effort(eff, c.snapshot_id, &payload)
-                            .await
-                            .ok()
-                            .flatten(),
-                        None => None,
-                    };
+                    let derived = self
+                        .diff_coverage(window, c.snapshot_id, &payload)
+                        .await
+                        .ok()
+                        .flatten();
                     match derived {
                         Some((pct, diff_payload)) => (Some(diff_payload.to_string()), Some(pct)),
                         None => continue,
@@ -2885,44 +2944,30 @@ impl CollectionService {
     }
 
     pub async fn effort_metric_deltas(&self, effort_id: &str) -> Vec<oxplow_db::EffortMetricDelta> {
-        let Some(eid) = EffortId::try_from_str(effort_id) else {
-            return vec![];
-        };
-        let Ok(Some(effort)) = self.efforts.get_effort(&eid).await else {
-            return vec![];
-        };
+        match self.effort_window(effort_id).await {
+            Some(window) => self.metric_deltas(&window).await,
+            None => vec![],
+        }
+    }
+
+    /// Every metric `window` moved, grouped and ordered as the panel shows
+    /// them (the families are [`Self::refresh_effort_evidence`]'s).
+    pub async fn metric_deltas(&self, window: &Window) -> Vec<oxplow_db::EffortMetricDelta> {
         // Every metric is a spec now (built-in ∪ producer ∪ config); each read
         // aggregates the spec's source measure's facts (epic tsk12, T-D).
         let Ok(specs) = self.facts.list_specs().await else {
             return vec![];
         };
-        // The effort's OWN captures (stamped `effort_id` at ingest, tsk37) — the
-        // attribution spine for the run + operational families. File gauges are
-        // snapshot scans (unstamped), so they read by claimed files × time below.
-        // Full rows (not just ids): an EMPTY capture (a clean analysis run) is a
-        // zero record the stamped read fills in (tsk44).
+        // The window's OWN captures — the attribution spine for the run +
+        // operational families. File gauges are snapshot scans (unstamped),
+        // so they read by its files × time below. Full rows (not just ids):
+        // an EMPTY capture (a clean analysis run) is a zero record the
+        // stamped read fills in (tsk44).
         let groups = self
             .facts
-            .effort_capture_groups(effort.id.value())
+            .capture_groups(window.members.clone())
             .await
             .unwrap_or_default();
-        let claimed: Vec<String> = self
-            .efforts
-            .list_files(&eid)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| f.path)
-            .collect();
-        // The effort's stream (via its thread): gauge captures are per-worktree
-        // scans, so the File family must not read another stream's facts (tsk43).
-        let stream = self
-            .threads
-            .get(&effort.thread_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| t.stream_id.value());
 
         use crate::attribution::{classify_effort_attribution, EffortAttributionFamily};
         // Per-call memo: several File-family specs share one `source_measure`
@@ -2939,10 +2984,8 @@ impl CollectionService {
             // One classifier (in `attribution.rs`, beside the write-side
             // `AttributionKind` each family maps to) decides the family; this match
             // is the only place each family's read computation is named (tsk274).
-            let inputs = self
-                .delta_inputs(spec, &effort, &claimed, stream, &groups)
-                .await;
-            let memo_key = (effort.id.value(), spec.key.clone());
+            let inputs = self.delta_inputs(spec, window, &groups).await;
+            let memo_key = (window.key.clone(), spec.key.clone());
             if let Some(inputs) = &inputs {
                 let memo = self.delta_memo.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some((from, row)) = memo.get(&memo_key) {
@@ -2959,14 +3002,14 @@ impl CollectionService {
                 .push(spec.key.clone());
             let row = match classify_effort_attribution(spec) {
                 EffortAttributionFamily::File => {
-                    self.file_delta_from_facts(spec, &effort, &claimed, stream, &mut fact_cache)
+                    self.file_delta_from_facts(spec, window, &mut fact_cache)
                         .await
                 }
                 // Coverage stays effort-relative, on the capture's detail
                 // payload (line-sets aren't in facts yet): the diff is derived
                 // from it (tsk270, T-D scope guard).
                 EffortAttributionFamily::Coverage => {
-                    self.coverage_delta_for_spec(spec, &effort).await
+                    self.coverage_delta_for_spec(spec, window).await
                 }
                 // Run + operational read identically now: before→after / `sum` over
                 // the facts of the effort's own captures (the tsk37 spine).
@@ -2976,8 +3019,7 @@ impl CollectionService {
                         // A spec with no named source: all the effort's.
                         None => groups.iter().map(|g| g.producer.clone()).collect(),
                     };
-                    self.effort_stamped_delta(spec, &effort, &producers, &groups)
-                        .await
+                    self.stamped_delta(spec, window, &producers, &groups).await
                 }
             };
             if let Some(inputs) = inputs {
@@ -3012,10 +3054,8 @@ impl CollectionService {
     async fn delta_inputs(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
-        claimed: &[String],
-        stream: Option<i64>,
-        groups: &[oxplow_db::EffortCaptureGroup],
+        window: &Window,
+        groups: &[oxplow_db::CaptureGroup],
     ) -> Option<DeltaInputs> {
         let measure = self
             .facts
@@ -3049,11 +3089,13 @@ impl CollectionService {
         read.sort();
         Some(DeltaInputs {
             key: format!(
-                "{spec:?}|{:?}|{:?}|{:?}|{:?}|{stream:?}|{claimed:?}|{read:?}|{token:?}",
-                effort.started_at,
-                effort.ended_at,
-                effort.start_snapshot_id,
-                effort.end_snapshot_id,
+                "{spec:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{read:?}|{token:?}",
+                window.started_at,
+                window.ended_at,
+                window.start_snapshot_id,
+                window.end_snapshot_id,
+                window.stream,
+                window.files,
             ),
             producers,
         })
@@ -3110,11 +3152,10 @@ impl CollectionService {
     async fn file_delta_from_facts(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
-        claimed: &[String],
-        stream: Option<i64>,
+        window: &Window,
         cache: &mut FileDeltaCache,
     ) -> Option<oxplow_db::EffortMetricDelta> {
+        let (claimed, stream) = (&window.files, window.stream);
         let measure_key = spec.source_measure.as_deref()?;
         let measure = self.facts.get_measure(measure_key).await.ok().flatten()?;
         let filter = spec_fact_filter(spec).ok()?;
@@ -3163,13 +3204,13 @@ impl CollectionService {
         let baseline_cap = all_caps
             .iter()
             .rev()
-            .find(|c| c.captured_at < effort.started_at)
+            .find(|c| c.captured_at < window.started_at)
             .map(|c| c.id);
         let current_cap = all_caps
             .iter()
             .rev()
-            .find(|c| match effort.ended_at {
-                Some(end) => c.captured_at <= end || c.effort_id == Some(effort.id.value()),
+            .find(|c| match window.ended_at {
+                Some(end) => c.captured_at <= end || window.members.holds(c),
                 None => true,
             })
             .map(|c| c.id);
@@ -3367,16 +3408,15 @@ impl CollectionService {
     /// capture (a clean analysis run — tsk44) reads as an explicit 0 point, so
     /// "3 errors → 0" shows in the panel. `None` when the effort has no
     /// captures carrying (or zero-recording) this metric's facts.
-    async fn effort_stamped_delta(
+    async fn stamped_delta(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
+        window: &Window,
         producers: &[String],
-        groups: &[oxplow_db::EffortCaptureGroup],
+        groups: &[oxplow_db::CaptureGroup],
     ) -> Option<oxplow_db::EffortMetricDelta> {
-        let effort_id = effort.id.value();
         // What the effort holds of the producers this spec reads.
-        let held: Vec<&oxplow_db::EffortCaptureGroup> = groups
+        let held: Vec<&oxplow_db::CaptureGroup> = groups
             .iter()
             .filter(|g| producers.contains(&g.producer))
             .collect();
@@ -3387,11 +3427,11 @@ impl CollectionService {
         let max_id = held.iter().map(|g| g.max_id).max().unwrap_or(0);
         if spec.aggregation == "sum" {
             return self
-                .folded_sum_delta(spec, effort, producers, count, max_id)
+                .folded_sum_delta(spec, window, producers, count, max_id)
                 .await;
         }
-        let effort_caps = self.effort_captures_read(effort_id, producers, 0).await?;
-        let (series, samples) = self.stamped_series(spec, &effort_caps).await?;
+        let own = self.captures_read(&window.members, producers, 0).await?;
+        let (series, samples) = self.stamped_series(spec, &own).await?;
         let (first, last) = (series.first()?, series.last()?);
         let latest = Some(last.capture_id);
         let baseline = first.value;
@@ -3417,15 +3457,15 @@ impl CollectionService {
 
     /// The effort's captures of `producers` after `after_id`, counted for
     /// the tests' read tally.
-    async fn effort_captures_read(
+    async fn captures_read(
         &self,
-        effort_id: i64,
+        members: &oxplow_db::Members,
         producers: &[String],
         after_id: i64,
     ) -> Option<Vec<oxplow_db::MetricCapture>> {
         let caps = self
             .facts
-            .effort_captures_after(effort_id, producers.to_vec(), after_id)
+            .captures_after(members.clone(), producers.to_vec(), after_id)
             .await
             .ok()?;
         #[cfg(test)]
@@ -3446,14 +3486,14 @@ impl CollectionService {
     async fn folded_sum_delta(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
+        window: &Window,
         producers: &[String],
         count: i64,
         max_id: i64,
     ) -> Option<oxplow_db::EffortMetricDelta> {
-        let effort_id = effort.id.value();
-        let base = format!("{spec:?}|{:?}|{:?}", effort.started_at, effort.ended_at);
-        let fold_key = (effort_id, spec.key.clone());
+        let members = &window.members;
+        let base = format!("{spec:?}|{:?}|{:?}", window.started_at, window.ended_at);
+        let fold_key = (window.key.clone(), spec.key.clone());
         let prior = self
             .sum_folds
             .lock()
@@ -3463,19 +3503,17 @@ impl CollectionService {
             .cloned();
         let (mut fold, caps) = match prior {
             Some(prior) => {
-                let new = self
-                    .effort_captures_read(effort_id, producers, prior.max_id)
-                    .await?;
+                let new = self.captures_read(members, producers, prior.max_id).await?;
                 if count - new.len() as i64 == prior.count {
                     (prior, new)
                 } else {
                     // A covered capture is gone: start over.
-                    let all = self.effort_captures_read(effort_id, producers, 0).await?;
+                    let all = self.captures_read(members, producers, 0).await?;
                     (SumFold::empty(base), all)
                 }
             }
             None => {
-                let all = self.effort_captures_read(effort_id, producers, 0).await?;
+                let all = self.captures_read(members, producers, 0).await?;
                 (SumFold::empty(base), all)
             }
         };
@@ -3596,10 +3634,10 @@ impl CollectionService {
 
     /// The effort's run captures (tests, coverage, analysis), oldest first —
     /// not the thousands of other reports an open effort holds.
-    async fn run_captures(&self, effort_id: i64) -> Vec<oxplow_db::MetricCapture> {
+    async fn run_captures(&self, members: &oxplow_db::Members) -> Vec<oxplow_db::MetricCapture> {
         let caps = self
             .facts
-            .effort_captures_by_trigger(effort_id, RUN_TRIGGER)
+            .captures_by_trigger(members.clone(), RUN_TRIGGER)
             .await
             .unwrap_or_default();
         #[cfg(test)]
@@ -3619,9 +3657,9 @@ impl CollectionService {
     async fn coverage_delta_for_spec(
         &self,
         spec: &oxplow_db::MetricSpec,
-        effort: &Effort,
+        window: &Window,
     ) -> Option<oxplow_db::EffortMetricDelta> {
-        let mut caps = self.run_captures(effort.id.value()).await;
+        let mut caps = self.run_captures(&window.members).await;
         caps.sort_by(|a, b| a.captured_at.cmp(&b.captured_at).then(a.id.cmp(&b.id)));
         let mut derived: Vec<f64> = Vec::new();
         let mut latest_cap = None;
@@ -3633,10 +3671,7 @@ impl CollectionService {
                 .filter(|env| env["kind"].as_str() == Some("coverage-detail"))
                 .and_then(|env| env.get("payload").cloned());
             if let Some(abs) = payload {
-                if let Ok(Some((pct, _))) = self
-                    .diff_coverage_for_effort(effort, c.snapshot_id, &abs)
-                    .await
-                {
+                if let Ok(Some((pct, _))) = self.diff_coverage(window, c.snapshot_id, &abs).await {
                     derived.push(pct);
                     latest_cap = Some(c.id);
                 }

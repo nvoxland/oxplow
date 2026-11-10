@@ -1,10 +1,12 @@
 //! The `change.analyze` pump consumer (P7.B4): keeps the mutable changes
-//! — a stream's working tree, its open efforts and its ranges headed at
-//! the working tree — analyzed as the stream moves.
+//! — a stream's working tree, its open efforts, its live requests and its
+//! ranges headed at the working tree — analyzed as the stream moves.
 //!
 //! On a `snapshot.taken` that recorded files (not `unchanged`) or a
 //! `vcs.head.moved`, it first lists the changed files of the event's
-//! stream's `working` change and each open effort's change on it (stage
+//! stream's `working` change, each open effort's change on it and each
+//! live request's (a turn of it running there, or ended since the
+//! stream's previous take: [`live_requests`]) (stage
 //! one, [`change_analysis::refresh_files`](crate::change_analysis::refresh_files):
 //! cheap, so the lists are current before anything slow runs), then
 //! recomputes their deep analysis
@@ -85,13 +87,17 @@ fn forces(event: &StoredEvent) -> bool {
 }
 
 /// The paced job of `target`'s deep analysis in `pending_run`: owner
-/// `core`, id `change/working/<stream>`, `change/effort/<effort>` or
-/// `change/range/<stream>/<base>..<head>` (a range of a known stream,
+/// `core`, id `change/working/<stream>`, `change/effort/<effort>`,
+/// `change/request/<stream>/<request>` or `change/range/<stream>/<base>..<head>` (a range of a known stream,
 /// its sides as its stored key spells them).
 pub fn job_id(target: &ChangeTarget) -> Option<String> {
     match target {
         ChangeTarget::Working { stream_id } => Some(format!("change/working/{stream_id}")),
         ChangeTarget::Effort { effort_id } => Some(format!("change/effort/{effort_id}")),
+        ChangeTarget::Request {
+            request_id,
+            stream_id: Some(stream_id),
+        } => Some(format!("change/request/{stream_id}/{request_id}")),
         ChangeTarget::Range {
             stream_id: Some(stream_id),
             base,
@@ -115,6 +121,13 @@ pub fn target_of(job: &str) -> Option<ChangeTarget> {
         "effort" => Some(ChangeTarget::Effort {
             effort_id: id.to_string(),
         }),
+        "request" => {
+            let (stream_id, request_id) = id.split_once('/')?;
+            Some(ChangeTarget::Request {
+                request_id: request_id.to_string(),
+                stream_id: Some(stream_id.to_string()),
+            })
+        }
         "range" => {
             let (stream_id, key) = id.split_once('/')?;
             let (base, head) = key.split_once("..")?;
@@ -367,6 +380,15 @@ impl AsyncEventConsumer for ChangeReactor {
         targets.extend(open.into_iter().map(|e| ChangeTarget::Effort {
             effort_id: e.id.to_string(),
         }));
+        targets.extend(
+            live_requests(&svc, stream, thread)
+                .await?
+                .into_iter()
+                .map(|r| ChangeTarget::Request {
+                    request_id: oxplow_domain::RequestId::new(r).to_string(),
+                    stream_id: Some(stream.to_string()),
+                }),
+        );
         for target in &targets {
             crate::change_analysis::refresh_files(&svc, target.clone())
                 .await
@@ -387,6 +409,53 @@ impl AsyncEventConsumer for ChangeReactor {
         }
         Ok(())
     }
+}
+
+/// The requests a move of `stream` can change: those with a turn on it
+/// still running, or one that ended since the stream's take before the
+/// latest (the latest is the move's own; a request's end take lands just
+/// after its last turn ended). With `thread`, a take its turn made, only
+/// that thread's requests; with none (the person's edits, a head move),
+/// all of them. One that began before the stream's first take has no
+/// change.
+async fn live_requests(
+    svc: &Services,
+    stream: oxplow_domain::StreamId,
+    thread: Option<oxplow_domain::ThreadId>,
+) -> Result<Vec<i64>, DomainError> {
+    let (stream, thread) = (stream.value(), thread.map(|t| t.value()));
+    svc.db
+        .read(move |c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT DISTINCT t.request_id
+                       FROM agent_turn t JOIN threads th ON th.id = t.thread_id
+                      WHERE th.stream_id = ?1 AND t.request_id IS NOT NULL
+                        AND (?2 IS NULL OR t.thread_id = ?2)
+                        AND (t.ended_at IS NULL
+                             OR t.ended_at >= coalesce(
+                                  (SELECT created_at FROM snapshot WHERE stream_id = ?1
+                                    ORDER BY created_at DESC, id DESC LIMIT 1 OFFSET 1), ''))
+                        -- One that began before the stream's first take has
+                        -- nothing to diff from.
+                        AND EXISTS (SELECT 1 FROM snapshot s
+                                     WHERE s.stream_id = ?1
+                                       AND s.created_at <= (
+                                         SELECT min(t2.started_at) FROM agent_turn t2
+                                           JOIN threads th2 ON th2.id = t2.thread_id
+                                          WHERE t2.request_id = t.request_id
+                                            AND th2.stream_id = ?1))
+                      ORDER BY t.request_id",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let ids = stmt
+                .query_map(rusqlite::params![stream, thread], |r| r.get(0))
+                .map_err(oxplow_db::map_sql_err)?
+                .collect::<Result<_, _>>()
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(ids)
+        })
+        .await
 }
 
 /// Analyze `target` now and clear its paced job: this run covers it.
@@ -557,6 +626,57 @@ mod tests {
                 [other.id.value().to_string()]
             ])
         );
+    }
+
+    /// A take refreshes the requests live on its stream: one with a turn
+    /// running there, or one that ended since the stream's previous take
+    /// (its end take). A take one thread's turn made refreshes that
+    /// thread's requests only; a take no thread made refreshes them all. A
+    /// request long finished isn't touched.
+    #[tokio::test]
+    async fn a_take_refreshes_the_requests_live_on_its_stream() {
+        let f = crate::thread_checkpoint::tests::with_baseline().await;
+        f.svc
+            .db
+            .transaction(|c| {
+                c.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                       VALUES (7, 1, 'other',
+                               '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z');
+                     INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 7), (3, 1);
+                     INSERT INTO agent_turn (thread_id, prompt, request_id, started_at, ended_at)
+                       VALUES (1, 'mine', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL),
+                              (7, 'theirs', 2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL),
+                              (1, 'old', 3, '2026-01-01T00:00:00.000000Z',
+                                            '2026-01-01T00:01:00.000000Z');",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let reactor = ChangeReactor::new(Arc::downgrade(&f.svc));
+        let analyzed = || async {
+            let out = f
+                .svc
+                .sql
+                .query_sql(
+                    "SELECT target FROM v_change WHERE kind = 'request' ORDER BY target",
+                    vec![],
+                    None,
+                )
+                .await
+                .unwrap();
+            serde_json::to_value(out.rows).unwrap()
+        };
+        let mut mine = log(&f.svc, taken(false, 1)).await;
+        mine.envelope.anchors.thread_id = Some(f.thread);
+        reactor.handle(&mine).await.unwrap();
+        assert_eq!(analyzed().await, serde_json::json!([["1"]]));
+        reactor
+            .handle(&log(&f.svc, taken(false, 1)).await)
+            .await
+            .unwrap();
+        assert_eq!(analyzed().await, serde_json::json!([["1"], ["2"]]));
     }
 
     /// A move lists the working tree's files first, on their own:
