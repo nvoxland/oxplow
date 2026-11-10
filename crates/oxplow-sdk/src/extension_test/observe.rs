@@ -1087,7 +1087,7 @@ pub(super) async fn observe_evidence(host: &Host, body: &Value) -> Result<(), St
 }
 
 pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String> {
-    use oxplow_app::hook_ingest::{HookEnvelope, LAST_ASSISTANT_MESSAGE};
+    use oxplow_app::hook_ingest::HookEnvelope;
     use oxplow_domain::hook::HookKind;
     for key in body.as_object().into_iter().flat_map(|m| m.keys()) {
         if ![
@@ -1135,6 +1135,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
     let envelope = |kind: HookKind, payload: Value| HookEnvelope {
         session_title: None,
         turn_run: None,
+        reading: Default::default(),
         kind,
         thread_id: Some(thread),
         stream_id: None,
@@ -1292,11 +1293,11 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
     for _ in 0..body.get("compactions").and_then(Value::as_u64).unwrap_or(0) {
         ingest(envelope(HookKind::PostCompact, json!({}))).await?;
     }
-    let mut payload = json!({});
-    if let Some(answer) = body.get("answer") {
-        payload[LAST_ASSISTANT_MESSAGE] = answer.clone();
-    }
-    let mut stop = envelope(HookKind::Stop, payload);
+    let mut stop = envelope(HookKind::Stop, json!({}));
+    stop.reading.final_message = body
+        .get("answer")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     if let Some(context) = body.get("context") {
         stop.turn_run = Some(oxplow_domain::hook::TurnRun {
             context_tokens: context.get("tokens").and_then(Value::as_i64),

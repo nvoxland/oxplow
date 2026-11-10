@@ -165,6 +165,7 @@ mod tests {
         HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(thread),
             stream_id: None,

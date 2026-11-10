@@ -307,6 +307,12 @@ pub trait AgentHarness: Send + Sync {
     fn session_title(&self, _body: &serde_json::Value) -> Option<String> {
         None
     }
+    /// What a hook's body means (its transcript, final message, whether a
+    /// notification waits on the person, a compaction, a session's end):
+    /// what core would otherwise read from the harness's own body keys.
+    fn reading(&self, _body: &serde_json::Value) -> crate::hook::HookReading {
+        crate::hook::HookReading::default()
+    }
     /// The model and effort a `Stop` hook's turn ran on, when its body (or
     /// what it points to) says; a harness that doesn't leaves them unset.
     async fn turn_run(&self, _body: &serde_json::Value) -> Option<TurnRun> {

@@ -146,6 +146,7 @@ impl ServicesChatHost {
         HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
@@ -339,10 +340,7 @@ impl ChatHost for ServicesChatHost {
         };
         // The turn's own counts ride its `agent.turn.ended`; the
         // `token_usage.turns` reactor records them.
-        let mut body = serde_json::json!({
-            "session_id": session_id,
-            crate::hook_ingest::LAST_ASSISTANT_MESSAGE: answer,
-        });
+        let mut body = serde_json::json!({ "session_id": session_id });
         if let Some(t) = tokens {
             body[crate::hook_ingest::TURN_USAGE_KEY] = serde_json::json!({
                 "input": t.input,
@@ -353,6 +351,7 @@ impl ChatHost for ServicesChatHost {
         }
         let mut env = self.envelope(HookKind::Stop, thread, session_id, body, None);
         env.turn_run = run.cloned();
+        env.reading.final_message = answer.map(str::to_string);
         if let Err(err) = svc.hook_ingest.ingest(env).await {
             warn!(?err, "chat: hook ingest failed");
         }
@@ -388,11 +387,9 @@ impl ChatHost for ServicesChatHost {
             SubagentChange::Started => (HookKind::SubagentStart, None),
             SubagentChange::Finished(said) => (HookKind::SubagentStop, said.as_deref()),
         };
-        let mut body = serde_json::json!({ "session_id": session_id, "agent_id": id });
-        if let Some(said) = said {
-            body[crate::hook_ingest::LAST_ASSISTANT_MESSAGE] = serde_json::json!(said);
-        }
+        let body = serde_json::json!({ "session_id": session_id, "agent_id": id });
         let mut env = self.envelope(hook, thread, session_id, body, None);
+        env.reading.final_message = said.map(str::to_string);
         env.subagent = Some(oxplow_domain::agent::tool::Subagent {
             id: id.to_string(),
             kind: kind.map(str::to_string),
@@ -502,6 +499,7 @@ impl ChatHost for ServicesChatHost {
         let env = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Interrupt,
             thread_id: Some(*thread),
             stream_id: self.stream_id,

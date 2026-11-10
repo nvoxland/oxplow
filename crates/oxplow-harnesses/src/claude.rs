@@ -272,6 +272,10 @@ impl AgentHarness for Claude {
             .map_err(|e| HarnessError::Unavailable(format!("reading its transcripts: {e}")))
     }
 
+    fn reading(&self, body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+        super::shared::claude_shaped_reading(body)
+    }
+
     /// A prompt hook names the session's custom title, once it has one.
     fn session_title(&self, body: &serde_json::Value) -> Option<String> {
         body.get("session_title")

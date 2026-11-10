@@ -185,6 +185,10 @@ impl AgentHarness for Opencode {
         })
     }
 
+    fn reading(&self, body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+        super::shared::claude_shaped_reading(body)
+    }
+
     /// A background subagent's result arrives as a synthetic user part,
     /// `<task id="<child session>" state="completed|error">`: it opens a
     /// turn from that subagent, not from the person.

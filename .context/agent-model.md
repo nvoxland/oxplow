@@ -1137,6 +1137,23 @@ one `HookEnvelope` to `HookIngestService::ingest`
 event it doesn't know is acked unread; `PreCompact` only resets the
 session's context baselines, and `PostCompact` is logged (`agent.context.compacted`).
 
+**Core reads no harness body keys.** What a body means the adapter says,
+in the envelope; `AgentHarness::reading` (Claude and opencode share
+`shared::claude_shaped_reading`; the chat host fills it for Codex and ACP;
+a harness that says nothing leaves the default) fills
+`HookEnvelope.reading` (`HookReading`):
+
+| Field | Used for | Claude Code's key |
+|---|---|---|
+| `transcript` | the turn's transcript path, the session's start/end bookkeeping | `transcript_path` |
+| `final_message` | a Stop's `answer`, a SubagentStop's result | `last_assistant_message` |
+| `waits_on_person`, `notice` | a Notification that parks the thread on the person, and its text | `notification_type` (`permission_prompt`, `elicitation_dialog`, `agent_needs_input`), `message` |
+| `compaction` | a SessionStart that is a mid-turn compaction, not a new process | `source: compact` |
+| `end_reason`, `clears_conversation` | a SessionEnd's reason; whether it clears the conversation | `reason`, `reason: clear` |
+
+An external provider harness has no verb for it yet, so reads none of
+these.
+
 **Which agent session a hook came from** (`agent_session_store::resolve_tx`,
 shared with OTLP exports), in order: the session the sender is (the
 bearer's, the ACP host's, the UI's interrupt's; refused with a warning

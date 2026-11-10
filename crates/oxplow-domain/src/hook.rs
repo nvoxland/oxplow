@@ -109,6 +109,30 @@ pub struct AgentTurn {
     pub source: Option<TurnSource>,
 }
 
+/// What a hook's body means, as its harness read it: the harness adapter
+/// says (core reads no harness's body keys). Each part is empty when the
+/// harness said nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HookReading {
+    /// Where the harness keeps the session's transcript.
+    pub transcript: Option<String>,
+    /// A `Stop` / `SubagentStop`'s final message: the agent's own last words.
+    pub final_message: Option<String>,
+    /// A `Notification`: the agent waits on the person (a permission, a
+    /// form, input).
+    pub waits_on_person: bool,
+    /// A `Notification`'s text.
+    pub notice: Option<String>,
+    /// A `SessionStart` that is a context compaction posted mid-turn: the
+    /// same process and turn go on.
+    pub compaction: bool,
+    /// A `SessionEnd`'s reason, as the harness names it.
+    pub end_reason: Option<String>,
+    /// A `SessionEnd` that clears the conversation: the next session starts
+    /// a new one.
+    pub clears_conversation: bool,
+}
+
 /// What a turn ran on and how full its context was, as its harness
 /// reported it with the turn's end. Each part is `None` when the harness
 /// said nothing.
