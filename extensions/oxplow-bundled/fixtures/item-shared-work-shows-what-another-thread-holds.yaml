@@ -7,7 +7,7 @@ given:
   - { command: oxplow.task.create, input: { title: Shared item, assignee: thr1 }, bind: item }
   - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
-  - observe: { snapshot: { files: [{ path: src/shared.rs, hash: a }] } }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: a }] } }
 when: { part: item-shared-work, params: { uri: $item.uri } }
 expect: { loaders: { item_shared_work: { rows: 0 } } }
 steps:
@@ -21,7 +21,7 @@ steps:
             prompt: beta
             tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }]
             during: [{ command: oxplow.task.update, input: { uri: $item.uri, title: Shared item }, as: agent }]
-      - observe: { snapshot: { files: [{ path: src/shared.rs, hash: b }] } }
+      - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: b }] } }
   - when: { part: item-shared-work, params: { uri: $item.uri } }
     expect:
       loaders:

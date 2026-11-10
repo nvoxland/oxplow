@@ -2374,40 +2374,44 @@ mod tests {
                 provider: None,
             })
         };
-        let s0 = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        // The turns are recorded as they happen: each opens, the take
+        // captures its file, it closes. The person's c.rs lands between
+        // the request's two turns.
+        let exec = |sql: &'static str, args: Vec<i64>| {
+            let db = f.svc.db.clone();
+            async move {
+                db.transaction(move |c| {
+                    c.execute(sql, rusqlite::params_from_iter(args.iter()))
+                        .map_err(oxplow_db::map_sql_err)?;
+                    Ok(c.last_insert_rowid())
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let open = "INSERT INTO agent_turn (thread_id, prompt, request_id, started_at)
+                    VALUES (1, 'p', ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
+        let close =
+            "UPDATE agent_turn SET ended_at = (SELECT created_at FROM snapshot WHERE id = ?2)
+                      WHERE id = ?1";
+        let pause = || tokio::time::sleep(std::time::Duration::from_millis(5));
+        let request = exec("INSERT INTO request (thread_id) VALUES (1)", vec![]).await;
+        let _s0 = take("src/a.rs", BEFORE).await.unwrap().unwrap();
+        pause().await;
+        let first = exec(open, vec![request]).await;
+        pause().await;
         let s1 = take("src/a.rs", AFTER).await.unwrap().unwrap();
-        let s2 = take("src/c.rs", "pub fn c() {}\n").await.unwrap().unwrap();
+        exec(close, vec![first, s1]).await;
+        pause().await;
+        let _s2 = take("src/c.rs", "pub fn c() {}\n").await.unwrap().unwrap();
+        pause().await;
+        let second = exec(open, vec![request]).await;
+        pause().await;
         let s3 = take("src/b.rs", "pub fn b() {}\n").await.unwrap().unwrap();
-        let (request, running) = f
-            .svc
-            .db
-            .transaction(move |c| {
-                let storage = |e: rusqlite::Error| oxplow_domain::DomainError::Storage(e.to_string());
-                let request = |c: &rusqlite::Connection| {
-                    c.execute("INSERT INTO request (thread_id) VALUES (1)", [])
-                        .map(|_| c.last_insert_rowid())
-                        .map_err(storage)
-                };
-                // Two turns of one request, each placed on the line by time:
-                // s0 -> s1, then s2 -> s3; the person's c.rs lands between.
-                let turn = |req: i64, from: i64, to: Option<i64>| {
-                    c.execute(
-                        "INSERT INTO agent_turn (thread_id, prompt, request_id, started_at, ended_at)
-                         VALUES (1, 'p', ?1, (SELECT created_at FROM snapshot WHERE id = ?2),
-                                             (SELECT created_at FROM snapshot WHERE id = ?3))",
-                        rusqlite::params![req, from, to],
-                    )
-                    .map_err(storage)
-                };
-                let done = request(c)?;
-                turn(done, s0, Some(s1))?;
-                turn(done, s2, Some(s3))?;
-                let running = request(c)?;
-                turn(running, s3, None)?;
-                Ok((done, running))
-            })
-            .await
-            .unwrap();
+        exec(close, vec![second, s3]).await;
+        let running = exec("INSERT INTO request (thread_id) VALUES (1)", vec![]).await;
+        pause().await;
+        exec(open, vec![running]).await;
 
         let c = ensure_change(
             &f.svc,
