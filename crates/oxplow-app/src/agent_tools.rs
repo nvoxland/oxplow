@@ -239,6 +239,7 @@ mod tests {
                 "oxplow_preview_collector",
                 "oxplow_query_sql",
                 "oxplow_read",
+                "oxplow_request_summary",
                 "oxplow_run_page",
                 "oxplow_run_page_action",
                 "oxplow_search",
@@ -265,6 +266,16 @@ mod tests {
         assert_eq!(work.target, ToolTarget::Page("oxplow/thread-tasks".into()));
         assert!(work.read_only);
         assert!(work.input_schema["properties"]["thread"].is_object());
+        let summary = tools
+            .iter()
+            .find(|t| t.name == "oxplow_request_summary")
+            .unwrap();
+        assert_eq!(
+            summary.target,
+            ToolTarget::Page("oxplow/request-summary".into())
+        );
+        assert!(summary.read_only);
+        assert!(summary.input_schema["properties"]["request"].is_object());
     }
 
     /// With only oxplow-foundation's declarations there is no task tracker

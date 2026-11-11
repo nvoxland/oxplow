@@ -25,7 +25,7 @@ import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { AssistantContext } from "../components/Assistant/assistantApi.js";
-import { parseUri } from "../uri/uri.js";
+import { parseUri, requestUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -289,6 +289,9 @@ export function cellLinkRef(
     }
     case "commit":
       return gitCommitRef(s);
+    case "request":
+      // Its ref opens its Changes page.
+      return requestUri(s);
     case "metric":
       return metricRef(s);
     case "page":

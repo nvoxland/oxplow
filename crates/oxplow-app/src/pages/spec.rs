@@ -770,6 +770,9 @@ pub enum LinkKind {
     Wiki,
     /// A git commit; the value is a sha.
     Commit,
+    /// A request's Changes page; the value is a request id (`v_request.id`,
+    /// or `req<id>`).
+    Request,
     /// A metric's page; the value is a metric key.
     Metric,
     /// Any oxplow page by its tab id (`oxplow:oxplow/task?id=<id>&provider=oxtask`,

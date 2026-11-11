@@ -5,12 +5,13 @@ use super::*;
 ///
 /// - `event: { type, v?, payload, subject?, anchors? }`: an event logged
 ///   and delivered, the extension's effects reacting.
-/// - `commit: { sha, at, subject, files?, .. }`: a commit the indexer read.
+/// - `commit: { sha, at?, subject, files?, .. }`: a commit the indexer read
+///   (a file's `blob` links it to the requests that left the file so).
 /// - `change: { kind?, target, files?, functions? }`: a change's analysis,
 ///   as the change analysis stores it (`kind` is `commit` by default).
 /// - `test_run: { turn, at?, cases?: [{ name, status }], asserted_failed? }`:
 ///   a test run a turn made, as a run recorder writes it.
-/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }` (a `turn_end` take is the latest turn's):
+/// - `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash, blob? }] }` (a `turn_end` take is the latest turn's):
 ///   one take in the stream's snapshot log.
 /// - `diagnostics: { path, language?, items?: [{ severity, message, line?, col?, source?, code? }] }`:
 ///   what a language server reported for a file.
@@ -285,6 +286,16 @@ async fn record_test_run(
             })).collect::<Vec<_>>()
         })]
     };
+    // The counts a run recorder writes beside a report's suites: a run
+    // with cases has its passed and total (a report-less one only what it
+    // asserted).
+    let mut payload = json!({ "command": "cargo test", "failed": failed, "suites": suites });
+    if !cases.is_empty() {
+        let count = |s: &str| cases.iter().filter(|(_, status)| status == s).count() as i64;
+        payload["passed"] = json!(count("passed"));
+        payload["skipped"] = json!(count("skipped"));
+        payload["total"] = json!(cases.len() as i64 + asserted_failed);
+    }
     let facts = &host.svc.fact_store;
     let case = facts
         .get_measure("oxplow.test_case")
@@ -293,6 +304,9 @@ async fn record_test_run(
         .ok_or("no `oxplow.test_case` measure")?;
     let stream = first_stream(host).await?;
     let mut capture = oxplow_db::NewMetricCapture::done(stream.value(), producer, "hook");
+    // A run's trigger, as the recorder stamps it: what a request's analysis
+    // reads its runs by.
+    capture.trigger = Some("on-report".into());
     capture.thread_id = Some(thread);
     capture.turn_id = turn;
     capture.branch = Some(branch.to_string());
@@ -300,7 +314,7 @@ async fn record_test_run(
     capture.detail_json = Some(
         json!({
             "kind": "test-detail",
-            "payload": { "command": "cargo test", "failed": failed, "suites": suites }
+            "payload": payload
         })
         .to_string(),
     );
@@ -871,7 +885,7 @@ pub(super) async fn observe_detail_compaction(host: &Host, body: &Value) -> Resu
         .map_err(|e| e.to_string())
 }
 
-/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
+/// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash, blob? }] }`:
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
 /// when `elapsed_ms` is more than `budget_ms`. A take whose files hash as
@@ -894,6 +908,9 @@ pub(super) async fn take_snapshot(
         None => SnapshotTrigger::Manual,
     };
     let mut rows = Vec::new();
+    // A file's `blob` is the git blob id of its bytes, as a take records
+    // it: what a commit's file is matched with.
+    let mut git_oids = std::collections::HashMap::new();
     for f in body
         .get("files")
         .and_then(Value::as_array)
@@ -901,6 +918,9 @@ pub(super) async fn take_snapshot(
         .flatten()
     {
         let text = |key: &str| f.get(key).and_then(Value::as_str);
+        if let (Some(path), Some(blob)) = (text("path"), text("blob")) {
+            git_oids.insert(path.to_string(), blob.to_string());
+        }
         rows.push(FileSnapshot {
             id: 0,
             stream_id: stream,
@@ -961,19 +981,26 @@ pub(super) async fn take_snapshot(
             contents: false,
             handle: None,
             changed_at: Default::default(),
-            git_oids: Default::default(),
+            git_oids,
         })
         .await
         .map_err(|e| e.to_string())
 }
 
-/// `commit: { sha, at, subject, author?, email?, body?, parents?, files?:
-/// [{ path, status?, additions?, deletions? }] }`: a commit the git indexer
-/// read, stored as it stores one (`SqliteGitStore::upsert_commit`).
+/// `commit: { sha, at?, subject, author?, email?, body?, parents?, files?:
+/// [{ path, status?, additions?, deletions?, blob? }] }`: a commit the git
+/// indexer read, stored as it stores one (`SqliteGitStore::upsert_commit`);
+/// `at` is now when absent. The files that name a `blob` (the git blob id
+/// the commit holds) are linked to the requests whose work left the file so
+/// on the first stream, as the indexer links a commit it indexed
+/// (`commit_request_store::link_commit_tx`).
 pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), String> {
     let text = |key: &str| body.get(key).and_then(Value::as_str);
-    let at = text("at").ok_or("`commit.at` is when it was committed (RFC 3339)")?;
-    let committed = oxplow_domain::Timestamp::parse(at).map_err(|e| format!("`commit.at`: {e}"))?;
+    let committed = match text("at") {
+        Some(at) => oxplow_domain::Timestamp::parse(at).map_err(|e| format!("`commit.at`: {e}"))?,
+        None => oxplow_domain::Timestamp::now(),
+    };
+    let mut blobs: Vec<(String, String)> = Vec::new();
     let mut files = Vec::new();
     for f in body
         .get("files")
@@ -981,6 +1008,12 @@ pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), Stri
         .into_iter()
         .flatten()
     {
+        if let (Some(path), Some(blob)) = (
+            f.get("path").and_then(Value::as_str),
+            f.get("blob").and_then(Value::as_str),
+        ) {
+            blobs.push((path.to_string(), blob.to_string()));
+        }
         files.push(oxplow_db::git_store::GitCommitFileRow {
             path: f
                 .get("path")
@@ -1013,6 +1046,33 @@ pub(super) async fn observe_commit(host: &Host, body: &Value) -> Result<(), Stri
                 .filter_map(|p| p.as_str().map(str::to_string))
                 .collect(),
             files,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    if blobs.is_empty() {
+        return Ok(());
+    }
+    let stream = first_stream(host).await?;
+    let sha = text("sha").unwrap_or_default().to_string();
+    host.svc
+        .db
+        .transaction(move |tx| {
+            let paths: Vec<oxplow_db::commit_request_store::CommitPath<'_>> = blobs
+                .iter()
+                .map(|(path, blob)| oxplow_db::commit_request_store::CommitPath {
+                    path,
+                    blob: Some(blob),
+                })
+                .collect();
+            oxplow_db::commit_request_store::link_commit_tx(
+                tx,
+                stream,
+                &sha,
+                committed,
+                &paths,
+                oxplow_domain::Timestamp::now(),
+            )
+            .map(|_| ())
         })
         .await
         .map_err(|e| e.to_string())

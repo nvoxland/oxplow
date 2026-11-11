@@ -221,7 +221,8 @@ exists for actions and links).
   th.title, 'uri', uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr'
   || th.id))`). An agent reads `agent in <label>`, `extension <label>`.
 - `link: { kind, from? }` makes cells clickable: `page` (any URI: a task's `v_task.uri`, `oxplow:oxplow/commit?sha=…`), `file` (a path;
-  `line: <column>`), `wiki` (a slug), `commit`, `metric`.
+  `line: <column>`), `wiki` (a slug), `commit`, `metric`, `request` (a
+  request's id, `v_request.id`: opens its Changes page).
   `from` names the column holding the id (default: the column itself).
 - `select: <param>`: a click sets that param to the column's value, and
   the page shows the picked row as its selection (master and detail with

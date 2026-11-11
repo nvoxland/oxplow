@@ -126,7 +126,7 @@ pub mod recovery;
 pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
-pub(crate) mod request_analysis;
+pub mod request_analysis;
 pub mod run_context;
 #[cfg(test)]
 mod run_context_tests;

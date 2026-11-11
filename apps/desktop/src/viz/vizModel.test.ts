@@ -137,6 +137,11 @@ describe("cellLinkRef", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
     expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("oxplow:oxplow/wiki?slug=auth-flow");
   });
+  test("a request link opens the request's Changes page from its id", () => {
+    const at = (id: number | string) => cellLinkRef({ kind: "request", from: "id", line: null, base: null, head: null }, "title", [id], ["id"]);
+    expect(at(7)).toBe("oxplow:oxplow/request?id=req7");
+    expect(at("req7")).toBe("oxplow:oxplow/request?id=req7");
+  });
   test("null or missing target gives no link", () => {
     expect(cellLinkRef({ kind: "file", from: "path", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
     expect(cellLinkRef({ kind: "file", from: "nope", line: null, base: null, head: null }, "title", row, cols)).toBeNull();
