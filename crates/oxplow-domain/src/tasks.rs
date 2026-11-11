@@ -239,7 +239,7 @@ pub struct TaskTrackerFeatures {
 #[serde(deny_unknown_fields)]
 pub struct LinkRecord {
     /// What it points at: another item (`oxplow:oxplow/task?id=<id>&provider=<provider>`), or
-    /// any ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/request?id=req12`).
+    /// any ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`).
     pub target: String,
     /// The list's own type (oxplow: `blocks`, `discovered_from`,
     /// `relates_to`, `duplicates`, `supersedes`, `replies_to`, `about`).

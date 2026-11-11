@@ -40,7 +40,7 @@
           "type": "string"
         },
         "target": {
-          "description": "What it points at: another item (`oxplow:oxplow/task?id=<id>&provider=<provider>`), or\nany ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/request?id=req12`).",
+          "description": "What it points at: another item (`oxplow:oxplow/task?id=<id>&provider=<provider>`), or\nany ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`).",
           "type": "string"
         }
       },
