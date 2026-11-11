@@ -916,8 +916,10 @@ Codex's `conn::Connection`, with no view. It:
   TUI's (`prompt` refuses; `guard_tests::nothing_starts_a_codex_turn`
   finds no `"turn/start"` in production code).
 
-**Recorded on 0.166.0 / 0.167.1** (`tests/fixtures/codex/approval.jsonl`,
-`interrupt.jsonl`):
+**Recorded on CLI 0.166.0, daemon 0.166.0 → 0.167.1** (the daemon
+self-updated mid-session; each fixture's header says which it ran on;
+`tests/fixtures/codex/approval.jsonl`, `interrupt.jsonl`, taken on oxplow's
+own Codex home, with no turn before the person's prompt):
 
 - *Approval the TUI answers.* `thread/status/changed` with
   `waitingOnApproval` comes **before** `item/commandExecution/requestApproval`
@@ -1070,8 +1072,8 @@ session slot, bearer or process of oxplow's:
   `message` as the result), once per child whichever item says it first.
   Recorded 2026-10-16 on 0.162.1: a spawn shows only as a
   `subAgentActivity` (no `spawnAgent` collab item); `wait` is a
-  `collabAgentToolCall` with no receivers. Recorded again on 0.166.0 /
-  0.167.1 (`tests/fixtures/codex/subagent.jsonl`): the same — the spawn is
+  `collabAgentToolCall` with no receivers. Recorded again on CLI 0.166.0 /
+  daemon 0.167.1 (`tests/fixtures/codex/subagent.jsonl`): the same — the spawn is
   `subAgentActivity` items only, `wait` names no receiver and has empty
   `agentsStates` although it waited for the child (so it is the parent's
   own call and starts or finishes no child), and the child's thread has no
@@ -1562,7 +1564,7 @@ Recorded in `fixtures/claude/subagent.jsonl` and replayed
 `chat/codex.rs`; `CODEX_FACTS` there is this table and a test keeps the
 two equal; written from the app-server protocol and the recordings in
 `tests/fixtures/codex/`; an approval and an interrupted turn are recorded
-(`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.167.1);
+(`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.166.0);
 a background terminal (`background_terminal.jsonl`) and a spawned child
 (`subagent.jsonl`) are too; a failed turn
 has not been recorded yet, so that row is pinned by synthetic
@@ -1744,7 +1746,7 @@ shows** what it can hear, **sets at launch** what a flag or open request
 takes, and **leaves to the harness** the rest — never answering for the
 person: a prompt or question is answered in the harness's own TUI, which
 is in the tab already ("Key invariant"). The audit behind this table was
-made against Claude Code 2.1.301, Codex 0.167.1 (daemon) / 0.166.0 (CLI)
+made against Claude Code 2.1.301, Codex CLI 0.166.0 (daemon 0.166.0 → 0.167.1)
 and opencode 1.17.4, from their documentation and protocol schema;
 *italic* is available from the harness but not used yet, — is not
 available from outside.
@@ -1975,7 +1977,7 @@ Cross-thread ownership and duplicate work are visibility, not gates
 ### Validated against, and what pins each scenario
 
 The session integration is checked against these versions: **Codex CLI
-0.166.0 / daemon 0.167.1** (the approval, interrupt, background-terminal
+0.166.0 / daemon 0.166.0 → 0.167.1** (the approval, interrupt, background-terminal
 and subagent recordings; older fixtures are 0.162.1 / 0.163), **Claude Code 2.1.322**, **opencode 1.17.4**; the
 recorded fixtures (`crates/oxplow-harnesses/fixtures/{claude,opencode}`,
 `crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`) were taken at

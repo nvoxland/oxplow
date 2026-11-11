@@ -1215,8 +1215,15 @@ mod tests {
         assert_eq!(log.last().unwrap(), "turn ended completed");
         assert_eq!(
             log.iter().filter(|l| *l == "turn started").count(),
-            2,
-            "the unprompted first turn, then the person's"
+            1,
+            "the person's prompt opens the first turn: none starts before it"
+        );
+        let first_turn = log.iter().position(|l| l == "turn started").unwrap();
+        let first_prompt = log.iter().position(|l| l == "user message").unwrap();
+        assert!(first_turn < first_prompt, "the turn opens with the prompt");
+        assert!(
+            log[..first_turn].iter().all(|l| l.starts_with("sent")),
+            "nothing but oxplow's own requests happens before the prompt"
         );
     }
 
@@ -1274,12 +1281,12 @@ mod tests {
     /// The recorded subagent (`subagent.jsonl`): the spawn is only
     /// `subAgentActivity` items (no spawn collab call), the `wait` names no
     /// agent, and the child's thread has no `thread/started`. The child is
-    /// attributed once, to the parent's turn (its `rootTurnId`); its three
+    /// attributed once, to the parent's turn (its `rootTurnId`); its two
     /// calls are the child's; its end finishes it before the wait does.
     #[test]
     fn a_recorded_subagent_is_attributed_to_the_turn_that_spawned_it() {
-        const PARENT: &str = "01a1c87c-b412-7620-b0ab-0faf5bf09350";
-        const KID: &str = "01a1c87d-057d-7dd1-9418-0d4adeabe5c0";
+        const PARENT: &str = "01a1c8a7-8117-7732-80ba-10a4beb4a18d";
+        const KID: &str = "01a1c8a7-f010-7c82-854b-788ad3cd9ac7";
         let text = include_str!("../../tests/fixtures/codex/subagent.jsonl");
         let log = replay(text);
         let from = log
@@ -1291,7 +1298,6 @@ mod tests {
             [
                 format!("subagent started {KID}"),
                 "collab wait InProgress".to_string(),
-                format!("child {KID} Read Completed"),
                 format!("child {KID} Search Completed"),
                 format!("child {KID} Read Completed"),
                 format!("subagent finished {KID}"),
