@@ -329,6 +329,9 @@ export const extensionUri = (name: string): string => resourceUri("oxplow/extens
 export const snapshotUri = (id: string | number): string => resourceUri("oxplow/snapshot", { id });
 /** An agent turn, by its id. */
 export const turnUri = (id: string | number): string => resourceUri("oxplow/turn", { id });
+/** A request, by its id: `req7`, or the bare number (`v_request.id`). */
+export const requestUri = (id: string | number): string =>
+  resourceUri("oxplow/request", { id: /^\d+$/.test(String(id)) ? `req${id}` : id });
 /** A commit, by its sha. */
 export const commitUri = (sha: string): string => resourceUri("oxplow/commit", { sha });
 /** A task, whichever list holds it. */

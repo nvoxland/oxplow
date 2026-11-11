@@ -214,8 +214,11 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      oxplow logs on its own, your effects reacting), `{ observe: { evidence:
      { request, observations: [{ kind, metric_value?, payload? }] } } }` (a
      request's `test-run` and `diff-coverage` evidence) and `{ observe: {
-     commit: { sha, at, subject, files?: [{ path, status?, additions?,
-     deletions? }] } } }` (a commit the git indexer read), `{ observe: {
+     commit: { sha, at?, subject, files?: [{ path, status?, additions?,
+     deletions?, blob? }] } } }` (a commit the git indexer read, `at` now
+     when absent; a file's `blob` is the git blob id it holds, and links the
+     commit to the requests whose turns left the file so — a snapshot row
+     with that `blob` — as `v_commit_request` reads), `{ observe: {
      change: { kind?, target, files?: [{ path, status?, additions?,
      deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
@@ -225,7 +228,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      own to fill), `{ observe: { test_run: { at?, cases?: [{ name,
      status }], asserted_failed? } } }` (a test run: a
      capture with a fact per case) and `{ observe: { snapshot: { trigger?,
-     elapsed_ms?, budget_ms?, files?: [{ path, hash }] } } }` (one take in
+     elapsed_ms?, budget_ms?, files?: [{ path, hash, blob? }] } } }` (one take in
      the stream's snapshot log; its parent is the take before it,
      `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
      col? }] } } }` (what a language server reported for a file),

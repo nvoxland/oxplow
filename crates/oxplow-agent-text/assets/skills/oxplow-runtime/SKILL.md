@@ -19,6 +19,16 @@ finish.
   the person, the rest) and its compactions. A request (`v_request`) is a
   prompt and every turn it caused, with its live state; the tasks it
   worked on are `v_request_task`.
+- **A request at a glance.** `oxplow_request_summary { request: "req3" }`
+  answers "what did this request do": its facts (`v_request`, its thread
+  in `v_thread`), its tasks (`v_request_task` with `v_task`), the files its
+  turns changed (`v_turn_file`, claimed or sole, joined through
+  `v_agent_turn.request_id`), its test runs, diff coverage and static
+  analysis (`v_request_observation`), the metrics it moved
+  (`v_request_metric_delta`) and the commits that hold its files
+  (`v_commit_request` with `v_commit`). Read it before you query those
+  one by one; its Changes page (`oxplow:oxplow/request?id=req3`) shows
+  the diff.
 - **Session history.** In SQL the history of your conversations is
   `v_agent_session` (the slots opened on a thread), `v_agent_session_status`
   (each open session's last status), `v_agent_turn` (each prompt and

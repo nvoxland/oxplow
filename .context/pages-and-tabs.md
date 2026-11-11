@@ -844,7 +844,14 @@ margin; an embed or a slot takes its title from the page it shows):
   pushed view change): an `embed` naming the change's owner when it has one, a `detail` of
   the range, the description, a `list`
   of concurrent work, a `tree` of files and a `table` of extensions,
-  then the `sections` slot.
+  then the `sections` slot. `request-summary` (no `for:`; param
+  `request`, `req3`; the agent's `oxplow_request_summary`) is a request at
+  a glance: a `detail` over `v_request` (its Changes row a `request`
+  link), then tables of its tasks (`v_request_task`, the strongest basis
+  per task), its files (`v_turn_file` claimed or sole, through
+  `v_agent_turn.request_id`), its runs (`v_request_observation`), its
+  metric changes (`v_request_metric_delta`, `changed = 1`) and its commits
+  (`v_commit_request`).
   `task` (`for: oxplow/task`) has the `task.detail` and
   `task.detail.state` replaceables and a `sections` slot.
   `agent-session` (`for: oxplow/agent_session`, pinned) is a `terminal`

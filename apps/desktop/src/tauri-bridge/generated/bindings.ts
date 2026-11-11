@@ -3466,6 +3466,11 @@ export type LinkKind =
 "wiki" |
 /**  A git commit; the value is a sha. */
 "commit" |
+/**
+ *  A request's Changes page; the value is a request id (`v_request.id`,
+ *  or `req<id>`).
+ */
+"request" |
 /**  A metric's page; the value is a metric key. */
 "metric" |
 /**

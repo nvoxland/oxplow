@@ -9833,6 +9833,29 @@ commands:
         );
     }
 
+    /// A column can link to a request's Changes page by the request's id
+    /// (`request`), as `commit` links a sha.
+    #[test]
+    fn a_request_link_names_the_column_holding_its_id() {
+        let (_d, ext) = load_x(
+            &[(
+                "requests",
+                &viz_page(
+                    "",
+                    "SELECT 3 AS id, 'Fix it' AS prompt",
+                    "columns:\n  - { key: prompt, link: { kind: request, from: id } }\n",
+                ),
+            )],
+            "",
+        );
+        let link = node(&ext, "requests").unwrap().columns[0]
+            .link
+            .clone()
+            .unwrap();
+        assert_eq!(link.kind, LinkKind::Request);
+        assert_eq!(link.from.as_deref(), Some("id"));
+    }
+
     /// A page's `label` is what its tab says, `{{param.<name>}}` filled
     /// from its URI: a renderer's names a param of what it renders, any
     /// other page's one of its `params`; a filter (`short`) may shape it.

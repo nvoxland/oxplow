@@ -530,8 +530,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   reads "(none)".
 
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
-  (kinds: `task`, `file`, `wiki`, `commit`, `metric`,
-  `page`, `diff-at`, `compare`). `page` opens any oxplow URI. The pages
+  (kinds: `task`, `file`, `wiki`, `commit`, `metric`, `request`,
+  `page`, `diff-at`, `compare`). `page` opens any oxplow URI. `request`
+  takes a request's id (`v_request.id`, or `req<id>`) and opens its
+  Changes page, so a column of ids (`v_request_metric_delta.request_id`)
+  links without building the URI in SQL (`viz/vizModel.ts` `cellLinkRef`). The pages
   a column's links open are the page's **origin**
   (`viz/linkOrigin.ts`, `.context/pages-and-tabs.md` "Origins"): Up and
   Down step through the rows that have one.

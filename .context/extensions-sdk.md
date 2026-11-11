@@ -238,8 +238,9 @@ check already reported is not repeated.
   that activation held back is the report's first lines (this
   extension's an error, another's a warning). `start_runtime` then starts
   what examples need — the effect and collector triggers (each example
-  delivers its event with `EventPump::settle`) and the job scheduler —
-  and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
+  delivers its event with `EventPump::settle`), the `request_analysis`
+  asset (so `v_request_observation` and `v_request_metric_delta` fill
+  before a read, as at boot) and the job scheduler — and binds every AI role to the **fixture model** (`oxplow_ai::fixture`,
   a host-registered kind no activation replaces): an example's `dataset: {
   replies }` is what it answers, in turn. No paid call, no provider.
   It runs `check`, then every intent example with a fixture (every
