@@ -730,7 +730,11 @@ What a query read is what it subscribes to.
   extensions contribute (`extensionsStore`, the launcher, what pages
   answer) reload on it, on `configChanged`, and on a daemon reconnect (a
   change while it was unreachable sent nothing). A burst of commits
-  coalesces into one re-run (100 ms).
+  coalesces into one re-run (100 ms). A change heard while a run is in
+  flight is remembered as what changed (`MissedChanges`: each dataset's and
+  measure's latest time), never as the events: every host hears every
+  event, and a list of a boot's burst, copied per event, once spun the
+  window's thread for most of an hour.
 
 ## Assets (P7.B1)
 
