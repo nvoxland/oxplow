@@ -163,6 +163,20 @@ fn collect_helpers(builder: &mut starlark::environment::GlobalsBuilder) {
         };
         Ok(crate::helpers::md_text(&text, limit as usize))
     }
+    /// The 32 lower-case hex digits of `text`'s UTF-8 bytes' xxh3-128: the
+    /// identity oxplow keys a blob by, so a snapshots script can report a
+    /// file's. Pure.
+    fn xxh3_128(text: &str) -> anyhow::Result<String> {
+        Ok(format!(
+            "{:032x}",
+            xxhash_rust::xxh3::xxh3_128(text.as_bytes())
+        ))
+    }
+    /// `text`'s size in UTF-8 bytes (`len` counts characters): the size of
+    /// the file the text was read from. Pure.
+    fn utf8_len(text: &str) -> anyhow::Result<u32> {
+        Ok(u32::try_from(text.len()).unwrap_or(u32::MAX))
+    }
     fn lines<'v>(
         content: &str,
         heap: starlark::values::Heap<'v>,
@@ -998,6 +1012,20 @@ impl From<TestReportJson> for TestReport {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// `xxh3_128(text)` is the 32 lower-case hex digits oxplow keys a blob
+    /// by (`BlobStore::hash`) of the text's UTF-8 bytes: what a snapshots
+    /// script reports as a file's identity. `utf8_len` is the size in those
+    /// bytes (a string's `len` counts characters).
+    #[test]
+    fn xxh3_128_and_utf8_len_name_a_text_as_the_blob_store_does() {
+        let script = "def f(x):\n    return [xxh3_128(\"abc\"), xxh3_128(\"é\"), xxh3_128(\"\"), utf8_len(\"é\"), len(\"é\")]\n";
+        let hex = |bytes: &[u8]| format!("{:032x}", xxhash_rust::xxh3::xxh3_128(bytes));
+        assert_eq!(
+            run_starlark_fn(script, "f", &json!({})).unwrap(),
+            json!([hex(b"abc"), hex("é".as_bytes()), hex(b""), 2, 1])
+        );
+    }
 
     /// A script may define several functions the host calls by name (an
     /// AI provider's `request` and `response`); the check names what's

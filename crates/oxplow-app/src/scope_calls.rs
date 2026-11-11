@@ -72,6 +72,19 @@ pub fn check_command_need(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// A capability implementation's need `id` (a script `implementations:`
+/// entry): a composing script's ([`check_script_need`]), which may read the
+/// stream's worktree (`tree.read`, bare or a path) and — the only script
+/// that may — write its own extension's private state (`state.write`).
+/// A verb runs on its own, outside any command's transaction, so reading a
+/// tree holds no database; its writes are its extension's own namespace's.
+pub fn check_implementation_need(id: &str) -> Result<(), String> {
+    if oxplow_domain::service::need_scope(id) == "state.write" {
+        return Ok(());
+    }
+    check_script_need(id)
+}
+
 /// The most rows one `sql.read` answers. A result over this cap is
 /// refused: the row-only answer cannot represent truncation.
 pub const SQL_READ_ROW_CAP: usize = 1_000;
@@ -84,6 +97,14 @@ pub type StateReader<'a> = dyn FnMut(
         crate::extension::extension_state::ReadInput,
     ) -> Result<
         Option<oxplow_domain::extension_state::Snapshot>,
+        crate::extension::extension_state::StateHostError,
+    > + 'a;
+
+/// How `state.write` is answered: the namespace's new snapshot, or why not.
+pub type StateWriter<'a> = dyn FnMut(
+        crate::extension::extension_state::WriteInput,
+    ) -> Result<
+        oxplow_domain::extension_state::Snapshot,
         crate::extension::extension_state::StateHostError,
     > + 'a;
 
@@ -137,6 +158,8 @@ pub struct Calls<'a> {
     run: &'a RunContext,
     read: Box<Reader<'a>>,
     state: Option<Box<StateReader<'a>>>,
+    /// Only a capability implementation's script is given one.
+    state_write: Option<Box<StateWriter<'a>>>,
     configuration: Option<Box<ConfigurationReader<'a>>>,
     jobs: Option<Box<JobReader<'a>>>,
     ai: Option<Box<AiReader<'a>>>,
@@ -154,6 +177,7 @@ impl<'a> Calls<'a> {
             run,
             read,
             state: None,
+            state_write: None,
             configuration: None,
             jobs: None,
             ai: None,
@@ -167,6 +191,31 @@ impl<'a> Calls<'a> {
     pub fn with_state_reader(mut self, state: Box<StateReader<'a>>) -> Self {
         self.state = Some(state);
         self
+    }
+
+    /// Answer `state.write` with `write`: the one place a script changes
+    /// state, given to a capability implementation's verbs alone.
+    pub fn with_state_writer(mut self, write: Box<StateWriter<'a>>) -> Self {
+        self.state_write = Some(write);
+        self
+    }
+
+    /// `state.write` over `source`: the owner's namespace, in a transaction
+    /// of its own, awaited on `runtime`.
+    pub fn with_state_write_source(
+        self,
+        source: Option<crate::extension::extension_state::StateSource>,
+        runtime: &tokio::runtime::Handle,
+    ) -> Self {
+        match source {
+            Some(source) => {
+                let (run, runtime) = (self.run.clone(), runtime.clone());
+                self.with_state_writer(Box::new(move |input| {
+                    runtime.block_on(source.write(run.clone(), input))
+                }))
+            }
+            None => self,
+        }
     }
 
     /// A script outside a database transaction reads a fresh owned snapshot for
@@ -314,6 +363,17 @@ impl<'a> Calls<'a> {
             crate::extension::extension_configuration::ReadInput::deserialize(&args)
                 .map_err(|_| "`extension_config.read` takes {}".to_string())?;
         }
+        let write_input = if id == "state.write" {
+            Some(
+                crate::extension::extension_state::WriteInput::deserialize(&args).map_err(|_| {
+                    "`state.write` takes { scope: project|personal, area: state|cache, expected: \
+                     the read's stamp or null, schema_version, values }"
+                        .to_string()
+                })?,
+            )
+        } else {
+            None
+        };
         let job_input = if id == "jobs.read" {
             Some(
                 serde_json::from_value::<crate::extension::extension_jobs::JobInput>(args.clone())
@@ -349,6 +409,7 @@ impl<'a> Calls<'a> {
             "sql.read" => self.sql_read(args),
             "extension_config.read" => self.configuration_read(),
             "state.read" => self.state_read(state_input.expect("parsed state request")),
+            "state.write" => self.state_write(write_input.expect("parsed state write")),
             "jobs.read" => self
                 .jobs
                 .as_mut()
@@ -399,6 +460,35 @@ impl<'a> Calls<'a> {
                 Err(message)
             }
             Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// The new stamp, as the native `state.write` operation answers it.
+    fn state_write(
+        &mut self,
+        input: crate::extension::extension_state::WriteInput,
+    ) -> Result<Value, String> {
+        let writer = self
+            .state_write
+            .as_mut()
+            .ok_or("`state.write` isn't available where this script runs")?;
+        match writer(input) {
+            Ok(snapshot) => serde_json::to_value(snapshot.stamp)
+                .map_err(|_| "extension state stamp could not be encoded".into()),
+            Err(crate::extension::extension_state::StateHostError::State(
+                oxplow_domain::extension_state::StateError::Storage(DomainError::Busy(message)),
+            )) => {
+                self.busy = Some(message.clone());
+                Err(message)
+            }
+            Err(crate::extension::extension_state::StateHostError::State(
+                oxplow_domain::extension_state::StateError::Conflict { .. },
+            )) => Err(
+                "`state.write`: the state changed since it was read; read its stamp again \
+                       and retry"
+                    .into(),
+            ),
+            Err(error) => Err(format!("`state.write`: {error}")),
         }
     }
 
@@ -523,6 +613,30 @@ impl<'a> Calls<'a> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// An implementation's script may read the stream's worktree
+    /// (`tree.read`, bare or a path) and write its own private state
+    /// (`state.write`); a command's script may do neither, and neither may
+    /// call what no script can.
+    #[test]
+    fn an_implementation_may_read_the_tree_and_write_its_state_a_command_may_not() {
+        for need in [
+            "tree.read",
+            "tree.read:src/",
+            "state.write",
+            "state.read",
+            "sql.read",
+        ] {
+            assert_eq!(check_implementation_need(need), Ok(()), "{need}");
+        }
+        let refused = check_implementation_need("threads.write").unwrap_err();
+        assert!(refused.contains("a scope a script can't use"), "{refused}");
+        let tree = check_command_need("tree.read").unwrap_err();
+        assert!(tree.contains("`tree.read` can't be used here"), "{tree}");
+        let write = check_command_need("state.write").unwrap_err();
+        assert!(write.contains("`state.write`"), "{write}");
+        assert!(check_script_need("state.write").is_err());
+    }
 
     fn needs(n: &[&str]) -> Vec<String> {
         n.iter().map(|s| s.to_string()).collect()

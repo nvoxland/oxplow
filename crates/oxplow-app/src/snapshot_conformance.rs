@@ -312,7 +312,7 @@ impl Ctx<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -325,7 +325,7 @@ mod tests {
 
     /// The fixture's stream with a capture service whose settle gate is
     /// off and whose predrain wait is `predrain`.
-    fn stream_of(f: &ThreadFixture, predrain: Duration) -> StreamId {
+    pub(crate) fn stream_of(f: &ThreadFixture, predrain: Duration) -> StreamId {
         let stream = StreamId::new(1);
         let svc = Arc::new(
             SnapshotCaptureService::new(
@@ -345,7 +345,7 @@ mod tests {
     }
 
     /// `id` as the project's snapshot implementation, its switch applied.
-    async fn choose(f: &ThreadFixture, id: &str) {
+    pub(crate) async fn choose(f: &ThreadFixture, id: &str) {
         f.svc
             .config
             .write()

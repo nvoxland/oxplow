@@ -1532,6 +1532,7 @@ impl Services {
                 global_dir: machine.config_dir.clone(),
                 events: event_bus.clone(),
                 capabilities: capabilities.clone(),
+                captures: snapshot_captures.clone(),
             },
             &commands,
             vec![

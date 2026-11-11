@@ -2777,7 +2777,7 @@
           "default": null
         },
         "needs": {
-          "description": "The scopes a script implementation calls (`sql.read`): only what a\ncommand's script can (`scope_calls::check_command_need`).",
+          "description": "The scopes a script implementation calls (`sql.read`): what a\ncomposing script can, and the tree (`tree.read`) and its own private\nstate (`state.write`) too (`scope_calls::check_implementation_need`).",
           "type": "array",
           "items": {
             "type": "string"
