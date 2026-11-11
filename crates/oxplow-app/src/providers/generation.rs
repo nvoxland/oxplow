@@ -88,6 +88,7 @@ impl PreparedProviderGeneration {
                     .as_ref()
                     .map(|capability| capability.kinds().clone())
                     .unwrap_or_default(),
+                offered: true,
                 id_pattern: staged.instance.spec.id_pattern.clone(),
                 icon: None,
                 config: serde_json::json!({}),
@@ -206,7 +207,11 @@ impl ProviderRegistry {
         let base = self.running.lock().await.clone();
         let mut staged = Vec::new();
         let mut ids = BTreeSet::new();
-        let declared = crate::capabilities::declared_by(snapshot.extensions());
+        // Only the ids matter here (a conflict is one, offered or not).
+        let declared = crate::capabilities::declared_by(
+            snapshot.extensions(),
+            &crate::capabilities::Settings::new(),
+        );
 
         // One instance that can't run never holds back the others: it is
         // left out and its state says why (the way the instance's

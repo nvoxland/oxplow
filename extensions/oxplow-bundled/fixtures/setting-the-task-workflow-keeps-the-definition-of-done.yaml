@@ -6,11 +6,11 @@
 given:
   # A review-policy setting of the project's own, which the workflow write
   # must keep.
-  - command: oxplow.review_policy.write
+  - command: oxplow.settings.write
     input: { schema_version: 2, project: { expected: null, values: { struggle: { repeatedEdits: 9 } } }, personal: null }
   - { command: oxplow.tasks.set_workflow, input: { workflow: person_files, definition_of_done: "Tests pass.\nCommitted." } }
   - { command: oxplow.tasks.set_workflow, input: { workflow: off } }
-when: { command: oxplow.review_policy.read, input: {} }
+when: { command: oxplow.settings.read, input: {} }
 expect:
   ok: true
   result: { values: { struggle: { repeatedEdits: 9 }, tasks: { workflow: "off", definitionOfDone: "Tests pass.\nCommitted." } } }
@@ -22,7 +22,7 @@ steps:
     expect: { ok: false }
   # A person's own workflow still wins for them: the project's write says so.
   - given:
-      - command: oxplow.review_policy.write
+      - command: oxplow.settings.write
         input: { schema_version: 2, personal: { expected: null, values: { tasks: { workflow: agent_tracks } } } }
   - when: { command: oxplow.tasks.set_workflow, input: { workflow: person_files } }
     expect:

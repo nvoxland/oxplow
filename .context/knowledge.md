@@ -145,6 +145,17 @@ appears** (`OxwikiPresence`, set by the publication that declares it:
 boot's, or turning it back on). While oxwiki is off its files are left
 alone.
 
+## Turning oxwiki off
+
+oxwiki is on by default. foundation's setting `oxwiki` (Settings, or
+`oxplow.knowledge.set_oxwiki { on }`) turns it off: it stays declared and
+listed (`v_capability_provider` `active = 0`, `chosen_by = 'setting'`), but
+no store runs, its pages are hidden, its watch ignores its folder, `resync`
+is refused and a bare `[[slug]]` names a store that isn't enabled. On
+again, the publication declares it again and its watch rescans the folder.
+(`.context/extensions-manifest.md` "An implementation offered by a
+setting".)
+
 ## Hidden, not deleted
 
 The record keeps every store's pages. `v_knowledge_page` joins the enabled

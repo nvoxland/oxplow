@@ -23,6 +23,7 @@ pub fn implementations() -> Vec<Implementation> {
         fields: Value::Array(Vec::new()),
         stages: Value::Array(Vec::new()),
         kinds: serde_json::Value::Array(Vec::new()),
+        offered: true,
         id_pattern: None,
         icon: None,
         config: json!({}),

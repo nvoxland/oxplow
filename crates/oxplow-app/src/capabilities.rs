@@ -325,6 +325,9 @@ pub struct Implementation {
     /// of `KindDecl`, its `data.kinds`); `[]`: `note` for a knowledge store,
     /// nothing for any other.
     pub kinds: Value,
+    /// Whether a setting offers it now (`when:` in its declaration; true
+    /// without one). One that isn't is declared but off: listed, never used.
+    pub offered: bool,
     /// What its items' own ids look like (a task tracker's), when it says.
     pub id_pattern: Option<String>,
     /// Its logo as a data URI, when its declaration has an `icon:`.
@@ -384,6 +387,7 @@ impl Implementation {
             fields: Value::Array(Vec::new()),
             stages: Value::Array(Vec::new()),
             kinds: Value::Array(Vec::new()),
+            offered: true,
             // Nothing in text is none's: it keeps no items.
             id_pattern: None,
             icon: None,
@@ -653,6 +657,7 @@ impl CapabilityRegistry {
                         fields: built_in_fields(b),
                         stages: built_in_stages(b),
                         kinds: serde_json::Value::Array(Vec::new()),
+                        offered: true,
                         id_pattern: b.id_pattern.map(str::to_string),
                         icon: None,
                         config: Value::Object(Default::default()),
@@ -702,8 +707,9 @@ impl CapabilityRegistry {
         &self,
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
+        settings: &Settings,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
-        self.prepare_candidate(snapshot, config, None)
+        self.prepare_candidate(snapshot, config, None, settings)
     }
 
     /// Prepare declarations and selections using a host-staged external
@@ -713,8 +719,9 @@ impl CapabilityRegistry {
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
         external: Vec<Implementation>,
+        settings: &Settings,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
-        self.prepare_candidate(snapshot, config, Some(external))
+        self.prepare_candidate(snapshot, config, Some(external), settings)
     }
 
     fn prepare_candidate(
@@ -722,6 +729,7 @@ impl CapabilityRegistry {
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
         external: Option<Vec<Implementation>>,
+        settings: &Settings,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
         let errors: crate::vocabulary_reactor::VocabularyErrors = snapshot
             .extensions()
@@ -782,7 +790,7 @@ impl CapabilityRegistry {
         if let Some(external) = external {
             candidate.external = external;
         }
-        candidate.declared = declared_by(snapshot.extensions());
+        candidate.declared = declared_by(snapshot.extensions(), settings);
         candidate.published_config = Some(Arc::new(config.clone()));
         candidate.revision = Arc::new(());
         let all = candidate.implementations();
@@ -897,9 +905,10 @@ impl CapabilityRegistry {
         } else {
             (spec.default.to_string(), ChosenBy::Default)
         };
+        // One a setting turned off isn't there to choose.
         if all
             .iter()
-            .any(|i| i.capability == capability && i.id == wanted)
+            .any(|i| i.offered && i.capability == capability && i.id == wanted)
         {
             return Resolved {
                 id: wanted,
@@ -1002,7 +1011,7 @@ impl CapabilityRegistry {
     ) -> crate::vocabulary_reactor::Recognizers {
         let mut knowledge_stores: Vec<String> = all
             .iter()
-            .filter(|i| i.capability == crate::knowledge::CAPABILITY)
+            .filter(|i| i.offered && i.capability == crate::knowledge::CAPABILITY)
             .map(|i| i.id.clone())
             .collect();
         knowledge_stores.sort();
@@ -1088,9 +1097,12 @@ impl CapabilityRegistry {
         for spec in capability::CAPABILITIES {
             let resolved = Self::resolve_from(all, config, spec.id);
             for i in all.iter().filter(|i| i.capability == spec.id) {
-                // Many serve at once: every declared one is active.
-                let active = spec.many || i.id == resolved.id;
-                let chosen_by = if spec.many {
+                // Many serve at once: every declared one is active — but one
+                // a setting turned off (`when:`) is listed, off, saying so.
+                let active = i.offered && (spec.many || i.id == resolved.id);
+                let chosen_by = if !i.offered {
+                    Some("setting".to_string())
+                } else if spec.many {
                     Some("declared".to_string())
                 } else {
                     active.then(|| resolved.chosen_by.as_str().to_string())
@@ -1191,39 +1203,64 @@ fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<Capa
         .collect()
 }
 
-/// The implementations `extensions` declare, as the registry holds them.
-pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Vec<Implementation> {
+/// Each namespace's effective configuration, for the implementations a
+/// setting offers (`when:`): [`offering_implementations`]. One missing
+/// offers nothing (it fails closed, as every read of a setting does).
+pub type Settings = std::collections::BTreeMap<String, Value>;
+
+/// The implementations `extensions` declare, as the registry holds them,
+/// each offered as `settings` say.
+pub fn declared_by(
+    extensions: &[crate::extension::extensions::Extension],
+    settings: &Settings,
+) -> Vec<Implementation> {
     extensions
         .iter()
         .filter(|e| e.enabled)
         .flat_map(|e| {
             e.implementations.iter().filter_map(|d| {
-                if let Some(kind) = &d.provider {
-                    return provider_implementation(e, d, kind);
-                }
-                if let Some(script) = &d.script {
-                    return Some(script_implementation(e, d, script));
-                }
-                let b = built_in(d.entry.as_deref()?)?;
-                let features = built_in_features(b);
-                Some(Implementation {
-                    capability: d.capability.clone(),
-                    id: d.id.clone(),
-                    title: d.title.clone().unwrap_or_else(|| b.title.to_string()),
-                    extension: Some(e.name.clone()),
-                    source: Source::BuiltIn(b.entry),
-                    features,
-                    fields: built_in_fields(b),
-                    stages: built_in_stages(b),
-                    kinds: serde_json::Value::Array(Vec::new()),
-                    id_pattern: b.id_pattern.map(str::to_string),
-                    icon: d.icon.clone(),
-                    config: d.config.clone(),
-                    description: d.description.clone(),
+                let offered = d.when.as_ref().is_none_or(|when| {
+                    settings
+                        .get(&e.namespace)
+                        .is_some_and(|values| when.holds(values))
+                });
+                declared(e, d).map(|mut i| {
+                    i.offered = offered;
+                    i
                 })
             })
         })
         .collect()
+}
+
+/// What `d` declares, offered.
+fn declared(
+    e: &crate::extension::extensions::Extension,
+    d: &crate::extension::extensions::implementations::ImplementationDecl,
+) -> Option<Implementation> {
+    if let Some(kind) = &d.provider {
+        return provider_implementation(e, d, kind);
+    }
+    if let Some(script) = &d.script {
+        return Some(script_implementation(e, d, script));
+    }
+    let b = built_in(d.entry.as_deref()?)?;
+    Some(Implementation {
+        capability: d.capability.clone(),
+        id: d.id.clone(),
+        title: d.title.clone().unwrap_or_else(|| b.title.to_string()),
+        extension: Some(e.name.clone()),
+        source: Source::BuiltIn(b.entry),
+        features: built_in_features(b),
+        fields: built_in_fields(b),
+        stages: built_in_stages(b),
+        kinds: serde_json::Value::Array(Vec::new()),
+        offered: true,
+        id_pattern: b.id_pattern.map(str::to_string),
+        icon: d.icon.clone(),
+        config: d.config.clone(),
+        description: d.description.clone(),
+    })
 }
 
 /// A script implementation, as the registry holds it: what it declares of
@@ -1258,6 +1295,7 @@ fn script_implementation(
             .find(|c| c.capability == d.capability)
             .and_then(|c| c.data.get("kinds").cloned())
             .unwrap_or_default(),
+        offered: true,
         id_pattern: script.spec.id_pattern.clone(),
         icon: d.icon.clone(),
         config: d.config.clone(),
@@ -1283,6 +1321,7 @@ fn provider_implementation(
         fields: serde_json::Value::Array(Vec::new()),
         stages: serde_json::Value::Array(Vec::new()),
         kinds: serde_json::Value::Array(Vec::new()),
+        offered: true,
         id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
@@ -1309,6 +1348,49 @@ pub async fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::Ag
         &settings,
         |path, file| crate::extension::extensions::read_extension_file(project_dir, path, file),
     )
+}
+
+/// The effective configuration of each namespace among `extensions` with an
+/// implementation a setting offers (`when:`), as stored now: what one
+/// publication's preparation reads once, so every reader of the declared
+/// implementations ([`declared_by`]) sees the same answer. One that can't be
+/// read is left out, so what it offers isn't (it fails closed).
+pub(crate) async fn offering_implementations(
+    svc: &crate::Services,
+    extensions: &[crate::extension::extensions::Extension],
+) -> Settings {
+    let wanted: Vec<(
+        String,
+        crate::extension::extensions::config_schema::ConfigurationFile,
+    )> = extensions
+        .iter()
+        .filter(|e| e.enabled && e.implementations.iter().any(|i| i.when.is_some()))
+        .filter_map(|e| Some((e.namespace.clone(), e.configuration.clone()?)))
+        .collect();
+    if wanted.is_empty() {
+        return Settings::new();
+    }
+    svc.db
+        .read(move |conn| {
+            Ok(wanted
+                .into_iter()
+                .filter_map(|(namespace, declaration)| {
+                    match crate::extension::extension_configuration::effective_values(
+                        conn,
+                        &namespace,
+                        &declaration,
+                    ) {
+                        Ok(values) => Some((namespace, values)),
+                        Err(error) => {
+                            tracing::warn!(%namespace, %error, "its settings can't be read; the implementations they offer are off");
+                            None
+                        }
+                    }
+                })
+                .collect())
+        })
+        .await
+        .unwrap_or_default()
 }
 
 /// The effective configuration of each namespace among `extensions` with a
@@ -1502,6 +1584,7 @@ mod tests {
             fields: serde_json::Value::Array(Vec::new()),
             stages: serde_json::Value::Array(Vec::new()),
             kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
@@ -1609,6 +1692,7 @@ mod tests {
             fields: serde_json::Value::Array(Vec::new()),
             stages: serde_json::Value::Array(Vec::new()),
             kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
@@ -1940,6 +2024,7 @@ mod tests {
                 fields: serde_json::Value::Array(Vec::new()),
                 stages: serde_json::Value::Array(Vec::new()),
                 kinds: serde_json::Value::Array(Vec::new()),
+                offered: true,
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
@@ -1978,6 +2063,7 @@ mod tests {
                 fields: serde_json::Value::Array(Vec::new()),
                 stages: serde_json::Value::Array(Vec::new()),
                 kinds: serde_json::Value::Array(Vec::new()),
+                offered: true,
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),

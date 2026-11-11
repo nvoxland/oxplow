@@ -1910,8 +1910,13 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
-            let (declared, errors) =
-                implementations::parse_implementations(v, man, &manifest, &|rel| files.read(rel));
+            let (declared, errors) = implementations::parse_implementations(
+                v,
+                man,
+                &manifest,
+                &|rel| files.read(rel),
+                ext.configuration.as_ref(),
+            );
             // An implementation owns the skills it lists: they must be its
             // extension's.
             for d in &declared {
@@ -6525,10 +6530,20 @@ commands:
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
         assert!(foundation.warnings.is_empty(), "{:?}", foundation.warnings);
         assert_eq!(foundation.namespace, "oxplow");
-        assert!(foundation.commands.iter().all(|c| matches!(
-            c.handler,
-            crate::extension::extension_commands::CommandHandler::Scope { .. }
-        )));
+        // Foundation's commands are core's ops, but for the one script that
+        // composes a settings write (oxwiki on or off).
+        let scripts: Vec<&str> = foundation
+            .commands
+            .iter()
+            .filter(|c| {
+                !matches!(
+                    c.handler,
+                    crate::extension::extension_commands::CommandHandler::Scope { .. }
+                )
+            })
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(scripts, ["oxplow.knowledge.set_oxwiki"]);
         // The agent harnesses and AI providers core runs are
         // foundation's declarations — many of each, all active.
         let declared = |capability: &str| {
@@ -6564,8 +6579,6 @@ commands:
         assert_eq!(
             commands,
             [
-                "oxplow.review_policy.read",
-                "oxplow.review_policy.write",
                 "oxplow.tasks.set_workflow",
                 "oxplow.tasks.clear_finished",
                 "oxplow.task.new"

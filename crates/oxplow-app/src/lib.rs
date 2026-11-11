@@ -1283,6 +1283,7 @@ impl Services {
                     fields: serde_json::Value::Array(Vec::new()),
                     stages: serde_json::Value::Array(Vec::new()),
                     kinds: serde_json::Value::Array(Vec::new()),
+                    offered: true,
                     id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),
@@ -2305,6 +2306,8 @@ mod tests {
                 // calls per input.
                 // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
+                // A settings write for the project, its stamps read first.
+                "oxplow.knowledge.set_oxwiki",
                 "oxplow.tasks.clear_finished",
                 "oxplow.tasks.set_workflow",
             ]

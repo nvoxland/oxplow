@@ -129,6 +129,7 @@ mod tests {
             fields: serde_json::json!([]),
             stages: serde_json::json!([]),
             kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
             id_pattern: None,
             icon: None,
             config: serde_json::json!({}),

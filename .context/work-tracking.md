@@ -237,7 +237,8 @@ or operational limits, not a view of what good work is:
 so the constants are settings, not forks. oxplow-bundled has `changeInterest.*`
 (weights and the long-function cut-off), `coChange.*` (pair threshold,
 window, per-commit file cap, dormant days) and `struggle.*`, set with
-`oxplow.review_policy.write`. The holder (`extensions-bundled.md`) has
+`oxplow.settings.write` (foundation's, over the `oxplow` namespace's one
+configuration). The holder (`extensions-bundled.md`) has
 `largeUncommitted.files` and `sharedFiles.windowMinutes`, set with
 `oxplow.advisory_policy.write`. All default to today's values. A metric's `target` / `warnAt` / `failAt` stay
 tunable from `project.yaml`.

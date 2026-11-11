@@ -68,7 +68,13 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 oxplow-foundation holds the data of the task tracker and knowledge: their
 datasets, the `task` and `knowledge` resources, the `oxplow:oxwiki`
-implementation, the bus commands (with no `ui:`), skills and metrics. It has
+implementation and its setting (`configuration: oxwiki`, default on; turned
+off by `oxplow.knowledge.set_oxwiki`, a script composing a settings write),
+the bus commands (with no `ui:`), skills and metrics. oxplow's own
+extensions share the namespace `oxplow`, so they share one configuration
+(at one `version`) and one pair of commands over it, foundation's
+`oxplow.settings.read` / `.write`; bundled's task workflow writes through
+them too. It has
 no page that a person uses to read or edit them. The task tracker's
 commands (`oxplow.task.*`) and the generic `tasks` skill (`needs:
 [task_tracker]`) are foundation's, serving any tracker; **oxtask itself is

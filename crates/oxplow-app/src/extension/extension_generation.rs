@@ -51,6 +51,9 @@ pub enum ConfigReader {
     Datasets,
     /// A skill is offered by a setting (`when:`).
     Skills,
+    /// An implementation is offered by a setting (`when:`): the capability
+    /// rows and the running adapters follow it.
+    Implementations,
 }
 
 /// What of `extension` reads its own configuration into what is
@@ -69,9 +72,11 @@ pub fn configuration_readers(
         .iter()
         .any(|dataset| datasets::config_reads(&dataset.sql).is_ok_and(|reads| !reads.is_empty()));
     let skills = extension.skills.iter().any(|skill| skill.when.is_some());
+    let implementations = extension.implementations.iter().any(|i| i.when.is_some());
     [
         (datasets, ConfigReader::Datasets),
         (skills, ConfigReader::Skills),
+        (implementations, ConfigReader::Implementations),
     ]
     .into_iter()
     .filter_map(|(reads, reader)| reads.then_some(reader))

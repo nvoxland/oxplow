@@ -974,9 +974,13 @@ impl ExtensionActivation {
             .stage(snapshot)
             .await
             .map_err(TxError::Aborted)?;
+        // What a setting offers (`when:` on an implementation), read once
+        // for this publication: the adapters and the capability rows agree.
+        let offered =
+            crate::capabilities::offering_implementations(svc, snapshot.extensions()).await;
         let adapters =
             crate::extension::extension_runtime_adapters::PreparedRuntimeAdapters::prepare(
-                svc, snapshot,
+                svc, snapshot, &offered,
             )
             .map_err(TxError::Aborted)?;
         let bundle_root = svc.layout.project_dir.clone();
@@ -1002,7 +1006,7 @@ impl ExtensionActivation {
             .map_err(TxError::Aborted)?;
         let capabilities = svc
             .capabilities
-            .prepare_with_external(snapshot, &config, providers.implementations())
+            .prepare_with_external(snapshot, &config, providers.implementations(), &offered)
             .map_err(TxError::Aborted)?;
         let database =
             crate::extension::extension_generation::PreparedExtensionDatabase::prepare_with_capabilities(
