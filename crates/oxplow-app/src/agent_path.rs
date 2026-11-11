@@ -142,8 +142,8 @@ pub fn augmented_path() -> Option<String> {
 /// would point its agents' hooks at the wrong oxplow. Oxplow sets its own
 /// identity for an agent after these are removed (`OXPLOW_*` ride the
 /// agent's command). Each harness adds its own session markers
-/// (`AgentHarness::env_markers`). `OXPLOW_HOOK_DEBUG` is the person's hook
-/// recording: an agent's own oxplow (its test runs) would append to it.
+/// (`AgentHarness::env_markers`). `OXPLOW_HOOK_DEBUG` and `OXPLOW_CODEX_DEBUG` are the person's
+/// recordings: an agent's own oxplow (its test runs) would append to them.
 /// `TERM_SESSION_ID` is the window of the terminal oxplow was started
 /// from: every terminal oxplow opens would share it, and macOS zsh restores
 /// that one window's session into each of them. [`base_pty_env`] names
@@ -156,6 +156,8 @@ pub const NOT_INHERITED: &[&str] = &[
     "OXPLOW_SESSION",
     "OXPLOW_BIN",
     "OXPLOW_HOOK_DEBUG",
+    "OXPLOW_CODEX_DEBUG",
+    "OXPLOW_OPENCODE_RAW",
     "TERM_SESSION_ID",
 ];
 
@@ -220,6 +222,8 @@ mod tests {
             // The person's hook recording: an agent's own test runs would
             // append their hooks to it.
             "OXPLOW_HOOK_DEBUG",
+            "OXPLOW_CODEX_DEBUG",
+            "OXPLOW_OPENCODE_RAW",
             // The terminal oxplow was started from: a shell that thinks it
             // is that terminal's window restores that window's session.
             "TERM_SESSION_ID",

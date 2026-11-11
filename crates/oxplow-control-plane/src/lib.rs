@@ -256,17 +256,24 @@ fn otlp_debug_dump(principal: &Principal, body: &[u8]) {
 /// before depending on them. No-op when unset; best-effort, like
 /// [`otlp_debug_dump`].
 fn hook_debug_dump(event: &str, thread: Option<&str>, body: &[u8]) {
-    let Ok(path) = std::env::var("OXPLOW_HOOK_DEBUG") else {
+    dump_to(
+        std::env::var("OXPLOW_HOOK_DEBUG").ok().as_deref(),
+        event,
+        thread,
+        body,
+    );
+}
+
+/// Append the entry to `path` when there is one (unset or empty: nothing).
+fn dump_to(path: Option<&str>, event: &str, thread: Option<&str>, body: &[u8]) {
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
         return;
     };
-    if path.is_empty() {
-        return;
-    }
     use std::io::Write;
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
     {
         let _ = f.write_all(hook_debug_entry(event, thread, body).as_bytes());
     }
@@ -307,6 +314,10 @@ fn otlp_ok() -> Response {
 /// the call site anyway.
 const HOOK_HANDLING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// The "event" of an opencode bridge post that is a raw recording line, not
+/// a hook (`assets/opencode-hooks.js`).
+const RAW_OPENCODE: &str = "opencode.raw";
+
 async fn handle_hook(
     State(ctx): State<AppCtx>,
     Extension(principal): Extension<Principal>,
@@ -314,6 +325,18 @@ async fn handle_hook(
     body: axum::body::Bytes,
 ) -> Response {
     let event_name = event.clone();
+    // opencode's raw events and hook inputs, posted by its bridge while
+    // `OXPLOW_HOOK_DEBUG` is set: appended to that file as their own lines
+    // and nothing else. Unset, they are acked and dropped.
+    if event == RAW_OPENCODE {
+        hook_debug_dump(&event, Some(&principal.thread.to_string()), &body);
+        return respond(
+            &ctx.services.harnesses,
+            Some(&principal.harness),
+            &HookAnswer::Ack,
+        )
+        .await;
+    }
     // A timed-out hook gets its harness's ack.
     let ack = respond(
         &ctx.services.harnesses,
@@ -791,6 +814,43 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(raw.trim_end()).unwrap();
         assert_eq!(v["payload"], "not json");
         assert!(v["thread"].is_null());
+    }
+
+    /// opencode's raw lines land in the recording as their own entries,
+    /// between the translated hooks, in order; without a file nothing is
+    /// written.
+    #[test]
+    fn raw_opencode_lines_are_recorded_only_with_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("hooks.jsonl");
+        let path = file.to_str().unwrap();
+        dump_to(
+            Some(path),
+            "UserPromptSubmit",
+            Some("thr3"),
+            br#"{"prompt":"hi"}"#,
+        );
+        dump_to(
+            Some(path),
+            RAW_OPENCODE,
+            Some("thr3"),
+            br#"{"kind":"event","type":"session.idle","event":{"type":"session.idle"}}"#,
+        );
+        dump_to(Some(path), "Stop", Some("thr3"), br#"{"session_id":"s"}"#);
+        let lines: Vec<serde_json::Value> = std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let events: Vec<&str> = lines.iter().map(|l| l["event"].as_str().unwrap()).collect();
+        assert_eq!(events, ["UserPromptSubmit", "opencode.raw", "Stop"]);
+        assert_eq!(lines[1]["payload"]["type"], "session.idle");
+
+        let off = dir.path().join("off.jsonl");
+        dump_to(None, RAW_OPENCODE, None, b"{}");
+        dump_to(Some(""), RAW_OPENCODE, None, b"{}");
+        assert!(!off.exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     fn auth(value: &'static str) -> HeaderMap {
