@@ -26,14 +26,19 @@ loaders:
     sql: |
       WITH res AS (
         SELECT uri_resource(:uri) AS kind, uri_param(:uri, 'id') AS id
+      ), rq_id AS (
+        SELECT CAST(substr(res.id, 4) AS INTEGER) AS id FROM res WHERE res.kind = 'oxplow/request'
       ), rq AS (
         -- A request on the snapshot line of the stream of its first turn.
-        SELECT CAST(substr(res.id, 4) AS INTEGER) AS id, th.stream_id AS stream_id,
+        -- Its turns are found from its id (the request index); joined to
+        -- `res` instead, next to the turn arm below the plan walked every
+        -- turn, each scanning every turn for its request's first.
+        SELECT r.id AS id, th.stream_id AS stream_id,
                min(t.started_at) AS began, max(t.ended_at) AS ended, max(t.ended_at IS NULL) AS running
-        FROM res, v_agent_turn t JOIN v_thread th ON th.id = t.thread_id
-        WHERE res.kind = 'oxplow/request' AND t.request_id = CAST(substr(res.id, 4) AS INTEGER)
+        FROM rq_id r CROSS JOIN v_agent_turn t JOIN v_thread th ON th.id = t.thread_id
+        WHERE t.request_id = r.id
           AND th.stream_id = (SELECT th2.stream_id FROM v_agent_turn t2 JOIN v_thread th2 ON th2.id = t2.thread_id
-                               WHERE t2.request_id = t.request_id ORDER BY t2.id LIMIT 1)
+                               WHERE t2.request_id = r.id ORDER BY t2.id LIMIT 1)
         GROUP BY th.stream_id
       ), derived AS (
         -- A turn: from the last take at or before it started to its own
@@ -62,9 +67,12 @@ loaders:
                     ELSE coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
                                     WHERE p.stream_id = rq.stream_id
                                       AND (p.created_at <= rq.ended
-                                           OR p.id IN (SELECT o.snapshot_id FROM v_snapshot_op o
-                                                         JOIN v_agent_turn tt ON tt.id = o.turn_id
-                                                        WHERE o.trigger = 'turn_end' AND tt.request_id = rq.id))
+                                           -- From its turns out: from the ops in, it
+                                           -- read every take's op and its turn.
+                                           OR p.id IN (SELECT o.snapshot_id FROM v_agent_turn tt
+                                                         CROSS JOIN v_snapshot_op o
+                                                        WHERE tt.request_id = rq.id AND o.turn_id = tt.id
+                                                          AND o.trigger = 'turn_end'))
                                     ORDER BY p.created_at DESC, p.id DESC LIMIT 1), 'working') END
         FROM rq
         UNION ALL

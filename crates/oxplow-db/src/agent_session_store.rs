@@ -397,6 +397,18 @@ pub fn set_fork_next_tx(
     Ok(())
 }
 
+/// The newest conversation binding's id (0 with none): it moves whenever a
+/// slot is bound to a conversation (started, resumed, forked or chosen),
+/// so a kept list of the harnesses' conversations knows to read again.
+pub fn newest_binding_tx(conn: &Connection) -> Result<i64, DomainError> {
+    conn.query_row(
+        "SELECT coalesce(max(id), 0) FROM agent_session_binding",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(map_sql_err)
+}
+
 /// The open slot, other than `except`, bound to `native_id` on `host`
 /// (`None` = local): one conversation can't run in two slots.
 pub fn bound_elsewhere_tx(

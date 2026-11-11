@@ -602,7 +602,14 @@ rows are read when a query names the dataset.
   none; a dataset read once inside a parenthesised `SELECT`, a CTE body or
   a subquery, is narrowed by that `SELECT`'s own conditions),
   the read gets the value and returns only those rows; anything else reads
-  them all, which is always correct. `v_file` narrows by
+  them all, which is always correct. So a page that joins a narrowed
+  dataset pins it in a subquery's own `WHERE`, never in the join's `ON`:
+  `LEFT JOIN (SELECT ahead, behind FROM v_branch_divergence WHERE base =
+  :base AND head = :branch) d ON …` compares one pair; `LEFT JOIN
+  v_branch_divergence d ON d.base = :base AND d.head = :branch` compares
+  every branch with every other, ~30× slower (branch-status, 2026-11-11). A
+  per-row value (`head = s.branch`) is a column, not a value: it narrows
+  nothing. `v_file` narrows by
   `filesystem`, `rev` and `parent`: `filesystem` and `rev` pick what is
   listed (a filesystem's own revision vocabulary; an empty `rev` is its
   default), `WHERE parent = :path` is one `read_dir`, not a walk. It lists
