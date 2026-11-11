@@ -557,3 +557,36 @@ async fn a_recorded_opencode_api_error_ends_one_turn_as_errored() {
     );
     assert_eq!(events_of(&r, "agent.turn.ended").await.len(), 1);
 }
+
+/// opencode's question tool, recorded: the tool hook and the question
+/// events both report it (two PreToolUse and two PostToolUse), but it is
+/// one tool call, one `ask` and one wait on the person that ends with the
+/// answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_question_is_one_tool_call_and_one_wait() {
+    let r = replayed("opencode/question.jsonl", "opencode").await;
+    assert_eq!(tools_of(&r).await, ["AskUserQuestion"]);
+    assert_eq!(events_of(&r, "agent.tool.requested").await.len(), 1);
+    let waits: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .into_iter()
+        .filter(|p| p["state"] == "awaiting_user")
+        .collect();
+    assert_eq!(waits.len(), 1, "{waits:#?}");
+    assert!(waits[0]["detail"]
+        .as_str()
+        .is_some_and(|d| d.contains("Which function would you like to add to calc.py?")));
+    let states: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .iter()
+        .map(|p| p["state"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some("idle"),
+        "{states:?}"
+    );
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].1, "completed");
+}

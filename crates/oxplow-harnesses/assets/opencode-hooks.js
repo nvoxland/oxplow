@@ -35,14 +35,18 @@
 ///                          (`MessageAbortedError`) or an error, and the
 ///                          children still running at the Stop ride it as
 ///                          `background_tasks`
-///   event permission.asked / question.asked
-///                       -> Notification (a permission prompt, naming it) /
-///                          PreToolUse of an `AskUserQuestion` call (the
-///                          first question): the agent waits on the person.
-///   event permission.replied / question.replied|rejected
-///                       -> PostToolUse  (names no tool, or the Ask call:
-///                          the wait is over). Only forwarded: the person
-///                          answers in opencode's own UI, never here.
+///   tool `question`    -> posted as `AskUserQuestion`: the agent waits on
+///                          the person from its PreToolUse to its PostToolUse.
+///                          The question events post nothing, but a rejected
+///                          question (its tool throws, so no `.after`)
+///                          ends the call with a PostToolUse.
+///   event permission.asked
+///                       -> Notification (a permission prompt, naming it):
+///                          the agent waits on the person.
+///   event permission.replied
+///                       -> PostToolUse  (names no tool: the wait is over).
+///                          Only forwarded: the person answers in
+///                          opencode's own UI, never here.
 ///
 /// Recording (`OXPLOW_OPENCODE_RAW`, set by oxplow on the launch only while
 /// `OXPLOW_HOOK_DEBUG` is set): every plugin hook input/output and every
@@ -95,6 +99,9 @@ export const OxplowHooks = async ({ client }) => {
     todowrite: "TodoWrite",
     todoread: "TodoRead",
     webfetch: "WebFetch",
+    // The agent asks the person: Claude's name for it, so the call is an
+    // ask and waits from its start to its end.
+    question: "AskUserQuestion",
   };
   const toolName = (tool) => TOOL_NAMES[tool] || tool;
 
@@ -144,6 +151,8 @@ export const OxplowHooks = async ({ client }) => {
   const toolStarts = new Map();
   const children = new Map();
   const errors = new Map();
+  // The tool call each pending question (by its request id) was asked by.
+  const askedCalls = new Map();
 
   // A child session ended: its parent's SubagentStop, once.
   async function stopChild(childID, error) {
@@ -283,28 +292,38 @@ export const OxplowHooks = async ({ client }) => {
         });
         return;
       }
+      // A question is its tool call: the tool hooks carry its start, its
+      // wait and its answer, so the question events add nothing to them
+      // (both reported it, and it counted twice). They only name the
+      // call a rejection ends: a rejected question's tool throws, so its
+      // `tool.execute.after` never comes.
       if (event.type === "question.asked") {
-        await post("PreToolUse", {
-          ...(await whose(props.sessionID)),
-          // The tool call that asked, when it names one, so the two pair.
-          tool_use_id: props.tool?.callID || props.id,
-          tool_name: "AskUserQuestion",
-          tool_input: { questions: props.questions || [] },
-        });
+        if (props.id && props.tool?.callID) {
+          askedCalls.set(props.id, { sessionID: props.sessionID, callID: props.tool.callID });
+        }
         return;
       }
       if (event.type === "permission.replied") {
         await post("PostToolUse", await whose(props.sessionID));
         return;
       }
-      if (event.type === "question.replied" || event.type === "question.rejected") {
-        await post("PostToolUse", {
-          ...(await whose(props.sessionID)),
-          tool_use_id: props.requestID,
-          tool_name: "AskUserQuestion",
-          tool_input: {},
-          tool_response: {},
-        });
+      if (event.type === "question.replied") {
+        askedCalls.delete(props.requestID);
+        return;
+      }
+      if (event.type === "question.rejected") {
+        const asked = askedCalls.get(props.requestID);
+        askedCalls.delete(props.requestID);
+        if (asked) {
+          toolStarts.delete(asked.callID);
+          await post("PostToolUse", {
+            ...(await whose(asked.sessionID)),
+            tool_use_id: asked.callID,
+            tool_name: "AskUserQuestion",
+            tool_input: {},
+            tool_response: { rejected: true },
+          });
+        }
         return;
       }
       if (event.type === "session.created") {

@@ -1473,6 +1473,22 @@ test keeps the two equal; recorded with 1.17.4: the fixtures under
 | What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
 | A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
 
+**A question is one tool call.** Recorded (`question.jsonl`): the
+`question` tool's `tool.execute.before`, then `question.asked` (with
+`tool.callID`, the same call, and its own `que_…` request id), then, after
+the person answers, `question.replied` and `tool.execute.after`. The
+bridge used to post the call twice (a PreToolUse and PostToolUse named
+`question` from the tool hooks, another pair named `AskUserQuestion`
+from the events, the Post under the request id), which core recorded as two
+finished calls. Now the tool is posted as `AskUserQuestion` and the
+question events post nothing; only `question.rejected` posts a
+PostToolUse for the asking call (its tool throws, so no
+`tool.execute.after` follows; not recorded, read from the source). The
+`question.jsonl` fixture is the recorded hooks with the events' duplicates
+removed and the tool renamed; `its_bridge_reports_an_answered_question_as_one_call`
+feeds the recording's raw inputs to the bridge and gets exactly those
+hooks.
+
 **One abort or error gives two idles.** Recorded (`abort.jsonl`,
 `error.jsonl`): `session.error` comes right before the first
 `session.idle`, so the first Stop carries the error (`MessageAbortedError`
@@ -1702,7 +1718,7 @@ available from outside.
 | | Claude Code | Codex | opencode |
 |---|---|---|---|
 | Waiting on a permission | `Notification` `permission_prompt` / `agent_needs_input`, and the `PermissionRequest` hook (observed, answered `Ack`) → AwaitingUser | `thread/status/changed` `activeFlags` `waitingOnApproval` → AwaitingUser, the request's command or reason as detail; cleared by the flags or `serverRequest/resolved` | the bridge forwards `permission.asked` (a `Notification`) and `permission.replied` |
-| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | `question.asked` (an Ask `PreToolUse`); a `?`-ending Stop |
+| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | the `question` tool, posted as `AskUserQuestion` (its PreToolUse to its PostToolUse); a `?`-ending Stop |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
@@ -1940,6 +1956,7 @@ equivalence between tools.
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
 | Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| opencode question | recorded `opencode/question.jsonl`: `a_recorded_opencode_question_is_one_tool_call_and_one_wait`; the bridge: `its_bridge_reports_an_answered_question_as_one_call`, `its_bridge_reports_a_wait_on_a_permission_or_a_question` |
 | opencode abort and API error | recorded `opencode/abort.jsonl`, `opencode/error.jsonl`: `a_recorded_opencode_abort_ends_one_turn_as_interrupted`, `a_recorded_opencode_api_error_ends_one_turn_as_errored` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
 | Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |
@@ -2010,8 +2027,9 @@ Codex's observer logs it from `thread/status/changed` active flags
 (`waitingOnApproval`, `waitingOnUserInput`; the detail is the request's
 command, reason or first question) and clears it on the cleared flags or
 `serverRequest/resolved`. opencode's bridge forwards `permission.asked`
-(a `Notification`) and `question.asked` (an Ask `PreToolUse`); the
-`*.replied` events become a tool-less `PostToolUse` that clears the wait.
+(a `Notification`; `permission.replied` becomes a tool-less `PostToolUse`
+that clears the wait). Its `question` tool is posted as `AskUserQuestion`,
+so the wait runs from the call's PreToolUse to its PostToolUse.
 ACP permission cards log it through `set_status`.
 
 **`permission_prompts`** means: oxplow learns when the agent waits on a
