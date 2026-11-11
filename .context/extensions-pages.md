@@ -312,8 +312,13 @@ loader says so. Do filtering and `LIMIT` in SQL.
 **Open runs** (`pages/open_runs.rs`): a window's open page keeps its run
 and the request that made it. A change to a dataset one of its loaders read
 (a command loader's `reads`), or to a param it binds (`head_sha` reads
-`v_stream`), re-runs the loaders that depend on it (`dirty_loaders`).
-`OxplowEvent::PageRunChanged` names the loaders whose rows differ (an
+`v_stream`), re-runs the loaders that depend on it (`dirty_loaders`);
+the rest keep their rows (`unreached`). A `page:` loader reads what its
+loader's chain on the other page read, not only the temp tables that
+loader selects from (`runner::chain_reads`): the Branch part borrows
+`branch-status`'s `facts`, which reads `v_branch_divergence` only through
+`status` and `marks`, and kept its old marks after a Merge out until
+this was so. `OxplowEvent::PageRunChanged` names the loaders whose rows differ (an
 embedded page's as `<embed id>/<loader>`), and the window fetches only
 those. A catalog change (a deploy) re-runs every open run
 (`page_runs.notify_everything()`).

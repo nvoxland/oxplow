@@ -394,6 +394,15 @@ view:
 "#,
     ),
     (
+        "borrows-after",
+        r#"
+title: Borrows after
+loaders:
+  borrowed: { page: acme/mixed, loader: after }
+view: { viz: table, from: borrowed }
+"#,
+    ),
+    (
         "related",
         r#"
 title: Related

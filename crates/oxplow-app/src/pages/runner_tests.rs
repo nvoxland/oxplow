@@ -281,6 +281,24 @@ async fn a_change_dirties_what_reads_it_and_what_follows() {
     );
 }
 
+/// A page loader reads what its loader's chain on the other page read: a
+/// borrowed loader over a temp table still follows the dataset behind it,
+/// so an open run re-runs it (a worktree's Branch part borrows
+/// `branch-status`'s `facts`, which reads `v_branch_divergence` through
+/// `status` and `marks`).
+#[tokio::test]
+async fn a_page_loader_follows_what_its_borrowed_chain_read() {
+    let (_dir, svc) = fixture().await;
+    let r = run(&svc, "acme/borrows-after", &[]).await;
+    assert_eq!(r.loaders["borrowed"].error, None);
+    let none: [String; 0] = [];
+    assert_eq!(
+        dirty_loaders(&r.page, &r, &["v_dataset".to_string()], &none),
+        ["borrowed"]
+    );
+    assert!(unreached(&r, &["v_dataset".to_string()], &none).is_empty());
+}
+
 #[tokio::test]
 async fn a_query_binds_an_earlier_loaders_column_by_name() {
     let (_dir, svc) = fixture().await;
