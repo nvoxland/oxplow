@@ -686,6 +686,39 @@ console.log(JSON.stringify(posts));
         assert_eq!(posts[0]["payload"]["session_id"], "ses1");
     }
 
+    /// `session.compacted` names only the session; what started the
+    /// compaction is the `compaction` part opencode adds to the session
+    /// just before (`auto: false` for `/compact`). The bridge puts it on the
+    /// PostCompact as `trigger`, once; a compaction with no such part names
+    /// none.
+    #[test]
+    fn its_bridge_names_what_triggered_a_compaction() {
+        let part = |auto: bool| {
+            format!(
+                r#"await ev("message.part.updated", {{ sessionID: "ses1", part: {{ id: "prt_1", sessionID: "ses1", messageID: "msg_1", type: "compaction", auto: {auto} }}, time: 1 }});"#
+            )
+        };
+        let run = bridge_run(&format!(
+            r#"
+{manual}
+await ev("session.compacted", {{ sessionID: "ses1" }});
+{auto}
+await ev("session.compacted", {{ sessionID: "ses1" }});
+await ev("session.compacted", {{ sessionID: "ses1" }});
+"#,
+            manual = part(false),
+            auto = part(true),
+        ));
+        let triggers: Vec<_> = run
+            .iter()
+            .map(|p| {
+                assert_eq!(p["event"], "PostCompact");
+                p["payload"].get("trigger").cloned()
+            })
+            .collect();
+        assert_eq!(triggers, [Some("manual".into()), Some("auto".into()), None]);
+    }
+
     /// A Stop's model and variant are the turn's model and effort, and its
     /// message's tokens (input, cache reads and writes) the context fill.
     /// The bridge cannot say the window.

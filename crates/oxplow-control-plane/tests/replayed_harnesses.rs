@@ -676,3 +676,31 @@ async fn a_recorded_opencode_background_subagent_hands_back_without_a_prompt() {
     assert_eq!(jobs[0].0, child);
     assert_eq!(resume_of(&r).await, "ses_e37903460ffegmpoSj2OY79zTd");
 }
+
+/// opencode's `/compact`, recorded: it posts no prompt, so no turn of the
+/// person's opens; the one turn (the earlier prompt) ends at its Stop; the
+/// compaction is recorded once, as a manual one, and the Stop after it
+/// (the summary message's idle) opens and ends no turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_compaction_is_recorded_and_opens_no_turn() {
+    let r = replayed("opencode/compaction.jsonl", "opencode").await;
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].0.as_deref(), Some("person"));
+    assert_eq!(turns[0].1, "completed");
+    assert_eq!(events_of(&r, "agent.prompt.submitted").await.len(), 1);
+    let compacted = events_of(&r, "agent.context.compacted").await;
+    assert_eq!(compacted.len(), 1, "{compacted:#?}");
+    assert_eq!(compacted[0]["trigger"], "manual");
+    assert_eq!(tools_of(&r).await, ["Read", "Read"]);
+    let states: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .iter()
+        .map(|p| p["state"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some("idle"),
+        "{states:?}"
+    );
+}

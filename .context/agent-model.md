@@ -1473,6 +1473,18 @@ test keeps the two equal; recorded with 1.17.4: the fixtures under
 | What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
 | A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
 
+**Compaction, recorded.** `/compact` posts no `chat.message`, so no
+prompt and no turn of the person's. opencode adds a `compaction` part
+(`auto: false` for `/compact`, `true` when it compacts by itself) in a
+`message.part.updated`, the summary streams as text of an assistant
+message (`mode: compaction`), then `session.compacted` carries only the
+`sessionID`, then `session.idle`. The bridge remembers the part's `auto` per
+session and posts it on the PostCompact as `trigger` (`manual` / `auto`;
+none when no part came first); core records one `agent.context.compacted`
+with it. The `session.idle` after it is a Stop with no open turn whose
+last message is the summary: it changes nothing but re-marks the thread
+idle. (`auto: true` is read from the schema, not recorded.)
+
 **Subagents, recorded.** A foreground `task` call: PreToolUse Task,
 `session.created` of the child (SubagentStart), the child's tools posted
 as the parent's session with the child's `agent_id` (the bridge asks the
@@ -1973,6 +1985,7 @@ equivalence between tools.
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
 | Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| opencode compaction | recorded `opencode/compaction.jsonl`: `a_recorded_opencode_compaction_is_recorded_and_opens_no_turn`; the bridge: `its_bridge_names_what_triggered_a_compaction` |
 | opencode subagents | recorded `opencode/foreground_subagent.jsonl`, `opencode/background_subagent.jsonl`: `a_recorded_opencode_foreground_subagent_is_attributed`, `a_recorded_opencode_background_subagent_hands_back_without_a_prompt` |
 | opencode question | recorded `opencode/question.jsonl`: `a_recorded_opencode_question_is_one_tool_call_and_one_wait`; the bridge: `its_bridge_reports_an_answered_question_as_one_call`, `its_bridge_reports_a_wait_on_a_permission_or_a_question` |
 | opencode abort and API error | recorded `opencode/abort.jsonl`, `opencode/error.jsonl`: `a_recorded_opencode_abort_ends_one_turn_as_interrupted`, `a_recorded_opencode_api_error_ends_one_turn_as_errored` |

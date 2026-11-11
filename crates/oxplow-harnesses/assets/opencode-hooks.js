@@ -25,7 +25,8 @@
 ///                          `model` / `variant` / `tokens`)
 ///   event session.compacted
 ///                       -> PostCompact  (the session's context was
-///                          summarized)
+///                          summarized; `trigger` `manual` / `auto`, from
+///                          the `compaction` part that began it)
 ///   event session.created (a child, `info.parentID`)
 ///                       -> SubagentStart (the parent's, `agent_id` the child)
 ///   event session.idle / session.error of a child
@@ -153,6 +154,8 @@ export const OxplowHooks = async ({ client }) => {
   const errors = new Map();
   // The tool call each pending question (by its request id) was asked by.
   const askedCalls = new Map();
+  // What started the compaction a session is in ("manual" | "auto").
+  const compactions = new Map();
 
   // A child session ended: its parent's SubagentStop, once.
   async function stopChild(childID, error) {
@@ -349,8 +352,23 @@ export const OxplowHooks = async ({ client }) => {
         if (props.error) errors.set(sessionID, props.error);
         return;
       }
+      // `session.compacted` names only the session; what started the
+      // compaction is the `compaction` part opencode adds just before
+      // (`auto: false` for the person's /compact).
+      if (event.type === "message.part.updated") {
+        const part = props.part;
+        if (part?.type === "compaction" && props.sessionID) {
+          compactions.set(props.sessionID, part.auto ? "auto" : "manual");
+        }
+        return;
+      }
       if (event.type === "session.compacted") {
-        await post("PostCompact", await whose(props.sessionID));
+        const trigger = compactions.get(props.sessionID);
+        compactions.delete(props.sessionID);
+        await post("PostCompact", {
+          ...(await whose(props.sessionID)),
+          ...(trigger ? { trigger } : {}),
+        });
         return;
       }
       if (event.type !== "session.idle") return;
