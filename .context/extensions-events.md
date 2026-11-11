@@ -28,7 +28,7 @@ An extension sees an event as one shape, `EventView`
   routine the pump uses too), so a script is written against one shape
   and older rows still reach it. A type the running vocabulary doesn't
   know (its extension is gone) passes as logged.
-- **Anchors in JSON are typed ids:** `"thr3"`, `"str1"`, `"eff9"`,
+- **Anchors in JSON are typed ids:** `"thr3"`, `"str1"`, `"req9"`,
   `"ses2"`; `turn_id` and `snapshot_id` are integers. A SQL input binds
   them as integers (`:thread_id`), because they're join keys.
 - **A fixture's event is built the same way** (`EventView::fixture`):

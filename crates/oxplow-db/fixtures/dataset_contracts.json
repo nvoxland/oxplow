@@ -26115,6 +26115,36 @@
         }
       ],
       "key": []
+    },
+    "5": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/thread?id=thr<n>`: what a hit opens."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The thread's title."
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "doc": "Its sessions' names."
+        },
+        {
+          "name": "stream_id",
+          "type": "TEXT",
+          "doc": "Its stream (`str1`)."
+        },
+        {
+          "name": "version",
+          "type": "TEXT",
+          "doc": "The newest of the thread's change and its sessions' changes."
+        }
+      ],
+      "key": []
     }
   },
   "search_turn": {

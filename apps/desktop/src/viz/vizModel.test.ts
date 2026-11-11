@@ -290,7 +290,7 @@ describe("chart data", () => {
 test("numericRowId strips a UI id prefix", () => {
   expect(numericRowId("tsk42")).toBe(42);
   expect(numericRowId("thr7")).toBe(7);
-  expect(numericRowId("eff262")).toBe(262);
+  expect(numericRowId("req262")).toBe(262);
   expect(numericRowId("12")).toBe(12);
   expect(numericRowId("abc")).toBeNull();
 });

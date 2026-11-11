@@ -390,7 +390,7 @@ impl WorkspaceFilter {
                         Some("wiki") if watching => false,
                         // Extension sources are watched for the same reason:
                         // an agent's edits to one are its work (snapshotted,
-                        // given to its effort), committed or not. Watching
+                        // given to its turn), committed or not. Watching
                         // never runs them; only a deploy does. In git's view
                         // too: a shared one is committed code (git decides
                         // which are there): in a tree, `.oxplow/.gitignore`
@@ -976,7 +976,7 @@ mod tests {
         // `*` / `!.gitignore` / `!project.yaml` precisely so the config is
         // shareable, and that `!` has to be honoured or the one file in there
         // meant to be committed is invisible to snapshots, Local History and
-        // effort attribution.
+        // attribution.
         //
         // Generalised deliberately: this is NOT a `project.yaml` carve-out.
         // Whatever a project un-ignores in that file becomes visible.

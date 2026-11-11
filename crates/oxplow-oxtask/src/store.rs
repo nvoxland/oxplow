@@ -18,8 +18,8 @@ pub struct SqliteOxtaskStore {
 }
 
 /// A status change made by [`set_status_tx`]: the row before and after.
-/// A task's status is a record; it never opens or closes an effort (the
-/// effort policy reacts to it, `.context/work-tracking.md`).
+/// A task's status is a record; it never opens or closes anything else
+/// (`.context/work-tracking.md`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusChange {
     pub before: Oxtask,

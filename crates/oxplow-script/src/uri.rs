@@ -86,7 +86,7 @@ fn uri_members(builder: &mut GlobalsBuilder) {
         })))
     }
 
-    /// The resource a URI names (`oxplow/effort`).
+    /// The resource a URI names (`oxplow/request`).
     fn resource(#[starlark(require = pos)] text: &str) -> anyhow::Result<String> {
         Ok(crate::uri::parse_uri(text)?.resource().to_string())
     }
@@ -108,7 +108,7 @@ fn uri_members(builder: &mut GlobalsBuilder) {
     }
 
     /// The key of a URI that names one thing by one param
-    /// (`oxplow:oxplow/effort?id=eff12` → `eff12`); with `resource`,
+    /// (`oxplow:oxplow/request?id=req12` → `req12`); with `resource`,
     /// fails unless it is of that resource.
     fn id(
         #[starlark(require = pos)] text: &str,
@@ -189,16 +189,17 @@ mod tests {
             })
         );
         assert_eq!(
-            run(r#"uri.resource("oxplow:oxplow/effort?id=eff12")"#).unwrap(),
-            json!("oxplow/effort")
+            run(r#"uri.resource("oxplow:oxplow/request?id=req12")"#).unwrap(),
+            json!("oxplow/request")
         );
         assert_eq!(
-            run(r#"uri.id("oxplow:oxplow/effort?id=eff12")"#).unwrap(),
-            json!("eff12")
+            run(r#"uri.id("oxplow:oxplow/request?id=req12")"#).unwrap(),
+            json!("req12")
         );
         assert_eq!(
-            run(r#"uri.id("oxplow:oxplow/effort?id=eff12", resource = "oxplow/effort")"#).unwrap(),
-            json!("eff12")
+            run(r#"uri.id("oxplow:oxplow/request?id=req12", resource = "oxplow/request")"#)
+                .unwrap(),
+            json!("req12")
         );
         let e =
             run(r#"uri.id("oxplow:oxplow/claim?id=3", resource = "oxplow/decision")"#).unwrap_err();
@@ -219,7 +220,7 @@ mod tests {
                 .unwrap(),
             json!({ "kind": "command", "namespace": null, "id": "oxplow.task.comment" })
         );
-        assert!(run(r#"uri.contribution("oxplow:oxplow/effort?id=eff1")"#).is_err());
+        assert!(run(r#"uri.contribution("oxplow:oxplow/request?id=req1")"#).is_err());
         // A guard for an optional value: `uri.is_uri` never fails.
         assert_eq!(
             run(

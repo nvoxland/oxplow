@@ -1211,7 +1211,7 @@ entities from data already in the semantic layer:
 | Piece | Where |
 |---|---|
 | Parse/validate declarations (`CollectorSpec`, `Trigger`) | `crates/oxplow-config/src/collectors.rs` |
-| Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_effort_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
+| Fact collectors: `FactCollector`, `fact_collectors()`, `run_collector_by_key`, `run_snapshot_collectors` / `run_event_collectors` | `crates/oxplow-app/src/metrics_service.rs` |
 | Script services (`runtime::Hosts`, `TreeHost`), `facts_of`, `parse_report` | `crates/oxplow-script/src/lib.rs`, `runtime.rs` |
 | Exec, coercion, `run_collector` / `run_for_event`, `CollectorRunner` + the `oxplow.collector.sync` command, scheduler | `crates/oxplow-app/src/collector_runner.rs` |
 | The `collector.triggers` consumer (`on:` / `where` / `after`) | `crates/oxplow-app/src/collector_triggers.rs` |

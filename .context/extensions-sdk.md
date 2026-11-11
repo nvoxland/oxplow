@@ -507,7 +507,7 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   snapshot log, `SqliteSnapshotStore::record_take`; `trigger: turn_end` makes
   it the latest turn's end take, so its files are that turn's), `diagnostics`
   (`SqliteDiagnosticStore::replace_file`), `symbols` (`SqliteSymbolStore::record`
-  at a snapshot taken with the file), `collect` (`run_effort_collectors`) 
+  at a snapshot taken with the file), `collect` (`run_event_collectors`) 
   `run` (`extension_run_store::record_tx`; `days_ago` through
   `RunContext::began_at`), `health` (`disable_tx`), `token_usage`, `hint`
   and `nudge` (their stores), `conversation` (a harness's saved

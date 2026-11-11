@@ -3,7 +3,7 @@
 # `.Wait` only counts when actually invoked — a method-group reference like
 # `var w = t.Wait;` (no parens) is not a blocking call. (A property literally
 # named `Result` is still counted — the heuristic has no type info.) Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and
 # a per-file `code_metrics.ast_hit` FACT (rule="blocking_async") — the metric is the
 # SPEC Sum(code_metrics.ast_hit) filtered by that rule (epic tsk12).
