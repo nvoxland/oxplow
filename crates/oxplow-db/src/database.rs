@@ -2074,9 +2074,14 @@ mod tests {
             2,
             "the deleted newest capture's id isn't used again"
         );
-        assert_eq!(count("SELECT count(*) FROM page_visit"), 1, "Go To loses the effort");
         assert_eq!(
-            conn.query_row("SELECT subject FROM event_log", [], |r| r.get::<_, String>(0))
+            count("SELECT count(*) FROM page_visit"),
+            1,
+            "Go To loses the effort"
+        );
+        assert_eq!(
+            conn.query_row("SELECT subject FROM event_log", [], |r| r
+                .get::<_, String>(0))
                 .unwrap(),
             "[\"oxplow:oxplow/snapshot?id=1\"]"
         );
