@@ -45,12 +45,24 @@ a rescan by checking the disk there. A rescan comes from:
   top-level directories, `pending.rs`);
 - a kept top-level directory appearing, or the rules stopping ignoring one.
 
+**A build rescans the root on macOS.** FSEvents drops events for a stream
+whose writes outrun it, and says so as a `user dropped` rescan *of the root*,
+with no hint where: 30,000 files written to an ignored `target/` (a test
+run) delivered 1,793 events and one root drop even to a watcher that did
+nothing per event, and oxplow swept the worktree 8 times for it (measured
+2026-11-11; on the day's log, ~1,500 sweeps). Pruning at registration
+can't prevent it (above), so a root rescan must cost what it finds: the
+sweep is a stat walk that queues nothing; the config reload announces
+`ConfigChanged` only when the file reads differently, and the extension
+listing is written only when its rows differ, since each announcement
+re-runs every open page that follows it.
+
 | Subscriber | A path | A rescan |
 |---|---|---|
 | Snapshot capture | dirty | `enqueue_tree_diff(under)`: the startup sweep, limited to a directory |
 | Workspace | `WorkspaceChanged`; one `index_moved` per batch | `WorkspaceChanged` with no path; `index_moved` |
 | Oxwiki | `sync_page` | `scan_and_sync_all` |
-| Config | reload, or restate sources | both |
+| Config | reload (announced only when it differs), restate sources (written only when they differ), or announce global metrics | reload and restate; global metrics when the rescan covers their folder |
 | Refs | re-read the state | same |
 
 Each picks when it reads, per consumer:

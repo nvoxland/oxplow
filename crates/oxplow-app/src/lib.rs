@@ -1994,9 +1994,16 @@ impl Services {
     /// running `/oxplow:configure` writes a `testing:` block — so the
     /// edit goes live without a process restart. A full reload from disk
     /// is safe: the in-memory config is always exactly the file's content
-    /// plus defaults (the same thing boot computes).
+    /// plus defaults (the same thing boot computes). A file that reads as
+    /// what is applied changes nothing and announces nothing: the watcher
+    /// reloads on every rescan (macOS drops events whenever a build writes
+    /// thousands of files), and each `ConfigChanged` re-runs every open page
+    /// that follows config.
     pub fn reload_config_from_disk(&self) -> Result<(), AppInitError> {
         let fresh = oxplow_config::load_project_config(&self.layout.project_dir)?;
+        if *self.config.read().unwrap_or_else(|e| e.into_inner()) == fresh {
+            return Ok(());
+        }
         self.snapshot_captures.set_generated(&fresh.generated);
         {
             let mut guard = self.config.write().unwrap_or_else(|e| e.into_inner());
@@ -2005,6 +2012,13 @@ impl Services {
         self.config_applied.notify_waiters();
         self.events.emit(OxplowEvent::ConfigChanged);
         Ok(())
+    }
+
+    /// A metric file in the global metrics folder changed: it isn't
+    /// project.yaml, so a reload would read the same config, but the metrics
+    /// runner reads the global scope again on `ConfigChanged`.
+    pub fn global_metrics_changed(&self) {
+        self.events.emit(OxplowEvent::ConfigChanged);
     }
 }
 
@@ -2102,6 +2116,31 @@ mod tests {
         let tree = repo.find_tree(tree_id).unwrap();
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .unwrap();
+    }
+
+    /// A reload that reads what is already applied changes nothing and says
+    /// nothing: the watcher reloads on every rescan (macOS drops events
+    /// whenever a build writes thousands of files, even under an ignored
+    /// folder), and each `ConfigChanged` re-runs every open page that
+    /// follows config.
+    #[tokio::test]
+    async fn reloading_an_unchanged_config_announces_nothing() {
+        let project = tempdir().unwrap();
+        init_git(project.path());
+        let services = Services::in_memory(project.path()).await.unwrap();
+        let path = oxplow_config::config_path(project.path());
+        std::fs::write(&path, "snapshotRetentionDays: 3\n").unwrap();
+        services.reload_config_from_disk().unwrap();
+        let mut rx = services.events.subscribe_ui();
+        services.reload_config_from_disk().unwrap();
+        let heard = std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|e| matches!(e, OxplowEvent::ConfigChanged));
+        assert!(!heard, "an unchanged reload announced ConfigChanged");
+        std::fs::write(&path, "snapshotRetentionDays: 4\n").unwrap();
+        services.reload_config_from_disk().unwrap();
+        let heard = std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|e| matches!(e, OxplowEvent::ConfigChanged));
+        assert!(heard, "a changed reload announced nothing");
     }
 
     #[tokio::test]
