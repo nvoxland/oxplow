@@ -1,0 +1,15 @@
+# Two requests changed files; one read a page, one did not: 50%.
+given:
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        tools:
+          - { name: Read, kind: read, paths: [".oxplow/oxwiki/greeting-notes.md"], ok: true }
+          - { name: Edit, kind: edit, paths: [a.txt], ok: true }
+  - observe:
+      turn:
+        prompt: Tweak the farewell
+        tools: [{ name: Edit, kind: edit, paths: [b.txt], ok: true }]
+when: { sql: "SELECT MEASURE('knowledge.read_requests_pct') AS pct FROM metric_grid('month')" }
+expect: { rows: [{ pct: 50.0 }] }

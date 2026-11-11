@@ -1,0 +1,9 @@
+# A request whose turn edited a file and read no knowledge page records 0.
+given:
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Greeting notes, body: "# Greeting notes\n\nThe greeting says hello." } }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }]
+when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'knowledge.read_requests'" }
+expect: { rows: [{ value: 0.0 }] }

@@ -1,0 +1,7 @@
+# A delete restates the count: one of two pages is left.
+given:
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: First, body: "# First\n\nOne." } }
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Second, body: "# Second\n\nTwo." } }
+  - { command: oxplow.knowledge.delete_page, input: { store: oxwiki, id: second }, confirmed: true }
+when: { sql: "SELECT MEASURE('knowledge.pages') AS pages FROM metric_grid('month')" }
+expect: { rows: [{ pages: 1.0 }] }
