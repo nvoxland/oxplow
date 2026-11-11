@@ -445,6 +445,24 @@ extension's own `state.write/compare_exchange` command with it
 (`triage.todos.decide`): the read and the swap land in one transaction,
 and a concurrent change refuses the second rather than losing it.
 
+**A capability implementation's script writes its state too**
+(`needs: [state.write]`, `scope("state.write", { scope, area, expected,
+schema_version, values })`, answering the new stamp). A verb is called by core,
+with no command around it, so the write is not inside a command's audited
+transaction: `StateSource::write` runs the same compare-exchange in a
+transaction of its own, with the same host checks as `StateHost::compare_exchange`
+(the run declared `state.write`, is allowed it by the extension's grant, is
+live; the owner is the current deployment) before the write and again before it
+commits, a refusal rolling it back. The namespace is the owner's only; the
+call is counted in the run's scope trace. **Limits:** a namespace is replaced
+whole and holds at most 1 MiB serialized and 256 keys
+(`oxplow_domain::extension_state`), so a script that keeps a big tree there (a
+snapshots implementation keeping file text) reads and rewrites all of it at
+each mark — slow, and it fails once the namespace is over the cap. It is not
+blocked, and nothing prunes it. A verb that read and wrote under a stamp that
+has since moved is refused ("read its stamp again and retry"); calls to one
+implementation are not serialized (a snapshots mark is).
+
 Provider `host/call` serves the same state read using the provider contribution
 identity captured from an exact enabled catalog declaration at instance creation,
 with the catalog generation unchanged across the instance's start,

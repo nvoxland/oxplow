@@ -91,6 +91,50 @@ impl StateSource {
     }
 }
 
+impl StateSource {
+    /// A capability implementation's script writes its extension's own
+    /// namespace, in a transaction of its own: the same checks as
+    /// [`StateHost::compare_exchange`] (the run declared `state.write`, is
+    /// allowed it and live, the owner is the current deployment — before the
+    /// write and again before it commits, which a refusal rolls back), but not
+    /// inside a command's audited transaction: a verb is called by core, with
+    /// no command around it. The run's trace counts the call.
+    pub async fn write(
+        &self,
+        run: RunContext,
+        input: WriteInput,
+    ) -> Result<Snapshot, StateHostError> {
+        let host = self.host.clone();
+        self.db
+            .transaction_or(move |tx| {
+                let namespace = host
+                    .authorize(&run, "state.write", input.scope, input.area)
+                    .map_err(oxplow_db::TxError::Aborted)?;
+                let snapshot = oxplow_db::extension_state_store::compare_exchange_tx(
+                    tx,
+                    &namespace,
+                    input.expected,
+                    input.schema_version,
+                    &input.values,
+                )
+                .map_err(|error| match error {
+                    StateError::Storage(storage) => oxplow_db::TxError::Storage(storage),
+                    other => oxplow_db::TxError::Aborted(StateHostError::State(other)),
+                })?;
+                host.authorize(&run, "state.write", input.scope, input.area)
+                    .map_err(oxplow_db::TxError::Aborted)?;
+                Ok(snapshot)
+            })
+            .await
+            .map_err(|error| match error {
+                oxplow_db::TxError::Storage(storage) => {
+                    StateHostError::State(StateError::Storage(storage))
+                }
+                oxplow_db::TxError::Aborted(other) => other,
+            })
+    }
+}
+
 impl StateHost {
     pub fn new(catalog: Arc<ExtensionCatalog>, project: PathBuf) -> Self {
         let project = catalog.project_of(&project).to_path_buf();

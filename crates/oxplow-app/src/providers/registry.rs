@@ -103,6 +103,9 @@ pub struct HostDeps {
     pub events: crate::events::EventBus,
     /// Every capability's implementations: an instance's while it runs.
     pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
+    /// Each stream's worktree: where a script implementation's `tree.read`
+    /// reads.
+    pub captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
 }
 
 /// Whose an instance is (P9.B2).

@@ -202,6 +202,7 @@ impl ExternalFileSystem {
     /// read its answer as `T`.
     async fn call<T: serde::de::DeserializeOwned>(
         &self,
+        cx: &FsCx,
         verb: &'static str,
         input: Value,
     ) -> Result<T, FsError> {
@@ -213,10 +214,16 @@ impl ExternalFileSystem {
             .check(&input)
             .map_err(|e| self.unavailable(format!("its `{verb}` schema refuses the call: {e}")))?;
         let key = format!("{verb}:{}", uuid::Uuid::new_v4().simple());
+        // Anchored to the stream the call is for: a script implementation's
+        // `tree.read` is that stream's worktree.
         let run = oxplow_domain::run::RunContext::core(
             oxplow_domain::Actor::System,
             oxplow_domain::run::Mode::External,
-        );
+        )
+        .anchored(oxplow_domain::events::Anchors {
+            stream_id: cx.stream,
+            ..Default::default()
+        });
         let out = self
             .instance
             .invoke(&run, verb, input, Some(key))
@@ -255,13 +262,13 @@ impl FileSystem for ExternalFileSystem {
 
     async fn stat(
         &self,
-        _cx: &FsCx,
+        cx: &FsCx,
         rev: Option<&str>,
         path: &str,
     ) -> Result<Option<FsStat>, FsError> {
         checked(path, false)?;
         let answer: StatAnswer = self
-            .call("stat", with_rev(json!({ "path": path }), rev))
+            .call(cx, "stat", with_rev(json!({ "path": path }), rev))
             .await?;
         Ok(answer.entry.map(|e| {
             let file = e.kind == FsKind::File;
@@ -279,7 +286,7 @@ impl FileSystem for ExternalFileSystem {
 
     async fn read(
         &self,
-        _cx: &FsCx,
+        cx: &FsCx,
         rev: Option<&str>,
         path: &str,
         range: Option<ByteRange>,
@@ -290,7 +297,7 @@ impl FileSystem for ExternalFileSystem {
             input["offset"] = json!(range.offset);
             input["len"] = json!(range.len);
         }
-        let answer: ReadAnswer = self.call("read", with_rev(input, rev)).await?;
+        let answer: ReadAnswer = self.call(cx, "read", with_rev(input, rev)).await?;
         let Some(bytes) = answer.bytes else {
             return Ok(None);
         };
@@ -306,7 +313,7 @@ impl FileSystem for ExternalFileSystem {
 
     async fn list(
         &self,
-        _cx: &FsCx,
+        cx: &FsCx,
         rev: Option<&str>,
         parent: Option<&str>,
     ) -> Result<Vec<FsEntry>, FsError> {
@@ -315,7 +322,7 @@ impl FileSystem for ExternalFileSystem {
             checked(parent, true)?;
             input["parent"] = json!(parent);
         }
-        let answer: ListAnswer = self.call("list", with_rev(input, rev)).await?;
+        let answer: ListAnswer = self.call(cx, "list", with_rev(input, rev)).await?;
         let mut entries = Vec::with_capacity(answer.entries.len());
         for e in answer.entries {
             checked(&e.path, false)
@@ -330,14 +337,14 @@ impl FileSystem for ExternalFileSystem {
         Ok(entries)
     }
 
-    async fn write(&self, _cx: &FsCx, path: &str, content: &[u8]) -> Result<(), FsError> {
+    async fn write(&self, cx: &FsCx, path: &str, content: &[u8]) -> Result<(), FsError> {
         if !self.has_feature(WRITABLE) {
             return Err(FsError::ReadOnly(self.id.clone()));
         }
         checked(path, false)?;
         let content = base64::engine::general_purpose::STANDARD.encode(content);
         let _: Value = self
-            .call("write", json!({ "path": path, "content": content }))
+            .call(cx, "write", json!({ "path": path, "content": content }))
             .await?;
         Ok(())
     }

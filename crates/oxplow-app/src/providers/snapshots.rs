@@ -289,6 +289,7 @@ impl ExternalSnapshots {
     /// read its answer as `T`.
     async fn call<T: serde::de::DeserializeOwned>(
         &self,
+        stream: StreamId,
         verb: &'static str,
         input: Value,
     ) -> Result<T, SnapshotError> {
@@ -300,10 +301,16 @@ impl ExternalSnapshots {
             .check(&input)
             .map_err(|e| self.failed(format!("its `{verb}` schema refuses the call: {e}")))?;
         let key = format!("{verb}:{}", uuid::Uuid::new_v4().simple());
+        // Anchored to the stream being marked: a script implementation's
+        // `tree.read` is that stream's worktree.
         let run = oxplow_domain::run::RunContext::core(
             oxplow_domain::Actor::System,
             oxplow_domain::run::Mode::External,
-        );
+        )
+        .anchored(oxplow_domain::events::Anchors {
+            stream_id: Some(stream),
+            ..Default::default()
+        });
         let out = self
             .instance
             .invoke(&run, verb, input, Some(key))
@@ -319,13 +326,18 @@ impl ExternalSnapshots {
     }
 
     /// Keep the bytes of each `(path, identity)` the blob store lacks.
-    async fn pull(&self, handle: &str, pull: Vec<(String, String)>) -> Result<(), SnapshotError> {
+    async fn pull(
+        &self,
+        stream: StreamId,
+        handle: &str,
+        pull: Vec<(String, String)>,
+    ) -> Result<(), SnapshotError> {
         for (path, identity) in pull {
             if self.ledger.blobs.has(&identity) {
                 continue;
             }
             let answer: BytesAnswer = self
-                .call("read_at", json!({ "handle": handle, "path": path }))
+                .call(stream, "read_at", json!({ "handle": handle, "path": path }))
                 .await?;
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(answer.bytes)
@@ -386,7 +398,7 @@ impl SnapshotProvider for ExternalSnapshots {
         if let Some(b) = request.budget {
             input["budget_ms"] = json!(b.as_millis() as u64);
         }
-        let marked: MarkAnswer = self.call("mark", input).await?;
+        let marked: MarkAnswer = self.call(request.stream, "mark", input).await?;
         tracing::debug!(
             provider = %self.instance.name(),
             handle = %marked.handle,
@@ -406,6 +418,7 @@ impl SnapshotProvider for ExternalSnapshots {
         } else {
             let changed: ChangedAnswer = self
                 .call(
+                    request.stream,
                     "changed",
                     json!({
                         "stream": request.stream.to_string(),
@@ -430,7 +443,8 @@ impl SnapshotProvider for ExternalSnapshots {
             )
             .map_err(|e| self.failed(e))?
         };
-        self.pull(&marked.handle, planned.pull).await?;
+        self.pull(request.stream, &marked.handle, planned.pull)
+            .await?;
         let outcome = store
             .record_take(TakeRecord {
                 stream_id: request.stream,

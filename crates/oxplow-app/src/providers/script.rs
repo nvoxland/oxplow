@@ -74,6 +74,8 @@ pub struct ScriptEndpoint {
     sql: crate::sql_gateway::SqlGateway,
     catalog: Arc<ExtensionCatalog>,
     root: PathBuf,
+    /// Where `tree.read` reads: the stream's worktree as it is now.
+    trees: Arc<dyn crate::services::TreeSource>,
 }
 
 impl ScriptEndpoint {
@@ -84,6 +86,7 @@ impl ScriptEndpoint {
         sql: &crate::sql_gateway::SqlGateway,
         catalog: &Arc<ExtensionCatalog>,
         root: &std::path::Path,
+        trees: &Arc<dyn crate::services::TreeSource>,
     ) -> Option<Self> {
         let script = decl.script.as_ref()?;
         let local = oxplow_domain::contribution::implementation_local(&decl.capability, &decl.id);
@@ -109,6 +112,7 @@ impl ScriptEndpoint {
             sql: sql.clone(),
             catalog: catalog.clone(),
             root: root.to_path_buf(),
+            trees: trees.clone(),
         })
     }
 
@@ -178,8 +182,12 @@ impl Endpoint for ScriptEndpoint {
         let run = self.run_of(run);
         // A revocation reaches a script that is computing.
         let _watch = crate::run_context::watch_authority(&run);
-        let given = crate::services::decide(&run, &self.text, &self.needs)
-            .and_then(crate::services::Wanted::scopes_only)
+        // `tree.read` is the stream's worktree as it is now; a script that
+        // doesn't use it is given no tree.
+        let sources = crate::services::Sources::default()
+            .with_tree(crate::services::Trees::From(self.trees.clone()));
+        let given = crate::services::prepare(&run, &self.text, &self.needs, &sources)
+            .await
             .map_err(failed)?;
         let arg = json!({
             "input": input,
@@ -196,8 +204,10 @@ impl Endpoint for ScriptEndpoint {
         let runtime = tokio::runtime::Handle::current();
         let out = tokio::task::spawn_blocking(move || {
             let read = Box::new(|q: oxplow_db::SqlQuery| runtime.block_on(sql.run_in(&run, q)));
-            let mut calls =
-                crate::scope_calls::Calls::new(&run, &needs, read).with_host(Some(&sql), &runtime);
+            // A verb alone may write its extension's private state.
+            let mut calls = crate::scope_calls::Calls::new(&run, &needs, read)
+                .with_host(Some(&sql), &runtime)
+                .with_state_write_source(sql.state_source(), &runtime);
             let out = {
                 let mut serve = |id: &str, args: Value| calls.serve(id, args);
                 run_verb(&text, &func, arg, given, &mut serve, &run)
@@ -280,6 +290,10 @@ impl ProviderRegistry {
     ) -> Result<PreparedScripts, VocabularyErrors> {
         let mut adapters = Vec::new();
         let mut errors = VocabularyErrors::new();
+        let trees: Arc<dyn crate::services::TreeSource> = super::worktree_tree::WorktreeTree::new(
+            self.deps.captures.clone(),
+            self.deps.project_dir.clone(),
+        );
         for ext in snapshot.extensions().iter().filter(|e| e.enabled) {
             for decl in &ext.implementations {
                 let Some(endpoint) = ScriptEndpoint::of(
@@ -288,6 +302,7 @@ impl ProviderRegistry {
                     &self.deps.sql,
                     &self.deps.catalog,
                     &self.deps.project_dir,
+                    &trees,
                 ) else {
                     continue;
                 };

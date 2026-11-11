@@ -121,8 +121,9 @@ pub(crate) struct ImplementationFile {
     /// One sentence saying what it is.
     #[serde(default)]
     description: Option<String>,
-    /// The scopes a script implementation calls (`sql.read`): only what a
-    /// command's script can (`scope_calls::check_command_need`).
+    /// The scopes a script implementation calls (`sql.read`): what a
+    /// composing script can, and the tree (`tree.read`) and its own private
+    /// state (`state.write`) too (`scope_calls::check_implementation_need`).
     #[serde(default)]
     needs: Vec<String>,
     /// A script implementation's features (`{ links: true }`): the
@@ -488,7 +489,7 @@ fn script_decl(
         ));
     }
     for need in &f.needs {
-        crate::scope_calls::check_command_need(need).map_err(|e| {
+        crate::scope_calls::check_implementation_need(need).map_err(|e| {
             problem(
                 "implementation.script_need",
                 format!("{what}: needs `{need}`: {e}"),
@@ -503,8 +504,12 @@ fn script_decl(
     })?;
     let defined = oxplow_script::runtime::top_level_defs(entry, &text)
         .and_then(|defined| {
-            crate::services::check_uses(&text, &f.needs, crate::scope_calls::check_command_need)
-                .map(|()| defined)
+            crate::services::check_uses(
+                &text,
+                &f.needs,
+                crate::scope_calls::check_implementation_need,
+            )
+            .map(|()| defined)
         })
         .map_err(|e| {
             problem(
@@ -625,37 +630,13 @@ fn script_decl(
     })
 }
 
-/// Why a capability with a provider contract still takes no script, when
-/// its verbs can't be answered by a pure function of its input and
-/// oxplow's datasets (`None`: it can).
-fn script_unsupported(capability: &str) -> Option<&'static str> {
-    match capability {
-        "snapshots" => Some(
-            "its `mark` reads the stream's worktree and hashes every file, and its `read_at` \
-             returns bytes it kept, but a script runs pure — it can't read the tree \
-             (`tree.read`), and it keeps nothing between calls. Implement it as a provider \
-             (`providers:`), a process that can",
-        ),
-        _ => None,
-    }
-}
-
 /// The verbs a script implementation of `spec` answers: its provider
-/// contract, or why a script can't implement it.
+/// contract, or why a script can't implement it (a capability with none).
 fn script_contract(
     spec: &oxplow_domain::capability::CapabilitySpec,
     entry: &str,
     what: &str,
 ) -> Result<&'static oxplow_domain::capability::ProviderContract, Box<Diagnostic>> {
-    if let Some(why) = script_unsupported(spec.id) {
-        return Err(problem(
-            "implementation.script_unsupported",
-            format!(
-                "{what}: entry `{entry}` is a script, and a script can't implement `{}`: {why}",
-                spec.id
-            ),
-        ));
-    }
     spec.provider.ok_or_else(|| {
         problem(
             "implementation.script_no_verbs",
@@ -941,9 +922,9 @@ mod tests {
                 "threads.write".into(),
             ),
             (
-                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [tree.read], {STAGES} }}\n"),
+                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [state.write:x], {STAGES} }}\n"),
                 "implementation.script_need",
-                "tree.read".into(),
+                "state.write:x".into(),
             ),
             (
                 format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, {STAGES} }}\n"),
@@ -1007,28 +988,48 @@ mod tests {
     }
 
     /// A snapshots implementation marks a stream's worktree and keeps what
-    /// it marked. A script runs pure, with no `tree.read` and nowhere to
-    /// keep bytes, so it can do neither: it is refused at load, naming the
-    /// reason, rather than failing on its first mark.
+    /// it marked: it reads the tree (`tree.read`) and keeps its marks in its
+    /// extension's private state (`state.write`), and a script that does so
+    /// loads. Nothing about the capability is refused any more.
     #[test]
-    fn a_snapshots_script_is_refused_with_the_reason() {
-        let read = |rel: &str| {
-            (rel == "s.star").then(|| {
-                "def mark(x):\n    return {}\ndef changed(x):\n    return {}\n".to_string()
-            })
-        };
+    fn a_snapshots_script_loads_with_tree_and_state_needs() {
+        let script =
+            "def mark(x):\n    files(\"**\")\n    scope(\"state.write\", {})\n    return {}\n\
+                      def changed(x):\n    return {}\n";
+        let read = |rel: &str| (rel == "s.star").then(|| script.to_string());
         let (decls, errors) = parse_with(
-            "  - { capability: snapshots, id: marks, entry: s.star }\n",
+            "  - { capability: snapshots, id: marks, entry: s.star, needs: [tree.read, state.write, state.read] }\n",
             &read,
         );
-        assert!(decls.is_empty(), "{decls:?}");
-        let e = errors.first().expect("refused");
-        assert_eq!(e.code, "implementation.script_unsupported");
-        assert!(
-            e.message.contains("worktree") && e.message.contains("`snapshots`"),
-            "{}",
-            e.message
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            decls[0].needs,
+            ["tree.read", "state.write", "state.read"].map(String::from)
         );
+    }
+
+    /// An implementation's script that calls what it didn't declare is
+    /// refused at load, `tree.read` and `state.write` among them: the
+    /// builtin names its need, the `scope` call needs a callable scope.
+    #[test]
+    fn an_undeclared_tree_read_or_state_write_is_refused_at_load() {
+        let read =
+            |script: &'static str| move |rel: &str| (rel == "s.star").then(|| script.to_string());
+        let entry = "  - { capability: snapshots, id: marks, entry: s.star, needs: [sql.read] }\n";
+        let (_, errors) = parse_with(
+            entry,
+            &read(
+                "def mark(x):\n    files(\"**\")\n    return {}\ndef changed(x):\n    return {}\n",
+            ),
+        );
+        let got = errors.iter().map(|d| d.message.clone()).collect::<String>();
+        assert!(got.contains("without `tree.read`"), "{got}");
+        // A tree.read with no body to call it: the declaration itself is fine.
+        let (_, errors) = parse_with(
+            "  - { capability: snapshots, id: marks, entry: s.star, needs: [tree.read] }\n",
+            &read("def mark(x):\n    return {}\ndef changed(x):\n    return {}\n"),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
     }
 
     const MARK: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><path d=\"M0 0h8v8z\"/></svg>";

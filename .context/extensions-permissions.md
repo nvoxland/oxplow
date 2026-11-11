@@ -269,7 +269,22 @@ uses):
   refused, naming why). A **command's** script reads the semantic layer
   (metric functions included) and not the tree: it decides what runs,
   and reading a whole tree belongs to an effect or a collector (refused
-  at load, naming them). A provider's
+  at load, naming them). **A capability implementation's** script
+  (`implementations:` with a script `entry`,
+  `scope_calls::check_implementation_need`) reads what a composing script
+  does, and also the **stream's worktree** (`tree.read`, bare or
+  `tree.read:<path>`, giving it `files()` and the other tree builtins: the
+  tree as it is on disk at the call, `providers::worktree_tree`, not a
+  snapshot) and writes **its own extension's private state**
+  (`scope("state.write", { scope, area, expected, schema_version, values })`,
+  see [extensions-manifest.md](./extensions-manifest.md) "Private state host
+  boundary"). Each is decided as any other need is: declared in the
+  implementation's `needs`, within the extension's permissions
+  (`tree.read` needs `files.read` in `permissions:`, checked at load as
+  every `needs` is; `state.write` is baseline, as `state.read` is: the
+  namespace is the extension's own), and by the run's live authority at
+  each call. A command's or an effect's script is refused `state.write`;
+  a command's script is still refused `tree.read`. A provider's
   `needs` stay `scope()` calls (`check_callable`: `host/call` answers
   `sql.read`).
 - **`scope("ai.discover", { role })`** (callable from an effect, a command

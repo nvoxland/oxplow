@@ -26,6 +26,7 @@ pub mod snapshots;
 pub mod spec;
 pub mod sync;
 pub mod tasks;
+pub mod worktree_tree;
 
 #[cfg(test)]
 mod script_capabilities;
