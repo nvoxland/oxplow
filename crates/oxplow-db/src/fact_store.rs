@@ -499,7 +499,7 @@ pub struct NewMetricCapture {
     pub idempotency_key: Option<String>,
     /// What this capture's facts are the figures of (a request's URI, say)
     /// when it takes the place of the producer's earlier captures of it
-    /// (V27): recording it deletes those captures and their facts in the
+    /// (V26): recording it deletes those captures and their facts in the
     /// same transaction, so the subject counts once, at this capture's
     /// `captured_at`. `None` (the default) replaces nothing.
     pub replaces: Option<String>,
