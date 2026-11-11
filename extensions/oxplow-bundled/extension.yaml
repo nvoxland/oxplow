@@ -82,7 +82,7 @@ datasets:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_tasks
-    version: 7
+    version: 8
     description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children), each with what its latest request is doing now; Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
