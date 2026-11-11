@@ -590,3 +590,89 @@ async fn a_recorded_opencode_question_is_one_tool_call_and_one_wait() {
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].1, "completed");
 }
+
+/// opencode's foreground subagent, recorded: the `task` call brackets a
+/// child session that starts and stops once; the child's tools post as the
+/// parent thread and are the subagent's; the Task call finishes once, after
+/// the SubagentStop; one turn of the person's; the session resumes the
+/// parent, not the child.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_foreground_subagent_is_attributed() {
+    let r = replayed("opencode/foreground_subagent.jsonl", "opencode").await;
+    let child = "ses_e3790fc8effebOoNfzkmVROGC0";
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 1);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 1);
+    assert_eq!(tools_of(&r).await, ["Glob", "Read", "Task"]);
+    let finished = events_of(&r, "agent.tool.finished").await;
+    for call in &finished[..2] {
+        assert_eq!(call["subagent"]["id"], child, "{call}");
+        assert_eq!(call["subagent"]["kind"], "task");
+    }
+    assert!(
+        finished[2]["subagent"].is_null(),
+        "the Task call is the parent's"
+    );
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].0.as_deref(), Some("person"));
+    assert_eq!(turns[0].1, "completed");
+    assert_eq!(resume_of(&r).await, "ses_e37910853ffekC2k67PjoCQfso");
+}
+
+/// opencode's background subagent, recorded: the parent stops while the
+/// child runs; the child's result arrives as a synthetic `<task …>` user
+/// message, which opens a turn of the subagent's (not the person's, and
+/// not a second prompt of theirs) that goes on with the turn it started
+/// in; the child finishes once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_background_subagent_hands_back_without_a_prompt() {
+    let r = replayed("opencode/background_subagent.jsonl", "opencode").await;
+    let child = "ses_e379029c4ffeCDHywhBAdL2b7J";
+    let received = events_of(&r, "agent.prompt.submitted").await;
+    let sources: Vec<_> = received.iter().map(|p| p["source"].clone()).collect();
+    assert_eq!(sources, ["person", "subagent"], "{received:#?}");
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 1);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 1);
+    assert_eq!(tools_of(&r).await, ["Task", "Read"]);
+    let read = &events_of(&r, "agent.tool.finished").await[1];
+    assert_eq!(read["subagent"]["id"], child, "{read}");
+    use oxplow_domain::hook::TurnSource;
+    let mut turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    turns.sort_by_key(|t| t.id.value());
+    assert_eq!(
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [Some(TurnSource::Person), Some(TurnSource::Subagent)]
+    );
+    assert!(
+        turns[1].prompt.starts_with("<task id="),
+        "{}",
+        turns[1].prompt
+    );
+    assert!(turns[1].answer.as_deref().unwrap().contains("mul"));
+    let started = events_of(&r, "agent.turn.started").await;
+    assert_eq!(started[1]["cause_turn"], turns[0].id.to_string());
+    // The child is one job, started in the first turn, reported in the second.
+    let jobs: Vec<(String, Option<String>, Option<String>)> = r
+        .svc
+        .db
+        .read(|c| {
+            let mut stmt = c
+                .prepare("SELECT harness_job_id, kind, status FROM v_agent_job ORDER BY id")
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    assert_eq!(jobs[0].0, child);
+    assert_eq!(resume_of(&r).await, "ses_e37903460ffegmpoSj2OY79zTd");
+}

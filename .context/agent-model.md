@@ -1473,6 +1473,23 @@ test keeps the two equal; recorded with 1.17.4: the fixtures under
 | What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
 | A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
 
+**Subagents, recorded.** A foreground `task` call: PreToolUse Task,
+`session.created` of the child (SubagentStart), the child's tools posted
+as the parent's session with the child's `agent_id` (the bridge asks the
+client for the session's `parentID`), the child's idle (SubagentStop),
+then the Task's PostToolUse, then the parent's Stop; the Task call is the
+parent's own and finishes once, after the SubagentStop. A background
+`task` (`OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`): the Task's
+PostToolUse comes at once (`<task id state="running">`), the parent's Stop
+carries the child in `background_tasks`, and the result comes later as a
+user `chat.message` whose only part is `synthetic: true` text
+`<task id="ses_…" state="completed">…`. The bridge posts it as a
+UserPromptSubmit (`prompt` that text, `message_id`), then the child's
+SubagentStop, then the parent's second Stop; `prompt()` reads it as
+`Prompt::Handback`, so it is a subagent's turn (source `subagent`, going
+on with the turn that started the child), never the person's prompt. Core
+needed no change for either.
+
 **A question is one tool call.** Recorded (`question.jsonl`): the
 `question` tool's `tool.execute.before`, then `question.asked` (with
 `tool.callID`, the same call, and its own `que_…` request id), then, after
@@ -1956,6 +1973,7 @@ equivalence between tools.
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
 | Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| opencode subagents | recorded `opencode/foreground_subagent.jsonl`, `opencode/background_subagent.jsonl`: `a_recorded_opencode_foreground_subagent_is_attributed`, `a_recorded_opencode_background_subagent_hands_back_without_a_prompt` |
 | opencode question | recorded `opencode/question.jsonl`: `a_recorded_opencode_question_is_one_tool_call_and_one_wait`; the bridge: `its_bridge_reports_an_answered_question_as_one_call`, `its_bridge_reports_a_wait_on_a_permission_or_a_question` |
 | opencode abort and API error | recorded `opencode/abort.jsonl`, `opencode/error.jsonl`: `a_recorded_opencode_abort_ends_one_turn_as_interrupted`, `a_recorded_opencode_api_error_ends_one_turn_as_errored` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
