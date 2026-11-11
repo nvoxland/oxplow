@@ -255,6 +255,17 @@ screens and the holder's add the review and analysis:
   `v_request.state`: the Now column); Up next the ready and blocked tasks
   assigned to the thread in its queue's order; Finished the done tasks a
   request on the thread worked on (each once) and wiki pages touched.
+  **Assigned to you** (`assigned`; parts `assigned-panel`, `assigned-line`,
+  `assigned-count`; page `assigned-to-you`, whose loaders `lines`, `line`
+  and `open_count` the parts read) is the same view for the person: the
+  open tasks with `assignee = oxplow:oxplow/person` (`v_task`) - In
+  progress, then Up next (todo and blocked) in the person's queue order
+  (`rank IS NULL, rank, created_at`) - each with its stage, under its
+  epic. The header count is the open ones. It has **no Finished
+  group**: a done task is unassigned and no record says who held it
+  (`request_task` links threads' requests, a person's command is in no
+  turn), so showing one would be a guess. Fixtures:
+  `assigned-to-you-*`.
   oxtask's opinion that an agent tracks its work as tasks is its
   `track-work` skill (offered only while oxtask is the active tracker)
   and its `untracked-work` advisory: a request that changed files (a

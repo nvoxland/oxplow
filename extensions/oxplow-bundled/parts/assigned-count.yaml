@@ -1,0 +1,10 @@
+title: Assigned to you (count)
+description: How many open tasks are assigned to you.
+loaders:
+  open_count:
+    page: oxplow/assigned-to-you
+    loader: open_count
+view:
+  from: open_count
+  viz: number
+badge: { loader: open_count, column: tasks }
