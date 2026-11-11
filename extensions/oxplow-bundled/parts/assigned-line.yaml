@@ -1,9 +1,13 @@
 title: Assigned to you (collapsed)
 description: What you hold in one glance - the task in progress, or else the next one.
+params:
+- name: thread_id
+  label: Thread
 loaders:
   line:
     page: oxplow/assigned-to-you
     loader: line
+    params: { thread_id: { param: thread_id } }
 view:
   from: line
   viz: list

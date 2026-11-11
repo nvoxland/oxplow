@@ -1,10 +1,14 @@
 title: Assigned to you
-description: The open tasks assigned to you, grouped like a thread's Work panel - in progress, then up next in your queue's order - each with its stage and under its epic. Finished is not shown; a done task is unassigned and nothing records who held it.
-icon: user-check
+description: The open tasks assigned to you, in progress then up next in your queue order, each with its stage and under its epic.
+icon: user
 category: Work
 keywords: assigned me my tasks queue person
 needs:
 - task_tracker
+# Everything assigned to the person, whatever thread asks: the panel's
+# `thread_id` only satisfies the rail, it narrows nothing.
+params:
+- name: thread_id
 loaders:
   # Open tasks assigned to the person (an epic is context, never a line of
   # its own unless it is itself assigned). A task under an epic follows the
@@ -41,7 +45,7 @@ loaders:
   # The first line of the glance: the task in progress, else the next one.
   line:
     sql: |
-      SELECT title, icon, uri, 0 AS depth, coalesce(stage_title, stage) AS stage
+      SELECT title, state AS icon, uri, 0 AS depth, coalesce(stage_title, stage) AS stage
       FROM v_task
       WHERE assignee = uri('oxplow/person') AND state IN ('in_progress', 'todo', 'blocked')
       ORDER BY state <> 'in_progress', rank IS NULL, rank, created_at, uri

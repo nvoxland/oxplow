@@ -1,9 +1,13 @@
 title: Assigned to you (panel)
 description: The open tasks assigned to you - in progress, then up next in your queue's order, each with its stage.
+params:
+- name: thread_id
+  label: Thread
 loaders:
   lines:
     page: oxplow/assigned-to-you
     loader: lines
+    params: { thread_id: { param: thread_id } }
 view:
   from: lines
   viz: list

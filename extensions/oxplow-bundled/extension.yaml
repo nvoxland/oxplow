@@ -175,7 +175,7 @@ panels:
   - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=work' }
   # What is assigned to the person: their open tasks, counted; the header
   # opens the Assigned to you page. Project-wide, so the thread is not a param.
-  - { id: assigned, title: Assigned to you, icon: user-check, scope: thread, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
+  - { id: assigned, title: Assigned to you, icon: user, scope: thread, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
 # oxplow's own task tracker, oxtask, is declared here: with only
 # oxplow-foundation running there is no task tracker. Its agent skill is the
 # ready queue (`/oxplow:next-task`).
