@@ -733,7 +733,7 @@ mod tests {
             .await
             .unwrap();
         let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
-        let text = oxplow_app::capabilities::agent_text(&svc);
+        let text = oxplow_app::capabilities::agent_text(&svc).await;
         let skill = |name: &str| {
             text.skill_full_text(name).or_else(|| {
                 oxplow_app::bundled_extensions::BUNDLED

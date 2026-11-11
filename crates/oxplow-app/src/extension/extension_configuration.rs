@@ -285,6 +285,96 @@ pub(crate) fn effective_values(
     Ok(resolve(namespace, declaration, project.as_ref(), personal.as_ref())?.values)
 }
 
+/// After an extension raises its configuration schema `version`, carry each
+/// stored layer at an older version forward when the new schema still takes
+/// its values: restamp it at the declared version, values as stored. "Takes"
+/// is the declaration resolving with that layer alone over the defaults (and
+/// the other layer when that one is already at the declared version). A
+/// layer it doesn't take is left as it is, failing closed until the
+/// extension's own command rewrites it; a layer newer than the declared
+/// version (after a rollback) is never touched. Runs in the publication's
+/// transaction, before datasets compile against the values. Returns the
+/// layers carried, as `(namespace, scope)`. Only a storage failure fails it
+/// (and the publication); a namespace whose rows can't be read is logged
+/// and left as it is.
+pub(crate) fn carry_forward_tx(
+    conn: &Connection,
+    extensions: &[crate::extension::extensions::Extension],
+) -> Result<Vec<(String, Scope)>, oxplow_domain::DomainError> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut carried = Vec::new();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        let Some(declaration) = &ext.configuration else {
+            continue;
+        };
+        // Settings are the namespace's: one declaration its extensions share.
+        if !seen.insert(ext.namespace.clone()) {
+            continue;
+        }
+        match carry_namespace(conn, &ext.namespace, declaration) {
+            Ok(scopes) => carried.extend(scopes.into_iter().map(|s| (ext.namespace.clone(), s))),
+            Err(ConfigStoreError::Storage(error)) => return Err(error),
+            Err(error) => {
+                tracing::warn!(namespace = %ext.namespace, %error, "its configuration layers can't be carried forward");
+            }
+        }
+    }
+    Ok(carried)
+}
+
+fn carry_namespace(
+    conn: &Connection,
+    ns: &str,
+    declaration: &ConfigurationFile,
+) -> Result<Vec<Scope>, ConfigStoreError> {
+    let mut carried = Vec::new();
+    let namespace = |scope| ConfigNamespace::new(ns.to_string(), scope);
+    let project = extension_config_store::read_tx(conn, &namespace(Scope::Project)?)?;
+    let personal = extension_config_store::read_tx(conn, &namespace(Scope::Personal)?)?;
+    fn at(layer: &Option<ConfigSnapshot>, version: u32) -> Option<&Value> {
+        layer
+            .as_ref()
+            .filter(|l| l.stamp().schema_version == version)
+            .map(ConfigSnapshot::values)
+    }
+    let current = |layer| at(layer, declaration.version);
+    for scope in [Scope::Project, Scope::Personal] {
+        let (layer, other) = match scope {
+            Scope::Project => (&project, &personal),
+            Scope::Personal => (&personal, &project),
+        };
+        let Some(layer) = layer
+            .as_ref()
+            .filter(|l| l.stamp().schema_version < declaration.version)
+        else {
+            continue;
+        };
+        let (p, q) = match scope {
+            Scope::Project => (Some(layer.values()), current(other)),
+            Scope::Personal => (current(other), Some(layer.values())),
+        };
+        if declaration.resolve(ns, p, q).is_err() {
+            continue;
+        }
+        extension_config_store::compare_exchange_tx(
+            conn,
+            &namespace(scope)?,
+            Some(layer.stamp()),
+            declaration.version,
+            layer.values(),
+        )?;
+        tracing::info!(
+            namespace = %ns,
+            ?scope,
+            from = layer.stamp().schema_version,
+            to = declaration.version,
+            "a configuration layer the new schema takes was carried forward"
+        );
+        carried.push(scope);
+    }
+    Ok(carried)
+}
+
 fn layers(
     conn: &Connection,
     extension: &str,

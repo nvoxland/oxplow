@@ -383,6 +383,26 @@ implementations:
   extensions (one with skills declares `agent`), when its `needs:` are met and, if an implementation lists
   it in its `skills:`, while that implementation is the active one. A name
   another extension already took is left out (logged).
+- **Offered by a setting** (`when:`): `{ name: track-work, file: …, when:
+  { config: /tasks/workflow, in: [agent_tracks] } }` is offered only while
+  the extension's effective configuration (defaults < project < personal,
+  `extension_configuration::effective_values`) has one of `in` at that JSON
+  pointer. The load refuses a `when` that can never hold:
+  `when.undeclared` (no `configuration:`), `when.unknown_key` (the pointer
+  names no key of `configuration.schema`), `when.not_scalar` (an object or
+  array key), `when.empty` (no values), `when.wrong_type` (a value not of
+  the key's `type`), `when.not_in_enum` (a value outside the key's `enum`).
+  Settings that can't be read (a layer at an old schema version) fail
+  closed: the skills they offer aren't. The condition is one shared type,
+  `config_schema::ConfigCondition`, for any contribution kind a setting
+  offers.
+- **A settings write rewrites the skills.** A skill with `when:` is a
+  configuration reader (`extension_generation::configuration_readers`, the
+  one list of them; a dataset's `config()` is the other): a write of the
+  extension's settings changes `ConfigSignature`, so
+  `request_config_refresh` (on `command.executed`) republishes, and the
+  publication runs `refresh_agent_text`. A running session keeps the skill
+  list it started with (harness behavior); a new one gets the new set.
 - **Installed.** Each spawn writes what's offered into the runtime
   (each harness's `launch`, `crates/oxplow-harnesses`); boot, an
   extension change and a `capability.switched` rewrite the runtimes

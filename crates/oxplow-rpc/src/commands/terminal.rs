@@ -222,7 +222,7 @@ pub async fn open_terminal_session(
         Some(&thread),
         &around,
         &declared,
-        &oxplow_app::capabilities::agent_text(ctx),
+        &oxplow_app::capabilities::agent_text(ctx).await,
     );
     let harness_config = config
         .agent_config
@@ -342,7 +342,7 @@ pub(crate) async fn launch_session(
     config: &serde_json::Value,
 ) -> Result<Launch, IpcError> {
     let identity = identity_env(endpoints, stream.id, thread.id, session.id);
-    let text = oxplow_app::capabilities::agent_text(ctx);
+    let text = oxplow_app::capabilities::agent_text(ctx).await;
     // The harness looks for its saved conversations under the home of the
     // machine the agent runs on: this one's only when the stream is local.
     let home = (stream.host == oxplow_domain::HostId::LOCAL)

@@ -19,6 +19,7 @@ use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
 
+use super::config_schema::{ConfigCondition, ConfigurationFile};
 use super::manifest_v2::{at, item_lines, key_line};
 use super::ExtensionFiles;
 
@@ -56,6 +57,9 @@ pub struct SkillDecl {
     /// The `description:` of its frontmatter: when the agent loads a skill,
     /// what a command does.
     pub description: String,
+    /// The setting of the extension's own configuration it's offered by:
+    /// offered only while it holds.
+    pub when: Option<ConfigCondition>,
 }
 
 /// A `skills:` entry as the manifest holds it.
@@ -68,15 +72,21 @@ pub(crate) struct SkillFile {
     file: String,
     #[serde(default)]
     needs: Vec<String>,
+    /// Offered only while a setting of the extension's own configuration is
+    /// one of the listed values: `{ config: /tasks/workflow, in: [agent_tracks] }`.
+    #[serde(default)]
+    when: Option<ConfigCondition>,
 }
 
 /// Parse `skills:`: the valid declarations, and what's wrong with the
-/// rest (at their lines).
+/// rest (at their lines). A `when:` is checked against `configuration`, the
+/// extension's own declaration.
 pub(crate) fn parse_skills(
     value: &Value,
     file: &str,
     manifest: &str,
     files: &dyn ExtensionFiles,
+    configuration: Option<&ConfigurationFile>,
 ) -> (Vec<SkillDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "skills");
     let Some(items) = value.as_sequence() else {
@@ -128,6 +138,8 @@ pub(crate) fn parse_skills(
             .find_map(|n| oxplow_domain::capability::check_need(n).err())
         {
             Some(("skill.unknown_need", e))
+        } else if let Some((code, why)) = f.when.as_ref().and_then(|w| w.problem(configuration)) {
+            Some((code, format!("skill `{}`: {why}", f.name)))
         } else {
             match files.read(&f.file) {
                 None => Some((
@@ -145,6 +157,7 @@ pub(crate) fn parse_skills(
                 kind: f.kind,
                 file: f.file,
                 needs: f.needs,
+                when: f.when,
             }),
         }
     }
@@ -210,6 +223,14 @@ mod tests {
     use super::*;
 
     fn parse(yaml: &str, files: &[(&str, &str)]) -> (Vec<SkillDecl>, Vec<Diagnostic>) {
+        parse_configured(yaml, files, None)
+    }
+
+    fn parse_configured(
+        yaml: &str,
+        files: &[(&str, &str)],
+        configuration: Option<&ConfigurationFile>,
+    ) -> (Vec<SkillDecl>, Vec<Diagnostic>) {
         let dir = tempfile::tempdir().unwrap();
         for (path, body) in files {
             let p = dir.path().join(path);
@@ -223,7 +244,31 @@ mod tests {
             "extension.yaml",
             &manifest,
             &super::super::Disk(dir.path().to_path_buf()),
+            configuration,
         )
+    }
+
+    /// Settings with a pick-one `workflow`, a free `note`, a `limit` and an
+    /// object `tasks`.
+    fn settings() -> ConfigurationFile {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "tasks": {
+                        "type": "object",
+                        "properties": {
+                            "workflow": { "type": "string", "enum": ["off", "agent_tracks"] },
+                            "note": { "type": "string" }
+                        }
+                    },
+                    "limit": { "type": "integer" }
+                }
+            },
+            "defaults": { "tasks": { "workflow": "agent_tracks" } }
+        }))
+        .unwrap()
     }
 
     const SKILL: &str = "---\nname: tasks\ndescription: Tasks.\n---\n# Tasks\n";
@@ -244,6 +289,7 @@ mod tests {
                     file: "s/SKILL.md".into(),
                     needs: vec!["task_tracker".into()],
                     description: "Tasks.".into(),
+                    when: None,
                 },
                 SkillDecl {
                     name: "next-task".into(),
@@ -251,6 +297,7 @@ mod tests {
                     file: "c.md".into(),
                     needs: vec![],
                     description: "Next.".into(),
+                    when: None,
                 },
             ]
         );
@@ -295,5 +342,77 @@ mod tests {
             &[("s.md", SKILL)]
         )
         .contains("twice"));
+    }
+
+    /// `when:` offers a skill by a setting of the extension's own.
+    #[test]
+    fn a_skill_names_the_setting_that_offers_it() {
+        let (decls, errors) = parse_configured(
+            "  - { name: tasks, file: s.md, when: { config: /tasks/workflow, in: [agent_tracks] } }\n",
+            &[("s.md", SKILL)],
+            Some(&settings()),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            decls[0].when,
+            Some(ConfigCondition {
+                config: "/tasks/workflow".into(),
+                values: vec![serde_json::json!("agent_tracks")],
+            })
+        );
+    }
+
+    /// A `when:` that can never hold is refused at load, saying why.
+    #[test]
+    fn a_when_that_names_no_setting_is_refused() {
+        let refused = |when: &str, configuration: Option<&ConfigurationFile>| {
+            let (decls, errors) = parse_configured(
+                &format!("  - {{ name: tasks, file: s.md, when: {when} }}\n"),
+                &[("s.md", SKILL)],
+                configuration,
+            );
+            assert!(decls.is_empty(), "{when}: refused skills aren't declared");
+            errors
+                .iter()
+                .map(|d| format!("{} {}", d.code, d.render("")))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let settings = settings();
+        let no_configuration = refused("{ config: /tasks/workflow, in: [off] }", None);
+        assert!(
+            no_configuration.contains("when.undeclared")
+                && no_configuration.contains("configuration:"),
+            "{no_configuration}"
+        );
+        let unknown = refused("{ config: /tasks/flow, in: [off] }", Some(&settings));
+        assert!(
+            unknown.contains("when.unknown_key") && unknown.contains("/tasks/flow"),
+            "{unknown}"
+        );
+        let object = refused("{ config: /tasks, in: [off] }", Some(&settings));
+        assert!(object.contains("when.not_scalar"), "{object}");
+        let outside = refused(
+            "{ config: /tasks/workflow, in: [off, sometimes] }",
+            Some(&settings),
+        );
+        assert!(
+            outside.contains("when.not_in_enum") && outside.contains("sometimes"),
+            "{outside}"
+        );
+        let wrong_type = refused("{ config: /limit, in: [many] }", Some(&settings));
+        assert!(wrong_type.contains("when.wrong_type"), "{wrong_type}");
+        let empty = refused("{ config: /tasks/workflow, in: [] }", Some(&settings));
+        assert!(empty.contains("when.empty"), "{empty}");
+        let free = parse_configured(
+            "  - { name: tasks, file: s.md, when: { config: /tasks/note, in: [anything] } }\n",
+            &[("s.md", SKILL)],
+            Some(&settings),
+        );
+        assert!(
+            free.1.is_empty(),
+            "a key without an enum takes any value of its type: {:?}",
+            free.1
+        );
     }
 }

@@ -68,6 +68,53 @@ async fn activation_leaves_an_old_layer_alone_until_the_extension_writes_it_agai
     assert_eq!(config["values"]["limit"], json!(20));
 }
 
+/// A schema version bump carries a stored layer forward when the new schema
+/// still takes its values (restamped at the new version, values as stored);
+/// a layer it doesn't take stays at the old version and fails closed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_version_bump_carries_forward_a_layer_the_new_schema_takes() {
+    let fx = services_with_thread().await;
+    declare(fx._dir.path(), "alpha", CONFIGURATION);
+    reconcile(&fx).await;
+    // Version 2 still takes `limit`; it has no `nested`.
+    store_layer(&fx, Scope::Project, 1, json!({"limit": 20})).await;
+    store_layer(&fx, Scope::Personal, 1, json!({"nested": {"a": 2}})).await;
+    declare(fx._dir.path(), "alpha", CONFIGURATION_V2);
+    reconcile(&fx).await;
+
+    assert_eq!(
+        stamp_of(&fx, "project").await,
+        json!({"schema_version": 2, "revision": 2}),
+        "the compatible layer is restamped"
+    );
+    assert_eq!(
+        stamp_of(&fx, "personal").await,
+        json!({"schema_version": 1, "revision": 1}),
+        "the incompatible layer is left as it was"
+    );
+    let refused = run(&fx, "alpha.config.read", json!({}))
+        .await
+        .expect_err("the old personal layer still fails closed");
+    let CommandError::Invalid { field, .. } = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(field.as_deref(), Some("/schema_version"));
+
+    // Once the extension's own command replaces the personal layer, the
+    // carried project value is what's read.
+    run(
+        &fx,
+        "alpha.config.write",
+        json!({"schema_version": 2,
+               "personal": {"expected": {"schema_version": 1, "revision": 1},
+                            "values": {}}}),
+    )
+    .await
+    .unwrap();
+    let config = run(&fx, "alpha.config.read", json!({})).await.unwrap();
+    assert_eq!(config["values"]["limit"], json!(20));
+}
+
 // ---- stale layers fail closed -----------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]

@@ -35,20 +35,55 @@ pub struct PreparedExtensionDatabase {
     )>,
 }
 
-/// The effective configuration the published datasets were compiled against,
-/// per extension that reads any; a change in it republishes them.
+/// The effective configuration the published generation was made with, per
+/// extension that reads its own ([`configuration_readers`]); a change in it
+/// republishes.
 pub type ConfigSignature = std::collections::BTreeMap<String, String>;
 
-/// Whether any dataset of `extension` reads its configuration with `config()`.
-pub fn reads_configuration(extension: &crate::extension::extensions::Extension) -> bool {
-    extension.configuration.is_some()
-        && extension.datasets.iter().any(|dataset| {
-            datasets::config_reads(&dataset.sql).is_ok_and(|reads| !reads.is_empty())
-        })
+/// A kind of contribution whose published form depends on the extension's
+/// effective configuration: a change of its settings republishes the
+/// generation (`ExtensionActivation::request_config_refresh`), which
+/// recompiles the datasets and rewrites the agents' skills
+/// (`capabilities::refresh_agent_text`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigReader {
+    /// A dataset's SQL calls `config()`: compiled with the values.
+    Datasets,
+    /// A skill is offered by a setting (`when:`).
+    Skills,
 }
 
-/// The effective configuration of each extension in `extensions` whose datasets
-/// read theirs, as it is stored now. A configuration that can't be resolved
+/// What of `extension` reads its own configuration: the one list of
+/// configuration readers. A new contribution kind that depends on a setting
+/// adds itself here.
+pub fn configuration_readers(
+    extension: &crate::extension::extensions::Extension,
+) -> Vec<ConfigReader> {
+    if extension.configuration.is_none() {
+        return Vec::new();
+    }
+    let datasets = extension
+        .datasets
+        .iter()
+        .any(|dataset| datasets::config_reads(&dataset.sql).is_ok_and(|reads| !reads.is_empty()));
+    let skills = extension.skills.iter().any(|skill| skill.when.is_some());
+    [
+        (datasets, ConfigReader::Datasets),
+        (skills, ConfigReader::Skills),
+    ]
+    .into_iter()
+    .filter_map(|(reads, reader)| reads.then_some(reader))
+    .collect()
+}
+
+/// Whether anything of `extension` reads its configuration
+/// ([`configuration_readers`]).
+pub fn reads_configuration(extension: &crate::extension::extensions::Extension) -> bool {
+    !configuration_readers(extension).is_empty()
+}
+
+/// The effective configuration of each extension in `extensions` that reads
+/// its own ([`reads_configuration`]), as it is stored now. A configuration that can't be resolved
 /// signs as its failure, so repairing it republishes too.
 pub fn config_signature_tx(
     conn: &rusqlite::Connection,
@@ -134,7 +169,10 @@ impl PreparedExtensionDatabase {
         let configurations = snapshot
             .extensions()
             .iter()
-            .filter(|extension| extension.enabled && reads_configuration(extension))
+            .filter(|extension| {
+                extension.enabled
+                    && configuration_readers(extension).contains(&ConfigReader::Datasets)
+            })
             .filter_map(|extension| {
                 Some((
                     extension.name.clone(),

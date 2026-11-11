@@ -1200,7 +1200,7 @@ mod tests {
         .unwrap_err();
         assert!(err.message.contains("oxplow-extension"), "{err:?}");
         // A skill's reference files are read by name too.
-        let core = oxplow_app::capabilities::agent_text(&_svc);
+        let core = oxplow_app::capabilities::agent_text(&_svc).await;
         let skill = core
             .skills
             .iter()
