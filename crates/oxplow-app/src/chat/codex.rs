@@ -1007,9 +1007,14 @@ mod tests {
         let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
         let fake = FakeAppServer::start(home.path(), |_, _| Ok(json!({})));
         let file = home.path().join("recorded.jsonl");
-        let (_server, mut messages) = AppServer::connect_recording(&fake.socket, None, Some(&file))
-            .await
-            .unwrap();
+        let (_server, mut messages) = AppServer::connect_recording(
+            &fake.socket,
+            None,
+            Some(&file),
+            oxplow_harnesses::codex_app_server::OBSERVER,
+        )
+        .await
+        .unwrap();
         let original = recorded();
         for m in &original {
             if let ServerMessage::Notification { method, params } = m {
