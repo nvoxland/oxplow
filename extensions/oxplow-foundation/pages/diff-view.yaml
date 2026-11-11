@@ -164,6 +164,44 @@ loaders:
     params:
       task:
         from: row.task
+  concurrent:
+    sql: |
+      -- The other requests (any thread) whose turns changed a path of this
+      -- change while it was being made: the window is the two points' take
+      -- times (open at the start for the whole tree, at the end for the
+      -- working tree). Joined by integer ids; the subject's own request
+      -- (a turn's, for a turn) is left out.
+      WITH win AS (
+        SELECT coalesce((SELECT s.created_at FROM v_snapshot s WHERE :start_rev LIKE 'snap:%' AND s.id = CAST(substr(:start_rev, 6) AS INTEGER)), '') AS lo,
+               coalesce((SELECT s.created_at FROM v_snapshot s WHERE :end_rev LIKE 'snap:%' AND s.id = CAST(substr(:end_rev, 6) AS INTEGER)), '9999') AS hi
+      ), own AS (
+        SELECT CASE WHEN :subject = 'request' THEN CAST(substr(uri_param(:uri, 'id'), 4) AS INTEGER)
+                    WHEN :subject = 'turn' THEN (SELECT x.request_id FROM v_agent_turn x WHERE x.id = CAST(substr(uri_param(:uri, 'id'), 4) AS INTEGER))
+               END AS request_id
+      )
+      SELECT CASE WHEN instr(r.prompt, char(10)) > 0 THEN substr(r.prompt, 1, instr(r.prompt, char(10)) - 1) ELSE r.prompt END AS prompt,
+             r.uri AS ref,
+             th.title AS thread,
+             group_concat(DISTINCT tf.path) AS shared
+      FROM v_change_file cf
+      JOIN v_turn_file tf ON tf.path = cf.path AND tf.confidence IN ('claimed', 'sole')
+      JOIN v_agent_turn t ON t.id = tf.turn_id
+      JOIN v_request r ON r.id = t.request_id
+      JOIN v_thread th ON th.id = t.thread_id, win, own
+      WHERE cf.change_id = :range_change_id
+        AND (own.request_id IS NULL OR r.id <> own.request_id)
+        AND tf.last_changed_at >= win.lo AND tf.first_changed_at <= win.hi
+      GROUP BY r.id
+      ORDER BY r.started_at, r.id
+    params:
+      subject:
+        from: row.subject
+      start_rev:
+        from: row.start_rev
+      end_rev:
+        from: row.end_rev
+      range_change_id:
+        from: row.range_change_id
   files:
     sql: |
       WITH ch(base_revision, head_revision) AS (
@@ -219,6 +257,22 @@ view:
     markdown:
       text: body
     empty: No description.
+  - id: concurrent
+    title: Other Requests On These Files
+    from: concurrent
+    viz: table
+    columns:
+    - key: prompt
+      label: Request
+      link:
+        kind: page
+        from: ref
+    - key: thread
+      label: Thread
+      width: 140
+    - key: shared
+      label: Shared files
+    empty: No other request changed these files in the same window.
   - id: files
     title: Files Changed
     from: files
