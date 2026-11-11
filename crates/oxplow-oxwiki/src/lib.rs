@@ -28,6 +28,13 @@ pub fn page_path(project_dir: &Path, slug: &str) -> PathBuf {
     oxwiki_dir(project_dir).join(format!("{slug}.md"))
 }
 
+/// The page whose file `path` (absolute) is: `<project>/.oxplow/oxwiki/<slug>.md`.
+pub fn page_of(project_dir: &Path, path: &Path) -> Option<String> {
+    let name = path.strip_prefix(oxwiki_dir(project_dir)).ok()?;
+    let slug = name.to_str()?.strip_suffix(".md")?;
+    valid_slug(slug).then(|| slug.to_string())
+}
+
 /// A slug is kebab-case: lowercase letters and digits in `-`-joined runs.
 pub fn valid_slug(slug: &str) -> bool {
     !slug.is_empty()
@@ -132,8 +139,8 @@ impl KnowledgeProvider for OxwikiStore {
         KnowledgeFeatures { edit: true }
     }
 
-    fn root(&self) -> Option<PathBuf> {
-        Some(oxwiki_dir(&self.project_dir))
+    fn page_at(&self, path: &Path) -> Option<String> {
+        page_of(&self.project_dir, path)
     }
 
     async fn write_page(
@@ -243,6 +250,23 @@ mod tests {
             draft(None, Some("!")),
         ] {
             assert!(matches!(slug_of(&bad), Err(CommandError::Invalid { .. })));
+        }
+    }
+
+    #[test]
+    fn a_page_is_its_file_in_the_folder() {
+        let project = Path::new("/p");
+        assert_eq!(
+            page_of(project, Path::new("/p/.oxplow/oxwiki/arch.md")).as_deref(),
+            Some("arch")
+        );
+        for not in [
+            "/p/.oxplow/oxwiki/sub/arch.md",
+            "/p/.oxplow/oxwiki/Arch.md",
+            "/p/src/arch.md",
+            "/p/.oxplow/oxwiki/arch.txt",
+        ] {
+            assert_eq!(page_of(project, Path::new(not)), None, "{not}");
         }
     }
 

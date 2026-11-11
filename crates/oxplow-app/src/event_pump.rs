@@ -63,6 +63,7 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "config.workspace_filter",
     "extension_datasets.entities",
     "knowledge.attribution",
+    "knowledge.reads",
     "knowledge.records",
     "metrics.entity_states",
     "page_ref.task",

@@ -23,7 +23,10 @@ use oxplow_db::knowledge_record::{
     delete_page_tx, strip_body_version_literals, write_page_tx, CitedRefs, PageWrite,
 };
 use oxplow_db::EventCtx;
-use oxplow_domain::events::schema::{KnowledgePageWritten, KnowledgePageWrittenV3};
+use oxplow_domain::events::schema::{
+    AgentToolFinished, AgentToolFinishedV4, KnowledgePageRead, KnowledgePageReadV1,
+    KnowledgePageWritten, KnowledgePageWrittenV3,
+};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{
     Kept, KnowledgeProvider, KnowledgeStores, PageCall, PageDraft, RefFreshness, OXWIKI,
@@ -205,6 +208,133 @@ impl crate::event_pump::EventConsumer for KnowledgeAttribution {
             return Ok(());
         }
         oxplow_db::knowledge_page_store::touch_tx(conn, thread, &written.page, event.envelope.at)
+    }
+}
+
+/// Log an agent's read of the page `uri` through a tool (`oxplow_read`):
+/// `knowledge.page.read { via: tool }`, as the actor. A read command runs
+/// unrecorded, so it appends this itself.
+pub async fn log_read(
+    svc: &crate::Services,
+    actor: &oxplow_domain::Actor,
+    uri: &str,
+) -> Result<(), DomainError> {
+    let Some((store, id)) = oxplow_domain::uri::build::knowledge_of_uri(uri) else {
+        return Ok(());
+    };
+    let page = knowledge_uri(&store, &id);
+    let vocabulary = svc.vocabulary.current();
+    let env = EventCtx {
+        vocabulary: &vocabulary,
+        source: actor.source(),
+        cause: None,
+    }
+    .typed::<KnowledgePageRead>(&KnowledgePageReadV1 {
+        page: page.clone(),
+        via: "tool".into(),
+    })
+    .with_anchors(actor.anchors())
+    .with_subject([page]);
+    svc.event_log_store.append(env).await.map(|_| ())
+}
+
+/// Records agents' reads of knowledge pages (`knowledge_page_read`,
+/// `v_knowledge_read`): each `knowledge.page.read` (an `oxplow_read`), and
+/// each `agent.tool.finished` of a file read whose file is a recorded
+/// page's (a store's `page_at`: oxwiki's `.oxplow/oxwiki/<slug>.md`), as a
+/// read `via: file`. A path is the worktree's (relative) or absolute; one
+/// that is no page is nothing.
+pub struct KnowledgeReads {
+    pub stores: Arc<KnowledgeStores>,
+    pub project_dir: PathBuf,
+}
+
+impl KnowledgeReads {
+    pub const NAME: &'static str = "knowledge.reads";
+}
+
+fn insert_read(
+    conn: &rusqlite::Connection,
+    uri: &str,
+    via: &str,
+    event: &oxplow_domain::StoredEvent,
+) -> Result<(), DomainError> {
+    let anchors = &event.envelope.anchors;
+    conn.execute(
+        "INSERT INTO knowledge_page_read (uri, thread_id, turn_id, via, at)
+         SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM knowledge_page WHERE uri = ?1)",
+        params![
+            uri,
+            anchors.thread_id.map(|t| t.value()),
+            anchors.turn_id,
+            via,
+            oxplow_db::ts_to_string(event.envelope.at),
+        ],
+    )
+    .map_err(sql)?;
+    Ok(())
+}
+
+impl crate::event_pump::EventConsumer for KnowledgeReads {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == <KnowledgePageRead as oxplow_domain::EventType>::TYPE
+            || event_type == <AgentToolFinished as oxplow_domain::EventType>::TYPE
+    }
+
+    fn handle(
+        &self,
+        conn: &rusqlite::Connection,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        let payload = event.envelope.payload.clone();
+        if event.envelope.event_type == <KnowledgePageRead as oxplow_domain::EventType>::TYPE {
+            let read: KnowledgePageReadV1 = serde_json::from_value(payload)
+                .map_err(|e| DomainError::Invalid(format!("knowledge.page.read payload: {e}")))?;
+            return insert_read(conn, &read.page, &read.via, event);
+        }
+        let Ok(tool) = serde_json::from_value::<AgentToolFinishedV4>(payload) else {
+            return Ok(());
+        };
+        if tool.kind != oxplow_domain::agent::tool::ToolKind::Read || tool.paths.is_empty() {
+            return Ok(());
+        }
+        // A relative path is the worktree's the agent ran in.
+        let worktree: PathBuf = match event.envelope.anchors.stream_id {
+            Some(stream) => conn
+                .query_row(
+                    "SELECT worktree_path FROM streams WHERE id = ?1",
+                    [stream.value()],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sql)?
+                .map_or_else(|| self.project_dir.clone(), PathBuf::from),
+            None => self.project_dir.clone(),
+        };
+        let stores: Vec<Arc<dyn KnowledgeProvider>> = self
+            .stores
+            .enabled()
+            .iter()
+            .filter_map(|id| self.stores.get(id))
+            .collect();
+        for path in &tool.paths {
+            let path = Path::new(path);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                worktree.join(path)
+            };
+            for store in &stores {
+                if let Some(id) = store.page_at(&path) {
+                    insert_read(conn, &knowledge_uri(store.id(), &id), "file", event)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

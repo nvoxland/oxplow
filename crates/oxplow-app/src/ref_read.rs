@@ -12,7 +12,7 @@
 //!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
 //!   `result` or `summary`; the caller's own stream's only), a model call's
 //!   (`#part=request` or `response`; not one another agent's thread asked
-//!   for), a page's definition.
+//!   for), a page's definition, a knowledge page's body.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
@@ -184,6 +184,20 @@ pub async fn read(
                 }
                 (r::AI_CALL, Some(part)) => {
                     out.set_content(ai_call_body(svc, &param("id"), part, reader.thread).await?);
+                }
+                // A knowledge page's content is its body, as its store kept it.
+                (r::KNOWLEDGE, _) => {
+                    let body = rows(
+                        svc,
+                        "SELECT body FROM v_knowledge_body WHERE uri = ?1",
+                        &reference,
+                    )
+                    .await?;
+                    if let Some(Value::String(body)) =
+                        body.into_iter().next().and_then(|mut r| r.remove("body"))
+                    {
+                        out.set_content(body);
+                    }
                 }
                 _ => {}
             }

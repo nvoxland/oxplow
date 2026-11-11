@@ -1257,8 +1257,11 @@ them. V28 dropped `wiki_page` and its sibling tables and deleted the
 wiki's old events, `page_ref` rows, visits, bookmarks, usage events,
 search entries, comments and context items (no data carried over).
 
-`knowledge_page_read (id, uri, thread_id, turn_id, via, at)` records
-reads of a page. It exists, and a later milestone fills it.
+`knowledge_page_read (id, uri, thread_id, turn_id, via, at)` records an
+agent's reads of a page (`via` `tool` or `file`), written by the
+`knowledge.reads` consumer from `knowledge.page.read` and file-read tool
+calls. `v_knowledge_read` adds a person's page visits
+(`.context/knowledge.md` "Reads").
 
 ### `page_ref` — unified cross-page reference graph (`crates/oxplow-db/src/page_ref_store.rs`, migration `V11__page_ref.sql`)
 
