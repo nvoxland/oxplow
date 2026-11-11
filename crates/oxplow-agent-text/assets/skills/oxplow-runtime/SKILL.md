@@ -19,23 +19,15 @@ finish.
   the person, the rest) and its compactions. A request (`v_request`) is a
   prompt and every turn it caused, with its live state; the tasks it
   worked on are `v_request_task`.
-- **A request at a glance.** `oxplow_request_summary { request: "req3" }`
-  answers "what did this request do": its facts (`v_request`, its thread
-  in `v_thread`), its tasks (`v_request_task` with `v_task`), the files its
-  turns changed (`v_turn_file`, claimed or sole, joined through
-  `v_agent_turn.request_id`), its test runs, diff coverage and static
-  analysis (`v_request_observation`), the metrics it moved
-  (`v_request_metric_delta`) and the commits that hold its files
-  (`v_commit_request` with `v_commit`). Read it before you query those
-  one by one; its Changes page (`oxplow:oxplow/request?id=req3`) shows
-  the diff.
-- **Session history.** In SQL the history of your conversations is
-  `v_agent_session` (the slots opened on a thread), `v_agent_session_status`
-  (each open session's last status), `v_agent_turn` (each prompt and
-  answer), `v_tool_call` and `v_subagent`; the tasks a session's requests
-  worked on are `v_request_task` joined to `v_task`. A session that lost its
-  conversation is brought back with `oxplow.agent_session.reopen { session }`;
-  the transcript page offers it.
+- **A request at a glance.** `oxplow_request_summary { request: "req3" }`:
+  its facts (`v_request`, `v_thread`), tasks (`v_request_task`, `v_task`),
+  files (`v_turn_file` via `v_agent_turn.request_id`), tests and coverage
+  (`v_request_observation`), metric moves (`v_request_metric_delta`) and
+  commits (`v_commit_request`, `v_commit`). Read it before querying those;
+  `oxplow:oxplow/request?id=req3` is its diff.
+- **Session history.** `v_agent_session`, `v_agent_session_status`,
+  `v_agent_turn`, `v_tool_call`, `v_subagent`. A session that lost its
+  conversation comes back with `oxplow.agent_session.reopen { session }`.
 - **Standing instructions.** What the person set for every session of
   your stream and of your thread is `v_stream.prompt` and `v_thread.prompt`
   (`SELECT s.prompt, t.prompt FROM v_thread t JOIN v_stream s ON s.id =
@@ -49,8 +41,8 @@ finish.
   `references/commands.md`. Nothing wakes the other agent.
 - **Context basket.** A `<context-basket>` block is what the person
   collected for you; read each `[oxplow uri …]` with `oxplow_read`.
-- **Hints.** oxplow may add short, advisory guidance to your next prompt
-  or tool result (work grown large with nothing committed, metric movement).
+- **Hints.** oxplow may add short advisory guidance to your next prompt or
+  tool result.
 
 ## Writing about work
 
