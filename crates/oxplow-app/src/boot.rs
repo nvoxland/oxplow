@@ -228,7 +228,7 @@ pub async fn run_boot_orchestration(
     // The agent runtimes' skills: what's offered now.
     crate::capabilities::refresh_agent_text(state).await;
     crate::providers::sync::spawn_sync_scheduler(state);
-    crate::request_analysis::register(state);
+    register_stored_analyses(state);
 
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate
@@ -603,4 +603,12 @@ pub async fn run_boot_orchestration(
         });
     }
     Ok(())
+}
+
+/// The stored analyses pages read but can't compute — each request's
+/// (`request_analysis`: `v_request_observation`, `v_request_metric_delta`),
+/// assets over what they read. Boot registers them, and so does a
+/// throwaway oxplow that runs an extension's examples.
+pub fn register_stored_analyses(state: &std::sync::Arc<crate::Services>) {
+    crate::request_analysis::register(state);
 }

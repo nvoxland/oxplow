@@ -398,7 +398,7 @@ impl Host {
         // Each request's stored analysis (`v_request_observation`,
         // `v_request_metric_delta`), an asset as at boot: recomputed with
         // the materialized datasets before a read.
-        oxplow_app::request_analysis::register(&self.svc);
+        oxplow_app::boot::register_stored_analyses(&self.svc);
         // The one change loop, as at boot: materialized datasets refill.
         oxplow_app::datasets_changed::spawn(
             self.svc.db.clone(),
