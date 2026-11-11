@@ -1458,9 +1458,9 @@ keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary i
 
 **What opencode reports and what oxplow reads** (the bridge,
 `opencode-hooks.js`; `OPENCODE_FACTS` in `opencode.rs` is this table and a
-test keeps the two equal; read from 1.17.4's source, not yet from
-recordings: compaction, question and the order of `session.error` before
-`session.idle` still need one):
+test keeps the two equal; recorded with 1.17.4: the fixtures under
+`crates/oxplow-harnesses/fixtures/opencode/` are replayed in
+`replayed_harnesses.rs`):
 
 | Fact | opencode reports | oxplow reads |
 |---|---|---|
@@ -1472,6 +1472,19 @@ recordings: compaction, question and the order of `session.error` before
 | An errored turn | `session.error` with another error, then `session.idle` | `TurnRun.outcome` `errored`, `TurnRun.error` `name: message` |
 | What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
 | A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
+
+**One abort or error gives two idles.** Recorded (`abort.jsonl`,
+`error.jsonl`): `session.error` comes right before the first
+`session.idle`, so the first Stop carries the error (`MessageAbortedError`
+is `interrupted`; the 401 `APIError` is `errored`, `APIError: Missing
+Authentication header`). Then a second `session.idle` follows (an
+aborted bash call's `tool.execute.after` lands between the two), and the
+bridge posts a second Stop with no error. Core already makes that one
+turn: the first Stop ends it, the late PostToolUse is the call finishing
+(it opens no turn), and a Stop with no open turn changes nothing but
+re-marks the thread idle. An aborted shell call reports `exit: null`, so
+its PostToolUse has no `exit_code`. The bridge's `tool_use_id` for the
+late call is the same `callID` as its PreToolUse.
 
 
 **Who in a session acted.** A subagent (Claude Code's `Agent`/`Task`, an
@@ -1927,6 +1940,7 @@ equivalence between tools.
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
 | Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| opencode abort and API error | recorded `opencode/abort.jsonl`, `opencode/error.jsonl`: `a_recorded_opencode_abort_ends_one_turn_as_interrupted`, `a_recorded_opencode_api_error_ends_one_turn_as_errored` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
 | Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |
 | Backend restart | `a_resumed_session_resets_a_turn_that_died_without_a_stop`, `a_restart_close_is_logged_as_recovery`, `a_process_exit_ends_its_session_once`; a Codex session end to end, `a_codex_session_resumes_its_thread_after_a_backend_restart` (a fake `codex` on the search path, the scripted daemon, Services reopened over the same database file: the bound thread is resumed, not replaced, and opens writable) |

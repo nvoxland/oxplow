@@ -482,3 +482,78 @@ async fn a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompt
     assert!(turns[1].prompt.contains("all tests passed"));
     assert!(turns[2].prompt.starts_with("[Cross-session idle notice]"));
 }
+
+/// A replay's turns, oldest first: source, outcome, error, question and
+/// prompt as the turn view reads them.
+type TurnRow = (
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+);
+async fn turn_rows(r: &Replayed) -> Vec<TurnRow> {
+    r.svc
+        .db
+        .read(|c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT source, outcome, error, question, prompt FROM v_agent_turn ORDER BY id",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap()
+}
+
+/// opencode's abort, recorded: the Stop with `MessageAbortedError` ends the
+/// person's turn as interrupted; the shell's PostToolUse that lands after
+/// that Stop and the second Stop (a second `session.idle`) open and end
+/// nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_abort_ends_one_turn_as_interrupted() {
+    let r = replayed("opencode/abort.jsonl", "opencode").await;
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].0.as_deref(), Some("person"));
+    assert_eq!(turns[0].1, "interrupted");
+    assert_eq!(turns[0].2, None);
+    assert_eq!(events_of(&r, "agent.turn.started").await.len(), 1);
+    assert_eq!(events_of(&r, "agent.turn.ended").await.len(), 1);
+    assert_eq!(tools_of(&r).await, ["Bash"]);
+    assert_eq!(events_of(&r, "agent.prompt.submitted").await.len(), 1);
+    // Nothing after the first Stop wakes the agent: its last state is idle.
+    let states: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .iter()
+        .map(|p| p["state"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some("idle"),
+        "{states:?}"
+    );
+}
+
+/// opencode's API error, recorded (a 401): the Stop carrying the error ends
+/// the turn as errored with the error's name and message; the second Stop
+/// ends nothing more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_api_error_ends_one_turn_as_errored() {
+    let r = replayed("opencode/error.jsonl", "opencode").await;
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].1, "errored");
+    assert_eq!(
+        turns[0].2.as_deref(),
+        Some("APIError: Missing Authentication header")
+    );
+    assert_eq!(events_of(&r, "agent.turn.ended").await.len(), 1);
+}
