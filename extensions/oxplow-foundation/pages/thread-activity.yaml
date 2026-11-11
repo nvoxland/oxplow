@@ -1,9 +1,23 @@
-title: Thread Activity
+title: Thread activity
 description: "What a thread's agent did, turn by turn, under the request each turn belongs to: prompt, session, model, context and compactions, files, test runs and tokens."
+icon: activity
+category: Activity
 params:
-- name: thread_id
-  label: Thread
+- name: thread
+  label: Thread (`thr3`)
+  type: choice
+  role: filter
+  options_from: '#threads'
+  default: ''
 loaders:
+  # The open threads, the most recently active first; a closed one is
+  # still named by its id.
+  threads:
+    sql: |
+      SELECT 'thr' || t.id AS value, t.title AS label
+      FROM v_thread t
+      WHERE t.closed_at IS NULL
+      ORDER BY (SELECT max(a.started_at) FROM v_agent_turn a WHERE a.thread_id = t.id) DESC, t.id
   thread_activity:
     sql: |
       WITH turns AS (
@@ -20,7 +34,7 @@ loaders:
                          ELSE t.prompt END) AS prompt,
                t.request_id
         FROM v_agent_turn t
-        WHERE t.thread_id = :thread_id
+        WHERE t.thread_id = (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread))
       )
       SELECT coalesce(nullif(trim(CASE WHEN instr(r.prompt, char(10)) > 0
                                        THEN substr(r.prompt, 1, instr(r.prompt, char(10)) - 1)

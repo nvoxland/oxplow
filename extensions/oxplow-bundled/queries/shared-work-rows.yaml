@@ -1,12 +1,12 @@
 title: Shared work
-description: What this thread holds together with another thread — items requests on both worked on, files their requests changed, epics split across them.
+description: "Where two threads hold the same thing, one row each: a task that requests on both worked on (`Items on two threads`), a file both threads' turns changed (`Files two threads changed`; a file two concurrent turns could each have changed is no evidence), an epic whose open children sit on different threads (`Epics spread over threads`). Requests count while running or finished in the last day. `thread_id` keeps the rows that involve that thread; `task` keeps that task's own row, the files its requests changed, and its epic's. Each row: `section`, `what`, `threads` (their titles), `uri`."
 params:
 - name: thread_id
+- name: task
 loaders:
-  thread_shared_work:
+  shared_work:
     sql: |
       WITH live AS (
-        -- Requests running now or finished in the last day.
         SELECT r.uri AS request
         FROM v_request r
         WHERE r.state <> 'finished' OR julianday(r.last_activity_at) >= julianday('now') - 1
@@ -15,8 +15,6 @@ loaders:
         FROM live l JOIN v_agent_turn t ON t.request = l.request
         JOIN v_thread th ON th.id = t.thread_id
       ), shared AS (
-        -- A task requests running or just finished (on any basis) worked on,
-        -- from two threads.
         SELECT 'Items on two threads' AS section, w.title AS what, w.uri AS uri,
                group_concat(DISTINCT o.thread_title) AS threads,
                group_concat(DISTINCT o.thread_id) AS thread_ids
@@ -24,8 +22,6 @@ loaders:
         JOIN v_task w ON w.uri = rt.task
         GROUP BY w.uri HAVING count(DISTINCT o.thread_id) >= 2
         UNION ALL
-        -- A file two threads' turns changed; a file two concurrent turns
-        -- could each have changed (`shared`) is no evidence.
         SELECT 'Files two threads changed', f.path, NULL,
                group_concat(DISTINCT o.thread_title), group_concat(DISTINCT o.thread_id)
         FROM v_turn_file f JOIN live_turns o ON o.turn = f.turn
@@ -39,19 +35,14 @@ loaders:
         GROUP BY p.uri HAVING count(DISTINCT t.id) >= 2
       )
       SELECT section, what, threads, uri FROM shared
-      WHERE instr(',' || thread_ids || ',', ',' || :thread_id || ',') > 0
+      WHERE (:thread_id IS NULL OR instr(',' || thread_ids || ',', ',' || :thread_id || ',') > 0)
+        AND (:task IS NULL
+             OR (section = 'Items on two threads' AND uri = :task)
+             OR (section = 'Files two threads changed' AND what IN (
+                   SELECT f.path FROM v_turn_file f
+                   JOIN v_agent_turn t ON t.uri = f.turn
+                   JOIN v_request_task rt ON rt.request = t.request
+                   WHERE rt.task = :task AND f.confidence <> 'shared'))
+             OR (section = 'Epics spread over threads'
+                 AND uri = (SELECT parent_uri FROM v_task WHERE uri = :task)))
       ORDER BY section, what
-view:
-  from: thread_shared_work
-  viz: list
-  group:
-    by: section
-  columns:
-  - key: what
-    label: What
-    link:
-      kind: page
-      from: uri
-  - key: threads
-    label: Threads
-  empty: Nothing is shared across threads.

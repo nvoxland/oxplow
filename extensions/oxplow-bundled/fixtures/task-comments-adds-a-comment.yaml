@@ -1,0 +1,9 @@
+# A task's Comment… adds a comment; the Comments part then reads it.
+given:
+  - { command: oxplow.task.create, input: { title: Item with notes }, bind: item }
+when: { part: task-comments, params: { uri: $item.uri } }
+expect: { loaders: { comments: { rows: 0 } } }
+steps:
+  - press: { action: comment, node: comments, input: { body: A note for later. } }
+    expect: { ok: true }
+  - expect: { loaders: { comments: { rows: [{ body: A note for later. }] } } }

@@ -3,7 +3,7 @@
 given:
   - observe: { turn: { prompt: Build the parser } }
   - observe: { turn: { prompt: What does the lexer do? } }
-when: { page: oxplow/thread-activity, params: { thread_id: 1 } }
+when: { page: oxplow/thread-activity, params: { thread: thr1 } }
 expect:
   loaders:
     thread_activity:

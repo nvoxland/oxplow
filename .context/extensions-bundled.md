@@ -35,10 +35,13 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       extension.
 
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
-- **The review packet** (in `oxplow-bundled`). Its pages, mounted in
+- **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
-  page), `commit` and `uncommitted-changes`:
-  - What Deviated (its own dataset `v_oxplow_deviation`: each
+  page), `commit` and `uncommitted-changes`. What deviated and Struggled
+  here are `oxplow-bundled`'s parts (`what-deviated`, `struggled`, on the
+  Changes page only; they take its `uri` and show a request's rows, none
+  for a snapshot's or a turn's); Tests Weakened is still the holder's:
+  - What deviated (its own dataset `v_oxplow_deviation`: each
     request's files (its turns' `v_turn_file` rows, claimed or sole)
     against its tasks' titles and bodies — a file is in
     the area when the text names it or one of its directories at least
@@ -47,7 +50,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   - Tests Weakened (deleted test functions from `v_change_function`,
     fewer assertions and new skip markers from `v_change_test_file`;
     also mounted in the `oxplow/commit.sections` and `oxplow/uncommitted.sections` slots)
-  - Struggled Here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per request, read through each tool call's turn)
+  - Struggled here (`v_oxplow_struggle`, the bundled dataset: a file edited 5+ times or 3+ failed shell commands per request, read through each tool call's turn)
   - Context Read (`v_context_read`)
 
   `questions.yaml` + `README.md` (its skill)
@@ -55,12 +58,6 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
   questions are checked against a running registry by
   `the_bundled_extensions_answer_their_questions` (oxplow-sdk).
 
-  It also has a Waiting on Me page, reachable from the launcher:
-  what your agents are waiting on you for (`v_agent_status` with
-  `awaiting_user`: a question or plan they put to you, a permission
-  prompt, a final message ending in a question), blocked tasks, and open
-  notes. Each empty state says what's *good*, e.g.
-  "Nothing is waiting on you."
 
   The slot pages above need a `change_id`, so they're
   parts, not in the launcher (opened there they'd show NULL-param empty
@@ -182,8 +179,7 @@ screens and the holder's add the review and analysis:
 - **Request blocks.** Blocks for a request's tests (coverage, untested
   files, test runs, failed tests, analysis findings), its metric deltas, its
   nudges and its plan, mounted at `oxplow/diff-view.sections`.
-  `thread-tokens`,
-  `thread-plan`, `thread-shared-work` and the two handoff strips mounted
+  `thread-plan` and the two handoff strips mounted
   on the old Tasks page; its board has no slot, so they mount nowhere
   until they move.
 - **Metric nudges.** The `threshold-crossed` advisory (with
@@ -229,7 +225,14 @@ screens and the holder's add the review and analysis:
   rows, 20 for the body, 6 for the icons), which reads the `thread-bookmarks`
   query, the one statement of which bookmarks a thread sees; the Go To page
   reads it too. Git (`git`, collapsed `git-line`, count `git-count`) is
-  foundation's too; its header opens Git Status (`git-dashboard`). Its
+  foundation's too; its header opens Git Status (`git-dashboard`).
+  Waiting on you (`waiting-on-you`, count `waiting-count`, project
+  scope) is foundation's: what only the person can move — a question an
+  agent waits on (`v_agent_status` `awaiting_user`, linked to its thread),
+  an open handoff to a thread with no agent session, an open note. Its
+  alert fires while anything waits. Tasks assigned to the person are
+  bundled's Assigned to you, never repeated here. Fixtures:
+  `waiting-on-you-*`. Its
   files parts, the `uncommitted-changes` page and Directory read foundation's `worktree-files` query, the one statement of
   which files a stream shows: `show` is `changed`, `changed_untracked` or
   `all` (one folder), `target` the change (`''`: the working tree). Its rows
@@ -293,8 +296,7 @@ screens and the holder's add the review and analysis:
   preset are the Rust test
   `oxtask_offers_the_skills_of_the_projects_task_workflow`. It is `oxplow-bundled`'s, beside its
   `thread_tasks` dataset and `tasks.clear_finished` command, with a `panel:`
-  fixture. Still in the holder: Waiting on You (`waiting-on-me`, a badge)
-  and Comments (`comments-panel`). Each moves the same way: its parts, a
+  fixture. Still in the holder: Comments (`comments-panel`). Each moves the same way: its parts, a
   `panel:` fixture, and any rule it repeats with a foundation page made one
   query. Only the UI moved: stores, commands and views stay core. Each
   panel's `body` is a part.

@@ -2,7 +2,7 @@
 
 What comes with oxplow, built as an ordinary extension:
 
-- the request review: what a person checks in an agent's work, shown on
+- the request review: the tests an agent weakened, shown on
   the diff (the `oxplow/changes.sections` slot);
 - the analytics pages: duplication, co-change, token use and page
   visits.

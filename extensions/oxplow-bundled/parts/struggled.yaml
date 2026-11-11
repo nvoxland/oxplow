@@ -1,14 +1,14 @@
-title: Struggled Here
-description: Files the agent edited over and over, and commands that kept failing. Likely places for mistakes.
+title: Struggled here
+description: In a request, the files the agent edited over and over and the commands that kept failing - likely places for mistakes.
 params:
-- name: request_id
-  label: Request
+# The Changes page's: a request's, else (a snapshot's, a turn's) nothing.
+- name: uri
 loaders:
   struggled:
     sql: |
       SELECT subject, kind, count
       FROM v_oxplow_struggle
-      WHERE request_id = :request_id
+      WHERE request_id = (SELECT id FROM v_request WHERE uri = :uri)
       ORDER BY count DESC
 view:
   from: struggled

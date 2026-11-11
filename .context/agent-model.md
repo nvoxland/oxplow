@@ -177,8 +177,8 @@ read as `event:<id>#summary`), Codex's finished `contextCompaction` item
 `session.compacted` (through the bridge; it names neither). The log is all
 that opencode's compaction records besides the reset on its `PostCompact`. Codex's
 compaction also resets the session's baselines (`ChatHost::compacted`),
-and the context is injected again once no turn runs. Thread Activity
-counts a turn's compactions. `v_turn_activity.compactions` counts them per turn (a compaction between turns belongs to none), beside the turn's `deliveries` and `person_prompts`.
+and the context is injected again once no turn runs. Thread activity
+(foundation) counts a turn's compactions. `v_turn_activity.compactions` counts them per turn (a compaction between turns belongs to none), beside the turn's `deliveries` and `person_prompts`.
 
 **Who else is in the worktree.** A stream's threads share its worktree,
 and any number of agents may work there at once — in one thread or
@@ -1937,12 +1937,13 @@ agent's `oxplow.handoff.send` still works and there is no menu entry):
   week.
 - The Navigator counts each thread's open inbound handoffs beside its
   title (`useOpenHandoffs`), the newest sender in the tooltip.
-- oxplow-bundled's Waiting on Me lists an open handoff to a thread with
+- foundation's Waiting on you lists an open handoff to a thread with
   no agent session open there: the person's move. Agent status is not
   touched; it stays derived from agent activity.
 
-`tests-e2e/specs/work/handoff.spec.ts` drives it: hand off from the
-thread's menu, see it on the other thread, take it, the item moves.
+foundation's fixture `taking-a-handoff-moves-its-task-to-the-receiving-thread`
+checks it: a handoff with a task is open with the task on the sender's
+thread; taken, the task is on the receiver's.
 
 **Nothing wakes a model.** oxplow never opens an inbox socket, a channel,
 a server prompt or `turn/start` for a handoff: those are Drive on an
@@ -1986,7 +1987,7 @@ message as its text when none is open (none if one is), logs the
 delivery (`agent.prompt.submitted`, `source: peer`, `sender`) and sets the
 session running.
 `v_agent_turn.sender` names the sender of a turn it opened (its socket in
-`cause_ref`), and Thread Activity titles that turn "Message from …".
+`cause_ref`), and Thread activity (foundation) titles that turn "Message from …".
 **The receiving turn is matched to the turn that sent it** (V15,
 `agent_message`, `oxplow_db::agent_message_store`): the Claude adapter reads
 a `SendMessage` call's recipient and text (`ToolUse.sent`), recorded with
@@ -2280,8 +2281,8 @@ row keyed by the event (`agent_token_usage.cause`).
 transcript the agent wrote — what the person typed into the real CLI.
 There is no second input box and no "send prompt" tool. Everything reads
 the rows through `v_token_usage`: the bundled `task-tokens` page
-(`oxplow/task-detail.sections` slot), `thread-tokens` (`thread.plan.header`)
-and the usage pages. Tables: [data-model.md](./data-model.md).
+(`oxplow/task-detail.sections` slot), foundation's Thread activity (per
+turn) and the usage pages. Tables: [data-model.md](./data-model.md).
 
 ### Collection command and skill
 

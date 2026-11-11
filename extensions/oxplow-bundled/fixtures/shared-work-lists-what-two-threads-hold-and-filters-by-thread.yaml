@@ -1,12 +1,12 @@
-# Shared work: items requests on two threads worked on, files two threads'
-# requests changed (a turn's own edit call names it, or it was the only turn
-# changing it), an epic whose children sit on different threads. The thread
-# and item variants keep only their own rows.
+# Shared work: a task requests on two threads worked on, a file two
+# threads' requests changed (a turn's own edit call names it, or it was the
+# only turn changing it), an epic whose children sit on different threads.
+# Filtered to a thread, it keeps what involves that thread.
 given:
   - { command: oxplow.task.create, input: { title: Shared item, assignee: thr1 }, bind: item }
   - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress } }
   - observe: { turn: { prompt: alpha, tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }] } }
-  - observe: { snapshot: { files: [{ path: src/shared.rs, hash: a }] } }
+  - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: a }] } }
 when: { page: oxplow/shared-work }
 expect: { loaders: { shared_work: { rows: 0 } } }
 steps:
@@ -20,7 +20,7 @@ steps:
             prompt: beta
             during: [{ command: oxplow.task.update, input: { uri: $item.uri, title: Shared item }, as: agent }]
             tools: [{ name: Edit, kind: edit, paths: [src/shared.rs], ok: true }]
-      - observe: { snapshot: { files: [{ path: src/shared.rs, hash: b }] } }
+      - observe: { snapshot: { trigger: turn_end, files: [{ path: src/shared.rs, hash: b }] } }
       # An epic whose children are on the two threads.
       - { command: oxplow.task.create, input: { title: Epic }, bind: epic }
       - { command: oxplow.task.create, input: { title: Child A, parent_uri: $epic.uri, assignee: thr1 } }
@@ -30,24 +30,12 @@ steps:
       loaders:
         shared_work:
           rows:
-            contains:
-              - { section: Items on two threads, what: Shared item }
-              - { section: Files two threads changed, what: src/shared.rs }
-              - { section: Epics spread over threads, what: Epic }
-  # The thread variant keeps what involves the thread; a third thread sees
-  # none of it.
-  - when: { part: oxplow/thread-shared-work, params: { thread_id: 2 } }
-    expect: { loaders: { thread_shared_work: { rows: 3 } } }
+            - { section: Epics spread over threads, what: Epic, threads: "Thread,Beta" }
+            - { section: Files two threads changed, what: src/shared.rs }
+            - { section: Items on two threads, what: Shared item }
+  - when: { page: oxplow/shared-work, params: { thread_id: 2 } }
+    expect: { loaders: { shared_work: { rows: 3 } } }
   - given:
       - { command: oxplow.thread.create, input: { stream: str1, title: Gamma } }
-  - when: { part: oxplow/thread-shared-work, params: { thread_id: 3 } }
-    expect: { loaders: { thread_shared_work: { rows: 0 } } }
-  # The item variant: the item's own row and the files its requests changed.
-  - when: { part: oxplow/item-shared-work, params: { uri: $item.uri } }
-    expect:
-      loaders:
-        item_shared_work:
-          rows:
-            contains:
-              - { section: Items on two threads }
-              - { section: Files two threads changed }
+  - when: { page: oxplow/shared-work, params: { thread_id: 3 } }
+    expect: { loaders: { shared_work: { rows: 0 } } }

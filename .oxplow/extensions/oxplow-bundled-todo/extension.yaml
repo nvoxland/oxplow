@@ -15,9 +15,9 @@ permissions: [sql.read, files.read, ai.compute, agent.write]
 build: { run: "bun install --frozen-lockfile && bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
-    Show what a reviewer must check in an agent's work — where it deviated
-    or struggled, the tests it weakened — and how the code moved:
-    duplication and co-change. Show what is waiting on the person.
+    Show what a reviewer must check in an agent's work — the tests it
+    weakened — and how the code moved:
+    duplication and co-change.
   origin: null
   examples:
     - name: settings-lists-a-replaced-component-and-choosing-one-is-a-config-write
@@ -29,9 +29,6 @@ intent:
     - name: remote-branches-lists-the-latest-first
       input: { page: remote-branches, params: { stream_id: 1 } }
       expect: the remote's branches newest first, and no local branch
-    - name: a stream with blocked tasks and open follow-ups
-      input: { page: waiting-on-me }
-      expect: the blocked tasks and open follow-up comments, and the Waiting panel's badge firing
     - name: extension runs over the last week
       input: { page: runs, params: {} }
       expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
@@ -44,33 +41,9 @@ intent:
     - name: repair-skips-without-a-task-tracker
       input: { effect: repair-disabled, event: { type: contribution.disabled } }
       expect: nothing filed when no task tracker is running
-    - name: waiting-on-me-lists-handoffs-no-agent-is-there-for
-      input: { page: oxplow/waiting-on-me }
-      expect: a handoff to a thread with no agent session, gone once an agent session is open there
     - name: comments-panel-counts-open-comments-by-who-acts
       input: { part: oxplow/comments-panel, params: { stream_id: 1 } }
       expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
-    - name: tasks-panel-groups-a-threads-work
-      input: { part: oxplow/work, params: { thread_id: 1 } }
-      expect: in progress, ready and finished under headings; clearing hides the finished
-    - name: work-count-counts-the-active-item-and-the-ready-ones
-      input: { part: oxplow/work-count, params: { thread_id: 1 } }
-      expect: the active item and the ready ones, not the finished
-    - name: work-shows-only-the-active-task-tracker
-      input: { part: oxplow/work, params: { thread_id: 1 } }
-      expect: nothing once the task tracker is none
-    - name: work-count-shows-only-the-active-task-tracker
-      input: { part: oxplow/work-count, params: { thread_id: 1 } }
-      expect: the count follows the active task tracker
-    - name: waiting-on-me-shows-only-the-active-task-tracker
-      input: { page: oxplow/waiting-on-me }
-      expect: a blocked item gone once the task tracker is none
-    - name: struggle-is-five-edits-of-a-file-or-three-failed-commands
-      input: { sql: v_oxplow_struggle }
-      expect: a file edited five times, or three failed shell commands, is struggle
-    - name: struggle-needs-five-edits-or-three-failures
-      input: { sql: v_oxplow_struggle }
-      expect: one fewer of each is no struggle
     - name: a-disabled-contribution-files-a-repair-item-and-a-repeat-comments
       input: { event: contribution.disabled }
       expect: one repair item while open, a comment on a repeat, a new item once closed
@@ -95,39 +68,15 @@ intent:
     - name: settings-data-area-lists-bundled-effects
       input: { page: oxplow/settings, params: { area: data } }
       expect: Settings → Data lists bundled's four effects
-    - name: waiting-on-me-lists-a-question-the-agent-asked
-      input: { page: waiting-on-me }
-      expect: a question the agent's last message asked is waiting on the person until a prompt moves it on
-    - name: what-deviated-lists-files-outside-the-tasks-stated-area
-      input: { part: what-deviated, params: { request_id: 1 } }
-      expect: files outside the area the task names; none when it names no area
-    - name: thread-activity-lists-turns-by-request
-      input: { page: thread-activity, params: { thread_id: 1 } }
-      expect: each turn under its request, titled by the request's first prompt
-    - name: thread-activity-shows-the-context-fill-and-compactions
-      input: { page: thread-activity, params: { thread_id: 1 } }
-      expect: a turn's context fill, of its window when known, and how often it compacted
-    - name: uncommitted-panel-is-a-tree-over-the-working-files
-      input: { part: uncommitted, params: { stream_id: 1 } }
-      expect: a folder tree of the working files with A/M/D letters, a one-line summary and a count
-    - name: waiting-on-me-alerts-while-anything-waits
-      input: { page: waiting-on-me }
-      expect: the alert fires, with a count, while anything waits on the person
     - name: tests-weakened-reports-deleted-tests-fewer-assertions-and-skips
       input: { part: tests-weakened }
       expect: deleted tests, fewer assertions and new skips in a change
     - name: the-change-review-grid-reads-an-analyzed-commit
       input: { part: change-review, params: { change_id: 1 } }
       expect: the summary, the changed functions and the test files of an analyzed commit
-    - name: token-pages-sum-a-tasks-and-a-threads-turns
-      input: { part: thread-tokens }
-      expect: a thread's turns summed, an idle thread nothing
     - name: the-plan-pages-show-the-proposed-plans
       input: { part: thread-plan, params: { thread_id: 1 } }
       expect: the plans an agent proposed, newest first, under a thread
-    - name: the-shared-work-pages-show-what-two-threads-hold
-      input: { page: shared-work }
-      expect: items, files and epics shared between threads; the thread and item variants keep their own
     - name: the-agent-interface-pages-count-tools-commands-and-hints
       input: { page: agent-interface }
       expect: tool calls by tool and harness, an agent's command runs and refusals, and the hints' counts
@@ -213,11 +162,9 @@ ui:
     - { page: change-review, at: oxplow/commit.sections }
     - { page: change-review, at: oxplow/uncommitted-changes.sections }
     - { page: file-co-change, at: oxplow/diff.file-header }
-    - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: tests-weakened, at: oxplow/diff-view.sections }
     - { page: tests-weakened, at: oxplow/commit.sections }
     - { page: tests-weakened, at: oxplow/uncommitted-changes.sections }
-    - { page: struggled, at: oxplow/diff-view.sections }
     # Git History's commits drawn as a graph, in place of oxplow's plain
     # list (`vcs.history.graph`, a target no provider binds). It only shows
     # and opens commits, so it isn't a program to approve.
@@ -232,7 +179,6 @@ custom_components:
   - { id: timeline, title: Timeline, bundle: dist/timeline, sql: read, description: "Requests, sessions, threads and commits on a zoomable time axis." }
   - { id: history-graph, title: History graph, description: "The commits of the project drawn as lanes by branch, with filters by message, author and branch." }
 panels:
-  - { id: waiting, title: Waiting on You, icon: bell, scope: project, body: waiting-on-me, badge: waiting-on-me }
   - { id: comments, title: Comments, icon: message-square, scope: stream, body: comments-panel, open: 'oxplow:oxplow/page?page=comments' }
 advisories:
   # A hint that ran a hundred times and never once spoke is dead weight, or

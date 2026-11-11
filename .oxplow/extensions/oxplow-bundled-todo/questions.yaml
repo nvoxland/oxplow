@@ -1,7 +1,0 @@
-# What an agent should be able to answer about a request's review.
-- question: Which files did this request change outside its task's area?
-  about: oxplow/request
-  skill: README.md
-  reaches:
-    sql: SELECT path FROM v_oxplow_deviation WHERE request_id = 1
-  shape: { columns: [path] }

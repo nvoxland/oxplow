@@ -1,14 +1,14 @@
-title: What Deviated
+title: What deviated
 description: Files the request changed outside the area its task names. A file is in the area when the task's title or description names it, or names one of its directories at least two levels deep (`src/ui`). Silent when the task names no area.
 params:
-- name: request_id
-  label: Request
+# The Changes page's: a request's, else (a snapshot's, a turn's) nothing.
+- name: uri
 loaders:
   what_deviated:
     sql: |
       SELECT path
       FROM v_oxplow_deviation
-      WHERE request_id = :request_id
+      WHERE request_id = (SELECT id FROM v_request WHERE uri = :uri)
       ORDER BY path
 view:
   from: what_deviated

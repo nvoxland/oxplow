@@ -2002,8 +2002,8 @@ Stops only sum the new tail — and a daemon restart never re-sums
 already-recorded usage. No FK (the transcript outlives any single row).
 
 Store methods: `record`, `totals_for_thread`, `cursor`/`set_cursor`. There are no IPC reads: the UI
-reads `v_token_usage` through oxplow-bundled pages (`task-tokens`,
-`thread-tokens`, `usage`), which re-run on `DatasetsChanged`.
+reads `v_token_usage` through pages (bundled's `task-tokens`,
+foundation's `thread-activity`, the holder's `usage`), which re-run on `DatasetsChanged`.
 
 ### `panel_layout` — `SqlitePanelLayoutStore` (`crates/oxplow-db/src/panel_layout_store.rs`)
 

@@ -220,7 +220,7 @@ pages against real data volume) and anything WKWebView-specific.
 
 The specs of pages that live in the turned-off holder extension under
 `.oxplow/extensions/`
-(Tasks, Board, Backlog, the wiki, Timeline, Explore Data, the history
-graph, handoffs, the Dashboards index, the task-views example) are in its
+(the wiki, Timeline, Explore Data, the history graph, the Dashboards
+index) are in its
 `e2e-specs/` folder, outside the suite. They come back with
 their page.

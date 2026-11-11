@@ -1,8 +1,0 @@
-# Waiting on Me raises its alert while anything is waiting on the person: a
-# blocked task is.
-when: { page: oxplow/waiting-on-me }
-expect: { alert: { firing: false } }
-steps:
-  - given:
-      - { command: oxplow.task.create, input: { title: Stuck, stage: blocked, assignee: thr1 } }
-  - expect: { alert: { firing: true, message: "Waiting on you: 1" } }

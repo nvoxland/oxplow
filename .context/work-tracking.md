@@ -131,9 +131,10 @@ still work on the same thing, and nothing refuses it (below, "No
 gates"). It is made visible, all of it bundled over existing datasets
 (oxplow-bundled):
 
-- The **Shared work** page (`shared-work` in the launcher under Work;
-  `thread-shared-work` on the thread page, slot `thread.plan.header`;
-  `item-shared-work` on a task, slot `oxplow/task-detail.sections`): items
+- The **Shared work** page (`shared-work` in the launcher under Work,
+  a `thread_id` param to keep one thread's; `item-shared-work` on a
+  task, slot `oxplow/task-detail.sections`), both over the one query
+  `shared-work-rows` (`thread_id`, `task`): items
   that requests on two threads worked on (`v_request_task`; requests
   running, or finished in the last day), files two threads' turns changed
   (`v_turn_file` over those requests' turns, only a `claimed` or `sole`

@@ -91,6 +91,10 @@ ui:
   mounts:
     - { page: task-tokens, at: oxplow/task-detail.sections }
     - { page: item-shared-work, at: oxplow/task-detail.sections }
+    # A request's Changes page shows where it left its task's area and
+    # where its agent struggled (empty on a snapshot's or a turn's).
+    - { page: what-deviated, at: oxplow/diff-view.sections }
+    - { page: struggled, at: oxplow/diff-view.sections }
 configuration:
   version: 2
   schema:

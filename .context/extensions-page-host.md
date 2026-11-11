@@ -332,8 +332,8 @@ the user guide is `docs/guide/pages.md`.
     panels stay ordinary open page runs: actions, visibility and reconnect
     work on them as on any page. The body renders compact; the badge's alert count shows
     on the panel, and the **Alerts** panel and page (the dock's bell) list
-    every firing badge. oxplow-bundled's Waiting on You is a panel whose
-    badge is its own page. A page dropped by `public_contracts` takes the
+    every firing badge. foundation's Waiting on you is a panel whose
+    count part reads its own page's loader. A page dropped by `public_contracts` takes the
     panel parts that name it with it.
   - **Actions are commands**: `actions:` on a page declares
     `{ id, label, command, input?, … }` — a button in the nav bar or its ☰

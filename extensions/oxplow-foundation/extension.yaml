@@ -419,6 +419,9 @@ panels:
   # branch stands (the header picks); its header opens Git Status, which
   # acts on both. Collapsed, one line of counts; counted by files.
   - { id: git, title: Git, icon: git-branch, scope: stream, body: git, collapsed: git-line, count: git-count, open: 'oxplow:oxplow/page?page=git-dashboard' }
+  # What only the person can move: a question an agent waits on, a handoff
+  # no agent is there to take, an open note; counted in its header.
+  - { id: waiting, title: Waiting on you, icon: bell, scope: project, body: waiting-on-you, count: waiting-count, open: 'oxplow:oxplow/page?page=waiting-on-you' }
 # What the coding agent reads about the task tracker: its commands, while
 # there is one (oxtask's ready-queue skill is oxplow-bundled's).
 skills:
