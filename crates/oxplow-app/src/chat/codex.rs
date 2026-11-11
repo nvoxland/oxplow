@@ -64,6 +64,8 @@ struct State {
     asked: Option<String>,
     /// The thread is waiting on the person (the status was reported).
     waiting: bool,
+    /// The wait was said before any request named what it is for.
+    wait_unnamed: bool,
     /// The child agents this thread drives (Codex's collab agents), by
     /// their own thread's id: what passes of what their threads send.
     children: std::collections::HashMap<String, Child>,
@@ -336,10 +338,7 @@ fn on_message(message: &ServerMessage, state: &mut State) -> Vec<Incoming> {
             ServerMessage::Notification { method, params } => {
                 on_notification(method, params, state)
             }
-            ServerMessage::Request { method, params, .. } => {
-                note_request(method, params, state);
-                Vec::new()
-            }
+            ServerMessage::Request { method, params, .. } => note_request(method, params, state),
         };
     }
     if let ServerMessage::Notification { method, params } = message {
@@ -499,23 +498,45 @@ fn collab_lifecycle(item: &Value, state: &mut State) -> Vec<Incoming> {
 }
 
 /// Remember what an approval or question request asks, to say it when the
-/// thread's status reports the wait.
-fn note_request(method: &str, p: &Value, state: &mut State) {
+/// thread's status reports the wait. Codex reports the wait first and sends
+/// the request after it (recorded on 0.167.1), so a wait already said
+/// without its question is said again with it.
+fn note_request(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
     let text = |pointer: &str| {
         p.pointer(pointer)
             .and_then(Value::as_str)
             .filter(|t| !t.is_empty())
     };
-    state.asked = match method {
+    // The command as the model wrote it, not its shell wrapper.
+    let command = || {
+        let actions: Vec<&str> = p
+            .get("commandActions")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a.get("command")?.as_str())
+            .collect();
+        (!actions.is_empty())
+            .then(|| actions.join(" && "))
+            .or_else(|| text("/command").map(str::to_string))
+    };
+    let asked = match method {
         "item/commandExecution/requestApproval" => {
-            text("/command").map(|c| format!("Approve in Codex: {c}"))
+            command().map(|c| format!("Approve in Codex: {c}"))
         }
         "item/fileChange/requestApproval" | "item/permissions/requestApproval" => {
             text("/reason").map(|r| format!("Approve in Codex: {r}"))
         }
         "item/tool/requestUserInput" => text("/questions/0/question").map(str::to_string),
-        _ => return,
+        _ => return Vec::new(),
     };
+    if std::mem::take(&mut state.wait_unnamed) {
+        if let Some(said) = asked {
+            return vec![Incoming::Waiting(Some(said))];
+        }
+    }
+    state.asked = asked;
+    Vec::new()
 }
 
 fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> {
@@ -535,6 +556,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                     return Vec::new();
                 }
                 state.waiting = true;
+                state.wait_unnamed = state.asked.is_none();
                 let said = state.asked.take().unwrap_or_else(|| {
                     if on_input {
                         "Waiting on your answer in Codex".to_string()
@@ -545,6 +567,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
                 vec![Incoming::Waiting(Some(said))]
             } else {
                 state.asked = None;
+                state.wait_unnamed = false;
                 if std::mem::take(&mut state.waiting) {
                     vec![Incoming::Waiting(None)]
                 } else {
@@ -555,6 +578,7 @@ fn on_notification(method: &str, p: &Value, state: &mut State) -> Vec<Incoming> 
         // Answered, one way or another.
         "serverRequest/resolved" => {
             state.asked = None;
+            state.wait_unnamed = false;
             if std::mem::take(&mut state.waiting) {
                 vec![Incoming::Waiting(None)]
             } else {
@@ -1094,6 +1118,132 @@ mod tests {
         assert!(plans(item("item/started", "1. a")).is_empty());
         assert!(plans(item("item/completed", "  ")).is_empty());
         assert_eq!(plans(item("item/completed", "1. a\n2. b")), ["1. a\n2. b"]);
+    }
+
+    /// What a recorded Codex 0.166 session (a `tests/fixtures/codex/*.jsonl`
+    /// file recorded by the client: `sent` / `response` lines among the
+    /// daemon's messages) makes of the thread, in order, one short line per
+    /// thing the session would act on. The thread is the one the recording
+    /// opened; a `sent` line shows as `sent <method>`.
+    fn replay(text: &str) -> Vec<String> {
+        let mut state = State::default();
+        let mut log = Vec::new();
+        for line in text.lines().skip(1) {
+            let v: Value = serde_json::from_str(line).unwrap();
+            if let Some(sent) = v.get("sent").and_then(Value::as_str) {
+                log.push(format!("sent {sent}"));
+                continue;
+            }
+            if let Some(id) = v.pointer("/response/thread/id").and_then(Value::as_str) {
+                state.thread = Some(id.to_string());
+            }
+            let Some(method) = v.get("method").and_then(Value::as_str) else {
+                continue;
+            };
+            let params = v.get("params").cloned().unwrap_or(Value::Null);
+            let message = match v.get("id") {
+                Some(id) => ServerMessage::Request {
+                    id: id.clone(),
+                    method: method.into(),
+                    params,
+                },
+                None => ServerMessage::Notification {
+                    method: method.into(),
+                    params,
+                },
+            };
+            for incoming in on_message(&message, &mut state) {
+                log.push(match incoming {
+                    Incoming::TurnStarted(_) => "turn started".to_string(),
+                    Incoming::PromptDone(Ok(end)) => format!("turn ended {}", end.stop_reason),
+                    Incoming::PromptDone(Err(e)) => format!("turn failed {e}"),
+                    Incoming::Waiting(Some(q)) => format!("waiting {q}"),
+                    Incoming::Waiting(None) => "waiting cleared".to_string(),
+                    Incoming::Subagent { change, id, .. } => match change {
+                        SubagentChange::Started => format!("subagent started {id}"),
+                        SubagentChange::Finished(_) => format!("subagent finished {id}"),
+                    },
+                    Incoming::ChildCall { child, call } => {
+                        format!("child {} {:?} {:?}", child.id, call.kind, call.status)
+                    }
+                    Incoming::Update(u) => match *u {
+                        ChatUpdate::UserChunk(_) => "user message".to_string(),
+                        ChatUpdate::ToolCall(t) if t.kind == ToolKind::Subagent => {
+                            format!("collab {} {:?}", t.name.unwrap_or_default(), t.status)
+                        }
+                        ChatUpdate::ToolCall(t) => {
+                            format!("call {:?} {:?} {}", t.kind, t.status, t.title)
+                        }
+                        _ => continue,
+                    },
+                    _ => continue,
+                });
+            }
+        }
+        log
+    }
+
+    /// The recorded approval (`tests/fixtures/codex/approval.jsonl`, Codex CLI
+    /// 0.166.0 on a 0.167.1 daemon): the thread's status reports the wait
+    /// first, then the request names the command, then the TUI's answer
+    /// resolves it. oxplow sends nothing back, and the wait is cleared once,
+    /// by `serverRequest/resolved`, with the turn going on.
+    #[test]
+    fn a_recorded_approval_the_tui_answers_is_waited_on_then_cleared() {
+        let log = replay(include_str!("../../tests/fixtures/codex/approval.jsonl"));
+        let waits: Vec<&str> = log
+            .iter()
+            .filter(|l| l.starts_with("waiting"))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            waits,
+            [
+                "waiting Waiting on an approval in Codex",
+                "waiting Approve in Codex: printf '\\n\\ndef div(a, b):\\n    return a / b\\n' >> calc.py",
+                "waiting cleared",
+            ],
+            "the status comes before the request: the command is said once the request names it"
+        );
+        let at = |what: &str| log.iter().position(|l| l.starts_with(what)).unwrap();
+        assert!(at("waiting cleared") < at("call Execute Completed printf"));
+        assert!(
+            !log.iter()
+                .any(|l| l.starts_with("sent") && l.contains("answer")),
+            "the TUI answered, not oxplow"
+        );
+        assert_eq!(log.last().unwrap(), "turn ended completed");
+        assert_eq!(
+            log.iter().filter(|l| *l == "turn started").count(),
+            2,
+            "the unprompted first turn, then the person's"
+        );
+    }
+
+    /// The recorded interrupt (`interrupt.jsonl`): Esc during a foreground
+    /// `sleep 120` ends the turn `interrupted` (no error); the command went
+    /// on as a background terminal, and `/stop` later fails its call. That
+    /// failure is the call's, after the turn ended: no turn starts or ends
+    /// for it.
+    #[test]
+    fn a_recorded_interrupt_ends_the_turn_and_a_late_failed_call_opens_none() {
+        let log = replay(include_str!("../../tests/fixtures/codex/interrupt.jsonl"));
+        assert_eq!(
+            log[log.len() - 4..],
+            [
+                "user message",
+                "call Execute InProgress sleep 120",
+                "turn ended interrupted",
+                "call Execute Failed sleep 120",
+            ]
+        );
+        assert_eq!(log.iter().filter(|l| *l == "turn started").count(), 1);
+        assert_eq!(
+            log.iter().filter(|l| l.starts_with("turn ended")).count(),
+            1,
+            "the late failure ends no turn"
+        );
+        assert!(!log.iter().any(|l| l.starts_with("turn failed")));
     }
 
     const CHILD: &str = "01a14232-aaaa-7d40-8466-1ec0e927ef99";

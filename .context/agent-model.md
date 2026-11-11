@@ -911,6 +911,26 @@ Codex's `conn::Connection`, with no view. It:
   TUI's (`prompt` refuses; `guard_tests::nothing_starts_a_codex_turn`
   finds no `"turn/start"` in production code).
 
+**Recorded on 0.166.0 / 0.167.1** (`tests/fixtures/codex/approval.jsonl`,
+`interrupt.jsonl`):
+
+- *Approval the TUI answers.* `thread/status/changed` with
+  `waitingOnApproval` comes **before** `item/commandExecution/requestApproval`
+  (which names the command, `reason` and `commandActions`). The wait is said
+  at the status, and said again with the command once the request arrives
+  (`Approve in Codex: <the model's command>`); `serverRequest/resolved`
+  clears it, and the status falling back to `active` says nothing more.
+  oxplow sends no answer. Pinned by
+  `a_recorded_approval_the_tui_answers_is_waited_on_then_cleared`.
+- *Interrupt.* Esc gives `turn/completed` `status: "interrupted"` with
+  `error: null` (an interrupted turn, not a failed one). The command is not
+  killed: it goes on as a background terminal, and `/stop` later gives
+  `item/completed` `commandExecution` `status: "failed"` (`exitCode: -1`)
+  after the turn's end. That late finish is recorded on its call (a
+  `PostToolUse` with `ok` false) and opens or ends no turn. Pinned by
+  `a_recorded_interrupt_ends_the_turn_and_a_late_failed_call_opens_none` and
+  `a_late_failed_call_after_an_interrupted_turn_opens_no_turn`.
+
 It stays open when the TUI exits (the PTY's exit ingests the
 `SessionEnd`), so a reopened TUI attaches to a held thread; it closes
 with the session or its thread (`SessionProcesses::kill`). After an
@@ -1459,9 +1479,10 @@ Recorded in `fixtures/claude/subagent.jsonl` and replayed
 **What Codex reports and what oxplow reads** (the chat host,
 `chat/codex.rs`; `CODEX_FACTS` there is this table and a test keeps the
 two equal; written from the app-server protocol and the recordings in
-`tests/fixtures/codex/`; an approval, an interrupted turn, a failed turn
-and a background terminal have not been recorded yet, so those rows are
-pinned by synthetic notifications, not recordings):
+`tests/fixtures/codex/`; an approval and an interrupted turn are recorded
+(`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.167.1);
+a failed turn and a background terminal have not been recorded yet, so
+those rows are pinned by synthetic notifications, not recordings):
 
 | Fact | Codex reports | oxplow reads |
 |---|---|---|
@@ -1639,7 +1660,7 @@ shows** what it can hear, **sets at launch** what a flag or open request
 takes, and **leaves to the harness** the rest — never answering for the
 person: a prompt or question is answered in the harness's own TUI, which
 is in the tab already ("Key invariant"). The audit behind this table was
-made against Claude Code 2.1.301, Codex 0.163 (daemon) / 0.162.1 (CLI)
+made against Claude Code 2.1.301, Codex 0.167.1 (daemon) / 0.166.0 (CLI)
 and opencode 1.17.4, from their documentation and protocol schema;
 *italic* is available from the harness but not used yet, — is not
 available from outside.
@@ -1870,8 +1891,8 @@ Cross-thread ownership and duplicate work are visibility, not gates
 ### Validated against, and what pins each scenario
 
 The session integration is checked against these versions: **Codex CLI
-0.162.1** (the 0.163 daemon was probed for "Codex: its TUI on a thread
-oxplow observes"), **Claude Code 2.1.322**, **opencode 1.17.4**; the
+0.166.0 / daemon 0.167.1** (the approval, interrupt, background-terminal
+and subagent recordings; older fixtures are 0.162.1 / 0.163), **Claude Code 2.1.322**, **opencode 1.17.4**; the
 recorded fixtures (`crates/oxplow-harnesses/fixtures/{claude,opencode}`,
 `crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`) were taken at
 the versions current when recorded. A harness declares what it supports

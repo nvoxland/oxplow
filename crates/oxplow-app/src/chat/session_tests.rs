@@ -1348,6 +1348,51 @@ mod codex {
         assert_eq!(rig.host.count("turn_started"), 0, "{:?}", rig.host.log());
     }
 
+    /// Recorded on 0.167.1: Esc ends the turn `interrupted`, the command
+    /// goes on as a background terminal, and `/stop` fails its call later. The
+    /// late failure is recorded on its call; no turn starts or ends for it.
+    #[tokio::test]
+    async fn a_late_failed_call_after_an_interrupted_turn_opens_no_turn() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        let cmd = |status: &str| {
+            note(
+                if status == "inProgress" {
+                    "item/started"
+                } else {
+                    "item/completed"
+                },
+                json!({"item": {"type": "commandExecution", "id": "c1", "command": "sleep 120",
+                    "status": status, "commandActions": [{"type": "unknown", "command": "sleep 120"}],
+                    "exitCode": if status == "failed" { json!(-1) } else { json!(null) }}}),
+            )
+        };
+        fake.push(note("turn/started", json!({"turn": {"id": "u1"}})));
+        fake.push(note("item/completed", json!({"item": {"type": "userMessage", "id": "m1", "content": [{"type": "text", "text": "sleep"}]}})));
+        fake.push(cmd("inProgress"));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u1", "status": "interrupted", "error": null}}),
+        ));
+        fake.push(cmd("failed"));
+        for _ in 0..100 {
+            if rig.host.count("tool shell") > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let log = rig.host.log();
+        let tail: Vec<&String> = log.iter().filter(|l| !l.starts_with("started")).collect();
+        assert_eq!(
+            tail,
+            [
+                "turn_started sleep",
+                "turn_ended  outcome=interrupted",
+                "tool shell"
+            ],
+            "{log:?}"
+        );
+    }
+
     /// How many context items the daemon was given so far.
     fn injected(fake: &FakeAppServer) -> usize {
         methods(fake)
