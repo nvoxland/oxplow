@@ -78,11 +78,15 @@ loaders:
                             WHEN 'backlog' THEN 3 WHEN 'done' THEN 4 ELSE 5 END,
                c.rank IS NULL, c.rank, c.created_at
   # The turns whose prompt named it: what the person pointed at it with.
+  # CROSS JOIN keeps the refs first (found by target_uri's index): with a
+  # plain JOIN the ORDER BY makes SQLite walk every turn, newest first,
+  # building each one's uri to probe page_ref, even when nothing names it.
   prompted:
     sql: |
       SELECT t.uri, t.started_at, first_sentence(t.prompt) AS prompt
-      FROM v_page_ref r JOIN v_agent_turn t ON t.uri = r.source_uri
+      FROM v_page_ref r CROSS JOIN v_agent_turn t
       WHERE r.target_uri = :uri AND r.ref_type = 'prompt_mention'
+        AND t.uri = r.source_uri
       ORDER BY t.id DESC
   # Where it is listed (the board of the thread it's for, else the Task
   # List at its stage) and its parent epic.

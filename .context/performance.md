@@ -1379,6 +1379,16 @@ alone timed out. The same query joined on `turn_id` / `request_id`
 answers at once (735 shared files, 35 shared items). The rule is in
 `resources.md` "Join two views by their ids".
 
+When no id exists on one side (a `page_ref`'s `source_uri` to a turn: a
+turn's key `trn3` is not its integer `id`), keep the indexed side first.
+The task page's `prompted` loader joined `v_page_ref` to `v_agent_turn`
+on `t.uri = r.source_uri` with `ORDER BY t.id DESC`; the plan was `SCAN t`
+then a `page_ref` probe per turn (all ~4,200 turns, 80–350 ms while
+agents wrote), even for a task nothing names. `FROM v_page_ref r CROSS
+JOIN v_agent_turn t` makes it `SEARCH page_ref USING INDEX
+idx_page_ref_target` first: no turn work when nothing names the task, one
+pass over the turns per mention.
+
 ## File watching at scale (measured 2026-11-06)
 
 `cargo run --example profile_watch --release -p oxplow-app -- --root <dir>`
