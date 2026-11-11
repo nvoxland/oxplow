@@ -51,5 +51,13 @@ export function useTabSessions() {
       return next === now && prev[thread] ? prev : { ...prev, [thread]: next };
     });
   }, []);
-  return { sessions, update };
+  /** Forget a thread's stored tabs: it opens as a new thread. */
+  const forget = useCallback((thread: string) => {
+    setSessions((prev) => {
+      if (!(thread in prev)) return prev;
+      const { [thread]: _, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+  return { sessions, update, forget };
 }

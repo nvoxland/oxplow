@@ -68,7 +68,7 @@ import type { PageAction } from "./kit/actions.js";
 import { LiveOriginResolver, liveItemsOf, resolvedOrigin } from "./tabs/liveOrigin.js";
 import { bookmarkedElsewhere, moveBookmark, removeBookmark, setBookmark, useBookmarks } from "./tabs/bookmarks.js";
 import type { BookmarkScope } from "./tabs/bookmarks.js";
-import { reconcileSessionTabs } from "./tabs/sessionTabs.js";
+import { reconcileSessionTabs, storedSessionIsStale } from "./tabs/sessionTabs.js";
 import { newThreadOpening } from "./newThreadSession.js";
 import { sessionLabel } from "./agentKinds.js";
 import { useAgentHarnesses } from "./useAgentHarnesses.js";
@@ -252,7 +252,7 @@ export function App() {
   // (`tabs/session.ts`), restored on start and stored on every change.
   // The strip, the bodies, history, origins and the active tab all come
   // from it (`.context/pages-and-tabs.md` "Navigation model").
-  const { sessions, update: updateSession } = useTabSessions();
+  const { sessions, update: updateSession, forget: forgetSession } = useTabSessions();
   // Per-tab page titles, keyed by tab id. Pages register their title via
   // PageNavigationContext.setTitle (the usePageTitle helper). Drives both
   // the tab strip label and the shared chrome header so the title lives in
@@ -1159,8 +1159,21 @@ export function App() {
   // The thread whose first tabs are still being opened: the window isn't
   // ready for a navigate until they are, or they would push it aside.
   const [openingThread, setOpeningThread] = useState<string | null>(null);
+  // The threads whose stored tabs were checked against their open sessions.
+  const checkedStored = useRef(new Set<string>());
   useEffect(() => {
     if (!selectedThreadId || selectedThreadSessions === null) return;
+    // Tabs the browser kept from before a project reset can name sessions the
+    // thread never had (a new thread gets an old one's id): forget them once,
+    // when the thread is first seen, and open it as a new thread.
+    const stored = sessions[selectedThreadId];
+    if (!checkedStored.current.has(selectedThreadId)) {
+      checkedStored.current.add(selectedThreadId);
+      if (stored !== undefined && storedSessionIsStale(stored, selectedThreadSessions)) {
+        forgetSession(selectedThreadId);
+        return;
+      }
+    }
     if (sessions[selectedThreadId] === undefined && selectedThreadSessions.length === 0) {
       const threadId = selectedThreadId;
       updateSession(threadId, (session) => session);
@@ -1169,7 +1182,7 @@ export function App() {
       return;
     }
     updateSession(selectedThreadId, (session) => setStrip(session, reconcileSessionTabs(refsOf(session), selectedThreadSessions)));
-  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession]);
+  }, [selectedThreadId, selectedThreadSessions, sessions, updateSession, forgetSession]);
 
   async function openNewThread(threadId: string) {
     try {
