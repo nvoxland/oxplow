@@ -447,7 +447,7 @@ mod tests {
 
     /// Its edit tool is `apply_patch`, the patch as `patchText` (a
     /// recorded OpenCode 2026-10 body): an edit of every file it names,
-    /// which the write guard and the effort's claims read.
+    /// which the write guard and the turn's reported files read.
     #[test]
     fn its_apply_patch_is_an_edit_of_the_files_it_names() {
         let h = harness("oxplow:opencode", "opencode");

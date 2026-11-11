@@ -1050,14 +1050,14 @@
     - { not_null: uri }
     - { unique: uri }
 - name: search_thread
-  version: 4
+  version: 5
   description: "What site search indexes for each thread: the `thread` kind's index is restated from these rows when they change. Closed and archived threads are included."
   fields:
     - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/thread?id=thr<n>`: what a hit opens." }
     - { name: "title", type: "TEXT", doc: "The thread's title." }
     - { name: "body", type: "TEXT", doc: "Its sessions' names." }
     - { name: "stream_id", type: "TEXT", doc: "Its stream (`str1`)." }
-    - { name: "version", type: "TEXT", doc: "The newest of the thread's change, its sessions' changes and its last turn." }
+    - { name: "version", type: "TEXT", doc: "The newest of the thread's change and its sessions' changes." }
   tests:
     - { not_null: uri }
     - { unique: uri }

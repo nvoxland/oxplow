@@ -324,7 +324,7 @@ mod tests {
                 "turn_id",
             ),
             (
-                json!({ "type": "acme.thing", "payload": { "count": 1 }, "anchors": { "thread_id": "eff1" } }),
+                json!({ "type": "acme.thing", "payload": { "count": 1 }, "anchors": { "thread_id": "req1" } }),
                 "thread_id",
             ),
             (

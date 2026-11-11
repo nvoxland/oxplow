@@ -475,16 +475,6 @@ impl SnapshotCaptureService {
         self.inner.workspace_filter.clone()
     }
 
-    /// Whether this stream's workspace filter excludes `rel` (a
-    /// worktree-relative path) from capture — the project's
-    /// `generated.exclude` list or `.gitignore`. A path that answers
-    /// `true` here is never snapshotted, so nothing downstream can
-    /// observe it as changed; attribution uses this to leave such paths
-    /// out entirely (tsk249).
-    pub fn excluded_from_capture(&self, rel: &Path) -> bool {
-        self.inner.workspace_filter.ignore(rel, false)
-    }
-
     /// This stream's history holds only what it touched: a worktree stream.
     pub fn with_sparse_history(mut self, sparse: bool) -> Self {
         if let Some(inner) = Arc::get_mut(&mut self.inner) {
@@ -570,21 +560,6 @@ impl SnapshotCaptureService {
                 }
             });
         (before.branch, revision)
-    }
-
-    /// The version triple for a file ref pinned to `snapshot_id` in this
-    /// stream ([`crate::file_ref_version::resolve`]).
-    pub async fn resolve_file_version(
-        &self,
-        snapshot_id: i64,
-    ) -> Result<crate::file_ref_version::ResolvedFileVersion, oxplow_domain::DomainError> {
-        crate::file_ref_version::resolve(
-            &self.inner.store,
-            &*self.inner.vcs,
-            &self.inner.project_dir,
-            snapshot_id,
-        )
-        .await
     }
 
     /// Reads this stream's captured bytes from whichever store holds them.
