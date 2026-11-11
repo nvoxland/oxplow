@@ -1262,10 +1262,11 @@ pub async fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::Ag
 }
 
 /// The effective configuration of each namespace among `extensions` with a
-/// skill a setting offers (`when:`), as stored now. One that can't be read
-/// (a layer at an old schema version, say) is left out, so its skills with
-/// `when:` aren't offered: it fails closed, as every read of it does.
-async fn offering_settings(
+/// skill or an agent context a setting offers (`when:`), as stored now. One
+/// that can't be read (a layer at an old schema version, say) is left out,
+/// so what its settings offer isn't: it fails closed, as every read of it
+/// does.
+pub(crate) async fn offering_settings(
     svc: &crate::Services,
     extensions: &[crate::extension::extensions::Extension],
 ) -> std::collections::BTreeMap<String, Value> {
@@ -1274,7 +1275,8 @@ async fn offering_settings(
         crate::extension::extensions::config_schema::ConfigurationFile,
     )> = Vec::new();
     for ext in extensions.iter().filter(|e| e.enabled) {
-        if !ext.skills.iter().any(|s| s.when.is_some())
+        if !(ext.skills.iter().any(|s| s.when.is_some())
+            || ext.contexts.iter().any(|c| c.when.is_some()))
             || wanted.iter().any(|(ns, _)| ns == &ext.namespace)
         {
             continue;

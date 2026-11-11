@@ -553,6 +553,11 @@ context:
       SELECT 'In progress: ' || title AS text FROM v_task WHERE thread_id = :thread_id ...
 ```
 
+- **`when: { config: <pointer>, in: [..] }`** sends it only while a
+  setting of the extension's own holds, checked at load and at delivery
+  as a skill's `when:` (settings that can't be read fail closed: it isn't
+  sent). A settings write republishes (contexts are configuration
+  readers).
 - **The query** is the extension's SQL (`config('/ptr')` reads its own
   settings). Its first row's `text`, trimmed, is what the agent is told;
   no row, a NULL or an empty text says nothing. `:request_id` is the
@@ -565,7 +570,9 @@ context:
   differs from what that agent session last received from it: **once,
   then on change**, the session context's rule (agent-model.md). A
   compaction or a fresh start (`reset_session`) forgets what was sent,
-  so the next prompt carries every context again. The records are in
+  so the next prompt carries every context again. A context that says
+  nothing now is forgotten for the session, so the same text coming back
+  is sent again. The records are in
   memory, like the session context's: a daemon restart costs one repeat.
 - **Budget**: `CONTEXT_BUDGET` (1,500 characters) per context, then
   `CONTEXTS_BUDGET` (3,000) for all that a prompt carries; a cut text

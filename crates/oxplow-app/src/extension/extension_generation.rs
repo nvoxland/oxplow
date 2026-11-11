@@ -51,6 +51,9 @@ pub enum ConfigReader {
     Datasets,
     /// A skill is offered by a setting (`when:`).
     Skills,
+    /// An agent context is sent by a setting (`when:`), or its query calls
+    /// `config()`.
+    Contexts,
 }
 
 /// What of `extension` reads its own configuration: the one list of
@@ -67,9 +70,14 @@ pub fn configuration_readers(
         .iter()
         .any(|dataset| datasets::config_reads(&dataset.sql).is_ok_and(|reads| !reads.is_empty()));
     let skills = extension.skills.iter().any(|skill| skill.when.is_some());
+    let contexts = extension.contexts.iter().any(|context| {
+        context.when.is_some()
+            || datasets::config_reads(&context.query).is_ok_and(|reads| !reads.is_empty())
+    });
     [
         (datasets, ConfigReader::Datasets),
         (skills, ConfigReader::Skills),
+        (contexts, ConfigReader::Contexts),
     ]
     .into_iter()
     .filter_map(|(reads, reader)| reads.then_some(reader))

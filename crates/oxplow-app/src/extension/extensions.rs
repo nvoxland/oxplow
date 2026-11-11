@@ -1904,7 +1904,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = m.context.as_ref() {
-            let (declared, errors) = agent_contexts::parse_contexts(v, man, &manifest);
+            let (declared, errors) =
+                agent_contexts::parse_contexts(v, man, &manifest, ext.configuration.as_ref());
             ext.contexts = declared;
             ext.errors.extend(errors);
         }

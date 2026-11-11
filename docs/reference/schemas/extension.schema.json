@@ -3021,6 +3021,18 @@
           },
           "default": []
         },
+        "when": {
+          "description": "Sent only while a setting of the extension's own holds (`{ config:\n/tasks/workflow, in: [agent_tracks] }`), as a skill's `when:`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConfigCondition"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "query": {
           "description": "SQL returning a `text` column, at most one row; `:thread_id`,\n`:stream_id`, `:request_id` bound (NULL when unknown).",
           "type": "string"

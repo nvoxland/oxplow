@@ -307,8 +307,16 @@ impl AgentContext {
         thread_id: &ThreadId,
         session_id: Option<&str>,
     ) -> Vec<(String, String)> {
-        let changed: Vec<(String, String, bool)> = extension_contexts(svc, thread_id)
-            .await
+        let current = extension_contexts(svc, thread_id).await;
+        // One that says nothing now is forgotten: when it says the same
+        // thing again, it's news again.
+        if let Some(session) = session_id {
+            let mut state = self.state.lock();
+            if let Some(sent) = state.last_extension_context.get_mut(session) {
+                sent.retain(|from, _| current.iter().any(|c| &c.from == from));
+            }
+        }
+        let changed: Vec<(String, String, bool)> = current
             .into_iter()
             .map(|c| {
                 let (text, cut) = cut_to(&c.text, CONTEXT_BUDGET);
@@ -495,6 +503,8 @@ async fn extension_contexts_in_generation(
     let request = crate::advisories::request_of(&svc.sql, thread, None)
         .await
         .map_or(SqlCell::Null(()), SqlCell::Int);
+    // The settings that offer contexts (`when:`), read once.
+    let settings = crate::capabilities::offering_settings(svc, &extensions).await;
     let params = vec![
         ("thread_id".to_string(), SqlCell::Int(thread.value())),
         ("stream_id".to_string(), stream),
@@ -502,11 +512,14 @@ async fn extension_contexts_in_generation(
     ];
     let mut out = Vec::new();
     for ext in &extensions {
-        for c in ext
-            .contexts
-            .iter()
-            .filter(|c| active.unmet(&c.needs).is_empty())
-        {
+        for c in ext.contexts.iter().filter(|c| {
+            active.unmet(&c.needs).is_empty()
+                && c.when.as_ref().is_none_or(|when| {
+                    settings
+                        .get(&ext.namespace)
+                        .is_some_and(|values| when.holds(values))
+                })
+        }) {
             let from = format!("{}/{}", ext.namespace, c.id);
             let query = match svc.sql.with_extension_config(ext, &c.query).await {
                 Ok(query) => query,
@@ -1237,6 +1250,47 @@ mod tests {
         assert!(prompt(&ctx, &fx).await.is_empty());
         ctx.reset_session(Some("s1"));
         assert_eq!(prompt(&ctx, &fx).await.len(), 1);
+    }
+
+    /// A context that stops saying anything is forgotten for the session:
+    /// when it says the same thing again later, it's sent again (the agent
+    /// may have acted on its absence).
+    #[tokio::test]
+    async fn an_extension_context_that_went_away_is_sent_again_when_it_returns() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: now\n    doc: The thread's title, unless it's Gone.\n    query: SELECT 'on ' || title AS text FROM v_thread WHERE id = :thread_id AND title <> 'Gone'\n",
+        )
+        .await;
+        let ctx = AgentContext::default();
+        assert_eq!(prompt(&ctx, &fx).await.len(), 1);
+        retitle(&fx.svc, fx.thread, "Gone").await;
+        assert!(prompt(&ctx, &fx).await.is_empty());
+        retitle(&fx.svc, fx.thread, "Thread").await;
+        assert_eq!(
+            prompt(&ctx, &fx).await,
+            vec!["<context from=\"state/now\">\non Thread\n</context>".to_string()]
+        );
+    }
+
+    /// A context the extension's own setting offers (`when:`) is sent only
+    /// while the setting holds; the defaults count when nothing is stored.
+    #[tokio::test]
+    async fn an_extension_context_follows_its_setting() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        write_context(
+            &fx.svc,
+            "state",
+            "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta] } } }\n  defaults: { mode: alpha }\n",
+            "  - id: shown\n    doc: Said in alpha.\n    when: { config: /mode, in: [alpha] }\n    query: SELECT 'alpha says' AS text\n  - id: hidden\n    doc: Said in beta.\n    when: { config: /mode, in: [beta] }\n    query: SELECT 'beta says' AS text\n",
+        );
+        crate::test_fixtures::activate(&fx.svc).await;
+        assert_eq!(
+            prompt(&AgentContext::default(), &fx).await,
+            vec!["<context from=\"state/shown\">\nalpha says\n</context>".to_string()]
+        );
     }
 
     /// A query that returns no row, or an empty text, has nothing to say.

@@ -40,6 +40,9 @@ pub struct AgentContextDecl {
     pub doc: String,
     /// What it needs active (`task_tracker`); without it, it doesn't run.
     pub needs: Vec<String>,
+    /// The extension's own setting that offers it (as a skill's `when:`);
+    /// `None`: always.
+    pub when: Option<super::config_schema::ConfigCondition>,
     pub query: String,
 }
 
@@ -55,6 +58,10 @@ pub(crate) struct AgentContextFile {
     /// Capabilities or features it needs active.
     #[serde(default)]
     needs: Vec<String>,
+    /// Sent only while a setting of the extension's own holds (`{ config:
+    /// /tasks/workflow, in: [agent_tracks] }`), as a skill's `when:`.
+    #[serde(default)]
+    when: Option<super::config_schema::ConfigCondition>,
     /// SQL returning a `text` column, at most one row; `:thread_id`,
     /// `:stream_id`, `:request_id` bound (NULL when unknown).
     query: String,
@@ -66,6 +73,7 @@ pub(crate) fn parse_contexts(
     value: &Value,
     file: &str,
     manifest: &str,
+    configuration: Option<&super::config_schema::ConfigurationFile>,
 ) -> (Vec<AgentContextDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "context");
     let Some(items) = value.as_sequence() else {
@@ -112,6 +120,8 @@ pub(crate) fn parse_contexts(
                 "context.missing_doc",
                 format!("context `{}`: `doc` says what it tells the agent", f.id),
             ))
+        } else if let Some((code, why)) = f.when.as_ref().and_then(|w| w.problem(configuration)) {
+            Some((code, format!("context `{}`: {why}", f.id)))
         } else {
             f.needs
                 .iter()
@@ -124,6 +134,7 @@ pub(crate) fn parse_contexts(
                 id: f.id,
                 doc: f.doc,
                 needs: f.needs,
+                when: f.when,
                 query: f.query,
             }),
         }
@@ -137,7 +148,7 @@ mod tests {
 
     fn parse(text: &str) -> (Vec<AgentContextDecl>, Vec<Diagnostic>) {
         let v: serde_yaml::Value = serde_yaml::from_str(text).unwrap();
-        parse_contexts(&v["context"], "extension.yaml", text)
+        parse_contexts(&v["context"], "extension.yaml", text, None)
     }
 
     /// Valid entries load; a bad id, a repeated id, a missing doc, an
@@ -172,5 +183,18 @@ mod tests {
         let (ok, errors) = parse("context: { id: x }\n");
         assert!(ok.is_empty());
         assert_eq!(errors[0].code, "context.not_a_list");
+    }
+
+    /// A `when:` that can never hold is refused at load, as a skill's is.
+    #[test]
+    fn a_contexts_when_names_a_setting_of_its_own() {
+        let manifest = "context:\n  - id: now\n    doc: A fact.\n    when: { config: /tasks/workflow, in: [agent_tracks] }\n    query: SELECT 'x' AS text\n";
+        let v: serde_yaml::Value = serde_yaml::from_str(manifest).unwrap();
+        let (decls, errors) = parse_contexts(&v["context"], "extension.yaml", manifest, None);
+        assert!(decls.is_empty());
+        assert!(
+            errors.iter().any(|e| e.code == "when.undeclared"),
+            "{errors:?}"
+        );
     }
 }

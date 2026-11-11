@@ -164,7 +164,8 @@ the session-context block off.
 
 **Compaction.** A compaction or a fresh start forgets what was sent
 (`AgentContext::reset_session`): on `PreCompact` (Claude Code's; its HTTP
-`SessionStart` never arrives) and on `SessionStart`, so the next
+`SessionStart` never arrives), on `PostCompact` (opencode's bridge posts
+only that one, after the fact) and on `SessionStart`, so the next
 prompt carries the session context and every extension context again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
@@ -174,7 +175,7 @@ A compaction is also logged, by every harness, as `agent.context.compacted@2`
 read as `event:<id>#summary`), Codex's finished `contextCompaction` item
 (through the chat host; it names neither), and opencode's
 `session.compacted` (through the bridge; it names neither). The log is all
-that is done for opencode, whose bridge posts no `PreCompact`. Codex's
+that opencode's compaction records besides the reset on its `PostCompact`. Codex's
 compaction also resets the session's baselines (`ChatHost::compacted`),
 and the context is injected again once no turn runs. Thread Activity
 counts a turn's compactions. `v_turn_activity.compactions` counts them per turn (a compaction between turns belongs to none), beside the turn's `deliveries` and `person_prompts`.
