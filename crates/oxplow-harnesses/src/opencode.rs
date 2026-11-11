@@ -25,11 +25,6 @@ use super::Named;
 
 pub(super) struct Opencode(pub(super) Named);
 
-/// The model opencode launches with (`-m provider/model`) when its config
-/// names none (`{ model }`). Assumes GitHub Copilot auth in opencode's own
-/// auth store.
-pub const DEFAULT_MODEL: &str = "github-copilot/gpt-5-mini";
-
 /// What tells the bridge to post opencode's raw events and hook inputs for
 /// the hook recording (`OXPLOW_HOOK_DEBUG`, which an agent's environment
 /// never holds): set on the launch only while a recording is on.
@@ -73,11 +68,10 @@ impl AgentHarness for Opencode {
             ),
         ));
         env.extend(raw_recording_env(std::env::var_os("OXPLOW_HOOK_DEBUG")));
-        let model = input
-            .config
-            .get("model")
-            .and_then(|m| m.as_str())
-            .unwrap_or(DEFAULT_MODEL);
+        // Only a model the person set: opencode runs its own default
+        // otherwise (a model oxplow named itself once vanished from the
+        // provider's list, and opencode quietly ran another).
+        let model = super::shared::setting(&input.config, "model");
         let program = input.resolve_program("opencode");
         Ok(Launch {
             spec: LaunchSpec::Pty {
@@ -97,8 +91,8 @@ impl AgentHarness for Opencode {
         vec![HarnessSetting {
             key: "model".into(),
             title: "Model".into(),
-            hint: "The model OpenCode launches with (`provider/model`). Blank uses its default; applies to sessions started after Save.".into(),
-            placeholder: DEFAULT_MODEL.into(),
+            hint: "The model OpenCode launches with (`provider/model`, as `opencode models` lists them). Blank uses your own OpenCode default; applies to sessions started after Save. OpenCode gives no error for a model it doesn't have, and runs another.".into(),
+            placeholder: "provider/model".into(),
         }]
     }
 
@@ -361,15 +355,18 @@ fn split_frontmatter_description(asset: &str) -> (Option<String>, String) {
     (description, body.trim().to_string())
 }
 
-/// `opencode -m <model>`, resuming `resume`.
+/// `opencode [-m <model>]`, resuming `resume`.
 fn command(
     cwd: &str,
     resume: Option<super::shared::Saved<'_>>,
     program: Option<&str>,
-    model: &str,
+    model: Option<&str>,
 ) -> String {
     let (prog, guard) = program_and_guard(program, "opencode");
-    let base = format!("{prog} -m {}", shell_escape(model));
+    let base = match model {
+        Some(model) => format!("{prog} -m {}", shell_escape(model)),
+        None => prog,
+    };
     let resume = match resume {
         None => Resume::Fresh,
         Some(saved) => Resume::Saved(format!(
@@ -1126,11 +1123,21 @@ console.log(JSON.stringify(posts));
         assert!(!l.workspace.join(".opencode").exists());
     }
 
+    /// opencode picks the model itself unless the person set one: oxplow
+    /// forces none (a model it named once vanished from the provider's
+    /// list, and opencode then ran a different one with no error).
     #[test]
-    fn with_no_model_configured_it_runs_the_default() {
-        let cmd = command("/repo", None, None, DEFAULT_MODEL);
-        assert!(cmd.contains("exec opencode") && cmd.contains(DEFAULT_MODEL));
-        assert!(!cmd.contains(" -s "));
+    fn with_no_model_configured_it_passes_none() {
+        let h = harness("oxplow:opencode", "opencode");
+        for config in [serde_json::json!({}), serde_json::json!({ "model": "  " })] {
+            let l = launch_in(h.as_ref(), None, None, &config);
+            let (command, _) = crate::test_launch::pty(&l.launch);
+            assert!(command.contains("exec "), "{command}");
+            assert!(!command.contains(" -m "), "{command}");
+            assert!(!command.contains(" -s "), "{command}");
+        }
+        assert_eq!(h.settings()[0].placeholder, "provider/model");
+        assert!(h.settings()[0].hint.contains("Blank uses"));
     }
 
     #[test]

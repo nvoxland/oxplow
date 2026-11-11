@@ -572,9 +572,14 @@ one no longer offered is removed, a person's own stay.
   commands, as skills) go to the worktree's `.agents/skills/`
   (`shared::write_worktree_skills`).
 - **opencode** writes `.oxplow/runtime/opencode-plugin/`
-  (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode -m
-  <model> [-s <id>]`, the model from `agentConfig.opencode.model`, else
-  `DEFAULT_MODEL` (`github-copilot/gpt-5-mini`). Hooks, MCP (bearer by
+  (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode [-m
+  <model>] [-s <id>]`, the model only from `agentConfig.opencode.model`
+  (blank: no `-m`, opencode's own default). oxplow used to force
+  `github-copilot/gpt-5-mini`; GitHub Copilot stopped offering it and
+  opencode 1.17.4 gave no error: it ran its most recent other model (a
+  local one), which `session.created` / `chat.message` show only as that
+  model's `modelID`, and the Stop's `model` reports. So oxplow names no
+  model of its own. Hooks, MCP (bearer by
   opencode's own `{env:OXPLOW_HOOK_TOKEN}`), the instructions file, skills
   and commands ride `OPENCODE_CONFIG_CONTENT`, inline config opencode
   merges last. The bridge (`crates/oxplow-harnesses/assets/opencode-hooks.js`)
@@ -1751,7 +1756,7 @@ available from outside.
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
-| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
+| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` (none when blank) |
 | Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
 | Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |
