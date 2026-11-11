@@ -120,9 +120,13 @@ impl AgentHarness for Opencode {
         let program = query.resolve_program("opencode").ok_or_else(|| {
             HarnessError::Unavailable("`opencode` isn't installed where oxplow looks".into())
         })?;
+        // Its list is of the project the program runs in, so it runs in the
+        // worktree (a directory outside any git checkout is opencode's
+        // `global` project).
         let listed = super::shared::program_output(
             &program,
             &["session", "list", "--format", "json", "-n", LIST_SCAN],
+            Some(&query.cwd),
         )
         .await?;
         sessions_in(&listed, &query.cwd.to_string_lossy(), query.limit)
@@ -388,7 +392,12 @@ fn sessions_in(
     cwd: &str,
     limit: usize,
 ) -> Result<Vec<NativeConversation>, HarnessError> {
-    let rows: Vec<serde_json::Value> = serde_json::from_str(listed.trim())
+    // A project with no sessions prints nothing (not `[]`) and succeeds.
+    let listed = listed.trim();
+    if listed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<serde_json::Value> = serde_json::from_str(listed)
         .map_err(|e| HarnessError::Unavailable(format!("reading its session list: {e}")))?;
     let at = |r: &serde_json::Value, key: &str| {
         r.get(key)
@@ -1026,22 +1035,72 @@ console.log(JSON.stringify(posts));
         assert!(sessions_in("not json", "/repo/wt", 1).is_err());
     }
 
+    /// A project with no sessions makes `session list --format json` print
+    /// nothing at all, exit code 0 (not `[]`; recorded with 1.17.4): that is
+    /// an empty list, not an error.
+    #[test]
+    fn a_blank_session_list_is_no_sessions() {
+        for blank in ["", "\n", "  \r\n "] {
+            assert!(sessions_in(blank, "/repo/wt", 10).unwrap().is_empty());
+        }
+        assert!(sessions_in("[]", "/repo/wt", 10).unwrap().is_empty());
+        // A cut-off list is still an error.
+        assert!(sessions_in("[{\"id\":\"ses_a\"", "/repo/wt", 10).is_err());
+    }
+
+    /// It lists the sessions of the project the program runs in, and the
+    /// project is the worktree's: the CLI runs there, and a program that
+    /// prints nothing lists none.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn its_session_list_runs_in_the_worktree_and_may_be_empty() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().join("wt");
+        fs::create_dir(&wt).unwrap();
+        let wt = wt.canonicalize().unwrap();
+        let bin = tmp.path().join("opencode");
+        // It lists a session of the directory it runs in.
+        fs::write(
+            &bin,
+            "#!/bin/sh\nprintf '[{\"id\":\"ses_here\",\"title\":\"H\",\"updated\":1,\"created\":1,\"directory\":\"%s\"}]' \"$(pwd -P)\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let h = harness("oxplow:opencode", "opencode");
+        let query = oxplow_domain::agent::harness::ConversationQuery {
+            cwd: wt.clone(),
+            home: None,
+            search_path: vec![tmp.path().to_path_buf()],
+            limit: 10,
+        };
+        let found = h.conversations(&query).await.unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].id, "ses_here");
+        // A project with no sessions: it prints nothing and succeeds.
+        fs::write(&bin, "#!/bin/sh\nexit 0\n").unwrap();
+        assert!(h.conversations(&query).await.unwrap().is_empty());
+    }
+
     /// Through its CLI: a program that prints the list.
     #[cfg(unix)]
     #[tokio::test]
     async fn its_conversations_come_from_its_cli() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().join("wt");
+        fs::create_dir(&wt).unwrap();
+        let wt = wt.canonicalize().unwrap();
         let bin = tmp.path().join("opencode");
         fs::write(
             &bin,
-            "#!/bin/sh\n[ \"$1 $2 $3 $4\" = 'session list --format json' ] || exit 2\necho '[{\"id\":\"ses_a\",\"title\":\"A\",\"updated\":1,\"created\":1,\"directory\":\"/repo/wt\"}]'\n",
+            "#!/bin/sh\n[ \"$1 $2 $3 $4\" = 'session list --format json' ] || exit 2\nprintf '[{\"id\":\"ses_a\",\"title\":\"A\",\"updated\":1,\"created\":1,\"directory\":\"%s\"}]' \"$(pwd -P)\"\n",
         )
         .unwrap();
         fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
         let h = harness("oxplow:opencode", "opencode");
         let query = oxplow_domain::agent::harness::ConversationQuery {
-            cwd: "/repo/wt".into(),
+            cwd: wt,
             home: None,
             search_path: vec![tmp.path().to_path_buf()],
             limit: 10,
