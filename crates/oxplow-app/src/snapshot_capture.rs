@@ -31,7 +31,7 @@ use oxplow_db::analytics_stores::TakeOutcome;
 use oxplow_db::{FileSnapshot, SnapshotStorage, SqliteSnapshotStore, TakeRecord};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::vcs::{ObjectStore, Revision, Vcs};
-use oxplow_domain::{EffortId, ThreadId};
+use oxplow_domain::ThreadId;
 
 /// What a snapshot take is for: why it runs, what it belongs to, and how
 /// long its caller will wait (P2.2/P2.3; `.context/data-model.md`
@@ -43,7 +43,6 @@ pub struct TakeRequest {
     pub thread_id: Option<ThreadId>,
     /// `agent_turn.id`.
     pub turn_id: Option<i64>,
-    pub effort_id: Option<EffortId>,
     /// The caller's time budget; recorded on the op, reported when
     /// exceeded.
     pub budget: Option<Duration>,
@@ -87,7 +86,6 @@ impl From<SnapshotTrigger> for TakeRequest {
             trigger,
             thread_id: None,
             turn_id: None,
-            effort_id: None,
             budget: None,
             provider: None,
         }
@@ -106,10 +104,9 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 /// giving the fs-watch debouncer (250 ms in
 /// `stream_watch`) time to deliver any in-flight events through
 /// the broadcast channel and into the dirty set. Without this, an
-/// edit followed almost immediately by the close (`oxplow.effort.report`) produces an
-/// empty bracket — the edit hasn't propagated yet, so
-/// `end_snapshot_id == start_snapshot_id` and the file-review diff
-/// reports the claim as unchanged.
+/// edit followed almost immediately by a turn's end produces an empty
+/// take — the edit hasn't propagated yet, so the turn's end snapshot
+/// equals its start and its diff reports the file as unchanged.
 ///
 /// 300 ms = 250 ms debouncer + a 50 ms cushion for the broadcast
 /// hop + run_watcher loop. Tests override via
@@ -333,10 +330,10 @@ struct Inner {
     /// there was nothing to sweep). Starts `true` so a service that
     /// never runs a startup sweep (non-primary streams) never gates;
     /// boot flips it `false` for the duration of the primary's sweep via
-    /// [`SnapshotCaptureService::begin_initial_sweep`]. Effort-start
-    /// awaits this ([`SnapshotCaptureService::await_initial_ready`]) so
-    /// an effort's baseline reflects the whole pre-edit tree, not a
-    /// half-swept one.
+    /// [`SnapshotCaptureService::begin_initial_sweep`]. A run's mark and
+    /// the startup diff await this
+    /// ([`SnapshotCaptureService::await_initial_ready`]) so they read the
+    /// whole tree, not a half-swept one.
     initial_ready: tokio::sync::watch::Sender<bool>,
     /// `true` once the git-refs listener has read the HEAD it counts moves
     /// from.
@@ -395,14 +392,14 @@ impl SnapshotCaptureService {
     }
 
     /// Signal that the initial sweep finished (or had nothing to do),
-    /// releasing any effort-start waiters.
+    /// releasing any waiters.
     pub fn mark_initial_complete(&self) {
         let _ = self.inner.initial_ready.send_replace(true);
     }
 
     /// Wait until this stream's initial startup snapshot is complete —
     /// returns immediately when it already is (or when this stream never
-    /// sweeps). Effort-start awaits this so the baseline is whole.
+    /// sweeps). A run's mark awaits this so the baseline is whole.
     pub async fn await_initial_ready(&self) {
         let mut rx = self.inner.initial_ready.subscribe();
         // Err only if the sender dropped (it lives in `inner`'s Arc, so
@@ -482,8 +479,8 @@ impl SnapshotCaptureService {
     /// worktree-relative path) from capture — the project's
     /// `generated.exclude` list or `.gitignore`. A path that answers
     /// `true` here is never snapshotted, so nothing downstream can
-    /// observe it as changed; effort attribution uses this to leave
-    /// such paths out of a claim entirely (tsk249).
+    /// observe it as changed; attribution uses this to leave such paths
+    /// out entirely (tsk249).
     pub fn excluded_from_capture(&self, rel: &Path) -> bool {
         self.inner.workspace_filter.ignore(rel, false)
     }
@@ -1166,7 +1163,7 @@ impl SnapshotCaptureService {
         // snapshot lists the whole tree) is gone (tsk71): metric baselines now
         // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
         // ordinary snapshot, so nothing needs a fabricated full-tree snapshot
-        // any more — and fabricating one polluted effort file-attribution.
+        // any more — and fabricating one polluted file attribution.
         self.enqueue_tree_diff(Path::new("")).await
     }
 
@@ -1861,8 +1858,8 @@ impl SnapshotCaptureService {
         // Send-bound cycle on the anonymous Future types
         // (request_snapshot → capture_inner → tokio::spawn(...) →
         // request_snapshot). The quiet trigger re-arms for entries left
-        // dirty (see `quiet_take`), and any other take — a turn end, an
-        // effort bracket, a git-refs change — picks them up too. Fresh-file
+        // dirty (see `quiet_take`), and any other take — a turn end, a
+        // run's mark, a git-refs change — picks them up too. Fresh-file
         // captures may land in a later snapshot than the one that
         // first observed them — a small latency cost for completely
         // suppressing transient-file rows.
@@ -1959,7 +1956,6 @@ impl SnapshotCaptureService {
             trigger: req.trigger,
             thread_id: req.thread_id,
             turn_id: req.turn_id,
-            effort_id: req.effort_id,
             branch,
             revision,
             elapsed_ms: started.elapsed().as_millis() as u64,
@@ -2267,7 +2263,7 @@ mod tests {
     }
 
     /// A worktree stream has no row for a file it never touched. A rescan of
-    /// its root must not record them all as new: an open effort would see
+    /// its root must not record them all as new: a running turn would see
     /// thousands of files added.
     #[tokio::test]
     async fn a_rescan_of_a_sparse_stream_records_no_clean_file_it_has_no_history_for() {
@@ -3401,10 +3397,9 @@ mod tests {
         // Nothing dirty: the current snapshot, and no op.
         let again = svc
             .request_snapshot(TakeRequest {
-                trigger: SnapshotTrigger::EffortEnd,
+                trigger: SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: Some(Duration::from_secs(5)),
                 provider: None,
             })
@@ -3420,10 +3415,9 @@ mod tests {
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         let second = svc
             .request_snapshot(TakeRequest {
-                trigger: SnapshotTrigger::EffortEnd,
+                trigger: SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: Some(Duration::from_secs(5)),
                 provider: None,
             })
@@ -3433,7 +3427,7 @@ mod tests {
         assert_ne!(second, first);
         let ops = store.list_ops(TEST_STREAM, 5).await.unwrap();
         assert_eq!(ops.len(), 2);
-        assert_eq!(ops[0].trigger, SnapshotTrigger::EffortEnd);
+        assert_eq!(ops[0].trigger, SnapshotTrigger::Manual);
         assert_eq!(
             (ops[0].snapshot_id, ops[0].parent_snapshot_id),
             (second, Some(first))
@@ -3639,7 +3633,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(
             !waiter.is_finished(),
-            "effort-start gate must block while the initial sweep is in flight",
+            "the initial-sweep gate must block while the sweep is in flight",
         );
         svc.mark_initial_complete();
         tokio::time::timeout(Duration::from_millis(500), waiter)
@@ -3653,7 +3647,7 @@ mod tests {
         let project = tempdir().unwrap();
         let svc = bare_service(project.path()).await;
         // No begin_initial_sweep → ready by default (a stream that never
-        // sweeps must not block effort-start forever).
+        // sweeps must not block a waiter forever).
         tokio::time::timeout(Duration::from_millis(200), svc.await_initial_ready())
             .await
             .expect("an un-swept service must not gate");

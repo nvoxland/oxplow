@@ -63,7 +63,6 @@ impl EventConsumer for UiPush {
                 trigger,
                 thread_id: env.anchors.thread_id,
                 turn_id: env.anchors.turn_id,
-                effort_id: env.anchors.effort_id,
             });
         }
         Ok(())

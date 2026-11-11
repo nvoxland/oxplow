@@ -243,7 +243,7 @@ pub struct CommandUi {
     /// More words search matches it by.
     #[serde(default)]
     pub keywords: Vec<String>,
-    /// The ref kind it acts on (`task`, `effort`): offered on that
+    /// The ref kind it acts on (`task`, `request`): offered on that
     /// ref's page and rows. `None`: it needs no ref, and search offers it.
     #[serde(default)]
     pub about: Option<String>,

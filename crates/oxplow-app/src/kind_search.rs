@@ -232,7 +232,7 @@ impl Prepared {
 /// One resource's feed, read in a recompute's read transaction.
 struct Feed<'a> {
     tx: &'a rusqlite::Connection,
-    /// The resource (`oxplow/effort`).
+    /// The resource (`oxplow/thread`).
     kind: &'a str,
     spec: &'a SearchableKind,
     /// A registry of the resource alone, which a row's URI must hold for.
@@ -1536,31 +1536,19 @@ mod core_tests {
             .unwrap();
     }
 
-    /// An effort's title is in its thread's text, so the thread is found by
-    /// a word only an effort says — and still found closed, then archived.
+    /// A thread is found by its title — and still found closed, then
+    /// archived.
     #[tokio::test]
-    async fn a_thread_is_found_by_its_efforts_even_closed_and_archived() {
+    async fn a_thread_is_found_by_its_title_even_closed_and_archived() {
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "Plain title").await;
+        let thread =
+            crate::test_fixtures::new_thread(&svc, stream.id, "Recalibrate the capacitor").await;
         change_loop(&svc);
-        run(
-            &svc,
-            crate::commands::effort::OPEN,
-            serde_json::json!({
-                "thread": thread.id.to_string(),
-                "title": "Recalibrate the flux capacitor",
-            }),
-        )
-        .await;
-        eventually("found by the effort's words", || {
+        eventually("found by its title", || {
             found(&svc, "capacitor", Some(stream.id), "oxplow/thread")
         })
         .await;
-        assert!(
-            found(&svc, "plain", Some(stream.id), "oxplow/thread").await,
-            "by its title"
-        );
         run(
             &svc,
             crate::commands::thread::CLOSE,
@@ -1673,35 +1661,6 @@ mod core_tests {
         assert!(
             found(&svc, "gnu", Some(stream.id), "oxplow/turn").await,
             "by the answer"
-        );
-    }
-
-    /// An effort is found by its title and by the item it was on.
-    #[tokio::test]
-    async fn an_effort_is_found_by_its_title_and_its_task() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
-        change_loop(&svc);
-        let item = task(&svc, thread.id, "Unrelated words").await;
-        run(
-            &svc,
-            crate::commands::effort::OPEN,
-            serde_json::json!({
-                "thread": thread.id.to_string(),
-                "title": "Reticulate splines",
-                "task": item,
-            }),
-        )
-        .await;
-        eventually("found by its title", || {
-            found(&svc, "reticulate", Some(stream.id), "oxplow/effort")
-        })
-        .await;
-        let native = oxplow_domain::uri::build::task_of_uri(&item).unwrap().1;
-        assert!(
-            found(&svc, &native, Some(stream.id), "oxplow/effort").await,
-            "by its task's id"
         );
     }
 

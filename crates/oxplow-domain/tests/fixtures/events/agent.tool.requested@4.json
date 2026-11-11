@@ -12,7 +12,7 @@
     "size": 412
   },
   "decision": "denied",
-  "reason": "no effort is open in this stream",
+  "reason": "the thread is closed",
   "subagent": {
     "id": "01a11f68-9625-7523-8ead-501bb708eb7d",
     "kind": "default"

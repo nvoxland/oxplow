@@ -835,8 +835,8 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
             ));
         }
     }
-    // Core's call of a verb — `task.<verb>`, the effort policy's
-    // dispatcher — is what a person confirms and what is gated: a verb
+    // Core's call of a verb — `task.<verb>`, a dispatcher — is what a
+    // person confirms and what is gated: a verb
     // records and never asks on its own.
     for command in declared
         .commands

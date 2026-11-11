@@ -888,7 +888,7 @@ async fn a_page_acting_for_an_agent_is_treated_as_the_agent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_external_run_whose_record_fails_still_reports_success() {
     let (db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.effort", Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.thing", Confirm::Never);
     spec.atomicity = Atomicity::External;
     let writes = db.clone();
     bus.register(
@@ -920,7 +920,7 @@ async fn an_external_run_whose_record_fails_still_reports_success() {
     let out = bus
         .run(
             &Actor::Human,
-            "oxplow.kv.effort",
+            "oxplow.kv.thing",
             json!({"k": "e", "v": "1"}),
             false,
         )

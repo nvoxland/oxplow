@@ -101,24 +101,25 @@ pub(crate) async fn page(
     }
 }
 
-/// Log an `effort.retitled` for `effort` titled `title` and return it as
-/// stored: an event an `on:` collector or effect can react to.
-pub(crate) async fn log_retitle(
+/// Log a `task.state_changed` moving `task` (an item's id on `issues`) to
+/// done on `thread` and return it as stored: an event an `on:` collector or
+/// effect can react to.
+pub(crate) async fn log_task_done(
     svc: &crate::Services,
-    effort: oxplow_domain::EffortId,
-    title: &str,
+    thread: oxplow_domain::ThreadId,
+    task: &str,
 ) -> oxplow_domain::StoredEvent {
     use oxplow_domain::events::Anchors;
     use oxplow_domain::Envelope;
-    let env = Envelope::typed::<oxplow_domain::events::schema::EffortRetitled>(
+    let env = Envelope::typed::<oxplow_domain::events::schema::TaskStateChanged>(
         "human",
-        &oxplow_domain::events::schema::EffortRetitledV2 {
-            effort: effort.to_string(),
-            title: Some(title.into()),
+        &oxplow_domain::events::schema::TaskStateChangedV1 {
+            task: oxplow_domain::uri::build::task_uri("issues", task),
+            to: oxplow_domain::tasks::Bucket::Done,
         },
     )
     .with_anchors(Anchors {
-        effort_id: Some(effort),
+        thread_id: Some(thread),
         ..Anchors::default()
     });
     let id = env.id.clone();
@@ -139,12 +140,12 @@ pub(crate) const CONFIGURATION_V2: &str = "configuration:
   defaults: { limit: 10 }
 ";
 
-/// `services_with_effort` with the pump's reactors a running oxplow has for
+/// `services_with_thread` with the pump's reactors a running oxplow has for
 /// the life of an extension: its `on:` collectors, its effects and what
 /// follows a changed setting. Boot registers them; in-memory services have
 /// none, so a scenario that logs an event or sets a config key asks for them.
-pub(crate) async fn booted() -> crate::test_fixtures::EffortFixture {
-    let fx = crate::test_fixtures::services_with_effort().await;
+pub(crate) async fn booted() -> crate::test_fixtures::ThreadFixture {
+    let fx = crate::test_fixtures::services_with_thread().await;
     crate::capabilities::register(&fx.svc);
     crate::collector_triggers::register(&fx.svc);
     crate::effect_triggers::register(&fx.svc);

@@ -1534,63 +1534,32 @@ fn a_capability_verb_is_record_and_never_confirms() {
     assert!(err.contains("`delete`"), "{err}");
 }
 
-/// The fake's spec, as an effort policy.
+/// The fake's spec, as an implementation of `capability`.
 #[cfg(unix)]
-fn policy_spec() -> spec::ProviderSpec {
+fn fake_spec(capability: &str) -> spec::ProviderSpec {
     let dir = tempfile::tempdir().unwrap();
     write_extension(dir.path(), "");
     let mut spec = extension(dir.path()).providers[0].clone();
-    spec.capability = "effort_policy".into();
+    spec.capability = capability.into();
     spec
 }
 
-/// A process may implement any capability with a contract: an effort
-/// policy declares `react`, and the contract's rules hold for it as for a
-/// task tracker — its verb is `confirm: never`, `access: record`, and it may
-/// emit nothing of core's.
-#[cfg(unix)]
-#[test]
-fn a_provider_may_implement_an_effort_policy_by_its_contract() {
-    let spec = policy_spec();
-    spec::check_declarations(&spec, &oxplow_provider_fake::policy_declarations()).unwrap();
-    let mut silent = oxplow_provider_fake::policy_declarations();
-    silent.commands.clear();
-    let err = spec::check_declarations(&spec, &silent).unwrap_err();
-    assert!(
-        err.contains("effort_policy") && err.contains("`react`"),
-        "{err}"
-    );
-    let mut asking = oxplow_provider_fake::policy_declarations();
-    asking.commands[0].confirm = "always".into();
-    let err = spec::check_declarations(&spec, &asking).unwrap_err();
-    assert!(err.contains("react") && err.contains("confirm"), "{err}");
-    let mut emitting = oxplow_provider_fake::policy_declarations();
-    emitting.event_types = oxplow_provider_fake::declarations().event_types;
-    let err = spec::check_declarations(&spec, &emitting).unwrap_err();
-    assert!(
-        err.contains("task.recorded@3") && err.contains("may emit only"),
-        "{err}"
-    );
-}
-
-/// A harness's declarations: the fake policy's, its `react` verb copied
-/// under each of `verbs`, the capability `agent_harness` with `features`
-/// and `data`.
+/// A harness's declarations: the fake harness's, its first verb copied
+/// under each of `verbs`, with `features` and `data`.
 fn harness_declarations(
     verbs: &[&str],
     features: serde_json::Value,
     data: serde_json::Value,
 ) -> oxplow_provider_protocol::model::InitializeResult {
-    let mut declared = oxplow_provider_fake::policy_declarations();
-    let react = declared.commands[0].clone();
+    let mut declared = oxplow_provider_fake::harness_declarations();
+    let verb = declared.commands[0].clone();
     declared.commands = verbs
         .iter()
         .map(|v| oxplow_provider_protocol::model::CommandDecl {
             name: (*v).into(),
-            ..react.clone()
+            ..verb.clone()
         })
         .collect();
-    declared.capabilities[0].capability = "agent_harness".into();
     declared.capabilities[0].features = features;
     declared.capabilities[0].data = data;
     declared
@@ -1603,8 +1572,7 @@ fn harness_declarations(
 #[cfg(unix)]
 #[test]
 fn a_provider_may_implement_an_agent_harness_by_its_contract() {
-    let mut spec = policy_spec();
-    spec.capability = "agent_harness".into();
+    let spec = fake_spec("agent_harness");
     let data = json!({
         "env_markers": ["ACME_SESSION"],
         "settings": [{ "key": "model", "title": "Model" }]
@@ -1653,16 +1621,16 @@ fn a_provider_may_implement_an_agent_harness_by_its_contract() {
 /// A capability whose contract asks for nothing more takes no `data`.
 #[cfg(unix)]
 #[test]
-fn a_policy_declares_no_data() {
-    let spec = policy_spec();
-    let mut declared = oxplow_provider_fake::policy_declarations();
+fn a_snapshots_provider_declares_no_data() {
+    let spec = fake_spec("snapshots");
+    let mut declared = oxplow_provider_fake::snapshots_declarations(false);
     declared.capabilities[0].data = json!({ "anything": 1 });
     let err = spec::check_declarations(&spec, &declared).unwrap_err();
     assert!(err.contains("declares no `data`"), "{err}");
 }
 
 /// The manifest names any capability with a contract; one without (the
-/// VCS), or a task tracker's own fields on a policy, is refused.
+/// VCS), or a task tracker's own fields on another capability, is refused.
 #[test]
 fn a_manifest_names_a_capability_a_process_may_implement() {
     let manifest = |capability: &str, extra: &str| {
@@ -1671,8 +1639,9 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
         )
     };
     let read = |rel: &str| {
-        (rel == "provider.json")
-            .then(|| serde_json::to_string(&oxplow_provider_fake::policy_declarations()).unwrap())
+        (rel == "provider.json").then(|| {
+            serde_json::to_string(&oxplow_provider_fake::snapshots_declarations(false)).unwrap()
+        })
     };
     let parse = |text: String| {
         spec::parse_providers(&serde_yaml::from_str(&text).unwrap(), &|rel| {
@@ -1683,7 +1652,7 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
             }
         })
     };
-    let (specs, errors) = parse(manifest("effort_policy", ""));
+    let (specs, errors) = parse(manifest("snapshots", ""));
     assert_eq!((specs.len(), errors), (1, Vec::<String>::new()));
     let (_, errors) = parse(manifest("vcs", ""));
     assert!(
@@ -1691,14 +1660,14 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
         "{errors:?}"
     );
     let (_, errors) = parse(manifest(
-        "effort_policy",
+        "snapshots",
         "    fields: [{ name: points, title: Points, kind: number }]\n",
     ));
     assert!(
         errors[0].contains("fields are a task tracker's"),
         "{errors:?}"
     );
-    let (_, errors) = parse(manifest("effort_policy", "    idPattern: \"P-\\\\d+\"\n"));
+    let (_, errors) = parse(manifest("snapshots", "    idPattern: \"P-\\\\d+\"\n"));
     assert!(
         errors[0].contains("id_pattern is a task tracker's"),
         "{errors:?}"
@@ -1718,14 +1687,14 @@ fn an_event_names_only_its_capabilitys_own_refs() {
     )
     .is_ok());
     assert!(check_subject(
-        "effort_policy",
+        "snapshots",
         "fake",
         "tracker",
         "oxplow:oxplow/task?id=W-1&provider=fake"
     )
     .is_err());
     assert!(check_subject(
-        "effort_policy",
+        "snapshots",
         "fake",
         "tracker",
         "oxplow:oxplow/extension?name=tracker"
@@ -6226,314 +6195,6 @@ async fn a_provider_needs_only_scopes_host_call_serves() {
         errs.contains("`config.read` is a scope a script can't call"),
         "{errs}"
     );
-}
-
-const POLICY: &str = "steward/fake";
-
-/// A private extension whose provider runs the fake as an effort policy
-/// with `hooks` (its state, `reacts` included, kept beside the project).
-#[cfg(unix)]
-fn write_policy_extension(project: &Path, hooks: &str) {
-    let dir = project.join(".oxplow/extensions/steward");
-    std::fs::create_dir_all(dir.join("bin")).unwrap();
-    std::fs::write(
-        dir.join("extension.yaml"),
-        "manifest: 2\nname: steward\nintent:\n  purpose: the fake effort policy\n  examples: [{ name: a }]\npermissions: [process.run, sql.read, commands:oxplow.effort.**]\nproviders:\n  - id: fake\n    capability: effort_policy\n    entry: bin/provider\n    declarations: provider.json\n    needs: [sql.read]\n",
-    )
-    .unwrap();
-    let script = dir.join("bin/provider");
-    std::fs::write(
-        &script,
-        format!(
-            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY=effort_policy OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-policy-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
-            project.join(".oxplow").display(),
-            fake_bin().display()
-        ),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    std::fs::write(
-        dir.join("provider.json"),
-        serde_json::to_string_pretty(&oxplow_provider_fake::policy_declarations()).unwrap(),
-    )
-    .unwrap();
-}
-
-/// The fixture with the policy extension approved and its instance
-/// running; the fixture's own effort closed, so the policy's are the only
-/// ones open.
-#[cfg(unix)]
-async fn running_policy(hooks: &str) -> (crate::test_fixtures::EffortFixture, Extension) {
-    let fx = crate::test_fixtures::services_with_effort().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_policy_extension(&project, hooks);
-    let ext = crate::extension::extensions::load_extensions(&project)
-        .into_iter()
-        .find(|e| e.name == "steward")
-        .expect("the policy extension loads");
-    assert!(ext.errors.is_empty(), "{:?}", ext.errors);
-    deploy(&fx, &ext).await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    fx.svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::effort::CLOSE,
-            json!({ "effort": fx.effort.to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    (fx, ext)
-}
-
-/// `id` as the project's effort policy.
-async fn choose_policy(fx: &ThreadFixture, id: &str) {
-    fx.svc
-        .config
-        .write()
-        .unwrap()
-        .active_providers
-        .insert("effort_policy".into(), id.into());
-    republish(fx);
-    crate::test_fixtures::activate_with_problems(&fx.svc).await;
-}
-
-/// A task filed on the fixture's thread, moved by the thread's agent to
-/// `to` (its anchors carry the thread); the policy has reacted when this
-/// returns.
-async fn agent_moves(fx: &ThreadFixture, item: &str, to: &str) {
-    let agent = Actor::Agent {
-        session_id: None,
-        thread_id: Some(fx.thread),
-        stream_id: Some(oxplow_domain::StreamId::new(1)),
-    };
-    fx.svc
-        .commands
-        .run(
-            &agent,
-            crate::commands::task::NAME,
-            json!({ "uri": item, "to": to }),
-            false,
-        )
-        .await
-        .unwrap();
-    fx.svc
-        .event_pump
-        .settle(
-            &[crate::effort_policy::NAME],
-            std::time::Duration::from_secs(10),
-        )
-        .await;
-}
-
-async fn file_task(fx: &ThreadFixture) -> String {
-    make_active(fx, "oxtask").await;
-    let out = fx
-        .svc
-        .commands
-        .run(
-            &Actor::Human,
-            crate::commands::task::CREATE,
-            json!({ "title": "policy work", "assignee": fx.thread.to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    out.result["uri"].as_str().unwrap().to_string()
-}
-
-/// `(task, open?)` of the thread's efforts, oldest first, and the
-/// source of the last `effort.opened`.
-async fn policy_efforts(fx: &ThreadFixture) -> (Vec<(Option<String>, bool)>, Option<String>) {
-    use oxplow_db::SqlCell;
-    let efforts = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT task, ended_at IS NULL FROM v_effort WHERE thread_id = ?1 ORDER BY id",
-            vec![SqlCell::Int(fx.thread.value())],
-            None,
-        )
-        .await
-        .unwrap()
-        .rows
-        .into_iter()
-        .map(|r| {
-            let item = match &r[0] {
-                SqlCell::Text(t) => Some(t.clone()),
-                _ => None,
-            };
-            (item, matches!(r[1], SqlCell::Int(1)))
-        })
-        .collect();
-    let source = fx
-        .svc
-        .db
-        .read(|c| {
-            Ok(c.query_row(
-                "SELECT source FROM event_log WHERE type = 'effort.opened' ORDER BY seq DESC LIMIT 1",
-                [],
-                |r| r.get::<_, String>(0),
-            )
-            .ok())
-        })
-        .await
-        .unwrap();
-    (efforts, source)
-}
-
-/// How many `react`s the fake answered.
-fn reacts(fx: &ThreadFixture) -> u64 {
-    std::fs::read_to_string(
-        fx.svc
-            .layout
-            .project_dir
-            .join(".oxplow/fake-policy-fake.json"),
-    )
-    .ok()
-    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-    .and_then(|v| v["reacts"].as_u64())
-    .unwrap_or(0)
-}
-
-/// A provider process as the project's effort policy: it is listed under
-/// the capability while it runs; a task its thread's agent starts opens an
-/// effort linked to it, run as `effect:effort_policy:fake`, and finishing
-/// the task closes it — the close read through `host/call`.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_provider_is_the_projects_effort_policy() {
-    let (fx, _ext) = running_policy("").await;
-    let listed = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT provider FROM v_capability_provider WHERE capability = 'effort_policy' ORDER BY provider",
-            vec![],
-            None,
-        )
-        .await
-        .unwrap();
-    assert!(
-        serde_json::to_value(&listed.rows)
-            .unwrap()
-            .to_string()
-            .contains("\"fake\""),
-        "{:?}",
-        listed.rows
-    );
-    choose_policy(&fx, "fake").await;
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    let (efforts, source) = policy_efforts(&fx).await;
-    assert_eq!(
-        efforts.last().unwrap(),
-        &(Some(task.clone()), true),
-        "{efforts:?}"
-    );
-    assert_eq!(source.as_deref(), Some("effect:effort_policy:fake"));
-    agent_moves(&fx, &task, "done").await;
-    let (efforts, _) = policy_efforts(&fx).await;
-    assert!(efforts.iter().all(|e| !e.1), "it closed: {efforts:?}");
-}
-
-/// What the fake provider last kept of its state.
-fn fake_policy_state(fx: &ThreadFixture) -> serde_json::Value {
-    std::fs::read_to_string(
-        fx.svc
-            .layout
-            .project_dir
-            .join(".oxplow/fake-policy-fake.json"),
-    )
-    .ok()
-    .and_then(|t| serde_json::from_str(&t).ok())
-    .unwrap_or_default()
-}
-
-/// A provider is told the run each call is part of: the policy's react
-/// runs as its effect actor, caused by the item's move, on the agent's
-/// thread.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_policy_provider_is_told_the_run_it_reacts_in() {
-    let (fx, _ext) = running_policy("").await;
-    choose_policy(&fx, "fake").await;
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    let context = fake_policy_state(&fx)["last_context"].clone();
-    assert!(
-        context["run"].as_str().is_some_and(|r| !r.is_empty()),
-        "{context}"
-    );
-    assert_eq!(context["actor"], "effect:effort_policy:fake", "{context}");
-    assert!(context["cause"].as_str().is_some(), "{context}");
-    assert_eq!(
-        context["anchors"]["thread_id"],
-        fx.thread.to_string(),
-        "{context}"
-    );
-}
-
-/// Only the chosen policy hears events: with `oxplow` or `none` active,
-/// the running provider is asked nothing.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_provider_policy_not_chosen_hears_nothing() {
-    let (fx, _ext) = running_policy("").await;
-    for chosen in ["oxplow", "none"] {
-        choose_policy(&fx, chosen).await;
-        let task = file_task(&fx).await;
-        agent_moves(&fx, &task, "in_progress").await;
-        agent_moves(&fx, &task, "done").await;
-    }
-    assert_eq!(reacts(&fx), 0);
-}
-
-/// What a policy composes is checked before any of it runs: a command
-/// that doesn't exist runs nothing, and the task's state stands.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_provider_policy_composing_no_command_runs_nothing() {
-    let (fx, _ext) = running_policy("bogus-react").await;
-    choose_policy(&fx, "fake").await;
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    assert!(reacts(&fx) > 0, "it was asked");
-    let (efforts, _) = policy_efforts(&fx).await;
-    assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
-    let state = fx
-        .svc
-        .sql
-        .query_sql(
-            "SELECT state FROM v_task WHERE uri = ?1",
-            vec![oxplow_db::SqlCell::Text(task)],
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(&state.rows).unwrap(),
-        json!([["in_progress"]])
-    );
-}
-
-/// A stopped instance is no policy: the choice falls back to `none`, and
-/// starting a task opens nothing.
-#[cfg(unix)]
-#[tokio::test]
-async fn a_stopped_provider_policy_resolves_to_none() {
-    let (fx, _ext) = running_policy("").await;
-    choose_policy(&fx, "fake").await;
-    turn_off(&fx.svc, POLICY).await;
-    let config = crate::config_service::read_config(&fx.svc.config);
-    assert_eq!(fx.svc.capabilities.active(&config, "effort_policy"), "none");
-    assert!(!fx.svc.effort_policies.has("fake"));
-    let task = file_task(&fx).await;
-    agent_moves(&fx, &task, "in_progress").await;
-    let (efforts, _) = policy_efforts(&fx).await;
-    assert!(efforts.iter().all(|e| !e.1), "nothing opened: {efforts:?}");
 }
 
 const HARNESS: &str = "conductor/fake";

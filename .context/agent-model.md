@@ -1962,11 +1962,11 @@ active snapshots implementation ([work-tracking.md](./work-tracking.md)
   (`SnapshotCaptureRegistry`), each watching its own worktree.
 - **Turn end.** When a turn closes (Stop or interrupt, every harness
   through `HookIngestService::ingest`), `turn_snapshots::CaptureTurnSnapshots`
-  runs a `turn_end` take anchored to the turn and its thread, and `agent_turn.snapshot_id` records it. **What the turn
-  changed is `agent_turn.start_snapshot_id → snapshot_id`**, the start
-  recorded when the turn opened — not the take's op parent, which other
-  takes during the turn (a commit, another thread's
-  turn end) move. One take per Stop, for the newest turn it closed
+  runs a `turn_end` take anchored to the turn and its thread
+  (`snapshot_op.turn_id`). **What the turn changed is its files**
+  (`turn_file`, a time join with the stream's snapshot line), not the
+  take's op parent, which other takes during the turn (a commit, another
+  thread's turn end) move. One take per Stop, for the newest turn it closed
   (`AgentTurnStore::close` reports whether it closed anything), after the
   status is set so the UI isn't held on running.
 - **The budget.** The Stop waits at most `snapshotTurnBudgetMs` (default

@@ -302,7 +302,6 @@ mod tests {
             id,
             stream_id: 1,
             thread_id: None,
-            effort_id: None,
             producer: "tests".into(),
             status: "done".into(),
             error: None,

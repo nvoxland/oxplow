@@ -51,7 +51,7 @@
           "type": "string"
         },
         "origin": {
-          "description": "The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known.",
+          "description": "The thread or request ref that created it (`oxplow:oxplow/request?id=req42`), when known.",
           "type": [
             "string",
             "null"
@@ -1861,7 +1861,7 @@
           "default": []
         },
         "about": {
-          "description": "The ref kind it acts on (`task`, `effort`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
+          "description": "The ref kind it acts on (`task`, `request`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
           "type": [
             "string",
             "null"
@@ -2485,12 +2485,7 @@
           "const": "request"
         },
         {
-          "description": "Once per effort, the first time the query returns rows. Efforts go\naway; use `request`.",
-          "type": "string",
-          "const": "effort"
-        },
-        {
-          "description": "Once per thread per `key` value: each row's `key` column fires\nonce (put `:effort_id` in the key for once per effort per row).",
+          "description": "Once per thread per `key` value: each row's `key` column fires\nonce (put `:request_id` in the key for once per request per row).",
           "type": "string",
           "const": "row"
         },
@@ -2739,7 +2734,7 @@
           "default": null
         },
         "entry": {
-          "description": "The built-in it is (`oxplow:oxtask`), or an effort policy's script.",
+          "description": "The built-in it is (`oxplow:oxtask`).",
           "type": [
             "string",
             "null"
@@ -2764,14 +2759,6 @@
         "config": {
           "description": "What it configures, checked against the built-in's schema.",
           "default": null
-        },
-        "needs": {
-          "description": "The scopes a policy script calls (`sql.read`): only what a script\ncan (`scope_calls::CALLABLE`).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
         },
         "icon": {
           "description": "A path to an SVG in the extension (`icons/claude.svg`): its logo,\nshown wherever the implementation is (a session's tab). Any\ncapability may declare one.",

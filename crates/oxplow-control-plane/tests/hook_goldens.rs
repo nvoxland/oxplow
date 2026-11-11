@@ -20,7 +20,6 @@ use common::{boot, seed_worktree_stream};
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
-use oxplow_db::EffortStore as _;
 use oxplow_domain::stores::{AgentSessionStore, StreamStore, ThreadStore};
 use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
 use oxplow_oxtask::OxtaskId;
@@ -91,8 +90,8 @@ async fn seed_thread(services: &Services) -> ThreadId {
     thread.id
 }
 
-/// An `in_progress` task on the thread, with its effort open.
-async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> OxtaskId {
+/// An `in_progress` task.
+async fn seed_task(services: &Services, title: &str) -> OxtaskId {
     let now = Timestamp::from_unix_ms(1);
     let task = services
         .task_store
@@ -111,11 +110,6 @@ async fn seed_task(services: &Services, thread_id: ThreadId, title: &str) -> Oxt
             note_count: 0,
             author: None,
         })
-        .await
-        .unwrap();
-    services
-        .effort_store
-        .start(&oxplow_oxtask::task_ref(task), &thread_id, None)
         .await
         .unwrap();
     task
@@ -171,7 +165,7 @@ async fn allowed_edit_and_post_tool_ack() {
 async fn stop_ack() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_task(&svc, tid, "ship the thing").await;
+    seed_task(&svc, "ship the thing").await;
     post(
         &cp,
         &svc,
@@ -196,7 +190,7 @@ async fn stop_ack() {
 async fn prompt_context_first_then_deduped() {
     let (cp, svc, root, _dir) = boot().await;
     let tid = seed_thread(&svc).await;
-    seed_task(&svc, tid, "ship the thing").await;
+    seed_task(&svc, "ship the thing").await;
     let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
     let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &first, &root);

@@ -79,17 +79,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         config_schema: None,
     },
     BuiltIn {
-        entry: "oxplow:commit-or-switch",
-        capability: "effort_policy",
-        provider: None,
-        title: "A commit lands it, or the task switches",
-        features: &[],
-        id_pattern: None,
-        fields: &[],
-        stages: &[],
-        config_schema: None,
-    },
-    BuiltIn {
         entry: "oxplow:snapshots",
         capability: "snapshots",
         provider: None,
@@ -292,16 +281,6 @@ pub enum Source {
     /// An AI provider: the Rust kind its declaration names (`provider:`,
     /// one of `oxplow_ai_rig::KINDS`), core's code.
     ProviderKind(&'static str),
-    /// A script in an extension (an effort policy written as one): its
-    /// entry, the extension's folder (`tree`,
-    /// `bundled:<name>` for a shipped one), the script's text and the
-    /// scopes it calls (`needs`).
-    Script {
-        entry: String,
-        tree: String,
-        script: String,
-        needs: Vec<String>,
-    },
     /// A provider instance's process.
     External,
     /// Nothing implements it.
@@ -313,7 +292,6 @@ impl Source {
         match self {
             Source::Core => "core",
             Source::BuiltIn(_) | Source::ProviderKind(_) => "builtin",
-            Source::Script { .. } => "script",
             Source::External => "external",
             Source::None => "none",
         }
@@ -1178,9 +1156,6 @@ pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Ve
                 if let Some(kind) = &d.provider {
                     return provider_implementation(e, d, kind);
                 }
-                if let Some(script) = &d.script {
-                    return Some(scripted_implementation(e, d, script));
-                }
                 let b = built_in(d.entry.as_deref()?)?;
                 Some(Implementation {
                     capability: d.capability.clone(),
@@ -1223,34 +1198,6 @@ fn provider_implementation(
         config: d.config.clone(),
         description: d.description.clone(),
     })
-}
-
-/// An implementation written as a script (an effort policy), as the
-/// registry holds it; it declares no features.
-fn scripted_implementation(
-    e: &crate::extension::extensions::Extension,
-    d: &crate::extension::extensions::implementations::ImplementationDecl,
-    script: &str,
-) -> Implementation {
-    Implementation {
-        capability: d.capability.clone(),
-        id: d.id.clone(),
-        title: d.title.clone().unwrap_or_else(|| d.id.clone()),
-        extension: Some(e.name.clone()),
-        source: Source::Script {
-            entry: d.entry.clone().unwrap_or_default(),
-            tree: e.path.clone(),
-            script: script.to_string(),
-            needs: d.needs.clone(),
-        },
-        features: serde_json::json!({}),
-        fields: serde_json::Value::Array(Vec::new()),
-        stages: serde_json::Value::Array(Vec::new()),
-        id_pattern: None,
-        icon: d.icon.clone(),
-        config: d.config.clone(),
-        description: d.description.clone(),
-    }
 }
 
 /// Every skill and slash command the agent gets now: core's, and each
@@ -1407,7 +1354,6 @@ mod tests {
         if declared {
             r.set_declared(vec![
                 builtin("task_tracker", "oxtask", "oxplow:oxtask"),
-                builtin("effort_policy", "oxplow", "oxplow:commit-or-switch"),
                 builtin("knowledge", "oxplow", "oxplow:wiki"),
             ]);
         }
@@ -1432,7 +1378,7 @@ mod tests {
     #[test]
     fn a_choice_is_the_persons_then_the_projects_then_the_default() {
         let r = registry(true);
-        let res = |c: &OxplowConfig| r.resolve(c, "effort_policy");
+        let res = |c: &OxplowConfig| r.resolve(c, "knowledge");
         assert_eq!(
             res(&config(&[], &[])),
             Resolved {
@@ -1442,10 +1388,10 @@ mod tests {
             }
         );
         assert_eq!(
-            res(&config(&[("effort_policy", "none")], &[])).chosen_by,
+            res(&config(&[("knowledge", "none")], &[])).chosen_by,
             ChosenBy::Project
         );
-        let both = config(&[("effort_policy", "none")], &[("effort_policy", "oxplow")]);
+        let both = config(&[("knowledge", "none")], &[("knowledge", "oxplow")]);
         assert_eq!(
             (res(&both).id.as_str(), res(&both).chosen_by),
             ("oxplow", ChosenBy::Personal)
@@ -1471,7 +1417,6 @@ mod tests {
         let disabled = registry(false);
         let none = config(&[], &[]);
         assert_eq!(disabled.active(&none, "task_tracker"), NONE);
-        assert_eq!(disabled.active(&none, "effort_policy"), NONE);
         // The wiki is bundled's: disabled, knowledge is none.
         assert_eq!(disabled.active(&none, "knowledge"), NONE);
         assert_eq!(r.active(&none, "knowledge"), "oxplow");
@@ -1601,9 +1546,9 @@ mod tests {
         );
     }
 
-    /// With `oxplow-bundled` disabled, the defaults still run: the effort
-    /// policy and snapshots are `oxplow-foundation`'s (core's own snapshots
-    /// default is the active row). oxtask is bundled's, so the task tracker
+    /// With `oxplow-bundled` disabled, the defaults still run: snapshots
+    /// are `oxplow-foundation`'s (core's own snapshots default is the
+    /// active row). oxtask is bundled's, so the task tracker
     /// resolves to none, and filing is a sink rather than a refusal.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
@@ -1620,7 +1565,6 @@ mod tests {
         crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
         assert_eq!(svc.capabilities.active(&config, "task_tracker"), "none");
-        assert_eq!(svc.capabilities.active(&config, "effort_policy"), "oxplow");
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
@@ -1658,14 +1602,14 @@ mod tests {
     #[tokio::test]
     async fn the_rows_say_what_is_active_and_why() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        let c = config(&[("task_tracker", "issues")], &[("effort_policy", "none")]);
+        let c = config(&[("task_tracker", "issues")], &[("knowledge", "none")]);
         fx.svc.capabilities.publish(&c, &fx.svc.db).await.unwrap();
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT capability, provider, active, chosen_by, available FROM v_capability_provider
-                  WHERE capability IN ('task_tracker', 'effort_policy') ORDER BY capability, provider",
+                  WHERE capability IN ('task_tracker', 'knowledge') ORDER BY capability, provider",
                 vec![],
                 None,
             )
@@ -1674,8 +1618,8 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             serde_json::json!([
-                ["effort_policy", "none", 1, "personal", 1],
-                ["effort_policy", "oxplow", 0, null, 1],
+                ["knowledge", "none", 1, "personal", 1],
+                ["knowledge", "oxplow", 0, null, 1],
                 ["task_tracker", "issues", 0, null, 0],
                 ["task_tracker", "none", 1, "fallback", 1],
                 ["task_tracker", "oxtask", 0, null, 1],
@@ -1691,7 +1635,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let default = config(&[], &[]);
-        let off = config(&[("effort_policy", "none")], &[]);
+        let off = config(&[("knowledge", "none")], &[]);
         // (Startup logged its own choices; only what follows is checked.)
         let startup = svc
             .db
@@ -1730,7 +1674,7 @@ mod tests {
         assert_eq!(
             switches,
             vec![serde_json::json!({
-                "capability": "effort_policy",
+                "capability": "knowledge",
                 "from": "oxplow",
                 "to": "none",
                 "chosen_by": "project",

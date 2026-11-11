@@ -43,7 +43,7 @@ pub struct Stream {
     /// Set when the stream was archived via the rail's "Remove…"
     /// action. Archived streams are filtered out of `StreamStore::list`
     /// so they disappear from the rail; the row stays in the DB so
-    /// history references (efforts, snapshots, page_visit) don't
+    /// history references (turns, snapshots, page_visit) don't
     /// dangle.
     pub archived_at: Option<Timestamp>,
 }

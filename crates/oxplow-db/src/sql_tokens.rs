@@ -839,14 +839,14 @@ mod tests {
 
     #[test]
     fn calls_are_found_with_their_arguments_outside_strings_and_comments() {
-        let sql = "SELECT * FROM ref('task') t\n  JOIN REF( 'effort' ) e ON e.id = t.x\n  -- ref('not')\n  WHERE t.s = 'ref(''no'')' AND s.ref('q') AND f(ref('a', g(1, 2)))";
+        let sql = "SELECT * FROM ref('task') t\n  JOIN REF( 'request' ) e ON e.id = t.x\n  -- ref('not')\n  WHERE t.s = 'ref(''no'')' AND s.ref('q') AND f(ref('a', g(1, 2)))";
         let found = calls(sql, "ref").unwrap();
         let args: Vec<Vec<String>> = found.iter().map(|c| c.args.clone()).collect();
         assert_eq!(
             args,
             vec![
                 vec!["'task'".to_string()],
-                vec!["'effort'".to_string()],
+                vec!["'request'".to_string()],
                 vec!["'a'".to_string(), "g(1, 2)".to_string()],
             ]
         );

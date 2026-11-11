@@ -199,8 +199,8 @@ impl SqlitePageRefStore {
     /// one of the supplied values are deleted, then `edges` is
     /// inserted. Used when a single source has multiple writers
     /// contributing different `ref_type`s — e.g. a task gets
-    /// body-mention edges from the task upsert, link edges from the
-    /// link store, and touched-file edges from the effort store. Each
+    /// body-mention edges from the task upsert and link edges from the
+    /// link store. Each
     /// writer passes only its own ref_types so the others' rows survive.
     pub async fn replace_source_for_ref_types(
         &self,

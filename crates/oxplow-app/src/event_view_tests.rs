@@ -108,7 +108,7 @@ async fn seen(svc: &Services, view: &str) -> Value {
 /// and an effect as one envelope — every field, at the newest version.
 #[tokio::test]
 async fn every_path_hands_over_the_same_envelope() {
-    let fx = crate::test_fixtures::services_with_task_effort().await;
+    let fx = crate::test_fixtures::services_with_task().await;
     let svc = &fx.svc;
     let root = svc.layout.project_dir.clone();
     extensions(&root, false);
@@ -131,7 +131,6 @@ async fn every_path_hands_over_the_same_envelope() {
         .unwrap()
         .with_anchors(Anchors {
             thread_id: Some(fx.thread),
-            effort_id: Some(fx.effort),
             turn_id: Some(7),
             agent_session_id: Some(fx.session),
             ..Anchors::default()

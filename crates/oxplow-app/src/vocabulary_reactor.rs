@@ -581,7 +581,7 @@ mod tests {
             .sql
             .query_sql(
                 "SELECT resource, extension, resolve, title, searchable, json_extract(params, '$.id.required') \
-                 FROM v_resource WHERE resource IN ('oxplow/effort', 'oxplow/turn', 'oxplow/file') \
+                 FROM v_resource WHERE resource IN ('oxplow/request', 'oxplow/turn', 'oxplow/file') \
                  ORDER BY resource",
                 vec![],
                 None,
@@ -595,20 +595,20 @@ mod tests {
             rows,
             vec![
                 vec![
-                    text("oxplow/effort"),
-                    text("oxplow-foundation"),
-                    text("v_effort"),
-                    null.clone(),
-                    text("v_search_effort"),
-                    SqlCell::Int(1)
-                ],
-                vec![
                     text("oxplow/file"),
                     text("oxplow-foundation"),
                     null.clone(),
                     null.clone(),
                     null.clone(),
                     null.clone()
+                ],
+                vec![
+                    text("oxplow/request"),
+                    text("oxplow-foundation"),
+                    text("v_request"),
+                    text("prompt"),
+                    null.clone(),
+                    SqlCell::Int(1)
                 ],
                 vec![
                     text("oxplow/turn"),
@@ -621,10 +621,10 @@ mod tests {
             ]
         );
         let vocabulary = f.svc.vocabulary.current();
-        let effort =
-            oxplow_domain::uri::oxplow_uri::OxplowUri::parse("oxplow:oxplow/effort?id=eff1")
+        let request =
+            oxplow_domain::uri::oxplow_uri::OxplowUri::parse("oxplow:oxplow/request?id=req1")
                 .unwrap();
-        assert_eq!(vocabulary.resources.validate(&effort), Ok(()));
+        assert_eq!(vocabulary.resources.validate(&request), Ok(()));
     }
 
     const ACME: &str = "manifest: 2

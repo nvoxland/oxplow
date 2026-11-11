@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use specta::Type;
 
-use crate::ids::{AgentSessionId, EffortId, StreamId, ThreadId};
+use crate::ids::{AgentSessionId, StreamId, ThreadId};
 use crate::time::Timestamp;
 use crate::DomainError;
 
@@ -46,12 +46,11 @@ impl std::fmt::Display for EventId {
 
 /// Where an event sits in oxplow's timeline. The engine fills these
 /// from context; every field is optional because not every event has a
-/// thread (a snapshot) or an effort (a stream-level config change).
+/// thread (a snapshot) or a turn (a stream-level config change).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Anchors {
     pub stream_id: Option<StreamId>,
     pub thread_id: Option<ThreadId>,
-    pub effort_id: Option<EffortId>,
     /// `agent_turn.id`.
     #[specta(type = Option<crate::JsNumber>)]
     pub turn_id: Option<i64>,

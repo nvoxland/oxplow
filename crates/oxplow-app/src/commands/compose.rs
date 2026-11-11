@@ -88,8 +88,8 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
-/// `SequenceInput`'s schema, with its example input: closing a task
-/// and reporting the effort, one audited run.
+/// `SequenceInput`'s schema, with its example input: closing a task and
+/// commenting on it, one audited run.
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
@@ -104,11 +104,8 @@ fn sequence_schema() -> Value {
                         "input": { "uri": item, "to": "done" }
                     },
                     {
-                        "name": "oxplow.effort.report",
-                        "input": {
-                            "summary": "Fixed the login redirect loop.",
-                            "impacts": [{ "kind": "file", "id": "src/auth.rs", "action": "updated" }]
-                        }
+                        "name": "oxplow.task.comment",
+                        "input": { "uri": item, "body": "Fixed the login redirect loop." }
                     }
                 ]
             }]),

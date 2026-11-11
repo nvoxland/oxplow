@@ -3,7 +3,7 @@
 //! (`.context/providers.md` "A snapshots provider"). The process marks the
 //! worktree; core keeps the record. Each mark is:
 //!
-//! - `mark { stream, worktree, trigger, thread?, turn?, effort?,
+//! - `mark { stream, worktree, trigger, thread?, turn?,
 //!   budget_ms?, parent }` → `{ handle, unchanged, file_count, branch?,
 //!   revision? }`, `parent` the handle on the stream's newest op (`null`
 //!   when core's capture took it, or nothing has);
@@ -31,7 +31,7 @@ use oxplow_domain::snapshot::{
     MarkRequest, Marked, SnapshotError, SnapshotProvider, SnapshotRegistry,
 };
 use oxplow_domain::tree_diff::FileChange;
-use oxplow_domain::uri::build::{effort_uri, thread_uri};
+use oxplow_domain::uri::build::thread_uri;
 use oxplow_domain::vcs::Revision;
 use oxplow_domain::{InputValidator, StreamId, Timestamp};
 use serde::Deserialize;
@@ -382,9 +382,6 @@ impl SnapshotProvider for ExternalSnapshots {
         if let Some(t) = request.turn {
             input["turn"] = json!(t);
         }
-        if let Some(e) = request.effort {
-            input["effort"] = json!(effort_uri(e));
-        }
         if let Some(b) = request.budget {
             input["budget_ms"] = json!(b.as_millis() as u64);
         }
@@ -440,7 +437,6 @@ impl SnapshotProvider for ExternalSnapshots {
                 trigger: request.trigger,
                 thread_id: request.thread,
                 turn_id: request.turn,
-                effort_id: request.effort,
                 branch: marked.branch,
                 revision,
                 elapsed_ms: started.elapsed().as_millis() as u64,

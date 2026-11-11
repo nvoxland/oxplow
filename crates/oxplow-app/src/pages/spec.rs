@@ -768,8 +768,6 @@ pub enum LinkKind {
     File,
     /// `oxplow:oxplow/wiki?slug=<slug>`.
     Wiki,
-    /// The effort's diff view; the value is an effort id.
-    EffortDiff,
     /// A git commit; the value is a sha.
     Commit,
     /// A metric's page; the value is a metric key.

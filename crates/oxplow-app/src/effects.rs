@@ -387,8 +387,8 @@ pub async fn dry_run(
 /// limited to `needs` and answered from `answers` (a fixture's, in call
 /// order) or for real (reads through `layer`), the other services it may
 /// use built from `sources`: what it composes, nothing run. Off the async
-/// runtime, under the effects' budget. An effect's dry run and an effort
-/// policy written as a script both run through it.
+/// runtime, under the effects' budget. An effect's dry run runs through
+/// it.
 pub async fn run_over(
     layer: &crate::sql_gateway::SqlGateway,
     run: &oxplow_domain::run::RunContext,

@@ -27,8 +27,6 @@ pub mod context_basket;
 pub mod credentials;
 pub mod delivery;
 pub mod effect;
-pub mod effort;
-pub mod effort_report;
 pub mod extension_configuration;
 pub mod extension_deploy;
 pub mod extension_jobs;
@@ -782,8 +780,8 @@ enum RunOrigin {
 
 impl RunOrigin {
     /// What the run's `command.executed` is caused by: the event an
-    /// effect reacted to, else what caused the run (an effort policy's
-    /// event, a collector run's trigger).
+    /// effect reacted to, else what caused the run (a collector run's
+    /// trigger).
     fn cause(&self, run: &RunContext) -> Option<oxplow_domain::EventId> {
         match self {
             RunOrigin::Effect(key, _) => Some(oxplow_domain::EventId(key.event_id.clone())),
@@ -1148,7 +1146,7 @@ impl CommandBus {
     }
 
     /// [`Self::run`] as part of `run`: its actor, caused by what caused
-    /// it (an effort policy's event), recorded as its.
+    /// it, recorded as its.
     pub async fn run_in(
         &self,
         run: &RunContext,

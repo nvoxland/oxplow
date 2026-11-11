@@ -369,12 +369,11 @@ pub fn mark_op() -> Op {
     )
 }
 
-/// `thread.close { thread }`: its open effort and its agent sessions close
-/// in the same transaction (the effort by `system`, the sessions
-/// `thread_closed`), the tasks assigned to it go back to nobody, and
-/// the sessions' processes stop once it commits. An agent closes only its
-/// own thread. Undone by reopening it (the effort stays closed, and the
-/// items stay unassigned).
+/// `thread.close { thread }`: its agent sessions close in the same
+/// transaction (`thread_closed`), the tasks assigned to it go back to
+/// nobody, and the sessions' processes stop once it commits. An agent
+/// closes only its own thread. Undone by reopening it (the items stay
+/// unassigned).
 pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
     Op::new(
         "threads.write",
@@ -397,21 +396,6 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
             thread.closed_at = Some(now);
             thread.updated_at = now;
             save(ctx, &thread)?;
-            // Its work ended with it: its open effort closes too.
-            if let Some(effort) =
-                oxplow_db::effort_store::open_for_thread_tx(ctx.conn, id).map_err(sql)?
-            {
-                oxplow_db::effort_store::finish_tx(
-                    ctx.conn,
-                    &ctx.events,
-                    effort,
-                    &oxplow_db::effort_store::EffortEnd::at(
-                        now,
-                        oxplow_db::effort_store::ClosedBy::System,
-                    ),
-                )
-                .map_err(CommandError::from)?;
-            }
             // Its sessions close with it, and their processes stop once the
             // close commits.
             let sessions: Vec<_> =
@@ -498,32 +482,6 @@ mod tests {
     use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Actor;
-
-    /// Closing a thread closes its open effort: the thread's work ended.
-    #[tokio::test]
-    async fn closing_a_thread_closes_its_effort() {
-        use oxplow_db::EffortStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
-        fx.svc
-            .commands
-            .run(
-                &Actor::Human,
-                CLOSE,
-                json!({ "thread": fx.thread.to_string() }),
-                false,
-            )
-            .await
-            .unwrap();
-        let effort = fx
-            .svc
-            .effort_store
-            .get_effort(&fx.effort)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(effort.ended_at.is_some());
-        assert_eq!(effort.closed_by.as_deref(), Some("system"));
-    }
 
     fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {

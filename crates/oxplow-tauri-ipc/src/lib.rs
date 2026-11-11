@@ -200,9 +200,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             // config
             commands::generated::get_config,
             commands::generated::get_workspace_context,
-            // efforts
-            commands::generated::list_efforts_at_snapshots,
-            commands::generated::list_efforts_in_window,
             commands::generated::run_command,
             commands::generated::command_open_after,
             commands::generated::get_command,

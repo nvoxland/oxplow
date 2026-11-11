@@ -3,7 +3,7 @@
 //!   * [`Measure`] — the catalog of fact TYPES (what a collector may emit).
 //!   * [`Dimension`] — the conformed-dimension catalog (cross-metric drill-across).
 //!   * [`MetricCapture`] — the ONE context row (renamed from `metric_run`): all
-//!     when/where/who/effort/trust metadata lives here, once.
+//!     when/where/who/turn/trust metadata lives here, once.
 //!   * [`NewFact`] / [`FactRow`] — the durable atomic measurement (folds the V38
 //!     `metric_sample` + `metric_finding`). A fact holds ONLY the measurement +
 //!     subject + reported finding metadata + dims; its context is reached through
@@ -394,11 +394,10 @@ fn row_to_spec(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricSpec> {
 // Capture (the context row)
 // ---------------------------------------------------------------------------
 
-/// Which captures belong to an analysis: the ones stamped with an effort
-/// at ingest, or the ones a set of turns made (a request's).
+/// Which captures belong to an analysis: the ones a set of turns made (a
+/// request's).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Members {
-    Effort(i64),
     Turns(Vec<i64>),
 }
 
@@ -406,10 +405,6 @@ impl Members {
     /// The SQL condition on `metric_capture` and its one parameter, as `?N`.
     fn condition(&self, n: usize) -> (String, rusqlite::types::Value) {
         match self {
-            Members::Effort(id) => (
-                format!("effort_id = ?{n}"),
-                rusqlite::types::Value::Integer(*id),
-            ),
             Members::Turns(turns) => (
                 format!("turn_id IN (SELECT value FROM json_each(?{n}))"),
                 rusqlite::types::Value::Text(
@@ -422,7 +417,6 @@ impl Members {
     /// Whether `capture` is one of them.
     pub fn holds(&self, capture: &MetricCapture) -> bool {
         match self {
-            Members::Effort(id) => capture.effort_id == Some(*id),
             Members::Turns(turns) => capture.turn_id.is_some_and(|t| turns.contains(&t)),
         }
     }
@@ -442,8 +436,6 @@ pub struct MetricCapture {
     pub id: i64,
     pub stream_id: i64,
     pub thread_id: Option<i64>,
-    /// The producing effort (provenance), nullable; SET NULL on effort GC.
-    pub effort_id: Option<i64>,
     pub producer: String,
     pub status: String,
     pub error: Option<String>,
@@ -482,7 +474,6 @@ pub struct MetricCapture {
 pub struct NewMetricCapture {
     pub stream_id: i64,
     pub thread_id: Option<i64>,
-    pub effort_id: Option<i64>,
     pub producer: String,
     pub status: String,
     pub error: Option<String>,
@@ -527,7 +518,6 @@ impl NewMetricCapture {
         Self {
             stream_id,
             thread_id: None,
-            effort_id: None,
             producer: producer.into(),
             status: "done".into(),
             error: None,
@@ -552,39 +542,38 @@ impl NewMetricCapture {
     }
 }
 
-const CAPTURE_COLS: &str = "id, stream_id, thread_id, effort_id, producer, status, error, scope, \
+const CAPTURE_COLS: &str = "id, stream_id, thread_id, producer, status, error, scope, \
      trigger, basis_ref, provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, \
      branch, captured_at, ended_at, detail_json, producer_version, scan_kind, turn_id";
 
 fn row_to_capture(row: &rusqlite::Row<'_>) -> rusqlite::Result<MetricCapture> {
-    let captured_at: String = row.get(16)?;
-    let ended_at: Option<String> = row.get(17)?;
+    let captured_at: String = row.get(15)?;
+    let ended_at: Option<String> = row.get(16)?;
     Ok(MetricCapture {
         id: row.get(0)?,
         stream_id: row.get(1)?,
         thread_id: row.get(2)?,
-        effort_id: row.get(3)?,
-        producer: row.get(4)?,
-        status: row.get(5)?,
-        error: row.get(6)?,
-        scope: row.get(7)?,
-        trigger: row.get(8)?,
-        basis_ref: row.get(9)?,
-        provenance: row.get(10)?,
-        source: row.get(11)?,
-        snapshot_id: row.get(12)?,
-        closest_vcs_rev: row.get(13)?,
-        vcs_rev_exact: row.get::<_, i64>(14)? != 0,
-        branch: row.get(15)?,
+        producer: row.get(3)?,
+        status: row.get(4)?,
+        error: row.get(5)?,
+        scope: row.get(6)?,
+        trigger: row.get(7)?,
+        basis_ref: row.get(8)?,
+        provenance: row.get(9)?,
+        source: row.get(10)?,
+        snapshot_id: row.get(11)?,
+        closest_vcs_rev: row.get(12)?,
+        vcs_rev_exact: row.get::<_, i64>(13)? != 0,
+        branch: row.get(14)?,
         captured_at: string_to_ts(&captured_at).map_err(ts_conv_err)?,
         ended_at: match ended_at {
             Some(s) => Some(string_to_ts(&s).map_err(ts_conv_err)?),
             None => None,
         },
-        detail_json: row.get(18)?,
-        producer_version: row.get(19)?,
-        scan_kind: row.get(20)?,
-        turn_id: row.get(21)?,
+        detail_json: row.get(17)?,
+        producer_version: row.get(18)?,
+        scan_kind: row.get(19)?,
+        turn_id: row.get(20)?,
     })
 }
 
@@ -980,15 +969,14 @@ fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite
     };
     conn.execute(
         "INSERT INTO metric_capture
-           (stream_id, thread_id, effort_id, producer, status, error, scope, trigger, basis_ref,
+           (stream_id, thread_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, branch,
             captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind,
             turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             c.stream_id,
             c.thread_id,
-            c.effort_id,
             c.producer,
             c.status,
             c.error,
@@ -1134,15 +1122,13 @@ pub struct CubeReadRow {
     pub closest_vcs_rev: Option<String>,
 }
 
-/// The joined read view of a fact: its own measurement columns PLUS the spine it
-/// inherits from its capture (`captured_at`, `branch`, version, effort, trust).
-/// One metric's roll-up over a single effort — the wire shape the task/effort
-/// page reads (built by `CollectionService::effort_metric_deltas`). NOT a stored
-/// row: derived per request from the substrate using the right attribution key
-/// per metric family (file-attributed for gauges, thread-scoped for operational,
-/// effort-diff for coverage/tests). See metrics.md.
+/// One metric's roll-up over a window of work (a request's, on one
+/// stream) — what `request_metric_delta` stores (built by
+/// `CollectionService::metric_deltas`). Derived from the substrate using the
+/// right attribution key per metric family (file-attributed for gauges,
+/// window-scoped for operational, a diff for coverage/tests). See metrics.md.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
-pub struct EffortMetricDelta {
+pub struct MetricDelta {
     pub key: String,
     pub title: String,
     pub unit: Option<String>,
@@ -1152,18 +1138,18 @@ pub struct EffortMetricDelta {
     pub kind: String,
     pub category: Option<String>,
     pub language: Option<String>,
-    /// How this delta was computed: `files` (Σ over the effort's claimed files),
+    /// How this delta was computed: `files` (Σ over the window's files),
     /// `sum` (Σ in-window flow, e.g. tokens), or `level` (before→after).
     pub agg: String,
-    /// The value as the effort began (`None` for a `sum`/flow metric).
+    /// The value as the window began (`None` for a `sum`/flow metric).
     pub baseline: Option<f64>,
-    /// The value as of the effort's end (or latest, if open).
+    /// The value as of the window's end (or latest, if open).
     pub current: f64,
     /// `current − baseline` for a level/file metric; the flow total for `sum`.
     pub delta: Option<f64>,
-    /// Whether the value moved across the effort (false ⇒ show the value only).
+    /// Whether the value moved across the window (false ⇒ show the value only).
     pub changed: bool,
-    /// For `files`: how many of the effort's claimed files carry this metric.
+    /// For `files`: how many of the window's files carry this metric.
     pub attributed_files: Option<i64>,
     /// Samples considered (in-window, or per-file for `files`).
     pub sample_count: i64,
@@ -1177,6 +1163,8 @@ pub struct EffortMetricDelta {
     pub latest_capture_id: Option<i64>,
 }
 
+/// The joined read view of a fact: its own measurement columns PLUS the spine it
+/// inherits from its capture (`captured_at`, `branch`, version, turn, trust).
 /// This is what the aggregation engine and reads consume.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct FactRow {
@@ -1205,9 +1193,12 @@ pub struct FactRow {
     pub snapshot_id: Option<i64>,
     pub stream_id: i64,
     pub thread_id: Option<i64>,
-    pub effort_id: Option<i64>,
-    /// The task `effort_id` is linked to, as a ref (resolved per read
-    /// from `effort`).
+    /// The turn the capture was made in (`metric_capture.turn_id`).
+    pub turn_id: Option<i64>,
+    /// The request of that turn (`agent_turn.request_id`), resolved per read.
+    pub request_id: Option<i64>,
+    /// That request's task, as a ref: its strongest `request_task` link
+    /// (resolved per read).
     pub task: Option<String>,
     pub provenance: String,
     pub source: String,
@@ -1241,7 +1232,7 @@ macro_rules! fact_row_cols {
              f.path_id, f.line, f.severity, f.rule, ",
             $detail,
             ", f.dims_id, c.captured_at, c.branch, c.closest_vcs_rev, c.vcs_rev_exact, \
-             c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, c.effort_id, \
+             c.basis_ref, c.snapshot_id, c.stream_id, c.thread_id, c.turn_id, \
              c.provenance, c.source, c.producer"
         )
     };
@@ -1276,12 +1267,20 @@ pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 pub(crate) fn fact_row_mapper<'c>(
     conn: &'c rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
-    // Effort → task, loaded once per read: `effort` is small next to
-    // the facts, and a per-row join would cost a lookup on every fact.
-    let items: std::collections::HashMap<i64, String> = conn
-        .prepare_cached("SELECT id, task FROM v_effort WHERE task IS NOT NULL")?
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-        .collect::<rusqlite::Result<_>>()?;
+    // Turn → (request, task), resolved once per turn a read meets: a
+    // per-row join would cost a lookup on every fact, and a read's facts
+    // come from a few turns.
+    let mut turns: std::collections::HashMap<i64, (Option<i64>, Option<String>)> =
+        std::collections::HashMap::new();
+    let mut request_of = conn.prepare_cached(
+        "SELECT t.request_id,
+                (SELECT rt.task_uri FROM request_task rt
+                  WHERE rt.request_id = t.request_id
+                  ORDER BY CASE rt.basis WHEN 'prompt' THEN 0 WHEN 'command' THEN 1
+                                         WHEN 'transition' THEN 2 ELSE 3 END, rt.at
+                  LIMIT 1)
+           FROM agent_turn t WHERE t.id = ?1",
+    )?;
     let mut last: Option<(i64, Timestamp)> = None;
     let mut text = FactText::new(conn);
     Ok(move |row: &rusqlite::Row<'_>| {
@@ -1304,7 +1303,21 @@ pub(crate) fn fact_row_mapper<'c>(
             }
         };
         let mut fact = row_to_fact_row_with(row, captured_at, &mut text)?;
-        fact.task = fact.effort_id.and_then(|e| items.get(&e).cloned());
+        if let Some(turn) = fact.turn_id {
+            let (request, task) = match turns.get(&turn) {
+                Some(hit) => hit.clone(),
+                None => {
+                    let found = request_of
+                        .query_row([turn], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .optional()?
+                        .unwrap_or((None, None));
+                    turns.insert(turn, found.clone());
+                    found
+                }
+            };
+            fact.request_id = request;
+            fact.task = task;
+        }
         Ok(fact)
     })
 }
@@ -1341,7 +1354,8 @@ fn row_to_fact_row_with(
         snapshot_id: row.get(18)?,
         stream_id: row.get(19)?,
         thread_id: row.get(20)?,
-        effort_id: row.get(21)?,
+        turn_id: row.get(21)?,
+        request_id: None,
         task: None,
         provenance: row.get(22)?,
         source: row.get(23)?,
@@ -1923,27 +1937,6 @@ impl SqliteFactStore {
             .await
     }
 
-    /// The captures produced BY an effort (`effort_id` stamped on the capture) —
-    /// the attribution-by-claim spine for the effort roll-up (epic tsk12, T-D).
-    /// Oldest first.
-    pub async fn captures_for_effort(
-        &self,
-        effort_id: i64,
-    ) -> Result<Vec<MetricCapture>, DomainError> {
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "SELECT {CAPTURE_COLS} FROM metric_capture
-                      WHERE effort_id = ?1
-                      ORDER BY captured_at ASC, id ASC"
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![effort_id], row_to_capture)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
     /// What `members` hold, per producer and trigger: how many captures and
     /// the newest id. An open analysis holds thousands (a token report every
     /// ~30 s); this is what a recompute asks first, so it reads rows only
@@ -2126,7 +2119,7 @@ impl SqliteFactStore {
     }
 
     /// [`Self::facts_for_measure`] bounded to one stream, SQL-side (tsk75).
-    /// The effort delta reads are per-worktree by definition — loading every
+    /// A request's delta reads are per-worktree by definition — loading every
     /// stream's history just to drop it in Rust made each panel refetch pay
     /// for the whole table.
     pub async fn facts_for_measure_in_stream(
@@ -2294,7 +2287,7 @@ impl SqliteFactStore {
     ///
     /// **Compaction, not deletion (tsk211).** The capture row and every one of
     /// its facts survive, so no metric value, trend point, or count changes —
-    /// only the effort Tests/Coverage detail for old runs is
+    /// only the Tests/Coverage detail for old runs is
     /// lost. That is why this is safe to have ON by default, unlike
     /// `prune_aged_captures` (which deletes facts and stays opt-in).
     ///
@@ -2957,7 +2950,7 @@ impl SqliteFactStore {
 
     /// One representative fact per distinct `(producer, rule, severity,
     /// dims_json)` slice of a measure (tsk75) — the whole `MIN(f.id)` row of
-    /// each slice. The zero-splice fallback in the effort delta only needs to
+    /// each slice. The zero-splice fallback in a window's delta only needs to
     /// learn WHICH producers emit a metric's slice; it used to load the
     /// measure's entire history to extract a handful of distinct producer
     /// names. Slice combos are bounded (rules × severities × dim payloads),
@@ -3033,7 +3026,7 @@ impl SqliteFactStore {
     }
 
     /// Facts of a measure belonging to the given captures (the attribution-by-claim
-    /// read — an effort's facts are those of its claimed captures, not a time
+    /// read — a request's facts are those of its turns' captures, not a time
     /// window). Oldest-first. Empty when `capture_ids` is empty.
     pub async fn facts_for_captures(
         &self,
@@ -3285,7 +3278,7 @@ impl SqliteFactStore {
 
     /// Drop the tree captures a newer baseline has made dead weight (tsk75).
     ///
-    /// By the tsk71 dominance argument, an **effort-less** `delta`/`full`
+    /// By the tsk71 dominance argument, a **turn-less** `delta`/`full`
     /// capture strictly OLDER than its (stream, producer)'s latest done `full`
     /// capture can never win any per-path fold rank: the baseline restates
     /// every path it ever scanned (live rows AND tombstones), newer. Their
@@ -3295,8 +3288,8 @@ impl SqliteFactStore {
     /// `fact.capture_id ON DELETE CASCADE`.
     ///
     /// Deliberately narrow:
-    /// - **effort-stamped captures survive** — they're attribution history
-    ///   (`captures_for_effort` reads them for closed-effort panels);
+    /// - **turn-stamped captures survive** — they're attribution history
+    ///   (a request's analysis reads its turns' captures, `Members::Turns`);
     /// - captures carrying any fact on a **non-per-path measure** survive —
     ///   complete/per-subject folds read past captures;
     /// - producers with **no full capture** are untouched;
@@ -3304,7 +3297,7 @@ impl SqliteFactStore {
     ///   failure records are gauge-health evidence).
     ///
     /// Trade-off, accepted deliberately: a per-path measure's TREND loses its
-    /// pre-baseline points (the current fold and every effort window at/after
+    /// pre-baseline points (the current fold and every request window at/after
     /// the baseline are unaffected). Runs after each successful baseline
     /// sweep. Only a producer whose facts land on a per-path measure is a
     /// baseline producer: a whole-tree restate of a complete-scope measure
@@ -3358,7 +3351,7 @@ impl SqliteFactStore {
                                 AND pc.producer = lf.producer
                                 AND pm.capture_scope = 'per-path'
                            )
-                           AND c.effort_id IS NULL
+                           AND c.turn_id IS NULL
                            AND c.status = 'done'
                            AND c.scan_kind IN ('delta', 'full')
                            AND (c.captured_at < lf.captured_at
@@ -3555,7 +3548,8 @@ impl SqliteFactStore {
     /// (`metricRetentionDays`, tsk93; the default 0 means this is never
     /// called). Deletes ONLY history no current value stands on; kept
     /// unconditionally:
-    /// - **effort-stamped captures** — attribution history;
+    /// - **turn-stamped captures** — attribution history (a request's
+    ///   analysis reads them);
     /// - each `(stream, producer)`'s **newest capture** — the headline /
     ///   zero-fill anchor;
     /// - any capture owning a **latest-per-partition fact** — latest per
@@ -3593,7 +3587,7 @@ impl SqliteFactStore {
                 };
                 let doomed_where = &format!(
                     "captured_at < ?1
-                       AND effort_id IS NULL
+                       AND turn_id IS NULL
                        AND id NOT IN (
                          SELECT id FROM (
                            SELECT id, ROW_NUMBER() OVER (
@@ -3915,8 +3909,6 @@ mod tests {
         holder.join().unwrap();
     }
 
-    /// stream(1) + thread(1) + task + effort so capture FKs resolve and the
-    /// effort-GC test has a real effort to delete.
     #[tokio::test]
     async fn extension_scoped_specs_and_measures_round_trip_and_prune() {
         let store = fixture().await;
@@ -4031,9 +4023,18 @@ mod tests {
                     [now],
                 )?;
                 let task_id = conn.last_insert_rowid();
+                // A turn (1) of a request (1) that worked on the task, so a
+                // capture made in the turn resolves to both.
+                conn.execute_batch(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                       VALUES (1, 1, 'p', '2026-06-30T10:00:00.000000Z');
+                     INSERT INTO request (id, thread_id, first_turn_id) VALUES (1, 1, 1);
+                     UPDATE agent_turn SET request_id = 1 WHERE id = 1;",
+                )?;
                 conn.execute(
-                    "INSERT INTO effort (id, task, thread_id, started_at, ended_at)
-                     VALUES (1, 'oxplow:oxplow/task?id=tsk&provider=oxtask' || ?1, 1, '2026-06-30T10:00:00.000000Z', '2026-06-30T11:00:00.000000Z')",
+                    "INSERT INTO request_task (request_id, task_uri, basis, turn_id, at)
+                     VALUES (1, 'oxplow:oxplow/task?id=tsk' || ?1 || '&provider=oxtask', 'command', 1,
+                             '2026-06-30T10:00:00.000000Z')",
                     params![task_id],
                 )?;
                 Ok(())
@@ -5184,11 +5185,11 @@ mod tests {
 
     #[tokio::test]
     async fn prune_drops_tree_captures_dominated_by_the_latest_full() {
-        // tsk75: every effort-less tree capture strictly OLDER than the latest
+        // tsk75: every turn-less tree capture strictly OLDER than the latest
         // done `full` capture of its (stream, producer) is dead weight — the
         // baseline restates every path it scanned, newer. Their facts were 69%
         // of a 778k-row fact table. Pruning must keep: the latest full, deltas
-        // NEWER than it, effort-stamped captures (attribution history), other
+        // NEWER than it, turn-stamped captures (attribution history), other
         // producers without a full capture, and any capture carrying facts of
         // a non-per-path measure. The fold value must not move.
         let store = fixture().await;
@@ -5242,11 +5243,11 @@ mod tests {
             &[("a.rs", 10.0)],
         )
         .await;
-        // An old effort-stamped capture — attribution history, never pruned.
+        // An old turn-stamped capture — attribution history, never pruned.
         let mut stamped = NewMetricCapture::done(1, "g", "oxplow:oxplow/metric?metric=g");
         stamped.snapshot_id = Some(1);
         stamped.captured_at = Some(at("2026-06-30T08:30:00.000000Z"));
-        stamped.effort_id = Some(1);
+        stamped.turn_id = Some(1);
         let stamped_id = store.record_facts(stamped, Vec::new()).await.unwrap();
         // A producer with no full capture — untouched.
         let other = gauge_capture(
@@ -5277,7 +5278,7 @@ mod tests {
         assert!(!alive.contains(&old_full), "dominated full pruned");
         assert!(alive.contains(&latest_full));
         assert!(alive.contains(&new_delta));
-        assert!(alive.contains(&stamped_id), "effort-stamped kept");
+        assert!(alive.contains(&stamped_id), "turn-stamped kept");
         assert!(alive.contains(&other), "producer without a baseline kept");
     }
 
@@ -5995,7 +5996,7 @@ mod tests {
     async fn aged_pruning_keeps_everything_a_current_value_stands_on() {
         // tsk93. `metricRetentionDays` is OPT-IN (default 0 = this never
         // runs); when enabled it may delete only history no current value
-        // stands on: effort-stamped captures are attribution (kept), each
+        // stands on: turn-stamped captures are attribution (kept), each
         // producer's newest capture anchors the headline/zero-fill (kept),
         // and any capture owning a latest-per-partition fact is LIVE in the
         // fold (kept) — deleting it would move today's number, which
@@ -6033,11 +6034,11 @@ mod tests {
             .record_facts(cap("2026-06-01T12:00:00.000000Z"), vec![subject("A", 3.0)])
             .await
             .unwrap();
-        // c4 OLD, superseded, but EFFORT-STAMPED → attribution → kept.
+        // c4 OLD, superseded, but TURN-STAMPED → attribution → kept.
         let c4 = store
             .record_facts(
                 NewMetricCapture {
-                    effort_id: Some(1),
+                    turn_id: Some(1),
                     ..cap("2026-06-01T09:00:00.000000Z")
                 },
                 vec![subject("A", 0.5)],
@@ -6093,7 +6094,7 @@ mod tests {
             "a still-live subject keeps its capture"
         );
         assert!(alive.contains(&c3), "the superseding capture is live");
-        assert!(alive.contains(&c4), "effort-stamped = attribution, kept");
+        assert!(alive.contains(&c4), "turn-stamped = attribution, kept");
         assert!(alive.contains(&c5), "inside the window, kept");
         assert!(
             store.cube_watermark(m, 1).await.unwrap().is_none(),
@@ -7178,13 +7179,9 @@ mod tests {
         assert_eq!(got.title, "API latency (p95)");
         assert_eq!(got.subject_kind.as_deref(), Some("endpoint"));
         assert_eq!(got.temporal_semantics, "semi-additive");
-        // The migrations seed 24 built-in measures (10 in V43 + oxplow.ast_hit in
-        // V45 + turn/effort/nudge in V46 + oxplow.effort_test_outcome in V53 +
-        // oxplow.test_duration in V57 + cache_tokens/cache_usage/effort_tokens in
-        // V59 + effort_steering/effort_time_to_green in V60 + oxplow.token_waste
-        // in V61 + coverage.branch/coverage.function in V68 + doc_coverage in
-        // V69); this upsert added one more.
-        assert_eq!(store.list_measures().await.unwrap().len(), 26);
+        // The migrations seed 18 built-in measures (V1's 25, less the seven
+        // efforts measured, V25); this upsert added one more.
+        assert_eq!(store.list_measures().await.unwrap().len(), 19);
     }
 
     #[tokio::test]
@@ -7714,53 +7711,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn captures_for_effort_returns_only_that_efforts_captures() {
-        // The attribution-by-claim spine (T-D): an effort's captures are those
-        // stamped with its effort_id, oldest first — not a time window.
-        let store = fixture().await;
-        let m = measure(&store, "oxplow.complexity").await;
-        // The fixture seeds effort 1; a `None`-effort capture (operational) must
-        // be excluded, and an effort with no captures returns empty.
-        for (effort, at_ts) in [
-            (Some(1), "2026-06-30T10:00:00Z"),
-            (Some(1), "2026-06-30T11:00:00Z"),
-            (None, "2026-06-30T12:00:00Z"),
-        ] {
-            store
-                .record_facts(
-                    NewMetricCapture {
-                        effort_id: effort,
-                        captured_at: Some(at(at_ts)),
-                        ..NewMetricCapture::done(1, "metrics", "builtin")
-                    },
-                    vec![NewFact::new(m, 1.0)],
-                )
-                .await
-                .unwrap();
-        }
-        let caps = store.captures_for_effort(1).await.unwrap();
-        assert_eq!(
-            caps.len(),
-            2,
-            "only effort 1's captures (the None one excluded)"
-        );
-        assert!(caps.iter().all(|c| c.effort_id == Some(1)));
-        // Oldest first.
-        assert!(caps[0].captured_at <= caps[1].captured_at);
-        // An effort with no captures returns empty (not a time-window match).
-        assert_eq!(store.captures_for_effort(99).await.unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn effort_gc_nulls_capture_effort_but_keeps_facts() {
-        // The core invariant: facts (and their capture) outlive the effort. GC of
-        // the effort SET-NULLs the capture's effort_id, never deletes a fact.
+    async fn a_fact_reads_its_captures_turn_request_and_task_and_outlives_the_turn() {
+        // A capture made in a turn: its facts read the turn, the turn's
+        // request and that request's task. Deleting the turn SET-NULLs the
+        // capture's turn, never deletes a fact.
         let store = fixture().await;
         let m = measure(&store, "oxplow.complexity").await;
         let capture = store
             .record_facts(
                 NewMetricCapture {
-                    effort_id: Some(1),
+                    turn_id: Some(1),
                     captured_at: Some(at("2026-06-30T10:30:00Z")),
                     ..NewMetricCapture::done(1, "metrics", "builtin")
                 },
@@ -7768,24 +7728,24 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            store.get_capture(capture).await.unwrap().unwrap().effort_id,
-            Some(1)
-        );
+        let rows = store.facts_for_measure(m).await.unwrap();
+        assert_eq!((rows[0].turn_id, rows[0].request_id), (Some(1), Some(1)));
+        assert!(rows[0]
+            .task
+            .as_deref()
+            .is_some_and(|t| t.starts_with("oxplow:oxplow/task?id=tsk")));
 
-        // Delete the effort — the capture and its fact must survive.
         store
             .db
-            .call(|conn| conn.execute("DELETE FROM effort WHERE id = 1", []))
+            .call(|conn| conn.execute("DELETE FROM agent_turn WHERE id = 1", []))
             .await
             .unwrap();
-
         let cap = store.get_capture(capture).await.unwrap().unwrap();
-        assert_eq!(cap.effort_id, None, "effort_id SET NULL on GC");
+        assert_eq!(cap.turn_id, None, "turn_id SET NULL on delete");
         let rows = store.facts_for_measure(m).await.unwrap();
-        assert_eq!(rows.len(), 1, "fact survives effort deletion");
+        assert_eq!(rows.len(), 1, "the fact survives its turn");
         assert_eq!(rows[0].value, 7.0);
-        assert_eq!(rows[0].effort_id, None);
+        assert_eq!((rows[0].turn_id, rows[0].task.as_deref()), (None, None));
     }
 
     #[tokio::test]

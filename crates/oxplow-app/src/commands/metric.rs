@@ -94,7 +94,7 @@ pub struct ScaffoldInput {
     /// language's files).
     #[serde(default)]
     pub glob: Option<String>,
-    /// The thread or effort ref that asked for it, recorded as the
+    /// The thread or request ref that asked for it, recorded as the
     /// extension's `intent.origin`.
     #[serde(default)]
     pub origin: Option<String>,

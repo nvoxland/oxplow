@@ -847,13 +847,13 @@ impl RunTrigger {
 pub struct Anchored {
     pub stream_id: Option<i64>,
     pub snapshot_id: Option<i64>,
-    pub effort_id: Option<i64>,
     pub thread_id: Option<i64>,
+    pub turn_id: Option<i64>,
 }
 
 /// The named parameters a collector's `input` may use: the trigger
-/// event's anchors (`:stream_id`, `:snapshot_id`, `:effort_id`,
-/// `:thread_id`, `:turn_id`), else what the run `known`, and the event
+/// event's anchors (`:stream_id`, `:snapshot_id`, `:thread_id`,
+/// `:turn_id`), else what the run `known`, and the event
 /// itself — `:event_id` its id, `:event_seq` its seq; NULL when neither
 /// has one. Ids bind as integers: they're join keys.
 pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String, SqlCell)> {
@@ -872,20 +872,16 @@ pub fn anchor_params(event: Option<&EventView>, known: Anchored) -> Vec<(String,
             int(a.and_then(|a| a.snapshot_id).or(known.snapshot_id)),
         ),
         (
-            "effort_id".into(),
-            int(a
-                .and_then(|a| a.effort_id)
-                .map(|v| v.value())
-                .or(known.effort_id)),
-        ),
-        (
             "thread_id".into(),
             int(a
                 .and_then(|a| a.thread_id)
                 .map(|v| v.value())
                 .or(known.thread_id)),
         ),
-        ("turn_id".into(), int(a.and_then(|a| a.turn_id))),
+        (
+            "turn_id".into(),
+            int(a.and_then(|a| a.turn_id).or(known.turn_id)),
+        ),
         (
             "event_id".into(),
             event
@@ -2793,7 +2789,7 @@ pub(crate) mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         for bad in [
             "work/bad",
-            "oxplow:oxplow/effort?id=eff1",
+            "oxplow:oxplow/request?id=req1",
             "oxplow:oxplow/collector?collector=nowhere",
         ] {
             let err = fx

@@ -323,7 +323,7 @@ async fn the_documented_examples_activate() {
     let active = svc
         .extension_catalog
         .unpinned(dir.path(), "a test reads declarations");
-    for name in ["github", "triage", "prompt-efforts"] {
+    for name in ["github", "triage", "session-history"] {
         assert!(
             active.iter().any(|e| e.name == name && e.enabled),
             "{name} is active"

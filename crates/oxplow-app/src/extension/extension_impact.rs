@@ -800,7 +800,7 @@ pub struct ImpactReport {
     /// the review stops running scripts at its deadline.
     pub out_of_time: Vec<String>,
     /// The report as lines ([`summary`]): what the install review, `extension
-    /// check --impact` and an effort's review say, in one wording.
+    /// check --impact` and a change's review say, in one wording.
     pub lines: Vec<String>,
 }
 
@@ -3208,7 +3208,7 @@ mod tests {
     }
 
     /// The report as lines, grants first — what the install review, the
-    /// CLI and an effort's review all say.
+    /// CLI and a change's review all say.
     #[test]
     fn effects_spell_out_each_change_grants_first() {
         let page = |id: &str, change: Change, error: Option<&str>| PageImpact {

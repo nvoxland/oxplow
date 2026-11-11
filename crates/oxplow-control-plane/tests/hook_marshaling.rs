@@ -16,7 +16,6 @@
 mod common;
 
 use common::boot;
-use oxplow_oxtask::task_ref;
 
 use oxplow_app::Services;
 use oxplow_control_plane::ControlPlane;
@@ -193,7 +192,7 @@ async fn pre_tool_use_into_another_streams_worktree_denies_with_write_guard_shap
     );
 }
 
-/// An agent edits its worktree with nothing tracked: no task, no effort.
+/// An agent edits its worktree with nothing tracked: no task.
 /// oxplow never asks for tracked work before an edit (inferred work
 /// tracking).
 #[tokio::test]
@@ -657,64 +656,6 @@ async fn post_tool_use_edit_acks_200_empty() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body, serde_json::json!({}));
-}
-
-#[tokio::test]
-async fn post_tool_use_edit_auto_claims_file_on_open_effort() {
-    // Child 1 of the claim-first attribution epic: a structured Edit's
-    // PostToolUse auto-claims the file onto the thread's OPEN effort in
-    // real time, so the agent's touched_files at completion merely
-    // confirms/amends rather than enumerating from scratch.
-    use oxplow_app::EffortStore as _;
-    let (cp, svc, root, _dir) = boot().await;
-    let tid = seed_thread(&svc).await;
-    // Insert a task and open an effort on the thread.
-    let now = Timestamp::from_unix_ms(1);
-    let task_id = svc
-        .task_store
-        .insert(&Oxtask {
-            id: OxtaskId::placeholder(),
-            parent_id: None,
-            title: "ship".into(),
-            description: "d".into(),
-            status: OxtaskStatus::InProgress,
-            priority: OxtaskPriority::Medium,
-            created_by: OxtaskActorKind::User,
-            created_at: now,
-            updated_at: now,
-            completed_at: None,
-            deleted_at: None,
-            note_count: 0,
-            author: None,
-        })
-        .await
-        .unwrap();
-    let effort = svc
-        .effort_store
-        .start(&task_ref(task_id), &tid, None)
-        .await
-        .unwrap();
-
-    let target = root.join("src/x.rs");
-    let resp = post_hook(
-        &cp,
-        &svc,
-        "PostToolUse",
-        tid,
-        serde_json::json!({
-            "tool_name": "Edit",
-            "tool_input": { "file_path": target.to_string_lossy() },
-            "session_id": "s1",
-        }),
-    )
-    .await;
-    assert_eq!(resp.status(), 200);
-    // The row and the claim are pump reactors on `agent.tool.finished`.
-    svc.event_pump.run_once().await.unwrap();
-
-    let files = svc.effort_store.list_files(&effort.id).await.unwrap();
-    assert_eq!(files.len(), 1, "the edit should auto-claim one file");
-    assert_eq!(files[0].path, "src/x.rs");
 }
 
 #[tokio::test]

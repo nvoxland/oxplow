@@ -236,13 +236,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Run an extension's effect again: retry a reaction, backfill past events.",
     },
     Scope {
-        id: "efforts.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Open, update, link and close efforts.",
-    },
-    Scope {
         id: "extension_config.read",
         access: Access::Read,
         host: Host::Daemon,

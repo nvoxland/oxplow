@@ -96,7 +96,6 @@ mod tests {
     fn raised(thread: String, audience: Audience, message: &str) -> NewAgentNudge {
         NewAgentNudge {
             thread_id: thread,
-            effort_id: None,
             kind: "x/muted".into(),
             message: message.into(),
             trigger: None,

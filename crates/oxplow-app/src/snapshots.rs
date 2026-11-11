@@ -66,7 +66,6 @@ impl SnapshotProvider for CoreSnapshots {
                 trigger: request.trigger,
                 thread_id: request.thread,
                 turn_id: request.turn,
-                effort_id: request.effort,
                 budget: request.budget,
                 provider: Some(self.id.clone()),
             })

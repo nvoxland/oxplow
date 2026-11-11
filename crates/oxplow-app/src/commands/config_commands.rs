@@ -107,7 +107,7 @@ fn mark() -> bool {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChooseProviderInput {
-    /// The capability (`task_tracker`, `effort_policy`, `snapshots`, …).
+    /// The capability (`task_tracker`, `snapshots`, `knowledge`, …).
     pub capability: String,
     /// The implementation to use; absent or blank: the default (the
     /// project's, for a personal choice).
@@ -657,21 +657,21 @@ mod tests {
         bus.run(
             &human,
             SET,
-            json!({ "key": "activeProviders", "value": { "effort_policy": "none" }, "layer": "personal" }),
+            json!({ "key": "activeProviders", "value": { "knowledge": "none" }, "layer": "personal" }),
             true,
         )
         .await
         .unwrap();
         assert_eq!(file(&dir), "", "project.yaml untouched");
         let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
-        assert!(personal.contains("effort_policy: none"), "{personal}");
+        assert!(personal.contains("knowledge: none"), "{personal}");
         assert_eq!(
             target
                 .config
                 .read()
                 .unwrap()
                 .personal_active_providers
-                .get("effort_policy")
+                .get("knowledge")
                 .map(String::as_str),
             Some("none")
         );
@@ -1066,7 +1066,7 @@ mod tests {
         let project = || crate::config_service::read_config(&svc.config).active_providers;
         let personal = || crate::config_service::read_config(&svc.config).personal_active_providers;
         run(json!({ "capability": "snapshots", "provider": "contents_store" })).await;
-        run(json!({ "capability": "effort_policy", "provider": "none" })).await;
+        run(json!({ "capability": "knowledge", "provider": "none" })).await;
         assert_eq!(project().len(), 2);
         run(json!({ "capability": "snapshots", "provider": "other", "layer": "personal" })).await;
         assert_eq!(
@@ -1080,7 +1080,7 @@ mod tests {
         );
         run(json!({ "capability": "snapshots" })).await;
         assert!(!project().contains_key("snapshots"));
-        run(json!({ "capability": "effort_policy" })).await;
+        run(json!({ "capability": "knowledge" })).await;
         assert!(project().is_empty());
         run(json!({ "capability": "snapshots", "layer": "personal" })).await;
         assert!(personal().is_empty());

@@ -10,9 +10,7 @@
 //!
 //! Agent status needs no reset: it is the newest logged
 //! `agent.status.changed`, and what the rail shows is derived from the
-//! logged activity, so a turn this closes reads as ended. An effort left
-//! open is legal across a restart (a task's status never implied one), so
-//! nothing here touches efforts.
+//! logged activity, so a turn this closes reads as ended.
 //!
 //! Called once from `Services::boot` after the DB is open. Idempotent.
 
@@ -128,8 +126,6 @@ mod tests {
             session_id: None,
             started_at: now,
             ended_at: None,
-            start_snapshot_id: None,
-            snapshot_id: None,
             source: Some(oxplow_domain::hook::TurnSource::Person),
         };
         turns.open(&turn).await.unwrap();

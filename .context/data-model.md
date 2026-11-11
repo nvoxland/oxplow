@@ -734,14 +734,28 @@ count — `rename_tx`, `delete_tx`); read as `v_terminal` (with its `uri`,
 `oxplow:oxplow/terminal?id=trm<n>`, the key the shell's PTY is registered
 under: [terminal.md](./terminal.md) "Terminals are rows").
 
-### `request` and the work recorded on it (`V11`, `V16`, `V18`–`V24`)
+### `request` and the work recorded on it (`V11`, `V16`, `V18`–`V25`)
 
 A **turn** (`agent_turn`) is one prompt-to-stop run of an agent. A
 **request** is the turn that started something and every turn that
 followed from it (a background job's report, a subagent's hand-back, a
 matched peer message), joined by the cause links set when each turn opens.
 Efforts were removed (2026-11-10); the request and its evidence replace
-them.
+them. **V25** dropped their data: the `effort`, `effort_file`,
+`effort_metric_delta`, `effort_observation_row` and
+`effort_evidence_state` tables; every `effort_id` column
+(`agent_nudge`, `agent_token_usage`, `agent_tool_call`, `metric_capture`,
+`once_mark`, `snapshot_op`, `event_log`, `extension_run`; the tables with
+a foreign key rebuilt, every token row and capture kept); the effort
+events, their measures, specs and the effort producers' captures; the
+`effort` change kind; the effort-projected `page_ref` edges and search
+entries; the `effort_policy` capability rows; and an effort-only once
+mark. A take an effort asked for (`effort_start` / `effort_end`) stays,
+as `manual`, in `snapshot_op` and its `snapshot.taken` payload. A nudge
+whose cause only an effort told apart keeps its row without its cause.
+`extension_job_context` drops `anchors.effort_id` from stored contexts.
+On a copy of a real database (2.1 GB, 150k captures, 1.9M facts, 340k
+events) it ran in 12 s.
 
 - **`request`** (V11): `id`, `thread_id` (`ON DELETE CASCADE`),
   `first_turn_id`. `agent_turn.request_id` is the request a turn belongs
@@ -893,13 +907,11 @@ task-local — dropping the registry's `Arc` alone never wakes the
 task, so without the signal an archived stream's watcher would
 linger until process exit.
 
-**Turns are bracketed by snapshots (V98 P2.3 tsk425, V99 tsk438).**
-`agent_turn.start_snapshot_id` is the stream's current snapshot when the
-turn opened (set in the open transaction); `snapshot_id` is the snapshot
-the worktree was at when it ended — set in the `turn_end` take's
-transaction (`record_take` stamps it whenever the take carries a
-`turn_id`). The turn's changes are start → end. `agent_turn.task_id` is gone (nothing ever set
-it). **What opened a turn** (V2): `source` (`person`, `background_job`,
+**A turn's snapshots are found by time.** V25 dropped
+`agent_turn.start_snapshot_id` and `snapshot_id`: the turn's end is its own
+`turn_end` take (`snapshot_op.turn_id`), and the `turn` and `request`
+change kinds find their two snapshots by time; its files are `turn_file`.
+`agent_turn.task_id` is gone (nothing ever set it). **What opened a turn** (V2): `source` (`person`, `background_job`,
 `subagent`, `peer`, `unknown`; NULL for a turn recorded before, until the
 one-time conversion), `harness_turn_id`, `cause_turn_id` (FK to the turn it
 goes on with), `cause_ref`, `cause_basis` (`reported`, `matched`) and
@@ -948,8 +960,8 @@ turn open, or whose harness said nothing, has NULLs. A compaction is an
 event, `agent.context.compacted@2`, not a column.
 
 **Snapshots are the worktree's own record.** There is no turn, request or
-`source` column on `snapshot` / `file_snapshot`. A turn is bracketed by
-`agent_turn.start_snapshot_id` and `snapshot_id`; a request's analysis by
+`source` column on `snapshot` / `file_snapshot`. A turn's end is its
+`turn_end` take (`snapshot_op.turn_id`); a request's analysis is bracketed by
 `request_analysis.start_snapshot_id` and `end_snapshot_id`; a turn's files
 by `turn_file`, a time join with the stream's snapshot line. Capture
 de-dupes an unchanged tree to the latest existing snapshot id rather than

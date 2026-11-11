@@ -9,7 +9,6 @@ use oxplow_domain::diagnostic::Diagnostic;
 pub struct PreparedRuntimeAdapters {
     tasks: crate::tasks::PreparedTaskTracker,
     harnesses: crate::harnesses::PreparedHarnesses,
-    policies: crate::effort_policy::PreparedEffortPolicies,
     knowledge: crate::knowledge::PreparedKnowledge,
     snapshots: crate::snapshots::PreparedSnapshots,
     models: crate::ai_service::PreparedModelProviders,
@@ -41,12 +40,9 @@ impl PreparedRuntimeAdapters {
         if !errors.is_empty() {
             return Err(errors);
         }
-        let trees = std::sync::Arc::new(svc.metrics.clone())
-            as std::sync::Arc<dyn crate::services::TreeSource>;
         Ok(Self {
             tasks: crate::tasks::prepare_built_ins(&declared, &svc.db),
             harnesses: crate::harnesses::prepare_built_ins(&declared),
-            policies: crate::effort_policy::prepare_built_ins(&declared, &svc.sql, &trees),
             knowledge: crate::knowledge::prepare_built_ins(&declared, &svc.layout.project_dir),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,
@@ -65,7 +61,6 @@ impl PreparedRuntimeAdapters {
     pub(crate) fn publish_maps(self, svc: &Services) {
         self.tasks.publish(&svc.tasks);
         self.harnesses.publish(&svc.harnesses);
-        self.policies.publish(&svc.effort_policies);
         self.knowledge.publish_maps(&svc.knowledge, &svc.wiki);
         self.snapshots
             .publish(&svc.snapshots, &svc.snapshot_captures);

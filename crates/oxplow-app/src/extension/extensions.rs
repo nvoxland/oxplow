@@ -108,11 +108,8 @@ pub enum AdvisoryOncePer {
     /// rows (the request of the turn the trigger belongs to): the next
     /// request is fresh. The default.
     Request,
-    /// Once per effort, the first time the query returns rows. Efforts go
-    /// away; use `request`.
-    Effort,
     /// Once per thread per `key` value: each row's `key` column fires
-    /// once (put `:effort_id` in the key for once per effort per row).
+    /// once (put `:request_id` in the key for once per request per row).
     Row,
     /// Every time, whenever the query returns rows.
     Turn,
@@ -152,9 +149,8 @@ fn default_once_per() -> AdvisoryOncePer {
 
 /// Guidance an extension gives the coding agent: a query over the semantic
 /// layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`,
-/// `:request_id` (the request of the turn the trigger belongs to) and
-/// `:effort_id` bound (`:effort_id` NULL when the thread has no effort). Each result row's `message`
-/// column is a line of guidance.
+/// and `:request_id` (the request of the turn the trigger belongs to)
+/// bound. Each result row's `message` column is a line of guidance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Advisory {
@@ -162,7 +158,7 @@ pub struct Advisory {
     pub on: AdvisoryOn,
     pub query: String,
     pub once_per: AdvisoryOncePer,
-    /// Line put above the messages (e.g. `# Metric deltas (this effort)`).
+    /// Line put above the messages (e.g. `# Metric deltas (this request)`).
     pub heading: Option<String>,
     pub audience: AdvisoryAudience,
     /// The capabilities (or features) it needs; without them it doesn't
@@ -1481,7 +1477,7 @@ pub async fn extension_tree_at(
 }
 
 /// One extension that changed between two revisions of a workspace:
-/// what an effort's review shows for it.
+/// what a review of the change shows for it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionChange {
@@ -2597,7 +2593,7 @@ fn needed_permissions(
         ));
     }
     for (i, imp) in ext.implementations.iter().enumerate() {
-        let mut needed = needs_permissions(&imp.needs);
+        let mut needed = needs_permissions(&[]);
         needed.ai |= imp.capability == "ai_provider";
         needed.agent |= !imp.skills.is_empty();
         out.push((
@@ -4493,7 +4489,7 @@ pub struct ManifestScaffold<'a> {
     pub name: &'a str,
     pub description: &'a str,
     pub purpose: &'a str,
-    /// The thread/effort ref that asked for it, when known.
+    /// The thread or request ref that asked for it, when known.
     pub origin: Option<&'a str>,
     pub example_name: &'a str,
     /// YAML flow text for the example's input (`{ page: demo }`).
@@ -6338,7 +6334,7 @@ commands:
         std::fs::create_dir_all(dir.join("commands")).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [effort.finished], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
+            "manifest: 2\nname: x\nintent:\n  purpose: p\npermissions: [ai.compute]\neffects:\n  - { id: e, summary: s, on: [task.state_changed], entry: effects/e.star, needs: [ai.discover] }\ncommands:\n  - { name: c.go, summary: s, entry: commands/c.star, needs: [ai.discover], input_schema: { type: object, additionalProperties: false } }\n",
         )
         .unwrap();
         let script = "def transform(x):\n    r = scope(\"ai.discover\", {\"role\": \"summarize\"})\n    if not r[\"dataset\"]:\n        return {\"skip\": r[\"problem\"]}\n    return {\"commands\": []}\n";
@@ -6487,7 +6483,6 @@ commands:
                 "oxplow.review_policy.read",
                 "oxplow.review_policy.write",
                 "oxplow.tasks.clear_finished",
-                "oxplow.effort.link_to_task",
                 "oxplow.task.new"
             ]
         );
@@ -6553,7 +6548,6 @@ commands:
                     ["tasks.", "knowledge.", "handoffs."]
                         .iter()
                         .any(|s| scope.starts_with(s))
-                        || c.name == "effort.link"
                 })
                 .map(|c| c.name.clone())
                 .collect::<Vec<_>>()
@@ -8418,11 +8412,11 @@ commands:
         let page = |head: &str, params: &str| {
             viz_page(
                 &format!("category: Work\nparams:\n{params}{head}"),
-                "SELECT :effort_id || :state || :q || :thread_id AS a",
+                "SELECT :request_id || :state || :q || :thread_id AS a",
                 "",
             )
         };
-        let params = "  - { name: effort_id, label: Effort }\n  - { name: state, default: open }\n  - { name: q, role: filter }\n  - { name: thread_id }\n";
+        let params = "  - { name: request_id, label: Request }\n  - { name: state, default: open }\n  - { name: q, role: filter }\n  - { name: thread_id }\n";
         let (_d, ext) = load_x(&[("p", &page("", params))], "");
         let warned: Vec<&Diagnostic> = ext
             .warnings
@@ -8432,7 +8426,7 @@ commands:
         assert_eq!(warned.len(), 1, "{:?}", ext.warnings);
         assert!(
             ext.shown(warned[0])
-                .contains("/pages/p.yaml:4: param `effort_id` opens empty from the launcher"),
+                .contains("/pages/p.yaml:4: param `request_id` opens empty from the launcher"),
             "{:?}",
             warned[0]
         );
@@ -8440,7 +8434,7 @@ commands:
         // In no category, it isn't opened from the launcher.
         let uncategorized = viz_page(
             &format!("params:\n{params}"),
-            "SELECT :effort_id || :state || :q || :thread_id AS a",
+            "SELECT :request_id || :state || :q || :thread_id AS a",
             "",
         );
         let (_d, ext) = load_x(&[("p", &uncategorized)], "");
@@ -9790,7 +9784,7 @@ commands:
     async fn advisories_parse_and_validate_their_columns() {
         let (d, ext) = load_x(
             &[],
-            "permissions: [agent.write]\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'add tests' AS message WHERE :effort_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
+            "permissions: [agent.write]\nadvisories:\n  - id: low-coverage\n    on: post-tool-use\n    once_per: request\n    query: SELECT 'add tests' AS message WHERE :request_id IS NOT NULL\n  - id: crossings\n    on: prompt\n    once_per: row\n    heading: '# Metric thresholds'\n    query: SELECT 'x' AS message, 'k' AS key\n  - id: nokey\n    on: prompt\n    once_per: row\n    query: SELECT 'x' AS message\n  - id: Bad Id\n    on: prompt\n    query: SELECT 1\n",
         );
         let ids: Vec<&str> = ext.advisories.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, vec!["low-coverage", "crossings", "nokey"]);
@@ -10118,11 +10112,11 @@ commands:
         assert_eq!(at_snapshot.description, "Edited.");
     }
 
-    /// An effort's review names the extensions that changed between
-    /// its two revisions, each with what the change does; files outside
+    /// A review names the extensions that changed between its two
+    /// revisions, each with what the change does; files outside
     /// `.oxplow/extensions/` change nothing here.
     #[tokio::test]
-    async fn an_effort_review_names_the_extensions_that_changed() {
+    async fn a_review_names_the_extensions_that_changed() {
         use oxplow_domain::stores::StreamStore as _;
         use oxplow_domain::vcs::Revision;
         let f = crate::test_fixtures::services_with_thread().await;

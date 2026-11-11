@@ -5,7 +5,7 @@
 //! sources. A migration that resets `page_ref` (V92 rewrote its kinds
 //! and cleared it) leaves every unsaved row without its edges, and a
 //! writer's bug leaves drift. This restates every task (from the
-//! task interface, the same core its pump consumer runs), effort,
+//! task interface, the same core its pump consumer runs),
 //! finding, thread-note and handoff slice from its row on boot, so the graph is its
 //! sources' again — which is why it stays (tsk920): it is the graph's
 //! one repair path.
@@ -31,15 +31,13 @@
 //! Wiki bodies and recent commits are NOT re-projected here —
 //! the wiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
-//! kinds whose data lives entirely in SQLite (tasks, efforts,
-//! findings, handoffs).
+//! kinds whose data lives entirely in SQLite (tasks, findings,
+//! handoffs).
 
 use std::sync::Arc;
 
 use oxplow_db::page_ref_projections::{finding_edges, note_edges};
-use oxplow_db::{
-    SourceSlice, SqliteCodeQualityStore, SqliteEffortStore, SqliteHandoffStore, SqlitePageRefStore,
-};
+use oxplow_db::{SourceSlice, SqliteCodeQualityStore, SqliteHandoffStore, SqlitePageRefStore};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
 /// Counts of rows touched per kind. Logged at INFO so the boot
@@ -47,7 +45,6 @@ use oxplow_domain::vocabulary::VocabularyHandle;
 #[derive(Debug, Default)]
 pub struct BackfillCounts {
     pub tasks: usize,
-    pub efforts: usize,
     pub findings: usize,
     pub handoffs: usize,
 }
@@ -91,14 +88,12 @@ fn slice(
 pub const REPAIR: &str = "page_ref_repair";
 
 /// The code that decides a source's edges: this module, the shared
-/// projections, the task interface's and the effort store's
-/// projectors. When any of it changes, the graph may have drifted; an
+/// projections and the task interface's projector. When any of it changes, the graph may have drifted; an
 /// edit elsewhere can't move it.
 const PROJECTION_SOURCES: &[&str] = &[
     include_str!("page_ref_backfill.rs"),
     include_str!("../../oxplow-db/src/page_ref_projections.rs"),
     include_str!("../../oxplow-db/src/task_refs.rs"),
-    include_str!("../../oxplow-db/src/effort_store.rs"),
 ];
 
 /// A hash of [`PROJECTION_SOURCES`]: the same for every build of the same
@@ -187,7 +182,6 @@ pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
 /// stores of the other kinds.
 pub struct Sources {
     pub db: oxplow_db::Database,
-    pub efforts: Arc<SqliteEffortStore>,
     pub findings: Arc<SqliteCodeQualityStore>,
     pub handoffs: Arc<SqliteHandoffStore>,
 }
@@ -200,7 +194,6 @@ pub async fn run(
 ) -> BackfillCounts {
     let Sources {
         db,
-        efforts,
         findings: findings_store,
         handoffs,
     } = sources;
@@ -233,15 +226,6 @@ pub async fn run(
                 }
             }
         }
-    }
-
-    // 1b. The effort-owned slice (touched files, summary mentions,
-    //     declared impacts) of every task with an effort — an oxplow
-    //     task's or another provider's — through the store's own projector.
-    //     Read in one go and written in batches, like the kinds below.
-    match efforts.effort_slices().await {
-        Ok(slices) => counts.efforts = write_batched(&page_refs, "effort", slices).await,
-        Err(e) => tracing::warn!(?e, "page-ref backfill: reading the effort slices failed"),
     }
 
     // 2b. Handoffs — one source per row, parsed from its body, as a note.
@@ -367,7 +351,6 @@ mod tests {
             page_refs.clone(),
             Sources {
                 db: db.clone(),
-                efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: findings_store,
                 handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
@@ -400,7 +383,7 @@ mod tests {
 
     /// Every task is restated from the interface, whichever list
     /// it's on: its body, its links (the list's own types) and its
-    /// comments; and the effort slices survive.
+    /// comments.
     #[tokio::test]
     async fn backfill_restates_every_task_from_the_interface() {
         let db = Database::in_memory();
@@ -498,38 +481,6 @@ mod tests {
         .await
         .unwrap();
 
-        // An effort on the task that declared an impact, and one on another
-        // provider's task with a summary mention (tsk452).
-        use oxplow_db::EffortStore as _;
-        let effort_writer = SqliteEffortStore::new(db.clone());
-        let own = effort_writer
-            .start(&oxplow_oxtask::task_ref(task_id), &ThreadId::new(1), None)
-            .await
-            .unwrap();
-        effort_writer
-            .set_impacts(
-                &own.id,
-                &[oxplow_domain::EffortImpact {
-                    kind: "wiki".into(),
-                    id: "auth-flow".into(),
-                    action: Some("updated".into()),
-                }],
-            )
-            .await
-            .unwrap();
-        let foreign = effort_writer
-            .start(
-                "oxplow:oxplow/task?id=ENG-12&provider=issues",
-                &ThreadId::new(1),
-                None,
-            )
-            .await
-            .unwrap();
-        effort_writer
-            .finish(&foreign.id, None, Some("touched [[src/lib.rs]]".into()))
-            .await
-            .unwrap();
-
         // Another list's item, as its records left it in the interface.
         db.transaction(|tx| {
             for sql in [
@@ -566,7 +517,6 @@ mod tests {
             page_refs.clone(),
             Sources {
                 db: db.clone(),
-                efforts: Arc::new(SqliteEffortStore::new(db.clone())),
                 findings: Arc::new(SqliteCodeQualityStore::new(db.clone())),
                 handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
@@ -583,11 +533,10 @@ mod tests {
             post[0].source,
             oxplow_domain::uri::build::task_uri("oxtask", &task_id.to_string())
         );
-        // Another provider's task is backfilled too — its effort's
-        // summary, its link and its comment …
+        // Another provider's task is backfilled too — its link and its
+        // comment.
         use oxplow_domain::uri::build;
         for (target, ref_type) in [
-            (build::file_uri("src/lib.rs"), "summary_file_ref"),
             (build::task_uri("issues", "ENG-7"), "task_link:parent_of"),
             (build::file_uri("src/c.rs"), "comment_file_ref"),
         ] {
@@ -600,11 +549,5 @@ mod tests {
                 "{target}"
             );
         }
-        // … and a declared impact survives the backfill.
-        let impacts = page_refs
-            .list_backlinks(&oxplow_domain::uri::build::wiki_uri("auth-flow"), None)
-            .await
-            .unwrap();
-        assert_eq!(impacts.len(), 1, "got {impacts:?}");
     }
 }

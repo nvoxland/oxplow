@@ -177,7 +177,7 @@ mod tests {
     #[tokio::test]
     async fn a_fed_dataset_says_how_its_collection_stands() {
         let fx = fixture().await;
-        let datasets = vec!["v_my_gh_pr".to_string(), "v_effort".to_string()];
+        let datasets = vec!["v_my_gh_pr".to_string(), "v_request".to_string()];
         let coverage = fx.svc.feeds.coverage(&fx.svc.db, &datasets).await.unwrap();
         assert_eq!(
             coverage.len(),
@@ -207,7 +207,7 @@ mod tests {
     #[tokio::test]
     async fn a_result_names_the_catalog_generation() {
         let fx = fixture().await;
-        let query = || oxplow_db::SqlQuery::new("SELECT count(*) FROM v_effort");
+        let query = || oxplow_db::SqlQuery::new("SELECT count(*) FROM v_request");
         let first = fx.svc.sql.run(query()).await.unwrap();
         assert!(first.coverage.is_empty());
         let generation = first.generation.clone().expect("a generation");

@@ -3,9 +3,9 @@
 //! tools its own way — Claude Code's `Edit` and `Bash`, Codex's
 //! `apply_patch` and `shell`, an ACP agent's tool kinds — and maps each
 //! call onto a [`ToolUse`] (`AgentHarness::tool_use`). Core reads only
-//! the [`ToolKind`] and the fields here: the write guard, the effort's
-//! claimed files, the agent's status, test-run collection and the effort
-//! policy never name a harness's tool.
+//! the [`ToolKind`] and the fields here: the write guard, a turn's
+//! claimed files, the agent's status and test-run collection never name a
+//! harness's tool.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

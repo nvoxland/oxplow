@@ -823,7 +823,6 @@ const WORKTREE_PATH_USERS: &[(&str, &str)] = &[
     ("crates/oxplow-app/src/collection.rs", "test runs and their reports are in the worktree"),
     // The ratchet: callers that reach the filesystem themselves.
     ("crates/oxplow-app/src/change_analysis.rs", "reads a change's files directly"),
-    ("crates/oxplow-app/src/effort_landing.rs", "asks git where an effort landed"),
     ("crates/oxplow-app/src/ref_read.rs", "`oxplow_read` reads a file at a revision and a page in the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/collectors.rs", "previews a collector from the caller's worktree"),
     ("crates/oxplow-app/src/commands/agent_reads/extensions.rs", "checks an extension in the caller's worktree"),
@@ -1084,7 +1083,7 @@ fn hand_made_refs() -> Vec<String> {
         .collect();
     let alternation = kinds.join("|");
     // A string literal that begins with `<kind>:` and goes on (`"file:{p}"`,
-    // `"effort:"`, `strip_prefix("wiki:")`) — a prefix being written or
+    // `"request:"`, `strip_prefix("wiki:")`) — a prefix being written or
     // matched; `"file: {}"` (a message) has a space after the colon.
     let literal = Regex::new(&format!(r#"["'](?:{alternation}):[^\s]"#)).expect("a fixed pattern");
     // A ref-named value split at its colon.
@@ -1115,7 +1114,7 @@ fn hand_made_refs() -> Vec<String> {
 /// A ref's owner spells it and everyone else carries it: production code
 /// builds a ref with `oxplow_domain::uri::build` and reads one with
 /// `parse_as` / `id_of` / `parse_kind` / `Uri::parse`, never with
-/// `format!("oxplow:oxplow/effort?id=…")`, `strip_prefix("wiki:")` or a split at the colon
+/// `format!("oxplow:oxplow/request?id=…")`, `strip_prefix("wiki:")` or a split at the colon
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn refs_are_built_and_parsed_through_the_grammar() {
@@ -1184,11 +1183,11 @@ fn hand_made_script_refs() -> Vec<String> {
         .collect();
     let alt = kinds.join("|");
     let patterns = [
-        // `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `"oxplow:oxplow/page?a=&page=x" || ref`.
+        // `"file:" + path`, `'oxplow:oxplow/request?id=req' || id`, `"oxplow:oxplow/page?a=&page=x" || ref`.
         format!(r#"["'](?:{alt}):[^"'\s]*["']\s*(?:\+|\|\|)"#),
         // `x + "file:"`, `x || 'wiki:'`.
         format!(r#"(?:\+|\|\|)\s*["'](?:{alt}):"#),
-        // `startswith("oxplow:oxplow/effort?id=eff")`, `len("oxplow:oxplow/effort?id=eff")`, `length('task:' || …)`.
+        // `startswith("oxplow:oxplow/request?id=req")`, `len("oxplow:oxplow/request?id=req")`, `length('task:' || …)`.
         format!(r#"(?i)(?:startswith|endswith|len|length)\(\s*["'](?:{alt}):"#),
     ]
     .map(|p| Regex::new(&p).expect("a fixed pattern"));
@@ -1220,7 +1219,7 @@ fn hand_made_script_refs() -> Vec<String> {
 /// A URI's owner spells it and everyone else carries it: scripts build a
 /// URI with `uri.build` and read one with `uri.id` / `uri.parse`, and SQL
 /// selects or joins on the owning dataset's `uri` column — never
-/// `"file:" + path`, `'oxplow:oxplow/effort?id=eff' || id`, `startswith("oxplow:oxplow/effort?id=eff")`
+/// `"file:" + path`, `'oxplow:oxplow/request?id=req' || id`, `startswith("oxplow:oxplow/request?id=req")`
 /// (`.context/resources.md`, "Using refs"). The kept list is empty.
 #[test]
 fn scripts_and_sql_carry_refs_rather_than_spelling_them() {
@@ -1441,7 +1440,7 @@ fn pages_take_spec_types_from_the_spec_module() {
 /// and re-export nothing, or put it under a facade such as `extension/`.
 #[test]
 fn the_crate_root_exposes_no_more_modules() {
-    const PUB_MODS: usize = 146;
+    const PUB_MODS: usize = 137;
     let lib = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
         .expect("lib.rs");
     let count = lib.lines().filter(|l| l.starts_with("pub mod ")).count();

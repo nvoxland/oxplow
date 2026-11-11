@@ -544,7 +544,6 @@ pub(super) async fn observe_token_usage(host: &Host, body: &Value) -> Result<(),
         .record(oxplow_db::NewAgentTokenUsage {
             stream_id: stream.to_string(),
             thread_id: thread_text(body),
-            effort_id: None,
             session_id: text("session").unwrap_or_else(|| "s".into()),
             agent_kind: text("agent").unwrap_or_else(|| "claude".into()),
             model: text("model").or_else(|| Some("m".into())),
@@ -594,7 +593,6 @@ pub(super) async fn observe_nudge(host: &Host, body: &Value) -> Result<(), Strin
         .nudge_store
         .record(NewAgentNudge {
             thread_id: thread_text(body),
-            effort_id: None,
             kind: text("kind").ok_or("`nudge.kind`")?,
             message: text("message").unwrap_or_default(),
             trigger: None,
@@ -927,7 +925,6 @@ pub(super) async fn take_snapshot(
             trigger,
             thread_id,
             turn_id,
-            effort_id: None,
             branch: body
                 .get("branch")
                 .and_then(Value::as_str)

@@ -400,7 +400,7 @@ The last git-named surfaces went in their own change (tsk542): the
 version columns on `metric_capture` and `page_ref` are
 `closest_vcs_rev` / `vcs_rev_exact` (V119 — the VCS's own revision id,
 `Revision::vcs_rev`; pinned dashboard tiles rewritten; `v_capture`,
-`v_effort_file`, `v_test_run` at v2), the metric dimension is
+`v_test_run` at v2), the metric dimension is
 `oxplow.vcs_rev`, the event is `VcsRefsChanged`, the workspace context
 says `vcs_enabled` (the desktop's `vcsEnabled`), the background task
 kind is `vcs`, and the project-root watcher asks `Vcs::detect` instead

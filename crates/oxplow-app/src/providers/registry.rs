@@ -1362,7 +1362,7 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 
 /// One capability's side of the host: what turns a started instance into
 /// the capability's implementation (the task tracker's `ExternalTaskTracker`,
-/// an external effort policy) and takes it out again.
+/// an external snapshots provider) and takes it out again.
 /// Validated capability adapter awaiting registration. Construction cannot
 /// mutate a live registry; publication is a synchronous map change only.
 pub struct PreparedProviderCapability {

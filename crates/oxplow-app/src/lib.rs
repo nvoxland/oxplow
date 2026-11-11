@@ -63,15 +63,6 @@ pub mod duplication_scan;
 pub mod effect_triggers;
 pub mod effective_config;
 pub mod effects;
-pub mod effort_evidence;
-pub mod effort_landing;
-pub mod effort_lifecycle;
-pub mod effort_observation;
-pub mod effort_policy;
-pub mod effort_policy_conformance;
-pub mod effort_policy_script;
-pub mod effort_reactors;
-pub mod effort_service;
 pub mod entity_metrics;
 pub mod event_bodies;
 pub mod event_lineage;
@@ -206,11 +197,6 @@ pub use background_task::{
     BackgroundTask, BackgroundTaskChange, BackgroundTaskChangeKind, BackgroundTaskKind,
     BackgroundTaskStatus, BackgroundTaskStore, StartInput, UpdateInput,
 };
-// Re-export the effort store trait + row type so downstream crates that
-// hold a `Services` (e.g. oxplow-control-plane, which doesn't depend on
-// oxplow-db directly) can call the trait methods its public
-// `effort_store` field exposes.
-pub use oxplow_db::{EffortFile, EffortStore};
 
 use thiserror::Error;
 use tracing::info;
@@ -220,10 +206,10 @@ use std::sync::RwLock;
 use oxplow_config::OxplowConfig;
 use oxplow_db::{
     Database, SqliteAgentNudgeStore, SqliteAgentSessionStore, SqliteAgentTurnStore,
-    SqliteCodeQualityStore, SqliteCommentStore, SqliteEffortStore, SqliteEventLogStore,
-    SqliteFactStore, SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore,
-    SqliteSnapshotStore, SqliteStreamStore, SqliteThreadStore, SqliteTokenUsageStore,
-    SqliteUsageStore, SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
+    SqliteCodeQualityStore, SqliteCommentStore, SqliteEventLogStore, SqliteFactStore,
+    SqlitePageRefStore, SqlitePageVisitStore, SqliteSearchStore, SqliteSnapshotStore,
+    SqliteStreamStore, SqliteThreadStore, SqliteTokenUsageStore, SqliteUsageStore,
+    SqliteWikiPageStore, SqliteWikiPageThreadUpdateStore,
 };
 use oxplow_domain::stores::AgentStatusStore;
 use oxplow_session::{StreamService, ThreadService, WorkspaceLayout};
@@ -500,9 +486,6 @@ pub struct Services {
     pub layout: AppLayout,
     pub streams: StreamService,
     pub threads: ThreadService,
-    /// What an effort's lifecycle does around its store (snapshot pins,
-    /// lifecycle metrics, file claims).
-    pub efforts: effort_service::EffortService,
     pub stream_store: Arc<SqliteStreamStore>,
     pub thread_store: Arc<SqliteThreadStore>,
     /// A thread's agent sessions (`agent_session`).
@@ -561,9 +544,6 @@ pub struct Services {
     pub session_auth: Arc<session_auth::SessionAuth>,
     /// Every capability's implementations and which is active.
     pub capabilities: Arc<capabilities::CapabilityRegistry>,
-    /// The effort policies, by id: the declared built-ins and the running
-    /// provider instances (`.context/work-tracking.md`).
-    pub effort_policies: Arc<oxplow_domain::effort_policy::EffortPolicyRegistry>,
     /// The snapshot implementations, and the one the project uses
     /// (`snapshots::CoreSnapshots` for both built-ins).
     pub snapshots: Arc<oxplow_domain::snapshot::SnapshotRegistry>,
@@ -607,7 +587,6 @@ pub struct Services {
     pub agent_turn_store: Arc<SqliteAgentTurnStore>,
     /// What the person's windows show: their tabs per thread (`client_reports`).
     pub client_reports: Arc<client_reports::ClientReports>,
-    pub effort_store: Arc<SqliteEffortStore>,
     /// Durable atomic fact layer (epic tsk12) — the unified metric substrate
     /// (the V38 `metric_*` cluster is retired, T-E3). Producers write facts
     /// here; the read surface aggregates them through `metric_engine`.
@@ -619,7 +598,7 @@ pub struct Services {
     /// disagree on what a branch sees.
     pub metric_visibility: Arc<metric_visibility::VisibilityResolver>,
     /// Runs config-declared `metrics:` gauges into the substrate (tsk213, P3):
-    /// seeds definitions, runs on-snapshot/on-effort-complete/manual triggers.
+    /// seeds definitions, runs on-snapshot/manual triggers.
     pub metrics: metrics_service::MetricsService,
     /// Persisted agent nudges (report-less-run / coverage-target) — the
     /// human-facing record of what oxplow steered the agent to do.
@@ -650,8 +629,6 @@ pub struct Services {
     pub change_analyzer: Arc<change_analysis::ChangeAnalyzer>,
     /// Runs extension advisories for the hooks (see `advisories`).
     pub advisories: Arc<advisories::AdvisoryRunner>,
-    /// Per-effort metric deltas / observations for pages (see `effort_evidence`).
-    pub effort_evidence_store: Arc<oxplow_db::SqliteEffortEvidenceStore>,
     pub request_analysis_store: Arc<oxplow_db::SqliteRequestAnalysisStore>,
     /// Secrets store (the OS keychain in the app): AI provider keys and
     /// extension-source credentials. Values never go to the UI or agents.
@@ -902,7 +879,6 @@ impl Services {
     pub fn advisory_deps(&self) -> advisories::AdvisoryDeps {
         advisories::AdvisoryDeps {
             advisories: self.advisories.clone(),
-            effort_store: self.effort_store.clone(),
             thread_store: self.thread_store.clone(),
             worktrees: self.worktrees.clone(),
             extension_catalog: self.extension_catalog.clone(),
@@ -1037,10 +1013,6 @@ impl Services {
             db.clone(),
             vocabulary.clone(),
         ));
-        let effort_store = Arc::new(SqliteEffortStore::with_vocabulary(
-            db.clone(),
-            vocabulary.clone(),
-        ));
         let fact_store = Arc::new(SqliteFactStore::new(db.clone()));
         let metric_visibility = Arc::new(metric_visibility::VisibilityResolver::new(
             SqliteSnapshotStore::new(db.clone()),
@@ -1060,7 +1032,6 @@ impl Services {
         let git_store = Arc::new(oxplow_db::SqliteGitStore::new(db.clone()));
         let diagnostic_store = Arc::new(oxplow_db::SqliteDiagnosticStore::new(db.clone()));
         let symbol_store = oxplow_db::SqliteSymbolStore::new(db.clone());
-        let effort_evidence_store = Arc::new(oxplow_db::SqliteEffortEvidenceStore::new(db.clone()));
         let request_analysis_store =
             Arc::new(oxplow_db::SqliteRequestAnalysisStore::new(db.clone()));
         let change_store = Arc::new(oxplow_db::SqliteChangeStore::new(db.clone()));
@@ -1347,15 +1318,12 @@ impl Services {
             hook_ingest.with_turn_snapshots(Arc::new(turn_snapshots::CaptureTurnSnapshots {
                 snapshots: snapshots.clone(),
                 threads: thread_store.clone(),
-                efforts: effort_store.clone(),
                 config: config_arc.clone(),
             }));
         // An agent's PTY exiting ends its session (Codex posts no SessionEnd).
         terminal_sessions.ingest_exits_into(hook_ingest.clone());
         let metrics = metrics_service::MetricsService::new(
             snapshot_store.clone(),
-            thread_store.clone(),
-            effort_store.clone(),
             snapshot_content.clone(),
             vcs.clone(),
             config_arc.clone(),
@@ -1371,30 +1339,12 @@ impl Services {
             layer: sql.clone(),
         })
         .with_ai(ai_compute.clone());
-        let efforts =
-            effort_service::EffortService::new(effort_store.clone(), thread_store.clone())
-                .with_event_pump(event_pump.clone())
-                .with_snapshot_captures(snapshot_captures.clone())
-                .with_snapshots(snapshots.clone())
-                .with_metrics(fact_store.clone(), event_bus.clone())
-                .with_steering_sources(agent_turn_store.clone(), comment_store.clone());
         // What an agent's context reads changing: sessions without a
         // prompt hook inject it between turns.
         let (context_changes, _) = tokio::sync::watch::channel(0u64);
         event_pump.register_async(Arc::new(context_watch::ContextChanges {
             changed: context_changes.clone(),
         }));
-        // The post-commit half of effort open/close runs on the pump.
-        event_pump.register_async(Arc::new(effort_lifecycle::EffortLifecycleConsumer::new(
-            efforts.without_event_pump(),
-            (*event_log_store).clone(),
-        )));
-        // A structured edit claims its file for the effort it happened in.
-        event_pump.register_async(Arc::new(tool_call_reactors::EffortClaimConsumer::new(
-            efforts.without_event_pump(),
-            db.clone(),
-            layout.project_dir.clone(),
-        )));
         // The vocabulary reads the active task tracker's own ids in text
         // (`tsk42`), as that list declares them; from the first read, and
         // at every rebuild (a switch rebuilds it).
@@ -1456,33 +1406,9 @@ impl Services {
             log: (*event_log_store).clone(),
             sql: sql.clone(),
         }));
-        // Its turn's changed files become the effort's observed ones.
-        event_pump.register_async(Arc::new(effort_observation::EffortObservationConsumer {
-            efforts: effort_store.clone(),
-            snapshots: snapshot_store.clone(),
-            sql: sql.clone(),
-            lifecycle: efforts.without_event_pump(),
-        }));
-        // The effort policies: the built-ins and scripts the extensions
-        // declare, and the provider instances that register themselves.
-        let effort_policies =
-            Arc::new(oxplow_domain::effort_policy::EffortPolicyRegistry::default());
         event_pump.register_async(Arc::new(snapshots::SnapshotSwitch {
             registry: snapshots.clone(),
             captures: snapshot_captures.clone(),
-        }));
-        // The project's effort policy reacts to items starting and
-        // finishing, through this bus (`.context/work-tracking.md`).
-        event_pump.register_async(Arc::new(effort_policy::EffortPolicyConsumer {
-            bus: Arc::downgrade(&commands),
-            sql: sql.clone(),
-            config: config_arc.clone(),
-            capabilities: capabilities.clone(),
-            policies: effort_policies.clone(),
-            vocabulary: vocabulary.clone(),
-            db: db.clone(),
-            catalog: extension_catalog.clone(),
-            root: layout.project_dir.clone(),
         }));
         let config_applied = Arc::new(tokio::sync::Notify::new());
         let config_target = commands::config_commands::ConfigTarget {
@@ -1533,7 +1459,6 @@ impl Services {
             chat.clone(),
             capabilities.clone(),
         ))
-        .chain(commands::effort::ops(tasks.clone()))
         .chain(commands::hint::ops())
         .chain(commands::terminal::ops(
             db.clone(),
@@ -1543,23 +1468,11 @@ impl Services {
         .chain(commands::comment::ops())
         .chain(commands::ui::ops())
         .chain(commands::op_error::ops())
-        .chain(commands::effort_report::ops(
-            commands::effort_report::EffortDeps {
-                lifecycle: efforts.clone(),
-                efforts: effort_store.clone(),
-                sql: sql.clone(),
-                db: db.clone(),
-                vocabulary: vocabulary.clone(),
-                project_dir: layout.project_dir.clone(),
-                vcs: vcs.clone(),
-            },
-        ))
         .chain(commands::handoff::ops(link_deps.clone(), tasks.clone()))
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
             stream_watches: stream_watches.clone(),
-            snapshots: snapshots.clone(),
             ref_moves: ref_moves.clone(),
             threads: thread_store.clone(),
             sessions: agent_session_store.clone(),
@@ -1567,7 +1480,6 @@ impl Services {
             log: event_log_store.clone(),
             search: search_store.clone(),
             worktrees: worktrees.clone(),
-            efforts: effort_store.clone(),
             db: db.clone(),
             terminals: terminal_store.clone(),
             terminal_sessions: terminal_sessions.clone(),
@@ -1624,9 +1536,6 @@ impl Services {
             &commands,
             vec![
                 Arc::new(providers::tasks::TaskTrackerHost(tasks.clone())),
-                Arc::new(providers::effort_policy::EffortPolicyHost(
-                    effort_policies.clone(),
-                )),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
                 Arc::new(providers::knowledge::KnowledgeHost(knowledge.clone())),
                 Arc::new(providers::filesystems::FileSystemsHost::new(
@@ -1675,7 +1584,6 @@ impl Services {
         let collection = collection::CollectionService::new(
             fact_store.clone(),
             nudge_store.clone(),
-            effort_store.clone(),
             thread_store.clone(),
             snapshot_store.clone(),
             snapshot_captures.clone(),
@@ -1800,7 +1708,6 @@ impl Services {
         let token_usage_store = Arc::new(SqliteTokenUsageStore::new(db.clone()));
         let token_usage = token_usage::TokenUsageService::new(
             token_usage_store.clone(),
-            effort_store.clone(),
             thread_store.clone(),
             agent_session_store.clone(),
             fact_store.clone(),
@@ -1843,7 +1750,6 @@ impl Services {
         }));
         let advisory_deps = advisories::AdvisoryDeps {
             advisories: advisories.clone(),
-            effort_store: effort_store.clone(),
             thread_store: thread_store.clone(),
             worktrees: worktrees.clone(),
             extension_catalog: extension_catalog.clone(),
@@ -1869,7 +1775,6 @@ impl Services {
             layout,
             streams,
             threads,
-            efforts,
             snapshot_captures,
             stream_watches,
             stream_store,
@@ -1898,7 +1803,6 @@ impl Services {
             saved_conversations,
             session_auth,
             capabilities,
-            effort_policies,
             snapshots,
             providers,
             knowledge,
@@ -1913,7 +1817,6 @@ impl Services {
             agent_status_store,
             agent_turn_store,
             client_reports,
-            effort_store,
             fact_store,
             metric_engine,
             metric_visibility,
@@ -1931,7 +1834,6 @@ impl Services {
             ai,
             ai_compute,
             secrets: machine.secrets,
-            effort_evidence_store,
             request_analysis_store,
             advisories,
             change_store,
@@ -2281,7 +2183,6 @@ mod tests {
                 "oxplow.effect.backfill",
                 "oxplow.effect.retry",
                 "oxplow.effect.retry_all",
-                "oxplow.effort.report",
                 // Writes the store, the settings and `.oxplow/.gitignore`.
                 "oxplow.extension.deploy",
                 "oxplow.extension.disable",

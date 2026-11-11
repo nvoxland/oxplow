@@ -165,6 +165,7 @@ mod tests {
 
     /// Park an event for `consumer`, as the pump would on a failure.
     async fn park(fx: &crate::test_fixtures::ThreadFixture, consumer: &str) -> i64 {
+        crate::test_fixtures::lifecycle::log_task_done(&fx.svc, fx.thread, "parked").await;
         let consumer = consumer.to_string();
         fx.svc
             .db
@@ -185,7 +186,7 @@ mod tests {
     /// none pending, either is unchanged.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_retries_or_discards_every_pending_letter() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         // Two consumers: one consumer's second failure on the same event
         // only bumps its letter's attempts.
         park(&fx, "no.such.consumer").await;
@@ -217,7 +218,7 @@ mod tests {
     /// `discarded`. A retry names why it can't run: no such consumer.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_discards_and_retries_dead_letters() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let id = park(&fx, "no.such.consumer").await;
         let run = |name: &'static str, confirmed: bool, actor: Actor| {
             let fx = &fx;
@@ -252,7 +253,7 @@ mod tests {
     /// An agent may retry or discard a parked delivery.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_agent_may_retry_and_discard() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),

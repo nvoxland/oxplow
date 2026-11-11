@@ -22,7 +22,7 @@ pub const NAME: &str = "agent.context_changes";
 const CHANGING_COMMANDS: &[&str] = &[crate::commands::context_basket::ADD];
 
 /// The event types whose facts the context reads: the handoffs and their
-/// count, the agents open in a worktree, and the open effort.
+/// count and the agents open in a worktree.
 pub fn changes_context(event_type: &str) -> bool {
     matches!(
         event_type,
@@ -30,11 +30,6 @@ pub fn changes_context(event_type: &str) -> bool {
             | "handoff.settled"
             | "agent.session.started"
             | "agent.session.ended"
-            | "effort.opened"
-            | "effort.closed"
-            | "effort.finished"
-            | "effort.linked"
-            | "effort.retitled"
             | "command.executed"
     )
 }

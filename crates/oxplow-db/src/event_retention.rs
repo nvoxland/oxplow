@@ -9,7 +9,7 @@
 //! | `agent` | 30 days | 14 days |
 //! | `test`, `code`, `collector`, `effect` | 90 days | 30 days |
 //! | an extension's (any namespace core doesn't own) | 30 days, or its declared window | 14 days, or its declared window |
-//! | core's state (`snapshot`, `vcs`, `effort`, `task`, `command`, `config`, …) | kept | kept |
+//! | core's state (`snapshot`, `vcs`, `task`, `command`, `config`, …) | kept | kept |
 //!
 //! The windows are `oxplow_domain::events::retention`'s. A project may set
 //! its own per namespace (`eventRetention`, a person's key): it replaces
@@ -755,7 +755,7 @@ mod tests {
             now.unix_ms() - 31 * DAY_MS,
         ));
         db.transaction(move |tx| {
-            for (id, ty) in [("e1", "agent.tool.finished"), ("e2", "effort.closed")] {
+            for (id, ty) in [("e1", "agent.tool.finished"), ("e2", "task.created")] {
                 tx.execute(
                     "INSERT INTO event_log (id, type, v, at, source, subject, payload)
                        VALUES (?1, ?2, 1, ?3, 'test', '[]', '{\"tool\":\"Bash\"}')",
@@ -815,7 +815,7 @@ mod tests {
             for (id, ty, at) in [
                 ("e1", "agent.tool.finished", &old31),
                 ("e2", "agent.tool.finished", &old2),
-                ("e3", "effort.closed", &old31),
+                ("e3", "task.created", &old31),
             ] {
                 tx.execute(
                     "INSERT INTO event_log (id, type, v, at, source, subject, payload)

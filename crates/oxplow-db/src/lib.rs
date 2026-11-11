@@ -28,8 +28,6 @@ pub mod datasets;
 pub mod diagnostic_store;
 pub mod effect_run_store;
 pub mod effect_state_store;
-pub mod effort_evidence_store;
-pub mod effort_store;
 pub mod event_content_store;
 pub mod event_log_store;
 pub mod event_retention;
@@ -63,8 +61,6 @@ pub mod symbol_store;
 pub mod table_generations;
 pub mod task_refs;
 pub mod terminal_store;
-#[cfg(test)]
-pub(crate) mod test_tasks;
 pub mod thread_context_store;
 pub mod thread_store;
 pub mod token_usage_store;
@@ -105,25 +101,20 @@ pub use database::{
     PublicationTransaction, TxError,
 };
 pub use diagnostic_store::{DiagnosticRow, SqliteDiagnosticStore};
-pub use effort_evidence_store::EffortObservation;
-pub use effort_evidence_store::SqliteEffortEvidenceStore;
-pub use effort_store::{
-    ClaimBasis, Effort, EffortAtSnapshot, EffortFile, EffortFileChange, EffortStore,
-    FileRefVersion, FileSource, OwnedFileRefVersion, SqliteEffortStore,
-};
 pub use event_log_store::{anchors_for_thread_tx, DeadLetter, EventCtx, SqliteEventLogStore};
 pub use fact_store::{
-    BatchApply, BatchRows, CaptureGroup, CubeReadRow, Dimension, EffortMetricDelta, FactRow,
-    FactSliceKey, Measure, Members, MetricCapture, MetricSpec, NewCubeRow, NewDimension, NewFact,
-    NewMeasure, NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
+    BatchApply, BatchRows, CaptureGroup, CubeReadRow, Dimension, FactRow, FactSliceKey, Measure,
+    Members, MetricCapture, MetricDelta, MetricSpec, NewCubeRow, NewDimension, NewFact, NewMeasure,
+    NewMetricCapture, NewMetricSpec, SqliteFactStore, TestCaseResult, TestCaseStat,
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use handoff_store::SqliteHandoffStore;
+pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
 pub use proposal_store::{NewProposal, Proposal, ProposalDecision, SqliteProposalStore};
 pub use provider_collector_store::{CollectorState, SqliteProviderCollectorStore};
-pub use request_analysis_store::{AnalysisSpan, SqliteRequestAnalysisStore};
+pub use request_analysis_store::{AnalysisSpan, Observation, SqliteRequestAnalysisStore};
 pub use search_store::{sanitize_query, SearchHit, SqliteSearchStore};
 pub use semantic_layer::{
     DatasetFreshness, Reads, SemanticLayer, SqlCell, SqlParams, SqlQuery, SqlQueryResult,

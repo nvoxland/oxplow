@@ -1,7 +1,6 @@
 SELECT c.id,
        c.stream_id,
        c.thread_id,
-       c.effort_id,
        json_extract(c.detail_json, '$.payload.command') AS command,
        json_extract(c.detail_json, '$.payload.exitCode') AS exit_code,
        json_extract(c.detail_json, '$.payload.passed') AS passed,

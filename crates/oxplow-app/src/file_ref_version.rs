@@ -1,12 +1,10 @@
 //! Capture-time helper that resolves the `(local_snapshot_id,
 //! closest_vcs_rev, vcs_rev_exact)` triple stamped on every
-//! file reference. Called by the effort-file recorder and the wiki
-//! ref sync so the agent doesn't have to think about it.
+//! file reference. Called by the wiki ref sync so the agent doesn't have to think about it.
 //!
 //! Resolution policy (matches V20 docs):
 //!   * `local_snapshot_id` is the snapshot the caller already pinned
-//!     the reference to (effort end snapshot, current wiki snapshot,
-//!     etc.).
+//!     the reference to (the current wiki snapshot, etc.).
 //!   * If that snapshot row has a `revision` (clean workspace at
 //!     capture or re-stamped later), use its id with
 //!     `vcs_rev_exact = true`.
@@ -35,7 +33,7 @@ pub struct ResolvedFileVersion {
 }
 
 impl ResolvedFileVersion {
-    /// Borrowed view suitable for [`oxplow_db::EffortStore::record_file`].
+    /// Borrowed view suitable for [`oxplow_db::page_ref_projections::stamp_file_versions`].
     pub fn as_ref(&self) -> oxplow_db::FileRefVersion<'_> {
         oxplow_db::FileRefVersion {
             local_snapshot_id: self.local_snapshot_id,

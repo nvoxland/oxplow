@@ -37,7 +37,6 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "thread",
     "snapshot",
     "vcs",
-    "effort",
     "task",
     "knowledge",
     "handoff",
@@ -150,7 +149,6 @@ impl EventSchemaRegistry {
         r.register::<VcsHeadMoved>().expect("core type registers");
         r.register::<VcsCommitIndexed>()
             .expect("core type registers");
-        r.register::<EffortLanded>().expect("core type registers");
         r.register::<AgentTurnStarted>()
             .expect("core type registers");
         r.register::<AgentTurnEnded>().expect("core type registers");
@@ -181,11 +179,6 @@ impl EventSchemaRegistry {
         r.register::<TestCoverageRecorded>()
             .expect("core type registers");
         r.register::<TaskDeleted>().expect("core type registers");
-        r.register::<EffortOpened>().expect("core type registers");
-        r.register::<EffortClosed>().expect("core type registers");
-        r.register::<EffortLinked>().expect("core type registers");
-        r.register::<EffortRetitled>().expect("core type registers");
-        r.register::<EffortFinished>().expect("core type registers");
         r.register::<CollectorSynced>()
             .expect("core type registers");
         r.register::<TaskEdited>().expect("core type registers");
@@ -835,7 +828,7 @@ impl EventType for FileDeleted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilitySwitchedV1 {
-    /// `task_tracker`, `effort_policy`, `snapshots`.
+    /// `task_tracker`, `snapshots`, `knowledge`.
     pub capability: String,
     /// The implementation id that was active (`none` for nothing).
     pub from: String,
@@ -1219,7 +1212,7 @@ pub struct TokenCount {
 
 /// `agent.tokens.reported@2`: an agent's own telemetry (an OTLP export)
 /// reported token counts. Anchored to the turn the export's time window
-/// fell in — exports lag the turn — and the thread's single open effort.
+/// fell in — exports lag the turn.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AgentTokensReportedV2 {
@@ -1541,30 +1534,6 @@ impl EventType for TestCoverageRecorded {
     type Payload = TestCoverageRecordedV1;
 }
 
-/// `effort.opened@3`: a span of a thread's work began, linked to a
-/// task or not (`.context/work-tracking.md`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortOpenedV3 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// `oxplow:oxplow/task?id=tsk42&provider=oxtask`, or another provider's item, when linked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-    /// The thread doing the work (`thr3`).
-    pub thread: String,
-    /// The start snapshot, when the open already had it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_snapshot: Option<i64>,
-}
-
-pub struct EffortOpened;
-impl EventType for EffortOpened {
-    const TYPE: &'static str = "effort.opened";
-    const V: u32 = 3;
-    type Payload = EffortOpenedV3;
-}
-
 /// `collector.synced@2` (P7.B3): a collector ran — by hand
 /// (`oxplow.collector.sync`), on its schedule, or for an event its `on:` trigger
 /// names (then the envelope's `cause` is that event). Logged in the
@@ -1610,8 +1579,8 @@ pub enum CheckpointReason {
 }
 
 /// `thread.checkpoint@2`: a point in a thread's work oxplow observed, with
-/// what changed since the turn began — what an effort policy reacts to
-/// without reading snapshots or harness tool names
+/// what changed since the turn began — what a reactor reacts to without
+/// reading snapshots or harness tool names
 /// (`.context/work-tracking.md`). Logged by the `thread.checkpoint`
 /// consumer once a turn's end take lands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1658,89 +1627,6 @@ impl EventType for TaskStateChanged {
     const TYPE: &'static str = "task.state_changed";
     const V: u32 = 1;
     type Payload = TaskStateChangedV1;
-}
-
-/// `effort.linked@2`: an effort's task was set, changed or cleared
-/// (`oxplow.effort.link`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortLinkedV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The task it's linked to now; absent when unlinked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-}
-
-pub struct EffortLinked;
-impl EventType for EffortLinked {
-    const TYPE: &'static str = "effort.linked";
-    const V: u32 = 2;
-    type Payload = EffortLinkedV2;
-}
-
-/// `effort.landed@2`: a commit holds an open effort's work — every file
-/// the effort changed is in the commit as the effort left it (`complete`),
-/// or only some of them. What an effort policy closes an effort on.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortLandedV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The commit's sha.
-    pub commit: String,
-    pub complete: bool,
-}
-
-pub struct EffortLanded;
-impl EventType for EffortLanded {
-    const TYPE: &'static str = "effort.landed";
-    const V: u32 = 2;
-    type Payload = EffortLandedV2;
-}
-
-/// `effort.retitled@2`: an effort's own title was set or cleared
-/// (`oxplow.effort.update`); cleared, it shows its default again.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortRetitledV2 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// Its title now; absent when cleared.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-}
-
-pub struct EffortRetitled;
-impl EventType for EffortRetitled {
-    const TYPE: &'static str = "effort.retitled";
-    const V: u32 = 2;
-    type Payload = EffortRetitledV2;
-}
-
-/// `effort.closed@3`: a span of a thread's work ended, linked to a
-/// task or not, and what closed it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortClosedV3 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The linked task, when there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-    /// The end snapshot, when the close already had it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<i64>,
-    /// What closed it: `commit`, `switch`, `person`, `agent` or `system`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub closed_by: Option<String>,
-}
-
-pub struct EffortClosed;
-impl EventType for EffortClosed {
-    const TYPE: &'static str = "effort.closed";
-    const V: u32 = 3;
-    type Payload = EffortClosedV3;
 }
 
 // The task events are the interface's: core logs them for every
@@ -2250,31 +2136,6 @@ impl EventType for KnowledgeCommentDeleted {
     type Payload = KnowledgeCommentDeletedV3;
 }
 
-/// `effort.finished@3`: a closed effort has its end snapshot
-/// pinned and its lifecycle metrics projected. Logged once per effort by the
-/// effort-lifecycle consumer (dedupe key `effort.finished:<effort>`),
-/// caused by the `effort.closed` it handled; what the effort reactors
-/// (evidence) and the `effort.finished` collectors consume.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct EffortFinishedV3 {
-    /// The effort (`eff12`).
-    pub effort: String,
-    /// The linked task, when there is one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task: Option<String>,
-    /// The end snapshot.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub end_snapshot: Option<i64>,
-}
-
-pub struct EffortFinished;
-impl EventType for EffortFinished {
-    const TYPE: &'static str = "effort.finished";
-    const V: u32 = 3;
-    type Payload = EffortFinishedV3;
-}
-
 /// Whether `event_type` is one of core's types (any version) — what a
 /// collector's `on:` trigger may name besides its own extension's
 /// declared types. Built once.
@@ -2340,12 +2201,6 @@ mod tests {
                 ("contribution.enabled", 1),
                 ("contribution.job.completed", 2),
                 ("effect.result", 5),
-                ("effort.closed", 3),
-                ("effort.finished", 3),
-                ("effort.landed", 2),
-                ("effort.linked", 2),
-                ("effort.opened", 3),
-                ("effort.retitled", 2),
                 ("file.created", 1),
                 ("file.deleted", 1),
                 ("file.directory_created", 1),

@@ -260,7 +260,6 @@ mod tests {
                 trigger: SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })

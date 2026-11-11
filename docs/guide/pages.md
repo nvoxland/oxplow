@@ -14,8 +14,8 @@ can **Save to wiki** or **Save as Page** to keep it.
 ## The data
 
 Everything oxplow tracks is exposed as read-only SQL views: `v_task`
-(the active task tracker's items, whichever tracker holds them), `v_effort`,
-`v_thread`, `v_comment`, `v_wiki_page`, `v_effort_file`, `v_agent_turn`,
+(the active task tracker's items, whichever tracker holds them), `v_request`,
+`v_thread`, `v_comment`, `v_wiki_page`, `v_turn_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
 **Explore Data** (launcher → Data) lists every view in its rail. Pick one to

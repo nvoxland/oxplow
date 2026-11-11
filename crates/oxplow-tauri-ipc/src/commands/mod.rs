@@ -9,7 +9,6 @@ pub mod app;
 pub mod background;
 pub mod branch;
 pub mod config;
-pub mod effort;
 pub mod generated;
 pub mod hooks;
 pub mod install_cli;

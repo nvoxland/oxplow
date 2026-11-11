@@ -3,19 +3,19 @@
 //! hands an export here. It is decoded and logged as one
 //! `agent.tokens.reported` event in one transaction — anchored to the turn
 //! the export measured (exports arrive after it; the one its window
-//! overlaps most) and the effort open during that turn — and the `token_usage.otlp` consumer turns the event into
+//! overlaps most) — and the `token_usage.otlp` consumer turns the event into
 //! token facts. Nothing else writes them.
 
 use std::sync::Arc;
 
-use oxplow_db::agent_stores::{activity_anchors_tx, effort_during_turn_tx, turn_for_window_tx};
+use oxplow_db::agent_stores::{activity_anchors_tx, turn_for_window_tx};
 use oxplow_db::event_log_store::{append_unique_tx, EventCtx};
 use oxplow_db::Database;
 use oxplow_domain::agent::registry::HarnessRegistry;
 use oxplow_domain::events::schema::{AgentTokensReported, AgentTokensReportedV2, TokenCount};
 use oxplow_domain::uri::build::{thread_uri, turn_uri};
 use oxplow_domain::vocabulary::VocabularyHandle;
-use oxplow_domain::{AgentSessionId, DomainError, EffortId, ThreadId};
+use oxplow_domain::{AgentSessionId, DomainError, ThreadId};
 
 use crate::event_pump::EventPump;
 use crate::otlp_tokens::decode_token_export;
@@ -104,17 +104,12 @@ impl OtlpIngestService {
                 // The turn it measured, not the one open as it arrives: an
                 // export lands after its turn's Stop, and is stamped with
                 // when it was collected, so its window can reach into the
-                // next turn — it goes to the turn it overlaps most, and to
-                // the effort open during that turn (tsk900). One that
-                // doesn't say when is the open turn's.
+                // next turn — it goes to the turn it overlaps most (tsk900).
+                // One that doesn't say when is the open turn's.
                 if let Some(end) = export.window_end {
                     let start = export.window_start.unwrap_or(end);
                     let turn = turn_for_window_tx(tx, thread, session, start, end)?;
                     anchors.turn_id = turn.map(|t| t.value());
-                    anchors.effort_id = match turn {
-                        Some(t) => effort_during_turn_tx(tx, thread, t)?.map(EffortId::new),
-                        None => None,
-                    };
                 }
                 let subject = anchors
                     .turn_id
@@ -185,11 +180,10 @@ mod tests {
             .unwrap()
     }
 
-    /// An export is one event: its counts, anchored to the open turn and
-    /// the thread's effort.
+    /// An export is one event: its counts, anchored to the open turn.
     #[tokio::test]
     async fn an_export_logs_one_event_anchored_to_its_turn() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         svc.hook_ingest
             .ingest(hook(fx.thread, HookKind::UserPromptSubmit))
@@ -206,7 +200,6 @@ mod tests {
         assert_eq!(events.len(), 1);
         let env = &events[0].envelope;
         assert_eq!(env.anchors.turn_id, Some(turn));
-        assert_eq!(env.anchors.effort_id, Some(fx.effort));
         assert_eq!(env.payload["counts"][0]["kind"], "input");
         assert_eq!(env.payload["counts"][0]["value"], 100);
     }
@@ -328,11 +321,10 @@ mod tests {
         assert!(reported(svc).await.is_empty());
     }
 
-    /// tsk935: an export whose points say no time is the open turn's, and
-    /// the open effort's.
+    /// tsk935: an export whose points say no time is the open turn's.
     #[tokio::test]
     async fn an_export_with_no_point_time_is_the_open_turns() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         svc.hook_ingest
             .ingest(hook(fx.thread, HookKind::UserPromptSubmit))
@@ -347,11 +339,10 @@ mod tests {
             .unwrap());
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, Some(open));
-        assert_eq!(events[0].envelope.anchors.effort_id, Some(fx.effort));
     }
 
     /// tsk935: an export measured before the thread's first turn is no
-    /// turn's — and no effort's.
+    /// turn's.
     #[tokio::test]
     async fn an_export_before_the_first_turn_is_no_turns() {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -369,7 +360,6 @@ mod tests {
             .unwrap());
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, None);
-        assert_eq!(events[0].envelope.anchors.effort_id, None);
     }
 
     /// An export arrives after the turn it measured has ended and the
@@ -405,11 +395,11 @@ mod tests {
 
     /// tsk900: a real Claude export is stamped with when it was collected,
     /// not when the response came back, so its window can span two turns.
-    /// It goes to the turn its window overlaps most, and to the effort open
-    /// during that turn — not the one open when it arrives.
+    /// It goes to the turn its window overlaps most — not the one open when
+    /// it arrives.
     #[tokio::test]
     async fn an_export_spanning_two_turns_goes_to_the_one_it_overlaps_most() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         for kind in [
             HookKind::UserPromptSubmit,
@@ -420,7 +410,6 @@ mod tests {
         }
         let t0 = Timestamp::now().unix_ms() - 60_000;
         let at = move |s: i64| Timestamp::from_unix_ms(t0 + s * 1000);
-        let (first_effort, thread) = (fx.effort.value(), fx.thread.value());
         let turns: Vec<i64> = svc
             .db
             .transaction(move |tx| {
@@ -434,8 +423,7 @@ mod tests {
                         .map_err(oxplow_db::map_sql_err)?;
                     rows
                 };
-                // Turn A 0–10 s, turn B from 11 s; effort A ends at 10.5 s and
-                // effort B opens at 11 s.
+                // Turn A 0–10 s, turn B from 11 s.
                 let set = |sql: &str, p: Vec<String>| {
                     tx.execute(sql, rusqlite::params_from_iter(p))
                         .map(|_| ())
@@ -448,22 +436,6 @@ mod tests {
                 set(
                     "UPDATE agent_turn SET started_at = ?1, ended_at = NULL WHERE id = ?2",
                     vec![at(11).to_string(), ids[1].to_string()],
-                )?;
-                set(
-                    "UPDATE effort SET started_at = ?1, ended_at = ?2 WHERE id = ?3",
-                    vec![
-                        at(0).to_string(),
-                        Timestamp::from_unix_ms(t0 + 10_500).to_string(),
-                        first_effort.to_string(),
-                    ],
-                )?;
-                set(
-                    "INSERT INTO effort (task, thread_id, started_at) VALUES (?1, ?2, ?3)",
-                    vec![
-                        "oxplow:oxplow/task?id=tsk999&provider=oxtask".into(),
-                        thread.to_string(),
-                        at(11).to_string(),
-                    ],
                 )?;
                 Ok(ids)
             })
@@ -484,17 +456,13 @@ mod tests {
             .unwrap();
         let events = reported(svc).await;
         assert_eq!(events[0].envelope.anchors.turn_id, Some(turns[0]));
-        assert_eq!(
-            events[0].envelope.anchors.effort_id.map(|e| e.value()),
-            Some(first_effort)
-        );
     }
 
     /// The facts come from the consumer, once, under a capture carrying
-    /// the event's turn and effort — the ingest writes none.
+    /// the event's turn — the ingest writes none.
     #[tokio::test]
     async fn otlp_facts_come_only_from_the_consumer() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         // The token facts are written only while a spec consumes them.
         svc.hook_ingest
@@ -528,19 +496,18 @@ mod tests {
         svc.event_pump.run_once().await.unwrap();
         let facts = svc.fact_store.facts_for_measure(tokens.id).await.unwrap();
         assert_eq!(facts.iter().map(|f| f.value).sum::<f64>(), 120.0);
-        let (capture_turn, capture_effort): (Option<i64>, Option<i64>) = svc
+        let capture_turn: Option<i64> = svc
             .db
             .read(|c| {
                 c.query_row(
-                    "SELECT turn_id, effort_id FROM metric_capture WHERE producer = 'otel-tokens'",
+                    "SELECT turn_id FROM metric_capture WHERE producer = 'otel-tokens'",
                     [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| r.get(0),
                 )
                 .map_err(oxplow_db::map_sql_err)
             })
             .await
             .unwrap();
         assert_eq!(capture_turn, Some(turn));
-        assert_eq!(capture_effort, Some(fx.effort.value()));
     }
 }

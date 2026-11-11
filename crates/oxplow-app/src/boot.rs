@@ -85,9 +85,9 @@ async fn sweep_stream(
             bts.fail(&task_id, e.to_string(), None);
         }
     }
-    // Release the effort-start gate on every path — including failure. A
-    // failed sweep leaves a best-effort baseline; blocking efforts forever
-    // would be worse than a partial one.
+    // Release the initial-sweep gate on every path — including failure. A
+    // failed sweep leaves a best-effort baseline; blocking its waiters
+    // forever would be worse than a partial one.
     svc.mark_initial_complete();
 }
 
@@ -159,9 +159,9 @@ pub async fn run_boot_orchestration(
 
     // Startup sweep: backfills changes that landed while the daemon wasn't
     // running, on every stream. Off the boot path because hashing a large
-    // worktree can take a few seconds. Each stream's effort-start gate is up
-    // the instant boot returns, so an agent dispatched during the sweep can't
-    // open an effort whose start snapshot reflects a half-captured tree.
+    // worktree can take a few seconds. Each stream's initial-sweep gate is up
+    // the instant boot returns, so a run marked during the sweep doesn't read
+    // a half-captured tree.
     {
         let captures = state.snapshot_captures.clone();
         for svc in captures.list() {
@@ -190,12 +190,10 @@ pub async fn run_boot_orchestration(
 
     // The event pump: delivers the log to its consumers (page_ref
     // projections first); catches up on anything logged while down.
-    crate::effort_reactors::register(state);
     crate::indexer::register(state);
     crate::symbol_collector::register(state);
-    // A stream's working tree and open efforts, re-analyzed as it moves (P7.B4).
+    // A stream's working tree, re-analyzed as it moves (P7.B4).
     crate::change_reactor::register(state);
-    crate::effort_landing::register(state);
     crate::capabilities::register(state);
     // `on:` collectors (P7.B3), after the consumers they may name.
     crate::collector_triggers::register(state);
@@ -230,15 +228,12 @@ pub async fn run_boot_orchestration(
     // The agent runtimes' skills: what's offered now.
     crate::capabilities::refresh_agent_text(state).await;
     crate::providers::sync::spawn_sync_scheduler(state);
-    // Open efforts' evidence, an asset over the tables it reads (P7.B6).
-    crate::effort_evidence::register(state);
     crate::request_analysis::register(state);
 
     // Metric retention loop (tsk93) — OPT-IN: `metricRetentionDays` defaults
     // to 0 = keep everything (per-test history is what makes the substrate
     // worth having). When enabled, a daily pass prunes captures older than
-    // the window that no current value stands on — effort-stamped captures,
-    // each producer's newest, and fold-live facts' captures are always kept
+    // the window that no current value stands on — each producer's newest, and fold-live facts' captures are always kept
     // (see `prune_aged_captures`). Config is re-read each pass, so flipping
     // the setting takes effect without a restart.
     {
@@ -488,7 +483,7 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Page-ref graph repair: re-project every existing task, effort,
+    // Page-ref graph repair: re-project every existing task,
     // finding and handoff into `page_ref` — only when a migration or a
     // new build may have left it drifted (`page_ref_backfill::needs_repair`).
     {
@@ -497,7 +492,6 @@ pub async fn run_boot_orchestration(
         let page_refs = state.page_ref_store.clone();
         let sources = crate::page_ref_backfill::Sources {
             db: state.db.clone(),
-            efforts: state.effort_store.clone(),
             findings: state.code_quality_store.clone(),
             handoffs: state.handoff_store.clone(),
         };

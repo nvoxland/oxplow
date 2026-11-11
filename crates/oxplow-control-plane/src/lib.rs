@@ -621,8 +621,8 @@ async fn handle_hook_inner(
     // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
-    // PostToolUse: record the call (wiki attribution, effort claim, tool
-    // call, collection — pump reactors on the event the ingest logged) and
+    // PostToolUse: record the call (wiki attribution, tool call,
+    // collection — pump reactors on the event the ingest logged) and
     // hand back any context for the agent (the thread's undelivered
     // nudges).
     if kind == HookKind::PostToolUse {
@@ -646,8 +646,8 @@ async fn handle_hook_inner(
         }
     }
 
-    // UserPromptSubmit: session context (when it changed), prompt
-    // advisories and the effort's decisions ride additionalContext.
+    // UserPromptSubmit: session context (when it changed) and prompt
+    // advisories ride additionalContext.
     let handback = matches!(envelope_for_resume.prompt, Some(Prompt::Handback { .. }));
     if kind == HookKind::UserPromptSubmit && !handback {
         if let Some(thread_id) = envelope_for_resume.thread_id.as_ref() {

@@ -5,7 +5,7 @@
 //! - the **row** of the dataset its resource resolves through (its
 //!   declaration's `resolve:`), every column, by its `ref`;
 //! - what sits **beside** it, for the resources that have some: a
-//!   task's links and comments, a commit's files, an effort's files;
+//!   task's links and comments, a commit's files, a turn's files;
 //! - its **content**, for the resources whose body no dataset holds: a file
 //!   at a revision (`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`;
 //!   the working tree when it names none, in the stream asked for else the
@@ -39,7 +39,7 @@ const MAX_RELATED: usize = 200;
 pub struct RefRead {
     /// The URI as read, canonical.
     pub uri: String,
-    /// Its resource (`oxplow/effort`).
+    /// Its resource (`oxplow/turn`).
     pub resource: String,
     /// The resolving dataset's row, every column; `None` for a resource no
     /// dataset holds (a file).
@@ -84,9 +84,9 @@ const RELATED: &[(&str, &str, &str)] = &[
         "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE uri = ?1) ORDER BY path",
     ),
     (
-        r::EFFORT,
+        r::TURN,
         "files",
-        "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE uri = ?1) ORDER BY path",
+        "SELECT * FROM v_turn_file WHERE turn_id = (SELECT id FROM v_agent_turn WHERE uri = ?1) ORDER BY path",
     ),
 ];
 

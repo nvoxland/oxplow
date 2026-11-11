@@ -4,12 +4,32 @@
 //! `.context/collection.md` "A request's analysis".
 
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use specta::Type;
 
-use oxplow_domain::DomainError;
+use oxplow_domain::{DomainError, Timestamp};
 
 use crate::database::{map_sql_err, Database};
-use crate::effort_evidence_store::EffortObservation;
-use crate::fact_store::EffortMetricDelta;
+use crate::fact_store::MetricDelta;
+
+/// One observation in a request's analysis: a run its turns made, as its
+/// evidence (`request_observation`, read as `v_request_observation`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
+pub struct Observation {
+    /// `test-run` | `diff-coverage` | `static-analysis`.
+    pub kind: String,
+    /// `observed` (oxplow saw it directly) | `asserted` (agent reported it).
+    pub provenance: String,
+    /// Free-form origin tag, e.g. `post-tool-bash` / `agent`.
+    pub source: String,
+    /// Headline numeric (e.g. coverage %); kind-specific, nullable.
+    pub metric_value: Option<f64>,
+    /// Kind-specific structured payload (parsed by the UI, opaque to Rust).
+    pub payload_json: Option<String>,
+    /// The snapshot the run was captured against.
+    pub local_snapshot_id: Option<i64>,
+    pub created_at: Timestamp,
+}
 
 /// What a request's analysis on a stream is computed from, as a signature:
 /// its turns' runs (how many, and the newest), its files (how many), its
@@ -112,11 +132,11 @@ impl SqliteRequestAnalysisStore {
         request: i64,
         stream: i64,
         span: AnalysisSpan,
-        deltas: Vec<EffortMetricDelta>,
-        observations: Vec<EffortObservation>,
+        deltas: Vec<MetricDelta>,
+        observations: Vec<Observation>,
         sig: String,
     ) -> Result<(), DomainError> {
-        let at = crate::database::ts_to_string(oxplow_domain::Timestamp::now());
+        let at = crate::database::ts_to_string(Timestamp::now());
         self.db
             .transaction(move |tx| {
                 tx.execute(

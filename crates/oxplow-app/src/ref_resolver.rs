@@ -412,13 +412,13 @@ mod tests {
     /// resource undeclared, its row gone — is a dead link, not an error.
     #[tokio::test]
     async fn a_resource_resolves_through_its_dataset_or_is_unresolved() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        let summary = resolve_ref(&fx.svc, &build::effort_uri(fx.effort)).await;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let summary = resolve_ref(&fx.svc, &build::thread_uri(fx.thread)).await;
         assert!(summary.resolved, "{summary:?}");
         assert!(summary.title.is_some(), "{summary:?}");
 
         for uri in [
-            build::keyed(oxplow_domain::uri::resources::EFFORT, "eff999"),
+            build::keyed(oxplow_domain::uri::resources::REQUEST, "req999"),
             build::collector_uri("gone", "x"),
             "oxplow:mystery/thing?id=x".to_string(),
         ] {

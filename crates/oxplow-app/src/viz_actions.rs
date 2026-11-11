@@ -1988,7 +1988,7 @@ view:
             SqlCell::Null(()),
         ];
         for sql in [
-            "SELECT 'effort', uri, COALESCE(NULLIF(title, ''), uri), started_at, ended_at FROM v_effort WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3) ORDER BY started_at",
+            "SELECT 'turn', uri, COALESCE(NULLIF(prompt, ''), uri), started_at, ended_at FROM v_agent_turn WHERE started_at < ?2 AND COALESCE(ended_at, ?2) > ?1 AND (?3 IS NULL OR thread_id = ?3) ORDER BY started_at",
             "SELECT 'commit', uri, subject, committed_at, NULL FROM v_commit WHERE committed_at >= ?1 AND committed_at < ?2 AND ?3 IS NULL ORDER BY committed_at",
             "SELECT 'thread', uri, title, created_at, closed_at FROM v_thread WHERE created_at < ?2 AND COALESCE(closed_at, ?2) > ?1 AND (?3 IS NULL OR uri = 'oxplow:oxplow/thread?id=thr' || ?3) ORDER BY created_at",
         ] {

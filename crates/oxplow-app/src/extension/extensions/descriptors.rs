@@ -233,7 +233,6 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
             &oxplow_domain::contribution::implementation_local(&i.capability, &i.id),
             RunsOn::Call,
         );
-        d.needs = i.needs.clone();
         d.source = entry("implementations", "id", &i.id);
         d.global = Some(format!("{}/{}", i.capability, i.id));
         d.description = i.description.clone();
@@ -741,13 +740,8 @@ mod tests {
             "manifest: 2\nname: acme\nintent: { purpose: p, origin: null, examples: [] }\n\
              permissions: [ai.compute]\n\
              implementations:\n\
-             \x20 - { capability: effort_policy, id: tidy, entry: policies/tidy.star }\n\
+             \x20 - { capability: task_tracker, id: oxtask, entry: \"oxplow:oxtask\" }\n\
              \x20 - { capability: ai_provider, id: tidy, provider: openai_compatible }\n",
-        );
-        write(
-            dir.path(),
-            ".oxplow/extensions/acme/policies/tidy.star",
-            "def transform(x):\n    return []\n",
         );
         let ext = load_extensions(dir.path())
             .into_iter()
@@ -761,7 +755,7 @@ mod tests {
         assert_eq!(
             ids,
             [
-                "oxplow:oxplow/implementation?implementation=acme/effort_policy.tidy",
+                "oxplow:oxplow/implementation?implementation=acme/task_tracker.oxtask",
                 "oxplow:oxplow/implementation?implementation=acme/ai_provider.tidy"
             ]
         );

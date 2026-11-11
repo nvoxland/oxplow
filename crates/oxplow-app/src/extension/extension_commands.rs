@@ -883,45 +883,6 @@ pub fn own_events(
         .collect()
 }
 
-/// An emitted event about an effort happened on that effort's thread: it
-/// carries the thread, its stream and the effort as anchors, so an effect
-/// reacting to it runs for that thread. One that already names a thread, or
-/// is about no effort, is left as it is.
-fn anchor_to_efforts(
-    conn: &rusqlite::Connection,
-    mut events: Vec<oxplow_domain::Envelope>,
-) -> Result<Vec<oxplow_domain::Envelope>, oxplow_domain::DomainError> {
-    use rusqlite::OptionalExtension as _;
-    for event in &mut events {
-        if event.anchors.thread_id.is_some() {
-            continue;
-        }
-        let Some(effort) = event
-            .subject
-            .iter()
-            .find_map(|r| oxplow_domain::uri::build::effort_of_uri(r))
-        else {
-            continue;
-        };
-        let thread: Option<i64> = conn
-            .query_row(
-                "SELECT thread_id FROM effort WHERE id = ?1",
-                [effort.value()],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(oxplow_db::map_sql_err)?;
-        if let Some(thread) = thread {
-            event.anchors = oxplow_db::event_log_store::anchors_for_thread_tx(
-                conn,
-                oxplow_domain::ThreadId::new(thread),
-            )?;
-            event.anchors.effort_id = Some(effort);
-        }
-    }
-    Ok(events)
-}
-
 /// What a command's script decided.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Composed {
@@ -1100,9 +1061,6 @@ pub fn extension_command(
                     events,
                 } => {
                     let events = own_events(&vocabulary.current(), &extension, &source, events)?;
-                    let events = runtime
-                        .block_on(composing.db.read(move |tx| anchor_to_efforts(tx, events)))
-                        .map_err(oxplow_domain::CommandError::from)?;
                     Ok(Composition {
                         calls,
                         result,

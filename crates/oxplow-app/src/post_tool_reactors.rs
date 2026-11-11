@@ -3,7 +3,7 @@
 //! used to run on a detached task the hook route spawned and waited up to
 //! 2.5 s for; now they are durable (a crash re-delivers the event), keyed
 //! by the event (a redelivery records nothing twice) and anchored to the
-//! turn and effort the tool ran in. What they want the agent to hear is
+//! turn the tool ran in. What they want the agent to hear is
 //! persisted as a nudge; the hook response takes the thread's undelivered
 //! nudges (`AgentContext::post_tool_context`), so a nudge that finishes after
 //! its hook's window goes out on the next one instead of being lost.
@@ -12,7 +12,7 @@
 //!   (`CollectionService::on_shell_run`), from the command and exit code
 //!   its `agent.tool.finished` carries.
 //! - `advisories.post_tool` — the enabled extensions' post-tool-use
-//!   advisories for the effort the tool ran in.
+//!   advisories for the turn the tool ran in.
 //! - `collection.run_reports` — a run reported any other way
 //!   (`oxplow.test.record_run`, a by-hand sync) has its coverage read from its
 //!   `test.run.recorded` (`CollectionService::on_test_run_recorded`,
@@ -127,7 +127,7 @@ impl AsyncEventConsumer for PostToolAdvisories {
     }
 
     /// An advisory reads what collection recorded for the same run
-    /// (`v_effort_observation`), so it sees the run only after collection.
+    /// (`v_test_run`), so it sees the run only after collection.
     fn after(&self) -> Vec<String> {
         vec![COLLECTION.to_string()]
     }
@@ -153,7 +153,6 @@ impl AsyncEventConsumer for PostToolAdvisories {
 #[cfg(test)]
 mod tests {
     use crate::{HookEnvelope, ToolDecision};
-    use oxplow_db::EffortStore as _;
     use oxplow_domain::HookKind;
     use serde_json::json;
 
@@ -199,7 +198,7 @@ mod tests {
     /// tool event.
     #[tokio::test]
     async fn a_test_run_is_recorded_once_and_anchored_to_its_turn() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.hook_ingest
             .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
@@ -229,7 +228,6 @@ mod tests {
         let run = &runs[0].envelope;
         // The run carries the tool event's own anchors.
         assert_eq!(run.anchors.turn_id, finished.envelope.anchors.turn_id);
-        assert_eq!(run.anchors.effort_id, Some(f.effort));
         assert_eq!(run.cause.as_ref(), Some(&finished.envelope.id));
         assert_eq!(run.payload["command"], "cargo test");
     }
@@ -286,38 +284,18 @@ mod tests {
         );
     }
 
-    /// The effort the command ran in owns the run, even when the reactor
-    /// records it after that effort closed.
-    #[tokio::test]
-    async fn a_run_recorded_after_the_close_belongs_to_its_effort() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let svc = &f.svc;
-        svc.hook_ingest
-            .ingest(hook(
-                f.thread,
-                HookKind::PostToolUse,
-                bash("cargo test -p x"),
-            ))
-            .await
-            .unwrap();
-        svc.effort_store
-            .finish(&f.effort, None, None)
-            .await
-            .unwrap();
-        svc.event_pump.run_once().await.unwrap();
-        assert_eq!(
-            count(svc, "SELECT count(*) FROM v_test_run WHERE effort_id = 1").await,
-            1
-        );
-    }
-
     /// A report-less run's nudge reaches the agent through the hook
     /// response once; one that misses its hook goes out on the next.
     #[tokio::test]
     async fn nudges_are_delivered_once_by_thread() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.config.write().unwrap().testing.command = Some("bun run test:collect".into());
+        // The run is in a turn, so its nudge is paced by the turn's request.
+        svc.hook_ingest
+            .ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
         svc.hook_ingest
             .ingest(hook(f.thread, HookKind::PostToolUse, bash("bun test")))
             .await
@@ -343,7 +321,6 @@ mod tests {
         svc.collection
             .persist_nudge(
                 &f.thread,
-                None,
                 crate::collection::Raised::agent("late", "a late nudge", "cmd"),
                 crate::collection::RunOrigin::Command { turn: None },
             )

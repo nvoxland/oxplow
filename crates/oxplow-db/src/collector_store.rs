@@ -755,10 +755,10 @@ mod tests {
         assert!(err.to_string().contains("belongs to `my-gh`"), "{err}");
         // A core dataset's view.
         let core = EntityTable {
-            extension: "effort".into(),
-            namespace: "effort".into(),
+            extension: "turn".into(),
+            namespace: "turn".into(),
             entity: "file".into(),
-            view: "v_effort_file".into(),
+            view: "v_turn_file".into(),
             key: "path".into(),
             description: String::new(),
             columns: vec![EntityColumn {

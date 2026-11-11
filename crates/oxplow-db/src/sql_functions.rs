@@ -322,10 +322,10 @@ mod tests {
     #[test]
     fn uri_builds_a_canonical_uri() {
         assert_eq!(
-            run("SELECT uri('oxplow/effort', 'id', 'eff' || 12)")
+            run("SELECT uri('oxplow/request', 'id', 'req' || 12)")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow:oxplow/effort?id=eff12")
+            Some("oxplow:oxplow/request?id=req12")
         );
         assert_eq!(
             run("SELECT uri('oxplow/task', 'provider', 'oxtask', 'id', 'tsk1', 'x', NULL)")
@@ -340,9 +340,9 @@ mod tests {
             Some("oxplow:oxplow/file?path=a%20b%26c.rs")
         );
         assert_eq!(run("SELECT uri(NULL, 'id', 'x')").unwrap(), None);
-        assert!(run("SELECT uri('oxplow/effort', 'id')").is_err());
-        assert!(run("SELECT uri('Effort', 'id', 'x')").is_err());
-        assert!(run("SELECT uri('oxplow/effort', 'bad key', 'x')").is_err());
+        assert!(run("SELECT uri('oxplow/request', 'id')").is_err());
+        assert!(run("SELECT uri('Request', 'id', 'x')").is_err());
+        assert!(run("SELECT uri('oxplow/request', 'bad key', 'x')").is_err());
     }
 
     #[test]
@@ -367,10 +367,10 @@ mod tests {
             Some("tsk1")
         );
         assert_eq!(
-            run("SELECT uri_param('oxplow:oxplow/effort?id=eff1', 'gone')").unwrap(),
+            run("SELECT uri_param('oxplow:oxplow/request?id=req1', 'gone')").unwrap(),
             None
         );
-        assert_eq!(run("SELECT uri_param('effort:eff1', 'id')").unwrap(), None);
+        assert_eq!(run("SELECT uri_param('request:req1', 'id')").unwrap(), None);
         assert_eq!(run("SELECT uri_param(NULL, 'id')").unwrap(), None);
     }
 
@@ -382,7 +382,7 @@ mod tests {
                 .as_deref(),
             Some("oxplow/task")
         );
-        assert_eq!(run("SELECT uri_resource('effort:eff1')").unwrap(), None);
+        assert_eq!(run("SELECT uri_resource('request:req1')").unwrap(), None);
         assert_eq!(run("SELECT uri_resource(NULL)").unwrap(), None);
     }
 
@@ -441,7 +441,10 @@ mod tests {
                 "> Quoted first: yes! Then more.",
                 Some("Quoted first: yes!"),
             ),
-            ("See `v_effort.title`. Done.", Some("See `v_effort.title`.")),
+            (
+                "See `v_request.prompt`. Done.",
+                Some("See `v_request.prompt`."),
+            ),
             ("Run `a. b` now. Then.", Some("Run `a. b` now.")),
             (
                 "Read [the spec](https://x.y/a.b?c=d. e) first. Then.",

@@ -15,7 +15,7 @@ use crate::database::{map_sql_err, Database};
 /// One implementation of a capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityProvider {
-    /// `task_tracker`, `effort_policy`, `snapshots`, `vcs`, `knowledge`.
+    /// `task_tracker`, `snapshots`, `vcs`, `knowledge`.
     pub capability: String,
     /// The implementation's id (`oxplow`, `git`, `issues`, `none`).
     pub provider: String,

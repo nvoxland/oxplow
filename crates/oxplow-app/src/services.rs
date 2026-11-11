@@ -2,8 +2,7 @@
 //! "Services"): each service its script uses decided on its run — its mode,
 //! what it declares, its authority — and the hosts built for those it may
 //! use. Every host that runs an extension's script prepares it here:
-//! collectors (entity and fact), commands, effects, effort policies. None
-//! builds its own.
+//! collectors (entity and fact), commands, effects. None builds its own.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -397,17 +396,6 @@ pub fn of_extension(
             &e.needs,
             &e.needs,
         );
-    }
-    for i in &ext.implementations {
-        if let (Some(script), Some(entry)) = (&i.script, &i.entry) {
-            push(
-                format!("{} `{}`", i.capability, i.id),
-                entry,
-                script,
-                &i.needs,
-                &i.needs,
-            );
-        }
     }
     out
 }

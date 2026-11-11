@@ -36,7 +36,7 @@ mod tests {
         );
         assert_eq!(oxtask_of_task_ref(&task_uri("issues", "ENG-1")), None);
         assert_eq!(
-            oxtask_of_task_ref(&keyed(oxplow_domain::uri::resources::EFFORT, "eff1")),
+            oxtask_of_task_ref(&keyed(oxplow_domain::uri::resources::REQUEST, "req1")),
             None
         );
         assert_eq!(

@@ -485,8 +485,8 @@ mod tests {
     }
 
     /// What changed in a worktree stream while oxplow was off is in a snapshot
-    /// once it has swept; a clean file isn't; and an effort can't start on that
-    /// stream until then.
+    /// once it has swept; a clean file isn't; and a run's mark on that stream
+    /// waits until then.
     #[tokio::test]
     async fn every_stream_sweeps_once_at_start_and_its_gate_holds_until_then() {
         let rig = rig().await;

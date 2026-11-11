@@ -342,7 +342,7 @@ pub async fn suite(
     // 5b. A list with links takes `about` to any ref — one that names
     // nothing too — and removes a link with `unlink`.
     if features.links {
-        let about = &oxplow_domain::uri::build::effort_uri(oxplow_domain::EffortId::new(999_999));
+        let about = &oxplow_domain::uri::build::request_uri(oxplow_domain::RequestId::new(999_999));
         match items.link(actor, &item, about, "about").await {
             Err(e) => fail("links", format!("link `about` {about}: {e}")),
             Ok(_) => {
@@ -643,7 +643,6 @@ pub struct ServicesProbe<'a>(pub &'a crate::Services);
 #[async_trait]
 impl TaskTrackerProbe for ServicesProbe<'_> {
     async fn settle(&self) {
-        self.0.efforts.settle_lifecycle().await;
         // The in-transaction consumers (the `tasks.project`
         // projection) run on the pump's next pass; run it now.
         if let Err(e) = self.0.event_pump.run_once().await {

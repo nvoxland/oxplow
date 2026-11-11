@@ -96,15 +96,6 @@ pub struct AgentTurn {
     pub session_id: Option<String>,
     pub started_at: Timestamp,
     pub ended_at: Option<Timestamp>,
-    /// The snapshot the stream's worktree was at when the turn opened;
-    /// `start_snapshot_id → snapshot_id` is what the turn changed.
-    /// `None` when the stream had no snapshot yet.
-    #[specta(type = Option<crate::JsNumber>)]
-    pub start_snapshot_id: Option<i64>,
-    /// The snapshot the worktree was at when the turn ended (its
-    /// `turn_end` take); `None` while running.
-    #[specta(type = Option<crate::JsNumber>)]
-    pub snapshot_id: Option<i64>,
     /// What opened it; `None` for a turn recorded before sources were.
     pub source: Option<TurnSource>,
 }

@@ -44,8 +44,8 @@ pub fn collector_request(spec: &CollectorSpec, needs: &[String]) -> GrantRequest
     }
 }
 
-/// A script that composes commands — an effect, an extension command, an
-/// effort policy — asks for the scopes it calls.
+/// A script that composes commands — an effect or an extension command —
+/// asks for the scopes it calls.
 pub fn script_request(needs: &[String]) -> GrantRequest {
     GrantRequest {
         scopes: scopes(needs),

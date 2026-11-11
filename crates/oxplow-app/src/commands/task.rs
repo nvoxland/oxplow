@@ -26,9 +26,7 @@
 //! for every list ([`canonical_events`]): `task.created`, `.edited`,
 //! `.state_changed`, `.linked`, `.commented` and `.deleted`, caused by the
 //! run's `command.executed`, after the list's own `task.recorded` —
-//! how what it wrote reaches the interface. An item's state never opens or
-//! closes an effort here; the effort policy reacts to
-//! `task.state_changed` (`crate::effort_policy`).
+//! how what it wrote reaches the interface.
 
 use crate::commands::ops::Op;
 use crate::link_check::LinkDeps;
@@ -1164,7 +1162,6 @@ mod tests {
             .await
             .unwrap()
     }
-    use oxplow_db::EffortStore as _;
     use oxplow_domain::Actor;
     use oxplow_domain::StreamId;
     use oxplow_oxtask::OxtaskId;
@@ -1441,11 +1438,11 @@ mod tests {
     /// reconcile in between; one that isn't available resolves to none, and
     /// filing says so.
     /// A loose id the active task tracker declares (`tsk12` for oxplow's
-    /// tasks) is that list's item, in every task ref field and in an
-    /// effort's link; one it doesn't declare is refused naming the shapes.
+    /// tasks) is that list's item, in every task ref field; one it doesn't
+    /// declare is refused naming the shapes.
     #[tokio::test]
     async fn a_loose_id_resolves_against_the_active_task_tracker() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let loose = fx.task.to_string();
         let out = fx
             .svc
@@ -1474,16 +1471,6 @@ mod tests {
             task_row(&fx.svc, &child.result).await["parent_id"],
             json!(loose)
         );
-        fx.svc
-            .commands
-            .run(
-                &Actor::Human,
-                crate::commands::effort::LINK,
-                json!({ "effort": fx.effort.to_string(), "task": loose }),
-                false,
-            )
-            .await
-            .unwrap();
         let err = fx
             .svc
             .commands
@@ -2071,10 +2058,8 @@ mod tests {
     /// A transition is one transaction with its audit: the status and
     /// core's `task.state_changed` carry the actor's source and are
     /// caused by the run's `command.executed`.
-    /// The effort policy closes the item's effort after it, as a reaction.
     /// A transition to the state the item is in moves nothing, so it logs
-    /// no `task.state_changed` — the event says the state moved, and
-    /// the effort policy acts on it.
+    /// no `task.state_changed` — the event says the state moved.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_transition_to_the_state_it_is_in_logs_no_change() {
         let fx = crate::test_fixtures::services_with_task().await;
@@ -2114,7 +2099,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_transition_commits_with_its_audit_and_names_its_cause() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -2154,21 +2139,6 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| e.envelope.id == executed && e.envelope.event_type == "command.executed"));
-        fx.svc
-            .event_pump
-            .settle(
-                &[crate::effort_policy::NAME],
-                std::time::Duration::from_secs(5),
-            )
-            .await;
-        let effort = fx
-            .svc
-            .effort_store
-            .get_effort(&fx.effort)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(effort.ended_at.is_some());
     }
 
     /// `oxplow.task.update`: fields and state commit together, audited and
@@ -2310,12 +2280,12 @@ mod tests {
         );
     }
 
-    /// `oxplow.task.create`: filing a task is audited to the actor; filed
-    /// straight into `in_progress`, the effort policy then switches the
-    /// thread's effort to it; the body's mentions are projected by the pump.
+    /// `oxplow.task.create`: filing a task is audited to the actor, filed
+    /// straight into `in_progress`; the body's mentions are projected by the
+    /// pump.
     #[tokio::test]
-    async fn a_create_is_audited_and_its_start_switches_the_effort() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+    async fn a_create_is_audited_and_its_mentions_are_projected() {
+        let fx = crate::test_fixtures::services_with_task().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -2360,29 +2330,6 @@ mod tests {
                 "task.assigned"
             ]
         );
-        // The fixture's effort closes as the thread switches to this one.
-        fx.svc
-            .event_pump
-            .settle(
-                &[crate::effort_policy::NAME],
-                std::time::Duration::from_secs(5),
-            )
-            .await;
-        let fixture_effort = fx
-            .svc
-            .effort_store
-            .get_effort(&fx.effort)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(fixture_effort.closed_by.as_deref(), Some("switch"));
-        assert!(fx
-            .svc
-            .effort_store
-            .find_open_for_task(&task_ref(id))
-            .await
-            .unwrap()
-            .is_some());
         fx.svc.event_pump.run_once().await.unwrap();
         let out_refs = fx
             .svc
@@ -2757,7 +2704,7 @@ mod tests {
     /// thread and a closed item are refused; closing an item releases it.
     #[tokio::test]
     async fn assign_gives_an_item_to_someone_and_undo_gives_it_back() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let mine = oxplow_domain::uri::build::thread_uri(fx.thread);
         let person = oxplow_domain::uri::build::person_uri(None);
         let t = task_ref(fx.task);
@@ -2783,15 +2730,6 @@ mod tests {
             .any(|e| e.envelope.event_type == "task.assigned"
                 && e.envelope.payload["task"] == json!(t)
                 && e.envelope.payload["to"] == json!(person)));
-        // Its effort is its thread's: an assignment leaves it open.
-        let effort = fx
-            .svc
-            .effort_store
-            .get_effort(&fx.effort)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(effort.ended_at.is_none());
 
         fx.svc
             .commands

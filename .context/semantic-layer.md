@@ -795,7 +795,6 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
 | `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
 | `v_task` | the active task tracker's items (`uri`, `provider`, `native_id`, `state` (the bucket), `stage` and `stage_title` (the list's own stage, as it declares it), `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxtask has no dataset of its own (`v_task` was removed) and keeps its own fields in `stage` / `native`; oxtask tasks are `task:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
-| `v_effort` | spans of a thread's work, linked to a task or not (`task` URI; join `v_task` for the item); `title` defaults to the item's or the first prompt's, `summary` (v3) to the last turn's final message, and `closed_by` says what closed it |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |
 | `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
@@ -808,7 +807,7 @@ and `v_dataset_test` are the catalog of all of them:
 | `v_task_comment` | comments on the active list's items (`v_task_note` was removed) |
 | `v_handoff` | work handed from one thread to another (`oxplow.handoff.*`; V84): sender thread and session, recipient thread, task, body, `delivered_at` (stamped at the recipient's next prompt), `state` `open` / `taken` / `declined` / `withdrawn`; `v_search_handoff` is its search feed |
 | `v_task_link` | typed links between the active list's items (`v_task_link` was removed) |
-| `v_agent_turn` | human prompt → agent answer, per thread (V74), with the snapshots the turn started and ended at (`start_snapshot_id`, `snapshot_id`: what the turn changed; V98/V99) |
+| `v_agent_turn` | human prompt → agent answer, per thread (V74); what a turn changed is `v_turn_file` |
 | `v_token_usage` | model tokens per thread / request / model, with each turn's prompt (V74, `prompt` V82) |
 | `v_page_visit` | pages the human opened, and for how long (V74) |
 | `v_event` | the event log: every activity and state change, oldest first by `seq`, with anchors, subject URIs and payload (V94; see [DATA_DATASET_X.md](./DATA_DATASET_X.md) "event_log"); `payload_expired_at` since V102) |

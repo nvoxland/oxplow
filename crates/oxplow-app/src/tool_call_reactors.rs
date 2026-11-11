@@ -10,30 +10,21 @@
 //!   turn's `agent.turn.ended` (or its session's `agent.session.ended`)
 //!   comes with it still running. One row per
 //!   call however often an event is delivered.
-//! - `effort.claim` (async) — an edit (`kind: edit`, whatever its harness
-//!   calls it) claims every file it names for the effort that was open
-//!   when it happened (the event's effort anchor), falling back to target
-//!   scoring when several were open. Shell and formatter writes stay for
-//!   snapshot reconciliation.
+//!   Every file a call names, or its harness reports it changed, is its
+//!   `agent_tool_call_path` row (`v_tool_call_path`).
 //!
 //! The ingest already made `paths` relative to the thread's worktree, so
 //! these read the payload as it is.
 
-use std::path::{Path, PathBuf};
-
-use async_trait::async_trait;
 use oxplow_db::tool_call_store::CallOwner;
-use oxplow_db::Database;
 use oxplow_domain::events::schema::{
     AgentSessionEnded, AgentToolFinished, AgentToolRequested, AgentTurnEnded, EventType,
 };
-use oxplow_domain::{DomainError, StoredEvent, ThreadId};
+use oxplow_domain::{DomainError, StoredEvent};
 
-use crate::effort_service::EffortService;
-use crate::event_pump::{AsyncEventConsumer, EventConsumer};
+use crate::event_pump::EventConsumer;
 
 pub const TOOL_CALL_PROJECTION: &str = "tool_call.project";
-pub const EFFORT_CLAIM: &str = "effort.claim";
 
 fn str_field<'a>(event: &'a StoredEvent, key: &str) -> Option<&'a str> {
     event.envelope.payload.get(key).and_then(|v| v.as_str())
@@ -88,7 +79,6 @@ impl EventConsumer for ToolCallProjection {
         let finished = env.event_type == AgentToolFinished::TYPE;
         let call = oxplow_db::NewToolCall {
             thread_id: thread.value(),
-            effort_id: env.anchors.effort_id.map(|e| e.value()),
             turn_id: env.anchors.turn_id,
             tool: str_field(event, "tool").unwrap_or_default().to_string(),
             kind: str_field(event, "kind").unwrap_or("other").to_string(),
@@ -127,99 +117,11 @@ impl EventConsumer for ToolCallProjection {
     }
 }
 
-/// Claims an edited file for the effort it was edited in.
-pub struct EffortClaimConsumer {
-    efforts: EffortService,
-    db: Database,
-    project_dir: PathBuf,
-}
-
-impl EffortClaimConsumer {
-    pub fn new(efforts: EffortService, db: Database, project_dir: PathBuf) -> Self {
-        Self {
-            efforts,
-            db,
-            project_dir,
-        }
-    }
-
-    /// The thread's worktree (its stream's; the project dir when none).
-    async fn worktree(&self, thread: ThreadId) -> Result<PathBuf, DomainError> {
-        let wt = self
-            .db
-            .read(move |tx| {
-                use rusqlite::OptionalExtension as _;
-                let wt: Option<String> = tx
-                    .query_row(
-                        "SELECT s.worktree_path FROM threads th JOIN streams s ON s.id = th.stream_id
-                          WHERE th.id = ?1",
-                        [thread.value()],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(oxplow_db::map_sql_err)?;
-                Ok(wt)
-            })
-            .await?;
-        Ok(wt
-            .filter(|w| !w.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.project_dir.clone()))
-    }
-}
-
-#[async_trait]
-impl AsyncEventConsumer for EffortClaimConsumer {
-    fn name(&self) -> &'static str {
-        EFFORT_CLAIM
-    }
-
-    fn handles(&self, event_type: &str) -> bool {
-        event_type == AgentToolFinished::TYPE
-    }
-
-    async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let Some(thread) = event.envelope.anchors.thread_id else {
-            return Ok(());
-        };
-        // An edit tool names its files; a shell call's are the ones its
-        // harness says it changed (`paths` then holds only those).
-        let basis = match str_field(event, "kind") {
-            Some("edit") => oxplow_db::ClaimBasis::Named,
-            Some("shell") => oxplow_db::ClaimBasis::Reported,
-            _ => return Ok(()),
-        };
-        // An absolute path is outside the thread's worktree: no effort's file.
-        let files: Vec<&str> = paths(event)
-            .into_iter()
-            .filter(|p| !Path::new(p).is_absolute())
-            .collect();
-        if files.is_empty() {
-            return Ok(());
-        }
-        let worktree = self.worktree(thread).await?;
-        for path in files {
-            self.efforts
-                .claim_effort_file(
-                    &thread,
-                    event.envelope.anchors.effort_id,
-                    event.envelope.anchors.agent_session_id,
-                    path,
-                    Some(&worktree),
-                    basis,
-                )
-                .await?;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     use crate::{HookEnvelope, ToolDecision};
-    use oxplow_db::EffortStore as _;
     use oxplow_domain::HookKind;
     use serde_json::json;
 
@@ -332,11 +234,11 @@ mod tests {
     }
 
     /// In a worktree stream (a sibling directory of the project) an edit's
-    /// absolute path is inside the thread's worktree: it is claimed and
-    /// recorded repo-relative all the same (tsk386).
+    /// absolute path is inside the thread's worktree: it is recorded
+    /// repo-relative all the same (tsk386).
     #[tokio::test]
-    async fn worktree_stream_edits_are_claimed_and_recorded_relative() {
-        let f = crate::test_fixtures::services_with_effort().await;
+    async fn worktree_stream_edits_are_recorded_relative() {
+        let f = crate::test_fixtures::services_with_thread().await;
         let worktree = tempfile::tempdir().unwrap();
         let wt = worktree.path().to_string_lossy().to_string();
         f.svc
@@ -367,18 +269,17 @@ mod tests {
             json!([["src/a.rs"]])
         );
         assert_eq!(
-            rows(&f.svc, "SELECT path FROM v_effort_file").await,
+            rows(&f.svc, "SELECT path FROM v_tool_call_path").await,
             json!([["src/a.rs"]])
         );
     }
 
     /// A shell call's files the harness reported (`bashEditDiff`) are on its
-    /// tool call and claimed for its effort with the basis `reported`; one
-    /// that reported none claims nothing; a report never takes a file an
-    /// edit tool named.
+    /// tool call with the basis `reported`; one that reported none names
+    /// nothing; a file an edit tool named is `named`.
     #[tokio::test]
-    async fn a_shell_calls_reported_files_are_claimed_apart_from_named_ones() {
-        let f = crate::test_fixtures::services_with_effort().await;
+    async fn a_shell_calls_reported_files_are_recorded_apart_from_named_ones() {
+        let f = crate::test_fixtures::services_with_thread().await;
         let worktree = tempfile::tempdir().unwrap();
         let wt = worktree.path().to_string_lossy().to_string();
         f.svc
@@ -431,37 +332,10 @@ mod tests {
         assert_eq!(
             rows(
                 &f.svc,
-                "SELECT path, claim_basis FROM v_effort_file ORDER BY path"
+                "SELECT path, min(basis) FROM v_tool_call_path GROUP BY path ORDER BY path"
             )
             .await,
             json!([["gen.rs", "reported"], ["named.rs", "named"]])
-        );
-    }
-
-    /// The claim goes to the effort that was open when the edit happened,
-    /// even when the reactor runs after that effort closed.
-    #[tokio::test]
-    async fn an_edit_is_claimed_by_the_effort_it_happened_in() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let svc = &f.svc;
-        svc.hook_ingest
-            .ingest(hook(
-                f.thread,
-                HookKind::PostToolUse,
-                json!({"tool_name": "Write", "tool_input": {"file_path": "src/b.rs"}}),
-            ))
-            .await
-            .unwrap();
-        // The effort closes before the reactor gets to the edit.
-        svc.effort_store
-            .finish(&f.effort, None, None)
-            .await
-            .unwrap();
-        svc.event_pump.run_once().await.unwrap();
-        let files = svc.effort_store.list_files(&f.effort).await.unwrap();
-        assert_eq!(
-            files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>(),
-            vec!["src/b.rs"]
         );
     }
 

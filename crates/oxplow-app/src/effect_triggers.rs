@@ -2112,12 +2112,12 @@ mod tests {
         start(svc).await;
         let mut stored = log(svc, state_changed(&fx, Bucket::Done)).await;
         stored.envelope.id = oxplow_domain::EventId::generate();
-        stored.envelope.subject = vec!["oxplow:oxplow/effort?id=eff77".into()];
+        stored.envelope.subject = vec!["oxplow:oxplow/request?id=req77".into()];
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&stored)
             .await
             .unwrap();
-        assert_eq!(title(&fx).await, "oxplow:oxplow/effort?id=eff77");
+        assert_eq!(title(&fx).await, "oxplow:oxplow/request?id=req77");
     }
 
     async fn run_as_person(

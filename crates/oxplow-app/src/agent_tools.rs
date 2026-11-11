@@ -228,7 +228,6 @@ mod tests {
                 "oxplow_code_symbols",
                 "oxplow_code_workspace_symbols",
                 "oxplow_diff",
-                "oxplow_effort_summary",
                 "oxplow_ensure_change",
                 "oxplow_find_page",
                 "oxplow_get_open_page",

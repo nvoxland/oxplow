@@ -1,14 +1,14 @@
 //! The `thread.checkpoint` consumer (`.context/work-tracking.md`): once a
 //! turn's end take lands (`snapshot.taken` with `trigger: turn_end`,
 //! logged even when the take outruns the Stop hook's budget), log
-//! `thread.checkpoint` with what an effort policy needs and nothing it
-//! would have to dig for: whether files changed during the turn, and how
+//! `thread.checkpoint` with what a reactor needs and nothing it would
+//! have to dig for: whether files changed during the turn, and how
 //! many of the turn's tool calls could have changed them.
 //!
 //! "Changed" is whether any file changed during the turn: its files joined
 //! by time with the stream's snapshot line (`v_turn_file`), so a file
 //! changed before the prompt doesn't count. Which tools
-//! can change the worktree is harness knowledge kept here, so a policy
+//! can change the worktree is harness knowledge kept here, so a reactor
 //! never reads tool names.
 
 use async_trait::async_trait;
@@ -125,7 +125,6 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
         .with_anchors(oxplow_domain::Anchors {
             thread_id: Some(thread),
             turn_id: Some(turn.value()),
-            effort_id: None,
             ..anchors.clone()
         })
         .with_subject([thread_uri(thread), turn_uri(turn)])
@@ -143,7 +142,7 @@ impl AsyncEventConsumer for ThreadCheckpointConsumer {
 pub(crate) mod tests {
     use super::*;
     use crate::hook_ingest::HookEnvelope;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::hook::HookKind;
     use oxplow_domain::stores::AgentTurnStore as _;
 
@@ -170,7 +169,7 @@ pub(crate) mod tests {
     /// ends, `tools` are the kinds of the calls it made (`edit`, `shell`,
     /// …). The checkpoint it logged.
     pub(crate) async fn turn(
-        f: &EffortFixture,
+        f: &ThreadFixture,
         edit: Option<(&str, &str)>,
         tools: &[&str],
     ) -> ThreadCheckpointV2 {
@@ -223,8 +222,8 @@ pub(crate) mod tests {
 
     /// The fixture with a baseline snapshot of its worktree, as a running
     /// app has from its startup sweep.
-    pub(crate) async fn with_baseline() -> EffortFixture {
-        let f = services_with_effort().await;
+    pub(crate) async fn with_baseline() -> ThreadFixture {
+        let f = services_with_thread().await;
         let stream = f.svc.streams.list_streams().await.unwrap()[0].id;
         let capture = f.svc.snapshot_captures.get(&stream).unwrap();
         std::fs::write(f.svc.layout.project_dir.join("seed.txt"), "seed").unwrap();

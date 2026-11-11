@@ -253,7 +253,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Implementation,
         "implementations",
         "Implementation",
-        "an implementation of a capability: a built-in, or an AI provider or effort policy written as a script",
+        "an implementation of a capability: a built-in, or an AI provider written as a script",
         true,
         false,
     ),
@@ -378,7 +378,7 @@ impl ContributionKind {
 /// kind it is, and its id there (for a [`ContributionKind::global_name`]
 /// kind, its global name). Its only public name is its ref
 /// ([`ContributionId::reference`], also its `Display`):
-/// `oxplow:oxplow/job?job=effort_review/review`, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`. Storage,
+/// `oxplow:oxplow/job?job=change_review/review`, `oxplow:oxplow/command?command=oxplow.tasks.clear_finished`. Storage,
 /// events, manifests and the desktop all carry that ref
 /// (`.context/resources.md` "Using refs").
 #[derive(
@@ -857,10 +857,10 @@ mod tests {
     /// text gives a `ContributionRef`; only a local ref says its owner.
     #[test]
     fn a_contribution_is_named_by_its_ref() {
-        let job = ContributionId::new("effort_review", ContributionKind::Job, "review");
+        let job = ContributionId::new("change_review", ContributionKind::Job, "review");
         assert_eq!(
             job.to_string(),
-            "oxplow:oxplow/job?job=effort_review/review"
+            "oxplow:oxplow/job?job=change_review/review"
         );
         let command = ContributionId::new(
             "acme-tools",
@@ -872,13 +872,13 @@ mod tests {
             "oxplow:oxplow/command?command=acme_tools.pr.merge"
         );
 
-        let parsed: ContributionRef = "oxplow:oxplow/job?job=effort_review/review"
+        let parsed: ContributionRef = "oxplow:oxplow/job?job=change_review/review"
             .parse()
             .unwrap();
         assert_eq!(parsed, job.reference());
         assert_eq!(
             parsed.to_string(),
-            "oxplow:oxplow/job?job=effort_review/review"
+            "oxplow:oxplow/job?job=change_review/review"
         );
         assert_eq!(parsed.id(), Some(job.clone()));
         let global: ContributionRef = "oxplow:oxplow/command?command=acme_tools.pr.merge"
@@ -887,9 +887,9 @@ mod tests {
         assert_eq!(global, command.reference());
         assert_eq!(global.id(), None, "a global name doesn't say its owner");
         for bad in [
-            "effort_review/job/review",
+            "change_review/job/review",
             // An extension's name isn't its namespace.
-            "oxplow:oxplow/job?job=effort-review/review",
+            "oxplow:oxplow/job?job=change-review/review",
             "nope:acme/x",
             "oxplow:oxplow/job?job=review",
             "oxplow:oxplow/job?job=Acme/x",
@@ -956,9 +956,9 @@ mod tests {
         );
         assert_eq!(r.of_kind(ContributionKind::Metric).count(), 1);
         // Kinds that share names (two mounts of one slot) don't collide.
-        let mut slot = metric("alpha", "a", "effort.review.details");
+        let mut slot = metric("alpha", "a", "change.review.details");
         slot.id.kind = ContributionKind::Slot;
-        let mut again = metric("beta", "b", "effort.review.details");
+        let mut again = metric("beta", "b", "change.review.details");
         again.id.kind = ContributionKind::Slot;
         r.add(slot).unwrap();
         r.add(again).unwrap();

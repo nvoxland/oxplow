@@ -16,7 +16,7 @@
 //! A resource is `<extension>/<name>`, where the extension segment is the
 //! extension's name, or `oxplow` for the extension whose namespace is
 //! oxplow's (only a bundled one may be). That one resolves to core's
-//! datasets (`resolve: effort` is `v_effort`); any other to its own
+//! datasets (`resolve: request` is `v_request`); any other to its own
 //! (`v_<namespace>_<dataset>`). Collisions across extensions are the
 //! vocabulary's to find.
 
@@ -659,12 +659,12 @@ resources:
             .find(|e| e.name == "oxplow-foundation")
             .expect("foundation ships");
         assert!(foundation.errors.is_empty(), "{:?}", foundation.errors);
-        let effort = foundation
+        let request = foundation
             .resources
             .iter()
-            .find(|r| r.decl.name.to_string() == "oxplow/effort")
-            .expect("foundation declares oxplow/effort");
-        assert_eq!(effort.decl.resolve.as_deref(), Some("v_effort"));
+            .find(|r| r.decl.name.to_string() == "oxplow/request")
+            .expect("foundation declares oxplow/request");
+        assert_eq!(request.decl.resolve.as_deref(), Some("v_request"));
     }
 
     /// The desktop draws exactly the icons an extension may name: its

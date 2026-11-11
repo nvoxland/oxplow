@@ -139,8 +139,6 @@ async fn read_workspace_file_missing_path_errors() {
 
 // ---- Wiki commands ----
 
-// ---- Effort commands ----
-
 // ---------------------------------------------------------------------------
 // Broad read-command coverage. The harness boots a real git repo + a primary
 // stream + a default thread, so `stream_id: Option<String>` falls back to the
@@ -309,19 +307,6 @@ async fn search_returns_empty_for_fresh_project() {
     .await
     .unwrap()
     .is_empty());
-}
-
-// ---- effort reads ----
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn effort_reads_empty_for_unknown_ids() {
-    let app = TestApp::build().await;
-    assert!(
-        commands::generated::list_efforts_at_snapshots(app.state(), vec![])
-            .await
-            .unwrap()
-            .is_empty()
-    );
 }
 
 // ---- snapshot reads ----

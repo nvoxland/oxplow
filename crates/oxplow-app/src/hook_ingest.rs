@@ -4,10 +4,10 @@
 //! all hand a Claude-shaped [`HookEnvelope`] to [`HookIngestService::ingest`].
 //! One envelope is **one transaction** (P3.3, tsk473): the state it changes
 //! (the thread's resume session, the agent turn) and the `agent.*` events
-//! that record it commit together, anchored to the thread's stream, its open
-//! turn and its single open effort. Large bodies (tool input and output)
+//! that record it commit together, anchored to the thread's stream and its
+//! open turn. Large bodies (tool input and output)
 //! go into `event_content` by hash. Reactors on the event pump do the rest
-//! (tool-call rows, effort claims, collection, token usage).
+//! (tool-call rows, collection, token usage).
 //!
 //! Per kind:
 //! - `UserPromptSubmit`: `agent.prompt.submitted`; opens a turn when none
@@ -1443,7 +1443,7 @@ fn bracketing_subagent_tx(
 const PLAN_TEXT_CAP: usize = 64 * 1024;
 
 /// Log `agent.plan.proposed` for `plan`, anchored to the session's open
-/// turn and effort. `dedupe` makes a re-posted hook log once.
+/// turn. `dedupe` makes a re-posted hook log once.
 fn log_plan_tx(
     conn: &rusqlite::Connection,
     ev: &EventCtx<'_>,
@@ -2476,28 +2476,12 @@ mod tests {
         assert_eq!(open_turns(&svc, tid).await, vec![None]);
     }
 
-    async fn open_effort(svc: &HookIngestService) -> i64 {
-        svc.db
-            .transaction(|c| {
-                c.execute(
-                    "INSERT INTO effort (task, thread_id, started_at)
-                       VALUES ('oxplow:oxplow/task?id=ENG-1&provider=issues', 1, '2026-01-01T00:00:00.000000Z')",
-                    [],
-                )
-                .map_err(|e| DomainError::Storage(e.to_string()))?;
-                Ok(c.last_insert_rowid())
-            })
-            .await
-            .unwrap()
-    }
-
     /// P3.3: a finished tool call is an `agent.tool.finished` anchored to
-    /// stream, thread, agent session, turn and effort, with its input and
-    /// output stored by hash and its path made worktree-relative.
+    /// stream, thread, agent session and turn, with its input and output
+    /// stored by hash and its path made worktree-relative.
     #[tokio::test]
-    async fn a_finished_tool_is_logged_with_five_anchors_and_its_content() {
+    async fn a_finished_tool_is_logged_with_four_anchors_and_its_content() {
         let (svc, tid) = fixture().await;
-        let effort = open_effort(&svc).await;
         svc.ingest(hook(
             HookKind::UserPromptSubmit,
             tid,
@@ -2527,7 +2511,6 @@ mod tests {
         assert_eq!(e.anchors.stream_id.map(|s| s.value()), Some(1));
         assert_eq!(e.anchors.thread_id, Some(tid));
         assert_eq!(e.anchors.turn_id, Some(turn));
-        assert_eq!(e.anchors.effort_id.map(|e| e.value()), Some(effort));
         assert_eq!(e.anchors.agent_session_id, Some(first_session()));
         assert_eq!(e.payload["tool"], "Edit");
         assert_eq!(e.payload["kind"], "edit");
@@ -2592,7 +2575,7 @@ mod tests {
         );
         env.decision = Some(ToolDecision {
             allowed: false,
-            reason: Some("no effort is open".into()),
+            reason: Some("the thread is closed".into()),
         });
         svc.ingest(env).await.unwrap();
         let events = logged(&svc).await;
@@ -2605,7 +2588,7 @@ mod tests {
                 p["decision"].as_str(),
                 p["reason"].as_str()
             ),
-            (Some("Write"), Some("denied"), Some("no effort is open"))
+            (Some("Write"), Some("denied"), Some("the thread is closed"))
         );
     }
 

@@ -1946,6 +1946,127 @@ mod tests {
         );
     }
 
+    /// V25 removes efforts and their data: the effort tables and every
+    /// `effort_id` column go, and so do the turn's snapshot columns; a token
+    /// row and a capture an effort was stamped on stay (the token row's
+    /// effort was ON DELETE CASCADE), an effort's event goes, an effort's
+    /// take stays as a manual one, and the database is consistent.
+    #[test]
+    fn v25_removes_efforts_and_keeps_what_they_were_stamped_on() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        embedded::migrations::runner()
+            .set_target(refinery::Target::Version(24))
+            .run(&mut conn)
+            .unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', 'a', 'a');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 't', 'a', 'a');
+             INSERT INTO snapshot (id, stream_id, created_at) VALUES (1, 1, 'a'), (2, 1, 'b');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at, start_snapshot_id, snapshot_id, effort)
+               VALUES (1, 1, 'p', '2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z', 1, 2, 'high');
+             INSERT INTO effort (id, thread_id, started_at) VALUES (1, 1, '2026-01-01T00:00:00Z');
+             INSERT INTO effort_file (effort_id, path, change_kind, local_snapshot_id)
+               VALUES (1, 'a.rs', 'updated', 1);
+             INSERT INTO agent_token_usage (id, stream_id, thread_id, effort_id, session_id, agent_kind,
+                 provenance, recorded_at, turn_id)
+               VALUES (1, 1, 1, 1, 's', 'claude', 'observed', 'a', 1);
+             INSERT INTO metric_capture (id, stream_id, thread_id, effort_id, producer, provenance, source, captured_at, turn_id)
+               VALUES (1, 1, 1, 1, 'tests', 'observed', 'hook', 'a', 1),
+                      (2, 1, 1, 1, 'effort-lifecycle', 'observed', 'builtin', 'a', NULL);
+             INSERT INTO fact (capture_id, measure_id, value)
+               SELECT 2, id, 1.0 FROM measure WHERE key = 'oxplow.cycle_time';
+             INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, effort_id, at, elapsed_ms, file_count)
+               VALUES (1, 1, 'effort_start', 1, 'a', 1, 0);
+             INSERT INTO event_log (id, type, v, at, source, effort_id, subject, payload)
+               VALUES ('e1', 'effort.opened', 3, 'a', 's', 1, '[]', '{}'),
+                      ('e2', 'snapshot.taken', 3, 'a', 's', 1, '[]', '{\"trigger\":\"effort_start\"}');
+             INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (1, 1, 'x/a', 'a');
+             INSERT INTO \"change\" (id, stream_id, kind, target, status) VALUES (1, 1, 'effort', '1', 'done');
+             INSERT INTO change_file (change_id, path, status, additions, deletions, is_test)
+               VALUES (1, 'a.rs', 'modified', 1, 0, 0);",
+        )
+        .unwrap();
+        embedded::migrations::runner().run(&mut conn).unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        let columns = |table: &str| -> Vec<String> {
+            conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+                .unwrap()
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(
+            count("SELECT count(*) FROM agent_token_usage WHERE turn_id = 1"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM metric_capture"),
+            1,
+            "the effort producer's goes"
+        );
+        assert_eq!(count("SELECT count(*) FROM fact"), 0);
+        assert_eq!(
+            count("SELECT count(*) FROM measure WHERE key = 'oxplow.cycle_time'"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM snapshot_op WHERE trigger = 'manual'"),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM event_log"), 1);
+        assert_eq!(
+            count("SELECT count(*) FROM event_log WHERE json_extract(payload, '$.trigger') = 'manual'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM once_mark"),
+            0,
+            "an effort's mark goes"
+        );
+        assert_eq!(count("SELECT count(*) FROM \"change\""), 0);
+        assert_eq!(count("SELECT count(*) FROM change_file"), 0);
+        assert_eq!(
+            count(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'effort%'"
+            ),
+            0
+        );
+        for table in [
+            "agent_nudge",
+            "agent_token_usage",
+            "agent_tool_call",
+            "metric_capture",
+            "once_mark",
+            "snapshot_op",
+            "event_log",
+            "extension_run",
+        ] {
+            assert!(
+                !columns(table).contains(&"effort_id".to_string()),
+                "{table}"
+            );
+        }
+        let turn = columns("agent_turn");
+        assert!(!turn.contains(&"snapshot_id".to_string()));
+        assert!(!turn.contains(&"start_snapshot_id".to_string()));
+        assert!(
+            turn.contains(&"effort".to_string()),
+            "the reasoning effort stays"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM agent_turn WHERE effort = 'high'"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM sqlite_master WHERE name = 'snapshot_op_turn_file'"),
+            1
+        );
+        assert_eq!(count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+    }
+
     /// V23 carries what efforts knew into `request_task`: a request whose
     /// turn started inside an effort's window, on its thread, links to the
     /// effort's task; a turn outside the window, or an effort with no task,
@@ -2543,8 +2664,6 @@ mod tests {
             "snapshot",
             "task",
             "oxtask_link",
-            "effort",
-            "effort_file",
             "wiki_page_thread_update",
             "page_ref",
             "comment",
@@ -2588,6 +2707,12 @@ mod tests {
             "hook_event",
             "agent_status",
             "effort_observation",
+            // V25 removed efforts.
+            "effort",
+            "effort_file",
+            "effort_metric_delta",
+            "effort_observation_row",
+            "effort_evidence_state",
             "metric_definition",
             "metric_dimension",
             "metric_subject",
@@ -2762,56 +2887,12 @@ mod tests {
         assert!(err.to_string().contains("`c`"), "{err}");
     }
 
-    /// Regression: the first version of V18 rebuilt the `task` table
-    /// via `task_new` + `DROP TABLE task` + rename, which under
-    /// `PRAGMA foreign_keys = ON` cascaded and wiped every
-    /// `task_effort` row (`task_effort.task_id REFERENCES oxtask(id)
-    /// ON DELETE CASCADE`). The fixed migration uses
-    /// `ALTER TABLE … DROP COLUMN` instead, which leaves child rows
-    /// untouched. This test asserts an `effort` row created
-    /// AFTER all migrations have run (including V18) coexists with
-    /// its parent and the `acceptance_criteria` column is gone.
+    /// The task table's `acceptance_criteria` column is gone (V18 dropped
+    /// it with `ALTER TABLE … DROP COLUMN`, leaving child rows untouched).
     #[test]
-    fn v18_does_not_cascade_to_task_effort() {
+    fn oxtask_has_no_acceptance_criteria_column() {
         let db = Database::in_memory();
         let conn = db.conn().unwrap();
-        let now = "2026-04-29T00:00:00Z";
-        conn.execute(
-            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
-             VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-             VALUES (1, 1, 't', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO oxtask (title, status, priority, created_by, created_at, updated_at)
-             VALUES ('t', 'in_progress', 'medium', 'user', ?1, ?1)",
-            [now],
-        )
-        .unwrap();
-        let task_id: i64 = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO effort (task, thread_id, started_at)
-             VALUES ('task:oxplow:tsk' || ?1, 1, ?2)",
-            (task_id, now),
-        )
-        .unwrap();
-
-        // effort row survives alongside its parent.
-        let n: i64 = conn
-            .query_row(
-                "SELECT count(*) FROM v_effort WHERE task = 'task:oxplow:tsk' || ?1",
-                [task_id],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(n, 1, "effort row must coexist with its parent task");
-
         // acceptance_criteria column is gone.
         let cols: Vec<String> = conn
             .prepare("PRAGMA table_info(oxtask)")

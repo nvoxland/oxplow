@@ -39,8 +39,8 @@ pub fn check_callable(id: &str) -> Result<(), String> {
     ))
 }
 
-/// A composing script's need `id` (a command's `entry:`, an effect, an
-/// effort policy script): a service it may use, or why not. Such a script
+/// A composing script's need `id` (a command's `entry:` or an
+/// effect): a service it may use, or why not. Such a script
 /// runs pure — it composes, and may be run again — so it may read (the
 /// semantic layer, the tree) but never ask a model.
 pub fn check_script_need(id: &str) -> Result<(), String> {

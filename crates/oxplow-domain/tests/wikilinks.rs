@@ -21,7 +21,7 @@ fn wikilink_sugar_translates_to_uris() {
         // A resource's own name with its key.
         ("commit:abc1234", "oxplow:oxplow/commit?sha=abc1234"),
         ("wiki:architecture", "oxplow:oxplow/wiki?slug=architecture"),
-        ("effort:eff3", "oxplow:oxplow/effort?id=eff3"),
+        ("request:req3", "oxplow:oxplow/request?id=req3"),
         ("dir:src/", "oxplow:oxplow/dir?path=src"),
         ("dir:src", "oxplow:oxplow/dir?path=src"),
         ("finding:f-9", "oxplow:oxplow/finding?id=f-9"),
@@ -64,7 +64,7 @@ fn wikilink_sugar_translates_to_uris() {
         "tskfoo/x",
         "Unknown_Kind:1",
         "oxplow:acme/pr?id=1",
-        "effort:3",
+        "request:3",
     ] {
         assert!(
             canonical_wikilink(&tasks(), bad).is_none(),
@@ -100,7 +100,7 @@ fn classify_wikilinks_reports_the_uri_beside_the_typed_view() {
         Reference::Commit("abc1234".into())
     );
     assert!(
-        Reference::try_from(&uri("oxplow:oxplow/effort?id=eff3")).is_err(),
+        Reference::try_from(&uri("oxplow:oxplow/request?id=req3")).is_err(),
         "no typed view yet"
     );
 }

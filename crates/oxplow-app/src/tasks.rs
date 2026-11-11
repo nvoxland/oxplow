@@ -606,7 +606,7 @@ mod tests {
                 )
             )
             .await,
-            // Done, the child is nobody's: who worked on it is its efforts.
+            // Done, the child is nobody's: who worked on it is its requests.
             json!([
                 [task, oxplow_domain::uri::build::thread_uri(fx.thread), 1, 0],
                 [child, null, 0, 1]

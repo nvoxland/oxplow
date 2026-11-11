@@ -6,7 +6,7 @@
 //! work left it is the commit's content (`commit_request`,
 //! `oxplow_db::commit_request_store`). A snapshot row keeps the git blob id
 //! of its bytes, so the match reads no bytes and survives Local History
-//! expiry. Nothing is closed by a commit and no effort is read: the
+//! expiry. Nothing is closed by a commit: the
 //! `task → commit` edge is derived through the requests' tasks
 //! (`v_request_task`, `v_commit_task`).
 
@@ -121,7 +121,6 @@ mod tests {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })
@@ -167,8 +166,7 @@ mod tests {
 
     /// The end to end case: a turn changes a file and the work is captured
     /// (the snapshot row keeps the git blob id of the bytes it captured); a
-    /// commit of exactly that content links the request, with no effort in
-    /// it; a commit made outside oxplow, of other content, links nothing;
+    /// commit of exactly that content links the request; a commit made outside oxplow, of other content, links nothing;
     /// and the task the request worked on is the commit's task, derived.
     #[tokio::test]
     async fn a_commit_of_a_turns_file_links_its_request_and_derives_its_task() {

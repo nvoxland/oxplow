@@ -1,5 +1,5 @@
-//! The change-analysis producer: for one change (a commit, an effort, or
-//! the working tree) it diffs the two endpoints, analyzes the changed files
+//! The change-analysis producer: for one change (a commit, a turn, a request,
+//! a range or the working tree) it diffs the two endpoints, analyzes the changed files
 //! (function metrics, churn, imports, zones, co-change) and stores the rows
 //! behind `v_change*`, which the analytics pages read. See
 //! `.context/semantic-layer.md` → "Change analysis".
@@ -326,12 +326,6 @@ pub enum ChangeTarget {
         #[serde(rename = "streamId", default)]
         stream_id: Option<String>,
     },
-    /// An effort: its start snapshot → its end snapshot (or the working
-    /// tree while it's open).
-    Effort {
-        #[serde(rename = "effortId")]
-        effort_id: String,
-    },
     /// An agent turn: its start snapshot → its end snapshot, "what changed
     /// this turn" (P2.10). A turn still running has no end: `NotFound`.
     Turn {
@@ -398,7 +392,7 @@ pub(crate) struct DupJob {
 
 /// Coalesces duplicate scans: each parses the whole tree, so one runs at
 /// a time across every change (a HEAD move or a turn's end analyzes the
-/// working tree and each open effort together), and the newest request for
+/// working tree and each running request together), and the newest request for
 /// a change replaces its queued one.
 #[derive(Default)]
 pub(crate) struct DupQueue {
@@ -458,9 +452,9 @@ pub(crate) fn hold_running_for_tests(svc: &crate::Services, id: i64) {
     svc.change_analyzer.state.lock().unwrap().running.insert(id);
 }
 
-/// Analyze `target` if it hasn't been (or its head moved — an effort
-/// closed), store the results, and return the change. A working tree's
-/// and an open effort's analysis is kept current by the `change.analyze`
+/// Analyze `target` if it hasn't been (or its head moved — a request
+/// finished), store the results, and return the change. A working tree's
+/// and a running request's analysis is kept current by the `change.analyze`
 /// consumer ([`refresh_change`]); this reads it, computing it the first
 /// time. While another call is computing the same change this returns it
 /// with status `running`; its rows' commit announces the results
@@ -732,7 +726,6 @@ async fn resolve(
     ),
     oxplow_domain::DomainError,
 > {
-    use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
     use oxplow_domain::DomainError;
 
@@ -914,36 +907,6 @@ async fn resolve(
                 head,
             )
         }
-        ChangeTarget::Effort { effort_id } => {
-            let eid = oxplow_domain::EffortId::try_from_str(&effort_id)
-                .ok_or_else(|| invalid(format!("not an effort id: {effort_id}")))?;
-            let effort = svc
-                .effort_store
-                .get_effort(&eid)
-                .await?
-                .ok_or(DomainError::NotFound)?;
-            let start = effort.start_snapshot_id.ok_or_else(|| {
-                invalid(format!(
-                    "effort {effort_id} has no start snapshot, so there's nothing to diff"
-                ))
-            })?;
-            let thread = svc
-                .thread_store
-                .get(&effort.thread_id)
-                .await?
-                .ok_or(DomainError::NotFound)?;
-            let head = match effort.end_snapshot_id {
-                Some(end) if effort.ended_at.is_some() => Revision::Snapshot(end),
-                _ => Revision::Working,
-            };
-            (
-                thread.stream_id,
-                "effort",
-                eid.value().to_string(),
-                Some(Revision::Snapshot(start)),
-                head,
-            )
-        }
     })
 }
 
@@ -1014,9 +977,9 @@ async fn analyze(
             };
         }
         // Computed from these very inputs: current, however it was asked
-        // for (a forced rerun, an effort's head now its end snapshot of the
-        // same tree). Otherwise results of another head (an effort analyzed
-        // while open, now closed) are stale however they were computed.
+        // for (a forced rerun, a request's head now its end snapshot of the
+        // same tree). Otherwise results of another head (a request analyzed
+        // while running, now finished) are stale however they were computed.
         let same_inputs = from.is_some() && row.analyzed_from == from;
         if row.status == "done" && (same_inputs || (!head_moved && !force)) {
             return Ok(row);
@@ -1327,30 +1290,19 @@ pub(crate) fn request_span(
     }))
 }
 
-/// An effort's own files (`v_effort_file`: claimed or observed): what its
-/// change is limited to, since its bracket also holds what other threads
-/// and the person changed. `None` for any other kind of change.
+/// A request's own files (its turns', `v_turn_file`): what its change is
+/// limited to, since its span also holds what other threads and the person
+/// changed. `None` for any other kind of change.
 async fn own_files(
     svc: &crate::Services,
     kind: &str,
     key: &str,
     stream: oxplow_domain::StreamId,
 ) -> Result<Option<std::collections::HashSet<String>>, oxplow_domain::DomainError> {
-    use oxplow_db::EffortStore as _;
     if kind == "request" {
         return Ok(Some(request_files(svc, key, stream).await?));
     }
-    if kind != "effort" {
-        return Ok(None);
-    }
-    let Ok(id) = key.parse::<i64>() else {
-        return Ok(None);
-    };
-    let files = svc
-        .effort_store
-        .list_files(&oxplow_domain::EffortId::new(id))
-        .await?;
-    Ok(Some(files.into_iter().map(|f| f.path).collect()))
+    Ok(None)
 }
 
 /// The files request `key`'s turns on `stream` changed, as `v_turn_file`
@@ -2195,7 +2147,7 @@ mod tests {
 
     /// P2.10 (tsk434): a turn diffs its start snapshot → its end snapshot
     /// — everything the turn changed, even across a snapshot taken in the
-    /// middle (an effort closing mid-turn).
+    /// middle (a run's measured take mid-turn).
     #[tokio::test]
     async fn a_turn_diffs_from_where_it_started_to_where_it_ended() {
         let f = crate::test_fixtures::services_with_thread().await;
@@ -2220,7 +2172,6 @@ mod tests {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })
@@ -2314,7 +2265,6 @@ mod tests {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })
@@ -2379,7 +2329,6 @@ mod tests {
                 trigger: oxplow_domain::snapshot::SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: None,
                 provider: None,
             })
@@ -2648,84 +2597,6 @@ mod tests {
             .await,
             serde_json::json!([[1, "merge"]])
         );
-    }
-
-    /// An effort's change is its own files: another file that changed in
-    /// its bracket (someone else's, or between its turns) isn't on it.
-    #[tokio::test]
-    async fn an_efforts_change_is_limited_to_its_files() {
-        use oxplow_db::EffortStore as _;
-        let f = crate::thread_checkpoint::tests::with_baseline().await;
-        let stream = f.svc.streams.list_streams().await.unwrap()[0].id;
-        let start = f
-            .svc
-            .snapshot_store
-            .latest_snapshot_id_for_stream(stream)
-            .await
-            .unwrap();
-        f.svc
-            .effort_store
-            .finish(&f.effort, None, None)
-            .await
-            .unwrap();
-        let effort = f
-            .svc
-            .effort_store
-            .start(
-                "oxplow:oxplow/task?id=A-1&provider=issues",
-                &f.thread,
-                start,
-            )
-            .await
-            .unwrap();
-        let root = f.svc.layout.project_dir.clone();
-        std::fs::write(root.join("mine.txt"), "mine").unwrap();
-        std::fs::write(root.join("theirs.txt"), "theirs").unwrap();
-        f.svc
-            .effort_store
-            .record_file(
-                &effort.id,
-                "mine.txt",
-                oxplow_db::EffortFileChange::Created,
-                oxplow_db::effort_store::FileRefVersion {
-                    local_snapshot_id: 0,
-                    closest_vcs_rev: None,
-                    vcs_rev_exact: false,
-                },
-            )
-            .await
-            .unwrap();
-        let c = refresh_files(
-            &f.svc,
-            ChangeTarget::Effort {
-                effort_id: effort.id.to_string(),
-            },
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            rows(
-                &f.svc,
-                "SELECT path FROM v_change_file WHERE change_id = ?1",
-                c.id
-            )
-            .await,
-            serde_json::json!([["mine.txt"]])
-        );
-    }
-
-    #[tokio::test]
-    async fn an_effort_without_a_start_snapshot_is_explained() {
-        let f = crate::test_fixtures::services_with_effort().await;
-        let err = ensure_change(
-            &f.svc,
-            ChangeTarget::Effort {
-                effort_id: f.effort.to_string(),
-            },
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("start snapshot"), "{err}");
     }
 
     #[tokio::test]

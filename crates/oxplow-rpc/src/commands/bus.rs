@@ -24,11 +24,6 @@ pub async fn run_command(
         .commands
         .run(&Actor::Human, &id, input.0, confirmed)
         .await?;
-    // A write may have opened or closed an effort: let its snapshot pin
-    // land before the UI reads what follows.
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -142,9 +137,6 @@ pub async fn run_command_for_call(
 ) -> Result<CommandOutcome, IpcError> {
     let actor = svc.client_host.caller(&client, &call)?;
     let outcome = svc.commands.run(&actor, &id, input.0, false).await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -167,9 +159,6 @@ pub async fn undo_command(
         .commands
         .undo(&Actor::Human, audit_id.value(), confirmed)
         .await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -192,9 +181,6 @@ pub async fn decide_proposal(
         .commands
         .approve(&Actor::Human, proposal.value())
         .await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(Some(outcome))
 }
 

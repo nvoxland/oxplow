@@ -19,7 +19,7 @@
 //! We read the NEW records since the last turn (offset-tracked via a
 //! persisted per-session cursor that commits with the rows, so we never re-sum
 //! the whole file or double-count across restarts or redeliveries) and persist
-//! one row per turn attributed to the effort the turn ran in. An ACP turn's
+//! one row per turn attributed to the turn it ran in. An ACP turn's
 //! counts ride the event instead ([`TokenUsageService::record_turn`]).
 //! Provenance is `observed`.
 //!
@@ -34,18 +34,17 @@
 //! move and a stale price table is worse than none). The per-turn `model` is
 //! stored so usage can be sliced by model.
 //!
-//! Mirrors the collection side-band (`collection.rs`): find open effort →
-//! record → emit, best-effort. See `.context/agent-model.md`,
+//! Mirrors the collection side-band (`collection.rs`): record → emit,
+//! best-effort. See `.context/agent-model.md`,
 //! `.context/metrics.md`, + `.context/data-model.md`.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::EffortStore;
 use oxplow_db::{
-    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteAgentSessionStore, SqliteEffortStore,
-    SqliteFactStore, SqliteThreadStore, SqliteTokenUsageStore,
+    NewAgentTokenUsage, NewFact, NewMetricCapture, SqliteAgentSessionStore, SqliteFactStore,
+    SqliteThreadStore, SqliteTokenUsageStore,
 };
 use oxplow_domain::agent::observe::{Turn, UsageDelta};
 use oxplow_domain::agent::registry::HarnessRegistry;
@@ -127,8 +126,6 @@ struct TokenAgg {
 pub struct TurnRecord {
     /// `agent_turn.id`.
     pub turn_id: Option<i64>,
-    /// The effort open when the turn ran (the event's anchor).
-    pub effort: Option<oxplow_domain::EffortId>,
     /// The agent session it ran in (the event's anchor): its harness says
     /// how to read the transcript.
     pub agent_session: Option<oxplow_domain::AgentSessionId>,
@@ -151,14 +148,12 @@ enum Counted {
 
 struct RecordedTurns {
     last_id: Option<i64>,
-    effort_val: Option<i64>,
     by_model: std::collections::HashMap<String, TokenAgg>,
 }
 
 #[derive(Clone)]
 pub struct TokenUsageService {
     usage: Arc<SqliteTokenUsageStore>,
-    efforts: Arc<SqliteEffortStore>,
     threads: Arc<SqliteThreadStore>,
     sessions: Arc<SqliteAgentSessionStore>,
     /// Durable fact layer (epic tsk12): per-kind token totals land as facts
@@ -171,7 +166,6 @@ pub struct TokenUsageService {
 impl TokenUsageService {
     pub fn new(
         usage: Arc<SqliteTokenUsageStore>,
-        efforts: Arc<SqliteEffortStore>,
         threads: Arc<SqliteThreadStore>,
         sessions: Arc<SqliteAgentSessionStore>,
         facts: Arc<SqliteFactStore>,
@@ -179,7 +173,6 @@ impl TokenUsageService {
     ) -> Self {
         Self {
             usage,
-            efforts,
             threads,
             sessions,
             facts,
@@ -201,13 +194,13 @@ impl TokenUsageService {
     }
 
     /// On Stop: parse the transcript tail since the last cursor, sum usage,
-    /// and persist one row attributed to the open effort + thread. Returns
+    /// and persist one row per turn, attributed to the thread and its turn.
+    /// Returns
     /// `Ok(Some(id))` when a row was written, `Ok(None)` when there was
     /// nothing to record (no transcript_path, no thread, no new usage, or a
     /// non-Claude agent). Best-effort — the caller treats errors as
     /// non-fatal so a parse hiccup never blocks the hook.
-    /// The rows carry the turn (`rec`) the `token_usage.turns` reactor saw
-    /// and the effort it ran in.
+    /// The rows carry the turn (`rec`) the `token_usage.turns` reactor saw.
     pub async fn on_stop(
         &self,
         thread: &ThreadId,
@@ -329,17 +322,6 @@ impl TokenUsageService {
         counted: Counted,
         cursor: Option<(String, u64)>,
     ) -> Result<RecordedTurns, DomainError> {
-        // The effort the turn ran in (its event's anchor), else the
-        // thread's open one. An effort opened later adopts the row.
-        let open_effort = match rec.effort {
-            Some(id) => self.efforts.get_effort(&id).await?,
-            None => self.efforts.find_open_for_thread(thread).await?,
-        };
-        let effort_id = open_effort.as_ref().map(|e| e.id.to_string());
-        // The i64 form stamps the fact-capture so `captures_for_effort` (the T-D
-        // fact-attribution read) attributes the token facts (tsk37).
-        let effort_val = open_effort.as_ref().map(|e| e.id.value());
-
         // One row per turn — each carrying its opening prompt, model, and the
         // usage of the assistant messages that answered it (tsk143). While we
         // record, accumulate per-model totals for the metric projection.
@@ -357,7 +339,6 @@ impl TokenUsageService {
             rows.push(NewAgentTokenUsage {
                 stream_id: stream_id.to_string(),
                 thread_id: thread.to_string(),
-                effort_id: effort_id.clone(),
                 session_id: session_key.to_string(),
                 agent_kind: kind.clone(),
                 model: turn.usage.model,
@@ -382,11 +363,7 @@ impl TokenUsageService {
             by_model.clear();
         }
         let last_id = ids.last().copied();
-        Ok(RecordedTurns {
-            last_id,
-            effort_val,
-            by_model,
-        })
+        Ok(RecordedTurns { last_id, by_model })
     }
 
     /// Tell the UI and project the recorded turns into the metric substrate
@@ -398,14 +375,8 @@ impl TokenUsageService {
         recorded: &RecordedTurns,
         rec: &TurnRecord,
     ) {
-        self.project_token_metrics(
-            thread,
-            stream_id,
-            &recorded.by_model,
-            recorded.effort_val,
-            rec,
-        )
-        .await;
+        self.project_token_metrics(thread, stream_id, &recorded.by_model, rec)
+            .await;
     }
 
     /// Project per-model token totals into the metric substrate. Best-effort: a
@@ -416,7 +387,6 @@ impl TokenUsageService {
         thread: &ThreadId,
         stream_id: &str,
         by_model: &std::collections::HashMap<String, TokenAgg>,
-        effort_val: Option<i64>,
         rec: &TurnRecord,
     ) {
         if by_model.is_empty() {
@@ -426,7 +396,7 @@ impl TokenUsageService {
             return;
         };
         if let Err(e) = self
-            .record_token_metrics(thread, stream_val, by_model, effort_val, rec)
+            .record_token_metrics(thread, stream_val, by_model, rec)
             .await
         {
             tracing::warn!(error = %e, "failed to project token usage into metric substrate");
@@ -439,7 +409,6 @@ impl TokenUsageService {
         thread: &ThreadId,
         stream_val: i64,
         by_model: &std::collections::HashMap<String, TokenAgg>,
-        effort_val: Option<i64>,
         rec: &TurnRecord,
     ) -> Result<(), DomainError> {
         // Turn facts only (epic tsk22): the `oxplow.tokens` facts now come from
@@ -477,7 +446,6 @@ impl TokenUsageService {
                 let mut capture = NewMetricCapture::done(stream_val, "token-parse", "token-parse");
                 capture.thread_id = Some(thread.value());
                 capture.trigger = Some("continuous".into());
-                capture.effort_id = effort_val;
                 capture.turn_id = rec.turn_id;
                 capture.idempotency_key = rec.cause.as_ref().map(|c| format!("turn-tokens:{c}"));
                 self.facts.record_facts(capture, facts).await?;
@@ -492,7 +460,7 @@ impl TokenUsageService {
     /// model and kind, input/output on `oxplow.tokens`, cache kinds on
     /// `oxplow.cache_tokens`, plus one per-model `oxplow.cache_usage`
     /// hit-ratio fact (tsk73) — all under one capture carrying the event's
-    /// thread, stream, effort and turn, keyed by the event so a redelivery
+    /// thread, stream and turn, keyed by the event so a redelivery
     /// counts nothing twice. How many facts it wrote.
     pub async fn record_reported(
         &self,
@@ -578,7 +546,6 @@ impl TokenUsageService {
         let mut capture = NewMetricCapture::done(stream.value(), "otel-tokens", "otel");
         capture.thread_id = Some(thread.value());
         capture.trigger = Some("continuous".into());
-        capture.effort_id = env.anchors.effort_id.map(|e| e.value());
         capture.turn_id = env.anchors.turn_id;
         capture.idempotency_key = Some(format!("otel-tokens:{}", env.id.as_str()));
         self.facts.record_facts(capture, facts).await?;
@@ -630,7 +597,7 @@ pub const TURN_TOKENS: &str = "token_usage.turns";
 /// reported itself (ACP, `usage` on `agent.turn.ended@2`) or from the
 /// session transcript's new tail (Claude, `transcript_path`). An async
 /// pump consumer — no transcript parsing in the Stop hook — anchored to
-/// the turn and the effort it ran in.
+/// the turn it ran in.
 pub struct TurnTokensConsumer {
     pub tokens: TokenUsageService,
     pub turns: oxplow_db::SqliteAgentTurnStore,
@@ -662,7 +629,6 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
         let session = turn.as_ref().and_then(|t| t.session_id.clone());
         let rec = TurnRecord {
             turn_id: Some(turn_id),
-            effort: env.anchors.effort_id,
             agent_session: env.anchors.agent_session_id,
             cause: Some(env.id.as_str().to_string()),
         };
@@ -703,7 +669,6 @@ impl crate::event_pump::AsyncEventConsumer for TurnTokensConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_oxtask::task_ref;
     use std::io::Write;
 
     const ASSISTANT_LINE: &str = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":50,"cache_read_input_tokens":200}}}"#;
@@ -733,9 +698,7 @@ mod tests {
 
     /// Build a real in-memory `Services` over a fresh git repo, seed a
     /// primary stream + a Claude thread, and return the service + thread id.
-    /// Token usage is attributed to the thread (no open effort created — the
-    /// effort-attribution path is covered by the store's `totals_for_effort`
-    /// tests).
+    /// Token usage is attributed to the thread.
     async fn service_fixture() -> (std::sync::Arc<crate::Services>, tempfile::TempDir, ThreadId) {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
@@ -792,11 +755,11 @@ mod tests {
 
     /// P3.7 (tsk477): a turn's tokens are counted by the `token_usage.turns`
     /// reactor from its `agent.turn.ended` — the transcript tail for Claude
-    /// — anchored to the turn and its effort; a redelivery reads nothing
+    /// — anchored to the turn; a redelivery reads nothing
     /// twice because the cursor moved with the rows.
     #[tokio::test]
     async fn a_turns_transcript_is_counted_once_by_the_reactor() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("session.jsonl");
@@ -819,7 +782,7 @@ mod tests {
         svc.event_pump.run_once().await.unwrap();
         let rows = svc
             .token_usage_store
-            .list_for_effort(&f.effort.to_string())
+            .list_for_thread(&f.thread.to_string())
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);
@@ -859,7 +822,7 @@ mod tests {
     /// and are counted once, keyed by that event.
     #[tokio::test]
     async fn a_turns_own_usage_is_counted_once() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         prompt(svc, f.thread).await;
         svc.hook_ingest
@@ -877,7 +840,7 @@ mod tests {
         svc.event_pump.run_once().await.unwrap();
         let rows = svc
             .token_usage_store
-            .list_for_effort(&f.effort.to_string())
+            .list_for_thread(&f.thread.to_string())
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);
@@ -1052,7 +1015,7 @@ mod tests {
 
     #[tokio::test]
     async fn on_stop_splits_a_multi_prompt_chunk_into_one_row_per_turn() {
-        // tsk143: an effort spanning two prompts in a single Stop chunk must
+        // tsk143: two prompts in a single Stop chunk must
         // yield two turn rows. (Bootstrap seeds first, so we land the prompts
         // on the second Stop.)
         let (svc, _dir, thread) = service_fixture().await;
@@ -1090,7 +1053,6 @@ mod tests {
         }
         let rec = TurnRecord {
             turn_id: None,
-            effort: None,
             agent_session: None,
             cause: Some("evt-stop-1".into()),
         };
@@ -1353,94 +1315,5 @@ mod tests {
             Some(1.0),
             "agent.turns headline over the turn fact",
         );
-    }
-
-    #[tokio::test]
-    async fn on_stop_stamps_token_capture_with_the_open_effort() {
-        // tsk37: the token fact-capture is stamped with the thread's single open
-        // effort (the same resolution the run-ledger auto-claim uses), so
-        // `captures_for_effort` — the T-D fact-attribution read — picks it up.
-        use oxplow_domain::Timestamp;
-        use oxplow_oxtask::OxtaskId;
-        use oxplow_oxtask::OxtaskStore;
-        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
-        let (svc, _dir, thread) = service_fixture().await;
-        // One open effort on the thread → the unambiguous single-open case.
-        let now = Timestamp::now();
-        let task_id = svc
-            .task_store
-            .insert(&Oxtask {
-                id: OxtaskId::placeholder(),
-                parent_id: None,
-                title: "t".into(),
-                description: String::new(),
-                status: OxtaskStatus::InProgress,
-                priority: OxtaskPriority::Medium,
-                created_by: OxtaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(OxtaskAuthor::User),
-            })
-            .await
-            .unwrap();
-        let effort = svc
-            .effort_store
-            .start(&task_ref(task_id), &thread, None)
-            .await
-            .unwrap();
-
-        let tdir = tempfile::tempdir().unwrap();
-        let path = tdir.path().join("session.jsonl");
-        let payload = format!(
-            "{{\"transcript_path\":{:?},\"session_id\":\"sess-e\"}}",
-            path.to_string_lossy()
-        );
-        std::fs::write(&path, format!("{ASSISTANT_LINE}\n")).unwrap();
-        svc.token_usage
-            .on_stop(&thread, Some("sess-e"), &payload, &TurnRecord::default())
-            .await
-            .unwrap();
-        {
-            let mut f = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&path)
-                .unwrap();
-            f.write_all(format!("{ASSISTANT_LINE}\n").as_bytes())
-                .unwrap();
-        }
-        svc.token_usage
-            .on_stop(&thread, Some("sess-e"), &payload, &TurnRecord::default())
-            .await
-            .unwrap();
-
-        // The turn capture is attributed to the open effort (tsk22: the
-        // transcript path projects turn facts; token facts ride the OTEL path).
-        let caps = svc
-            .fact_store
-            .captures_for_effort(effort.id.value())
-            .await
-            .unwrap();
-        assert!(
-            !caps.is_empty(),
-            "the turn capture is attributed to the open effort"
-        );
-        assert!(caps.iter().all(|c| c.effort_id == Some(effort.id.value())));
-        // …and its facts are reachable through the fact-attribution read.
-        let turn_measure = svc
-            .fact_store
-            .get_measure("oxplow.turn")
-            .await
-            .unwrap()
-            .unwrap();
-        let cap_ids: Vec<i64> = caps.iter().map(|c| c.id).collect();
-        let facts = svc
-            .fact_store
-            .facts_for_captures(turn_measure.id, cap_ids)
-            .await
-            .unwrap();
-        assert_eq!(facts.len(), 1, "one turn fact under the effort's capture");
     }
 }

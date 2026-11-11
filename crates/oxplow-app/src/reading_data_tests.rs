@@ -130,62 +130,6 @@ async fn failing_or_flaky_tests() {
     );
 }
 
-/// Efforts count per thread, an open one counted apart, and a thread with
-/// none stays as a row of zeros.
-#[tokio::test]
-async fn efforts_per_thread() {
-    let fx = crate::test_fixtures::services_with_effort().await;
-    let stream = oxplow_domain::StreamId::new(1);
-    let second = crate::test_fixtures::new_thread(&fx.svc, stream, "Second").await;
-    let third = crate::test_fixtures::new_thread(&fx.svc, stream, "Third").await;
-    let run = |name: &'static str, input: serde_json::Value| {
-        let svc = fx.svc.clone();
-        async move {
-            svc.commands
-                .run(&oxplow_domain::Actor::Human, name, input, false)
-                .await
-                .unwrap()
-        }
-    };
-    let thread_ref = |t: oxplow_domain::ThreadId| t.to_string();
-    // thr1: its fixture effort is closed and a second one left open.
-    run(
-        crate::commands::effort::CLOSE,
-        json!({ "effort": fx.effort.to_string() }),
-    )
-    .await;
-    run(
-        crate::commands::effort::OPEN,
-        json!({ "thread": thread_ref(fx.thread) }),
-    )
-    .await;
-    // thr2: one effort, closed.
-    let opened = run(
-        crate::commands::effort::OPEN,
-        json!({ "thread": thread_ref(second.id) }),
-    )
-    .await;
-    run(
-        crate::commands::effort::CLOSE,
-        json!({ "effort": opened.result["effort"] }),
-    )
-    .await;
-    let got = rows(&fx, "Efforts per thread").await;
-    let by_thread: Vec<(i64, i64, i64)> = got
-        .iter()
-        .map(|r| (int(&r[0]), int(&r[2]), int(&r[3])))
-        .collect();
-    assert_eq!(
-        by_thread,
-        [
-            (fx.thread.value(), 2, 1),
-            (second.id.value(), 1, 0),
-            (third.id.value(), 0, 0)
-        ],
-        "{got:?}"
-    );
-}
-
 /// Usage reports sum per thread and agent, cache reads apart.
 #[tokio::test]
 async fn token_usage_per_thread_and_agent() {
@@ -196,7 +140,6 @@ async fn token_usage_per_thread_and_agent() {
         oxplow_db::NewAgentTokenUsage {
             stream_id: stream.to_string(),
             thread_id: thread.to_string(),
-            effort_id: None,
             session_id: "s".into(),
             agent_kind: kind.into(),
             model: None,

@@ -1,5 +1,5 @@
 SELECT t.id, t.thread_id, t.agent_session_id, t.prompt, t.answer, t.session_id, t.started_at,
-       t.ended_at, t.start_snapshot_id, t.snapshot_id,
+       t.ended_at,
        CAST(uri('oxplow/turn', 'id', 'trn' || t.id) AS TEXT) AS uri,
        -- The session's transcript (its `session`), shown from this turn (its
        -- view's `turn`): where a turn opens. NULL for a turn no session claims.

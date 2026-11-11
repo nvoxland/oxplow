@@ -41,7 +41,7 @@ pub struct IntentExample {
 pub struct Intent {
     /// The question it answers, or the job it does.
     pub purpose: String,
-    /// The thread or effort ref that created it (`oxplow:oxplow/effort?id=eff42`), when known.
+    /// The thread or request ref that created it (`oxplow:oxplow/request?id=req42`), when known.
     #[serde(default)]
     pub origin: Option<String>,
     #[serde(default)]
@@ -762,7 +762,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> Vec<Diagnostic> {
                 Some(1),
                 "`intent` is required",
             )
-            .fix("add `intent: { purpose: <what it is for>, origin: <thread or effort ref>, examples: [...] }`"),
+            .fix("add `intent: { purpose: <what it is for>, origin: <thread or request ref>, examples: [...] }`"),
         ),
         Some(intent) => {
             if intent.purpose.trim().is_empty() {
@@ -777,7 +777,7 @@ pub fn check(m: &ManifestV2, file: &str, text: &str) -> Vec<Diagnostic> {
                             key_line(text, "intent"),
                             format!("`intent.origin` `{origin}` is not an oxplow URI"),
                         )
-                        .fix("use `oxplow:oxplow/effort?id=eff42` or `oxplow:oxplow/thread?id=thr3`"),
+                        .fix("use `oxplow:oxplow/request?id=req42` or `oxplow:oxplow/thread?id=thr3`"),
                     );
                 }
             }

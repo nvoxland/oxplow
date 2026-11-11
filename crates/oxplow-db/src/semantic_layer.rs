@@ -1282,13 +1282,13 @@ mod tests {
         .to_string();
         db.call(move |c| {
             c.execute_batch(
-                "INSERT INTO effort (id, task, thread_id, started_at, ended_at) VALUES (7, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01', '2026-01-02');
-                 INSERT INTO effort (id, task, thread_id, started_at) VALUES (8, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01');
-                 INSERT INTO metric_capture (id, stream_id, effort_id, producer, provenance, source, captured_at)
+                "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES
+                   (7, 1, 'p', '2026-01-01'), (8, 1, 'q', '2026-01-01');
+                 INSERT INTO metric_capture (id, stream_id, turn_id, producer, provenance, source, captured_at)
                    VALUES (40, 1, 7, 'coverage', 'observed', 'hook', '2026-01-01T00:00:00Z');",
             )?;
             c.execute(
-                "INSERT INTO metric_capture (id, stream_id, thread_id, effort_id, producer, provenance, source, captured_at, detail_json)
+                "INSERT INTO metric_capture (id, stream_id, thread_id, turn_id, producer, provenance, source, captured_at, detail_json)
                  VALUES (41, 1, 1, 7, 'tests', 'observed', 'hook', '2026-01-02T00:00:00Z', ?1),
                         (42, 1, 1, 8, 'test-run', 'asserted', 'mcp', '2026-01-03T00:00:00Z', ?2)",
                 [&payload, &counts_only],
@@ -1304,7 +1304,7 @@ mod tests {
             }
         };
         assert_eq!(
-            rows("SELECT id, stream_id, thread_id, effort_id, command, exit_code, passed, failed, skipped, total, duration_ms, provenance FROM v_test_run ORDER BY id").await,
+            rows("SELECT id, stream_id, thread_id, turn_id, command, exit_code, passed, failed, skipped, total, duration_ms, provenance FROM v_test_run ORDER BY id").await,
             json!([
                 [41, 1, 1, 7, "bun run test:collect", 1, 1, 1, 1, 3, 4200, "observed"],
                 [42, 1, 1, 8, "cargo test", null, 5, 0, null, 5, null, "asserted"]

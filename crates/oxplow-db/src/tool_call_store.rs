@@ -12,7 +12,6 @@ use crate::Database;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NewToolCall {
     pub thread_id: i64,
-    pub effort_id: Option<i64>,
     /// The turn it ran in (`agent_turn.id`).
     pub turn_id: Option<i64>,
     /// The harness's own name for the tool.
@@ -62,13 +61,12 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
     let n = conn
         .execute(
             "INSERT INTO agent_tool_call
-               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind,
+               (thread_id, turn_id, tool, path, detail, ok, at, event_id, kind,
                 agent_session_id, subagent_id, subagent_kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
             rusqlite::params![
                 call.thread_id,
-                call.effort_id,
                 call.turn_id,
                 call.tool,
                 call.path,
@@ -99,14 +97,13 @@ pub fn record_request_tx(
     let n = conn
         .execute(
             "INSERT INTO agent_tool_call
-               (thread_id, effort_id, turn_id, tool, path, detail, at, kind, agent_session_id,
+               (thread_id, turn_id, tool, path, detail, at, kind, agent_session_id,
                 subagent_id, subagent_kind, call_id, started_at, ended_at, state, request_event_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?7,
-                     CASE WHEN ?13 THEN ?7 END, CASE WHEN ?13 THEN 'denied' ELSE 'running' END, ?14)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?6,
+                     CASE WHEN ?12 THEN ?6 END, CASE WHEN ?12 THEN 'denied' ELSE 'running' END, ?13)
              ON CONFLICT (request_event_id) WHERE request_event_id IS NOT NULL DO NOTHING",
             rusqlite::params![
                 call.thread_id,
-                call.effort_id,
                 call.turn_id,
                 call.tool,
                 call.path,
@@ -170,15 +167,14 @@ pub fn record_finish_tx(
     let n = conn
         .execute(
             "INSERT INTO agent_tool_call
-               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind,
+               (thread_id, turn_id, tool, path, detail, ok, at, event_id, kind,
                 agent_session_id, subagent_id, subagent_kind, call_id, ended_at, duration_ms,
                 state, request_event_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?8, ?15,
-                     'finished', ?16)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?7, ?14,
+                     'finished', ?15)
              ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
             rusqlite::params![
                 call.thread_id,
-                call.effort_id,
                 call.turn_id,
                 call.tool,
                 call.path,
@@ -271,8 +267,7 @@ mod tests {
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
                  INSERT INTO oxtask (id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, task, thread_id, started_at) VALUES (1, 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01');",
+                   VALUES (1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');",
             )
         })
         .await
@@ -284,7 +279,6 @@ mod tests {
     fn call(kind: &str, path: Option<&str>, ok: Option<bool>) -> NewToolCall {
         NewToolCall {
             thread_id: 1,
-            effort_id: Some(1),
             tool: kind.into(),
             kind: kind.into(),
             path: path.map(str::to_string),

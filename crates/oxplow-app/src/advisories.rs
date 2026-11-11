@@ -1,7 +1,7 @@
 //! Advisories: extension-declared guidance for the coding agent — hints
 //! (see `extensions::Advisory`). Core runs each advisory's query at
 //! `post-tool-use`, `prompt` or `turn-end` with the thread, stream, turn
-//! and effort bound, applies its `once_per` rule, and records every hit
+//! and request bound, applies its `once_per` rule, and records every hit
 //! as a nudge (`v_agent_nudge`): the thread's undelivered nudges go out on
 //! its next prompt or tool call, stamped when they do. See
 //! `.context/extensions-commands.md` → "Advisories".
@@ -15,13 +15,7 @@ use crate::event_pump::AsyncEventConsumer;
 use crate::extension::extensions::{AdvisoryAudience, AdvisoryOn, AdvisoryOncePer, Extension};
 
 /// The params every advisory query may use.
-pub const PARAMS: &[&str] = &[
-    "thread_id",
-    "stream_id",
-    "turn_id",
-    "request_id",
-    "effort_id",
-];
+pub const PARAMS: &[&str] = &["thread_id", "stream_id", "turn_id", "request_id"];
 
 /// The turn-end consumer's name (its checkpoint key; what callers settle on).
 pub const TURN_END: &str = "advisories.turn_end";
@@ -53,7 +47,6 @@ pub struct AdvisoryScope {
     /// The request of the turn the trigger belongs to (a prompt's: the turn
     /// it opened or went into).
     pub request: Option<i64>,
-    pub effort: Option<i64>,
     pub session: Option<String>,
 }
 
@@ -65,7 +58,6 @@ impl AdvisoryScope {
             ("stream_id".into(), cell(self.stream)),
             ("turn_id".into(), cell(self.turn)),
             ("request_id".into(), cell(self.request)),
-            ("effort_id".into(), cell(self.effort)),
         ]
     }
 
@@ -73,20 +65,18 @@ impl AdvisoryScope {
         OnceScope::thread(self.thread)
     }
 
-    /// The request, else the effort, else the thread: where deliveries are
-    /// counted for muting, and a muted hint stays muted. A new request
-    /// starts fresh.
+    /// The request, else the thread: where deliveries are counted for
+    /// muting, and a muted hint stays muted. A new request starts fresh.
     fn work_scope(&self) -> OnceScope {
-        match (self.request, self.effort) {
-            (Some(r), _) => OnceScope::request(self.thread, r),
-            (None, Some(e)) => OnceScope::effort(self.thread, e),
-            (None, None) => self.thread_scope(),
+        match self.request {
+            Some(r) => OnceScope::request(self.thread, r),
+            None => self.thread_scope(),
         }
     }
 
     /// The one-shot mark `id` claims under `once_per`, and where: `None`
     /// for the rules that repeat (`row` marks each key, `turn` nothing);
-    /// `Err` when the rule can't hold here (once per effort with no effort,
+    /// `Err` when the rule can't hold here (once per request with no request,
     /// once per session with none), so the advisory doesn't run.
     fn once_mark(
         &self,
@@ -96,10 +86,6 @@ impl AdvisoryScope {
         Ok(match once_per {
             AdvisoryOncePer::Request => match self.request {
                 Some(r) => Some((OnceScope::request(self.thread, r), id.to_string())),
-                None => return Err(()),
-            },
-            AdvisoryOncePer::Effort => match self.effort {
-                Some(e) => Some((OnceScope::effort(self.thread, e), id.to_string())),
                 None => return Err(()),
             },
             AdvisoryOncePer::Thread => Some((self.thread_scope(), id.to_string())),
@@ -239,8 +225,8 @@ impl AdvisoryRunner {
                         .unwrap_or(0);
                     if delivered >= MUTE_AFTER {
                         marks.push((scope.work_scope(), mute));
-                        let place = if scope.effort.is_some() {
-                            "this effort"
+                        let place = if scope.request.is_some() {
+                            "this request"
                         } else {
                             "this thread"
                         };
@@ -287,7 +273,6 @@ impl AdvisoryRunner {
 #[derive(Clone)]
 pub struct AdvisoryDeps {
     pub advisories: std::sync::Arc<AdvisoryRunner>,
-    pub effort_store: std::sync::Arc<oxplow_db::SqliteEffortStore>,
     pub thread_store: std::sync::Arc<oxplow_db::SqliteThreadStore>,
     pub worktrees: std::sync::Arc<crate::worktrees::WorktreeRouter>,
     pub extension_catalog: std::sync::Arc<crate::extension::extension_catalog::ExtensionCatalog>,
@@ -301,8 +286,8 @@ pub struct AdvisoryDeps {
 
 /// Run the `on` advisories for `thread`, reading extensions from the main
 /// worktree (whatever the thread's stream), and record each hit as an undelivered nudge.
-/// For an event (`cause`), the turn and effort are the event's anchors;
-/// for a prompt, the effort is the thread's open one and there's no turn.
+/// For an event (`cause`), the turn is the event's anchor; a prompt has
+/// none, and its request is that of the thread's newest turn.
 pub async fn for_thread(
     svc: &AdvisoryDeps,
     thread: &oxplow_domain::ThreadId,
@@ -328,18 +313,7 @@ async fn for_thread_in_generation(
     on: AdvisoryOn,
     cause: Option<&crate::collection::RunCause>,
 ) -> Vec<AdvisoryHit> {
-    use oxplow_db::EffortStore as _;
     use oxplow_domain::stores::ThreadStore as _;
-    let effort = match cause {
-        Some(c) => match c.anchors.effort_id {
-            Some(id) => svc.effort_store.get_effort(&id).await,
-            None => Ok(None),
-        },
-        None => svc.effort_store.find_open_for_thread(thread).await,
-    };
-    let Ok(effort) = effort else {
-        return Vec::new();
-    };
     let stream = match svc.thread_store.get(thread).await {
         Ok(Some(t)) => Some(t.stream_id),
         _ => None,
@@ -365,7 +339,6 @@ async fn for_thread_in_generation(
         stream: stream.map(|s| s.value()),
         turn: cause.and_then(|c| c.anchors.turn_id),
         request: request_of(&svc.sql, thread, cause.and_then(|c| c.anchors.turn_id)).await,
-        effort: effort.as_ref().map(|e| e.id.value()),
         session: session_of(&svc.sql, thread).await,
     };
     let hits = svc.advisories.run(&svc.sql, &extensions, on, &scope).await;
@@ -373,7 +346,6 @@ async fn for_thread_in_generation(
         svc.collection
             .persist_nudge(
                 thread,
-                effort.as_ref(),
                 crate::collection::Raised {
                     kind: &hit.id,
                     message: &hit.text,
@@ -439,9 +411,8 @@ async fn session_of(
     }
 }
 
-/// Runs the `turn-end` advisories on each `thread.checkpoint`, after the
-/// effort policy and observation (so a turn's new effort and its files are
-/// there to read), for the effort holding the turn's end.
+/// Runs the `turn-end` advisories on each `thread.checkpoint`, for the
+/// turn the checkpoint ends (its request is the turn's).
 pub struct TurnEndAdvisories {
     pub deps: AdvisoryDeps,
 }
@@ -452,29 +423,21 @@ impl AsyncEventConsumer for TurnEndAdvisories {
         TURN_END
     }
 
-    fn after(&self) -> Vec<String> {
-        vec![crate::effort_observation::NAME.to_string()]
-    }
-
     fn handles(&self, event_type: &str) -> bool {
         event_type == ThreadCheckpoint::TYPE
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let (Some(thread), Some(turn)) = (
+        let (Some(thread), Some(_)) = (
             event.envelope.anchors.thread_id,
             event.envelope.anchors.turn_id,
         ) else {
             return Ok(());
         };
-        let effort = crate::effort_observation::effort_at_turn_end(&self.deps.sql, turn).await?;
         let cause = crate::collection::RunCause {
             event_id: event.envelope.id.as_str().to_string(),
             seq: event.seq,
-            anchors: oxplow_domain::Anchors {
-                effort_id: effort,
-                ..event.envelope.anchors.clone()
-            },
+            anchors: event.envelope.anchors.clone(),
             at: event.envelope.at,
             started: None,
         };
@@ -522,32 +485,30 @@ mod tests {
         }
     }
 
-    /// The scope of effort `id` on thread 1.
-    fn on(effort: i64) -> AdvisoryScope {
+    /// The scope of thread 1, outside any request.
+    fn on_thread() -> AdvisoryScope {
         AdvisoryScope {
             thread: 1,
             stream: Some(1),
             turn: None,
             request: None,
-            effort: Some(effort),
             session: None,
         }
     }
 
-    /// The scope of request `id` on thread 1 (no effort).
+    /// The scope of request `id` on thread 1.
     fn on_request(request: i64) -> AdvisoryScope {
         AdvisoryScope {
             thread: 1,
             stream: Some(1),
             turn: None,
             request: Some(request),
-            effort: None,
             session: None,
         }
     }
 
-    /// A layer and a runner over one database holding efforts 1–5 (a
-    /// once-mark references its effort).
+    /// A layer and a runner over one database holding requests 1–5 (a
+    /// once-mark references its request).
     async fn setup() -> (crate::sql_gateway::SqlGateway, AdvisoryRunner) {
         let db = oxplow_db::Database::in_memory();
         db.transaction(|tx| {
@@ -556,13 +517,7 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'r', 'r', '/r', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 't', '2026-01-01', '2026-01-01');
-                 INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1);
-                 INSERT INTO effort (id, task, thread_id, started_at, ended_at) VALUES
-                   (1, 'oxplow:oxplow/task?id=A-1&provider=issues', 1, '2026-01-01', '2026-01-01'),
-                   (2, 'oxplow:oxplow/task?id=A-2&provider=issues', 1, '2026-01-01', '2026-01-01'),
-                   (3, 'oxplow:oxplow/task?id=A-3&provider=issues', 1, '2026-01-01', '2026-01-01'),
-                   (4, 'oxplow:oxplow/task?id=A-4&provider=issues', 1, '2026-01-01', '2026-01-01'),
-                   (5, 'oxplow:oxplow/task?id=A-5&provider=issues', 1, '2026-01-01', '2026-01-01');",
+                 INSERT INTO request (id, thread_id) VALUES (1, 1), (2, 1), (3, 1), (4, 1), (5, 1);",
             )
             .map_err(oxplow_db::map_sql_err)
         })
@@ -575,16 +530,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn once_per_effort_fires_once_per_effort_and_only_with_rows() {
+    async fn once_per_request_fires_only_with_rows_and_durably() {
         let (l, runner) = setup().await;
         let e = vec![ext(vec![adv(
             "low",
             AdvisoryOn::PostToolUse,
-            AdvisoryOncePer::Effort,
-            "SELECT 'add tests (' || :effort_id || ')' AS message WHERE :effort_id <> 3",
+            AdvisoryOncePer::Request,
+            "SELECT 'add tests (' || :request_id || ')' AS message WHERE :request_id <> 3",
         )])];
         let (l, e, runner) = (&l, &e, &runner);
-        let run = |id: i64| async move { runner.run(l, e, AdvisoryOn::PostToolUse, &on(id)).await };
+        let run = |id: i64| async move {
+            runner
+                .run(l, e, AdvisoryOn::PostToolUse, &on_request(id))
+                .await
+        };
         assert_eq!(
             run(1).await,
             vec![AdvisoryHit {
@@ -593,12 +552,10 @@ mod tests {
                 audience: AdvisoryAudience::Agent,
             }]
         );
-        assert!(run(1).await.is_empty(), "once per effort");
         assert!(run(3).await.is_empty(), "no rows, no hit");
-        assert_eq!(run(2).await.len(), 1, "another effort fires again");
         assert!(
             runner
-                .run(l, e, AdvisoryOn::Prompt, &on(5))
+                .run(l, e, AdvisoryOn::Prompt, &on_request(5))
                 .await
                 .is_empty(),
             "only advisories for this hook point run"
@@ -606,7 +563,7 @@ mod tests {
         // Durable: a runner over the same database after a restart agrees.
         let again = AdvisoryRunner::new(runner.marks.clone());
         assert!(again
-            .run(l, e, AdvisoryOn::PostToolUse, &on(1))
+            .run(l, e, AdvisoryOn::PostToolUse, &on_request(1))
             .await
             .is_empty());
     }
@@ -639,7 +596,7 @@ mod tests {
         );
         // With no request to scope it, a once-per-request hint doesn't run.
         assert!(runner
-            .run(l, e, AdvisoryOn::PostToolUse, &on(1))
+            .run(l, e, AdvisoryOn::PostToolUse, &on_thread())
             .await
             .is_empty());
 
@@ -691,7 +648,7 @@ mod tests {
             "SELECT '- x: 1 → 2' AS message",
         );
         let e = vec![ext(vec![rows, every])];
-        let first = runner.run(&l, &e, AdvisoryOn::Prompt, &on(1)).await;
+        let first = runner.run(&l, &e, AdvisoryOn::Prompt, &on_thread()).await;
         assert_eq!(
             first,
             vec![
@@ -707,7 +664,7 @@ mod tests {
                 },
             ]
         );
-        let second = runner.run(&l, &e, AdvisoryOn::Prompt, &on(1)).await;
+        let second = runner.run(&l, &e, AdvisoryOn::Prompt, &on_thread()).await;
         assert_eq!(
             second,
             vec![AdvisoryHit {
@@ -735,19 +692,19 @@ mod tests {
             "SELECT nope FROM nowhere",
         )]);
         assert!(runner
-            .run(&l, &[off, bad], AdvisoryOn::Prompt, &on(1))
+            .run(&l, &[off, bad], AdvisoryOn::Prompt, &on_thread())
             .await
             .is_empty());
     }
 
     #[tokio::test]
-    async fn thread_advisories_use_the_open_effort_and_record_post_tool_use_nudges() {
-        let f = crate::test_fixtures::services_with_effort().await;
+    async fn thread_advisories_record_post_tool_use_nudges() {
+        let f = crate::test_fixtures::services_with_thread().await;
         let dir = f.svc.layout.project_dir.join(".oxplow/extensions/guide");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("extension.yaml"),
-            "manifest: 2\nname: guide\nintent:\n  purpose: test\npermissions: [agent.write]\nadvisories:\n  - id: hello\n    on: post-tool-use\n    once_per: effort\n    query: SELECT 'effort ' || :effort_id AS message\n",
+            "manifest: 2\nname: guide\nintent:\n  purpose: test\npermissions: [agent.write]\nadvisories:\n  - id: hello\n    on: post-tool-use\n    once_per: thread\n    query: SELECT 'thread ' || :thread_id AS message\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&f.svc).await;
@@ -762,7 +719,7 @@ mod tests {
             hits,
             vec![AdvisoryHit {
                 id: "guide/hello".into(),
-                text: format!("effort {}", f.effort.value()),
+                text: format!("thread {}", f.thread.value()),
                 audience: AdvisoryAudience::Agent,
             }]
         );
@@ -772,7 +729,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            serde_json::json!([["guide/hello", format!("effort {}", f.effort.value())]])
+            serde_json::json!([["guide/hello", format!("thread {}", f.thread.value())]])
         );
         assert!(
             for_thread(&f.svc.advisory_deps(), &f.thread, AdvisoryOn::Prompt, None)
@@ -835,36 +792,21 @@ mod tests {
     }
 
     /// A turn-end hint is evaluated when the turn's checkpoint lands, with
-    /// the thread, stream and turn bound and no effort when none is open;
+    /// the thread, stream and turn bound;
     /// it reaches the agent once, at the next prompt, stamped delivered;
     /// `once_per: thread` holds it after that.
     #[tokio::test]
     async fn a_turn_end_hint_reaches_the_next_prompt_once_per_thread() {
         let f = crate::thread_checkpoint::tests::with_baseline().await;
         let svc = &f.svc;
-        svc.commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                crate::commands::effort::CLOSE,
-                serde_json::json!({ "effort": f.effort.to_string() }),
-                false,
-            )
-            .await
-            .unwrap();
         approved(
             svc,
             "guide",
-            "  - id: asked\n    on: turn-end\n    once_per: thread\n    query: SELECT 'thread ' || :thread_id || ' stream ' || :stream_id || ' turn ' || :turn_id || ' effort ' || coalesce(:effort_id, 'none') AS message\n",
+            "  - id: asked\n    on: turn-end\n    once_per: thread\n    query: SELECT 'thread ' || :thread_id || ' stream ' || :stream_id || ' turn ' || :turn_id AS message\n",
         ).await;
         let settle = || {
-            svc.event_pump.settle(
-                &[
-                    crate::effort_policy::NAME,
-                    crate::effort_observation::NAME,
-                    TURN_END,
-                ],
-                std::time::Duration::from_secs(10),
-            )
+            svc.event_pump
+                .settle(&[TURN_END], std::time::Duration::from_secs(10))
         };
         crate::thread_checkpoint::tests::turn(&f, None, &["read"]).await;
         settle().await;
@@ -883,7 +825,7 @@ mod tests {
             .unwrap_or_default();
         assert!(
             context.contains(&format!(
-                "thread {} stream {stream} turn {turn} effort none",
+                "thread {} stream {stream} turn {turn}",
                 f.thread.value()
             )),
             "{context}"
@@ -916,7 +858,7 @@ mod tests {
             .prompt_context(svc, &f.thread, Some("s"), None, None)
             .await
             .unwrap_or_default();
-        assert!(!third.contains("effort none"), "once per thread: {third}");
+        assert!(!third.contains("guide"), "once per thread: {third}");
     }
 
     /// (kind, audience, delivered) of the thread's nudges, oldest first.
@@ -1075,7 +1017,7 @@ mod tests {
         ])];
         let in_session = |id: Option<&str>| AdvisoryScope {
             session: id.map(str::to_string),
-            ..on(1)
+            ..on_thread()
         };
         let ids = |hits: Vec<AdvisoryHit>| hits.into_iter().map(|h| h.id).collect::<Vec<_>>();
         assert_eq!(

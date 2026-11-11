@@ -16,7 +16,6 @@ pub const PROJECT: &str = "oxplow/project";
 pub const STREAM: &str = "oxplow/stream";
 pub const THREAD: &str = "oxplow/thread";
 pub const PERSON: &str = "oxplow/person";
-pub const EFFORT: &str = "oxplow/effort";
 pub const TURN: &str = "oxplow/turn";
 pub const REQUEST: &str = "oxplow/request";
 pub const SNAPSHOT: &str = "oxplow/snapshot";
@@ -450,7 +449,7 @@ mod tests {
 
     fn registry() -> ResourceRegistry {
         let mut r = ResourceRegistry::default();
-        r.register(decl("oxplow/effort", &[("id", true, Some(r"^eff\d+$"))]))
+        r.register(decl("oxplow/request", &[("id", true, Some(r"^req\d+$"))]))
             .unwrap();
         r.register(decl(
             "oxplow/file",
@@ -474,7 +473,7 @@ mod tests {
 
     #[test]
     fn a_uri_names_a_declared_resource_with_the_params_it_takes() {
-        assert_eq!(check("oxplow:oxplow/effort?id=eff12"), Ok(()));
+        assert_eq!(check("oxplow:oxplow/request?id=req12"), Ok(()));
         assert_eq!(
             check("oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=1-2"),
             Ok(())
@@ -486,15 +485,15 @@ mod tests {
             Err(ResourceError::Undeclared(_))
         ));
         assert!(matches!(
-            check("oxplow:oxplow/effort"),
+            check("oxplow:oxplow/request"),
             Err(ResourceError::MissingParam { .. })
         ));
         assert!(matches!(
-            check("oxplow:oxplow/effort?id=12"),
+            check("oxplow:oxplow/request?id=12"),
             Err(ResourceError::BadValue { .. })
         ));
         assert!(matches!(
-            check("oxplow:oxplow/effort?id=eff1&x=1"),
+            check("oxplow:oxplow/request?id=req1&x=1"),
             Err(ResourceError::UnknownParam { .. })
         ));
         assert!(matches!(
@@ -507,8 +506,8 @@ mod tests {
     fn a_resource_is_declared_once_and_its_sugar_is_its_own() {
         let mut r = registry();
         assert_eq!(
-            r.register(decl("oxplow/effort", &[])),
-            Err(ResourceError::Collision("oxplow/effort".into()))
+            r.register(decl("oxplow/request", &[])),
+            Err(ResourceError::Collision("oxplow/request".into()))
         );
         let with_link = |name: &str, prefix: &str, param: &str| ResourceDecl {
             wikilink: Some(WikilinkDecl {

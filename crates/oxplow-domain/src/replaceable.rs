@@ -161,8 +161,7 @@ mod tests {
             assert!(!r.props.is_empty(), "{}", r.target);
             assert!(!r.props.contains(&"stream_id"), "{}", r.target);
             // A target is named for what its capability is about:
-            // `task.*` for `task_tracker`, `effort.*` for
-            // `effort_policy`, `vcs.*` for `vcs`.
+            // `task.*` for `task_tracker`, `vcs.*` for `vcs`.
             let noun = r.target.split('.').next().unwrap_or_default();
             assert!(r.capability.starts_with(noun), "{}", r.target);
         }

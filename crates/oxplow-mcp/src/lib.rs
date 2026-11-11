@@ -357,7 +357,7 @@ impl ServerHandler for OxplowMcp {
         // the default and assign.
         let mut info = ServerConfig::default();
         info.instructions = Some(
-            "Oxplow knows this project's work and code: tasks, efforts, \
+            "Oxplow knows this project's work and code: tasks, requests, \
              test runs and coverage, commits, metrics and the wiki, readable \
              with `oxplow_query_sql` over the read-only `v_*` datasets (`v_dataset` lists \
              them). Every write is a command (`run_command`).\n\n\
@@ -495,9 +495,6 @@ impl OxplowMcp {
             }
             Err(err) => return Err(command_error(err)),
         };
-        if outcome.audit_id.is_some() {
-            self.services.efforts.settle_lifecycle().await;
-        }
         match outcome.result {
             serde_json::Value::String(text) => {
                 Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
@@ -544,12 +541,6 @@ impl OxplowMcp {
             }
             Err(err) => return Err(command_error(err)),
         };
-        // A write may have opened or closed an effort (`oxplow.effort.open`,
-        // `oxplow.task.transition`): let its snapshot pin land before the
-        // agent's next step.
-        if outcome.audit_id.is_some() {
-            self.services.efforts.settle_lifecycle().await;
-        }
         json_result(&outcome)
     }
 
@@ -891,7 +882,7 @@ mod tests {
         );
         w(
             ".oxplow/extensions/demo/pages/review.yaml",
-            "title: Review\nparams:\n  - { name: path }\nloaders:\n  r: { sql: SELECT :path AS effort }\nview: { viz: table, from: r }\n",
+            "title: Review\nparams:\n  - { name: path }\nloaders:\n  r: { sql: SELECT :path AS file }\nview: { viz: table, from: r }\n",
         );
         w(
             ".oxplow/extensions/demo/pages/streams.yaml",

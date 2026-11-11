@@ -208,9 +208,6 @@ macro_rules! oxplow_command_table {
                 select_thread => $crate::commands::threads::select_thread { req: $crate::commands::threads::SelectThreadRequest } -> (),
                 // backlog
                 // tasks
-                // effort
-                list_efforts_in_window => $crate::commands::effort::list_efforts_in_window { window_start: ::oxplow_domain::Timestamp, window_end: ::oxplow_domain::Timestamp } -> Vec<::oxplow_db::Effort>,
-                list_efforts_at_snapshots => $crate::commands::effort::list_efforts_at_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<::oxplow_db::EffortAtSnapshot>,
                 // metrics: reads are SQL (`metric_grid()`, `v_metric_catalog`); this
                 // switches them, through the `oxplow.metric.enable` command (P4.7)
                 // the command bus, as the person
@@ -484,10 +481,8 @@ mod tests {
     #[tokio::test]
     async fn bad_args_are_rejected_as_invalid() {
         let (svc, _dir) = services().await;
-        // `snapshotIds` is required; an empty object can't deserialize into Args.
-        let err = dispatch("list_efforts_at_snapshots", json!({}), &svc)
-            .await
-            .unwrap_err();
+        // `streamId` is required; an empty object can't deserialize into Args.
+        let err = dispatch("list_threads", json!({}), &svc).await.unwrap_err();
         assert_eq!(err.code, "INVALID");
     }
 }

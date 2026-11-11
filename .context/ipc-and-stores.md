@@ -472,8 +472,8 @@ is one transaction (`record_take`: the snapshot row, its file rows, a
 is an ancestry chain (see data-model.md "Takes and the operation log").
 Rows returned by `listSnapshotsForStream` carry their creating op's
 `parent_snapshot_id` / `trigger` / `over_budget`, and exclude the
-first-ever baseline (nothing to diff against). Agent
-turns anchor to snapshots through `agent_turn.start_snapshot_id` / `snapshot_id`.
+first-ever baseline (nothing to diff against). An agent
+turn's end take carries its `turn_id`.
 Unlike other stores it doesn't expose a `subscribe()`; the renderer
 hears a take that recorded something as `SnapshotTaken`, which the
 `ui.push` consumer derives from the logged `snapshot.taken@3` (and a

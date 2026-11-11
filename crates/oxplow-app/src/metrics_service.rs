@@ -3,7 +3,7 @@
 //! the collectors that record facts (`collectors:` with `facts:`, the
 //! project's, an extension's, or a built-in one a `metrics: - use:`
 //! enables). The `collector.triggers` pump consumer hands it the ones an
-//! event triggers (`snapshot.taken`, `effort.finished`, …); `oxplow.collector.sync`
+//! event triggers (`snapshot.taken`, `vcs.head.moved`, …); `oxplow.collector.sync`
 //! runs one by hand; `oxplow.metric.rebuild` baselines them.
 //!
 //! A fact collector's Starlark script runs with a [`TreeHost`] exposing the
@@ -33,12 +33,10 @@ use oxplow_config::{
     DimensionEntry, MeasureEntry, MetricEntry, OxplowConfig, ResolvedSpec,
 };
 use oxplow_db::{
-    EffortStore, NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteEffortStore,
-    SqliteFactStore, SqliteSnapshotStore, SqliteThreadStore,
+    NewDimension, NewMeasure, NewMetricSpec, SnapshotStorage, SqliteFactStore, SqliteSnapshotStore,
 };
 use oxplow_domain::run::Budget;
-use oxplow_domain::stores::ThreadStore;
-use oxplow_domain::{Actor, DomainError, EffortId, StreamId, ThreadId};
+use oxplow_domain::{Actor, DomainError, StreamId};
 use oxplow_script::CollectedFact;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -246,8 +244,6 @@ const SNAPSHOT_TAKEN: &str = "snapshot.taken";
 /// A stream's HEAD moved: what a whole-tree collector that follows commits
 /// runs on.
 const HEAD_MOVED: &str = "vcs.head.moved";
-/// The event that runs effort-triggered fact collectors.
-const EFFORT_FINISHED: &str = "effort.finished";
 
 /// How one fact collector's run went.
 #[derive(Debug, Clone, PartialEq)]
@@ -282,8 +278,6 @@ struct PublishedMetricInputs {
 #[derive(Clone)]
 pub struct MetricsService {
     snapshot_store: Arc<SqliteSnapshotStore>,
-    thread_store: Arc<SqliteThreadStore>,
-    effort_store: Arc<SqliteEffortStore>,
     content: SnapshotContent,
     vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
     config: Arc<RwLock<OxplowConfig>>,
@@ -409,11 +403,10 @@ struct CollectorRunContext {
     closest_vcs_rev: Option<String>,
     vcs_rev_exact: bool,
     branch: Option<String>,
-    /// The producing effort, when the trigger knows it unambiguously (the
-    /// `on-effort-complete` ride-along) — stamped onto the capture so the
-    /// effort-attribution read (`captures_for_effort`) sees the run (tsk43).
-    /// Snapshot/manual scans are effort-less (`None`).
-    effort_id: Option<i64>,
+    /// The turn the run's trigger event was anchored to, stamped onto the
+    /// capture so the turn's request reads the run (`Members::Turns`).
+    /// Snapshot/manual scans have none.
+    turn_id: Option<i64>,
     /// The capture's scanned-set semantics (tsk71): `delta` for the ordinary
     /// incremental rescan over the snapshot's own rows; `full` for a baseline
     /// over the RECONSTRUCTED tree as-of the snapshot. Stamped verbatim onto
@@ -455,8 +448,6 @@ impl MetricsService {
 
     pub fn new(
         snapshot_store: Arc<SqliteSnapshotStore>,
-        thread_store: Arc<SqliteThreadStore>,
-        effort_store: Arc<SqliteEffortStore>,
         content: SnapshotContent,
         vcs: Arc<dyn oxplow_domain::vcs::Vcs>,
         config: Arc<RwLock<OxplowConfig>>,
@@ -467,8 +458,6 @@ impl MetricsService {
         );
         Self {
             snapshot_store,
-            thread_store,
-            effort_store,
             content,
             vcs,
             config,
@@ -906,7 +895,7 @@ impl MetricsService {
         if let Some(origin) = origin.as_deref() {
             oxplow_domain::uri::OxplowUri::parse(origin).map_err(|e| {
                 format!(
-                    "origin `{origin}` is not a canonical ref (`oxplow:oxplow/effort?id=eff42`, `oxplow:oxplow/thread?id=thr3`): {}",
+                    "origin `{origin}` is not a canonical ref (`oxplow:oxplow/request?id=req42`, `oxplow:oxplow/thread?id=thr3`): {}",
                     e.reason()
                 )
             })?;
@@ -941,7 +930,7 @@ impl MetricsService {
     /// This set is the pending-baseline QUEUE: the on-snapshot sweep drains it by
     /// running these collectors `full` over the next snapshot that lands, so a newly
     /// added or edited collector baselines on the next ordinary snapshot — no
-    /// fabricated full-tree snapshot (which used to pollute effort attribution).
+    /// fabricated full-tree snapshot (which used to pollute run attribution).
     pub async fn collectors_needing_baseline(&self, stream_id: i64) -> Vec<String> {
         let Some(facts) = self.fact_store.as_ref() else {
             return Vec::new();
@@ -1045,7 +1034,7 @@ impl MetricsService {
     /// Bring every `per-path` metric up to date over the WHOLE tree (tsk50).
     ///
     /// A baseline no longer fabricates a full-tree snapshot (tsk71 — that
-    /// snapshot polluted effort file-attribution). Instead it drains any
+    /// snapshot polluted file attribution). Instead it drains any
     /// pending edits into an ORDINARY snapshot (authored work, correctly
     /// attributed), anchors on the latest snapshot, and runs the un-baselined
     /// collectors `scan_kind = 'full'` over the RECONSTRUCTED tree as-of it — the
@@ -1330,7 +1319,7 @@ impl MetricsService {
             let full_ok = r.failed.is_empty();
             report.ran += r.ran;
             report.failed.extend(r.failed);
-            // A fresh baseline makes every older effort-less tree capture dead
+            // A fresh baseline makes every older turn-less tree capture dead
             // weight (tsk75 — their facts were ~69% of the table and every
             // full-history read paid for them). Prune only on a clean baseline
             // sweep: a failed collector wrote no baseline, so its history must
@@ -1458,64 +1447,12 @@ impl MetricsService {
         }
     }
 
-    /// Run the fact collectors an `effort.finished` triggers, over the
-    /// effort's end snapshot (the worktree as it stood at close), stamped
-    /// with the effort.
-    pub async fn run_effort_collectors(
-        &self,
-        thread_id: &ThreadId,
-        effort_id: &EffortId,
-        event: Option<Arc<oxplow_domain::StoredEvent>>,
-        select: &(dyn Fn(&FactCollector) -> bool + Sync),
-    ) {
-        let collectors: Vec<FactCollector> = self
-            .fact_collectors()
-            .into_iter()
-            .filter(|g| g.runs_on(EFFORT_FINISHED))
-            .filter(|g| select(g))
-            .filter(|g| {
-                event
-                    .as_ref()
-                    .is_none_or(|e| g.trigger.where_fits(&e.envelope.payload))
-            })
-            .collect();
-        let collectors = self.runnable(collectors, event.as_deref()).await;
-        if collectors.is_empty() || self.skips_without_contents("effort collectors") {
-            return;
-        }
-        let stream_val = match self.thread_store.get(thread_id).await {
-            Ok(Some(t)) => t.stream_id.value(),
-            _ => return,
-        };
-        let snapshot_id = match self.effort_store.get_effort(effort_id).await {
-            Ok(Some(e)) => e.end_snapshot_id,
-            _ => None,
-        };
-        let files = self.snapshot_files(snapshot_id, "effort collectors").await;
-        let mut ctx = self
-            .snapshot_context(
-                stream_val,
-                Some(thread_id.value()),
-                EFFORT_FINISHED,
-                snapshot_id.unwrap_or(0),
-            )
-            .await;
-        ctx.event = event;
-        // This trigger KNOWS the producing effort — stamp it so the capture is
-        // attributable via `captures_for_effort` (tsk43; the pre-arc effort
-        // subject default was removed without a replacement).
-        ctx.effort_id = Some(effort_id.value());
-        for g in &collectors {
-            self.run_one_collector(g, &ctx, files.clone()).await;
-        }
-    }
-
     /// Run fact collector `key` (of `owner`), deferred by its pacing, for
     /// `event`. A snapshot collector runs over the stream's latest
     /// snapshot with every file recorded since it last finished — what it
     /// would have scanned running on each snapshot between — so skipped
-    /// snapshots lose nothing; an effort's or another event's runs as the
-    /// event would have had it.
+    /// snapshots lose nothing; another event's runs as the event would have
+    /// had it.
     pub async fn run_paced(&self, owner: &str, key: &str, event: Arc<oxplow_domain::StoredEvent>) {
         let only = |c: &FactCollector| c.owner == owner && c.key == key;
         let anchors = event.envelope.anchors.clone();
@@ -1540,16 +1477,6 @@ impl MetricsService {
                     None => None,
                 };
                 self.run_snapshot_collectors(stream, latest, false, Some(event), &only, since)
-                    .await;
-            }
-            EFFORT_FINISHED => {
-                let (Ok(effort), Some(thread)) = (
-                    crate::effort_lifecycle::effort_of(&event),
-                    anchors.thread_id,
-                ) else {
-                    return;
-                };
-                self.run_effort_collectors(&thread, &effort, Some(event), &only)
                     .await;
             }
             _ => self.run_event_collectors(event, &only).await,
@@ -1588,7 +1515,7 @@ impl MetricsService {
             .snapshot_context(stream_val, None, "on", snapshot_id.unwrap_or(0))
             .await;
         ctx.thread_id = event.envelope.anchors.thread_id.map(|t| t.value());
-        ctx.effort_id = event.envelope.anchors.effort_id.map(|e| e.value());
+        ctx.turn_id = event.envelope.anchors.turn_id;
         ctx.event = Some(event);
         for c in &collectors {
             self.run_one_collector(c, &ctx, files.clone()).await;
@@ -1827,7 +1754,7 @@ impl MetricsService {
             closest_vcs_rev: version.as_ref().and_then(|v| v.closest_vcs_rev.clone()),
             vcs_rev_exact: version.as_ref().map(|v| v.vcs_rev_exact).unwrap_or(false),
             branch: self.current_branch().await,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -2319,8 +2246,8 @@ impl MetricsService {
                 crate::collector_runner::Anchored {
                     stream_id: Some(ctx.stream_val),
                     snapshot_id: ctx.snapshot_id,
-                    effort_id: ctx.effort_id,
                     thread_id: ctx.thread_id,
+                    turn_id: ctx.turn_id,
                 },
             );
             crate::collector_runner::input_rows_for_run(&log.layer, &c.key, sql, params, run)
@@ -2449,7 +2376,7 @@ impl MetricsService {
         capture.status = "failed".into();
         capture.error = Some(error.to_string());
         capture.thread_id = ctx.thread_id;
-        capture.effort_id = ctx.effort_id;
+        capture.turn_id = ctx.turn_id;
         capture.scope = Some(collector.scope());
         capture.trigger = Some(ctx.trigger.into());
         capture.snapshot_id = ctx.snapshot_id;
@@ -2586,7 +2513,7 @@ impl MetricsService {
         // No `rows.is_empty()` bail: the empty capture IS the zero record.
         let capture = oxplow_db::NewMetricCapture {
             thread_id: ctx.thread_id,
-            effort_id: ctx.effort_id,
+            turn_id: ctx.turn_id,
             scope: Some(collector.scope()),
             trigger: Some(ctx.trigger.into()),
             basis_ref: ctx.closest_vcs_rev.clone(),
@@ -2979,7 +2906,6 @@ mod tests {
         }
     }
     use super::*;
-    use oxplow_oxtask::task_ref;
 
     /// A distinct count's buckets don't add up, so its points aren't
     /// stored as a `sum` (the detail page would total them) (tsk367).
@@ -3892,7 +3818,7 @@ def transform(input):
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
             branch: Some("metrics-substrate".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -3957,7 +3883,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4019,7 +3945,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4153,9 +4079,9 @@ def transform(input):
     #[tokio::test]
     async fn rebuild_does_not_fabricate_a_snapshot_on_a_clean_tree() {
         // tsk71: the old rebuild enqueued EVERY path as dirty and captured a
-        // full-tree snapshot, which polluted effort file-attribution (edits
-        // from other efforts first landed in a snapshot inside whatever effort
-        // window was open). The baseline now anchors to the latest existing
+        // full-tree snapshot, which polluted file attribution (edits
+        // from other work first landed in a snapshot inside whatever window
+        // was open). The baseline now anchors to the latest existing
         // snapshot and scans the RECONSTRUCTED tree — so a rebuild over an
         // unchanged tree must not create any snapshot at all.
         let (svc, dir) = fixture().await;
@@ -4216,7 +4142,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4426,7 +4352,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4475,7 +4401,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4552,7 +4478,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4589,40 +4515,21 @@ def transform(input):
     }
 
     #[tokio::test]
-    async fn effort_complete_collector_capture_is_effort_stamped() {
-        // tsk43: the on-effort-complete trigger KNOWS its producing effort —
-        // `record_collector_facts` stamps the capture's `effort_id` so the T-D
-        // attribution spine (`captures_for_effort`) sees the run. Snapshot scans
-        // (the other fixtures, `effort_id: None`) stay unstamped.
-        use oxplow_oxtask::OxtaskId;
-        use oxplow_oxtask::OxtaskStore as _;
-        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
+    async fn an_event_collectors_capture_is_stamped_with_the_events_turn() {
+        // A run for an event anchored to a turn records its capture in that
+        // turn, so the turn's request reads it (`Members::Turns`). Snapshot
+        // scans (the other fixtures, `turn_id: None`) stay unstamped.
         let (svc, dir) = fixture().await;
-        // A real effort row (the capture's effort_id is a foreign key).
-        let now = oxplow_domain::Timestamp::now();
-        let thread = ThreadId::new(1);
-        let task = svc
-            .task_store
-            .insert(&Oxtask {
-                id: OxtaskId::placeholder(),
-                parent_id: None,
-                title: "t".into(),
-                description: String::new(),
-                status: OxtaskStatus::InProgress,
-                priority: OxtaskPriority::Medium,
-                created_by: OxtaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(OxtaskAuthor::User),
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                     VALUES (5, 1, 'p', '2026-01-01T00:00:00Z')",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
             })
-            .await
-            .unwrap();
-        let effort = svc
-            .effort_store
-            .start(&task_ref(task), &thread, None)
             .await
             .unwrap();
 
@@ -4643,12 +4550,12 @@ def transform(input):
             excluded: Arc::default(),
             stream_val: 1,
             thread_id: Some(1),
-            trigger: "on-effort-complete",
+            trigger: "on",
             snapshot_id: None,
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: Some(effort.id.value()),
+            turn_id: Some(5),
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4658,77 +4565,21 @@ def transform(input):
             .run_one_collector(&metric, &ctx, Arc::new(HashMap::new()))
             .await;
         assert_eq!(count, FactRun::Recorded(1));
-        let caps = svc
-            .fact_store
-            .captures_for_effort(effort.id.value())
-            .await
-            .unwrap();
-        assert_eq!(caps.len(), 1, "the capture is stamped with the effort");
-        assert_eq!(caps[0].producer, "acme.effcollector");
-    }
-
-    #[tokio::test]
-    async fn effort_finished_runs_on_effort_complete_collectors() {
-        // Effort-triggered collectors run from the `collector.triggers` pump
-        // consumer on `effort.finished` (P7.B3).
-        use oxplow_oxtask::OxtaskId;
-        use oxplow_oxtask::OxtaskStore as _;
-        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
-        let (svc, dir) = fixture().await;
-        let now = oxplow_domain::Timestamp::now();
-        let thread = ThreadId::new(1);
-        let task = svc
-            .task_store
-            .insert(&Oxtask {
-                id: OxtaskId::placeholder(),
-                parent_id: None,
-                title: "t".into(),
-                description: String::new(),
-                status: OxtaskStatus::InProgress,
-                priority: OxtaskPriority::Medium,
-                created_by: OxtaskActorKind::User,
-                created_at: now,
-                updated_at: now,
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(OxtaskAuthor::User),
+        let turns: Vec<Option<i64>> = svc
+            .db
+            .read(|tx| {
+                tx.prepare(
+                    "SELECT turn_id FROM metric_capture WHERE producer = 'acme.effcollector'",
+                )
+                .and_then(|mut st| {
+                    st.query_map([], |r| r.get(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .map_err(oxplow_db::map_sql_err)
             })
             .await
             .unwrap();
-        let effort = svc
-            .effort_store
-            .start(&task_ref(task), &thread, None)
-            .await
-            .unwrap();
-        crate::collector_triggers::register(&svc);
-        std::fs::write(
-            project_ext_file(dir.path(), "metrics/eff.star"),
-            "def transform(input):\n    return {\"facts\": [{\"measure\": \"code_metrics.ast_hit\", \"value\": 1, \"rule\": \"eff\", \"subject\": \"oxplow:oxplow/dir?path=.\"}]}\n",
-        )
-        .unwrap();
-        declare_project_collectors(
-                dir.path(),
-                "- { id: acme.effcollector, runtime: starlark, entry: metrics/eff.star, on: [effort.finished], facts: [code_metrics.ast_hit] }",
-            );
-        crate::test_fixtures::activate_with_problems(&svc).await;
-        svc.effort_store
-            .finish(&effort.id, None, None)
-            .await
-            .unwrap();
-        svc.event_pump.run_once().await.unwrap();
-        for _ in 0..100 {
-            let caps = svc
-                .fact_store
-                .captures_for_effort(effort.id.value())
-                .await
-                .unwrap();
-            if caps.iter().any(|c| c.producer == "acme.effcollector") {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-        panic!("the on-effort-complete collector didn't run after effort.finished");
+        assert_eq!(turns, vec![Some(5)], "the capture is the turn's");
     }
 
     #[tokio::test]
@@ -4768,7 +4619,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4882,7 +4733,7 @@ def transform(input):
             closest_vcs_rev: Some("abc1234".into()),
             vcs_rev_exact: true,
             branch: Some("main".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -4951,7 +4802,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5015,7 +4866,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5087,7 +4938,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: None,
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5156,7 +5007,7 @@ def transform(input):
             closest_vcs_rev: Some("def5678".into()),
             vcs_rev_exact: true,
             branch: Some("main".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5227,7 +5078,7 @@ def transform(input):
             closest_vcs_rev: None,
             vcs_rev_exact: false,
             branch: Some("main".into()),
-            effort_id: None,
+            turn_id: None,
             scan_kind: "delta",
             event: None,
             run: RunContext::core(Actor::System, Mode::External),
@@ -5289,7 +5140,7 @@ def transform(input):
         assert_eq!(spec.source_measure.as_deref(), Some("oxplow.coverage"));
         assert_eq!(spec.aggregation, "ratio");
         // The new V46 measures exist for the producers with no prior home.
-        for key in ["oxplow.turn", "oxplow.task_effort", "oxplow.nudge"] {
+        for key in ["oxplow.turn", "oxplow.nudge"] {
             assert!(
                 svc.fact_store.get_measure(key).await.unwrap().is_some(),
                 "{key} measure seeded by V46"

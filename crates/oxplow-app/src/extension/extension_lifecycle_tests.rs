@@ -22,7 +22,7 @@ use crate::extension::extension_private_state_tests::{declare, write, write_stat
 use crate::test_fixtures::lifecycle::write_extension;
 use crate::test_fixtures::lifecycle::EXT;
 use crate::test_fixtures::lifecycle::{
-    booted, log_retitle, page, problem, readable, CONFIGURATION_V2,
+    booted, log_task_done, page, problem, readable, CONFIGURATION_V2,
 };
 use crate::test_fixtures::ThreadFixture;
 
@@ -120,15 +120,15 @@ impl Alpha {
   - id: seen
     runtime: starlark
     entry: collectors/seen.star
-    on: [effort.retitled]{settle}
+    on: [task.state_changed]{settle}
     input: \"SELECT :event_seq AS ev\"
     sync: upsert
     entities:
       - {{ name: seen, key: ev, columns: {{ ev: int, who: text }} }}
 effects:
   - id: note
-    summary: Note a retitled effort.
-    on: [effort.retitled]
+    summary: Note a finished task.
+    on: [task.state_changed]
     entry: effects/note.star
 event_types:
   types:
@@ -235,10 +235,10 @@ fn page_title(fx: &ThreadFixture) -> Option<String> {
         .map(|l| l.title)
 }
 
-/// An effort is retitled: the collector and the effect react to it, as the
+/// A task is done: the collector and the effect react to it, as the
 /// event pump runs them.
-async fn verified(fx: &crate::test_fixtures::EffortFixture) {
-    log_retitle(&fx.svc, fx.effort, "reviewer").await;
+async fn verified(fx: &ThreadFixture) {
+    log_task_done(&fx.svc, fx.thread, "reviewer").await;
     assert!(
         fx.svc.event_pump.settle_all(Duration::from_secs(10)).await,
         "the consumers handled it"

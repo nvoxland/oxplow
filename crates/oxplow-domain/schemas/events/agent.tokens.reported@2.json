@@ -36,7 +36,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "`agent.tokens.reported@2`: an agent's own telemetry (an OTLP export)\nreported token counts. Anchored to the turn the export's time window\nfell in — exports lag the turn — and the thread's single open effort.",
+  "description": "`agent.tokens.reported@2`: an agent's own telemetry (an OTLP export)\nreported token counts. Anchored to the turn the export's time window\nfell in — exports lag the turn.",
   "properties": {
     "counts": {
       "items": {

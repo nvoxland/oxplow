@@ -21,8 +21,8 @@
 //! event as a dead letter and moves on, like the sync kind.
 //!
 //! [`EventPump::settle`] runs the pump now and waits (bounded) for it — a
-//! caller whose answer depends on a consumer's effect (the close's
-//! file review needs the effort's end snapshot) settles instead of
+//! caller whose answer depends on a consumer's effect (a turn-end
+//! advisory reads the turn's checkpoint) settles instead of
 //! re-implementing the effect inline. One run at a time: the loop and a
 //! settle never deliver the same event concurrently.
 //!
@@ -61,12 +61,6 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "config.providers",
     "config.scripts",
     "config.workspace_filter",
-    "effort.claim",
-    "effort.evidence",
-    "effort.landing",
-    "effort.lifecycle",
-    "effort.observe",
-    "effort.policy",
     "extension_datasets.entities",
     "knowledge.records",
     "knowledge.switch",
@@ -594,7 +588,7 @@ impl EventPump {
             loop {
                 let Some(p) = pump.upgrade() else { return };
                 let ran = p.run_slot(&slot).await;
-                // A handler may have logged events (`effort.finished`) that
+                // A handler may have logged events (`thread.checkpoint`) that
                 // other consumers wait on, and a consumer running `after`
                 // this one waits on its checkpoint.
                 if matches!(&ran, Ok(r) if r.handled + r.skipped + r.dead_lettered > 0) {

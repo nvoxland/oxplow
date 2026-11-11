@@ -10,13 +10,10 @@
 //! `uri::build`: a wiki page's, a task's, a file's, a directory's, a
 //! finding's, a commit's, a thread note's.
 
+use crate::page_ref_store::PageRefEdge;
 use oxplow_domain::uri::build;
 use oxplow_domain::uri::resources::{self as r, ResourceRegistry};
 use oxplow_domain::uri::{extract, RefVersion};
-use oxplow_domain::EffortImpact;
-
-use crate::effort_store::FileRefVersion;
-use crate::page_ref_store::PageRefEdge;
 
 pub const RT_WIKI_FILE: &str = "wiki_file_ref";
 pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
@@ -31,12 +28,34 @@ pub const RT_FINDING_PATH: &str = "finding_path";
 /// delivered, a reprompt adding to its turn's.
 pub const RT_PROMPT_MENTION: &str = "prompt_mention";
 
-// Ref-types written by the effort store from union of all
-// `effort.summary` bodies for a task. Distinct from
-// `task_body_*` so the body slice (task_store) and the summary
-// slice (effort_store) can coexist under the same `(task, id)`
-// source without clobbering each other.
-pub const RT_SUMMARY_FILE: &str = "summary_file_ref";
+/// Snapshot-pinned version data for a file reference. The
+/// store/service layer computes this from a snapshot id at capture
+/// time and stamps it onto every per-file ref row.
+#[derive(Debug, Clone, Copy)]
+pub struct FileRefVersion<'a> {
+    pub local_snapshot_id: i64,
+    pub closest_vcs_rev: Option<&'a str>,
+    pub vcs_rev_exact: bool,
+}
+
+/// Owned variant of [`FileRefVersion`] for callers that need to move
+/// the triple into a `'static` transaction closure.
+#[derive(Debug, Clone)]
+pub struct OwnedFileRefVersion {
+    pub local_snapshot_id: i64,
+    pub closest_vcs_rev: Option<String>,
+    pub vcs_rev_exact: bool,
+}
+
+impl OwnedFileRefVersion {
+    pub fn as_ref(&self) -> FileRefVersion<'_> {
+        FileRefVersion {
+            local_snapshot_id: self.local_snapshot_id,
+            closest_vcs_rev: self.closest_vcs_rev.as_deref(),
+            vcs_rev_exact: self.vcs_rev_exact,
+        }
+    }
+}
 
 /// Stamp the supplied file-version triple onto every edge in
 /// `edges` whose target is a file or directory. Mutates in place
@@ -54,17 +73,6 @@ pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_
         edge.vcs_rev_exact = version.vcs_rev_exact;
     }
 }
-pub const RT_SUMMARY_DIR: &str = "summary_dir_ref";
-pub const RT_SUMMARY_WIKILINK: &str = "summary_wikilink";
-pub const RT_SUMMARY_TASK: &str = "summary_task_mention";
-pub const RT_SUMMARY_FINDING: &str = "summary_finding_mention";
-pub const RT_SUMMARY_COMMIT: &str = "summary_commit_mention";
-
-/// Declared impacts (per-effort `EffortImpact` rows) — the action
-/// taken is carried in `source_extra` as `{"action": "..."}`.
-/// Single ref_type covers every impacted kind because the target
-/// kind already discriminates wiki vs task vs file vs etc.
-pub const RT_IMPACT: &str = "impact";
 
 /// A task's body slice: its title and body's mentions.
 pub fn task_body_ref_types() -> Vec<String> {
@@ -130,84 +138,6 @@ const COMMENT_MENTIONS: MentionTypes = MentionTypes {
     finding: RT_COMMENT_FINDING,
     commit: RT_COMMENT_COMMIT,
 };
-
-/// Slice owned by the effort store: the union of touched-file
-/// edges across every effort on a task, the projection of every
-/// `effort.summary` body parsed for refs, and the declared
-/// `EffortImpact` rows for each effort.
-pub fn effort_ref_types() -> Vec<String> {
-    vec![
-        RT_TOUCHED_FILE.to_string(),
-        RT_SUMMARY_FILE.to_string(),
-        RT_SUMMARY_DIR.to_string(),
-        RT_SUMMARY_WIKILINK.to_string(),
-        RT_SUMMARY_TASK.to_string(),
-        RT_SUMMARY_FINDING.to_string(),
-        RT_SUMMARY_COMMIT.to_string(),
-        RT_IMPACT.to_string(),
-    ]
-}
-
-const SUMMARY_MENTIONS: MentionTypes = MentionTypes {
-    file: RT_SUMMARY_FILE,
-    dir: RT_SUMMARY_DIR,
-    wiki: RT_SUMMARY_WIKILINK,
-    task: RT_SUMMARY_TASK,
-    finding: RT_SUMMARY_FINDING,
-    commit: RT_SUMMARY_COMMIT,
-};
-
-/// The kinds a `EffortImpact` may name, as the agent's tools document them.
-pub const IMPACT_KINDS: [&str; 6] = ["wiki", "task", "file", "directory", "git_commit", "finding"];
-
-/// The URI an `EffortImpact` names: its `kind` (one of [`IMPACT_KINDS`])
-/// and `id`. A task's id is its URI or one of the active list's own
-/// ids (`tsk7`); `None` for anything else (refused where impacts come in).
-pub fn impact_target(kinds: &ResourceRegistry, kind: &str, id: &str) -> Option<String> {
-    let id = id.trim();
-    if id.is_empty() {
-        return None;
-    }
-    Some(match kind {
-        "wiki" => build::wiki_uri(id),
-        "task" => match build::task_of_uri(id) {
-            Some((provider, item)) => build::task_uri(&provider, &item),
-            None => kinds.task_uri_of(id)?,
-        },
-        "file" => build::file_uri(id),
-        "directory" => build::dir_uri(id),
-        "git_commit" => build::commit_uri(id),
-        "finding" => build::finding_uri(id),
-        _ => return None,
-    })
-}
-
-/// Edges contributed by the union of every effort's declared impacts,
-/// from the task `source` (its URI). Self references are filtered
-/// out (an effort on tsk7 declaring it "completed" tsk7 is implicit).
-pub fn effort_impact_edges(
-    kinds: &ResourceRegistry,
-    source: &str,
-    impacts: &[EffortImpact],
-) -> Vec<PageRefEdge> {
-    let mut out = Vec::new();
-    for imp in impacts {
-        let Some(target) = impact_target(kinds, &imp.kind, &imp.id) else {
-            continue;
-        };
-        if target == source {
-            continue;
-        }
-        let mut edge = PageRefEdge::new(source, target, RT_IMPACT);
-        if let Some(action) = &imp.action {
-            if !action.trim().is_empty() {
-                edge = edge.with_extra(serde_json::json!({ "action": action.trim() }).to_string());
-            }
-        }
-        out.push(edge);
-    }
-    out
-}
 
 /// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
 /// A file edge carries the line and version the link named.
@@ -355,41 +285,6 @@ fn mention_edges(
     out
 }
 
-/// Touched-file edges for a task (`source`, its URI).
-///
-/// `entries` is `(path, change_kind)` — the change_kind is one of
-/// the `effort_file.change_kind` values (`created` / `updated`
-/// / `deleted`) and is carried through `source_extra` as
-/// `{"change_kind":"..."}` so the renderer can display "created"
-/// / "modified" / "deleted" instead of a single "touched" label.
-/// The renderer normalizes `updated` → "modified" for display.
-pub fn effort_touched_file_edges(source: &str, entries: &[(String, String)]) -> Vec<PageRefEdge> {
-    entries
-        .iter()
-        .map(|(path, change_kind)| {
-            let extra = serde_json::json!({ "change_kind": change_kind }).to_string();
-            PageRefEdge::new(source, build::file_uri(path), RT_TOUCHED_FILE).with_extra(extra)
-        })
-        .collect()
-}
-
-/// Edges contributed by the union of every `effort.summary` body for one
-/// task (`source`, its URI). Parsed via the shared ref extractor, so
-/// wikilinks (`[[some-slug]]`), file/dir refs, task/finding/commit
-/// mentions all flow through as outbound edges from the item.
-/// Owned slice = the `summary_*` ref_types above (paired with
-/// `RT_TOUCHED_FILE` under `effort_ref_types()`).
-pub fn effort_summary_edges(
-    kinds: &ResourceRegistry,
-    source: &str,
-    summaries: &[String],
-) -> Vec<PageRefEdge> {
-    if summaries.is_empty() {
-        return Vec::new();
-    }
-    mention_edges(kinds, source, &summaries.join("\n\n"), &SUMMARY_MENTIONS)
-}
-
 /// One edge per finding -> file. Owned by the findings writer.
 pub fn finding_edges(finding_id: &str, path: &str) -> Vec<PageRefEdge> {
     vec![PageRefEdge::new(
@@ -455,150 +350,6 @@ mod tests {
         // self-mention filtered out
         assert!(!targets.contains(&task("tsk1").as_str()));
         assert!(edges.iter().all(|e| e.source == task("tsk1")));
-    }
-
-    #[test]
-    fn effort_touched_file_edges_one_per_path() {
-        let entries = vec![
-            ("a.rs".to_string(), "created".to_string()),
-            ("b.rs".to_string(), "updated".to_string()),
-            ("c.rs".to_string(), "deleted".to_string()),
-        ];
-        let edges = effort_touched_file_edges(&task("tsk7"), &entries);
-        assert_eq!(edges.len(), 3);
-        assert_eq!(edges[0].source, task("tsk7"));
-        assert_eq!(edges[0].target, build::file_uri("a.rs"));
-        assert_eq!(edges[0].ref_type, "touched_file");
-        assert!(edges[0]
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("created")));
-        assert!(edges[1]
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("updated")));
-        assert!(edges[2]
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("deleted")));
-    }
-
-    #[test]
-    fn effort_summary_edges_extract_all_kinds() {
-        let summaries = vec![
-            "Filed [[url-schemes]] with refs to [[src/foo.rs]]".to_string(),
-            "Resolved tsk99 and finding:fnd-2; see [[git:abcdef0]] and [[dir:src/x]]".to_string(),
-        ];
-        let edges = effort_summary_edges(&tasks_kinds(), &task("tsk7"), &summaries);
-        let has =
-            |target: String, rt: &str| edges.iter().any(|e| e.target == target && e.ref_type == rt);
-        assert!(has(build::wiki_uri("url-schemes"), "summary_wikilink"));
-        assert!(has(build::file_uri("src/foo.rs"), "summary_file_ref"));
-        assert!(has(task("tsk99"), "summary_task_mention"));
-        assert!(has(build::finding_uri("fnd-2"), "summary_finding_mention"));
-        assert!(edges.iter().any(|e| resource(e) == "oxplow/commit"));
-        assert!(has(build::dir_uri("src/x"), "summary_dir_ref"));
-    }
-
-    #[test]
-    fn effort_summary_edges_filter_self_task() {
-        let summaries = vec!["wraps up tsk7 itself and references tsk9".into()];
-        let edges = effort_summary_edges(&tasks_kinds(), &task("tsk7"), &summaries);
-        let tasks: Vec<_> = edges
-            .iter()
-            .filter(|e| resource(e) == "oxplow/task")
-            .map(|e| e.target.clone())
-            .collect();
-        assert_eq!(tasks, vec![task("tsk9")]);
-    }
-
-    #[test]
-    fn effort_summary_edges_empty_input_yields_no_edges() {
-        assert!(effort_summary_edges(&tasks_kinds(), &task("tsk7"), &[]).is_empty());
-    }
-
-    #[test]
-    fn effort_impact_edges_normalize_kinds_and_carry_action() {
-        use oxplow_domain::EffortImpact;
-        let impacts = vec![
-            EffortImpact {
-                kind: "wiki".into(),
-                id: "url-schemes".into(),
-                action: Some("created".into()),
-            },
-            EffortImpact {
-                kind: "git_commit".into(),
-                id: "abc1234".into(),
-                action: Some("referenced".into()),
-            },
-            EffortImpact {
-                kind: "directory".into(),
-                id: "src/x".into(),
-                action: None,
-            },
-            EffortImpact {
-                kind: "dir".into(),
-                id: "src/y".into(),
-                action: None,
-            }, // not an impact kind — filtered
-            EffortImpact {
-                kind: "task".into(),
-                id: "tsk7".into(),
-                action: Some("completed".into()),
-            }, // self — filtered
-            EffortImpact {
-                kind: "bogus".into(),
-                id: "x".into(),
-                action: None,
-            }, // bad kind — filtered
-            EffortImpact {
-                kind: "task".into(),
-                id: "".into(),
-                action: None,
-            }, // empty id — filtered
-        ];
-        let edges = effort_impact_edges(&tasks_kinds(), &task("tsk7"), &impacts);
-        assert_eq!(edges.len(), 3, "got {edges:?}");
-        let wiki = edges
-            .iter()
-            .find(|e| e.target == build::wiki_uri("url-schemes"))
-            .expect("wiki edge");
-        assert!(wiki
-            .source_extra
-            .as_deref()
-            .is_some_and(|s| s.contains("created")));
-        assert!(edges
-            .iter()
-            .any(|e| e.target == build::commit_uri("abc1234")));
-        let dir = edges
-            .iter()
-            .find(|e| e.target == build::dir_uri("src/x"))
-            .expect("dir edge");
-        assert!(dir.source_extra.is_none());
-    }
-
-    /// A task impact names the active list's item: a loose id as the
-    /// list declares its ids, or its URI; stored canonical either way.
-    /// What isn't one of its ids names nothing.
-    #[test]
-    fn impact_tasks_are_stored_canonical_whatever_the_agent_wrote() {
-        use oxplow_domain::EffortImpact;
-        let impact = |id: &str| EffortImpact {
-            kind: "task".into(),
-            id: id.into(),
-            action: None,
-        };
-        let impacts = vec![
-            impact("tsk9"),
-            impact(&task("tsk11")),
-            impact("11"),
-            impact("ENG-12"),
-        ];
-        let targets: Vec<String> = effort_impact_edges(&tasks_kinds(), &task("tsk7"), &impacts)
-            .into_iter()
-            .map(|e| e.target)
-            .collect();
-        assert_eq!(targets, vec![task("tsk9"), task("tsk11")]);
     }
 
     #[test]

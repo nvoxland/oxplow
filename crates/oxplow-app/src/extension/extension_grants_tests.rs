@@ -43,17 +43,17 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     let root = fx.svc.layout.project_dir.clone();
     let commands = [
         ("items", "sql.read:v_task", "SELECT uri FROM v_task"),
-        ("efforts", "sql.read:v_task", "SELECT id FROM v_effort"),
-        ("any", "sql.read", "SELECT id FROM v_effort"),
+        ("requests", "sql.read:v_task", "SELECT id FROM v_request"),
+        ("any", "sql.read", "SELECT id FROM v_request"),
         (
             "derived",
             "sql.read:v_task",
-            "SELECT id FROM v_acme_efforts",
+            "SELECT id FROM v_acme_requests",
         ),
         (
             "joined",
             "sql.read:v_task",
-            "SELECT w.uri FROM v_task w, v_effort e",
+            "SELECT w.uri FROM v_task w, v_request e",
         ),
         (
             "ownlineage",
@@ -65,7 +65,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
             "sql.read:v_acme_mine, sql.read:v_task",
             "SELECT uri FROM v_acme_mine",
         ),
-        ("anyderived", "sql.read", "SELECT id FROM v_acme_efforts"),
+        ("anyderived", "sql.read", "SELECT id FROM v_acme_requests"),
     ];
     let block: String = commands
         .iter()
@@ -75,13 +75,13 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         &root,
         ".oxplow/extensions/acme/extension.yaml",
         &format!(
-            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\ndatasets:\n  - name: efforts\n    version: 1\n    description: Efforts.\n    fields:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
+            "manifest: 2\nname: acme\nintent:\n  purpose: p\npermissions: [sql.read]\ndatasets:\n  - name: requests\n    version: 1\n    description: Requests.\n    fields:\n      - {{ name: id, type: INTEGER, doc: Id. }}\n  - name: mine\n    version: 1\n    description: Items.\n    fields:\n      - {{ name: uri, type: TEXT, doc: Ref. }}\ncommands:\n{block}"
         ),
     );
     write(
         &root,
-        ".oxplow/extensions/acme/datasets/efforts.sql",
-        "SELECT id FROM ref('effort')",
+        ".oxplow/extensions/acme/datasets/requests.sql",
+        "SELECT id FROM ref('request')",
     );
     write(
         &root,
@@ -121,9 +121,9 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
     // a join with one, an extension dataset derived from one, and an extension
     // dataset it holds a grant for whose own inputs it does not.
     for (name, dataset) in [
-        ("efforts", "v_effort"),
-        ("joined", "v_effort"),
-        ("derived", "v_effort"),
+        ("requests", "v_request"),
+        ("joined", "v_request"),
+        ("derived", "v_request"),
         ("ownlineage", "v_task"),
     ] {
         let error = run(&fx, &format!("acme.read.{name}"))
@@ -149,7 +149,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
         .svc
         .sql
         .query_sql(
-            "SELECT decisions FROM v_extension_run WHERE contribution = 'oxplow:oxplow/command?command=acme.read.efforts'",
+            "SELECT decisions FROM v_extension_run WHERE contribution = 'oxplow:oxplow/command?command=acme.read.requests'",
             vec![],
             None,
         )
@@ -165,7 +165,7 @@ async fn a_qualified_read_reaches_only_its_dataset_and_what_derives_from_it() {
             .unwrap()
             .iter()
             .any(|d| d["need"] == "dataset"
-                && d["name"] == "v_effort"
+                && d["name"] == "v_request"
                 && d["decision"] == "denied"),
         "{denied}"
     );

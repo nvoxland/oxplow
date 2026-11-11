@@ -51,8 +51,6 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
             .map(|s| string_to_ts(&s))
             .transpose()
             .map_err(map_err_text)?,
-        start_snapshot_id: row.get("start_snapshot_id")?,
-        snapshot_id: row.get("snapshot_id")?,
         source: row
             .get::<_, Option<String>>("source")?
             .as_deref()
@@ -61,9 +59,9 @@ fn row_to_turn(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTurn> {
 }
 
 /// The anchors agent activity in agent session `session` on `thread`
-/// carries (P3.3): the thread, its stream, the session, the session's open
-/// turn and the thread's open effort (at most one). `None` is activity no
-/// session claims (a hook from an agent oxplow didn't start).
+/// carries (P3.3): the thread, its stream, the session and the session's
+/// open turn. `None` is activity no session claims (a hook from an agent
+/// oxplow didn't start).
 pub fn activity_anchors_tx(
     conn: &Connection,
     thread: ThreadId,
@@ -74,8 +72,6 @@ pub fn activity_anchors_tx(
     anchors.turn_id = open_turn_ids_in_tx(conn, thread, session)?
         .first()
         .map(|t| t.value());
-    anchors.effort_id = crate::effort_store::open_for_thread_tx(conn, thread)
-        .map_err(crate::database::map_sql_err)?;
     Ok(anchors)
 }
 
@@ -160,33 +156,6 @@ pub fn turn_for_window_tx(
         Some((id, _)) => Ok(Some(AgentTurnId::new(id))),
         None => turn_at_tx(conn, thread, session, to),
     }
-}
-
-/// The effort open on `thread` during `turn`: the one whose span overlaps
-/// the turn's, when exactly one does (tsk900).
-pub fn effort_during_turn_tx(
-    conn: &Connection,
-    thread: ThreadId,
-    turn: AgentTurnId,
-) -> Result<Option<i64>, DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT e.id FROM effort e JOIN agent_turn t ON t.id = ?2
-              WHERE e.thread_id = ?1
-                AND (t.ended_at IS NULL OR e.started_at <= t.ended_at)
-                AND (e.ended_at IS NULL OR e.ended_at >= t.started_at)",
-        )
-        .map_err(map_sql_err)?;
-    let ids = stmt
-        .query_map(params![thread.value(), turn.value()], |r| {
-            r.get::<_, i64>(0)
-        })
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(map_sql_err)?;
-    Ok(match ids.as_slice() {
-        [one] => Some(*one),
-        _ => None,
-    })
 }
 
 /// The thread's open turns, newest first.
@@ -409,7 +378,7 @@ fn join_request_tx(
 
 /// Open a turn in agent session `agent_session` on `thread` and log
 /// `agent.turn.started`, in the caller's transaction (`session` is the
-/// harness's own session id). The turn starts at its stream's current snapshot.
+/// harness's own session id).
 pub fn open_turn_tx(
     conn: &Connection,
     ev: &EventCtx<'_>,
@@ -442,16 +411,6 @@ pub fn open_turn_tx(
     .map_err(map_sql_err)?;
     let id = AgentTurnId::new(conn.last_insert_rowid());
     join_request_tx(conn, thread, id, opening.cause_turn)?;
-    if let Some(stream) = anchors.stream_id {
-        // Its diff runs from here to the snapshot it ends at.
-        let start =
-            crate::analytics_stores::current_snapshot_tx(conn, stream).map_err(map_sql_err)?;
-        conn.execute(
-            "UPDATE agent_turn SET start_snapshot_id = ?2 WHERE id = ?1",
-            params![id.value(), start],
-        )
-        .map_err(map_sql_err)?;
-    }
     let env = ev
         .typed::<AgentTurnStarted>(&AgentTurnStartedV3 {
             turn: id.to_string(),
@@ -1203,8 +1162,6 @@ mod tests {
             session_id: Some("s1".into()),
             started_at: Timestamp::now(),
             ended_at: None,
-            start_snapshot_id: None,
-            snapshot_id: None,
             source: Some(oxplow_domain::hook::TurnSource::Person),
         };
         let id = store.open(&turn).await.unwrap();
@@ -1243,8 +1200,6 @@ mod tests {
             session_id: Some("s1".into()),
             started_at: Timestamp::now(),
             ended_at: None,
-            start_snapshot_id: None,
-            snapshot_id: None,
             source: Some(oxplow_domain::hook::TurnSource::Person),
         };
         let id = store.open(&turn).await.unwrap();
@@ -1326,8 +1281,6 @@ mod tests {
                 session_id: None,
                 started_at: Timestamp::now(),
                 ended_at: None,
-                start_snapshot_id: None,
-                snapshot_id: None,
                 source: Some(oxplow_domain::hook::TurnSource::Person),
             };
             ids.push(store.open(&turn).await.unwrap());
@@ -1415,8 +1368,6 @@ mod tests {
                 session_id: None,
                 started_at: Timestamp::now(),
                 ended_at: None,
-                start_snapshot_id: None,
-                snapshot_id: None,
                 source: Some(oxplow_domain::hook::TurnSource::Person),
             })
             .await

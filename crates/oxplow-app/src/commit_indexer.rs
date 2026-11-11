@@ -169,7 +169,7 @@ pub async fn index_recent(
 ///
 /// A commit the scan hasn't reached yet is new history: the workspace's
 /// scan runs first, so it is indexed and logged as the scan always does
-/// (`vcs.commit.indexed`, which lands efforts). One still missing is old
+/// (`vcs.commit.indexed`, which links its requests). One still missing is old
 /// history, past the horizon: stored and linked, not logged.
 pub async fn ensure_commit(
     svc: &crate::Services,
@@ -296,7 +296,7 @@ pub async fn refresh(svc: &crate::Services) -> usize {
 
 /// Index the new history reachable from workspace `ws`'s head (found
 /// from `stream`, when it is one's): each new commit stored, linked to
-/// the tasks whose effort's work it holds, and logged. How many.
+/// the requests whose work it holds, and logged. How many.
 async fn index_workspace(
     svc: &crate::Services,
     ws: &Path,
@@ -314,7 +314,7 @@ async fn index_workspace(
     .await;
     for (sha, committed) in &indexed {
         if let Err(e) = crate::commit_links::link_commit(svc, ws, sha, *committed).await {
-            tracing::warn!(?e, %sha, "linking a commit to its effort failed");
+            tracing::warn!(?e, %sha, "linking a commit to its requests failed");
         }
         if let Some(stream) = stream {
             log_indexed(svc, stream, sha, *committed).await;
@@ -528,7 +528,7 @@ mod tests {
     /// `v_tag`. A stream's history is a recursive read from its head.
     /// A query that names a commit by its sha reads it whether or not the
     /// index has reached it: a new one is indexed as the scan indexes it
-    /// (logged, so efforts land), one no head reaches is stored quietly,
+    /// (logged, so its requests link), one no head reaches is stored quietly,
     /// and one git doesn't know reads no rows and no error.
     #[tokio::test]
     async fn a_commit_a_query_names_is_indexed_on_demand() {

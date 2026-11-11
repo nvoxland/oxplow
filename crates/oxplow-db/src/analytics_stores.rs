@@ -23,7 +23,6 @@ use oxplow_domain::events::schema::{SnapshotTaken, SnapshotTakenV3, VcsHeadMoved
 use oxplow_domain::events::{Anchors, Envelope};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::uri::build::{commit_uri, snapshot_uri, stream_uri};
-use oxplow_domain::EffortId;
 
 // ---------------- Page visits ----------------
 
@@ -1116,15 +1115,11 @@ fn stamp_revision_tx(
         params![revision.to_string(), snapshot_id],
     )?;
     if let Revision::Vcs { rev, .. } = revision {
-        for table in ["effort_file", "page_ref"] {
-            conn.execute(
-                &format!(
-                    "UPDATE {table} SET closest_vcs_rev = ?1, vcs_rev_exact = 1
-                      WHERE local_snapshot_id = ?2"
-                ),
-                params![rev, snapshot_id],
-            )?;
-        }
+        conn.execute(
+            "UPDATE page_ref SET closest_vcs_rev = ?1, vcs_rev_exact = 1
+              WHERE local_snapshot_id = ?2",
+            params![rev, snapshot_id],
+        )?;
     }
     Ok(())
 }
@@ -1136,7 +1131,7 @@ fn insert_op_tx(
     snapshot_id: i64,
     parent: Option<i64>,
     trigger: SnapshotTrigger,
-    anchors: (Option<ThreadId>, Option<i64>, Option<EffortId>),
+    anchors: (Option<ThreadId>, Option<i64>),
     elapsed_ms: u64,
     budget_ms: Option<u64>,
     file_count: u32,
@@ -1145,9 +1140,9 @@ fn insert_op_tx(
     let over = budget_ms.is_some_and(|b| elapsed_ms > b);
     conn.execute(
         "INSERT INTO snapshot_op
-           (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id, effort_id,
+           (stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id, turn_id,
             at, elapsed_ms, budget_ms, over_budget, file_count, provider, contents, handle)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             stream_id.value(),
             snapshot_id,
@@ -1155,7 +1150,6 @@ fn insert_op_tx(
             trigger.as_db_str(),
             anchors.0.map(|t| t.value()),
             anchors.1,
-            anchors.2.map(|e| e.value()),
             ts_to_string(Timestamp::now()),
             elapsed_ms as i64,
             budget_ms.map(|b| b as i64),
@@ -1312,7 +1306,7 @@ fn record_take_tx(
                 snapshot_id,
                 parent,
                 take.trigger,
-                (take.thread_id, take.turn_id, take.effort_id),
+                (take.thread_id, take.turn_id),
                 take.elapsed_ms,
                 take.budget_ms,
                 file_count,
@@ -1325,19 +1319,11 @@ fn record_take_tx(
             .map_err(map_sql_err)?,
         )
     };
-    if let Some(turn) = take.turn_id {
-        // The turn ended at this snapshot (P2.3).
-        tx.execute(
-            "UPDATE agent_turn SET snapshot_id = ?2 WHERE id = ?1",
-            params![turn, snapshot_id],
-        )
-        .map_err(map_sql_err)?;
-    }
     let over_budget = take.budget_ms.is_some_and(|b| take.elapsed_ms > b);
-    // Whoever asked for a take waits on its event (a turn's checkpoint, an
-    // effort's bracket). A request nobody is anchored to that found nothing
-    // is not a fact about the worktree.
-    let waited_on = take.thread_id.is_some() || take.turn_id.is_some() || take.effort_id.is_some();
+    // Whoever asked for a take waits on its event (a turn's checkpoint).
+    // A request nobody is anchored to that found nothing is not a fact
+    // about the worktree.
+    let waited_on = take.thread_id.is_some() || take.turn_id.is_some();
     if unchanged && op_seq.is_none() && !waited_on {
         return Ok(Some(TakeOutcome {
             op_seq,
@@ -1366,7 +1352,6 @@ fn record_take_tx(
     .with_anchors(Anchors {
         stream_id: Some(take.stream_id),
         thread_id: take.thread_id,
-        effort_id: take.effort_id,
         turn_id: take.turn_id,
         snapshot_id: Some(snapshot_id),
         ..Anchors::default()
@@ -1411,7 +1396,7 @@ fn record_head_moved_tx(
         sid,
         Some(sid),
         SnapshotTrigger::HeadMoved,
-        (None, None, None),
+        (None, None),
         0,
         None,
         0,
@@ -1433,7 +1418,7 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
     };
     let trigger: String = row.get(4)?;
-    let at: String = row.get(8)?;
+    let at: String = row.get(7)?;
     Ok(SnapshotOp {
         seq: row.get(0)?,
         stream_id: StreamId::new(row.get(1)?),
@@ -1446,15 +1431,14 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotOp> {
         })?,
         thread_id: row.get::<_, Option<i64>>(5)?.map(ThreadId::new),
         turn_id: row.get(6)?,
-        effort_id: row.get::<_, Option<i64>>(7)?.map(EffortId::new),
         at: string_to_ts(&at).map_err(conv)?,
-        elapsed_ms: row.get(9)?,
-        budget_ms: row.get(10)?,
-        over_budget: row.get::<_, i64>(11)? != 0,
-        file_count: row.get(12)?,
-        provider: row.get(13)?,
-        contents: row.get::<_, i64>(14)? != 0,
-        handle: row.get(15)?,
+        elapsed_ms: row.get(8)?,
+        budget_ms: row.get(9)?,
+        over_budget: row.get::<_, i64>(10)? != 0,
+        file_count: row.get(11)?,
+        provider: row.get(12)?,
+        contents: row.get::<_, i64>(13)? != 0,
+        handle: row.get(14)?,
     })
 }
 
@@ -1469,7 +1453,6 @@ pub struct TakeRecord {
     pub thread_id: Option<ThreadId>,
     /// `agent_turn.id`, when the take belongs to a turn.
     pub turn_id: Option<i64>,
-    pub effort_id: Option<EffortId>,
     /// The branch the workspace was on (recorded clean or dirty).
     pub branch: Option<String>,
     /// The head revision when the workspace was clean at the take.
@@ -1527,7 +1510,6 @@ pub struct SnapshotOp {
     pub thread_id: Option<ThreadId>,
     #[specta(type = Option<oxplow_domain::JsNumber>)]
     pub turn_id: Option<i64>,
-    pub effort_id: Option<EffortId>,
     pub at: Timestamp,
     #[specta(type = oxplow_domain::JsNumber)]
     pub elapsed_ms: i64,
@@ -1670,7 +1652,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let mut stmt = conn.prepare(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
-                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
+                            turn_id, at, elapsed_ms, budget_ms, over_budget, file_count,
                             provider, contents, handle
                        FROM snapshot_op WHERE stream_id = ?1
                       ORDER BY seq DESC LIMIT ?2",
@@ -1691,7 +1673,7 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 conn.query_row(
                     "SELECT seq, stream_id, snapshot_id, parent_snapshot_id, trigger, thread_id,
-                            turn_id, effort_id, at, elapsed_ms, budget_ms, over_budget, file_count,
+                            turn_id, at, elapsed_ms, budget_ms, over_budget, file_count,
                             provider, contents, handle
                        FROM snapshot_op WHERE snapshot_id = ?1 ORDER BY seq ASC LIMIT 1",
                     params![snapshot_id],
@@ -3319,7 +3301,6 @@ mod tests {
             trigger,
             thread_id: None,
             turn_id: None,
-            effort_id: None,
             branch: Some("main".into()),
             revision: None,
             elapsed_ms: 5,
@@ -3624,8 +3605,8 @@ mod tests {
         assert_eq!(events(&db, "snapshot.taken").len(), 1);
     }
 
-    /// A request that names a turn, a thread or an effort is waited on (the
-    /// checkpoint, an effort's bracket): it logs `snapshot.taken` as
+    /// A request that names a turn or a thread is waited on (the
+    /// checkpoint): it logs `snapshot.taken` as
     /// unchanged, though no operation.
     #[tokio::test]
     async fn an_unchanged_request_that_someone_waits_on_still_logs_its_event() {
@@ -3785,7 +3766,7 @@ mod tests {
     #[tokio::test]
     async fn a_revision_stamp_cascades_to_file_refs() {
         // When a revision is stamped on a snapshot, every
-        // `effort_file` and `page_ref` row pointing at that
+        // `page_ref` row pointing at that
         // snapshot must pick up the sha and flip
         // `vcs_rev_exact` to 1. We bypass the domain stores
         // (FK setup noise) and seed the rows directly.
@@ -3813,26 +3794,10 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        // Seed one effort_file row pointing at this snapshot
-        // (skip the FK chain — fk on `effort` is enforced but
-        // we can disable it for the test by NOT joining via the
-        // store and writing through the raw connection.)
+        // Seed one page_ref row pointing at this snapshot.
         let db_for_seed = db.clone();
         tokio::task::spawn_blocking(move || {
             db_for_seed.with_conn(|conn| {
-                conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-                conn.execute(
-                    "INSERT INTO effort (task, thread_id, started_at)
-                     VALUES ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 1, '2026-01-01T00:00:00Z')",
-                    [],
-                )?;
-                conn.execute(
-                    "INSERT INTO effort_file
-                       (effort_id, path, change_kind,
-                        local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
-                     VALUES (?1, ?2, 'updated', ?3, ?4, 0)",
-                    params![1, "src/a.rs", snap_id, "aaaa"],
-                )?;
                 conn.execute(
                     "INSERT INTO page_ref
                        (source_uri, target_uri, source_resource, target_resource, ref_type,
@@ -3855,35 +3820,22 @@ mod tests {
             .unwrap();
 
         let db_for_check = db.clone();
-        let (file_sha, file_exact, edge_sha, edge_exact): (
-            Option<String>,
-            i64,
-            Option<String>,
-            i64,
-        ) = tokio::task::spawn_blocking(move || {
-            db_for_check.with_conn(|conn| {
-                let mut row = conn.query_row(
-                    "SELECT closest_vcs_rev, vcs_rev_exact FROM effort_file
-                         WHERE effort_id = 1 AND path = 'src/a.rs'",
-                    [],
-                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
-                )?;
-                let er = conn.query_row(
-                    "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
+        let (edge_sha, edge_exact): (Option<String>, i64) =
+            tokio::task::spawn_blocking(move || {
+                db_for_check.with_conn(|conn| {
+                    let er = conn.query_row(
+                        "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
                          WHERE source_uri = uri('oxplow/wiki', 'slug', 'intro')
                            AND target_uri = uri('oxplow/file', 'path', 'src/a.rs')",
-                    [],
-                    |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
-                )?;
-                row = (row.0, row.1);
-                Ok((row.0, row.1, er.0, er.1))
+                        [],
+                        |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+                    )?;
+                    Ok((er.0, er.1))
+                })
             })
-        })
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(file_sha.as_deref(), Some("bbbb"));
-        assert_eq!(file_exact, 1);
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(edge_sha.as_deref(), Some("bbbb"));
         assert_eq!(edge_exact, 1);
     }

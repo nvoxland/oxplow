@@ -206,7 +206,7 @@ pub async fn check_links(services: &Services, body: &str) -> Vec<LinkWarning> {
 }
 
 /// [`check_links_in`] against a project's database and VCS, for a command
-/// run outside the bus's transaction (`oxplow.effort.report`).
+/// run outside the bus's transaction.
 pub async fn check_links_at(
     db: &oxplow_db::Database,
     vocabulary: &oxplow_domain::vocabulary::VocabularyHandle,
@@ -339,7 +339,7 @@ mod tests {
 
     /// tsk894: a ref of any kind the vocabulary knows is a link. One of a
     /// kind no dataset holds (a shell page) is a link as it stands; one a
-    /// dataset holds — an effort, core's or an extension's — is checked
+    /// dataset holds — a request, core's or an extension's — is checked
     /// against that dataset's rows.
     #[tokio::test]
     async fn accepts_refs_of_kinds_with_no_probe() {
@@ -347,9 +347,9 @@ mod tests {
         let services = Services::in_memory(dir.path()).await.unwrap();
         let warnings = check_links(&services, "See [[page:settings]].").await;
         assert!(warnings.is_empty(), "got {warnings:?}");
-        let warnings = check_links(&services, "See [[effort:eff1]].").await;
+        let warnings = check_links(&services, "See [[request:req1]].").await;
         assert_eq!(warnings.len(), 1, "got {warnings:?}");
-        assert!(warnings[0].reason.contains("no row in `v_effort`"));
+        assert!(warnings[0].reason.contains("no row in `v_request`"));
         // A task is checked against the active list's items: another
         // list's isn't one.
         let warnings = check_links(&services, "See [[task:issues:ENG-12]].").await;

@@ -26,11 +26,11 @@ fn envelope(fx: &ThreadFixture, kind: HookKind, body: serde_json::Value) -> Hook
     }
 }
 
-/// A plan Claude proposes is a row with its thread, effort, turn, text and
+/// A plan Claude proposes is a row with its thread, session, turn, text and
 /// file; the row's event is the plan's ref.
 #[tokio::test]
-async fn a_proposed_plan_is_a_row_with_its_effort_and_turn() {
-    let fx = crate::test_fixtures::services_with_effort().await;
+async fn a_proposed_plan_is_a_row_with_its_turn() {
+    let fx = crate::test_fixtures::services_with_thread().await;
     let ingest = |e: HookEnvelope| {
         let svc = fx.svc.clone();
         async move { svc.hook_ingest.ingest(e).await.unwrap() }
@@ -47,7 +47,7 @@ async fn a_proposed_plan_is_a_row_with_its_effort_and_turn() {
         .svc
         .sql
         .query_sql(
-            "SELECT thread_id, effort_id IS NOT NULL, turn_id IS NOT NULL, text, path,
+            "SELECT thread_id, agent_session_id IS NOT NULL, turn_id IS NOT NULL, text, path,
                     event_id, proposed_at IS NOT NULL
                FROM v_agent_plan",
             vec![],
@@ -59,7 +59,7 @@ async fn a_proposed_plan_is_a_row_with_its_effort_and_turn() {
     assert_eq!(rows.len(), 1, "{rows:?}");
     use oxplow_db::SqlCell::{Int, Text};
     let row = &rows[0];
-    assert_eq!(row[1], Int(1), "an open effort");
+    assert_eq!(row[1], Int(1), "its session");
     assert_eq!(row[2], Int(1), "an open turn");
     assert_eq!(row[3], Text("1. Model\n2. VizConfig".into()));
     assert_eq!(row[4], Text("/h/p.md".into()));

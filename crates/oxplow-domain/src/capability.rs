@@ -42,7 +42,7 @@ impl ChosenBy {
 /// One capability, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilitySpec {
-    /// `task_tracker`, `effort_policy`, …: the key under `activeProviders`.
+    /// `task_tracker`, `knowledge`, …: the key under `activeProviders`.
     pub id: &'static str,
     /// How a person names it.
     pub title: &'static str,
@@ -185,21 +185,6 @@ pub const TASK_TRACKER: ProviderContract = ProviderContract {
     }),
     resource: Some("oxplow/task"),
     items: true,
-    data: None,
-};
-
-/// An effort policy's: core offers it each event a policy reacts to and
-/// runs the commands it answers with (`.context/work-tracking.md`).
-pub const EFFORT_POLICY: ProviderContract = ProviderContract {
-    verbs: &[Verb {
-        name: "react",
-        needs: Need::Always,
-    }],
-    dispatch: None,
-    events: &[],
-    records: None,
-    resource: None,
-    items: false,
     data: None,
 };
 
@@ -387,16 +372,6 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
             "idempotent_writes",
         ],
         provider: Some(&TASK_TRACKER),
-    },
-    CapabilitySpec {
-        id: "effort_policy",
-        title: "Effort policy",
-        choosable: true,
-        optional: true,
-        many: false,
-        default: "oxplow",
-        features: &[],
-        provider: Some(&EFFORT_POLICY),
     },
     CapabilitySpec {
         id: "snapshots",
@@ -632,7 +607,7 @@ mod tests {
         }
         assert_eq!(
             choosable().map(|c| c.id).collect::<Vec<_>>(),
-            ["task_tracker", "effort_policy", "snapshots", "knowledge"]
+            ["task_tracker", "snapshots", "knowledge"]
         );
         assert_eq!(spec("knowledge").map(|c| c.optional), Some(true));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
@@ -659,7 +634,7 @@ mod tests {
     }
 
     /// What a process may implement is what core gives a contract: the
-    /// task tracker, the effort policy, snapshots, knowledge, an agent harness
+    /// task tracker, snapshots, knowledge, an agent harness
     /// and a filesystem. The rest are core's or built-ins'.
     #[test]
     fn a_process_implements_only_a_capability_with_a_contract() {
@@ -671,7 +646,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 "task_tracker",
-                "effort_policy",
                 "snapshots",
                 "knowledge",
                 "agent_harness",
@@ -697,8 +671,6 @@ mod tests {
         // Who works on an item and its place in their queue are core's.
         assert!(work.verb("assign").is_none() && work.verb("reorder").is_none());
         assert!(work.verb("estimate").is_none());
-        let policy = contract("effort_policy").unwrap();
-        assert_eq!(policy.required(&serde_json::json!({})), ["react"]);
         let knowledge = contract("knowledge").unwrap();
         assert_eq!(
             knowledge.required(&serde_json::json!({})),
@@ -736,8 +708,7 @@ mod tests {
         }
     }
 
-    /// A task tracker owns its items' refs and streams them as records; an
-    /// effort policy owns nothing and emits nothing.
+    /// A task tracker owns its items' refs and streams them as records.
     #[test]
     fn a_contract_says_what_its_provider_owns_and_emits() {
         let work = contract("task_tracker").unwrap();
@@ -749,12 +720,6 @@ mod tests {
         );
         assert_eq!(work.dispatch, Some("oxplow.task"));
         assert!(work.items);
-        let policy = contract("effort_policy").unwrap();
-        assert!(policy.events.is_empty() && policy.records.is_none());
-        assert_eq!(
-            (policy.resource, policy.dispatch, policy.items),
-            (None, None, false)
-        );
     }
 
     #[test]
