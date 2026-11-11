@@ -147,8 +147,10 @@ alone.
 
 ## Turning oxwiki off
 
-oxwiki is on by default. foundation's setting `oxwiki` (Settings, or
-`oxplow.knowledge.set_oxwiki { on }`) turns it off: it stays declared and
+oxwiki is on by default. foundation's setting `oxwiki` (Settings →
+Integrations → Knowledge stores, which lists every store on or off with
+its kinds and extension; or `oxplow.knowledge.set_oxwiki { on }`) turns it
+off: it stays declared and
 listed (`v_capability_provider` `active = 0`, `chosen_by = 'setting'`), but
 no store runs, its pages are hidden, its watch ignores its folder, `resync`
 is refused and a bare `[[slug]]` names a store that isn't enabled. On

@@ -1,0 +1,17 @@
+# Settings → Integrations lists every knowledge store, on or off, which
+# extension it is from and the kinds of page it keeps; oxwiki has Turn Off
+# while it is on, and Turn On once a setting turned it off.
+when: { page: settings, params: { area: integrations } }
+expect:
+  loaders:
+    knowledge_stores:
+      rows:
+        - { store: oxwiki, title: oxwiki, standing: "On", extension: oxplow-foundation, kinds: Note, can_turn_off: 1, can_turn_on: 0 }
+steps:
+  - given:
+      - { command: oxplow.knowledge.set_oxwiki, input: { on: false } }
+    expect:
+      loaders:
+        knowledge_stores:
+          rows:
+            - { store: oxwiki, standing: "Off: turned off in settings", can_turn_off: 0, can_turn_on: 1 }
