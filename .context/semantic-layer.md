@@ -1038,8 +1038,10 @@ extension's own declared event types, logged with the run (P9.D2;
   it declares them, the semantic layer and a dataset (`ai.compute`); its input is `{report?, rows?, event?}` (`report: { path,
   format }` parsed — text | json | xml | lcov | lines; the `input:`
   query's rows; the trigger event); it returns `{"facts": [{measure,
-  value, subject?, path?, line?, rule?, num?, den?, dims?}]}` and nothing
-  else (`facts_of`). A fact on a measure not in `facts:` or not defined is
+  value, subject?, path?, line?, rule?, num?, den?, dims?}], "capture"?:
+  {at?, replaces?}}` and nothing else (`collected_of`; `capture` places the
+  run's capture and names whose earlier captures it replaces — metrics.md
+  "Placed, replacing captures"). A fact on a measure not in `facts:` or not defined is
   dropped. Each run records one metric capture (or a failed one) plus a
   `collector_run` row and `collector.synced@2` with its `facts` count.
   Snapshot runs keep the delta / full-baseline machinery (pending-baseline

@@ -1,21 +1,24 @@
-# A request's outcome, recorded each time one of its turns ends (a request
-# has no finished moment: a later turn records it again, and each measure
-# keeps a request's latest): the tokens it spent, its cycle time, and how its
-# tests went — red at the end, how red it got, which tests broke, how many
-# runs went red, and how long it stayed red before the first green.
+# A request's outcome, recorded each time one of its turns ends while none
+# of its turns runs (a request has no finished moment: a later turn records
+# it again): the tokens it spent, its cycle time, and how its tests went —
+# red at the end, how red it got, which tests broke, how many runs went red,
+# and how long it stayed red before the first green.
 #
 # Gets {"rows": [...]}: the request's own row first ({request, tokens,
-# cycle_ms}, run NULL), then one row per (run, failed case) of the test runs
-# its turns made, oldest first, a run with no failed case on a row of its
-# own: {run, failed, cases, at_ms, case}. `case` is the failed test's
-# subject; `cases` how many cases the run's report listed (0 for a run that
-# only asserted counts, whose failures have no identity). Returns
-# {"facts": [...]}.
+# cycle_ms, placed_at}, run NULL; none while a turn of it runs), then one
+# row per (run, failed case) of the test runs its turns made, oldest first,
+# a run with no failed case on a row of its own: {run, failed, cases, at_ms,
+# case}. `case` is the failed test's subject; `cases` how many cases the
+# run's report listed (0 for a run that only asserted counts, whose failures
+# have no identity). Returns {"facts": [...], "capture": {at, replaces}}:
+# the capture is placed at `placed_at` and replaces the request's earlier
+# one, so the request counts once, in the period it is placed in.
 
 def transform(x):
     request = None
     tokens = None
     cycle = None
+    placed_at = None
     runs = []
     by_run = {}
     for r in x["rows"]:
@@ -23,6 +26,7 @@ def transform(x):
             request = r["request"]
             tokens = r["tokens"]
             cycle = r["cycle_ms"]
+            placed_at = r["placed_at"]
             continue
         if r["run"] not in by_run:
             by_run[r["run"]] = {"at": r["at_ms"], "failed": r["failed"], "reported": r["cases"] > 0, "refs": []}
@@ -31,7 +35,9 @@ def transform(x):
             by_run[r["run"]]["refs"].append(r["case"])
     if request == None:
         return {"facts": []}
+    return {"facts": outcome(request, tokens, cycle, runs, by_run), "capture": {"at": placed_at, "replaces": request}}
 
+def outcome(request, tokens, cycle, runs, by_run):
     facts = []
     if tokens:
         facts.append({"measure": "oxplow.request_tokens", "value": tokens, "subject": request, "num": tokens, "den": 1})
@@ -40,7 +46,7 @@ def transform(x):
             cycle = 0
         facts.append({"measure": "oxplow.request_cycle_time", "value": cycle, "subject": request, "num": cycle, "den": 1})
     if not runs:
-        return {"facts": facts}
+        return facts
 
     # How many tests failed in each run: the failed cases it listed, or — a
     # run that reported no cases — the failures it asserted.
@@ -97,4 +103,4 @@ def transform(x):
                     "den": 1,
                 })
                 break
-    return {"facts": facts}
+    return facts

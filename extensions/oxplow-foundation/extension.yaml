@@ -449,11 +449,14 @@ implementations:
   - { capability: ai_provider, id: llamacpp, title: llama.cpp server, provider: llamacpp, config: { baseUrl: "http://localhost:8080/v1" }, description: "Models that run in a local llama.cpp server." }
   - { capability: ai_provider, id: typesafe, title: TypeSafe, provider: typesafe, config: { baseUrl: "https://api.typesafe.ai" }, description: "A model service that only answers typed questions." }
 collectors:
-  # A request's outcome, recorded each time one of its turns ends (a request
-  # has no finished moment; each measure keeps a request's latest): its
-  # tokens, its cycle time, and what its turns' test runs came to. After
-  # `token_usage.turns`, which records the turn's tokens from its transcript
-  # once it ends: before it, most of a turn's tokens aren't counted yet.
+  # A request's outcome, recorded each time one of its turns ends and none
+  # of its turns is still running (a request has no finished moment): its
+  # tokens, its cycle time, and what its turns' test runs came to. One
+  # capture per request, placed at `placed_at` (the request's start) and
+  # replacing the request's earlier one, so a period's point is the mean
+  # of the requests that started in it. After `token_usage.turns`, which
+  # records the turn's tokens from its transcript once it ends: before it,
+  # most of a turn's tokens aren't counted yet.
   - id: oxplow.request_outcome
     doc: How a request went — its tokens, its cycle time and its tests — recorded when a turn of it ends.
     runtime: starlark
@@ -464,10 +467,13 @@ collectors:
       WITH req AS (
         SELECT t.request_id AS id FROM v_agent_turn t
          WHERE t.id = :turn_id AND t.request_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                            WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
       )
       SELECT NULL AS run, NULL AS failed, NULL AS cases, NULL AS at_ms, NULL AS "case",
              r.uri AS request, r.input_tokens + r.output_tokens AS tokens,
-             CAST(round((julianday(r.last_activity_at) - julianday(r.started_at)) * 86400000) AS INTEGER) AS cycle_ms
+             CAST(round((julianday(r.last_activity_at) - julianday(r.started_at)) * 86400000) AS INTEGER) AS cycle_ms,
+             r.started_at AS placed_at
       FROM v_request r JOIN req ON r.id = req.id
       UNION ALL
       SELECT * FROM (
@@ -478,7 +484,7 @@ collectors:
                  + CAST(substr(cap.captured_at, 21, 3) AS INTEGER) AS at_ms,
                CASE WHEN c.name IS NULL THEN NULL
                     ELSE uri('oxplow/test', 'class', c.classname, 'name', c.name) END AS "case",
-               NULL AS request, NULL AS tokens, NULL AS cycle_ms
+               NULL AS request, NULL AS tokens, NULL AS cycle_ms, NULL AS placed_at
         FROM v_capture cap
         JOIN v_test_run tr ON tr.id = cap.id
         LEFT JOIN v_test_case c ON c.run_id = tr.id AND c.status = 'failed'
@@ -1912,10 +1918,13 @@ measures:
   - {"key": "oxplow.test_duration", "title": "Test duration", "unit": "ms", "subjectKind": "test", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time a test run took."}
   - {"key": "oxplow.cache_tokens", "title": "Prompt-cache tokens", "unit": "count", "subjectKind": "model", "temporalSemantics": "additive", "fold": "sum", "captureScope": "complete", "description": "Tokens an agent read from or wrote to the model's prompt cache."}
   - {"key": "oxplow.cache_usage", "title": "Prompt-cache hit ratio", "unit": "%", "subjectKind": "model", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Share of an agent's prompt tokens that the cache served."}
-  - {"key": "oxplow.request_tokens", "title": "Request token spend", "unit": "count", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Tokens (input + output) a request spent over all its turns, as of its latest turn."}
-  - {"key": "oxplow.request_cycle_time", "title": "Request cycle time", "unit": "ms", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time from a request's first prompt to its last activity, as of its latest turn."}
-  - {"key": "oxplow.request_test_outcome", "title": "Request test outcome", "unit": "count", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "A figure of how a request's tests went, such as runs or failures, as of its latest turn."}
-  - {"key": "oxplow.request_time_to_green", "title": "Request time to green", "unit": "ms", "subjectKind": "request", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "per-subject", "description": "Time from a request's first red test run to its first green one."}
+  # A request's figures: one capture per request at its start, replaced
+  # when the request is recorded again, so each is one observation and a
+  # period's mean is Σ/count over the requests that started in it.
+  - {"key": "oxplow.request_tokens", "title": "Request token spend", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Tokens (input + output) a request spent over all its turns, as of its latest turn."}
+  - {"key": "oxplow.request_cycle_time", "title": "Request cycle time", "unit": "ms", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from a request's first prompt to its last activity, as of its latest turn."}
+  - {"key": "oxplow.request_test_outcome", "title": "Request test outcome", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "A figure of how a request's tests went, such as runs or failures, as of its latest turn."}
+  - {"key": "oxplow.request_time_to_green", "title": "Request time to green", "unit": "ms", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "Time from a request's first red test run to its first green one."}
   - {"key": "oxplow.coverage.branch", "title": "Branch coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's branches that tests ran."}
   - {"key": "oxplow.coverage.function", "title": "Function coverage", "unit": "%", "subjectKind": "file", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "Share of a file's functions that tests ran."}
 dimensions:

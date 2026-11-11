@@ -1967,6 +1967,7 @@ impl MetricsService {
             .await
             .map_err(|e| format!("task failed: {e}"))??;
         Ok(facts
+            .facts
             .into_iter()
             .map(|f| {
                 let mut v = serde_json::to_value(&f).unwrap_or_default();
@@ -2123,25 +2124,25 @@ impl MetricsService {
                 this_run.check_authority()?;
                 Ok(facts)
             });
-            // Facts the ingest would refuse fail the run here, with why (tsk986).
+            // Facts the ingest would refuse fail the run here, with why
+            // (tsk986), and so does a capture time that isn't one.
             let outcome = match outcome {
-                Ok(collector_facts) => {
-                    match self.refused_facts(collector, &collector_facts).await {
-                        Some(why) => Err(why),
-                        None => Ok(collector_facts),
-                    }
-                }
-                failed => failed,
+                Ok(collected) => match self.refused_facts(collector, &collected.facts).await {
+                    Some(why) => Err(why),
+                    None => CapturePlace::of(collected.capture.as_ref())
+                        .map(|place| (collected.facts, place)),
+                },
+                Err(failed) => Err(failed),
             };
             let (run, capture) = match outcome {
-                Ok(collector_facts) => {
+                Ok((collector_facts, place)) => {
                     tracing::debug!(
                         key = %collector.key,
                         elapsed_ms = started.elapsed().as_millis() as u64,
                         "fact collector: complete",
                     );
                     match self
-                        .collector_capture(collector, ctx, &source, &collector_facts)
+                        .collector_capture(collector, ctx, &source, &collector_facts, place)
                         .await
                     {
                         Some((capture, rows)) => {
@@ -2470,6 +2471,7 @@ impl MetricsService {
         ctx: &CollectorRunContext,
         source: &str,
         collector_facts: &[CollectedFact],
+        place: CapturePlace,
     ) -> Option<(oxplow_db::NewMetricCapture, Vec<oxplow_db::NewFact>)> {
         let facts = self.fact_store.as_ref()?;
         // Resolve the measure catalog once (one query), then map each fact's key.
@@ -2530,6 +2532,10 @@ impl MetricsService {
                 .iter()
                 .map(|e| (e.path.clone(), e.reason.as_str().to_string()))
                 .collect(),
+            // When its facts were true, and what they are the figures of,
+            // when the collector said (`"capture": {at, replaces}`).
+            captured_at: place.at,
+            replaces: place.replaces,
             ..oxplow_db::NewMetricCapture::done(
                 ctx.stream_val,
                 collector.key.clone(),
@@ -2667,6 +2673,39 @@ pub struct MetricScaffold {
     pub files: Vec<crate::metric_scaffold::ScaffoldFile>,
 }
 
+/// Where a fact collector's run said its capture goes: the time its facts
+/// are placed at (`None`: when it ran) and what they are the figures of,
+/// whose earlier captures it replaces.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct CapturePlace {
+    at: Option<oxplow_domain::Timestamp>,
+    replaces: Option<String>,
+}
+
+impl CapturePlace {
+    /// The run's `"capture"`, checked: a time that isn't RFC 3339 fails the
+    /// run, saying so.
+    fn of(capture: Option<&oxplow_script::CollectedCapture>) -> Result<Self, String> {
+        let Some(c) = capture else {
+            return Ok(Self::default());
+        };
+        let at =
+            c.at.as_deref()
+                .map(|at| {
+                    oxplow_domain::Timestamp::parse(at).map_err(|e| {
+                        format!(
+                        "`capture.at` is a time (RFC 3339, like 2026-01-05T09:00:00Z): `{at}`: {e}"
+                    )
+                    })
+                })
+                .transpose()?;
+        Ok(Self {
+            at,
+            replaces: c.replaces.clone(),
+        })
+    }
+}
+
 /// What runs a fact collector.
 enum FactRunner {
     Starlark(String),
@@ -2682,16 +2721,16 @@ enum FactRunner {
 impl FactRunner {
     /// Run over `input` under the fact-collector budget, with the
     /// services it was `given` (its `sql.read` calls read through
-    /// `layer`), and read its `{"facts": [...]}`. Blocking: call it from
-    /// `spawn_blocking`, inside the runtime.
+    /// `layer`), and read its `{"facts": [...], "capture"?: {..}}`.
+    /// Blocking: call it from `spawn_blocking`, inside the runtime.
     fn run(
         self,
         input: &serde_json::Value,
         given: crate::services::Given,
         layer: Option<crate::sql_gateway::SqlGateway>,
         run: &RunContext,
-    ) -> Result<Vec<CollectedFact>, String> {
-        use oxplow_script::facts_of;
+    ) -> Result<oxplow_script::Collected, String> {
+        use oxplow_script::collected_of;
         use oxplow_script::runtime::run_exec_authorized_at;
         use oxplow_script::workers::{shared, ScriptRun};
         run.check_authority()?;
@@ -2734,7 +2773,7 @@ impl FactRunner {
         .map_err(|e| e.to_string())
         .and_then(|value| {
             run.check_authority()?;
-            facts_of(value).map_err(|e| e.to_string())
+            collected_of(value).map_err(|e| e.to_string())
         })
     }
 }

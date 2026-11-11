@@ -25,8 +25,18 @@ shape** — one atomic fact per subject, NOT a pre-aggregated total:
 
 The Starlark entry is `def transform(input): … return { "facts": [...] }`.
 `input` is `{report?, rows?, event?}`: the parsed `report`, the `input:`
-query's rows, and the event that triggered the run. Anything but `facts` in
-the return (an old `samples` / `findings` shape) is refused.
+query's rows, and the event that triggered the run. Anything but `facts` and
+`capture` in the return (an old `samples` / `findings` shape) is refused.
+
+`capture` (optional) says where the run's facts go when that is not "now, as
+one more scan": `{ "at"?: "<RFC 3339 time>", "replaces"?: "<key>" }`. `at`
+places the capture (and so its facts' trend period) at the time the facts
+were true; `replaces` makes it take the place of this collector's earlier
+captures under the same key, with their facts. Together they give a figure
+per thing (a request, say) that counts once, in its own period, and is
+updated in place: declare its measures `temporalSemantics: non-additive`,
+`fold: sum`, `captureScope: complete`, and an `AVG(value)` metric means
+over the things placed in each period.
 
 ### Three authoring patterns
 
