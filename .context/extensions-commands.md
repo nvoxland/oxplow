@@ -254,7 +254,8 @@ implementations:
   `providers::endpoint::Endpoint` (`CapabilityHost::prepare`), so the
   task tracker's is an `ExternalTaskTracker` and `task.<verb>` reaches it
   through `TaskVerbs::invoke` like any list — and each call runs the verb
-  pure in the command scripts' sandbox, as the implementation's own
+  in the command scripts' sandbox (no I/O of its own; its host calls are
+  its scopes), as the implementation's own
   contribution (kind `implementation`, `<capability>.<id>`), on a child of
   the caller's run whose authority declares only its `needs`, within the
   extension's permissions (`permissions:` must grant them), guarded by its
@@ -264,19 +265,31 @@ implementations:
   verbs; a shape that isn't `InvokeResult` fails the call. What it keeps
   between calls it reads back through its scopes — a task tracker's own
   items from `v_task` (`sql.read`), recorded by the `task.recorded@3`
-  its verbs answered. Its adapter is prepared and published with the
+  its verbs answered — or in its **extension's private state**: it may
+  declare `state.write` (and `state.read`) and keep what it needs there
+  ([extensions-manifest.md](./extensions-manifest.md) "Private state host
+  boundary": whole-namespace compare-exchange, 1 MiB and 256 keys, `project`
+  or `personal`, `state` or `cache`; its own namespace only), and `tree.read`
+  (bare or a path prefix; needs `files.read` in `permissions:`) to read the
+  stream's worktree as it is on disk now, anchored to the stream the call is
+  for (a filesystem call's `FsCx.stream`, a snapshots mark's stream; else the
+  primary stream). Each verb has the command scripts' 5 s budget; a script
+  holds text, not bytes (the tree is text files only: a binary, non-UTF-8 or
+  oversize file isn't in it), `len(text)` counts characters, and two
+  builtins give what a file's bytes are: `xxh3_128(text)` (the blob store's
+  identity of the text's UTF-8 bytes) and `utf8_len(text)` (their count). Its adapter is prepared and published with the
   generation's other runtime adapters (`PreparedRuntimeAdapters`,
   `ProviderRegistry::prepare_scripts` / `publish_scripts`); one a host
   refuses holds the extension back (`activation.script_implementation`).
   **Refused at load**, each its own code: `implementation.script_no_verbs`
   (a capability with no contract), `script_id` (an id its refs can't
   carry, `capability::instance_id_problem`), `script_outside`,
-  `script_config` (not a map), `script_need` (not what a command's script
-  may call: `scope_calls::check_command_need`, so no `tree.read`),
+  `script_config` (not a map), `script_need` (not what an implementation's
+  script may call: `scope_calls::check_implementation_need` — a composing
+  script's, plus `tree.read` and `state.write`),
   `script_missing`, `script_invalid` (doesn't parse, or calls a scope it
   doesn't need), `script_items` (stages/fields/id pattern),
-  `script_unsupported` (a capability whose verbs a pure script can't
-  answer: snapshots), `script_missing_verb` (a verb the contract requires for the declared
+  `script_missing_verb` (a verb the contract requires for the declared
   features), `script_declares` (a feature or `data` the capability
   doesn't have). A built-in refuses the script-only keys
   (`implementation.built_in_needs`, `built_in_declares`), and an AI
@@ -296,20 +309,34 @@ implementations:
   - `agent_harness` works for a terminal harness: `launch` answers a
     `pty` spec (the identity env passed on, never on the command line),
     `tool_use` and `render` map hooks. It is registered by id beside the
-    built-ins and passes `harness_conformance::suite`. What a script can't
-    do is look for the harness's program on `search_path` (no file
-    access): it names the command and lets the shell find it.
-  - `filesystem` works for a tree the script knows (a fixed one, or one
-    it computes): `stat`, `read` (base64: the script encodes), `list`;
-    it passes the filesystem checks, read-only. The sandbox has no bytes
-    type or base64 builtin, so a script holds bytes as lists of ints.
-  - `snapshots` is **refused at load** (`implementation.script_unsupported`,
-    naming why): `mark` must read the stream's worktree and hash every file
-    and `read_at` must return bytes it kept, but a script is pure — no
-    `tree.read` (`check_command_need`) and nothing kept between calls. A
-    snapshots implementation that needs those is a provider (`providers:`).
-    `implementations::script_unsupported` is where a capability whose verbs
-    a pure script can't answer is named.
+    built-ins and passes `harness_conformance::suite`. **What a script
+    can't do is find the harness's program** on `search_path`: that is the
+    machine's `PATH`, and `tree.read` is the stream's worktree (what oxplow
+    tracks of the project), not the machine's files; no other read of its
+    scopes gives a file's presence on disk. It names the command and lets
+    the shell find it. Looking for it needs raw filesystem access, which a
+    script doesn't have by design; an agent harness that must check for its
+    program is a provider (`providers:`), a process.
+  - `filesystem` works for a tree the script knows (a fixed one, or one it
+    computes, or the stream's worktree with `tree.read`): `stat`, `read`
+    (base64: the script encodes), `list`; and it may be **writable**
+    (`features: { writable: true }`, a `write` verb): the writes are kept in
+    its extension's private state (`state.write`), and the read verbs look
+    there first. It passes the filesystem checks, the write ones among
+    them (`script_capabilities.rs`). The sandbox has no bytes type or
+    base64 builtin, so a script holds bytes as lists of ints (or keeps the
+    base64 text it was given). A path that leaves the filesystem is refused
+    by core before the call.
+  - `snapshots` works (`features: { contents: true }` to keep bytes): `mark`
+    reads the worktree (`tree.read`), names each file (`xxh3_128`, `utf8_len`) and keeps
+    the mark's listing and each new file's text in private state; `changed`
+    compares two kept listings; `read_at` answers a kept file's text
+    (base64). It passes `snapshot_conformance::suite`. **Size:** a big tree
+    in extension state is slow (each mark reads and rewrites the whole
+    namespace) and the namespace is capped at 1 MiB, so a script like this
+    suits a small project, or one that keeps hashes only (no `contents`); a
+    larger one is a provider (`providers:`). Nothing here blocks a big tree:
+    the write is refused at the cap.
 - **An `ai_provider` names its Rust kind** with `provider:` instead of
   `entry:` (`implementations::provider_decl`, `Source::ProviderKind`):
   one of `oxplow_ai_rig::KINDS` (`anthropic`, `openai`,
