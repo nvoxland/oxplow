@@ -1840,7 +1840,17 @@ not prove a receipt; a sender outside oxplow is known by its name and
 socket only. Pinned by `a_peers_message_is_matched_to_the_turn_that_sent_it`, `a_message_is_matched_across_threads` and `a_send_that_never_ran_is_not_a_candidate`. Pinned by
 `a_peers_message_opens_a_turn_of_its_own_with_its_text`, `a_peers_message_is_not_a_persons_prompt`
 and the recorded `claude/peer_message.jsonl`
-(`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`). Codex's
+(`a_recorded_claude_code_peer_message_opens_a_turn_of_its_own`).
+The **idle notice** a `SendMessage` with `notify_when_idle` asks for
+arrives as a prompt starting `[Cross-session idle notice] "<session name>"`
+(not `[idle notice]`): the adapter reads it as a `PeerMessage` from that
+session (no socket, no message), never a person's prompt
+(`an_idle_notice_is_a_peers_and_not_a_persons_prompt`). Recorded from the
+sender's side in `claude/cross_session.jsonl`
+(`a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompts`);
+the reply is `<cross-session-message from="uds:/tmp/cc-socks/<pid>.sock"
+from-name=… from-mode="prompting">`. A `[Cross-session delivery notice]`
+(a recipient in another permission mode) has not been recorded. Codex's
 collab agents are subagents ("Collab agents are subagents"). Observe
 only: oxplow never sends a peer message and doesn't read Claude's team
 mailboxes (not a documented interface).
@@ -2159,7 +2169,8 @@ No findings passes.
   `crates/oxplow-harnesses/fixtures/<harness>/hooks.jsonl` (`{event,
   payload}` per line; paths scrubbed to `<ROOT>`, `<HOME>`, `<TMP>`;
   `claude/subagent.jsonl` is a background-subagent session,
-  `claude/background_shell.jsonl` a background shell).
+  `claude/background_shell.jsonl` a background shell, `claude/cross_session.jsonl`
+a cross-session exchange; its ListAgents listing is an invented stub).
   `tests/replayed_harnesses.rs` posts each in order to a live route as a
   session of its harness, its own mapping and answers running, and the
   suite checks the record (tokens aren't replayed). When an agent's hook

@@ -215,7 +215,9 @@ impl AgentHarness for Claude {
     /// What a prompt is: a background subagent's report (a prompt starting
     /// `<agent-message from="<agent_id>">`), another session's message
     /// (`<cross-session-message …>`), a background job's notice
-    /// (`<task-notification>` naming the call that started it), else a
+    /// (`<task-notification>` naming the call that started it), an idle notice
+    /// for a session the agent asked about (`[Cross-session idle notice]`,
+    /// a peer's), else a
     /// person's words. The text is kept as delivered.
     async fn prompt(&self, body: &serde_json::Value) -> Option<Prompt> {
         let text = body.get("prompt")?.as_str()?;
@@ -224,6 +226,14 @@ impl AgentHarness for Claude {
                 from: peer.from.into(),
                 socket: peer.socket.map(str::to_string),
                 message: peer.message.map(str::to_string),
+                text: text.into(),
+            });
+        }
+        if let Some(name) = idle_notice_from(text) {
+            return Some(Prompt::PeerMessage {
+                from: name.into(),
+                socket: None,
+                message: None,
                 text: text.into(),
             });
         }
@@ -375,6 +385,16 @@ fn peer_message_from(text: &str) -> Option<PeerFrom<'_>> {
         socket,
         message,
     })
+}
+
+/// The session an idle notice is about: the prompt is the harness's
+/// `[Cross-session idle notice] "<session name>", which you asked to be
+/// notified about, is idle now …`.
+fn idle_notice_from(text: &str) -> Option<&str> {
+    let rest = text.strip_prefix("[Cross-session idle notice] \"")?;
+    rest.split_once('"')
+        .map(|(name, _)| name)
+        .filter(|name| !name.is_empty())
 }
 
 /// A background job's notice: the prompt is a `<task-notification>`,
@@ -1086,6 +1106,34 @@ mod tests {
             "hook_event_name": "SubagentStop", "agent_id": "afd849d5d475e378d", "agent_type": "general-purpose"
         });
         assert!(crate::test_launch::block(h.subagent(&real)).is_some());
+    }
+
+    /// The idle notice a session asked for is an automated notice from
+    /// another session's harness (`[Cross-session idle notice] "<name>" …`,
+    /// recorded in `claude/cross_session.jsonl`): the named session's, not
+    /// a person's words.
+    #[test]
+    fn an_idle_notice_is_a_peers_and_not_a_persons_prompt() {
+        use oxplow_domain::agent::observe::Prompt;
+        let h = harness("oxplow:claude-code", "claude");
+        let text = "[Cross-session idle notice] \"rec-project-f9\", which you asked to be notified about, is idle now \u{2014} it finished a turn at 20:06. This is an automated notice from that session's harness.";
+        let got = crate::test_launch::block(h.prompt(&serde_json::json!({ "prompt": text })));
+        assert_eq!(
+            got,
+            Some(Prompt::PeerMessage {
+                from: "rec-project-f9".into(),
+                socket: None,
+                message: None,
+                text: text.into(),
+            })
+        );
+        // A person quoting the marker mid-sentence is still a person.
+        let quoted =
+            serde_json::json!({ "prompt": "what is a [Cross-session idle notice] \"x\"?" });
+        assert!(matches!(
+            crate::test_launch::block(h.prompt(&quoted)),
+            Some(Prompt::Person { .. })
+        ));
     }
 
     /// A `SendMessage` call says what it sends to whom, so the turn that

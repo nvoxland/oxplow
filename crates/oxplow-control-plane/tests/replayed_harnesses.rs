@@ -444,3 +444,41 @@ async fn a_recorded_claude_code_background_shell_is_a_job_from_its_start_to_its_
         )]
     );
 }
+
+/// Claude Code's cross-session messages, recorded from the sender's side:
+/// the peer's reply and the idle notice the sender asked for each open a
+/// turn that is a peer's, not the person's; the ListAgents and SendMessage
+/// calls are ordinary tool calls.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompts() {
+    let r = replayed("claude/cross_session.jsonl", "claude").await;
+    let received = events_of(&r, "agent.prompt.submitted").await;
+    let sources: Vec<_> = received.iter().map(|p| p["source"].clone()).collect();
+    assert_eq!(sources, ["person", "peer", "peer"]);
+    assert_eq!(received[1]["sender"], "rec-project-f9");
+    assert_eq!(received[2]["sender"], "rec-project-f9");
+    assert_eq!(
+        tools_of(&r).await,
+        ["ToolSearch", "ListAgents", "SendMessage"]
+    );
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 0);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 0);
+    let mut turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    turns.sort_by_key(|t| t.id.value());
+    use oxplow_domain::hook::TurnSource;
+    assert_eq!(
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [
+            Some(TurnSource::Person),
+            Some(TurnSource::Peer),
+            Some(TurnSource::Peer)
+        ]
+    );
+    assert!(turns[1].prompt.contains("all tests passed"));
+    assert!(turns[2].prompt.starts_with("[Cross-session idle notice]"));
+}
