@@ -2002,7 +2002,16 @@ The **idle notice** a `SendMessage` with `notify_when_idle` asks for
 arrives as a prompt starting `[Cross-session idle notice] "<session name>"`
 (not `[idle notice]`): the adapter reads it as a `PeerMessage` from that
 session (no socket, no message), never a person's prompt
-(`an_idle_notice_is_a_peers_and_not_a_persons_prompt`). Recorded from the
+(`an_idle_notice_is_a_peers_and_not_a_persons_prompt`). It has no text
+to match on, so it is linked by who it names: a `SendMessage` with
+`notify_when_idle` also records a marker row in `agent_message`
+(`text_hash` is a fixed marker, `recipient` the call's `to`), and the notice
+joins the turn of the one unmatched marker for that session name within an
+hour (`cause_basis` `matched`; none or two for one name link nothing, and a
+denied or failed call is no candidate). Pinned by
+`an_idle_notice_is_matched_to_the_send_that_asked_for_it` and the recorded
+exchange. A send to a recipient given as a session id, not its name, is not
+linked. Recorded from the
 sender's side in `claude/cross_session.jsonl`
 (`a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompts`);
 the reply is `<cross-session-message from="uds:/tmp/cc-socks/<pid>.sock"

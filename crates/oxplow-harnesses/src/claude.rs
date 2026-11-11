@@ -194,9 +194,17 @@ impl AgentHarness for Claude {
                     .and_then(|v| v.as_str())
                     .map(str::to_string)
             };
-            call.sent = field("to")
-                .zip(field("message"))
-                .map(|(to, text)| oxplow_domain::agent::tool::SentMessage { to, text });
+            let notify = input
+                .and_then(|i| i.get("notify_when_idle"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            call.sent = field("to").zip(field("message")).map(|(to, text)| {
+                oxplow_domain::agent::tool::SentMessage {
+                    to,
+                    text,
+                    notify_when_idle: notify,
+                }
+            });
         }
         Some(call)
     }
@@ -227,6 +235,7 @@ impl AgentHarness for Claude {
                 socket: peer.socket.map(str::to_string),
                 message: peer.message.map(str::to_string),
                 text: text.into(),
+                idle_notice: false,
             });
         }
         if let Some(name) = idle_notice_from(text) {
@@ -235,6 +244,7 @@ impl AgentHarness for Claude {
                 socket: None,
                 message: None,
                 text: text.into(),
+                idle_notice: true,
             });
         }
         if let Some(id) = handback_from(text) {
@@ -1041,6 +1051,7 @@ mod tests {
                 socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
                 message: Some("hi".into()),
                 text: named["prompt"].as_str().unwrap().into(),
+                idle_notice: false,
             })
         );
         let unnamed = serde_json::json!({
@@ -1053,6 +1064,7 @@ mod tests {
                 socket: Some("uds:/tmp/cc-socks/21663.sock".into()),
                 message: Some("hi".into()),
                 text: unnamed["prompt"].as_str().unwrap().into(),
+                idle_notice: false,
             })
         );
         // A person quoting one is still a person.
@@ -1125,6 +1137,7 @@ mod tests {
                 socket: None,
                 message: None,
                 text: text.into(),
+                idle_notice: true,
             })
         );
         // A person quoting the marker mid-sentence is still a person.
@@ -1143,14 +1156,15 @@ mod tests {
         let h = harness("oxplow:claude-code", "claude");
         let call = crate::test_launch::block(h.tool_use(&serde_json::json!({
             "tool_name": "SendMessage", "tool_use_id": "t1",
-            "tool_input": {"to": "oxplow-bugfixes", "summary": "s", "message": "merge main first"}
+            "tool_input": {"to": "oxplow-bugfixes", "summary": "s", "message": "merge main first", "notify_when_idle": true}
         })))
         .unwrap();
         assert_eq!(
             call.sent,
             Some(oxplow_domain::agent::tool::SentMessage {
                 to: "oxplow-bugfixes".into(),
-                text: "merge main first".into()
+                text: "merge main first".into(),
+                notify_when_idle: true,
             })
         );
         let other = crate::test_launch::block(h.tool_use(&serde_json::json!({

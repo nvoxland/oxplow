@@ -13,6 +13,16 @@ use crate::database::{map_sql_err, ts_to_string};
 /// How long after it was sent a received message may still match its send.
 pub const MATCH_WINDOW_SECONDS: i64 = 600;
 
+/// How long after it was sent a send that asked to be told when its
+/// recipient is idle may still be matched to that notice (the recipient may
+/// work on it for a while).
+pub const IDLE_MATCH_WINDOW_SECONDS: i64 = 3600;
+
+/// The `text_hash` of the row that records a send's `notify_when_idle` ask:
+/// a marker, not any message's hash (a notice has no text to match on, only
+/// the session that went idle).
+const IDLE_ASK: &str = "oxplow:agent_message:notify_when_idle";
+
 /// The content hash two ends of a message are matched on.
 pub fn text_hash(text: &str) -> String {
     crate::event_content_store::hash(text.trim().as_bytes())
@@ -27,6 +37,8 @@ pub struct Sent<'a> {
     pub call: Option<&'a str>,
     pub recipient: &'a str,
     pub text: &'a str,
+    /// The call asked to be told when the recipient is idle.
+    pub notify_when_idle: bool,
     pub at: Timestamp,
 }
 
@@ -39,23 +51,30 @@ pub fn record_sent_tx(conn: &Connection, sent: &Sent<'_>) -> Result<(), DomainEr
         call,
         recipient,
         text,
+        notify_when_idle,
         at,
     } = *sent;
-    conn.execute(
-        "INSERT INTO agent_message (thread_id, agent_session_id, turn_id, call_id, recipient,
-                                    text_hash, sent_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            thread.value(),
-            session.map(|s| s.value()),
-            turn.map(|t| t.value()),
-            call,
-            recipient,
-            text_hash(text),
-            ts_to_string(at)
-        ],
-    )
-    .map_err(map_sql_err)?;
+    let hashes = [
+        Some(text_hash(text)),
+        notify_when_idle.then(|| IDLE_ASK.to_string()),
+    ];
+    for hash in hashes.into_iter().flatten() {
+        conn.execute(
+            "INSERT INTO agent_message (thread_id, agent_session_id, turn_id, call_id, recipient,
+                                        text_hash, sent_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                thread.value(),
+                session.map(|s| s.value()),
+                turn.map(|t| t.value()),
+                call,
+                recipient,
+                hash,
+                ts_to_string(at)
+            ],
+        )
+        .map_err(map_sql_err)?;
+    }
     Ok(())
 }
 
@@ -71,10 +90,33 @@ pub fn find_sent_tx(
     text: &str,
     at: Timestamp,
 ) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
+    find_tx(conn, &text_hash(text), None, at, MATCH_WINDOW_SECONDS)
+}
+
+/// The send an idle notice about session `name` received at `at` matches:
+/// the one unmatched send to `name` that asked to be told when it is idle,
+/// within [`IDLE_MATCH_WINDOW_SECONDS`] before it (same rules as
+/// [`find_sent_tx`]: none, or more than one, is no match).
+pub fn find_idle_ask_tx(
+    conn: &Connection,
+    name: &str,
+    at: Timestamp,
+) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
+    find_tx(conn, IDLE_ASK, Some(name), at, IDLE_MATCH_WINDOW_SECONDS)
+}
+
+fn find_tx(
+    conn: &Connection,
+    hash: &str,
+    recipient: Option<&str>,
+    at: Timestamp,
+    window: i64,
+) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
     let mut stmt = conn
         .prepare(
             "SELECT m.id, m.turn_id FROM agent_message m
               WHERE m.text_hash = ?1 AND m.received_turn_id IS NULL AND m.turn_id IS NOT NULL
+                AND (?4 IS NULL OR m.recipient = ?4)
                 AND julianday(m.sent_at) <= julianday(?2)
                 AND julianday(m.sent_at) >= julianday(?2) - ?3 / 86400.0
                 AND NOT EXISTS (
@@ -85,10 +127,9 @@ pub fn find_sent_tx(
         )
         .map_err(map_sql_err)?;
     let found: Vec<(i64, i64)> = stmt
-        .query_map(
-            params![text_hash(text), ts_to_string(at), MATCH_WINDOW_SECONDS],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
+        .query_map(params![hash, ts_to_string(at), window, recipient], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .map_err(map_sql_err)?
         .collect::<Result<_, _>>()
         .map_err(map_sql_err)?;
@@ -145,6 +186,7 @@ mod tests {
                             call: Some(call),
                             recipient: "main",
                             text: "hello",
+                            notify_when_idle: false,
                             at: Timestamp::from_unix_ms(999_000),
                         },
                     )

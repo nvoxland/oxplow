@@ -651,14 +651,18 @@ fn record_tx(
                 socket,
                 message,
                 text,
+                idle_notice,
             }) = &env.prompt
             else {
                 unreachable!("matched above")
             };
             // The turn that sent it, when exactly one recent send of the same
             // text matches (`matched`: the harness names no link).
+            // An idle notice has no text: it matches the send that asked for
+            // it, to the session it names.
             let sent = match message {
                 Some(message) => agent_message_store::find_sent_tx(conn, message, now)?,
+                None if *idle_notice => agent_message_store::find_idle_ask_tx(conn, from, now)?,
                 None => None,
             };
             let opening = TurnOpening {
@@ -1620,6 +1624,7 @@ fn log_tool_tx(
                     call: tool.call_id.as_deref(),
                     recipient: &sent.to,
                     text: &sent.text,
+                    notify_when_idle: sent.notify_when_idle,
                     at: Timestamp::now(),
                 },
             )?;
@@ -2262,6 +2267,7 @@ mod tests {
                 text: format!(
                     "<cross-session-message from-name=\"{from}\">hi</cross-session-message>"
                 ),
+                idle_notice: false,
             }),
             ..hook(HookKind::UserPromptSubmit, tid, Some("h1"), json!({}))
         };
@@ -4742,6 +4748,7 @@ mod tests {
                 socket: None,
                 message: Some(text.into()),
                 text: format!("<cross-session-message from-name=\"oxplow-main\">\n{text}\n</cross-session-message>"),
+                idle_notice: false,
             }),
             ..hook_in(HookKind::UserPromptSubmit, tid, receiver, Some("r1"), json!({}))
         }
@@ -4812,6 +4819,103 @@ mod tests {
         );
     }
 
+    /// The idle notice a `notify_when_idle` send asked for names only the
+    /// session that went idle: it joins the turn of the send that asked, to
+    /// that recipient. A send that did not ask, one to another recipient,
+    /// or two that asked match nothing (the notice then starts its own
+    /// request).
+    #[tokio::test]
+    async fn an_idle_notice_is_matched_to_the_send_that_asked_for_it() {
+        let (svc, tid) = fixture().await;
+        let sender = first_session();
+        let receiver = open_session(&svc, tid).await;
+        let send = |call: &str, to: &str, notify: bool| {
+            hook_in(
+                HookKind::PreToolUse,
+                tid,
+                sender,
+                Some("s1"),
+                json!({"tool_name": "SendMessage", "tool_use_id": call,
+                       "tool_input": {"to": to, "message": format!("hi {call}"),
+                                      "notify_when_idle": notify}}),
+            )
+        };
+        let notice = |from: &str, sid: &str| {
+            HookEnvelope {
+            prompt: Some(Prompt::PeerMessage {
+                from: from.into(),
+                socket: None,
+                message: None,
+                text: format!("[Cross-session idle notice] \"{from}\", which you asked to be notified about, is idle now"),
+                idle_notice: true,
+            }),
+            ..hook_in(HookKind::UserPromptSubmit, tid, sender, Some(sid), json!({}))
+        }
+        };
+        let stop = |sid| {
+            hook_in(
+                HookKind::Stop,
+                tid,
+                sender,
+                Some(sid),
+                json!({"last_assistant_message": "ok"}),
+            )
+        };
+        let _ = receiver;
+        svc.ingest(hook_in(
+            HookKind::UserPromptSubmit,
+            tid,
+            sender,
+            Some("s1"),
+            json!({"prompt": "ask peers"}),
+        ))
+        .await
+        .unwrap();
+        for (call, to, notify) in [
+            ("t1", "asked", true),
+            ("t2", "silent", false),
+            ("t3", "twice", true),
+            ("t4", "twice", true),
+        ] {
+            svc.ingest(send(call, to, notify)).await.unwrap();
+        }
+        svc.ingest(stop("s1")).await.unwrap();
+        for (n, from) in ["asked", "silent", "twice", "stranger"].iter().enumerate() {
+            let sid = format!("n{n}");
+            svc.ingest(notice(from, &sid)).await.unwrap();
+            svc.ingest(stop(Box::leak(sid.into_boxed_str())))
+                .await
+                .unwrap();
+        }
+        let rows: Vec<(Option<String>, Option<String>)> = svc
+            .db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare("SELECT cause_turn, cause_basis FROM v_agent_turn ORDER BY id")
+                    .map_err(oxplow_db::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(oxplow_db::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (None, None),
+                (
+                    Some("oxplow:oxplow/turn?id=trn1".into()),
+                    Some("matched".into())
+                ),
+                (None, None),
+                (None, None),
+                (None, None),
+            ]
+        );
+    }
+
     /// The match does not stop at a thread: a message a session of one
     /// thread sent is received in another thread, and the received turn
     /// joins the sender's request.
@@ -4858,6 +4962,7 @@ mod tests {
                 socket: None,
                 message: Some("over to you".into()),
                 text: "<cross-session-message from-name=\"first\">\nover to you\n</cross-session-message>".into(),
+                idle_notice: false,
             }),
             ..hook_in(HookKind::UserPromptSubmit, other, receiver, Some("r1"), json!({}))
         })
