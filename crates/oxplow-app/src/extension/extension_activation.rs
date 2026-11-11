@@ -240,8 +240,9 @@ impl ExtensionActivation {
         Ok(())
     }
 
-    /// An extension's stored configuration only changes what its datasets were
-    /// compiled against when one of them reads it: republish when it has.
+    /// An extension's stored configuration only changes what was published
+    /// when something of it reads it (`configuration_readers`: a dataset's
+    /// `config()`, a skill's `when:`): republish when it has.
     pub(crate) async fn request_config_refresh(
         &self,
         db: &oxplow_db::Database,
@@ -753,6 +754,14 @@ impl ExtensionActivation {
                             .map_err(TxError::Storage)?;
                         }
                     }
+                    // A raised configuration version keeps the stored
+                    // layers its schema still takes, before datasets
+                    // compile against them.
+                    crate::extension::extension_configuration::carry_forward_tx(
+                        publication.transaction()?,
+                        published.extensions(),
+                    )
+                    .map_err(TxError::Storage)?;
                     let vocabulary =
                         database.replace_tx(publication.transaction()?, Timestamp::now())?;
                     metrics.replace_tx(publication.transaction()?)?;

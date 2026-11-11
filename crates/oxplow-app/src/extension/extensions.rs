@@ -1893,7 +1893,8 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.errors.extend(errors);
         }
         if let Some(v) = m.skills.as_ref() {
-            let (declared, errors) = skills::parse_skills(v, man, &manifest, files);
+            let (declared, errors) =
+                skills::parse_skills(v, man, &manifest, files, ext.configuration.as_ref());
             ext.skills = declared;
             ext.errors.extend(errors);
         }
@@ -2750,12 +2751,9 @@ fn check_config_reads(ext: &mut Extension) {
 /// The `type` of the schema property at JSON pointer `pointer`, following
 /// `properties`; `None` when the schema declares no such property or type.
 fn config_key_type<'a>(schema: &'a serde_json::Value, pointer: &str) -> Option<&'a str> {
-    let mut node = schema;
-    for token in pointer.split('/').skip(1) {
-        let token = token.replace("~1", "/").replace("~0", "~");
-        node = node.get("properties")?.get(&token)?;
-    }
-    node.get("type")?.as_str()
+    config_schema::schema_key(schema, pointer)?
+        .get("type")?
+        .as_str()
 }
 
 /// Name each page file `page` refers to — a param's `options_from`, a

@@ -91,7 +91,9 @@ its active provider declaration, independently of the invoking command.
 Public write commands still require private audit/proposal input handling.
 Neither configuration nor state has a migration runner: a stored configuration layer at
 another schema version fails closed until the extension's own command rewrites it at its
-version — after a rollback too, where the layer is newer than the running version. The
+version — after a rollback too, where the layer is newer than the running version. One
+exception: a layer behind a raised version whose values the new schema still takes is
+restamped by the publication (`extensions-manifest.md` "Changing the schema version"). The
 lower-level store APIs grant no authority themselves. Configuration continues to
 use the project/personal file layers. A file edit and a SQLite
 reset cannot be represented as one atomic DB transaction.

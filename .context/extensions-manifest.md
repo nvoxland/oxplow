@@ -350,11 +350,19 @@ Reading such a layer fails closed with a `/schema_version` error, distinct
 from a stale-stamp conflict (`/expected`).
 
 **Changing the schema version.** There is no migration runner. When an
-extension changes its configuration schema `version`, activation leaves stored
-layers alone. A layer stored at the old version fails closed on every read
+extension raises its configuration schema `version`, each publication
+carries a stored layer at an older version forward when the new schema still
+takes its values (`extension_configuration::carry_forward_tx`, in the
+publication transaction, before datasets compile): the layer is restamped
+at the new version, its values as stored, its revision one higher. "Takes"
+is the new declaration resolving with that layer alone over the defaults
+(and the other layer when that one is already current). A layer the new
+schema doesn't take is left alone and fails closed on every read
 (`/schema_version`) until the extension's own command writes it at the new
 version: a compare-and-swap with the old stamp as `expected`, both layers in
-one audited transaction. Values are never discarded or rewritten by the host.
+one audited transaction. A layer at a *newer* version than the declared one
+(after a rollback) is never touched. The host never discards or changes a
+layer's values.
 
 Reset uses an empty override object at a newer revision, retaining stale-token
 rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
@@ -386,8 +394,10 @@ advisories' queries — reads its own configuration with
   transaction (`PreparedExtensionDatabase::replace_tx`), so the view carries
   the literal; a stored configuration that can't be resolved holds that
   extension back like a dataset that doesn't compile. **A change republishes:**
-  the generation records the configuration the datasets were compiled against
-  (`ConfigSignature`, beside the entity signature), the entities consumer
+  the generation records the configuration it was published with, for every
+  extension with a configuration reader (`configuration_readers`: datasets
+  that call `config()`, skills with `when:`; `ConfigSignature`, beside the
+  entity signature), the entities consumer
   checks it after each `command.executed` (`request_config_refresh`; a write
   through `extension_config.write` is one) and requests an activation when it
   differs; a changed definition refills a materialized dataset.

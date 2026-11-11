@@ -82,7 +82,10 @@ that exists is refused):
   an extension's advisories need `agent.write`;
 - `skill` — a skill (`SKILL.md` with `name:` and `description:`
   frontmatter) you load when it's relevant; `kind: command` makes it a
-  slash command;
+  slash command; `when: { config: /a/key, in: [value, …] }` offers it
+  only while that key of the extension's own `configuration:` is one of
+  the values (a scalar key; the values in its `enum` if it has one), and a
+  settings change rewrites what's offered;
 - `panel` — a part compact in the left nav, written to `parts/<name>.yaml` (a
   panel's `scope` is the param its part declares);
 - `extension` — the manifest only.

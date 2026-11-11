@@ -1243,14 +1243,73 @@ fn provider_implementation(
 /// Every skill and slash command the agent gets now: core's, and each
 /// extension's that's offered (one with skills declares `agent`: it doesn't
 /// load otherwise) — what it needs is active, and,
-/// when an implementation lists it, that implementation is the active one.
-/// A name another extension already took is left out (logged).
-pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
+/// when an implementation lists it, that implementation is the active one,
+/// and, when a setting offers it (`when:`), the extension's effective
+/// setting is one of its values. A name another extension already took is
+/// left out (logged).
+pub async fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
     let project_dir = svc.worktrees.project_dir();
     let extensions = svc.extension_catalog.get(project_dir).to_vec();
     let config = crate::config_service::read_config(&svc.config);
-    offered_text(&svc.capabilities, &config, &extensions, |path, file| {
-        crate::extension::extensions::read_extension_file(project_dir, path, file)
+    let settings = offering_settings(svc, &extensions).await;
+    offered_text(
+        &svc.capabilities,
+        &config,
+        &extensions,
+        &settings,
+        |path, file| crate::extension::extensions::read_extension_file(project_dir, path, file),
+    )
+}
+
+/// The effective configuration of each namespace among `extensions` with a
+/// skill a setting offers (`when:`), as stored now. One that can't be read
+/// (a layer at an old schema version, say) is left out, so its skills with
+/// `when:` aren't offered: it fails closed, as every read of it does.
+async fn offering_settings(
+    svc: &crate::Services,
+    extensions: &[crate::extension::extensions::Extension],
+) -> std::collections::BTreeMap<String, Value> {
+    let mut wanted: Vec<(
+        String,
+        crate::extension::extensions::config_schema::ConfigurationFile,
+    )> = Vec::new();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        if !ext.skills.iter().any(|s| s.when.is_some())
+            || wanted.iter().any(|(ns, _)| ns == &ext.namespace)
+        {
+            continue;
+        }
+        if let Some(declaration) = &ext.configuration {
+            wanted.push((ext.namespace.clone(), declaration.clone()));
+        }
+    }
+    if wanted.is_empty() {
+        return Default::default();
+    }
+    let read = svc
+        .db
+        .read(move |conn| {
+            Ok(wanted
+                .into_iter()
+                .filter_map(|(namespace, declaration)| {
+                    match crate::extension::extension_configuration::effective_values(
+                        conn,
+                        &namespace,
+                        &declaration,
+                    ) {
+                        Ok(values) => Some((namespace, values)),
+                        Err(error) => {
+                            tracing::warn!(%namespace, %error, "its settings can't be read; the skills they offer are left out");
+                            None
+                        }
+                    }
+                })
+                .collect())
+        })
+        .await;
+    read.unwrap_or_else(|error| {
+        tracing::warn!(%error, "reading the settings that offer skills failed");
+        Default::default()
     })
 }
 
@@ -1262,7 +1321,7 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
 pub async fn refresh_agent_text(svc: &crate::Services) {
     // The offered capabilities and the extensions' files are read from one
     // generation; an unavailable one is refreshed by the next publication.
-    let Ok(text) = svc.sql.read_generation(async { agent_text(svc) }).await else {
+    let Ok(text) = svc.sql.read_generation(agent_text(svc)).await else {
         return;
     };
     let project_dir = &svc.layout.project_dir;
@@ -1321,10 +1380,13 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
 }
 
 /// [`agent_text`] over `extensions`, reading each file with `read`.
+/// `settings` is the effective configuration of each namespace, by namespace:
+/// a skill with `when:` is offered only while its namespace's holds it.
 pub fn offered_text(
     registry: &CapabilityRegistry,
     config: &OxplowConfig,
     extensions: &[crate::extension::extensions::Extension],
+    settings: &std::collections::BTreeMap<String, Value>,
     // `(extension's path, file)`: a file of a skill, read through its
     // extension's folder.
     read: impl Fn(&str, &str) -> Option<String>,
@@ -1344,7 +1406,12 @@ pub fn offered_text(
                         .get(&d.capability, &d.id)
                         .is_some_and(|i| i.extension.as_deref() == Some(ext.name.as_str()))
             });
-            if !owner_active || !active.unmet(&skill.needs).is_empty() {
+            let set = skill.when.as_ref().is_none_or(|when| {
+                settings
+                    .get(&ext.namespace)
+                    .is_some_and(|values| when.holds(values))
+            });
+            if !owner_active || !set || !active.unmet(&skill.needs).is_empty() {
                 continue;
             }
             if text.names(&skill.name) {
@@ -2133,5 +2200,153 @@ mod contribution_tests {
             checked += 1;
         }
         assert_eq!(checked, 3);
+    }
+}
+
+#[cfg(test)]
+mod setting_tests {
+    use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
+    use oxplow_domain::extension_state::Scope;
+    use oxplow_domain::Actor;
+    use serde_json::{json, Value};
+
+    use crate::test_fixtures::ThreadFixture;
+
+    /// `acme`: a pick-one `mode` (default `a`), a skill offered while it's
+    /// `a` and one while it's `b`, and its native settings write.
+    fn declare(fx: &ThreadFixture) {
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("skills")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2
+name: acme
+intent:
+  purpose: p
+  examples: [{ name: a }]
+permissions: [agent.write]
+configuration:
+  version: 1
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      mode: { type: string, enum: [a, b] }
+  defaults: { mode: a }
+skills:
+  - { name: on-a, file: skills/on-a.md, when: { config: /mode, in: [a] } }
+  - { name: on-b, file: skills/on-b.md, when: { config: /mode, in: [b] } }
+  - { name: always, file: skills/always.md }
+commands:
+  - name: config.write
+    summary: Replace configuration overrides.
+    scope: extension_config.write
+    op: compare_exchange
+",
+        )
+        .unwrap();
+        for name in ["on-a", "on-b", "always"] {
+            std::fs::write(
+                dir.join(format!("skills/{name}.md")),
+                format!("---\nname: {name}\ndescription: d\n---\nGo.\n"),
+            )
+            .unwrap();
+        }
+        fx.svc.extension_catalog.changed();
+    }
+
+    async fn offered(fx: &ThreadFixture) -> Vec<String> {
+        let mut names: Vec<String> = fx
+            .svc
+            .sql
+            .read_generation(super::agent_text(&fx.svc))
+            .await
+            .unwrap()
+            .skills
+            .iter()
+            .map(|s| s.name.clone())
+            .filter(|n| ["on-a", "on-b", "always"].contains(&n.as_str()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    async fn store(fx: &ThreadFixture, scope: Scope, values: Value) {
+        SqliteExtensionConfigStore::new(fx.svc.db.clone())
+            .compare_exchange(
+                ConfigNamespace::new("acme".into(), scope).unwrap(),
+                None,
+                1,
+                values,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// A skill with `when:` is offered only while the extension's effective
+    /// setting is one of its values: the default, then a project layer over
+    /// it, then a personal layer over the project's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_skill_is_offered_by_the_effective_setting() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        declare(&fx);
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert_eq!(offered(&fx).await, ["always", "on-a"], "the default is a");
+
+        store(&fx, Scope::Project, json!({ "mode": "b" })).await;
+        assert_eq!(offered(&fx).await, ["always", "on-b"], "the project's b");
+
+        store(&fx, Scope::Personal, json!({ "mode": "a" })).await;
+        assert_eq!(
+            offered(&fx).await,
+            ["always", "on-a"],
+            "the person's a over the project's b"
+        );
+    }
+
+    /// A settings write through the extension's own command republishes, and
+    /// the runtimes already on disk get the skills the new value offers: no
+    /// restart.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_settings_write_rewrites_the_agents_skills() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        declare(&fx);
+        let skills = fx
+            .svc
+            .layout
+            .project_dir
+            .join(".oxplow/runtime/claude-plugin/skills");
+        std::fs::create_dir_all(&skills).unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        super::refresh_agent_text(&fx.svc).await;
+        assert!(skills.join("on-a/SKILL.md").is_file());
+        assert!(!skills.join("on-b").exists());
+
+        fx.svc.extension_activation.spawn(&fx.svc);
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "acme.config.write",
+                json!({ "schema_version": 1,
+                        "project": { "expected": null, "values": { "mode": "b" } } }),
+                false,
+            )
+            .await
+            .unwrap();
+        // What the event pump does when the write's `command.executed` arrives.
+        fx.svc
+            .extension_activation
+            .request_config_refresh(&fx.svc.db)
+            .await
+            .unwrap();
+        assert!(
+            crate::test_fixtures::until(std::time::Duration::from_secs(20), || async {
+                skills.join("on-b/SKILL.md").is_file()
+            })
+            .await,
+            "the write republished and rewrote the skills"
+        );
+        assert!(!skills.join("on-a").exists(), "on-a is no longer offered");
     }
 }

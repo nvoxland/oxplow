@@ -1777,6 +1777,25 @@ export type CommitRefLabel = {
 export type CommitRefLabelKind = "branch" | "tag";
 
 /**
+ *  `when: { config: <pointer>, in: [<values>] }`: a contribution that is
+ *  there only while a setting of its extension's own configuration is one
+ *  of `in`. The one condition type every contribution kind that is offered
+ *  by a setting shares.
+ */
+export type ConfigCondition = {
+	/**
+	 *  A JSON pointer into the extension's own configuration, naming a
+	 *  scalar key of `configuration.schema` (`/tasks/workflow`).
+	 */
+	config: string,
+	/**
+	 *  The values for which it holds: of the key's type, and of its `enum`
+	 *  when it has one.
+	 */
+	in: unknown[],
+};
+
+/**
  *  A versioned declaration of non-secret settings. This is data, not consent
  *  or a credential reference. Stored overrides and host services are separate.
  */
@@ -5953,6 +5972,11 @@ export type SkillDecl = {
 	 *  what a command does.
 	 */
 	description: string,
+	/**
+	 *  The setting of the extension's own configuration it's offered by:
+	 *  offered only while it holds.
+	 */
+	when: ConfigCondition | null,
 };
 
 /**  What the agent's runtime makes of it. */
