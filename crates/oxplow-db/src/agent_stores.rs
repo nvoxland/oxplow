@@ -263,33 +263,6 @@ pub fn turn_by_harness_id_tx(
     .map_err(map_sql_err)
 }
 
-/// The agent sessions with a turn on `thread` running at any point of the
-/// window `from`..=`to` (a turn overlaps it when it began by `to` and
-/// hadn't ended before `from`): the sessions whose work a change seen over
-/// that window could be. A turn no session claims is `None`.
-pub fn sessions_active_tx(
-    conn: &Connection,
-    thread: ThreadId,
-    from: &str,
-    to: &str,
-) -> Result<Vec<Option<AgentSessionId>>, DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT DISTINCT agent_session_id FROM agent_turn
-              WHERE thread_id = ?1 AND started_at <= ?3
-                AND (ended_at IS NULL OR ended_at >= ?2)
-              ORDER BY agent_session_id",
-        )
-        .map_err(map_sql_err)?;
-    let rows = stmt
-        .query_map(params![thread.value(), from, to], |r| {
-            r.get::<_, Option<i64>>(0)
-        })
-        .map_err(map_sql_err)?;
-    rows.map(|r| r.map(|s| s.map(AgentSessionId::new)).map_err(map_sql_err))
-        .collect()
-}
-
 /// What opened a turn: who, the text delivered, and the turn whose work it
 /// goes on with, as far as the harness said.
 #[derive(Debug, Clone)]

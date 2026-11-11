@@ -45,15 +45,9 @@ describe("humanRefType", () => {
       "wikilink",
       "wiki_file_ref",
       "wiki_dir_ref",
-      "summary_wikilink",
-      "summary_file_ref",
-      "summary_dir_ref",
       "task_mention",
-      "summary_task_mention",
       "finding_mention",
-      "summary_finding_mention",
       "commit_mention",
-      "summary_commit_mention",
     ]) {
       expect(humanRefTypeForTest(rt, null)).toBe("mention");
     }
@@ -81,14 +75,6 @@ describe("humanRefType", () => {
     expect(humanRefTypeForTest("touched_file", JSON.stringify({ change_kind: "deleted" }))).toBe("deleted");
     // Legacy rows with no extra fall back to "modified" (the dominant case)
     expect(humanRefTypeForTest("touched_file", null)).toBe("modified");
-  });
-
-  test("impact surfaces the declared action verb without an 'impact' prefix", () => {
-    expect(humanRefTypeForTest("impact", JSON.stringify({ action: "created" }))).toBe("created");
-    expect(humanRefTypeForTest("impact", JSON.stringify({ action: "updated" }))).toBe("modified");
-    expect(humanRefTypeForTest("impact", JSON.stringify({ action: "resolved" }))).toBe("resolved");
-    expect(humanRefTypeForTest("impact", JSON.stringify({ action: "referenced" }))).toBe("referenced");
-    expect(humanRefTypeForTest("impact", null)).toBe("impact");
   });
 
   test("typed task links humanize the sub-type", () => {

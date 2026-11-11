@@ -88,7 +88,7 @@ pub struct Envelope {
     /// The event that caused this one.
     pub cause: Option<EventId>,
     /// A stable key the emitter derives from the action (`task:tsk4:
-    /// transition:eff9`), so an at-least-once producer can't log the same
+    /// transition:req9`), so an at-least-once producer can't log the same
     /// occurrence twice: the second append fails with `Constraint`.
     pub dedupe_key: Option<String>,
 }

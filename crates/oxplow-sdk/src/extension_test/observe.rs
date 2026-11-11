@@ -37,14 +37,17 @@ use super::*;
 ///   what a collector found, recorded as one capture of the measure.
 /// - `retention: { days }`: the log's retention sweep, run as it is `days`
 ///   from now: payloads past their keep are expired, envelopes stay.
+/// - `detail_compaction: { keep }`: old run detail compacted, as the daily
+///   pass does, keeping each producer's newest `keep` captures' whole.
 /// - `turn: { prompt?, during?: [{ command, input?, as? }], tools?: [{ name, kind, paths?, command?, detail?,
 ///   ok?, exit_code? }], write?: { path, body }, answer?, compactions?: n,
-///   context?: { tokens, window? }, thread?, session?, subagent?, peer? }`:
+///   context?: { tokens, window? }, thread?, session?, subagent?, peer?, open? }`:
 ///   one turn on `thread` (thr1), in `session`, as
 ///   its harness's hooks report it — the prompt, each tool call, the file
 ///   the turn wrote (a snapshot of the worktree is taken after it), the
 ///   context compactions, and the turn's end with the agent's last message
-///   and how full its context was.
+///   and how full its context was (none with `open: true`: it is still
+///   running).
 pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> Result<(), String> {
     let Some(map) = observed.as_object().filter(|m| m.len() == 1) else {
         return Err("name one kind — fix: `observe: { turn: { .. } }`".into());
@@ -60,6 +63,7 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "diagnostics" => observe_diagnostics(host, body).await,
         "symbols" => observe_symbols(host, body).await,
         "retention" => observe_retention(host, body).await,
+        "detail_compaction" => observe_detail_compaction(host, body).await,
         "facts" => observe_facts(host, body).await,
         "visit" => observe_visit(host, body).await,
         "refs" => observe_refs(host, body).await,
@@ -72,7 +76,7 @@ pub(super) async fn observe(host: &Host, ext: &Extension, observed: &Value) -> R
         "conversation" => observe_conversation(host, body).await,
         other => {
             return Err(format!(
-                "`{other}` isn't a kind — fix: `turn`, `event`, `commit`, `change`, `test_run`, `snapshot`, `diagnostics`, `symbols`, `retention`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
+                "`{other}` isn't a kind — fix: `turn`, `event`, `commit`, `change`, `test_run`, `snapshot`, `diagnostics`, `symbols`, `retention`, `detail_compaction`, `facts`, `visit`, `refs`, `analyze`, `run`, `health`, `token_usage`, `hint`, `nudge` or `conversation`"
             ))
         }
     }?;
@@ -850,6 +854,23 @@ pub(super) async fn observe_retention(host: &Host, body: &Value) -> Result<(), S
         .map_err(|e| e.to_string())
 }
 
+/// `detail_compaction: { keep }`: the daily compaction of old run detail
+/// (`compact_capture_details`), keeping each producer's newest `keep`
+/// captures' detail whole.
+pub(super) async fn observe_detail_compaction(host: &Host, body: &Value) -> Result<(), String> {
+    let keep = body
+        .get("keep")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or("`detail_compaction.keep` is how many of each producer's newest captures keep their detail")?;
+    host.svc
+        .fact_store
+        .compact_capture_details(None, Some(keep))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// `snapshot: { trigger?, elapsed_ms?, budget_ms?, revision?, branch?, files?: [{ path, hash }] }`:
 /// one take in the stream's snapshot log (`SqliteSnapshotStore::
 /// record_take`): its parent is the take before it, and it is over budget
@@ -1015,11 +1036,13 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             "subagent",
             "peer",
             "conversation",
+            "job",
+            "open",
         ]
         .contains(&key.as_str())
         {
             return Err(format!(
-                "`turn.{key}` — fix: `prompt`, `during`, `runs`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer` or `conversation`"
+                "`turn.{key}` — fix: `prompt`, `during`, `runs`, `tools`, `write`, `answer`, `compactions`, `context`, `thread`, `session`, `subagent`, `peer`, `conversation`, `job` or `open`"
             ));
         }
     }
@@ -1243,6 +1266,10 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
     }
     for _ in 0..body.get("compactions").and_then(Value::as_u64).unwrap_or(0) {
         ingest(envelope(HookKind::PostCompact, json!({}))).await?;
+    }
+    // `open: true` leaves the turn running: no end.
+    if body.get("open").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok(());
     }
     let mut stop = envelope(HookKind::Stop, json!({}));
     stop.reading.final_message = body

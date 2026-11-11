@@ -7258,6 +7258,25 @@ mod tests {
             assert!(run(703).await.is_some(), "the next request is nudged again");
         }
 
+        /// A report-less run with no request (a turn that belongs to none)
+        /// is nudged once per thread.
+        #[tokio::test]
+        async fn a_report_less_run_with_no_request_is_nudged_once_per_thread() {
+            let h = build(None).await;
+            let run = || async {
+                h.service
+                    .on_shell_run(
+                        &h.thread,
+                        bash_payload("bun test --watch false", 0),
+                        crate::collection::RunOrigin::Command { turn: None },
+                    )
+                    .await
+                    .unwrap()
+            };
+            assert!(run().await.is_some(), "the first run, no request");
+            assert!(run().await.is_none(), "once per thread without a request");
+        }
+
         /// tsk893: when the run's reports weren't read because a collector
         /// failed (or is disabled, or awaits approval), the nudge says so —
         /// not "run the tests again", which the agent just did — and a

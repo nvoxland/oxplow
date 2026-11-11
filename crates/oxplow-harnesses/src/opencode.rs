@@ -30,6 +30,15 @@ pub(super) struct Opencode(pub(super) Named);
 /// auth store.
 pub const DEFAULT_MODEL: &str = "github-copilot/gpt-5-mini";
 
+/// What tells the bridge to post opencode's raw events and hook inputs for
+/// the hook recording (`OXPLOW_HOOK_DEBUG`, which an agent's environment
+/// never holds): set on the launch only while a recording is on.
+fn raw_recording_env(hook_debug: Option<std::ffi::OsString>) -> Option<(String, String)> {
+    hook_debug
+        .filter(|path| !path.is_empty())
+        .map(|_| ("OXPLOW_OPENCODE_RAW".into(), "1".into()))
+}
+
 #[async_trait::async_trait]
 impl AgentHarness for Opencode {
     fn id(&self) -> &str {
@@ -63,6 +72,7 @@ impl AgentHarness for Opencode {
                 &input.text,
             ),
         ));
+        env.extend(raw_recording_env(std::env::var_os("OXPLOW_HOOK_DEBUG")));
         let model = input
             .config
             .get("model")
@@ -447,7 +457,7 @@ mod tests {
 
     /// Its edit tool is `apply_patch`, the patch as `patchText` (a
     /// recorded OpenCode 2026-10 body): an edit of every file it names,
-    /// which the write guard and the effort's claims read.
+    /// which the write guard and the turn's reported files read.
     #[test]
     fn its_apply_patch_is_an_edit_of_the_files_it_names() {
         let h = harness("oxplow:opencode", "opencode");
@@ -965,6 +975,19 @@ console.log(JSON.stringify({{ posts }}));
             command.contains(" -s ") && command.contains("sess-w") && command.contains(" --fork"),
             "{command}"
         );
+    }
+
+    /// The bridge records raw only while a hook recording is on.
+    #[test]
+    fn the_bridge_records_raw_only_while_a_hook_recording_is_on() {
+        assert_eq!(
+            raw_recording_env(Some("/tmp/hooks.jsonl".into())),
+            Some(("OXPLOW_OPENCODE_RAW".into(), "1".into()))
+        );
+        assert_eq!(raw_recording_env(Some("".into())), None);
+        assert_eq!(raw_recording_env(None), None);
+        let js = include_str!("../assets/opencode-hooks.js");
+        assert!(js.contains("OXPLOW_OPENCODE_RAW") && js.contains("opencode.raw"));
     }
 
     #[test]

@@ -231,7 +231,7 @@ lists each declared reference with Set… and Revoke.
 | `effects` | scripts that react to logged events | below |
 | `advisories` | guidance queries for the coding agent |  |
 | `skills` | skills and slash commands for the coding agent |  |
-| `implementations` | an implementation of a capability: a built-in, or an AI provider written as a script | below |
+| `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
 | `providers` | an external program implementing a capability, such as the task tracker | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
@@ -448,7 +448,7 @@ chooses the model for it, and a job that declares `tools` takes none here. The r
 is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 `snapshot` take `{id}`. The `intentKey` is what the job is about, one job
 per key: asking again with it returns the same job. Put the subject in it
-(`review:eff12`), and read it back as the snapshot's `intentKey` or
+(`review:req12`), and read it back as the snapshot's `intentKey` or
 `v_job_run.intent_key`. The host records intent before a worker starts, and
 the extension must declare `permissions: [ai.compute]` before a job can
 spend an AI provider key, and a person approves that when the extension is

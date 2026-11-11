@@ -952,8 +952,14 @@ mod tests {
     /// 0.163.0): a person's "say hi", then a shell command appending to
     /// `notes.txt`, then a direct edit of it, then a rename.
     fn recorded() -> Vec<ServerMessage> {
-        include_str!("../../tests/fixtures/codex/app-server.jsonl")
-            .lines()
+        parse_recording(include_str!("../../tests/fixtures/codex/app-server.jsonl"))
+    }
+
+    /// The server's messages in a recording (a fixture, or a file
+    /// `OXPLOW_CODEX_DEBUG` wrote): the lines with a `method`; the header
+    /// and the `sent` / `response` lines are skipped.
+    fn parse_recording(text: &str) -> Vec<ServerMessage> {
+        text.lines()
             .skip(1)
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter_map(|v| {
@@ -989,6 +995,61 @@ mod tests {
                 ServerMessage::Request { .. } => Vec::new(),
             })
             .collect()
+    }
+
+    /// A session recorded with `OXPLOW_CODEX_DEBUG` replays like a
+    /// fixture: the recorded thread, pushed through a real connection that
+    /// records to a file, comes back out of the file as the same messages
+    /// and maps to the same updates.
+    #[tokio::test]
+    async fn a_session_recorded_by_the_client_replays_like_the_fixture() {
+        use oxplow_harnesses::codex_app_server::fake::FakeAppServer;
+        let home = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+        let fake = FakeAppServer::start(home.path(), |_, _| Ok(json!({})));
+        let file = home.path().join("recorded.jsonl");
+        let (_server, mut messages) = AppServer::connect_recording(&fake.socket, None, Some(&file))
+            .await
+            .unwrap();
+        let original = recorded();
+        for m in &original {
+            if let ServerMessage::Notification { method, params } = m {
+                fake.push(json!({"method": method, "params": params}));
+            }
+        }
+        let notifications = original
+            .iter()
+            .filter(|m| matches!(m, ServerMessage::Notification { .. }))
+            .count();
+        for _ in 0..notifications {
+            messages.recv().await.unwrap();
+        }
+        let replayed = parse_recording(&std::fs::read_to_string(&file).unwrap());
+        let key = |m: &ServerMessage| match m {
+            ServerMessage::Notification { method, params } => (method.clone(), params.clone()),
+            ServerMessage::Request { method, params, .. } => (method.clone(), params.clone()),
+        };
+        assert_eq!(
+            replayed.iter().map(key).collect::<Vec<_>>(),
+            original.iter().map(key).collect::<Vec<_>>()
+        );
+        let map = |messages: Vec<ServerMessage>| {
+            let mut state = State {
+                thread: Some(THREAD.into()),
+                ..State::default()
+            };
+            messages
+                .into_iter()
+                .filter(|m| m.thread_id() == Some(THREAD))
+                .flat_map(|m| match m {
+                    ServerMessage::Notification { method, params } => {
+                        on_notification(&method, &params, &mut state)
+                    }
+                    ServerMessage::Request { .. } => Vec::new(),
+                })
+                .count()
+        };
+        assert_eq!(map(replayed), map(original));
+        assert!(map(recorded()) > 0, "the recorded thread maps to updates");
     }
 
     fn waits(method: &str, params: Value, state: &mut State) -> Vec<Option<String>> {

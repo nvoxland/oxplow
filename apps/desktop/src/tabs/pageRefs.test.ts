@@ -222,7 +222,7 @@ describe("refFromTabId", () => {
   });
 
   test("a diff page rebuilds its whole spec from its id", () => {
-    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "eff9", revealLine: undefined } as const;
+    const spec = { path: "src/a.ts", leftVersion: "snap:3", rightVersion: "git:HEAD", baseLabel: "x", labelOverride: "req9", revealLine: undefined } as const;
     const rebuilt = refFromTabId(diffRef(spec).id)!;
     expect(diffSpecOf(rebuilt)).toEqual(spec);
   });

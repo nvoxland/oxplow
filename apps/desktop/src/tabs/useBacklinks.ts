@@ -141,10 +141,10 @@ function entryFor(edge: BacklinkEdge, uri: string): BacklinkEntry {
  * Two cases that need this today:
  *
  *  1. A wiki page is referenced both as `wiki:<slug>` (via
- *     `summary_wikilink` / `impact`) and as `file:.oxplow/wiki/<slug>.md`
- *     (via `touched_file`). Same underlying entity, three rows.
- *  2. Multiple ref_types pointing at the same target (e.g. an
- *     impact edge AND a summary_wikilink edge to the same slug).
+ *     `wikilink`) and as `file:.oxplow/wiki/<slug>.md` (via
+ *     `touched_file`). Same underlying entity, two rows.
+ *  2. Multiple ref_types pointing at the same target (e.g. a
+ *     wikilink edge AND a touched_file edge to the same slug).
  *
  * Strategy: bucket by canonical key, prefer the wiki ref over the
  * file ref when both exist, prefer a non-fallback label, and merge
@@ -233,9 +233,7 @@ function openFor(uri: string, resolved: boolean): string | null {
  *    `referenced` / `resolved` / `completed` / `reopened`, …) —
  *    rendered for any edge that represents a change. `touched_file`
  *    edges carry their change kind through
- *    `source_extra.change_kind`; `impact` edges carry the declared
- *    action through `source_extra.action`. Both paths normalize
- *    `updated` to `modified` for display.
+ *    `source_extra.change_kind`; `updated` is shown as `modified`.
  *
  *  - **typed link** — `task_link:<sub>` becomes the sub-type with
  *    underscores swapped for spaces (e.g. `blocks`, `relates to`).
@@ -256,15 +254,9 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     case "wiki_file_ref":
     case "wiki_dir_ref":
     case "wikilink":
-    case "summary_wikilink":
-    case "summary_file_ref":
-    case "summary_dir_ref":
     case "task_mention":
-    case "summary_task_mention":
     case "finding_mention":
-    case "summary_finding_mention":
     case "commit_mention":
-    case "summary_commit_mention":
       return "mention";
     case "comment_file_ref":
     case "comment_dir_ref":
@@ -277,8 +269,6 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
       return normalizeAction(parseExtraField(sourceExtra, "change_kind")) ?? "modified";
     case "finding_path":
       return "found in";
-    case "impact":
-      return normalizeAction(parseExtraField(sourceExtra, "action")) ?? "impact";
     default:
       return refType;
   }
@@ -298,8 +288,7 @@ function parseExtraField(sourceExtra: string | null, field: string): string | nu
 
 /**
  * Normalize the action vocabulary the backend stores
- * (`created`/`updated`/`deleted`, plus the
- * looser impact verbs the agent declares) into the labels the
+ * (`created`/`updated`/`deleted`) into the labels the
  * renderer surfaces. Notably: `updated` → "modified" everywhere so
  * a file-change row and a wiki-page-change row read the same way.
  */

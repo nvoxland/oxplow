@@ -201,14 +201,14 @@ impl SqliteAgentNudgeStore {
     }
 
     /// How many `kind` nudges reached the agent in `scope`: within the
-    /// request, or anywhere on the thread.
+    /// request, or (no request) outside any request, on the thread's own.
     pub async fn delivered(&self, scope: OnceScope, kind: &str) -> Result<i64, DomainError> {
         let kind = kind.to_string();
         self.db
             .call(move |conn| {
                 conn.query_row(
                     "SELECT count(*) FROM agent_nudge
-                      WHERE thread_id = ?1 AND (?3 IS NULL OR request_id = ?3) AND kind = ?2
+                      WHERE thread_id = ?1 AND request_id IS ?3 AND kind = ?2
                         AND audience = 'agent' AND delivered_at IS NOT NULL",
                     params![scope.thread, kind, scope.request],
                     |r| r.get(0),
@@ -648,9 +648,12 @@ mod tests {
                 .unwrap(),
             2
         );
+        // The thread's own scope counts what reached the agent outside any
+        // request: deliveries inside a request are that request's, so a turn
+        // with no request isn't muted by them.
         assert_eq!(
             store.delivered(OnceScope::thread(1), "x/a").await.unwrap(),
-            3
+            1
         );
         store
             .evaluated(1, vec!["x/a".into(), "x/b".into()])

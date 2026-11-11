@@ -44,6 +44,12 @@
 ///                          the wait is over). Only forwarded: the person
 ///                          answers in opencode's own UI, never here.
 ///
+/// Recording (`OXPLOW_OPENCODE_RAW`, set by oxplow on the launch only while
+/// `OXPLOW_HOOK_DEBUG` is set): every plugin hook input/output and every
+/// event is first posted as it came, unfiltered and untranslated, to
+/// `<base>/opencode.raw`, which oxplow appends to the hook recording as
+/// its own line. Then the translation above runs as usual.
+///
 /// Everything is best-effort: a hook POST failure must never break the
 /// agent, matching oxplow's side-band hook policy.
 
@@ -69,6 +75,10 @@ export const OxplowHooks = async ({ client }) => {
       return null;
     }
   }
+
+  // The raw recording, on only when oxplow asked for it.
+  const recording = !!env.OXPLOW_OPENCODE_RAW;
+  const raw = (kind, payload) => (recording ? post("opencode.raw", { kind, ...payload }) : null);
 
   // opencode tool names are lowercase; the control plane's write guard
   // matches Claude's names (Edit/Write/Bash/...).
@@ -190,6 +200,7 @@ export const OxplowHooks = async ({ client }) => {
 
   return {
     "chat.message": async (input, output) => {
+      await raw("hook", { name: "chat.message", input, output });
       const sessionID = input.sessionID || output.message?.sessionID;
       if (await isChildSession(sessionID)) return;
       const text = (output.parts || [])
@@ -218,6 +229,7 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     "tool.execute.before": async (input, output) => {
+      await raw("hook", { name: "tool.execute.before", input, output });
       if (input.callID) toolStarts.set(input.callID, Date.now());
       const res = await post("PreToolUse", {
         ...(await whose(input.sessionID)),
@@ -234,6 +246,7 @@ export const OxplowHooks = async ({ client }) => {
     },
 
     "tool.execute.after": async (input, output) => {
+      await raw("hook", { name: "tool.execute.after", input, output });
       // Its bash tool reports the command's exit code as `metadata.exit`;
       // other tools have none, and send none.
       const exit = output?.metadata?.exit;
@@ -257,6 +270,7 @@ export const OxplowHooks = async ({ client }) => {
 
     event: async ({ event }) => {
       if (!event) return;
+      await raw("event", { type: event.type, event });
       const props = event.properties || {};
       // The agent waits on the person (or no longer does): reported, never
       // answered. A child session's wait is its parent's.

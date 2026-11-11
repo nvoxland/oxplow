@@ -601,7 +601,8 @@ of where it runs, which nothing trusts (`identity_env` in `terminal.rs`).
 **What an agent inherits.** Every agent and terminal is
 spawned without `agent_path::not_inherited(&harnesses)`: an oxplow
 agent's identity (`agent_path::NOT_INHERITED`: the `OXPLOW_*` above and
-`OXPLOW_HOOK_DEBUG`) and every registered harness's `env_markers()`
+the recordings' `OXPLOW_HOOK_DEBUG`, `OXPLOW_CODEX_DEBUG` and
+`OXPLOW_OPENCODE_RAW`) and every registered harness's `env_markers()`
 (Claude Code's `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, …). Otherwise
 oxplow run from inside an agent's terminal starts child sessions — Claude
 Code turns transcript saving off, breaking resume and token counts —
@@ -1121,6 +1122,30 @@ thread are told apart.
   in its harness's shape.
 
 ### Hook ingest and recording
+
+**Recording a session.** Claude Code and opencode: `OXPLOW_HOOK_DEBUG=<file>`
+(the dump below). opencode's lines are what its bridge translated, so
+events the bridge doesn't forward leave no trace. While the variable is
+set, oxplow also launches opencode with `OXPLOW_OPENCODE_RAW=1`
+(`raw_recording_env`; `OXPLOW_HOOK_DEBUG` itself is never in an agent's
+environment) and the bridge first posts every plugin hook input/output and
+every event untouched to `/hook/opencode.raw`; the route appends each as a
+line `{event: "opencode.raw", thread, at, payload: {kind: "hook" | "event",
+…}}`, in order among the translated hooks, and does nothing else with it.
+The replay (`replayed_harnesses.rs`) reads only the hook lines: trim the
+`opencode.raw` lines when a recording becomes a fixture.
+Codex: `OXPLOW_CODEX_DEBUG=<file>` (`AppServer::connect`,
+`crates/oxplow-harnesses/src/codex/app_server.rs`) appends every message
+oxplow's app-server client sends and receives, one JSON line each in the
+fixtures' shape: a header `{recorded, codex, note}` first (`codex` is
+`null`: the version isn't known at connect; fill it in), then `{method,
+params, emittedAtMs}` for a notification (a server request adds `id`),
+`{sent, params}` for what oxplow sent, `{response}` / `{error}` for the
+answer, `{answered: id, result}` for oxplow's answer to a server request.
+Both the chat connection and a thread listing record to the file. Trim it
+to the case, scrub paths and ids like the other fixtures, and read it back
+with `chat::codex::tests::parse_recording`
+(`a_session_recorded_by_the_client_replays_like_the_fixture`).
 
 Each hook POSTs to `/hook/<event>` with the session's bearer. The route
 (`handle_hook_inner`) dumps it when `OXPLOW_HOOK_DEBUG=<file>` is set (one

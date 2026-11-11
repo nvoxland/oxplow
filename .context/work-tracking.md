@@ -68,6 +68,8 @@ last take at or before it ended). Nothing here depends on how many threads or ag
 `OXPLOW_HOOK_DEBUG=<file>` appends every hook payload, as the agent sent
 it, to that file, one JSON line each (`event`, `thread`, `at`, `payload`).
 Use it to learn a harness's real payload shapes before depending on them.
+(`OXPLOW_CODEX_DEBUG` records Codex, and opencode's raw events join this
+file while it is set: `.context/agent-model.md` "Hook ingest and recording".)
 Besides the hooks oxplow acts on, the Claude Code plugin registers events it
 only observes — `TaskCreated`, `TaskCompleted`, `PreCompact` — which are
 acked unread until something needs them

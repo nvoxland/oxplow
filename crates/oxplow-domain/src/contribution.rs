@@ -253,7 +253,7 @@ pub const KINDS: &[KindSpec] = &[
         ContributionKind::Implementation,
         "implementations",
         "Implementation",
-        "an implementation of a capability: a built-in, or an AI provider written as a script",
+        "an implementation of a capability: a built-in, or an AI provider",
         true,
         false,
     ),

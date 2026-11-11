@@ -197,8 +197,7 @@ name, a built `oxplow/task` URI or `tsk` id parsing in desktop code.
   (`v_task_comment`).
 - **`readTask`** and **`readTasksByRef`** read the rest (Tasks
   and Task List are pages over `v_task`: an assignee's queue in
-  order (`rank`, then `created_at`), an item with a child an epic);
-  `readItemEfforts(ref)` an item's activity.
+  order (`rank`, then `created_at`), an item with a child an epic).
 - **Writes** are `task.*` commands by uri: `createTask` (no
   list named — it files on the active one; `native` carries the list's
   own fields), `updateTask`, `transitionTask`, `applyItemChange`

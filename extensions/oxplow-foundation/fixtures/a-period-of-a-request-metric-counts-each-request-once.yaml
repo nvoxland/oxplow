@@ -1,0 +1,33 @@
+# A request metric's point for a period is the mean over the requests that
+# started in it, each counted once at its latest figures however many of its
+# turns recorded it: req1 went red once, then twice more in a background
+# job's report (3 red runs); req2 never went red (0). The month's mean is
+# 1.5, not the 4/3 that counting req1's first turn again would give.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: Fix the failing tests
+        tools: [{ name: Bash, kind: shell, command: "sleep 9", call_id: c1, ok: true }]
+        runs:
+          - { at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }] }
+  - observe:
+      turn:
+        session: $ses.id
+        job: c1
+        prompt: "<task-notification>c1</task-notification>"
+        runs:
+          - { at: "2026-01-01T00:00:11Z", cases: [{ name: a, status: failed }] }
+          - { at: "2026-01-01T00:00:21Z", cases: [{ name: a, status: failed }] }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: Now add a test
+        runs:
+          - { at: "2026-01-01T00:01:01Z", cases: [{ name: b, status: passed }] }
+when:
+  sql: SELECT MEASURE('oxplow.tests.red_runs') AS red FROM metric_grid('month')
+expect:
+  rows:
+    - { red: 1.5 }
