@@ -34,6 +34,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `oxplow.extension.write_page`) refuses to write into a bundled
       extension.
 
+- **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
 - **The review packet** (in `oxplow-bundled`). Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
   page), `commit` and `uncommitted-changes`:

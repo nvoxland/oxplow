@@ -4,7 +4,7 @@ namespace: oxplow
 description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
 # Its task tracker's skill is written to the agent's runtime (`/oxplow:next-task`).
-permissions: [agent.write]
+permissions: [files.read, agent.write]
 # Its Work board is a custom component in TypeScript (src/board/), built
 # into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
 build: { run: "bun run build", output: dist, exclude: [node_modules] }
@@ -208,3 +208,30 @@ advisories:
         AND NOT EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = :request_id)
         AND NOT EXISTS (SELECT 1 FROM v_task w JOIN v_thread th ON th.uri = w.assignee
                          WHERE th.id = :thread_id AND w.state = 'in_progress')
+# Whether the work was tracked: of the requests that changed files, the share
+# that has a task linked. It reads no workflow setting: it measures what
+# happened, whatever the workflow.
+collectors:
+  - id: oxplow.request_tracked
+    doc: Whether a request that changed files has a task linked, recorded when a turn of it ends and none of its turns runs.
+    runtime: starlark
+    entry: collectors/request/tracked.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request,
+             EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = r.id) AS tracked,
+             r.started_at AS placed_at
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                          WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
+         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn pt ON pt.id = p.turn_id
+                      WHERE pt.request_id = t.request_id)
+    facts: [oxplow.request_tracked]
+measures:
+  # One capture per request at its start, replaced when the request is
+  # recorded again: 1 when tracked, 0 when not.
+  - {"key": "oxplow.request_tracked", "title": "Request tracked", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when a request that changed files has a task linked, else 0, as of its latest turn."}
+metrics:
+  - {"key":"tasks.tracked_requests_pct","title":"Tracked requests","measure": "oxplow.request_tracked", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files which have a task link.","sliceableDims":["oxplow.branch"]}

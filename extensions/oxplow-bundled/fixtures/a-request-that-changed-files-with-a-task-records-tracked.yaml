@@ -1,0 +1,12 @@
+# A request whose turn edited a file and took a task (moved it to in progress)
+# is tracked: it records 1 for the request.
+given:
+  - { command: oxplow.task.create, input: { title: The fix, stage: todo, assignee: thr1 }, bind: fix }
+  - observe:
+      turn:
+        prompt: Fix the greeting
+        during:
+          - { command: oxplow.task.transition, input: { uri: $fix.uri, to: in_progress }, as: agent }
+        tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }]
+when: { sql: "SELECT value FROM v_fact WHERE measure_key = 'oxplow.request_tracked'" }
+expect: { rows: [{ value: 1.0 }] }
