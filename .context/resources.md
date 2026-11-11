@@ -41,6 +41,14 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
 | TS (desktop) | `uri/uri.ts` builders (`knowledgeUri(store, id)`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
 
+**Join two views by their ids, not their `uri` columns.** A dataset's
+`uri` is built per row, so `JOIN … ON x.uri = y.turn` reaches no index: it
+rebuilds the URI for every row of the other side, once for each row of
+this side. Over `v_turn_file` × `v_agent_turn` that took the Shared work
+part past `query_sql`'s 5 s; the same join on `turn_id` / `request_id` is
+instant. Compare a `uri` to a param (`WHERE uri = :uri`) freely; join by
+the id columns the views carry next to it (`request_id`, `turn_id`, `id`).
+
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
 `source_guards::scripts_and_sql_carry_refs_rather_than_spelling_them`

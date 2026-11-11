@@ -1369,6 +1369,16 @@ on the same data. A query plan test holds it (`agent_stores`). The
 `slow page loader` log line names a loader of 50 ms or more, and a page's
 `spec` run through `oxplow_run_page` times a query in place.
 
+## Shared work joins by ids (measured 2026-11-11)
+
+The task page's Shared work section (`oxplow-bundled`'s
+`shared-work-rows`) timed out (`query_sql: timed out after 5s`) on this
+repo's database: 52 live requests, 130 live turns, joined to
+`v_turn_file` and `v_request_task` on their `uri` columns. Each section
+alone timed out. The same query joined on `turn_id` / `request_id`
+answers at once (735 shared files, 35 shared items). The rule is in
+`resources.md` "Join two views by their ids".
+
 ## File watching at scale (measured 2026-11-06)
 
 `cargo run --example profile_watch --release -p oxplow-app -- --root <dir>`
