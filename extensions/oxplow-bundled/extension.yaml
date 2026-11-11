@@ -199,6 +199,14 @@ commands:
     op: create
     ui: {"label": "New Task…", "group": "Tasks", "keywords": ["task"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
     example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
+  # The person's menu entry for foundation's `knowledge.write_page`: an
+  # agent runs foundation's; this adds the label and the form a person uses.
+  - name: knowledge.new_page
+    summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Knowledge Page… opens the form and shows the page it writes."
+    scope: knowledge.write
+    op: write_page
+    ui: { label: "New Knowledge Page…", group: Knowledge, keywords: [knowledge, wiki, page, note, write], form: "oxplow:oxplow/page?page=new-knowledge-page", open_after: "{{result.page}}" }
+    example: {"title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
 custom_components:
   # The Work board: the tasks as cards in a column per stage, its own
   # toolbar, drag and card menu; oxplow draws its nav bar and confirms.

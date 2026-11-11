@@ -460,6 +460,7 @@ pub struct WritePageInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// The whole page, markdown. Every `[[link]]` must resolve.
+    #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
     /// Files you re-read against this body: their pins move to now. A
     /// file under a `[[dir:…]]` the body cites counts.

@@ -194,10 +194,10 @@ screens and the holder's add the review and analysis:
 - **Git History's commit graph.** The `history-graph` component, replacing
   core's plain commit list (`vcs.history.graph`, a `ui.mounts`
   entry).
-- **The wiki screens.** `wiki-index`, `wiki-page`, `wiki-freshness` and
-  `hand-off`. Their menu entries are the commands `knowledge.new_page` and
-  `handoff.offer`. Each runs the same operation as a foundation
-  command and adds the label, shortcut and form a person uses.
+- **The hand-off screen.** `hand-off`. Its menu entry is the command
+  `handoff.offer`. It runs the same operation as a foundation command and
+  adds the label, shortcut and form a person uses. (The wiki screens have
+  moved to `oxplow-bundled`: see "The knowledge pages" below.)
 - **Explore Data.** The `explore-data` page and its component (source in
   `src/explore-data/`, built into `dist/` by `package.json`; the manifest's
   `build:` runs it). Foundation's dataset pages do not link to it.
@@ -373,6 +373,37 @@ screens and the holder's add the review and analysis:
   board (`src/board/model.ts`; a card's description is the query's
   `summary`, `first_sentence(body)`) is tested from the desktop suite
   (`viz/boardModel.test.ts`); the frame by a `ui:` fixture.
+
+**The knowledge pages** (moved from the holder; written for URIs and
+stores, not slugs). They are bundled's, so with `oxplow-bundled` off a
+knowledge page link opens core's generic resource page. The data they read
+is foundation's (`.context/knowledge.md` "Pages").
+
+- `knowledge` (the Knowledge index, launcher section Knowledge): Stores
+  (every knowledge row of `v_capability_provider`, on or off, with page
+  and stale counts; with none on, a line says how to turn one on), Pages
+  (newest change first; a filter over title and body; Delete in the row's
+  right-click menu, confirmed, only for a store that can `edit`), Stale
+  pages, and Recent reads and writes. New page opens `new-knowledge-page`.
+  It also answers which pages cite a file (its `path` param).
+- `knowledge-page` (`for: oxplow/knowledge`, default): the tab is the
+  page's title. The body is the markdown, editable (Save) only when the
+  page's store has `edit` on. The rail has About (store, kind, author, last
+  edited, freshness, reads) and Open in its store (when the page has a
+  `url`). Referenced files has Mark verified. See also: the index, the
+  page's freshness, and what links to it.
+- `knowledge-freshness` (params `store`, `id`): the page's files, stale
+  ones first, Mark verified per file and for all.
+- `new-knowledge-page`: a form of title and body. It has no id field, the
+  store derives it. It asks for a store only when more than one store that
+  oxplow writes is on; with one, the form sends that one. Its command is
+  `knowledge.new_page` (menu: New Knowledge Page…), which opens the page the
+  write answers (`open_after: {{result.page}}`).
+- The body field is plain text in the form: the write's `body` carries no
+  `contentMediaType: text/markdown`, which is what makes a form field the
+  markdown editor. Fixtures: `knowledge-*`, `new-knowledge-page-*`,
+  `the-knowledge-page-*`, `deleting-a-knowledge-page-*`. A store that can't
+  edit is not a fixture: the throwaway has only oxwiki.
 
 **Owns what reads tables (P7.B5).** Derived data computed only from
 core's rows is the extension's, as SQL: the "look here first" score is

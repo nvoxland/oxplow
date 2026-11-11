@@ -128,24 +128,12 @@ intent:
     - name: duplicate-lines-restates-both-sides-of-every-duplicate-block
       input: { collector: oxplow.duplicate_lines }
       expect: both sides of a duplicate block are facts on their own block
-    - name: wiki-page-reads-its-body-even-before-it-is-written
-      input: { page: wiki-page, params: { slug: otters } }
-      expect: the body of a written page and of a slug not written yet, freshness, no references
     - name: the-slot-page-links-the-mounted-page-and-its-host
       input: { page: slot, params: { uri: "oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0" } }
       expect: the page a slot mount shows, the page that hosts it and the slot
-    - name: wiki-index-lists-pages-newest-change-first-and-searches
-      input: { page: wiki-index }
-      expect: the wiki-index page lists what its loaders read
-    - name: wiki-freshness-lists-the-files-a-page-cites
-      input: { page: wiki-freshness }
-      expect: the wiki-freshness page lists what its loaders read
     - name: the-slot-page-links-to-its-extension
       input: { page: slot, params: { uri: 'oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0' } }
       expect: its see-also links name the extension that declares it
-    - name: the-wiki-page-links-to-the-wiki-and-the-pages-that-link-to-it
-      input: { page: wiki-page, params: { uri: 'oxplow:oxplow/wiki?slug=otters', slug: otters } }
-      expect: its see-also links open the wiki and the work that links to it
     - name: the-slot-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: slot, params: {uri:"oxplow:oxplow/slot?slot=oxplow/oxplow.task-detail.sections-0"} }
       expect: its description is a paragraph above the facts
@@ -350,15 +338,9 @@ commands:
     scope: extension_config.write
     op: compare_exchange
     example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"largeUncommitted": {"files": 20}}}, "personal": null}
-  # The person's menu entries for foundation's wiki and handoff
-  # commands. Foundation keeps the commands (an agent runs them);
-  # these add the labels, shortcuts and forms a person uses.
-  - name: knowledge.new_page
-    summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Wiki Page… opens the wiki and shows the page it writes."
-    scope: knowledge.write
-    op: write_page
-    ui: { label: "New Wiki Page…", group: Knowledge, keywords: [wiki, page, note, write], form: "oxplow:oxplow/page?page=wiki-index", open_after: "oxplow:oxplow/wiki?slug={{result.page}}" }
-    example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
+  # The person's menu entry for foundation's handoff command.
+  # Foundation keeps the command (an agent runs it); this adds the
+  # label, shortcut and form a person uses.
   - name: handoff.offer
     summary: "The person's menu entry for `oxplow.handoff.send`: Hand Off Work… on a thread opens the hand-off form."
     scope: handoffs.write

@@ -279,3 +279,20 @@ events, links, visits, bookmarks, comments, search entries and context
 items; nothing was carried over. Thread notes are gone too: durable
 understanding is a knowledge page; what an agent did is its turns,
 requests and handoffs.
+
+## Pages
+
+The screens are `oxplow-bundled`'s (`.context/extensions-bundled.md`
+"The knowledge pages"); this extension holds only the data they read.
+
+- **Knowledge** (`knowledge`): the stores, the pages, the stale ones and
+  recent reads and writes; New page and Delete.
+- **Knowledge Page** (`for: oxplow/knowledge`): one page by its URI. The
+  body is editable only when its store's `edit` is on. A store with
+  `url` set gets Open in its store.
+- **Knowledge Freshness** (`store`, `id`): the files a page cites.
+
+They read `v_knowledge_page`, `v_knowledge_body`, `v_knowledge_ref`,
+`v_knowledge_read`, `v_page_ref` and `v_capability_provider`, and write
+through `oxplow.knowledge.write_page`, `delete_page` and `verify_files`.
+Never a slug: a page is its `store` and `id`.

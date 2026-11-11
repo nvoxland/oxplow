@@ -159,7 +159,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 ## What the specs cover
 
-`shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox and
+`shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox, the knowledge page's editor (links, toolbar, Save, Source view, inline page fences) and
 an extension's resource; `code/` a commit's diff (file watching over a real daemon is a Rust test, `real_watch_tests.rs`); `data/` extension pages; `settings/`
 Programs approval and the settings pages; `integrations/` the fake tracker's
 Integrations frame (the config form, Check, Enable, the task-tracker choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,
@@ -220,7 +220,7 @@ pages against real data volume) and anything WKWebView-specific.
 
 The specs of pages that live in the turned-off holder extension under
 `.oxplow/extensions/`
-(the wiki, Timeline, Explore Data, the history graph, the Dashboards
+(Timeline, Explore Data, the history graph, the Dashboards
 index) are in its
 `e2e-specs/` folder, outside the suite. They come back with
 their page.

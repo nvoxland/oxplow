@@ -1,30 +1,29 @@
-import { run, searchable } from "../../support/daemon.js";
+import { run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
-import { searchLauncher } from "../../support/ui.js";
+import { open } from "../../support/ui.js";
 
-test("a wiki page's inline page fence reads live data and refreshes after a command", async ({ page, daemon }) => {
+const uriOf = (id: string) => `oxplow:oxplow/knowledge?id=${id}&store=oxwiki`;
+
+test("a knowledge page's inline page fence reads live data and refreshes after a command", async ({ page, daemon }) => {
   await run(daemon, "oxplow.knowledge.write_page", {
-    slug: "page-block-signal", title: "Signal before refresh", body: "The record the inline view reads.",
+    store: "oxwiki", title: "Page block signal", body: "Signal before refresh",
   });
   const spec = [
     "title: Live signal",
     "loaders:",
     "  signal:",
-    "    sql: SELECT title FROM v_knowledge_page WHERE slug = 'page-block-signal'",
+    "    sql: SELECT excerpt FROM v_knowledge_page WHERE id = 'page-block-signal'",
     "view:",
     "  id: signal",
     "  viz: table",
     "  from: signal",
-    "  columns: [{ key: title, label: Signal }]",
+    "  columns: [{ key: excerpt, label: Signal }]",
   ].join("\n");
   await run(daemon, "oxplow.knowledge.write_page", {
-    slug: "page-block-live", title: "Page block live",
+    store: "oxwiki", title: "Page block live",
     body: `# Page block live\n\nBefore the live view.\n\n\`\`\`oxplow-page\n${spec}\n\`\`\`\n\nAfter the live view.\n`,
   });
-  await searchable(daemon, "page block live", "wiki");
-  await page.goto("/");
-  await searchLauncher(page, "page block live");
-  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=page-block-live").click();
+  await open(page, daemon, uriOf("page-block-live"));
   const body = page.locator('[data-node="body"]:visible');
   const inline = body.getByTestId("inline-page");
   await expect(inline).toContainText("Signal before refresh");
@@ -33,7 +32,7 @@ test("a wiki page's inline page fence reads live data and refreshes after a comm
   await expect(body).toContainText("After the live view.");
 
   await run(daemon, "oxplow.knowledge.write_page", {
-    slug: "page-block-signal", title: "Signal after refresh", body: "The updated record the inline view reads.",
+    store: "oxwiki", id: "page-block-signal", title: "Page block signal", body: "Signal after refresh",
   });
   await expect(inline).toContainText("Signal after refresh");
   await expect(inline).not.toContainText("Signal before refresh");
@@ -43,23 +42,20 @@ test("a wiki page's inline page fence reads live data and refreshes after a comm
   await body.getByRole("button", { name: "Edit YAML" }).click();
   const source = body.locator(".oxplow-rt-page pre code");
   await expect(source).toBeVisible();
-  await expect(source).toContainText("SELECT title FROM v_knowledge_page");
+  await expect(source).toContainText("SELECT excerpt FROM v_knowledge_page");
   await source.click();
   await page.keyboard.press("Escape");
   await expect(inline).toContainText("Signal after refresh");
   await expect(source).toBeHidden();
 });
 
-test("invalid YAML in a wiki page fence shows its source and validation error inline", async ({ page, daemon }) => {
+test("invalid YAML in a knowledge page fence shows its source and validation error inline", async ({ page, daemon }) => {
   const invalid = "title: Invalid page\nview: [";
   await run(daemon, "oxplow.knowledge.write_page", {
-    slug: "page-block-invalid", title: "Page block invalid",
+    store: "oxwiki", title: "Page block invalid",
     body: `# Page block invalid\n\n\`\`\`oxplow-page\n${invalid}\n\`\`\`\n\nThe rest of the page still renders.\n`,
   });
-  await searchable(daemon, "page block invalid", "wiki");
-  await page.goto("/");
-  await searchLauncher(page, "page block invalid");
-  await page.getByTestId("launcher-hit-oxplow:oxplow/wiki?slug=page-block-invalid").click();
+  await open(page, daemon, uriOf("page-block-invalid"));
   const body = page.locator('[data-node="body"]:visible');
   const error = body.getByTestId("inline-page-error");
   await expect(error).toBeVisible();
