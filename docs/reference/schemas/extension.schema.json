@@ -2734,7 +2734,7 @@
           "default": null
         },
         "entry": {
-          "description": "The built-in it is (`oxplow:oxtask`).",
+          "description": "The built-in it is (`oxplow:oxtask`), or a script in the extension\nthat implements the capability's verbs.",
           "type": [
             "string",
             "null"
@@ -2775,12 +2775,140 @@
             "null"
           ],
           "default": null
+        },
+        "needs": {
+          "description": "The scopes a script implementation calls (`sql.read`): only what a\ncommand's script can (`scope_calls::check_command_need`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "features": {
+          "description": "A script implementation's features (`{ links: true }`): the\ncapability's, each true or false.",
+          "default": null
+        },
+        "data": {
+          "description": "What a script implementation declares of itself beyond its features:\nits capability's `data` (an agent harness's environment markers and\nsettings).",
+          "default": null
+        },
+        "stages": {
+          "description": "A script task tracker's stages, in order, each in one of core's\nbuckets (one in each of todo, in_progress and done).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StageDecl"
+          },
+          "default": []
+        },
+        "fields": {
+          "description": "A script task tracker's own fields (kept in an item's `native`).",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldDecl"
+          },
+          "default": []
+        },
+        "id_pattern": {
+          "description": "What a script task tracker's own ids look like (a regex matched\nwhole).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
         "capability",
         "id"
+      ]
+    },
+    "StageDecl": {
+      "description": "One of a task tracker's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "snake_case, unique in the list (`in_review`).",
+          "type": "string"
+        },
+        "title": {
+          "description": "How a person names it (`In Review`).",
+          "type": "string"
+        },
+        "bucket": {
+          "$ref": "#/definitions/Bucket"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "bucket"
+      ]
+    },
+    "Bucket": {
+      "description": "What a task tracker's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
+      "type": "string",
+      "enum": [
+        "backlog",
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled"
+      ]
+    },
+    "FieldDecl": {
+      "description": "One of a task tracker's own fields: kept in an item's `native` under\n`name`, declared so screens render and edit it without knowing which\nlist is active.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Its key in `native` (snake_case).",
+          "type": "string"
+        },
+        "title": {
+          "description": "How a person names it.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/FieldKind"
+        },
+        "values": {
+          "description": "An `enum`'s values, in the order they're offered (empty for any\nother kind).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "read_only": {
+          "description": "Set by the list itself (who filed it, when it synced): shown, never\nedited — a `oxplow.task.update` that names it is refused.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "title",
+        "kind"
+      ]
+    },
+    "FieldKind": {
+      "description": "What kind of value a declared field holds.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "text",
+            "number"
+          ]
+        },
+        {
+          "description": "One of `values`.",
+          "type": "string",
+          "const": "enum"
+        }
       ]
     },
     "SkillFile": {
@@ -3134,94 +3262,6 @@
       "required": [
         "schemaVersion",
         "id"
-      ]
-    },
-    "FieldDecl": {
-      "description": "One of a task tracker's own fields: kept in an item's `native` under\n`name`, declared so screens render and edit it without knowing which\nlist is active.",
-      "type": "object",
-      "properties": {
-        "name": {
-          "description": "Its key in `native` (snake_case).",
-          "type": "string"
-        },
-        "title": {
-          "description": "How a person names it.",
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/definitions/FieldKind"
-        },
-        "values": {
-          "description": "An `enum`'s values, in the order they're offered (empty for any\nother kind).",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": []
-        },
-        "read_only": {
-          "description": "Set by the list itself (who filed it, when it synced): shown, never\nedited — a `oxplow.task.update` that names it is refused.",
-          "type": "boolean",
-          "default": false
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "title",
-        "kind"
-      ]
-    },
-    "FieldKind": {
-      "description": "What kind of value a declared field holds.",
-      "oneOf": [
-        {
-          "type": "string",
-          "enum": [
-            "text",
-            "number"
-          ]
-        },
-        {
-          "description": "One of `values`.",
-          "type": "string",
-          "const": "enum"
-        }
-      ]
-    },
-    "StageDecl": {
-      "description": "One of a task tracker's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
-      "type": "object",
-      "properties": {
-        "id": {
-          "description": "snake_case, unique in the list (`in_review`).",
-          "type": "string"
-        },
-        "title": {
-          "description": "How a person names it (`In Review`).",
-          "type": "string"
-        },
-        "bucket": {
-          "$ref": "#/definitions/Bucket"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "title",
-        "bucket"
-      ]
-    },
-    "Bucket": {
-      "description": "What a task tracker's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
-      "type": "string",
-      "enum": [
-        "backlog",
-        "todo",
-        "in_progress",
-        "blocked",
-        "done",
-        "canceled"
       ]
     },
     "EffectFile": {

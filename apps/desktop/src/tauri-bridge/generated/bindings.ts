@@ -3257,6 +3257,11 @@ export type ImplementationDecl = {
 	 *  (`v_capability_provider.description`).
 	 */
 	description: string | null,
+	/**
+	 *  The scopes a script implementation calls (`sql.read`); empty for
+	 *  anything else.
+	 */
+	needs: string[],
 };
 
 export type ImportDeclaration = {

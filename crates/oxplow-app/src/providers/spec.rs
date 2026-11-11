@@ -854,6 +854,37 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
     Ok(())
 }
 
+/// What's wrong with what `spec` says of the items it keeps — its
+/// `fields`, `stages` and `id_pattern`, a task tracker's and nothing
+/// else's — or `None`. One rule for a provider and a script implementation
+/// (`implementations:`).
+pub(crate) fn items_problem(spec: &ProviderSpec) -> Option<String> {
+    let items = contract_of(spec).items;
+    if !spec.fields.is_empty() && !items {
+        return Some(format!(
+            "fields are a task tracker's; `{}` has none",
+            spec.capability
+        ));
+    }
+    if let Some(p) = oxplow_domain::tasks::fields_problem(&spec.fields) {
+        return Some(p);
+    }
+    if let Some(p) = stages_problem(spec) {
+        return Some(p);
+    }
+    match &spec.id_pattern {
+        Some(pattern) => match regex::Regex::new(pattern) {
+            Err(e) => Some(format!("id_pattern `{pattern}` isn't a regex: {e}")),
+            Ok(_) if !items => Some(format!(
+                "id_pattern is a task tracker's; `{}` has no ids",
+                spec.capability
+            )),
+            Ok(_) => None,
+        },
+        None => None,
+    }
+}
+
 /// Parse an extension's `providers:` block. Valid specs, and a message
 /// for each invalid one. `read` reads a file inside the extension folder.
 pub fn parse_providers(
@@ -901,31 +932,8 @@ pub fn parse_providers(
             .find(|h| !crate::net_sandbox::valid_host_pattern(h))
         {
             Some(format!("provider `{id}`: `{bad}` isn't a host pattern"))
-        } else if let Some(problem) = (!spec.fields.is_empty() && !contract_of(&spec).items)
-            .then(|| {
-                format!(
-                    "provider `{id}`: fields are a task tracker's; `{}` has none",
-                    spec.capability
-                )
-            })
-            .or_else(|| {
-                oxplow_domain::tasks::fields_problem(&spec.fields)
-                    .map(|p| format!("provider `{id}`: {p}"))
-            })
-            .or_else(|| stages_problem(&spec).map(|p| format!("provider `{id}`: {p}")))
-        {
-            Some(problem)
-        } else if let Some(pattern) = &spec.id_pattern {
-            match regex::Regex::new(pattern) {
-                Err(e) => Some(format!(
-                    "provider `{id}`: id_pattern `{pattern}` isn't a regex: {e}"
-                )),
-                Ok(_) if !contract_of(&spec).items => Some(format!(
-                    "provider `{id}`: id_pattern is a task tracker's; `{}` has no ids",
-                    spec.capability
-                )),
-                Ok(_) => read_declarations(&spec, read).err(),
-            }
+        } else if let Some(problem) = items_problem(&spec) {
+            Some(format!("provider `{id}`: {problem}"))
         } else {
             read_declarations(&spec, read).err()
         };

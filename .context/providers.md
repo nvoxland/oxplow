@@ -473,6 +473,21 @@ synchronous registry action that the generation applies at publication. All
 six capability hosts use this split; nothing publishes an adapter outside a
 generation.
 
+**A host adapts an endpoint, not a process** (`endpoint::Endpoint`):
+what its adapter calls — the id and name, the declarations
+(`InitializeResult`), a task tracker's stages and id pattern, `invoke`,
+`envelope` (`endpoint::envelope_of`, one rule: a declared type within
+the contract, its own records and subjects) and `restart`. An `Instance`
+is one (its process); a **script implementation** an extension declares
+under `implementations:` is another (`script::ScriptEndpoint`: its
+functions, run in the command scripts' sandbox with its `needs`;
+extensions-commands.md "Implementations"). So every capability with a
+provider contract takes a script with no host change, and the script's
+answers meet the same checks as a process's. Script adapters are
+prepared and published with the generation's runtime adapters
+(`ProviderRegistry::prepare_scripts`, `publish_scripts`, which retires
+the previous generation's), not with the instances.
+
 A candidate that is rejected before publication is marked stopped and shut down
 directly; cleanup does not withdraw by name or touch an incumbent's
 maps/database rows. Process supervision starts after publication.
@@ -1385,6 +1400,12 @@ and the throwaway host the conformance suite runs in
   the page, its body and its event; pins go stale and re-pin; a dangling
   link is refused; a link lands; a delete takes the page), which the wiki
   passes too.
+- **A script implementation's suite** (`suites::script_suite`): for each
+  `implementations:` entry whose entry is a script, the same capability
+  suite (`capability_suite`, shared with the providers') on a fork of the
+  throwaway with the implementation chosen (a choosable capability's
+  `activeProviders`); its case is `implementation <id>`. The example
+  `examples/extensions/note-tracker` passes the task tracker's.
 
 The red test (`extension_cli.rs`,
 `extension_test_blesses_a_provider_then_a_changed_transcript_fails`)

@@ -236,6 +236,7 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         d.source = entry("implementations", "id", &i.id);
         d.global = Some(format!("{}/{}", i.capability, i.id));
         d.description = i.description.clone();
+        d.needs = i.needs.clone();
         out.push(d);
     }
     // A provider's id is its default instance's id, its refs' segment and

@@ -120,6 +120,19 @@ nothing reaches it. A built-in whose items' URIs carry a provider id
 `implementations.rs` refuses another, which would register a list that
 refuses its own items.
 
+**A script list.** An extension may write a task tracker as a script:
+`implementations: [{ capability: task_tracker, id: notes, entry:
+trackers/notes.star, needs: [sql.read], stages: [...] }]`, one Starlark
+function per verb (`create`, `update`, `transition`, and those its
+features add). Its host makes it an `ExternalTaskTracker` over a
+`providers::script::ScriptEndpoint`, so `task.<verb>` dispatches to it as
+to a provider's instance, and its answers are checked the same way
+(extensions-commands.md "Implementations" has the ABI). It keeps nothing
+of its own: its verbs answer `task.recorded@3` and read rows back from
+`v_task`. The conformance suite passes against the example
+(`examples/extensions/note-tracker`, `providers::script` tests) and runs
+in `oxplow extension test` for any script tracker.
+
 **Page refs** for every list's item come from the interface: its body's
 mentions, its links (`task_link:<type>`, the list's own types) and
 its comments' mentions (`comment_*`, keyed by the item), restated by

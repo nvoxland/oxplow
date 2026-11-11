@@ -37,7 +37,8 @@ use oxplow_domain::{InputValidator, StreamId, Timestamp};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
+use super::endpoint::Endpoint;
+use super::registry::{CapabilityHost, PreparedProviderCapability};
 use crate::blob_store::BlobStore;
 use crate::snapshot_capture_registry::SnapshotCaptureRegistry;
 use crate::snapshot_files::SnapshotFiles;
@@ -72,8 +73,8 @@ impl CapabilityHost for SnapshotsHost {
         self.registry.has(id)
     }
 
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
-        let declared = &instance.declared;
+    fn prepare(&self, instance: &Arc<dyn Endpoint>) -> Result<PreparedProviderCapability, String> {
+        let declared = instance.declared();
         let capability = declared
             .capabilities
             .iter()
@@ -115,7 +116,7 @@ impl CapabilityHost for SnapshotsHost {
 }
 
 pub struct ExternalSnapshots {
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     contents: bool,
     /// Each declared contract verb's compiled input schema.
     verbs: BTreeMap<&'static str, InputValidator>,
@@ -280,7 +281,7 @@ impl ExternalSnapshots {
     fn failed(&self, message: impl std::fmt::Display) -> SnapshotError {
         SnapshotError::Storage(format!(
             "snapshot provider `{}`: {message}",
-            self.instance.name
+            self.instance.name()
         ))
     }
 
@@ -347,7 +348,7 @@ impl ExternalSnapshots {
 #[async_trait]
 impl SnapshotProvider for ExternalSnapshots {
     fn id(&self) -> &str {
-        &self.instance.id
+        self.instance.id()
     }
 
     fn contents(&self) -> bool {
@@ -387,7 +388,7 @@ impl SnapshotProvider for ExternalSnapshots {
         }
         let marked: MarkAnswer = self.call("mark", input).await?;
         tracing::debug!(
-            provider = %self.instance.name,
+            provider = %self.instance.name(),
             handle = %marked.handle,
             files = marked.file_count,
             unchanged = marked.unchanged,
@@ -441,8 +442,8 @@ impl SnapshotProvider for ExternalSnapshots {
                 revision,
                 elapsed_ms: started.elapsed().as_millis() as u64,
                 budget_ms: request.budget.map(|b| b.as_millis() as u64),
-                source: oxplow_domain::uri::build::provider_source(&self.instance.name),
-                provider: Some(self.instance.id.clone()),
+                source: oxplow_domain::uri::build::provider_source(self.instance.name()),
+                provider: Some(self.instance.id().to_string()),
                 contents: self.contents,
                 handle: Some(marked.handle),
                 changed_at: Default::default(),

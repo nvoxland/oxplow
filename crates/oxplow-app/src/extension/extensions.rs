@@ -2593,7 +2593,7 @@ fn needed_permissions(
         ));
     }
     for (i, imp) in ext.implementations.iter().enumerate() {
-        let mut needed = needs_permissions(&[]);
+        let mut needed = needs_permissions(&imp.needs);
         needed.ai |= imp.capability == "ai_provider";
         needed.agent |= !imp.skills.is_empty();
         out.push((

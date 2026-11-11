@@ -325,10 +325,9 @@ impl ProviderRegistry {
                 Some(current) => (current.clone(), true),
                 None => (instance, false),
             };
-            let capability = match self
-                .host_of(&instance)
-                .and_then(|host| host.prepare(&instance))
-            {
+            let capability = match self.host_of(&instance).and_then(|host| {
+                host.prepare(&(instance.clone() as Arc<dyn crate::providers::endpoint::Endpoint>))
+            }) {
                 Ok(capability) => capability,
                 Err(reason) => {
                     refused(&reason);

@@ -17,6 +17,14 @@
 //! declared. `config:` configures a built-in that takes one, checked
 //! against its schema (none does today). An `ai_provider` names no entry:
 //! `provider:` is the Rust kind it is (`oxplow_ai_rig::KINDS`).
+//!
+//! An entry that is a path in the extension is a **script implementation**
+//! of a capability whose interface is a set of verbs (its provider contract,
+//! `oxplow_domain::capability::ProviderContract`): the script defines one
+//! function per verb, which core calls through the same dispatch as an
+//! external provider's (`providers::script`). It declares what a provider
+//! declares of itself — `features:`, `data:`, a task tracker's `stages:`,
+//! `fields:` and `id_pattern:` — and the scopes it calls in `needs:`.
 
 use oxplow_domain::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
@@ -52,7 +60,35 @@ pub struct ImplementationDecl {
     /// One sentence saying what this implementation is
     /// (`v_capability_provider.description`).
     pub description: Option<String>,
+    /// The scopes a script implementation calls (`sql.read`); empty for
+    /// anything else.
+    pub needs: Vec<String>,
+    /// A script implementation: its text and what it declares, when `entry`
+    /// names a file of the extension rather than a built-in.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub script: Option<ScriptImplementation>,
 }
+
+/// A capability implementation written as a script (`entry:` a Starlark
+/// file of the extension): what it declares, in the shape an external
+/// provider declares it, so the capability's host checks and adapts it the
+/// same way (`providers::script`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScriptImplementation {
+    /// The script's text.
+    pub text: String,
+    /// Its declarations as a provider's: the capability with its
+    /// `features` and `data`, and one verb (`confirm: never`, `access:
+    /// record`) for each of the contract's verbs the script defines.
+    pub declared: oxplow_provider_protocol::model::InitializeResult,
+    /// Its spec as a provider's: its id, capability and entry, a task
+    /// tracker's `stages`, `fields` and `id_pattern`, and its `needs`.
+    pub spec: crate::providers::spec::ProviderSpec,
+}
+
+// Its declarations hold strings and JSON values only, which compare totally.
+impl Eq for ScriptImplementation {}
 
 /// An `implementations:` entry as the manifest holds it.
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -62,7 +98,8 @@ pub(crate) struct ImplementationFile {
     id: String,
     #[serde(default)]
     title: Option<String>,
-    /// The built-in it is (`oxplow:oxtask`).
+    /// The built-in it is (`oxplow:oxtask`), or a script in the extension
+    /// that implements the capability's verbs.
     #[serde(default)]
     entry: Option<String>,
     /// An `ai_provider`'s Rust kind (`anthropic`, `openai`,
@@ -84,6 +121,49 @@ pub(crate) struct ImplementationFile {
     /// One sentence saying what it is.
     #[serde(default)]
     description: Option<String>,
+    /// The scopes a script implementation calls (`sql.read`): only what a
+    /// command's script can (`scope_calls::check_command_need`).
+    #[serde(default)]
+    needs: Vec<String>,
+    /// A script implementation's features (`{ links: true }`): the
+    /// capability's, each true or false.
+    #[serde(default)]
+    #[schemars(with = "Option<serde_json::Value>")]
+    features: Option<Value>,
+    /// What a script implementation declares of itself beyond its features:
+    /// its capability's `data` (an agent harness's environment markers and
+    /// settings).
+    #[serde(default)]
+    #[schemars(with = "Option<serde_json::Value>")]
+    data: Option<Value>,
+    /// A script task tracker's stages, in order, each in one of core's
+    /// buckets (one in each of todo, in_progress and done).
+    #[serde(default)]
+    stages: Vec<oxplow_domain::tasks::StageDecl>,
+    /// A script task tracker's own fields (kept in an item's `native`).
+    #[serde(default)]
+    fields: Vec<oxplow_domain::tasks::FieldDecl>,
+    /// What a script task tracker's own ids look like (a regex matched
+    /// whole).
+    #[serde(default)]
+    id_pattern: Option<String>,
+}
+
+impl ImplementationFile {
+    /// The first key only a script implementation takes that this entry
+    /// sets: a built-in's and an AI provider's are core's to say.
+    fn script_key(&self) -> Option<&'static str> {
+        [
+            ("needs", !self.needs.is_empty()),
+            ("features", self.features.is_some()),
+            ("data", self.data.is_some()),
+            ("stages", !self.stages.is_empty()),
+            ("fields", !self.fields.is_empty()),
+            ("id_pattern", self.id_pattern.is_some()),
+        ]
+        .into_iter()
+        .find_map(|(key, set)| set.then_some(key))
+    }
 }
 
 /// The largest icon file.
@@ -280,11 +360,19 @@ fn decl_of(
         ));
     };
     if !entry.starts_with("oxplow:") {
+        return script_decl(f, &entry, spec, read, icon);
+    }
+    if let Some(key) = f.script_key() {
+        let code = if key == "needs" {
+            "implementation.built_in_needs"
+        } else {
+            "implementation.built_in_declares"
+        };
         return Err(problem(
-            "implementation.not_built_in",
+            code,
             format!(
-                "entry `{entry}` isn't a built-in: an implementation names one of core's \
-                 (`oxplow:<name>`); an `ai_provider` names its kind with `provider:`"
+                "entry `{entry}` takes no `{key}`: a built-in is core's code, and core says its \
+                 {key} (a script implementation declares them)"
             ),
         ));
     }
@@ -346,6 +434,213 @@ fn decl_of(
         config,
         icon,
         description: f.description,
+        needs: Vec::new(),
+        script: None,
+    })
+}
+
+/// A script implementation of a capability whose interface is a set of
+/// verbs (its provider contract): checked as it will be called — the
+/// script parses, uses only the scopes in its `needs`, and defines every
+/// verb the contract requires for the features it declares; what it
+/// declares of itself meets the rules an external provider's declarations
+/// do (`spec::check_declarations`, `spec::items_problem`).
+fn script_decl(
+    f: ImplementationFile,
+    entry: &str,
+    spec: &oxplow_domain::capability::CapabilitySpec,
+    read: &dyn Fn(&str) -> Option<String>,
+    icon: Option<String>,
+) -> Result<ImplementationDecl, Box<Diagnostic>> {
+    let what = format!("`{}` implementation `{}`", f.capability, f.id);
+    let contract = script_contract(spec, entry, &what)?;
+    // Its id is the segment of its items' refs, as an instance's is.
+    if let Some(why) = oxplow_domain::capability::instance_id_problem(&f.id) {
+        return Err(problem(
+            "implementation.script_id",
+            format!("{what}: a script implementation's id {why}"),
+        ));
+    }
+    if entry.starts_with('/') || entry.split('/').any(|p| p == ".." || p.is_empty()) {
+        return Err(problem(
+            "implementation.script_outside",
+            format!("{what}: entry `{entry}` must be a file inside the extension"),
+        ));
+    }
+    let to_json = |key: &str, v: &Value| {
+        serde_json::to_value(v).map_err(|e| {
+            problem(
+                "implementation.script_declares",
+                format!("{what}: {key}: {e}"),
+            )
+        })
+    };
+    // Its config is handed to every verb (`x["config"]`), as an instance's
+    // config is to its process: any map.
+    let config = match &f.config {
+        Some(v) => to_json("config", v)?,
+        None => serde_json::json!({}),
+    };
+    if !config.is_object() {
+        return Err(problem(
+            "implementation.script_config",
+            format!("{what}: `config` must be a map (each verb gets it as `x[\"config\"]`)"),
+        ));
+    }
+    for need in &f.needs {
+        crate::scope_calls::check_command_need(need).map_err(|e| {
+            problem(
+                "implementation.script_need",
+                format!("{what}: needs `{need}`: {e}"),
+            )
+        })?;
+    }
+    let text = read(entry).ok_or_else(|| {
+        problem(
+            "implementation.script_missing",
+            format!("{what}: entry `{entry}` isn't in the extension"),
+        )
+    })?;
+    let defined = oxplow_script::runtime::top_level_defs(entry, &text)
+        .and_then(|defined| {
+            crate::services::check_uses(&text, &f.needs, crate::scope_calls::check_command_need)
+                .map(|()| defined)
+        })
+        .map_err(|e| {
+            problem(
+                "implementation.script_invalid",
+                format!("{what}: `{entry}` {e}"),
+            )
+        })?;
+    let mut features = match &f.features {
+        Some(v) => to_json("features", v)?,
+        None => serde_json::json!({}),
+    };
+    // Every feature of the capability is said, on or off, as a provider's
+    // declarations say them: one it leaves out is off.
+    if let Some(declared) = features.as_object_mut() {
+        for feature in spec.features {
+            declared
+                .entry(feature.to_string())
+                .or_insert(serde_json::Value::Bool(false));
+        }
+    }
+    let data = match &f.data {
+        Some(v) => to_json("data", v)?,
+        None => serde_json::Value::Null,
+    };
+    let provider_spec = crate::providers::spec::ProviderSpec {
+        id: f.id.clone(),
+        capability: f.capability.clone(),
+        entry: Some(entry.to_string()),
+        args: Vec::new(),
+        adapter: None,
+        env: Vec::new(),
+        credentials: Vec::new(),
+        network: Vec::new(),
+        declarations: entry.to_string(),
+        id_pattern: f.id_pattern.clone(),
+        fields: f.fields.clone(),
+        stages: f.stages.clone(),
+        needs: f.needs.clone(),
+    };
+    if let Some(p) = crate::providers::spec::items_problem(&provider_spec) {
+        return Err(problem(
+            "implementation.script_items",
+            format!("{what}: {p}"),
+        ));
+    }
+    for verb in contract.required(&features) {
+        if !defined.iter().any(|d| d == verb) {
+            let when = match contract.verb(verb).map(|v| v.needs) {
+                Some(oxplow_domain::capability::Need::Feature(feature)) => {
+                    format!(" when it declares `{feature}`")
+                }
+                _ => String::new(),
+            };
+            return Err(problem(
+                "implementation.script_missing_verb",
+                format!(
+                    "{what}: `{entry}` defines no `{verb}` (`def {verb}(x):`), a verb a `{}` \
+                     implementation answers{when}",
+                    spec.id
+                ),
+            ));
+        }
+    }
+    use oxplow_provider_protocol::model as wire;
+    let declared = wire::InitializeResult {
+        protocol_version: wire::PROTOCOL_VERSION.to_string(),
+        provider: wire::Party {
+            name: f.title.clone().unwrap_or_else(|| f.id.clone()),
+            version: "script".into(),
+        },
+        capabilities: vec![wire::CapabilityDecl {
+            capability: f.capability.clone(),
+            features,
+            data,
+        }],
+        // Core checks a call against the capability's own command
+        // (`task.<verb>`) before it reaches the script: any object here.
+        commands: contract
+            .verbs
+            .iter()
+            .filter(|v| defined.iter().any(|d| d == v.name))
+            .map(|v| wire::CommandDecl {
+                name: v.name.to_string(),
+                summary: format!("`{entry}`'s `{}`.", v.name),
+                input_schema: serde_json::json!({ "type": "object" }),
+                confirm: "never".into(),
+                access: "record".into(),
+                undoable: false,
+            })
+            .collect(),
+        event_types: Vec::new(),
+        collectors: Vec::new(),
+        config_schema: serde_json::json!({ "type": "object" }),
+    };
+    crate::providers::spec::check_declarations(&provider_spec, &declared).map_err(|e| {
+        let prefix = format!("provider `{}`: ", f.id);
+        problem(
+            "implementation.script_declares",
+            format!("{what}: {}", e.strip_prefix(&prefix).unwrap_or(&e)),
+        )
+    })?;
+    Ok(ImplementationDecl {
+        capability: f.capability,
+        id: f.id,
+        title: f.title,
+        entry: Some(entry.to_string()),
+        provider: None,
+        skills: f.skills,
+        config,
+        icon,
+        description: f.description,
+        needs: f.needs,
+        script: Some(ScriptImplementation {
+            text,
+            declared,
+            spec: provider_spec,
+        }),
+    })
+}
+
+/// The verbs a script implementation of `spec` answers: its provider
+/// contract, or why a script can't implement it.
+fn script_contract(
+    spec: &oxplow_domain::capability::CapabilitySpec,
+    entry: &str,
+    what: &str,
+) -> Result<&'static oxplow_domain::capability::ProviderContract, Box<Diagnostic>> {
+    spec.provider.ok_or_else(|| {
+        problem(
+            "implementation.script_no_verbs",
+            format!(
+                "{what}: entry `{entry}` is a script, and a script implements a capability \
+                 through its verbs — `{}` has none (name one of core's built-ins: `oxplow:<name>`)",
+                spec.id
+            ),
+        )
     })
 }
 
@@ -357,6 +652,21 @@ fn provider_decl(
     icon: Option<String>,
 ) -> Result<ImplementationDecl, Box<Diagnostic>> {
     let known = || oxplow_ai_rig::names().join(", ");
+    if let Some(key) = f.script_key() {
+        let code = if key == "needs" {
+            "implementation.provider_needs"
+        } else {
+            "implementation.provider_declares"
+        };
+        return Err(problem(
+            code,
+            format!(
+                "`ai_provider` implementation `{}` takes no `{key}` (it is a Rust kind, and \
+                 calls nothing of oxplow's)",
+                f.id
+            ),
+        ));
+    }
     if f.entry.is_some() {
         return Err(problem(
             "implementation.provider_entry",
@@ -427,6 +737,8 @@ fn provider_decl(
         config,
         icon,
         description: f.description,
+        needs: Vec::new(),
+        script: None,
     })
 }
 
@@ -494,21 +806,180 @@ mod tests {
         }
     }
 
-    /// An entry that isn't one of core's built-ins is refused: an
-    /// implementation is core's code.
+    const TRACKER: &str = "def create(x):\n    return {\"result\": {}}\n\
+        def update(x):\n    return {\"result\": {}}\n\
+        def transition(x):\n    return {\"result\": scope(\"sql.read\", {\"sql\": \"SELECT 1\"})}\n\
+        def _helper(x):\n    return x\n";
+    const STAGES: &str = "stages: [{ id: open, title: Open, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: closed, title: Closed, bucket: done }]";
+
+    fn scripts(rel: &str) -> Option<String> {
+        match rel {
+            "trackers/t.star" => Some(TRACKER.to_string()),
+            "trackers/two.star" => {
+                Some("def create(x):\n    return {}\ndef update(x):\n    return {}\n".to_string())
+            }
+            "trackers/broken.star" => Some("def create(x)\n".to_string()),
+            _ => None,
+        }
+    }
+
+    /// An entry that is a file of the extension is a script implementing
+    /// the capability's verbs: it keeps its `needs`, and what it declares
+    /// of itself as an external provider's declarations would say it —
+    /// the verbs it defines (helpers aside), its features, its stages.
     #[test]
-    fn an_entry_names_a_built_in() {
-        let read = |rel: &str| (rel == "policies/p.star").then(|| "x = 1\n".to_string());
-        let (_, errors) = parse_with(
-            "  - { capability: task_tracker, id: acme, entry: policies/p.star }\n",
-            &read,
+    fn an_entry_may_be_a_script_implementing_the_verbs() {
+        let (decls, errors) = parse_with(
+            &format!(
+                "  - {{ capability: task_tracker, id: notes, title: Notes, entry: trackers/t.star, needs: [sql.read], id_pattern: \"n\\\\d+\", features: {{ hierarchy: false }}, config: {{ prefix: n }}, {STAGES} }}\n"
+            ),
+            &scripts,
         );
-        assert!(
-            errors
+        assert!(errors.is_empty(), "{errors:?}");
+        let d = &decls[0];
+        assert_eq!(d.entry.as_deref(), Some("trackers/t.star"));
+        assert_eq!(d.needs, vec!["sql.read".to_string()]);
+        assert_eq!(d.config["prefix"], "n");
+        let script = d.script.as_ref().unwrap();
+        assert_eq!(script.text, TRACKER);
+        let verbs: Vec<&str> = script
+            .declared
+            .commands
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(verbs, ["create", "update", "transition"]);
+        // Every feature said, one it leaves out off.
+        assert_eq!(
+            script.declared.capabilities[0].features,
+            serde_json::json!({
+                "hierarchy": false,
+                "comments": false,
+                "links": false,
+                "delete": false,
+                "idempotent_writes": false,
+            })
+        );
+        assert_eq!(script.spec.stages.len(), 3);
+        assert_eq!(script.spec.id_pattern.as_deref(), Some("n\\d+"));
+    }
+
+    /// What a script implementation can't be is refused at load, each with
+    /// its own code: a capability with no verbs, a script that isn't there
+    /// or doesn't parse, a verb the contract requires (for the features it
+    /// declares) left undefined, a feature or need that isn't one, a scope
+    /// it calls without needing, a task tracker without stages and stages on
+    /// anything else, a config that isn't a map, an id its refs can't carry;
+    /// and a built-in or an AI provider is refused the keys only a script
+    /// takes.
+    #[test]
+    fn a_bad_script_implementation_is_refused() {
+        let errors = |yaml: &str| {
+            parse_with(yaml, &scripts)
+                .1
                 .iter()
-                .any(|d| d.message.contains("isn't a built-in")),
-            "{errors:?}"
-        );
+                .map(|d| format!("{}: {}", d.code, d.message))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let tracker = |extra: &str| {
+            format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [sql.read], {STAGES}{extra} }}\n")
+        };
+        for (yaml, code, want) in [
+            (
+                "  - { capability: task_tracker, id: notes, entry: trackers/gone.star }\n".to_string(),
+                "implementation.script_missing",
+                "isn't in the extension".to_string(),
+            ),
+            (
+                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/broken.star, {STAGES} }}\n"),
+                "implementation.script_invalid",
+                "doesn't parse".into(),
+            ),
+            (
+                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/two.star, {STAGES} }}\n"),
+                "implementation.script_missing_verb",
+                "defines no `transition`".into(),
+            ),
+            (
+                tracker(", features: { links: true }"),
+                "implementation.script_missing_verb",
+                "defines no `link` (`def link(x):`), a verb a `task_tracker` implementation answers when it declares `links`".into(),
+            ),
+            (
+                tracker(", features: { wings: true }"),
+                "implementation.script_declares",
+                "`wings` isn't one of its features".into(),
+            ),
+            (
+                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [threads.write], {STAGES} }}\n"),
+                "implementation.script_need",
+                "threads.write".into(),
+            ),
+            (
+                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, needs: [tree.read], {STAGES} }}\n"),
+                "implementation.script_need",
+                "tree.read".into(),
+            ),
+            (
+                format!("  - {{ capability: task_tracker, id: notes, entry: trackers/t.star, {STAGES} }}\n"),
+                "implementation.script_invalid",
+                "without".into(),
+            ),
+            (
+                "  - { capability: task_tracker, id: notes, entry: trackers/t.star, needs: [sql.read] }\n".into(),
+                "implementation.script_items",
+                "declares its `stages:`".into(),
+            ),
+            (
+                "  - { capability: knowledge, id: notes, entry: trackers/t.star, needs: [sql.read], stages: [{ id: open, title: Open, bucket: todo }] }\n".into(),
+                "implementation.script_items",
+                "stages are a task tracker's".into(),
+            ),
+            (
+                tracker(", config: [a]"),
+                "implementation.script_config",
+                "must be a map".into(),
+            ),
+            (
+                tracker("").replace("id: notes", "id: oxtask"),
+                "implementation.script_id",
+                "reserved".into(),
+            ),
+            (
+                tracker("").replace("trackers/t.star", "../t.star"),
+                "implementation.script_outside",
+                "inside the extension".into(),
+            ),
+            (
+                "  - { capability: task_tracker, id: oxtask, entry: \"oxplow:oxtask\", needs: [sql.read] }\n".into(),
+                "implementation.built_in_needs",
+                "takes no `needs`".into(),
+            ),
+            (
+                format!("  - {{ capability: task_tracker, id: oxtask, entry: \"oxplow:oxtask\", {STAGES} }}\n"),
+                "implementation.built_in_declares",
+                "takes no `stages`".into(),
+            ),
+            (
+                "  - { capability: ai_provider, id: acme, provider: anthropic, needs: [sql.read] }\n".into(),
+                "implementation.provider_needs",
+                "takes no `needs`".into(),
+            ),
+        ] {
+            let got = errors(&yaml);
+            assert!(got.contains(code) && got.contains(&want), "{yaml}\nwant {code}: {want}\ngot {got}");
+        }
+    }
+
+    /// A capability whose interface isn't a set of verbs (no provider
+    /// contract) has nothing a script could define.
+    #[test]
+    fn a_capability_without_verbs_takes_no_script() {
+        let spec = oxplow_domain::capability::spec("vcs").unwrap();
+        let err = script_contract(spec, "x.star", "`vcs` implementation `jj`").unwrap_err();
+        assert_eq!(err.code, "implementation.script_no_verbs");
+        assert!(err.message.contains("`vcs` has none"), "{}", err.message);
     }
 
     const MARK: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><path d=\"M0 0h8v8z\"/></svg>";
@@ -603,6 +1074,8 @@ mod tests {
                 config: serde_json::json!({}),
                 icon: None,
                 description: None,
+                needs: vec![],
+                script: None,
             }]
         );
     }

@@ -1275,45 +1275,66 @@ impl Instance {
         actor: &Actor,
         draft: EventDraft,
     ) -> Result<Envelope, CommandError> {
-        let failed = |message: String| CommandError::Failed { message };
-        if !self
-            .declared
-            .event_types
-            .iter()
-            .any(|t| t.event_type == draft.event_type && t.v == draft.v)
-        {
-            return Err(failed(format!(
-                "provider `{}` returned `{}@{}`, which it doesn't declare",
-                self.name, draft.event_type, draft.v
-            )));
-        }
-        let contract = spec::contract_of(&self.spec);
-        if let Some(record) = contract
-            .records
-            .filter(|r| r.event == (draft.event_type.as_str(), draft.v))
-        {
-            let row = draft.payload[record.key]["uri"]
-                .as_str()
-                .unwrap_or_default();
-            if !owns(contract, &self.id, row) {
-                return Err(failed(format!(
-                    "provider `{}` recorded `{row}`, which isn't one of its {}s",
-                    self.name, record.entity
-                )));
-            }
-        }
-        for subject in &draft.subject {
-            check_subject(&self.spec.capability, &self.id, &self.ext.name, subject)
-                .map_err(failed)?;
-        }
-        // An agent's thread anchors what it did.
-        let anchors = match actor {
-            Actor::Agent { .. } => actor.anchors(),
-            _ => oxplow_domain::Anchors::default(),
-        };
-        Envelope::new(draft.event_type, draft.v, actor.source(), draft.payload)
-            .map(|e| e.with_subject(draft.subject).with_anchors(anchors))
-            .map_err(|e| failed(e.to_string()))
+        super::endpoint::envelope_of(
+            &self.name,
+            &self.id,
+            &self.ext.name,
+            &self.spec.capability,
+            |event_type, v| {
+                self.declared
+                    .event_types
+                    .iter()
+                    .any(|t| t.event_type == event_type && t.v == v)
+            },
+            actor,
+            draft,
+        )
+    }
+}
+
+/// An instance answers its capability's verbs through its process.
+#[async_trait::async_trait]
+impl super::endpoint::Endpoint for Instance {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn extension(&self) -> &str {
+        &self.ext.name
+    }
+
+    fn declared(&self) -> &InitializeResult {
+        &self.declared
+    }
+
+    fn stages(&self) -> &[oxplow_domain::tasks::StageDecl] {
+        &self.spec.stages
+    }
+
+    fn id_pattern(&self) -> Option<&str> {
+        self.spec.id_pattern.as_deref()
+    }
+
+    async fn invoke(
+        &self,
+        run: &RunContext,
+        verb: &str,
+        input: Value,
+        idempotency_key: Option<String>,
+    ) -> Result<InvokeResult, CommandError> {
+        Instance::invoke(self, run, verb, input, idempotency_key).await
+    }
+
+    fn envelope(&self, actor: &Actor, draft: EventDraft) -> Result<Envelope, CommandError> {
+        Instance::envelope(self, actor, draft)
+    }
+
+    async fn restart(&self) {
+        self.end_process().await;
     }
 }
 
@@ -1394,11 +1415,17 @@ pub trait CapabilityHost: Send + Sync {
     /// Whether `id` already names one of this capability's
     /// implementations: an instance can't take it.
     fn has(&self, id: &str) -> bool;
-    /// Validate and construct an adapter without registering it. Its features
-    /// and synchronous publication action belong to one activation candidate.
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String>;
+    /// Validate and construct an adapter over `endpoint` — a started
+    /// instance, or a script implementation (`providers::script`) — without
+    /// registering it. Its features and synchronous publication action
+    /// belong to one activation candidate.
+    fn prepare(
+        &self,
+        endpoint: &Arc<dyn super::endpoint::Endpoint>,
+    ) -> Result<PreparedProviderCapability, String>;
 
-    /// Take a stopped instance's implementation out.
+    /// Take a stopped instance's (or a withdrawn script's) implementation
+    /// out.
     fn retire(&self, id: &str);
 }
 
@@ -1440,6 +1467,10 @@ pub struct ProviderRegistry {
     instances_gate: tokio::sync::Mutex<()>,
     /// Numbers each sign-in, so a finished one untracks only itself.
     sign_in_seq: std::sync::atomic::AtomicU32,
+    /// The script implementations the last generation published, each
+    /// `(capability, id)`: what the next one retires
+    /// (`ProviderRegistry::publish_scripts`).
+    pub(super) published_scripts: parking_lot::Mutex<Vec<(String, String)>>,
 }
 
 /// Where `scope`'s credentials are kept: the project's key, or the
@@ -1554,7 +1585,14 @@ impl ProviderRegistry {
             sign_in_gates: parking_lot::Mutex::new(BTreeMap::new()),
             instances_gate: tokio::sync::Mutex::new(()),
             sign_in_seq: std::sync::atomic::AtomicU32::new(1),
+            published_scripts: parking_lot::Mutex::new(Vec::new()),
         })
+    }
+
+    /// The host of `capability`, when a provider or a script may
+    /// implement it.
+    pub(super) fn host(&self, capability: &str) -> Option<&Arc<dyn CapabilityHost>> {
+        self.hosts.get(capability)
     }
 
     pub async fn get(&self, instance: &str) -> Option<Arc<Instance>> {

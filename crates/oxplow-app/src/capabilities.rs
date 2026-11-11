@@ -283,6 +283,10 @@ pub enum Source {
     ProviderKind(&'static str),
     /// A provider instance's process.
     External,
+    /// A script in its extension (`implementations:` with a file as its
+    /// `entry`), called through the capability's verbs
+    /// (`providers::script`).
+    Script,
     /// Nothing implements it.
     None,
 }
@@ -293,6 +297,7 @@ impl Source {
             Source::Core => "core",
             Source::BuiltIn(_) | Source::ProviderKind(_) => "builtin",
             Source::External => "external",
+            Source::Script => "script",
             Source::None => "none",
         }
     }
@@ -1156,6 +1161,9 @@ pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Ve
                 if let Some(kind) = &d.provider {
                     return provider_implementation(e, d, kind);
                 }
+                if let Some(script) = &d.script {
+                    return Some(script_implementation(e, d, script));
+                }
                 let b = built_in(d.entry.as_deref()?)?;
                 Some(Implementation {
                     capability: d.capability.clone(),
@@ -1174,6 +1182,38 @@ pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Ve
             })
         })
         .collect()
+}
+
+/// A script implementation, as the registry holds it: what it declares of
+/// itself — its features, a task tracker's fields, stages and id pattern —
+/// as an external provider's instance row says it.
+fn script_implementation(
+    e: &crate::extension::extensions::Extension,
+    d: &crate::extension::extensions::implementations::ImplementationDecl,
+    script: &crate::extension::extensions::implementations::ScriptImplementation,
+) -> Implementation {
+    let features = script
+        .declared
+        .capabilities
+        .iter()
+        .find(|c| c.capability == d.capability)
+        .map(|c| c.features.clone())
+        .filter(|f| !f.is_null())
+        .unwrap_or_else(|| serde_json::json!({}));
+    Implementation {
+        capability: d.capability.clone(),
+        id: d.id.clone(),
+        title: d.title.clone().unwrap_or_else(|| d.id.clone()),
+        extension: Some(e.name.clone()),
+        source: Source::Script,
+        features,
+        fields: serde_json::to_value(&script.spec.fields).unwrap_or_default(),
+        stages: serde_json::to_value(&script.spec.stages).unwrap_or_default(),
+        id_pattern: script.spec.id_pattern.clone(),
+        icon: d.icon.clone(),
+        config: d.config.clone(),
+        description: d.description.clone(),
+    }
 }
 
 /// An AI provider, as the registry holds it: the Rust kind it is. Its one

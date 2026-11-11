@@ -57,6 +57,12 @@ pub enum Kind {
     /// declarations from the capability's contract, a stub program to
     /// replace, and the fixtures `extension test` runs.
     Provider { capability: &'static str },
+    /// A script implementation of `capability` (one whose interface is a
+    /// set of verbs): an `implementations:` entry and its Starlark file,
+    /// one function per verb. A task tracker's is a working one (it keeps
+    /// its items in oxplow's own record) with a fixture that files one;
+    /// another capability's verbs are stubs to replace.
+    Implementation { capability: &'static str },
     /// A derived (Starlark) collector of an entity, a dataset over it and a
     /// page over the dataset.
     Collector,
@@ -90,12 +96,15 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `collector`, `metric`, `command`, `effect`, `component`, `advisory`, `skill`, `panel`, `job` or `query`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `implementation`, `collector`, `metric`, `command`, `effect`, `component`, `advisory`, `skill`, `panel`, `job` or `query`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
             "extension" => Some(Kind::Extension),
             "provider" => Some(Kind::Provider {
+                capability: "task_tracker",
+            }),
+            "implementation" => Some(Kind::Implementation {
                 capability: "task_tracker",
             }),
             "collector" => Some(Kind::Collector),
@@ -116,10 +125,21 @@ impl Kind {
     /// A provider of `capability`; refused unless a process may implement
     /// it (its spec carries a provider contract).
     pub fn provider(capability: &str) -> Result<Kind, SdkError> {
+        Self::with_verbs(capability, "a provider").map(|capability| Kind::Provider { capability })
+    }
+
+    /// A script implementation of `capability`; refused unless its
+    /// interface is a set of verbs (its spec carries a provider contract),
+    /// the same capabilities a provider may implement.
+    pub fn implementation(capability: &str) -> Result<Kind, SdkError> {
+        Self::with_verbs(capability, "a script")
+            .map(|capability| Kind::Implementation { capability })
+    }
+
+    /// The core id of `capability` when it has verbs to implement.
+    fn with_verbs(capability: &str, who: &str) -> Result<&'static str, SdkError> {
         match oxplow_domain::capability::spec(capability).filter(|c| c.provider.is_some()) {
-            Some(spec) => Ok(Kind::Provider {
-                capability: spec.id,
-            }),
+            Some(spec) => Ok(spec.id),
             None => {
                 let may: Vec<String> = oxplow_domain::capability::CAPABILITIES
                     .iter()
@@ -127,7 +147,7 @@ impl Kind {
                     .map(|c| format!("`{}`", c.id))
                     .collect();
                 Err(SdkError::Invalid(format!(
-                    "`{capability}` isn't a capability a provider can implement; one of {}",
+                    "`{capability}` isn't a capability {who} can implement; one of {}",
                     may.join(", ")
                 )))
             }
@@ -311,6 +331,21 @@ pub fn scaffold_with(
             let starter = provider_starter(capability);
             (starter.input, starter.expect, Some(starter.fixture))
         }
+        // A task tracker's files a task through the interface once chosen;
+        // another capability's verbs are stubs, run by its conformance
+        // suite, so its example has no fixture of its own yet.
+        Kind::Implementation {
+            capability: "task_tracker",
+        } => (
+            format!("{{ sql: \"SELECT title, stage FROM v_task WHERE provider = '{provider_id}'\" }}"),
+            "chosen as the task tracker, a task it files is one of its items, in its first stage",
+            Some("{ rows: [{ title: First, stage: todo }] }".to_string()),
+        ),
+        Kind::Implementation { .. } => (
+            "{}".to_string(),
+            "TODO: what its verbs answer (`extension test` runs its capability's conformance suite)",
+            None,
+        ),
         Kind::Collector => (
             format!(
                 "{{ collector: items, rows: [{{ uri: \"{}\", title: First, state: todo }}, {{ uri: \"{}\", title: Second, state: done }}] }}",
@@ -399,6 +434,9 @@ pub fn scaffold_with(
             if let Some(needs) = starter.needs {
                 manifest.push_str(needs);
             }
+        }
+        Kind::Implementation { capability } => {
+            manifest.push_str(&implementation_manifest(capability, &provider_id, name));
         }
         Kind::Collector
         | Kind::Command
@@ -499,10 +537,21 @@ pub fn scaffold_with(
         // is made first.
         let (given, when) = match kind {
             Kind::Command => (
-                "given: [{ command: oxplow.task.create, input: { title: First }, bind: item }]\n",
+                "given: [{ command: oxplow.task.create, input: { title: First }, bind: item }]\n"
+                    .to_string(),
                 format!("{{ command: {ns}.notes.add, input: {{ uri: $item.uri }} }}"),
             ),
-            _ => ("", example_input.clone()),
+            // Chosen as the task tracker, a task the interface files is
+            // one of its items, in its first stage.
+            Kind::Implementation { .. } => (
+                format!(
+                    "given:\n\
+                     \x20 - {{ command: oxplow.capability.choose, input: {{ capability: task_tracker, provider: {provider_id} }} }}\n\
+                     \x20 - {{ command: oxplow.task.create, input: {{ title: First }} }}\n"
+                ),
+                example_input.clone(),
+            ),
+            _ => (String::new(), example_input.clone()),
         };
         write(
             &format!("{rel_dir}/fixtures/basic.yaml"),
@@ -549,6 +598,10 @@ pub fn scaffold_with(
                 )?;
             }
         }
+        Kind::Implementation { capability } => write(
+            &format!("{rel_dir}/implementations/{provider_id}.star"),
+            implementation_script(capability),
+        )?,
         Kind::Collector => {
             write(
                 &format!("{rel_dir}/pages/{name}.yaml"),
@@ -745,6 +798,124 @@ pub fn scaffold_with(
         files,
     })
 }
+
+/// The manifest lines of a scaffolded script implementation `id` of
+/// `capability`: its `implementations:` entry and what it declares — a task
+/// tracker its stages and the `sql.read` it reads its items back with, an
+/// agent harness its `data`.
+fn implementation_manifest(capability: &str, id: &str, name: &str) -> String {
+    let mut out = String::new();
+    if capability == "task_tracker" {
+        out.push_str(
+            "# Its script reads its own items back from v_task.\npermissions: [sql.read]\n",
+        );
+    }
+    out.push_str(&format!(
+        "implementations:\n\
+         \x20 - capability: {capability}\n\
+         \x20   id: {id}\n\
+         \x20   title: {title}\n\
+         \x20   description: \"TODO: one sentence on what this implementation is.\"\n\
+         \x20   # One function per verb: core calls it as it calls a provider's.\n\
+         \x20   entry: implementations/{id}.star\n",
+        title = title_case(name)
+    ));
+    match capability {
+        "task_tracker" => out.push_str(
+            "    needs: [sql.read]\n\
+             \x20   # Its workflow: a stage in each of todo, in_progress and done is required.\n\
+             \x20   stages:\n\
+             \x20     - { id: backlog, title: Backlog, bucket: backlog }\n\
+             \x20     - { id: todo, title: To Do, bucket: todo }\n\
+             \x20     - { id: in_progress, title: In Progress, bucket: in_progress }\n\
+             \x20     - { id: blocked, title: Blocked, bucket: blocked }\n\
+             \x20     - { id: done, title: Done, bucket: done }\n\
+             \x20     - { id: canceled, title: Canceled, bucket: canceled }\n",
+        ),
+        "agent_harness" => out.push_str("    data: { env_markers: [], settings: [] }\n"),
+        _ => {}
+    }
+    out
+}
+
+/// A scaffolded script implementation of `capability`. A task tracker's
+/// works: it keeps its items in oxplow's own record, each verb answering
+/// the item's whole row and reading it back from `v_task`. Another
+/// capability's verbs are stubs that fail until written.
+fn implementation_script(capability: &str) -> String {
+    const HEAD: &str = "# One function per verb. Each gets one dict, `x`:\n\
+        #   x[\"input\"]   the verb's input, as the capability's contract gives it\n\
+        #   x[\"config\"]  the implementation's `config:` from extension.yaml\n\
+        #   x[\"id\"]      the implementation's id\n\
+        #   x[\"key\"]     the call's idempotency key\n\
+        # and answers { result, events?, inverse? }, as a provider's verb does.\n";
+    if capability == "task_tracker" {
+        return format!("{HEAD}{TASK_TRACKER_SCRIPT}");
+    }
+    let mut out = HEAD.to_string();
+    for verb in oxplow_domain::capability::contract(capability)
+        .map(|c| c.verbs)
+        .unwrap_or_default()
+        .iter()
+        .filter(|v| v.needs == oxplow_domain::capability::Need::Always)
+    {
+        out.push_str(&format!(
+            "\ndef {name}(x):\n    fail(\"TODO: `{name}` — answer {{\\\"result\\\": ...}} for x[\\\"input\\\"]\")\n",
+            name = verb.name
+        ));
+    }
+    out
+}
+
+/// A scaffolded script task tracker's verbs.
+const TASK_TRACKER_SCRIPT: &str = r#"#
+# It keeps nothing of its own: each answer records the item's whole row as a
+# `task.recorded@3` event, and a later verb reads the row back from `v_task`.
+
+def _recorded(item):
+    return {"type": "task.recorded", "v": 3, "payload": {"item": item}, "subject": [item["uri"]]}
+
+def _item(uri_text):
+    rows = scope("sql.read", {
+        "sql": "SELECT uri, title, body, stage FROM v_task WHERE uri = :uri",
+        "params": {"uri": uri_text},
+    })
+    if not rows:
+        fail("no task %s" % uri_text)
+    row = rows[0]
+    return {"uri": row["uri"], "title": row["title"], "body": row["body"] or "", "stage": row["stage"], "native": {}}
+
+def create(x):
+    i = x["input"]
+    # The key is the call's: the same call, sent again, is the same task.
+    item = {
+        "uri": uri.build("oxplow/task", id = "t%d" % abs(hash(x["key"])), provider = x["id"]),
+        "title": i["title"],
+        "body": i.get("body", ""),
+        "stage": i["stage"],
+        "native": {},
+    }
+    return {"result": {"uri": item["uri"]}, "events": [_recorded(item)]}
+
+def update(x):
+    i = x["input"]
+    item = _item(i["uri"])
+    for key in ["title", "body", "stage"]:
+        if key in i:
+            item[key] = i[key]
+    return {"result": {"uri": item["uri"]}, "events": [_recorded(item)]}
+
+def transition(x):
+    i = x["input"]
+    item = _item(i["uri"])
+    was = item["stage"]
+    item["stage"] = i["to"]
+    return {
+        "result": {"uri": item["uri"]},
+        "events": [_recorded(item)],
+        "inverse": {"command": "transition", "input": {"uri": item["uri"], "to": was}},
+    }
+"#;
 
 /// What a scaffolded provider of `capability` starts with beyond its
 /// contract: the intent example's input, what it should show and the
@@ -1505,6 +1676,11 @@ mod tests {
             Kind::provider("snapshots").unwrap(),
             Kind::provider("knowledge").unwrap(),
             Kind::provider("filesystem").unwrap(),
+            Kind::implementation("task_tracker").unwrap(),
+            Kind::implementation("agent_harness").unwrap(),
+            Kind::implementation("snapshots").unwrap(),
+            Kind::implementation("knowledge").unwrap(),
+            Kind::implementation("filesystem").unwrap(),
             Kind::Collector,
             Kind::Metric,
             Kind::Command,

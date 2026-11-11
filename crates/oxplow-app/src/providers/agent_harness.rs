@@ -42,7 +42,8 @@ use oxplow_domain::capability::AGENT_HARNESS;
 use oxplow_domain::InputValidator;
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance};
+use super::endpoint::Endpoint;
+use super::registry::CapabilityHost;
 
 /// How long the hook route waits on a provider's `tool_use` or `render`,
 /// inside its own budget (`HOOK_HANDLING_TIMEOUT`, 5 s).
@@ -67,9 +68,9 @@ impl CapabilityHost for HarnessHost {
 
     fn prepare(
         &self,
-        instance: &Arc<Instance>,
+        instance: &Arc<dyn Endpoint>,
     ) -> Result<super::registry::PreparedProviderCapability, String> {
-        let declared = &instance.declared;
+        let declared = instance.declared();
         let capability = declared
             .capabilities
             .iter()
@@ -111,7 +112,7 @@ impl CapabilityHost for HarnessHost {
 }
 
 pub struct ExternalHarness {
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     title: String,
     data: HarnessData,
     /// The verbs it declares, their input schemas compiled.
@@ -156,11 +157,11 @@ impl ExternalHarness {
         match tokio::time::timeout(HOOK_VERB_TIMEOUT, self.call(verb, input, None)).await {
             Ok(Ok(answer)) => answer,
             Ok(Err(error)) => {
-                tracing::warn!(harness = %self.instance.name, verb, %error, "a harness provider's hook verb failed");
+                tracing::warn!(harness = %self.instance.name(), verb, %error, "a harness provider's hook verb failed");
                 None
             }
             Err(_) => {
-                tracing::warn!(harness = %self.instance.name, verb, "a harness provider's hook verb timed out");
+                tracing::warn!(harness = %self.instance.name(), verb, "a harness provider's hook verb timed out");
                 None
             }
         }
@@ -171,14 +172,14 @@ impl ExternalHarness {
         match answer {
             Ok(answer) => answer.unwrap_or_default(),
             Err(error) => {
-                tracing::warn!(harness = %self.instance.name, verb, %error, "a harness provider's verb failed");
+                tracing::warn!(harness = %self.instance.name(), verb, %error, "a harness provider's verb failed");
                 T::default()
             }
         }
     }
 
     fn failed(&self, verb: &str, message: impl std::fmt::Display) -> String {
-        format!("harness `{}` `{verb}`: {message}", self.instance.name)
+        format!("harness `{}` `{verb}`: {message}", self.instance.name())
     }
 }
 
@@ -197,7 +198,7 @@ fn field<T: serde::de::DeserializeOwned>(answer: Value, field: &str) -> Result<T
 #[async_trait]
 impl AgentHarness for ExternalHarness {
     fn id(&self) -> &str {
-        &self.instance.id
+        self.instance.id()
     }
 
     fn title(&self) -> &str {
@@ -224,7 +225,7 @@ impl AgentHarness for ExternalHarness {
         match field::<Option<ToolUse>>(answer, "tool") {
             Ok(tool) => tool,
             Err(error) => {
-                tracing::warn!(harness = %self.instance.name, %error, "a harness provider's tool_use answer doesn't read");
+                tracing::warn!(harness = %self.instance.name(), %error, "a harness provider's tool_use answer doesn't read");
                 None
             }
         }

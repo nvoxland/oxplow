@@ -203,6 +203,23 @@ check already reported is not repeated.
   contract that asks none). A capability with no starter gets its first verb with `{}` and `$any`.
   Then a stub `bin/provider` that exits 1 and `fixtures/provider-<id>.yaml`
   (`config: {}`).
+- **`scaffold(…, Kind::Implementation { capability }, …)`** (`extension
+  new implementation <name> [--capability <cap>]`) adds an
+  `implementations:` entry whose `entry` is a script,
+  `implementations/<id>.star` (extensions-commands.md "Implementations").
+  `Kind::implementation(cap)` takes the capabilities a provider may
+  implement (a provider contract) and refuses the rest. A task tracker's
+  works as written (`implementation_script`: its items kept in oxplow's
+  own record, read back from `v_task` with `sql.read`; the provider
+  scaffold's six stages) and its `basic` fixture chooses it and files a
+  task (`given: [oxplow.capability.choose, oxplow.task.create]`, then a
+  `sql` read of `v_task`); another capability's verbs (each its contract
+  always needs) are stubs that `fail`, so its conformance suite is red
+  until they're written (`just_works.rs`
+  `a_scaffolded_script_implementation_is_red_until_its_verbs_are_written`).
+  `extension test` runs each script implementation's capability suite
+  (`suites::script_suite`, case `implementation <id>`; providers.md "The
+  conformance kit").
 - **`extension_test::test_extension(root, name, bless)`** (`extension
   test <name> [--bless] [--json] [--junit <file>]`, P5.D5, from either
   binary: `oxplow extension …` and `oxplow-daemon extension …` are the one

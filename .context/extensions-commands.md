@@ -216,6 +216,73 @@ implementations:
   `activeProviders` like a built-in, a harness registered beside the
   built-ins under its instance id, as many as run
   ([providers.md](./providers.md) "What a provider may implement").
+- **A script implements a capability with verbs here**: an `entry:`
+  that isn't `oxplow:<name>` is a Starlark file of the extension
+  (`implementations::script_decl`, `Source::Script`, `v_capability_provider.source
+  = 'script'`), for any capability whose spec carries a provider
+  contract — the same verb tables a provider implements
+  (`oxplow_domain::capability::ProviderContract`), so a capability added
+  that way takes a script with no change here. Example:
+  `examples/extensions/note-tracker` (a task tracker); `oxplow extension
+  new implementation <name> [--capability <cap>]` scaffolds one.
+
+  ```yaml
+  implementations:
+    - capability: task_tracker
+      id: notes
+      entry: trackers/notes.star
+      needs: [sql.read]           # the scopes it calls
+      config: { prefix: n }       # any map: every verb gets it
+      features: { links: false }  # the capability's; one left out is off
+      id_pattern: "n\\d+"         # a task tracker's, as a provider's
+      stages: [{ id: jotted, title: Jotted, bucket: todo }, …]
+  ```
+
+  It declares what a provider declares of itself — `features:`,
+  `data:` (an agent harness's), a task tracker's `stages:`, `fields:`
+  and `id_pattern:` — and the load checks it with the provider rules
+  (`spec::items_problem`, `spec::check_declarations` over the
+  declarations the script stands for). **The ABI**: the script defines one
+  function per verb (`def create(x):`; other functions are helpers),
+  called with `x = { input, config, id, key }` — the verb's input as
+  core's dispatch gives it, the entry's config, the implementation's id
+  (its refs' `provider`), the call's idempotency key (the caller's, or a
+  fresh `call:<uuid>`) — and answers what a provider's `invoke` answers,
+  `{ result, events?, inverse? }` (`InvokeResult`; `inverse` is `{
+  command: <verb>, input }`). **How it runs** (`providers::script`): its
+  capability's host adapts it as it adapts an instance — both are a
+  `providers::endpoint::Endpoint` (`CapabilityHost::prepare`), so the
+  task tracker's is an `ExternalTaskTracker` and `task.<verb>` reaches it
+  through `TaskVerbs::invoke` like any list — and each call runs the verb
+  pure in the command scripts' sandbox, as the implementation's own
+  contribution (kind `implementation`, `<capability>.<id>`), on a child of
+  the caller's run whose authority declares only its `needs`, within the
+  extension's permissions (`permissions:` must grant them), guarded by its
+  extension staying live. Its answer is checked as a provider's: only its
+  contract's event types, only its own items' records and subjects
+  (`endpoint::envelope_of`), an inverse naming one of the capability's
+  verbs; a shape that isn't `InvokeResult` fails the call. What it keeps
+  between calls it reads back through its scopes — a task tracker's own
+  items from `v_task` (`sql.read`), recorded by the `task.recorded@3`
+  its verbs answered. Its adapter is prepared and published with the
+  generation's other runtime adapters (`PreparedRuntimeAdapters`,
+  `ProviderRegistry::prepare_scripts` / `publish_scripts`); one a host
+  refuses holds the extension back (`activation.script_implementation`).
+  **Refused at load**, each its own code: `implementation.script_no_verbs`
+  (a capability with no contract), `script_id` (an id its refs can't
+  carry, `capability::instance_id_problem`), `script_outside`,
+  `script_config` (not a map), `script_need` (not what a command's script
+  may call: `scope_calls::check_command_need`, so no `tree.read`),
+  `script_missing`, `script_invalid` (doesn't parse, or calls a scope it
+  doesn't need), `script_items` (stages/fields/id pattern),
+  `script_missing_verb` (a verb the contract requires for the declared
+  features), `script_declares` (a feature or `data` the capability
+  doesn't have). A built-in refuses the script-only keys
+  (`implementation.built_in_needs`, `built_in_declares`), and an AI
+  provider too (`provider_needs`, `provider_declares`).
+  `oxplow extension test` runs the capability's conformance suite against
+  it on a throwaway oxplow, chosen there, as it does a provider's program
+  ([extensions-sdk.md](./extensions-sdk.md)).
 - **An `ai_provider` names its Rust kind** with `provider:` instead of
   `entry:` (`implementations::provider_decl`, `Source::ProviderKind`):
   one of `oxplow_ai_rig::KINDS` (`anthropic`, `openai`,
