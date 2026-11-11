@@ -149,8 +149,11 @@ source directly: an edit changes nothing until it is deployed.
   activate against, need `cargo run -q -p oxplow-dev -- extension deploy`
   with oxplow quit (`extension_deploy::DEPLOY_FROM_OUTSIDE`; it deploys
   every extension that is on whose source isn't what runs, foundation
-  first). Nothing ships to roll back to, and a non-required one can be
-  removed.
+  first, as one change to what runs: `extension_deploy::deploy_together`
+  stages each, then activates them all at once, so oxplow's own two moving
+  their shared `configuration` version together are checked against each
+  other, never against the copy of the other that runs). Nothing ships
+  to roll back to, and a non-required one can be removed.
 - **The live set:** each extension's active deployment, in the
   `extension_deployment` table (`v_extension_deployment`: name, hash,
   deployed_at, commit, dirty, source, active). `commit` is the primary

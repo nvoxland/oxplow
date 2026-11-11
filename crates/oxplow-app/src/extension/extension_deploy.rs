@@ -641,9 +641,24 @@ fn valid(name: &str) -> Result<(), DomainError> {
     }
 }
 
-/// Activate `changes`, staging again when a change made meanwhile (a
-/// config reload, a provider's restart) overtook the candidate.
+/// Activate `changes`, every one going live or the problems the error.
 async fn activate(svc: &Arc<Services>, changes: &LiveChanges) -> Result<(), DomainError> {
+    let problems = activate_holding(svc, changes).await?;
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems_of(svc, TxError::Aborted(problems)))
+    }
+}
+
+/// Activate `changes`, staging again when a change made meanwhile (a
+/// config reload, a provider's restart) overtook the candidate. What
+/// didn't go live, by extension (each held, its last working version
+/// staying): empty when all did.
+async fn activate_holding(
+    svc: &Arc<Services>,
+    changes: &LiveChanges,
+) -> Result<VocabularyErrors, DomainError> {
     let mut attempts = 0;
     loop {
         attempts += 1;
@@ -654,10 +669,19 @@ async fn activate(svc: &Arc<Services>, changes: &LiveChanges) -> Result<(), Doma
         {
             Ok(_) => {
                 after_activation(svc).await;
-                return Ok(());
+                return Ok(VocabularyErrors::new());
             }
             Err(TxError::Aborted(problems)) if problems.contains_key("<host>") && attempts < 3 => {}
-            Err(error) => return Err(problems_of(svc, error)),
+            Err(TxError::Aborted(problems)) => {
+                // The rest went live.
+                if changes.keys().any(|name| !problems.contains_key(name))
+                    && problems.keys().all(|name| changes.contains_key(name))
+                {
+                    after_activation(svc).await;
+                }
+                return Ok(problems);
+            }
+            Err(TxError::Storage(error)) => return Err(error),
         }
     }
 }
@@ -758,6 +782,113 @@ pub async fn deploy(
     name: &str,
     confirmed: bool,
 ) -> Result<Deployed, DeployError> {
+    deploy_together(svc, &[name.to_string()], confirmed)
+        .await
+        .pop()
+        .map_or_else(|| Err(invalid("nothing to deploy").into()), |(_, r)| r)
+}
+
+/// Deploy each of `names` as [`deploy`] does, as one change to what runs:
+/// each is staged (checked, built, copied, recorded), then all go live in
+/// one activation. So a change that spans them — oxplow's own extensions
+/// moving their shared settings to a new version — is checked against the
+/// others' new versions, never the ones running. One that doesn't stage,
+/// or doesn't go live (held, its last working version staying), is its own
+/// error; the rest go live. A result per name, in order.
+pub async fn deploy_together(
+    svc: &Arc<Services>,
+    names: &[String],
+    confirmed: bool,
+) -> Vec<(String, Result<Deployed, DeployError>)> {
+    let mut results: Vec<(String, Option<Result<Deployed, DeployError>>)> = Vec::new();
+    let mut ready: Vec<(usize, Deployed, Option<String>, bool)> = Vec::new();
+    for name in names {
+        let staged = stage_deploy(svc, name, confirmed).await;
+        let at = results.len();
+        results.push((
+            name.clone(),
+            match staged {
+                Ok(Staged::Already(deployed)) => Some(Ok(deployed)),
+                Ok(Staged::Ready {
+                    deployed,
+                    target,
+                    enabled_now,
+                }) => {
+                    ready.push((at, deployed, target, enabled_now));
+                    None
+                }
+                Err(e) => Some(Err(e)),
+            },
+        ));
+    }
+    if !ready.is_empty() {
+        let changes: LiveChanges = ready
+            .iter()
+            .map(|(_, d, target, _)| (d.name.clone(), target.clone()))
+            .collect();
+        let refused = activate_holding(svc, &changes).await;
+        // A problem of no extension deployed here (the host's) refuses
+        // them all.
+        let all_refused = match &refused {
+            Ok(problems) => problems.keys().any(|k| !changes.contains_key(k)),
+            Err(_) => true,
+        };
+        for (at, deployed, _, enabled_now) in ready {
+            let name = deployed.name.clone();
+            let error = match &refused {
+                Err(e) => Some(e.clone()),
+                Ok(problems) if all_refused => {
+                    Some(problems_of(svc, TxError::Aborted(problems.clone())))
+                }
+                Ok(problems) => problems.get(&name).map(|why| {
+                    problems_of(
+                        svc,
+                        TxError::Aborted(VocabularyErrors::from([(name.clone(), why.clone())])),
+                    )
+                }),
+            };
+            results[at].1 = Some(match error {
+                Some(e) => {
+                    undo_turn_on(svc, &name, enabled_now);
+                    Err(e.into())
+                }
+                None => prune(svc, &name)
+                    .await
+                    .map(|()| deployed)
+                    .map_err(Into::into),
+            });
+        }
+    }
+    results
+        .into_iter()
+        .map(|(name, r)| {
+            let r = r.unwrap_or_else(|| Err(invalid("not deployed").into()));
+            (name, r)
+        })
+        .collect()
+}
+
+/// What staging an extension for a deploy found.
+enum Staged {
+    /// Its deployment is already the one that runs: nothing to activate.
+    Already(Deployed),
+    /// Its deployment is recorded: `target` is its change to the live set,
+    /// `enabled_now` whether staging turned it on (a refusal takes it back).
+    Ready {
+        deployed: Deployed,
+        target: Option<String>,
+        enabled_now: bool,
+    },
+}
+
+/// Everything [`deploy`] does to `name` short of going live: check its
+/// source, approve its permissions, turn it on, build it, copy it into the
+/// store and record the deployment.
+async fn stage_deploy(
+    svc: &Arc<Services>,
+    name: &str,
+    confirmed: bool,
+) -> Result<Staged, DeployError> {
     valid(name)?;
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, name)?;
@@ -834,14 +965,14 @@ pub async fn deploy(
     });
     let enabled_now = turn_on(svc, name)?;
     if live_now {
-        return Ok(Deployed {
+        return Ok(Staged::Already(Deployed {
             name: name.to_string(),
             hash,
             already: true,
             warnings: loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
             commit,
             dirty,
-        });
+        }));
     }
     if target.is_some() {
         let built_before = extension_store::deployment_dir(&project, name, &hash).is_dir();
@@ -929,24 +1060,22 @@ pub async fn deploy(
             .transaction(move |tx| store_rows::record_tx(tx, &row))
             .await?;
     }
-    let changes = LiveChanges::from([(name.to_string(), target)]);
-    if let Err(error) = activate(svc, &changes).await {
-        undo_turn_on(svc, name, enabled_now);
-        return Err(error.into());
-    }
-    prune(svc, name).await?;
-    Ok(Deployed {
-        name: name.to_string(),
-        hash,
-        already: false,
-        warnings: [
-            loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
-            size_warnings(name, size),
-            removal.into_iter().collect(),
-        ]
-        .concat(),
-        commit,
-        dirty,
+    Ok(Staged::Ready {
+        deployed: Deployed {
+            name: name.to_string(),
+            hash,
+            already: false,
+            warnings: [
+                loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
+                size_warnings(name, size),
+                removal.into_iter().collect(),
+            ]
+            .concat(),
+            commit,
+            dirty,
+        },
+        target,
+        enabled_now,
     })
 }
 

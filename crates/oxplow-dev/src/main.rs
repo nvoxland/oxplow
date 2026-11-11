@@ -164,8 +164,12 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
     };
     let mut out = Vec::new();
     let mut failed = Vec::new();
-    for name in &names {
-        match oxplow_app::extension::extension_deploy::deploy(&svc, name, true).await {
+    // One change to what runs: the set is checked against itself.
+    let results =
+        oxplow_app::extension::extension_deploy::deploy_together(&svc, &names, true).await;
+    for (name, result) in &results {
+        let name = name.as_str();
+        match result {
             Ok(deployed) => {
                 out.push(format!(
                     "{name}: {} {}{}",
@@ -1055,6 +1059,53 @@ mod tests {
         let again = dev(p, &["extension", "deploy"]).await.unwrap();
         for name in ["oxplow-foundation", "acme"] {
             assert!(again.contains(&format!("{name}: already runs")), "{again}");
+        }
+    }
+
+    /// With no name, the extensions deploy as one change to what runs:
+    /// oxplow's own two moving their shared settings to a new version
+    /// together are checked against each other, never against the running
+    /// copy of the other (foundation, first, once was refused for
+    /// bundled's old version, and needed a second run).
+    #[tokio::test]
+    async fn deploy_with_no_name_deploys_a_shared_settings_version_together() {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let dir = developing_oxplow_with_a_stale_foundation().await;
+        let p = dir.path();
+        let foundation = p.join(".oxplow/extensions/oxplow-foundation/extension.yaml");
+        let bundled = p.join(".oxplow/extensions/oxplow-bundled/extension.yaml");
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        let bundled_at = |version: u32| {
+            format!(
+                "manifest: 2\nname: oxplow-bundled\nnamespace: oxplow\nintent:\n  purpose: test\n\
+                 configuration:\n  version: {version}\n  schema:\n    type: object\n    \
+                 properties:\n      bundledKey: {{ type: integer }}\n"
+            )
+        };
+        std::fs::write(&bundled, bundled_at(2)).unwrap();
+        std::fs::write(
+            p.join(".oxplow/project.yaml"),
+            "enableBundledExtensions: false\nextensions: [oxplow-bundled]\n",
+        )
+        .unwrap();
+        let first = dev(p, &["extension", "deploy"]).await.unwrap();
+        for name in ["oxplow-foundation", "oxplow-bundled"] {
+            assert!(first.contains(&format!("{name}: deployed")), "{first}");
+        }
+
+        let text = std::fs::read_to_string(&foundation).unwrap();
+        assert!(text.contains("\n  version: 2\n"), "{text}");
+        std::fs::write(
+            &foundation,
+            text.replace("\n  version: 2\n", "\n  version: 3\n"),
+        )
+        .unwrap();
+        std::fs::write(&bundled, bundled_at(3)).unwrap();
+        let both = dev(p, &["extension", "deploy"]).await.unwrap();
+        for name in ["oxplow-foundation", "oxplow-bundled"] {
+            assert!(both.contains(&format!("{name}: deployed")), "{both}");
         }
     }
 
