@@ -5,10 +5,8 @@ category: Work
 keywords: assigned me my tasks queue person
 needs:
 - task_tracker
-# Everything assigned to the person, whatever thread asks: the panel's
-# `thread_id` only satisfies the rail, it narrows nothing.
-params:
-- name: thread_id
+# Everything assigned to the person: a project-wide view (the panel is
+# project-scoped).
 loaders:
   # Open tasks assigned to the person (an epic is context, never a line of
   # its own unless it is itself assigned). A task under an epic follows the

@@ -1,13 +1,9 @@
 title: Assigned to you (count)
 description: How many open tasks are assigned to you.
-params:
-- name: thread_id
-  label: Thread
 loaders:
   open_count:
     page: oxplow/assigned-to-you
     loader: open_count
-    params: { thread_id: { param: thread_id } }
 view:
   from: open_count
   viz: number
