@@ -184,7 +184,11 @@ no `||`). The pane is told what happened:
 `conversation_list` lists its saved conversations for the session's
 worktree (`AgentHarness::conversations`: Claude's transcripts under its
 config dir, named by their last `custom-title` / `ai-title` record with the
-first thing the person typed; opencode's `session list --format json`;
+first thing the person typed; opencode's `session list --format json -n 500`, run in the worktree, since
+it lists the sessions of the project of its cwd (a non-git directory is
+the `global` project), and a project with no sessions prints nothing at
+all, exit 0, which is no sessions and not a parse error (1.17.4; it once
+showed as "couldn't list its saved sessions: … EOF");
 Codex's daemon's `thread/list`), read as `v_agent_conversation`. The
 agent session page's **Fork into New Session…**
 (offered `when` the harness declares `conversation_fork`) is a form whose conversation is a select from the

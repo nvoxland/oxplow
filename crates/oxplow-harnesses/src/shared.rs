@@ -516,13 +516,18 @@ pub const METADATA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub async fn program_output(
     program: &str,
     args: &[&str],
+    cwd: Option<&std::path::Path>,
 ) -> Result<String, oxplow_domain::agent::harness::HarnessError> {
     use oxplow_domain::agent::harness::HarnessError;
-    let run = tokio::process::Command::new(program)
+    let mut command = tokio::process::Command::new(program);
+    command
         .args(args)
         .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .output();
+        .kill_on_drop(true);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let run = command.output();
     let out = tokio::time::timeout(METADATA_TIMEOUT, run)
         .await
         .map_err(|_| HarnessError::Unavailable(format!("`{program}` didn't answer in time")))?

@@ -572,9 +572,14 @@ one no longer offered is removed, a person's own stay.
   commands, as skills) go to the worktree's `.agents/skills/`
   (`shared::write_worktree_skills`).
 - **opencode** writes `.oxplow/runtime/opencode-plugin/`
-  (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode -m
-  <model> [-s <id>]`, the model from `agentConfig.opencode.model`, else
-  `DEFAULT_MODEL` (`github-copilot/gpt-5-mini`). Hooks, MCP (bearer by
+  (`plugin/oxplow-hooks.js`, `skills/`, `prompts/`) and runs `opencode [-m
+  <model>] [-s <id>]`, the model only from `agentConfig.opencode.model`
+  (blank: no `-m`, opencode's own default). oxplow used to force
+  `github-copilot/gpt-5-mini`; GitHub Copilot stopped offering it and
+  opencode 1.17.4 gave no error: it ran its most recent other model (a
+  local one), which `session.created` / `chat.message` show only as that
+  model's `modelID`, and the Stop's `model` reports. So oxplow names no
+  model of its own. Hooks, MCP (bearer by
   opencode's own `{env:OXPLOW_HOOK_TOKEN}`), the instructions file, skills
   and commands ride `OPENCODE_CONFIG_CONTENT`, inline config opencode
   merges last. The bridge (`crates/oxplow-harnesses/assets/opencode-hooks.js`)
@@ -1458,9 +1463,9 @@ keeping an `awaiting_user` the turn set — and acks `{}`. A request's summary i
 
 **What opencode reports and what oxplow reads** (the bridge,
 `opencode-hooks.js`; `OPENCODE_FACTS` in `opencode.rs` is this table and a
-test keeps the two equal; read from 1.17.4's source, not yet from
-recordings: compaction, question and the order of `session.error` before
-`session.idle` still need one):
+test keeps the two equal; recorded with 1.17.4: the fixtures under
+`crates/oxplow-harnesses/fixtures/opencode/` are replayed in
+`replayed_harnesses.rs`):
 
 | Fact | opencode reports | oxplow reads |
 |---|---|---|
@@ -1472,6 +1477,64 @@ recordings: compaction, question and the order of `session.error` before
 | An errored turn | `session.error` with another error, then `session.idle` | `TurnRun.outcome` `errored`, `TurnRun.error` `name: message` |
 | What a turn left running | the children not yet idle at the `session.idle` | `TurnRun.left_running` |
 | A call's duration | the gap between `tool.execute.before` and `.after` | `duration_ms` on the PostToolUse |
+
+**Compaction, recorded.** `/compact` posts no `chat.message`, so no
+prompt and no turn of the person's. opencode adds a `compaction` part
+(`auto: false` for `/compact`, `true` when it compacts by itself) in a
+`message.part.updated`, the summary streams as text of an assistant
+message (`mode: compaction`), then `session.compacted` carries only the
+`sessionID`, then `session.idle`. The bridge remembers the part's `auto` per
+session and posts it on the PostCompact as `trigger` (`manual` / `auto`;
+none when no part came first); core records one `agent.context.compacted`
+with it. The `session.idle` after it is a Stop with no open turn whose
+last message is the summary: it changes nothing but re-marks the thread
+idle. (`auto: true` is read from the schema, not recorded.)
+
+**Subagents, recorded.** A foreground `task` call: PreToolUse Task,
+`session.created` of the child (SubagentStart), the child's tools posted
+as the parent's session with the child's `agent_id` (the bridge asks the
+client for the session's `parentID`), the child's idle (SubagentStop),
+then the Task's PostToolUse, then the parent's Stop; the Task call is the
+parent's own and finishes once, after the SubagentStop. A background
+`task` (`OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS`): the Task's
+PostToolUse comes at once (`<task id state="running">`), the parent's Stop
+carries the child in `background_tasks`, and the result comes later as a
+user `chat.message` whose only part is `synthetic: true` text
+`<task id="ses_…" state="completed">…`. The bridge posts it as a
+UserPromptSubmit (`prompt` that text, `message_id`), then the child's
+SubagentStop, then the parent's second Stop; `prompt()` reads it as
+`Prompt::Handback`, so it is a subagent's turn (source `subagent`, going
+on with the turn that started the child), never the person's prompt. Core
+needed no change for either.
+
+**A question is one tool call.** Recorded (`question.jsonl`): the
+`question` tool's `tool.execute.before`, then `question.asked` (with
+`tool.callID`, the same call, and its own `que_…` request id), then, after
+the person answers, `question.replied` and `tool.execute.after`. The
+bridge used to post the call twice (a PreToolUse and PostToolUse named
+`question` from the tool hooks, another pair named `AskUserQuestion`
+from the events, the Post under the request id), which core recorded as two
+finished calls. Now the tool is posted as `AskUserQuestion` and the
+question events post nothing; only `question.rejected` posts a
+PostToolUse for the asking call (its tool throws, so no
+`tool.execute.after` follows; not recorded, read from the source). The
+`question.jsonl` fixture is the recorded hooks with the events' duplicates
+removed and the tool renamed; `its_bridge_reports_an_answered_question_as_one_call`
+feeds the recording's raw inputs to the bridge and gets exactly those
+hooks.
+
+**One abort or error gives two idles.** Recorded (`abort.jsonl`,
+`error.jsonl`): `session.error` comes right before the first
+`session.idle`, so the first Stop carries the error (`MessageAbortedError`
+is `interrupted`; the 401 `APIError` is `errored`, `APIError: Missing
+Authentication header`). Then a second `session.idle` follows (an
+aborted bash call's `tool.execute.after` lands between the two), and the
+bridge posts a second Stop with no error. Core already makes that one
+turn: the first Stop ends it, the late PostToolUse is the call finishing
+(it opens no turn), and a Stop with no open turn changes nothing but
+re-marks the thread idle. An aborted shell call reports `exit: null`, so
+its PostToolUse has no `exit_code`. The bridge's `tool_use_id` for the
+late call is the same `callID` as its PreToolUse.
 
 
 **Who in a session acted.** A subagent (Claude Code's `Agent`/`Task`, an
@@ -1689,12 +1752,12 @@ available from outside.
 | | Claude Code | Codex | opencode |
 |---|---|---|---|
 | Waiting on a permission | `Notification` `permission_prompt` / `agent_needs_input`, and the `PermissionRequest` hook (observed, answered `Ack`) → AwaitingUser | `thread/status/changed` `activeFlags` `waitingOnApproval` → AwaitingUser, the request's command or reason as detail; cleared by the flags or `serverRequest/resolved` | the bridge forwards `permission.asked` (a `Notification`) and `permission.replied` |
-| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | `question.asked` (an Ask `PreToolUse`); a `?`-ending Stop |
+| Asked a question | `AskUserQuestion` PreToolUse → AwaitingUser with its question; a `?`-ending Stop | `waitingOnUserInput` with `requestUserInput`'s first question; a `?`-ending Stop | the `question` tool, posted as `AskUserQuestion` (its PreToolUse to its PostToolUse); a `?`-ending Stop |
 | Answering from oxplow | — (no interface into an interactive session; a cross-session message can't consent) | — (a request goes to the turn's client) | *HTTP `permission` / `question` reply* — left native |
 | The plan | `ExitPlanMode` PreToolUse `tool_input.plan`, `planFilePath` → `agent.plan.proposed` | the `plan` item's text on `item/completed` → `agent.plan.proposed`; `turn/plan/updated` steps reach only the chat library | — (`plan_exit` carries no text, so none is recorded) |
 | Model / effort | `agent_turn.model` / `effort`: the Stop's `effort.level` and the transcript tail's newest `message.model`; transcript `message.model` → `v_token_usage.model`; *`SessionStart.model`, `PostModelSwitch`* | `agent_turn.model` / `effort`: `Thread.model` / `reasoningEffort` at open, moved by `thread/settings/updated` | `agent_turn.model` / `effort`: the bridge's Stop carries the last assistant message's `modelID` and `variant` |
-| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` |
-| Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` |
+| Set at launch | `agentConfig.claude.model` → `--model`, `.effort` → `--effort` | `agentConfig.codex.model` → the open request's `model`, `.effort` → its `config.model_reasoning_effort` | `agentConfig.opencode.model` → `-m` (none when blank) |
+| Context fill, compaction | `agent_turn.context_tokens` (window NULL): the transcript tail's newest assistant usage; `PostCompact` → `agent.context.compacted` (`trigger`, `compact_summary`); `PreCompact` resets the context baselines | `agent_turn.context_tokens` / `context_window`: `thread/tokenUsage/updated` `last.totalTokens` / `modelContextWindow`; the `contextCompaction` item → `agent.context.compacted` (resets nothing: no prompt channel) | `agent_turn.context_tokens` (window NULL): the Stop's `tokens`; `session.compacted` → `agent.context.compacted` (`trigger` `manual` / `auto` from the preceding `compaction` part) |
 | Tokens | OTLP and the transcript tail | `turn/completed` deltas | — (the bridge sends none) |
 | Skills, commands | shipped (`--plugin-dir`; skills reload live) | shipped (`.agents/skills`) | shipped (plugin dir, inline `command`) |
 | Native worktrees | `--worktree`, subagent `isolation: worktree` → `<repo>/.claude/worktrees/<name>`; hook `cwd` follows | none (`cwd`, `runtimeWorkspaceRoots`) | none |
@@ -1927,6 +1990,10 @@ equivalence between tools.
 | Native title changes | `a_slot_records_its_conversations_and_their_titles` (Claude's `session_title`); Codex's `thread/name/updated` in `a_prompt_in_the_tui_is_a_recorded_turn`, the name on resume in `a_new_thread_is_saved_so_the_tui_can_resume_it`; rename: `a_native_rename_is_a_thread_name_set` |
 | Binding changes (started, switched, forked, chosen) | `a_slots_bindings_are_its_conversations_in_order`, `a_person_resumes_a_chosen_conversation`, `a_fork_opens_a_new_session_and_leaves_the_source_alone`, `a_fork_launch_binds_the_new_session_not_the_source`, `a_child_sessions_tool_hook_leaves_the_resume_pointer` |
 | Child-agent attribution | `its_subagents_are_read_from_their_hooks` (recorded `claude/subagent.jsonl`), `its_bridge_sends_the_call_id_the_exit_code_and_a_childs_parent` (opencode), `a_call_inside_a_subagent_call_is_the_subagents`, `a_background_subagent_hands_back_without_a_prompt` |
+| opencode compaction | recorded `opencode/compaction.jsonl`: `a_recorded_opencode_compaction_is_recorded_and_opens_no_turn`; the bridge: `its_bridge_names_what_triggered_a_compaction` |
+| opencode subagents | recorded `opencode/foreground_subagent.jsonl`, `opencode/background_subagent.jsonl`: `a_recorded_opencode_foreground_subagent_is_attributed`, `a_recorded_opencode_background_subagent_hands_back_without_a_prompt` |
+| opencode question | recorded `opencode/question.jsonl`: `a_recorded_opencode_question_is_one_tool_call_and_one_wait`; the bridge: `its_bridge_reports_an_answered_question_as_one_call`, `its_bridge_reports_a_wait_on_a_permission_or_a_question` |
+| opencode abort and API error | recorded `opencode/abort.jsonl`, `opencode/error.jsonl`: `a_recorded_opencode_abort_ends_one_turn_as_interrupted`, `a_recorded_opencode_api_error_ends_one_turn_as_errored` |
 | Unsupported capability | the conformance test above; `a_harness_without_a_list_says_so`; `a_native_rename_needs_the_feature_a_name_and_a_running_observer` |
 | Live client reconnect | `an_agent_session_is_reattached_not_spawned_again`; the pane's reopen (`terminalSession.test.ts`); Codex: `a_restarted_daemon_is_observed_again_on_the_next_open` |
 | Backend restart | `a_resumed_session_resets_a_turn_that_died_without_a_stop`, `a_restart_close_is_logged_as_recovery`, `a_process_exit_ends_its_session_once`; a Codex session end to end, `a_codex_session_resumes_its_thread_after_a_backend_restart` (a fake `codex` on the search path, the scripted daemon, Services reopened over the same database file: the bound thread is resumed, not replaced, and opens writable) |
@@ -1996,8 +2063,9 @@ Codex's observer logs it from `thread/status/changed` active flags
 (`waitingOnApproval`, `waitingOnUserInput`; the detail is the request's
 command, reason or first question) and clears it on the cleared flags or
 `serverRequest/resolved`. opencode's bridge forwards `permission.asked`
-(a `Notification`) and `question.asked` (an Ask `PreToolUse`); the
-`*.replied` events become a tool-less `PostToolUse` that clears the wait.
+(a `Notification`; `permission.replied` becomes a tool-less `PostToolUse`
+that clears the wait). Its `question` tool is posted as `AskUserQuestion`,
+so the wait runs from the call's PreToolUse to its PostToolUse.
 ACP permission cards log it through `set_status`.
 
 **`permission_prompts`** means: oxplow learns when the agent waits on a
