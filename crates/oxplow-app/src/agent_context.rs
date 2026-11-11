@@ -1,7 +1,8 @@
 //! The context oxplow hands an agent, shared by every transport (tsk334,
 //! P3.8): the `<session-context>` block (deduped per session — it names
 //! the other live agents in the worktree, so it changes as they come and
-//! go), the open handoffs to the thread no agent was given yet, prompt
+//! go), the extensions' agent contexts (`context:`, each once, then on
+//! change), the open handoffs to the thread no agent was given yet, prompt
 //! advisories on a prompt; the
 //! thread's undelivered nudges after a tool call. What an agent *did* is
 //! recorded elsewhere — the hook ingest logs `agent.*` events and pump
@@ -9,7 +10,8 @@
 //! the token reactor).
 //!
 //! State kept here is runtime-only (losing it on a restart costs at most
-//! one repeated context block): the last context per agent session. The
+//! one repeated context block): the last context and the last block of
+//! each extension's agent context per agent session. The
 //! session's resume id is the hook ingest's (`hook_ingest`). See
 //! `.context/agent-model.md`.
 
@@ -24,12 +26,15 @@ use tracing::warn;
 use crate::agent_prompt::{build_session_context_block, OtherAgent, Surroundings};
 use crate::Services;
 
-/// The last context block per agent session.
+/// What each agent session was last sent, per block.
 #[derive(Default)]
 struct ContextState {
     /// Last context block returned per session. The launch prompt already carries this data, so a
     /// byte-identical repeat adds noise without new information.
     last_context_by_session_id: HashMap<String, String>,
+    /// Per session, the last block each extension's agent context sent
+    /// (by `<namespace>/<id>`): sent again only when it changes.
+    last_extension_context: HashMap<String, HashMap<String, String>>,
 }
 
 /// How long a tool call's hook waits for the reactors that write nudges.
@@ -49,10 +54,9 @@ impl AgentContext {
         let Some(session_id) = session_id else {
             return;
         };
-        self.state
-            .lock()
-            .last_context_by_session_id
-            .remove(session_id);
+        let mut state = self.state.lock();
+        state.last_context_by_session_id.remove(session_id);
+        state.last_extension_context.remove(session_id);
     }
 
     /// What the agent hears after a tool call: the thread's undelivered
@@ -109,7 +113,8 @@ impl AgentContext {
 
     /// What a prompt in the session would carry, built and **not yet
     /// taken**: the `<session-context>` block (only when it differs from
-    /// what the session was last sent), the thread's undelivered handoffs,
+    /// what the session was last sent), each extension's agent context (the same
+    /// rule, per contribution), the thread's undelivered handoffs,
     /// nudges (prompt advisories, and the hints its last turn's end left).
     /// Nothing changes until [`Self::commit`] — the delivery can
     /// fail, and then the next build carries it all again.
@@ -127,6 +132,7 @@ impl AgentContext {
         let mut pending = PendingContext {
             text: String::new(),
             baselines: Vec::new(),
+            contexts: Vec::new(),
             handoffs: Vec::new(),
             nudges: Vec::new(),
             basket: Vec::new(),
@@ -139,6 +145,24 @@ impl AgentContext {
         if let (Some(key), Some(block)) = (session_id, &ctx_block) {
             pending.baselines.push((key.to_string(), block.clone()));
         }
+        // What the extensions say the agent should know now, each block
+        // once, then when it changes.
+        let extension_blocks = self
+            .changed_extension_contexts(svc, thread_id, session_id)
+            .await;
+        if let Some(key) = session_id {
+            pending.contexts = extension_blocks
+                .iter()
+                .map(|(from, block)| (key.to_string(), from.clone(), block.clone()))
+                .collect();
+        }
+        let extension_block = (!extension_blocks.is_empty()).then(|| {
+            extension_blocks
+                .into_iter()
+                .map(|(_, block)| block)
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        });
         let handoffs_block = handoffs(svc, *thread_id).await;
         if let Some((_, ids)) = &handoffs_block {
             pending.handoffs = ids.clone();
@@ -162,6 +186,7 @@ impl AgentContext {
         }
         let combined: String = [
             ctx_block,
+            extension_block,
             handoffs_block.map(|(text, _)| text),
             basket_block.map(|(text, _)| text),
             advisory_block.map(|(text, _)| text),
@@ -185,6 +210,13 @@ impl AgentContext {
             let mut state = self.state.lock();
             for (key, block) in built.baselines {
                 state.last_context_by_session_id.insert(key, block);
+            }
+            for (session, from, block) in built.contexts {
+                state
+                    .last_extension_context
+                    .entry(session)
+                    .or_default()
+                    .insert(from, block);
             }
         }
         if !built.handoffs.is_empty() {
@@ -264,6 +296,65 @@ impl AgentContext {
         self.would_emit(session_id, &block).then_some(block)
     }
 
+    /// The extensions' agent contexts the session wasn't sent as they read
+    /// now, each as its block, by who says it: one cut to
+    /// [`CONTEXT_BUDGET`], then all of them to [`CONTEXTS_BUDGET`]. What
+    /// doesn't fit at all waits for a later prompt, when the ones sent
+    /// now don't repeat.
+    async fn changed_extension_contexts(
+        &self,
+        svc: &Services,
+        thread_id: &ThreadId,
+        session_id: Option<&str>,
+    ) -> Vec<(String, String)> {
+        let changed: Vec<(String, String, bool)> = extension_contexts(svc, thread_id)
+            .await
+            .into_iter()
+            .map(|c| {
+                let (text, cut) = cut_to(&c.text, CONTEXT_BUDGET);
+                (c.from, text, cut)
+            })
+            .filter(|(from, text, cut)| {
+                self.would_emit_extension_context(
+                    session_id,
+                    from,
+                    &context_block(from, text, *cut),
+                )
+            })
+            .collect();
+        let mut left = CONTEXTS_BUDGET;
+        let mut out = Vec::new();
+        for (from, text, cut) in changed {
+            if left == 0 {
+                break;
+            }
+            let (text, over) = cut_to(&text, left);
+            left -= text.chars().count();
+            let block = context_block(&from, &text, cut || over);
+            out.push((from, block));
+        }
+        out
+    }
+
+    /// Whether `block` is new from `from` for `session_id` (as
+    /// [`Self::would_emit`] for the session context).
+    fn would_emit_extension_context(
+        &self,
+        session_id: Option<&str>,
+        from: &str,
+        block: &str,
+    ) -> bool {
+        let Some(session_id) = session_id else {
+            return true;
+        };
+        self.state
+            .lock()
+            .last_extension_context
+            .get(session_id)
+            .and_then(|sent| sent.get(from))
+            .is_none_or(|previous| previous != block)
+    }
+
     /// Whether `block` is new for `session_id`: it differs from what the
     /// session was last sent (recorded by [`Self::commit`]). Without a
     /// session id it always is: suppressing could hide a change from
@@ -287,6 +378,8 @@ impl AgentContext {
 pub struct PendingContext {
     pub text: String,
     baselines: Vec<(String, String)>,
+    /// The extensions' agent contexts it carries: (session, from, block).
+    contexts: Vec<(String, String, String)>,
     handoffs: Vec<HandoffId>,
     nudges: Vec<i64>,
     /// The context basket's items it carries (`thread_context_item.id`).
@@ -303,6 +396,7 @@ impl PendingContext {
         Self {
             text: text.into(),
             baselines: Vec::new(),
+            contexts: Vec::new(),
             handoffs: Vec::new(),
             nudges: Vec::new(),
             basket: Vec::new(),
@@ -338,6 +432,137 @@ pub fn carries(svc: &Services, harness: Option<&str>, channel: &str) -> bool {
 /// Characters of nudges one hook carries to the agent; the rest wait for
 /// its next.
 pub const NUDGE_BUDGET: usize = 2_000;
+
+/// Characters one extension's agent context may say on a prompt; the
+/// rest is cut, with [`CONTEXT_CUT`].
+pub const CONTEXT_BUDGET: usize = 1_500;
+/// Characters all extensions' agent contexts may say on one prompt.
+pub const CONTEXTS_BUDGET: usize = 3_000;
+/// The line that ends a cut agent context.
+pub const CONTEXT_CUT: &str = "… (cut: over its budget)";
+
+/// What one extension's agent context says for a thread now, uncut:
+/// who says it (`<namespace>/<id>`) and its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtensionContext {
+    pub from: String,
+    pub text: String,
+}
+
+/// Every enabled extension's agent context (`context:`) for `thread`
+/// whose needs are met and whose query has something to say: its first
+/// row's `text`, trimmed, when not empty. By namespace, then as each
+/// extension declares them. A query that fails is logged and says
+/// nothing. Not a nudge: nothing is recorded, muted or counted.
+pub async fn extension_contexts(svc: &Services, thread: &ThreadId) -> Vec<ExtensionContext> {
+    match svc
+        .sql
+        .read_generation(extension_contexts_in_generation(svc, thread))
+        .await
+    {
+        Ok(contexts) => contexts,
+        Err(error) => {
+            warn!(%error, "agent context generation read failed");
+            Vec::new()
+        }
+    }
+}
+
+async fn extension_contexts_in_generation(
+    svc: &Services,
+    thread: &ThreadId,
+) -> Vec<ExtensionContext> {
+    use crate::extension::extensions::agent_contexts::TEXT_COLUMN;
+    use oxplow_db::semantic_layer::SqlCell;
+    let active = svc
+        .capabilities
+        .snapshot(&crate::config_service::read_config(&svc.config));
+    let mut extensions: Vec<crate::extension::extensions::Extension> = svc
+        .extension_catalog
+        .get(svc.worktrees.project_dir())
+        .iter()
+        .filter(|e| e.enabled && !e.contexts.is_empty())
+        .cloned()
+        .collect();
+    if extensions.is_empty() {
+        return Vec::new();
+    }
+    extensions.sort_by(|a, b| a.namespace.cmp(&b.namespace));
+    let stream = match svc.thread_store.get(thread).await {
+        Ok(Some(t)) => SqlCell::Int(t.stream_id.value()),
+        _ => SqlCell::Null(()),
+    };
+    let request = crate::advisories::request_of(&svc.sql, thread, None)
+        .await
+        .map_or(SqlCell::Null(()), SqlCell::Int);
+    let params = vec![
+        ("thread_id".to_string(), SqlCell::Int(thread.value())),
+        ("stream_id".to_string(), stream),
+        ("request_id".to_string(), request),
+    ];
+    let mut out = Vec::new();
+    for ext in &extensions {
+        for c in ext
+            .contexts
+            .iter()
+            .filter(|c| active.unmet(&c.needs).is_empty())
+        {
+            let from = format!("{}/{}", ext.namespace, c.id);
+            let query = match svc.sql.with_extension_config(ext, &c.query).await {
+                Ok(query) => query,
+                Err(error) => {
+                    warn!(context = %from, %error, "agent context configuration failed");
+                    continue;
+                }
+            };
+            let result = match svc
+                .sql
+                .run(
+                    oxplow_db::SqlQuery::new(&query)
+                        .named(params.clone())
+                        .limit(Some(1)),
+                )
+                .await
+            {
+                Ok(r) => r,
+                Err(error) => {
+                    warn!(context = %from, %error, "agent context query failed");
+                    continue;
+                }
+            };
+            let Some(i) = result.columns.iter().position(|c| c == TEXT_COLUMN) else {
+                warn!(context = %from, "agent context query returned no `text` column");
+                continue;
+            };
+            let text = match result.rows.first().map(|r| &r[i]) {
+                Some(SqlCell::Text(t)) => t.trim().to_string(),
+                _ => continue,
+            };
+            if !text.is_empty() {
+                out.push(ExtensionContext { from, text });
+            }
+        }
+    }
+    out
+}
+
+/// `text` within `limit` characters, and whether it was cut.
+fn cut_to(text: &str, limit: usize) -> (String, bool) {
+    if text.chars().count() <= limit {
+        return (text.to_string(), false);
+    }
+    (text.chars().take(limit).collect(), true)
+}
+
+/// The block an agent context is sent as.
+fn context_block(from: &str, text: &str, cut: bool) -> String {
+    let marker = if cut {
+        format!("\n{CONTEXT_CUT}")
+    } else {
+        String::new()
+    };
+    format!("<context from=\"{from}\">\n{text}{marker}\n</context>")
+}
 
 /// The agent's undelivered nudges on the thread as one block, up to
 /// [`NUDGE_BUDGET`], marked delivered: each reaches the agent once, on
@@ -915,6 +1140,224 @@ mod tests {
             .await
             .unwrap_or_default();
         assert!(!tool.contains("and the lexer"), "{tool}");
+    }
+
+    /// A project extension `name` declaring `context` (YAML list items),
+    /// with `agent.write`, activated.
+    async fn with_context(svc: &std::sync::Arc<Services>, name: &str, context: &str) {
+        write_context(svc, name, "permissions: [agent.write]\n", context);
+        crate::test_fixtures::activate(svc).await;
+    }
+
+    fn write_context(svc: &Services, name: &str, permissions: &str, context: &str) {
+        let dir = svc.layout.project_dir.join(".oxplow/extensions").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            format!(
+                "manifest: 2\nname: {name}\nintent:\n  purpose: test\n{permissions}context:\n{context}"
+            ),
+        )
+        .unwrap();
+    }
+
+    /// The `<context from=..>` blocks of a prompt's context, in order.
+    fn contexts(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find("<context from=") {
+            let end = rest[start..].find("</context>").unwrap() + start + "</context>".len();
+            out.push(rest[start..end].to_string());
+            rest = &rest[end..];
+        }
+        out
+    }
+
+    async fn prompt(ctx: &AgentContext, fx: &crate::test_fixtures::ThreadFixture) -> Vec<String> {
+        contexts(
+            &ctx.prompt_context(&fx.svc, &fx.thread, Some("s1"), Some(fx.session), None)
+                .await
+                .unwrap_or_default(),
+        )
+    }
+
+    async fn retitle(svc: &Services, thread: ThreadId, title: &'static str) {
+        svc.db
+            .transaction(move |tx| {
+                tx.execute(
+                    "UPDATE threads SET title = ?1 WHERE id = ?2",
+                    rusqlite::params![title, thread.value()],
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    /// An extension's context reaches the session's first prompt, tagged
+    /// with where it came from; an unchanged text isn't sent again, a
+    /// changed one is.
+    #[tokio::test]
+    async fn an_extension_context_is_sent_once_then_on_change() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: now\n    doc: The thread's title.\n    query: SELECT 'working on ' || title AS text FROM v_thread WHERE id = :thread_id\n",
+        )
+        .await;
+        let ctx = AgentContext::default();
+        assert_eq!(
+            prompt(&ctx, &fx).await,
+            vec!["<context from=\"state/now\">\nworking on Thread\n</context>".to_string()]
+        );
+        assert_eq!(prompt(&ctx, &fx).await, Vec::<String>::new());
+        retitle(&fx.svc, fx.thread, "Parser").await;
+        assert_eq!(
+            prompt(&ctx, &fx).await,
+            vec!["<context from=\"state/now\">\nworking on Parser\n</context>".to_string()]
+        );
+        assert_eq!(prompt(&ctx, &fx).await, Vec::<String>::new());
+    }
+
+    /// A compaction (or a fresh start) forgets what the session was sent:
+    /// the next prompt carries the context again.
+    #[tokio::test]
+    async fn a_compaction_sends_the_extension_context_again() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: now\n    doc: A fact.\n    query: SELECT 'a fact' AS text\n",
+        )
+        .await;
+        let ctx = AgentContext::default();
+        assert_eq!(prompt(&ctx, &fx).await.len(), 1);
+        assert!(prompt(&ctx, &fx).await.is_empty());
+        ctx.reset_session(Some("s1"));
+        assert_eq!(prompt(&ctx, &fx).await.len(), 1);
+    }
+
+    /// A query that returns no row, or an empty text, has nothing to say.
+    #[tokio::test]
+    async fn an_extension_context_without_a_row_says_nothing() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: none\n    doc: Nothing.\n    query: SELECT 'x' AS text WHERE 0\n  - id: blank\n    doc: Blank.\n    query: SELECT '  ' AS text\n",
+        )
+        .await;
+        assert!(prompt(&AgentContext::default(), &fx).await.is_empty());
+    }
+
+    /// Several contributions all arrive, in a stable order: by namespace,
+    /// then as each extension declares them.
+    #[tokio::test]
+    async fn two_extension_contexts_arrive_in_a_stable_order() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        write_context(
+            &fx.svc,
+            "zeta",
+            "permissions: [agent.write]\n",
+            "  - id: b\n    doc: B.\n    query: SELECT 'zb' AS text\n  - id: a\n    doc: A.\n    query: SELECT 'za' AS text\n",
+        );
+        with_context(
+            &fx.svc,
+            "alpha",
+            "  - id: one\n    doc: One.\n    query: SELECT 'a1' AS text\n",
+        )
+        .await;
+        let got: Vec<String> = prompt(&AgentContext::default(), &fx)
+            .await
+            .iter()
+            .map(|b| b.lines().next().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                "<context from=\"alpha/one\">",
+                "<context from=\"zeta/b\">",
+                "<context from=\"zeta/a\">",
+            ]
+        );
+    }
+
+    /// One contribution says at most `CONTEXT_BUDGET` characters, and all
+    /// of them together `CONTEXTS_BUDGET`: the rest is cut, visibly.
+    #[tokio::test]
+    async fn extension_contexts_are_cut_to_their_budget() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let long = |n: usize| format!("SELECT replace(printf('%{n}s', ''), ' ', 'x') AS text");
+        with_context(
+            &fx.svc,
+            "big",
+            &format!(
+                "  - id: a\n    doc: A.\n    query: \"{}\"\n  - id: b\n    doc: B.\n    query: \"{}\"\n  - id: c\n    doc: C.\n    query: \"{}\"\n",
+                long(2_000),
+                long(1_400),
+                long(1_400)
+            ),
+        )
+        .await;
+        let blocks = prompt(&AgentContext::default(), &fx).await;
+        let body = |b: &str| b.lines().nth(1).unwrap().to_string();
+        assert_eq!(blocks.len(), 3, "{blocks:?}");
+        assert_eq!(body(&blocks[0]).len(), CONTEXT_BUDGET);
+        assert!(blocks[0].contains(CONTEXT_CUT), "{}", blocks[0]);
+        assert_eq!(body(&blocks[1]).len(), 1_400);
+        assert!(!blocks[1].contains(CONTEXT_CUT));
+        assert_eq!(
+            body(&blocks[2]).len(),
+            CONTEXTS_BUDGET - CONTEXT_BUDGET - 1_400
+        );
+        assert!(blocks[2].contains(CONTEXT_CUT), "{}", blocks[2]);
+    }
+
+    /// What reaches the agent's context needs `agent.write`: without it
+    /// the extension doesn't load, and the agent hears nothing.
+    #[tokio::test]
+    async fn an_extension_context_needs_agent_write() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        write_context(
+            &fx.svc,
+            "sneaky",
+            "",
+            "  - id: now\n    doc: A fact.\n    query: SELECT 'a fact' AS text\n",
+        );
+        let errors = crate::test_fixtures::load_errors(&fx.svc, "sneaky").await;
+        assert!(
+            errors.contains("context `now` needs `agent.write` in `permissions:`"),
+            "{errors}"
+        );
+        assert!(prompt(&AgentContext::default(), &fx).await.is_empty());
+    }
+
+    /// A harness that can't carry context on a prompt gets none, and
+    /// nothing is recorded as sent: the session's first prompt through a
+    /// channel still carries it.
+    #[tokio::test]
+    async fn a_harness_without_the_prompt_channel_gets_no_extension_context() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: now\n    doc: A fact.\n    query: SELECT 'a fact' AS text\n",
+        )
+        .await;
+        let ctx = AgentContext::default();
+        assert!(ctx
+            .prompt_context(
+                &fx.svc,
+                &fx.thread,
+                Some("s1"),
+                Some(fx.session),
+                Some("no-prompt-channel")
+            )
+            .await
+            .is_none());
+        assert_eq!(prompt(&ctx, &fx).await.len(), 1);
     }
 
     /// Alone in the worktree, the context has no such line.

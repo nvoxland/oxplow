@@ -14,7 +14,7 @@ use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <page|extension|provider|implementation|collector|metric|command|effect|component|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|implementation|collector|metric|command|effect|component|advisory|context|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the request/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
@@ -30,7 +30,7 @@ usage:
       limit, its area dimension, the metric and a page linking to the file
       and line; a command composing core
       commands; an effect reacting to an event; a custom component with
-      its page and bundle; an advisory; a skill;
+      its page and bundle; an advisory; an agent context; a skill;
       a panel over a page; a job (a cancellable model call, with its
       commands, page and an effect that publishes the reply); a query (rows
       other pages read, as a choice's options). Each checks clean
@@ -44,14 +44,14 @@ usage:
       With a <name> every reference to the example's own name (its datasets,
       pages, commands, the manifest's name) is rewritten to it; without one
       it keeps the example's name. --list-examples names them
-  oxplow extension add <page|collector|command|effect|component|advisory|skill> <id> [<extension>] [--root <dir>]
+  oxplow extension add <page|collector|command|effect|component|advisory|context|skill> <id> [<extension>] [--root <dir>]
       add one contribution to an extension that exists (the only one under
       .oxplow/extensions/, or <extension>): the kind's starter files, and its
       entry appended to the manifest's list, with the manifest's comments
       kept. An id the list already has, or a file that exists, is refused
   oxplow extension check <name|path> [--impact] [--against <rev>] [--services] [--json] [--root <dir>]
       load the extension and report every problem with file:line, dry-running
-      its datasets, commands, pages and advisories on a throwaway oxplow —
+      its datasets, commands, pages, advisories and agent contexts on a throwaway oxplow —
       this build's schema, no data, what the extension declares turned on
       (never the project's database); command names against the same.
       --impact also says what the working tree's version changes against

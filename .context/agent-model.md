@@ -111,6 +111,7 @@ harness only delivers them.
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`) |
 | Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
 | Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
+| Extension context | What an enabled extension says the agent should know now (`context:`), each as `<context from="<namespace>/<id>">`, once, then on change; 1,500 characters each, 3,000 in all | Prompt-time context (extensions-commands.md "Agent context") |
 | Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
 | Nudges | Advisory hints, the collection nudge | Prompt- or tool-time context ("Nudge persistence") |
 | Server instructions | What oxplow knows, writes are commands, answer with `oxplow_find_page` / `oxplow_show_page` | MCP `get_info` ("The agent's tools") |
@@ -149,7 +150,12 @@ history between turns ("Codex: its TUI on a thread oxplow observes",
 **Once, then on change.** On every prompt, `prompt_context` builds the
 `<session-context>` block and sends it only
 when it differs from what that agent session was last sent (`should_emit`,
-keyed by the harness's session id). The first
+keyed by the harness's session id). Each extension's agent context
+(`context:`) follows the same rule, per contribution: right after the
+session context, its block goes only when it differs from the one that
+session last got from it (`would_emit_extension_context`, keyed by
+session and `<namespace>/<id>`). It is not a nudge: no ledger row, no
+muting, its own budget (`CONTEXT_BUDGET`, `CONTEXTS_BUDGET`). The first
 prompt of a session always carries it, which is why the launch prompt
 leaves the session context out for a harness with `prompt_context`.
 Between them rides the thread's undelivered nudges, prompt advisories
@@ -159,7 +165,7 @@ the session-context block off.
 **Compaction.** A compaction or a fresh start forgets what was sent
 (`AgentContext::reset_session`): on `PreCompact` (Claude Code's; its HTTP
 `SessionStart` never arrives) and on `SessionStart`, so the next
-prompt carries the session context again. The baselines
+prompt carries the session context and every extension context again. The baselines
 are in memory: a daemon restart costs at most one repeated block.
 
 A compaction is also logged, by every harness, as `agent.context.compacted@2`

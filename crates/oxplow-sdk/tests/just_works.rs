@@ -1017,6 +1017,20 @@ async fn a_scaffolded_advisory_checks_loads_and_stays_quiet() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_agent_context_checks_and_is_declared() {
+    let dir = project().await;
+    scaffolded(dir.path(), "context", "open-threads").await;
+    let report = test_extension(dir.path(), "open-threads", false)
+        .await
+        .unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "open-threads");
+    assert_eq!(ext.contexts.len(), 1);
+    assert_eq!(ext.contexts[0].id, "open-threads");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_skill_checks_and_is_declared() {
     let dir = project().await;
     scaffolded(dir.path(), "skill", "house-style").await;

@@ -14,7 +14,7 @@ working examples oxplow ships, and `new --from <example> [<name>]` copies one (w
 `<name>` it rewrites the example's own name everywhere to it). Each passes `check` and `extension test` as written, so a
 failure after your edit is yours. `$OXPLOW_BIN extension add <kind>
 <id> [<extension>]` adds one more of the `page`, `collector`, `command`,
-`effect`, `component`, `advisory` or `skill` starters below to an extension
+`effect`, `component`, `advisory`, `context` or `skill` starters below to an extension
 that exists (its files and its manifest entry, comments kept; an id or file
 that exists is refused):
 - `page` — a page over open tasks with a row action (Start);
@@ -80,6 +80,9 @@ that exists is refused):
 - `advisory` — guidance for you: a query run at a turn's end whose rows
   reach the agent (`audience: person` raises them in Alerts instead); a
   an extension's advisories need `agent.write`;
+- `context` — what you should know now: a query whose `text` (one row) reaches
+  you on your first prompt, then only when it changes, and again after a
+  compaction; at most 1,500 characters; it needs `agent.write`;
 - `skill` — a skill (`SKILL.md` with `name:` and `description:`
   frontmatter) you load when it's relevant; `kind: command` makes it a
   slash command;

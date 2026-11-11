@@ -231,6 +231,7 @@ lists each declared reference with Set… and Revoke.
 | `effects` | scripts that react to logged events | below |
 | `advisories` | guidance queries for the coding agent |  |
 | `skills` | skills and slash commands for the coding agent |  |
+| `context` | text for the coding agent's context, sent once, then when it changes |  |
 | `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
 | `providers` | an external program implementing a capability, such as the task tracker | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |

@@ -591,6 +591,94 @@ pub(super) async fn advisory_example(
     }
 }
 
+/// Run agent context `id` for a thread (`when: { context, thread? }`, the
+/// primary thread when none) as the app does on a prompt, and check what
+/// the agent would be told, uncut: `expect: { text: <string> | null }`
+/// (`null`: nothing to say). A text over the per-context budget is a
+/// warning: the agent gets it cut.
+pub(super) async fn context_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    id: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    if !ext.contexts.iter().any(|c| c.id == id) {
+        return report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.unknown",
+                format!("`{id}` isn't one of the extension's agent contexts"),
+            )
+            .fix("the example's `when.context`"),
+        );
+    }
+    let thread = match ex.when.get("thread").and_then(Value::as_str) {
+        None => oxplow_domain::ThreadId::new(1),
+        Some(t) => match oxplow_domain::ThreadId::try_from_str(t) {
+            Some(thread) => thread,
+            None => {
+                return report.errors.push(
+                    error(
+                        shown,
+                        None,
+                        "fixture.unknown",
+                        format!("`when.thread: {t}` isn't a thread"),
+                    )
+                    .fix("`thr1`"),
+                )
+            }
+        },
+    };
+    if let Err(e) = host.svc.streams.ensure_primary().await {
+        return report.errors.push(error(
+            shown,
+            None,
+            "example.thread_failed",
+            format!("its thread: {e}"),
+        ));
+    }
+    host.current().await;
+    let from = format!("{}/{id}", ext.namespace);
+    let text = oxplow_app::agent_context::extension_contexts(&host.svc, &thread)
+        .await
+        .into_iter()
+        .find(|c| c.from == from)
+        .map(|c| c.text);
+    if let Some(t) = &text {
+        let over = t.chars().count();
+        if over > oxplow_app::agent_context::CONTEXT_BUDGET {
+            report.warnings.push(
+                warning(
+                    shown,
+                    None,
+                    "context.over_budget",
+                    format!(
+                        "context `{id}` says {over} characters: the agent gets the first {}",
+                        oxplow_app::agent_context::CONTEXT_BUDGET
+                    ),
+                )
+                .fix("say less: the facts the agent needs now"),
+            );
+        }
+    }
+    let got = json!({ "text": text });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("context `{id}` said {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("its query, or the example's `given` and `expect` (`{ text: <string> | null }`)")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
 /// Read the published datasets with `when: { sql, params? }` as a page's
 /// loader would — a dataset, a decorator's labels, a metric's grid — through
 /// an inline page of one `sql` loader: `expect: { rows, columns? }`,

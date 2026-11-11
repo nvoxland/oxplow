@@ -252,6 +252,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::skills::SkillFile>>")]
     pub skills: Option<Value>,
+    /// Text for the coding agent's context: a query whose `text` the
+    /// agent is sent on a prompt once, then when it changes.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::agent_contexts::AgentContextFile>>")]
+    pub context: Option<Value>,
     /// External providers: programs implementing a capability, whose
     /// operations its `commands:` declare.
     #[serde(default)]

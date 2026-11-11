@@ -368,7 +368,7 @@ async fn for_thread_in_generation(
 /// The request a trigger belongs to: that of `turn` when the trigger names
 /// one (a tool call's, a turn end's), else of the thread's newest turn (a
 /// prompt's: the turn it opened or went into).
-async fn request_of(
+pub(crate) async fn request_of(
     sql: &crate::sql_gateway::SqlGateway,
     thread: &oxplow_domain::ThreadId,
     turn: Option<i64>,

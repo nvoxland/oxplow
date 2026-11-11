@@ -923,6 +923,22 @@ export type AdvisoryOncePer =
 /**  Once per thread per day (UTC). */
 "day";
 
+/**
+ *  One agent context as the extension declares it. A new condition on
+ *  when it runs is a field here beside `needs`.
+ */
+export type AgentContextDecl = {
+	id: string,
+	/**
+	 *  What it tells the agent, for a person reading the manifest or the
+	 *  catalog.
+	 */
+	doc: string,
+	/**  What it needs active (`task_tracker`); without it, it doesn't run. */
+	needs: string[],
+	query: string,
+};
+
 export type AgentSessionId = string;
 
 export type AgentStatus = {
@@ -1819,7 +1835,7 @@ export type ContributionId = {
 };
 
 /**  Every kind of contribution a manifest can declare. */
-export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
+export type ContributionKind = "dataset" | "measure" | "metric" | "dimension" | "collector" | "event_type" | "resource" | "command" | "job" | "ai_profile" | "effect" | "advisory" | "skill" | "agent_context" | "implementation" | "provider" | "page" | "panel" | "slot" | "decorator" | "replacement" | "custom_component";
 
 /**  One credential a provider declares. */
 export type CredentialDecl = {
@@ -2512,6 +2528,11 @@ export type Extension_Deserialize = {
 	 */
 	skills: SkillDecl[],
 	/**
+	 *  What it puts in the coding agent's context (`context:`; valid
+	 *  ones — invalid ones are in `errors`).
+	 */
+	contexts: AgentContextDecl[],
+	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the
 	 *  type (`vocabulary_reactor`).
@@ -2672,6 +2693,11 @@ export type Extension_Serialize = {
 	 *  valid ones — invalid ones are in `errors`).
 	 */
 	skills: SkillDecl[],
+	/**
+	 *  What it puts in the coding agent's context (`context:`; valid
+	 *  ones — invalid ones are in `errors`).
+	 */
+	contexts: AgentContextDecl[],
 	/**
 	 *  Another extension's event types its effects and collectors react
 	 *  to (P9.D1): each resolves when an enabled extension registers the

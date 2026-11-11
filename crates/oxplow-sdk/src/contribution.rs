@@ -26,7 +26,7 @@ pub struct Contribution {
 
 /// The kinds `extension add` takes.
 pub const ADDABLE: &str =
-    "`page`, `collector`, `command`, `effect`, `component`, `advisory` or `skill`";
+    "`page`, `collector`, `command`, `effect`, `component`, `advisory`, `context` or `skill`";
 
 /// Every service the table offers, with the builtin that reaches it.
 fn services_list() -> String {
@@ -332,6 +332,26 @@ pub(crate) fn build(
              \x20     WHERE t.request_id = :request_id\n\
              \x20     HAVING count(DISTINCT p.path) >= 15\n",
                     advisory = ContributionKind::Advisory.spec().title.to_lowercase()
+                ),
+            )],
+            vec!["agent.write"],
+        ),
+        Kind::Context => (
+            vec![(
+                "context",
+                format!(
+                    "\
+             \x20 # An {context}: what the agent should know now, as one short text.\n\
+             \x20 # Its query returns a `text` column (one row; none says nothing). The\n\
+             \x20 # agent gets it on its first prompt, then only when it changes, and again\n\
+             \x20 # after a compaction. Params: :thread_id, :stream_id, :request_id (NULL when\n\
+             \x20 # unknown). At most 1,500 characters reach the agent.\n\
+             \x20 - id: {id}\n\
+             \x20   doc: \"TODO: what it tells the agent.\"\n\
+             \x20   query: |\n\
+             \x20     SELECT 'TODO: what the agent should know. Here: open threads in this stream: ' || count(*) AS text\n\
+             \x20     FROM v_thread WHERE stream_id = :stream_id AND closed_at IS NULL\n",
+                    context = ContributionKind::AgentContext.spec().title.to_lowercase()
                 ),
             )],
             vec!["agent.write"],
