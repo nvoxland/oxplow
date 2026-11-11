@@ -14,9 +14,9 @@ params:
 - name: path
   default: ''
 answers:
-- {"question":"Which knowledge pages are there, and which store keeps each?","params":{},"skill":"oxplow-wiki-capture"}
-- {"question":"Which knowledge pages cite files that changed since they were written?","params":{},"skill":"oxplow-wiki-capture"}
-- {"question":"Which knowledge pages talk about this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-wiki-capture"}
+- {"question":"Which knowledge pages are there, and which store keeps each?","params":{},"skill":"oxplow-knowledge"}
+- {"question":"Which knowledge pages cite files that changed since they were written?","params":{},"skill":"oxplow-knowledge"}
+- {"question":"Which knowledge pages talk about this file?","about":"oxplow/file","params":{"path":"src/lib.rs"},"skill":"oxplow-knowledge"}
 loaders:
   # The form a new page is written in; none while no store that oxplow
   # writes is on.

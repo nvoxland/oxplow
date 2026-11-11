@@ -5,6 +5,10 @@
   tracker's business: when one is active, its skill says how, and you
   follow it. For handoffs and the command bus, read the `oxplow-runtime`
   skill.
+- The project keeps knowledge pages — durable understanding, in one or
+  more stores (oxwiki is oxplow's own). Find them with `v_knowledge_page`
+  or `oxplow_search`, read one with `oxplow_read`, keep one with
+  `oxplow.knowledge.write_page` (the `oxplow-knowledge` skill).
 - When your reply needs the person's answer, end it with the question
   itself: oxplow shows your thread as waiting on them.
 - When the person mentions an error they saw in the app (a red toast, a row

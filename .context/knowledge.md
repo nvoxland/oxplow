@@ -270,6 +270,16 @@ takes the page and logs it. oxwiki passes it
 (`oxwiki_is_a_conforming_store`), and so do the script and provider
 stores in the tests and `oxplow extension test`.
 
+## Agents
+
+Every harness gets the same: the `oxplow-knowledge` skill (find before you
+create, across stores; read with `oxplow_read`; write with `store?`, `id?`
+and a title; links as `[[…]]`, `[[<store>:<id>]]` for another store), a
+bullet of the working-in-oxplow preamble saying knowledge exists and where,
+and core's slash command `/oxplow:note` (keep what was just worked out as a
+page, following the skill). An agent never writes a store's files: the
+write guard refuses oxwiki's (`oxwiki_page_reason`).
+
 ## Removed for good
 
 The wiki was one chosen store (`oxplow:wiki` under the id `oxplow`, or

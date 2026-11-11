@@ -47,6 +47,7 @@ const CORE_COMMANDS: &[(&str, &str)] = &[
     ),
     ("configure", include_str!("../assets/configure.md")),
     ("new-metric", include_str!("../assets/new-metric.md")),
+    ("note", include_str!("../assets/note.md")),
 ];
 
 /// One skill: its `SKILL.md` and the reference files beside it
@@ -78,7 +79,7 @@ macro_rules! skill {
 /// lives in references the agent opens when it needs them.
 const OXPLOW_SKILLS: &[SkillFiles] = &[
     skill!("oxplow-runtime", ["commands"]),
-    skill!("oxplow-wiki-capture", ["search-existing", "write-page"]),
+    skill!("oxplow-knowledge", ["search-existing", "write-page"]),
     skill!("oxplow-mermaid", ["syntax"]),
     skill!("oxplow-collection", ["custom-parsers"]),
     skill!(

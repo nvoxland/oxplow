@@ -2211,6 +2211,8 @@ mod tests {
                 "oxplow.knowledge.delete_page",
                 "oxplow.knowledge.drift",
                 "oxplow.knowledge.link",
+                // Bundled's menu entry for write_page, over its form.
+                "oxplow.knowledge.new_page",
                 "oxplow.knowledge.write_page",
                 // A download into .oxplow/lsp/, a person's call (P8.A9).
                 "oxplow.lsp.install_server",

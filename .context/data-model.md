@@ -1329,7 +1329,7 @@ materialized as an edge) and the paths it took out (`removed_files`:
 must be gone). Refs left in the body but in NEITHER list keep their
 existing pin — that's how "this content relies on a stale source" stays
 accurate ([knowledge.md](./knowledge.md)).
-Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-wiki-capture/SKILL.md`.
+Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-knowledge/SKILL.md`.
 
 **User-facing Freshness view.** `v_knowledge_ref` (read by
 `knowledge.ts`'s `readKnowledgeFreshness`) joins `page_ref` with the latest

@@ -6581,7 +6581,8 @@ commands:
             [
                 "oxplow.tasks.set_workflow",
                 "oxplow.tasks.clear_finished",
-                "oxplow.task.new"
+                "oxplow.task.new",
+                "oxplow.knowledge.new_page"
             ]
         );
         let mut datasets: Vec<&str> = b.datasets.iter().map(|m| m.decl.name.as_str()).collect();

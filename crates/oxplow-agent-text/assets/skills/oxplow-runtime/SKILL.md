@@ -48,7 +48,7 @@ finish.
 
 Refer to a task by its quoted title, never by id or "#N": the person
 can't map ids to what they see. Write entities in task bodies, summaries
-and wiki pages as `[[…]]` wikilinks (syntax: the oxplow-wiki-capture skill).
+and knowledge pages as `[[…]]` wikilinks (syntax: the oxplow-knowledge skill).
 Inline code is for identifiers and snippets.
 
 # Commands (the one write path)

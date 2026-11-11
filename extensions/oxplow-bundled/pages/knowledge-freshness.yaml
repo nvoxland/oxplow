@@ -13,7 +13,7 @@ params:
   role: filter
   label: Knowledge page (its id)
 answers:
-- {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"oxplow-wiki-capture"}
+- {"question":"Which files does this knowledge page cite, and which have changed?","params":{"store":"oxwiki","id":"auth-flow"},"skill":"oxplow-knowledge"}
 loaders:
   freshness:
     sql: |

@@ -109,7 +109,7 @@ harness only delivers them.
 | Preamble | How to work in oxplow: turns are observed and tracking work as tasks is the active tracker's skill's business, end with the question, reading the errors a person saw, the references oxplow puts in a prompt (`@<path>`, `[oxplow uri <uri>]`, `[oxplow <task uri>: …]`, `[oxplow page …]`) | `oxplow_agent_text::WORKING_IN_OXPLOW` (`crates/oxplow-agent-text/assets/working-in-oxplow.md`) |
 | Launch prompt | The preamble; the session context only for a harness without `prompt_context`; the thread's and stream's custom prompts; `agentPromptAppend`; the testing hint (`testing.agentHint`); the skill index only for a harness without `runtime_text` | `agent_prompt::assemble_system_prompt(config, stream, thread, around, harness, skills)`, given the session's declared harness (`crates/oxplow-app/src/agent_prompt.rs`) |
 | Skills | Core's (`oxplow-runtime`, `-wiki-capture`, `-mermaid`, `-collection`, `-metrics`, `-extension`, `-codebase`) and the active extensions' (one with `when:` only while its extension's setting holds it, `extensions-commands.md` "Skills") | `AgentText` (`oxplow_agent_text::core_text` + `capabilities::agent_text`, which reads the settings that offer skills) |
-| Slash commands | Core's (`review-comments`, `configure`, `new-metric`) and the active extensions' | Same |
+| Slash commands | Core's (`review-comments`, `configure`, `new-metric`, `note`: keep what was just worked out as a knowledge page) and the active extensions' | Same |
 | Session context | Stream, worktree, branch, thread, the other live agents in the worktree, the count of open handoffs to the thread | Prompt-time context |
 | Extension context | What an enabled extension says the agent should know now (`context:`), each as `<context from="<namespace>/<id>">`, once, then on change; 1,500 characters each, 3,000 in all | Prompt-time context (extensions-commands.md "Agent context") |
 | Handoffs | Work another thread handed this one, once, at the first prompt that takes it ("Handoffs and native messaging") | Prompt-time context |
@@ -128,7 +128,7 @@ tells an agent goes through them (`the_prompt_carries_no_project_instruction_fil
 writes the references beside `SKILL.md` (`shared::write_skills`); one that
 doesn't gets the index and reads a body with `oxplow_get_skill { name,
 reference? }`. Each rule has one home skill (wikilinks:
-`oxplow-wiki-capture`; waiting on the person: `oxplow-runtime`;
+`oxplow-knowledge`; waiting on the person: `oxplow-runtime`;
 foreground tests: `oxplow-collection`; `v_dataset`/`oxplow_query_sql`:
 `oxplow-extension`); the others point to it by name. No skill text names
 a task id or `.context/` (tests).
