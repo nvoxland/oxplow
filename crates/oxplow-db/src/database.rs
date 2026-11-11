@@ -1981,7 +1981,12 @@ mod tests {
                VALUES (1, 1, 'effort_start', 1, 'a', 1, 0);
              INSERT INTO event_log (id, type, v, at, source, effort_id, subject, payload)
                VALUES ('e1', 'effort.opened', 3, 'a', 's', 1, '[]', '{}'),
-                      ('e2', 'snapshot.taken', 3, 'a', 's', 1, '[]', '{\"trigger\":\"effort_start\"}');
+                      ('e2', 'snapshot.taken', 3, 'a', 's', 1,
+                       '[\"oxplow:oxplow/effort?id=eff1\",\"oxplow:oxplow/snapshot?id=1\"]',
+                       '{\"trigger\":\"effort_start\"}');
+             INSERT INTO page_visit (page_kind, page_id, visited_at)
+               VALUES ('oxplow/effort', 'oxplow:oxplow/effort?id=eff1', 'a'),
+                      ('oxplow/task', 'oxplow:oxplow/task?id=tsk1&provider=oxtask', 'a');
              INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (1, 1, 'x/a', 'a');
              INSERT INTO \"change\" (id, stream_id, kind, target, status) VALUES (1, 1, 'effort', '1', 'done');
              INSERT INTO change_file (change_id, path, status, additions, deletions, is_test)
@@ -2064,11 +2069,22 @@ mod tests {
             count("SELECT count(*) FROM sqlite_master WHERE name = 'snapshot_op_turn_file'"),
             1
         );
+        assert_eq!(
+            count("SELECT seq FROM sqlite_sequence WHERE name = 'metric_capture'"),
+            2,
+            "the deleted newest capture's id isn't used again"
+        );
+        assert_eq!(count("SELECT count(*) FROM page_visit"), 1, "Go To loses the effort");
+        assert_eq!(
+            conn.query_row("SELECT subject FROM event_log", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "[\"oxplow:oxplow/snapshot?id=1\"]"
+        );
         assert_eq!(count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
     }
 
     /// V23 carries what efforts knew into `request_task`: a request whose
-    /// turn started inside an effort's window, on its thread, links to the
+    /// turn overlapped an effort's window, on its thread, links to the
     /// effort's task; a turn outside the window, or an effort with no task,
     /// links nothing.
     #[test]

@@ -13,6 +13,15 @@
 -- rebuilt below; it is recreated, unchanged, at the end.
 DROP TRIGGER snapshot_op_turn_file;
 
+-- The id sequences of the tables rebuilt below: a rebuild's sequence is the
+-- highest id it copied, so ids past a deleted newest row would be used
+-- again (an old event's `run?id=` would name another run). Restored at the
+-- end.
+CREATE TABLE v25_seq AS
+  SELECT name, seq FROM sqlite_sequence
+   WHERE name IN ('change', 'agent_turn', 'agent_nudge', 'agent_token_usage',
+                  'metric_capture', 'agent_tool_call', 'once_mark', 'snapshot_op');
+
 -- What efforts measured: their measures, the specs over them, and the
 -- captures only the effort producers wrote.
 CREATE TEMP TABLE v25_measure (id INTEGER PRIMARY KEY);
@@ -380,6 +389,22 @@ DROP INDEX event_log_effort;
 ALTER TABLE event_log DROP COLUMN effort_id;
 ALTER TABLE extension_run DROP COLUMN effort_id;
 
+-- What still names an effort: pages visited (Go To would list a page
+-- nothing draws), event subjects, subjects no fact uses, and the state of
+-- the assets and tables that are gone.
+DELETE FROM page_visit
+ WHERE page_kind IN ('oxplow/effort', 'changes-effort') OR page_id LIKE 'oxplow:oxplow/effort?%';
+UPDATE event_log
+   SET subject = (SELECT json_group_array(j.value) FROM json_each(event_log.subject) j
+                   WHERE j.value NOT LIKE 'oxplow:oxplow/effort?%')
+ WHERE subject LIKE '%oxplow:oxplow/effort?%';
+DELETE FROM fact_subject
+ WHERE uri LIKE 'oxplow:oxplow/effort?%'
+   AND NOT EXISTS (SELECT 1 FROM fact f WHERE f.subject_id = fact_subject.id);
+DELETE FROM asset_state WHERE asset IN ('effort_evidence', 'search:oxplow/effort');
+DELETE FROM table_generation WHERE name IN ('effort', 'effort_file', 'effort_metric_delta',
+                                             'effort_observation_row', 'effort_evidence_state');
+
 -- The effort tables.
 DROP TABLE effort_evidence_state;
 DROP TABLE effort_observation_row;
@@ -433,6 +458,13 @@ BEGIN
     timed = min(timed, excluded.timed),
     shared = max(shared, excluded.shared);
 END;
+
+UPDATE sqlite_sequence
+   SET seq = (SELECT v.seq FROM v25_seq v WHERE v.name = sqlite_sequence.name)
+ WHERE seq < (SELECT v.seq FROM v25_seq v WHERE v.name = sqlite_sequence.name);
+INSERT INTO sqlite_sequence (name, seq)
+  SELECT name, seq FROM v25_seq WHERE name NOT IN (SELECT name FROM sqlite_sequence);
+DROP TABLE v25_seq;
 
 DROP TABLE v25_measure;
 DROP TABLE v25_capture;
