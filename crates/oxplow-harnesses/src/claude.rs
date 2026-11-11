@@ -180,6 +180,12 @@ impl AgentHarness for Claude {
     /// sends to whom.
     async fn tool_use(&self, body: &serde_json::Value) -> Option<ToolUse> {
         let mut call = claude_shaped_tool_use(body)?;
+        // A background shell's PostToolUse names the job it started.
+        call.started_job = body
+            .pointer("/tool_response/backgroundTaskId")
+            .and_then(|id| id.as_str())
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
         if call.name == "SendMessage" {
             let input = body.get("tool_input");
             let field = |k: &str| {
@@ -316,8 +322,12 @@ impl AgentHarness for Claude {
     }
 
     /// `SubagentStart` / `SubagentStop` name it by `agent_id` / `agent_type`.
+    ///
+    /// Every Stop is followed by a SubagentStop with an `agent_id` and an
+    /// empty `agent_type` (Claude Code's internal helper agent; no subagent
+    /// was asked for): that is no subagent of the session's.
     async fn subagent(&self, body: &serde_json::Value) -> Option<Subagent> {
-        super::shared::subagent_of(body)
+        super::shared::subagent_of(body).filter(|s| s.kind.as_deref() != Some(""))
     }
 
     async fn render(&self, answer: &HookAnswer) -> serde_json::Value {
@@ -1032,6 +1042,50 @@ mod tests {
             crate::test_launch::block(h.prompt(&quoted)),
             Some(Prompt::Person { .. })
         ));
+    }
+
+    /// A background Bash call's PostToolUse names the job it started
+    /// (`tool_response.backgroundTaskId`, the recorded
+    /// `claude/background_shell.jsonl`): the id its Stop and its report
+    /// name. Its PreToolUse and an ordinary call name none.
+    #[test]
+    fn a_background_shell_call_names_the_job_it_started() {
+        let h = harness("oxplow:claude-code", "claude");
+        let started = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "toolu_bg",
+            "tool_input": {"command": "sleep 45", "run_in_background": true},
+            "tool_response": {"stdout": "", "backgroundTaskId": "bkrmmrzrm"}
+        })))
+        .unwrap();
+        assert_eq!(started.started_job.as_deref(), Some("bkrmmrzrm"));
+        let before = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "toolu_bg",
+            "tool_input": {"command": "sleep 45", "run_in_background": true}
+        })))
+        .unwrap();
+        assert_eq!(before.started_job, None);
+        let plain = crate::test_launch::block(h.tool_use(&serde_json::json!({
+            "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_input": {"command": "ls"}, "tool_response": {"stdout": "x"}
+        })))
+        .unwrap();
+        assert_eq!(plain.started_job, None);
+    }
+
+    /// Every Claude Code Stop is followed by a SubagentStop with an
+    /// `agent_id` and an empty `agent_type` (an internal helper, recorded:
+    /// no subagent was asked for): it is no subagent of the session's.
+    #[test]
+    fn a_helper_agent_with_no_type_is_no_subagent() {
+        let h = harness("oxplow:claude-code", "claude");
+        let helper = serde_json::json!({
+            "hook_event_name": "SubagentStop", "agent_id": "a72d255bb6f97ae75", "agent_type": ""
+        });
+        assert_eq!(crate::test_launch::block(h.subagent(&helper)), None);
+        let real = serde_json::json!({
+            "hook_event_name": "SubagentStop", "agent_id": "afd849d5d475e378d", "agent_type": "general-purpose"
+        });
+        assert!(crate::test_launch::block(h.subagent(&real)).is_some());
     }
 
     /// A `SendMessage` call says what it sends to whom, so the turn that

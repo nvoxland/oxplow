@@ -347,3 +347,100 @@ async fn a_recorded_claude_code_peer_message_opens_a_turn_of_its_own() {
     );
     assert_eq!(turns[0].answer.as_deref(), Some("Marked it done."));
 }
+
+/// The tool calls of a replay that finished, by tool name, oldest first.
+async fn tools_of(r: &Replayed) -> Vec<String> {
+    events_of(r, "agent.tool.finished")
+        .await
+        .iter()
+        .map(|p| p["tool"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// Claude Code's background shell, recorded: the Bash call that starts it
+/// opens its job (kind shell), the `<task-notification>` that finishes it
+/// is a background job's report and not a person's prompt, it opens a turn
+/// that goes on with the one the job started in, and the SubagentStop
+/// after each Stop (an empty `agent_type`: an internal helper) opens and
+/// closes no subagent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_claude_code_background_shell_is_a_job_from_its_start_to_its_report() {
+    let r = replayed("claude/background_shell.jsonl", "claude").await;
+    let received = events_of(&r, "agent.prompt.submitted").await;
+    let sources: Vec<_> = received.iter().map(|p| p["source"].clone()).collect();
+    assert_eq!(sources, ["person", "background_job"]);
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 0);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 0);
+    assert_eq!(tools_of(&r).await, ["Read", "Bash", "Read"]);
+
+    use oxplow_domain::hook::TurnSource;
+    let mut turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    turns.sort_by_key(|t| t.id.value());
+    assert_eq!(
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [Some(TurnSource::Person), Some(TurnSource::BackgroundJob)]
+    );
+    assert!(turns[1]
+        .answer
+        .as_deref()
+        .unwrap()
+        .contains("done-sleeping"));
+
+    // One job: opened by the Bash call, finished by the notice.
+    type Job = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+    let jobs: Vec<Job> = r
+        .svc
+        .db
+        .read(|c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT harness_job_id, kind, start_basis, started_turn, report_turn, status, state
+                       FROM v_agent_job ORDER BY id",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    let trn =
+        |t: &oxplow_domain::AgentTurn| Some(format!("oxplow:oxplow/turn?id=trn{}", t.id.value()));
+    assert_eq!(
+        jobs,
+        [(
+            "bkrmmrzrm".to_string(),
+            Some("shell".to_string()),
+            Some("reported".to_string()),
+            trn(&turns[0]),
+            trn(&turns[1]),
+            Some("completed".to_string()),
+            "reported".to_string(),
+        )]
+    );
+}

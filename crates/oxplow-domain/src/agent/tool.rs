@@ -128,6 +128,10 @@ pub struct ToolUse {
     /// A message the call sends to another agent session (Claude Code's
     /// `SendMessage`): who to, and its text as the receiver will see it.
     pub sent: Option<SentMessage>,
+    /// The harness's id of the background job this call started (Claude
+    /// Code's Bash `backgroundTaskId`, on its PostToolUse): the job is
+    /// known from this call on, the id its Stop and its report name.
+    pub started_job: Option<String>,
     /// Whether it succeeded, when the harness said (a finished call).
     pub ok: Option<bool>,
     /// A shell call's exit code, when the harness said.

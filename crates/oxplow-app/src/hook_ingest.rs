@@ -810,6 +810,25 @@ fn record_tx(
             // A body that names no tool records nothing.
             if let Some(tool) = &tool {
                 log_tool_tx(conn, ev, thread, &row, env, tool, session)?;
+                // A call that started a background job opens its record: the
+                // turn that made the call started it, as the harness reports.
+                if let Some(job) = &tool.started_job {
+                    agent_job_store::seen_tx(
+                        conn,
+                        thread,
+                        slot,
+                        &JobSighting {
+                            id: job,
+                            kind: Some(job_kind(tool.kind)),
+                            start_call: tool.call_id.as_deref(),
+                            started_turn: applied.turn,
+                            basis: Some(CauseBasis::Reported),
+                            running: true,
+                            ..JobSighting::default()
+                        },
+                        now,
+                    )?;
+                }
                 // A plan put to the person: on the record before the dialog
                 // answers (a refused call proposes nothing).
                 let allowed = env.decision.as_ref().is_none_or(|d| d.allowed);
@@ -1343,6 +1362,17 @@ fn log_prompt_tx(
 
 /// What a job a subagent is, in `agent_job.kind`.
 const SUBAGENT_JOB: &str = "subagent";
+
+/// What a job a tool call started is, in `agent_job.kind`: the harness's
+/// own word for it (Claude Code's Stop says `shell`).
+fn job_kind(tool: oxplow_domain::agent::tool::ToolKind) -> &'static str {
+    use oxplow_domain::agent::tool::ToolKind;
+    match tool {
+        ToolKind::Shell => "shell",
+        ToolKind::Subagent => SUBAGENT_JOB,
+        _ => "other",
+    }
+}
 
 /// The dedupe key of harness session `session`'s tool call `call` at
 /// `phase` (`requested`, `finished`, `plan`): one occurrence each.
@@ -3956,6 +3986,81 @@ mod tests {
         let events = logged(&svc).await;
         let ended = of_type(&events, "agent.turn.ended");
         assert_eq!(ended[0].envelope.payload["left_running"][0]["id"], "a105c");
+    }
+
+    /// A background shell's job opens at the call that starts it (its
+    /// PostToolUse names the job), in the turn that made the call, before
+    /// any Stop lists it; the Stop and the report keep that start.
+    #[tokio::test]
+    async fn a_background_shell_job_opens_at_its_starting_call() {
+        let (svc, tid) = fixture().await;
+        svc.ingest(hook(
+            HookKind::UserPromptSubmit,
+            tid,
+            Some("h1"),
+            json!({"prompt": "go"}),
+        ))
+        .await
+        .unwrap();
+        let bash = json!({
+            "tool_name": "Bash", "tool_use_id": "toolu_bg",
+            "tool_input": {"command": "sleep 9", "run_in_background": true},
+            "tool_response": {"stdout": "", "backgroundTaskId": "bsh1"}
+        });
+        svc.ingest(hook(HookKind::PostToolUse, tid, Some("h1"), bash))
+            .await
+            .unwrap();
+        let rows = |svc: &HookIngestService| {
+            let db = svc.db.clone();
+            async move {
+                db.read(|c| {
+                    let mut stmt = c
+                        .prepare(
+                            "SELECT harness_job_id, kind, started_turn, start_basis, state
+                               FROM v_agent_job ORDER BY id",
+                        )
+                        .map_err(oxplow_db::map_sql_err)?;
+                    let rows = stmt
+                        .query_map([], |r| {
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, Option<String>>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                                r.get::<_, Option<String>>(3)?,
+                                r.get::<_, String>(4)?,
+                            ))
+                        })
+                        .map_err(oxplow_db::map_sql_err)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(oxplow_db::map_sql_err)
+                })
+                .await
+                .unwrap()
+            }
+        };
+        let expected = vec![(
+            "bsh1".to_string(),
+            Some("shell".to_string()),
+            Some("oxplow:oxplow/turn?id=trn1".to_string()),
+            Some("reported".to_string()),
+            "running".to_string(),
+        )];
+        assert_eq!(rows(&svc).await, expected);
+        // The Stop that lists it running keeps the start.
+        svc.ingest(HookEnvelope {
+            turn_run: Some(TurnRun {
+                left_running: Some(vec![oxplow_domain::hook::RunningWork {
+                    id: "bsh1".into(),
+                    kind: Some("shell".into()),
+                    description: None,
+                }]),
+                ..TurnRun::default()
+            }),
+            ..hook(HookKind::Stop, tid, Some("h1"), json!({}))
+        })
+        .await
+        .unwrap();
+        assert_eq!(rows(&svc).await, expected);
     }
 
     /// A job the agent started in the background is one record from its

@@ -1545,7 +1545,11 @@ hook that shows it, so a turn opened by its report finds the turn it goes
 on with at once, with no projection lag:
 
 - **Opened by** a `SubagentStart` (kind `subagent`, started in the open
-  turn, `start_basis` `reported`), or a Stop's running work
+  turn, `start_basis` `reported`), the call that starts it (a finished
+  tool call that names the job it started, `ToolUse.started_job`: Claude
+  Code's Bash `PostToolUse` `tool_response.backgroundTaskId`; kind
+  `shell`, the call's id as `start_call_id`, the open turn as the start,
+  `reported`), or a Stop's running work
   (`TurnRun.left_running`, Claude Code's `background_tasks`: started in
   the turn that Stop closes — oxplow's guess, `matched`). A later sight
   fills what the row lacks, and a reported start replaces a matched
@@ -1572,11 +1576,19 @@ on with at once, with no projection lag:
   its session, for a call made with no turn open).
 
 Claude Code's ids line up: the notice's `<task-id>`, the Stop's
-`background_tasks[].id` and a subagent's `agent_id` are one id
-(`claude/subagent.jsonl`). A job with no report and not lost is
+`background_tasks[].id`, the Bash call's `backgroundTaskId` and a
+subagent's `agent_id` are one id (`claude/subagent.jsonl`,
+`claude/background_shell.jsonl`). **Every Stop is followed ~1.5 s later by
+a `SubagentStop` with an `agent_id` and `agent_type: ""`** (an internal
+helper; no subagent was asked for): the Claude adapter reads no subagent
+from it (`AgentHarness::subagent` is `None`), so it opens and closes no
+subagent record or job. A job with no report and not lost is
 `running` (`v_agent_job.state`): that is what a request is waiting on.
 Pinned also by `a_jobs_start_basis_resumed_runs_and_lost_jobs`. Pinned by
-`a_background_job_is_a_record_from_start_to_report`.
+`a_background_job_is_a_record_from_start_to_report`,
+`a_background_shell_job_opens_at_its_starting_call` and the recorded
+`claude/background_shell.jsonl`
+(`a_recorded_claude_code_background_shell_is_a_job_from_its_start_to_its_report`).
 
 ### Requests
 
@@ -1840,7 +1852,7 @@ Cross-thread ownership and duplicate work are visibility, not gates
 
 The session integration is checked against these versions: **Codex CLI
 0.162.1** (the 0.163 daemon was probed for "Codex: its TUI on a thread
-oxplow observes"), **Claude Code 2.1.301**, **opencode 1.17.4**; the
+oxplow observes"), **Claude Code 2.1.322**, **opencode 1.17.4**; the
 recorded fixtures (`crates/oxplow-harnesses/fixtures/{claude,opencode}`,
 `crates/oxplow-app/tests/fixtures/codex/app-server.jsonl`) were taken at
 the versions current when recorded. A harness declares what it supports
@@ -2146,7 +2158,8 @@ No findings passes.
   and opencode, recorded with `OXPLOW_HOOK_DEBUG`, is checked in at
   `crates/oxplow-harnesses/fixtures/<harness>/hooks.jsonl` (`{event,
   payload}` per line; paths scrubbed to `<ROOT>`, `<HOME>`, `<TMP>`;
-  `claude/subagent.jsonl` is a background-subagent session).
+  `claude/subagent.jsonl` is a background-subagent session,
+  `claude/background_shell.jsonl` a background shell).
   `tests/replayed_harnesses.rs` posts each in order to a live route as a
   session of its harness, its own mapping and answers running, and the
   suite checks the record (tokens aren't replayed). When an agent's hook

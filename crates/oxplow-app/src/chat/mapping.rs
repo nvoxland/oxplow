@@ -90,6 +90,7 @@ pub fn tool_use(t: &ToolCall) -> Option<ToolUse> {
         plan: None,
         subagent: None,
         sent: None,
+        started_job: None,
         input: Some(t.raw_input.clone().unwrap_or_else(|| serde_json::json!({}))),
         output: tool_response(t),
     })
