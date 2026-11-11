@@ -23,7 +23,8 @@ use oxplow_domain::tasks::{
 use oxplow_domain::{CommandCall, CommandError, InputValidator};
 use serde_json::Value;
 
-use super::registry::{CapabilityHost, Instance};
+use super::endpoint::Endpoint;
+use super::registry::CapabilityHost;
 
 /// A provider's declared task tracker features.
 pub fn features_of(features: &Value) -> Result<TaskTrackerFeatures, String> {
@@ -49,7 +50,7 @@ impl CapabilityHost for TaskTrackerHost {
 
     fn prepare(
         &self,
-        instance: &Arc<Instance>,
+        instance: &Arc<dyn Endpoint>,
     ) -> Result<super::registry::PreparedProviderCapability, String> {
         let provider = ExternalTaskTracker::provider(instance)?;
         let features = serde_json::to_value(provider.features).map_err(|e| e.to_string())?;
@@ -66,7 +67,7 @@ impl CapabilityHost for TaskTrackerHost {
 }
 
 pub struct ExternalTaskTracker {
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     /// Each declared verb's compiled input schema.
     inputs: BTreeMap<String, InputValidator>,
 }
@@ -74,16 +75,16 @@ pub struct ExternalTaskTracker {
 impl ExternalTaskTracker {
     /// The capability provider over a started instance: its id, its
     /// declared features, and its verbs.
-    pub fn provider(instance: &Arc<Instance>) -> Result<TaskTracker, String> {
+    pub fn provider(instance: &Arc<dyn Endpoint>) -> Result<TaskTracker, String> {
         let decl = instance
-            .declared
+            .declared()
             .capabilities
             .iter()
             .find(|c| c.capability == TaskTrackerHost::CAPABILITY)
             .ok_or("it doesn't declare the tasks capability")?;
         let features = features_of(&decl.features)?;
         let inputs = instance
-            .declared
+            .declared()
             .commands
             .iter()
             .filter(|c| {
@@ -98,10 +99,10 @@ impl ExternalTaskTracker {
             })
             .collect::<Result<_, _>>()?;
         Ok(TaskTracker {
-            id: instance.id.clone(),
-            id_pattern: instance.spec.id_pattern.clone(),
+            id: instance.id().to_string(),
+            id_pattern: instance.id_pattern().map(str::to_string),
             sink: false,
-            stages: instance.spec.stages.clone(),
+            stages: instance.stages().to_vec(),
             features,
             verbs: Arc::new(ExternalTaskTracker {
                 instance: instance.clone(),
@@ -114,7 +115,7 @@ impl ExternalTaskTracker {
 #[async_trait]
 impl TaskVerbs for ExternalTaskTracker {
     async fn restart(&self) {
-        self.instance.end_process().await;
+        self.instance.restart().await;
     }
 
     async fn invoke(
@@ -124,7 +125,7 @@ impl TaskVerbs for ExternalTaskTracker {
         input: Value,
     ) -> Result<VerbOutcome, CommandError> {
         let actor = call.actor().clone();
-        let id = &self.instance.id;
+        let id = self.instance.id();
         let validator = self.inputs.get(verb).ok_or_else(|| CommandError::Invalid {
             field: None,
             message: format!("{id} tasks don't support `{verb}`"),

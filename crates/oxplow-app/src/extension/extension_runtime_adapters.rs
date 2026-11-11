@@ -12,6 +12,7 @@ pub struct PreparedRuntimeAdapters {
     knowledge: crate::knowledge::PreparedKnowledge,
     snapshots: crate::snapshots::PreparedSnapshots,
     models: crate::ai_service::PreparedModelProviders,
+    scripts: crate::providers::script::PreparedScripts,
     jobs: std::sync::Arc<crate::extension::extension_job_operations::JobOperationRegistry>,
 }
 
@@ -28,6 +29,7 @@ impl PreparedRuntimeAdapters {
         }
         let declared = crate::capabilities::declared_by(snapshot.extensions());
         let jobs = svc.jobs.prepare_registry(snapshot)?;
+        let scripts = svc.providers.prepare_scripts(snapshot)?;
         let mut errors = VocabularyErrors::new();
         let models = crate::ai_service::prepare_built_ins(&declared).map_err(|failures| {
             for (id, message) in failures {
@@ -50,6 +52,7 @@ impl PreparedRuntimeAdapters {
                 &svc.snapshot_files(),
             ),
             models: models.expect("all adapter errors were rejected"),
+            scripts,
             jobs,
         })
     }
@@ -65,6 +68,7 @@ impl PreparedRuntimeAdapters {
         self.snapshots
             .publish(&svc.snapshots, &svc.snapshot_captures);
         self.models.publish(svc.ai.providers());
+        svc.providers.publish_scripts(self.scripts);
         svc.jobs.publish_registry(self.jobs);
     }
 

@@ -239,6 +239,15 @@ async fn run(
             test_provider(&host, root, &ext, spec, bless, &env, &mut report).await;
             report.finish_case(format!("provider {}", spec.id), mark);
         }
+        // A script implementation runs its capability's suite, as a
+        // provider's program does.
+        for decl in ext.implementations.iter().filter(|d| d.script.is_some()) {
+            let mark = report.mark();
+            let case = format!("implementation {}", decl.id);
+            report.ran.push(case.clone());
+            suites::script_suite(&host, decl, &env, &mut report).await;
+            report.finish_case(case, mark);
+        }
         page_answers(&host, &ext, &mut report).await;
         let mark = report.mark();
         questions(&host, &ext, &mut report).await;

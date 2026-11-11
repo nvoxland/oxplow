@@ -14,13 +14,16 @@ use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 
 const USAGE: &str = "\
 usage:
-  oxplow extension new <page|extension|provider|collector|metric|command|effect|component|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
+  oxplow extension new <page|extension|provider|implementation|collector|metric|command|effect|component|advisory|skill|panel|job|query> <name> [--origin <ref>] [--capability <cap>] [--language <lang>] [--glob <glob>] [--root <dir>]
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the request/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
       provider of --capability (task_tracker, the default,
       agent_harness, snapshots, knowledge or filesystem)
-      with its contract's declarations, a stub program and test config; a Starlark
+      with its contract's declarations, a stub program and test config; a
+      script implementation of --capability (the same ones): its
+      `implementations:` entry and one Starlark function per verb (a task
+      tracker's a working one, another's stubs); a Starlark
       collector with a dataset and a page over it; a code metric (--language,
       default rust, over --glob, default the language's files): a per-path
       measure, a collector counting each file's functions over a complexity
@@ -32,7 +35,8 @@ usage:
       commands, page and an effect that publishes the reply); a query (rows
       other pages read, as a choice's options). Each checks clean
       and passes `test` as written
-      (a provider once a real program replaces its stub)
+      (a provider once a real program replaces its stub, another
+      capability's script once its verbs are written)
   oxplow extension new --from <example> [<name>] [--root <dir>]
   oxplow extension new --list-examples
       copy an example extension oxplow ships (a working one: its pages,
@@ -110,7 +114,8 @@ impl From<crate::SdkError> for Failure {
 struct Parsed {
     positional: Vec<String>,
     origin: Option<String>,
-    /// `new provider --capability`: the capability it implements.
+    /// `new provider --capability`, `new implementation --capability`: the
+    /// capability it implements.
     capability: Option<String>,
     /// `new --from <example>`: the example to copy.
     from: Option<String>,
@@ -276,8 +281,12 @@ fn run_inner(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Resul
                     (Kind::Provider { .. }, Some(capability)) => {
                         Kind::provider(capability).map_err(|e| Failure::Usage(e.to_string()))?
                     }
+                    (Kind::Implementation { .. }, Some(capability)) => {
+                        Kind::implementation(capability)
+                            .map_err(|e| Failure::Usage(e.to_string()))?
+                    }
                     (_, Some(_)) => return Err(Failure::Usage(
-                        "--capability is a provider's: `new provider <name> --capability <cap>`"
+                        "--capability is a provider's or an implementation's: `new provider <name> --capability <cap>`"
                             .into(),
                     )),
                     (kind, None) => kind,
@@ -777,6 +786,47 @@ mod tests {
         ]);
         assert_eq!(code, 2, "{err}");
         assert!(err.contains("--capability"), "{err}");
+    }
+
+    /// `new implementation --capability` scaffolds a script implementation of
+    /// that capability: its entry is the script; one without verbs is
+    /// refused.
+    #[test]
+    fn new_implementation_takes_a_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let (code, _, err) = cli(&[
+            "new",
+            "implementation",
+            "shelf",
+            "--capability",
+            "knowledge",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 0, "{err}");
+        let ext = dir.path().join(".oxplow/extensions/shelf");
+        let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
+        assert!(manifest.contains("capability: knowledge\n"), "{manifest}");
+        assert!(
+            manifest.contains("entry: implementations/shelf.star\n"),
+            "{manifest}"
+        );
+        let script = std::fs::read_to_string(ext.join("implementations/shelf.star")).unwrap();
+        for verb in ["write_page", "delete_page", "link"] {
+            assert!(script.contains(&format!("def {verb}(x):")), "{script}");
+        }
+        let (code, _, err) = cli(&[
+            "new",
+            "implementation",
+            "git",
+            "--capability",
+            "vcs",
+            "--root",
+            root,
+        ]);
+        assert_eq!(code, 2, "{err}");
+        assert!(err.contains("`vcs`"), "{err}");
     }
 
     /// `new metric` takes the language and files it scans; the flags are a

@@ -51,6 +51,21 @@ that exists is refused):
   `knowledge.page.recorded@2` event `{ page: { uri: "oxplow:oxplow/wiki?slug=<slug>", title,
   body, uris, updated_at, deleted? } }` (`uris`: the body's links as `oxplow:oxplow/file?path=…` /
   `oxplow:oxplow/wiki?slug=…`), and a `knowledge_pages` collector of the same rows;
+- `implementation` — a capability implemented by a script instead of a
+  program: an `implementations:` entry whose `entry` is a Starlark file
+  (`implementations/<id>.star`) with one function per verb, for the same
+  `--capability` choices as `provider` (a task tracker's works as
+  written; another's verbs are stubs that fail until you write them).
+  Each function gets `x = { input, config, id, key }` and answers `{ result,
+  events?, inverse? }`, as a provider's verb does; it runs in the
+  sandbox, calling only the scopes in its `needs:` (granted in
+  `permissions:`), and keeps what it needs between calls in what it can
+  read back (a task tracker: the `task.recorded@3` it answers, read from
+  `v_task`). The entry also says what a provider declares: `features:`
+  (one left out is off), `data:`, a task tracker's `stages:`, `fields:`,
+  `id_pattern:`. Choose it in Settings → Capabilities
+  (`oxplow.capability.choose`); `extension test` runs its capability's
+  conformance suite. Example: `--from note-tracker`;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs under the extension's permissions);
 - `job` — model work that runs on its own, outside any transaction: the

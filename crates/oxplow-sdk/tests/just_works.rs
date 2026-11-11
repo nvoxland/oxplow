@@ -839,6 +839,72 @@ async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() 
     );
 }
 
+/// A scaffolded script task tracker works as written: it checks clean, its
+/// example (chosen, a task the interface files is one of its items) passes,
+/// and `extension test` runs the task tracker conformance suite against it,
+/// as against a provider's program.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_script_task_tracker_checks_tests_and_conforms() {
+    let dir = project().await;
+    scaffolded(dir.path(), "implementation", "jotter").await;
+    let ran = tested(dir.path(), "jotter").await;
+    for want in [
+        "example basic",
+        "implementation jotter",
+        "task_tracker suite",
+    ] {
+        assert!(ran.iter().any(|r| r == want), "{want}: {ran:?}");
+    }
+    let svc = booted(dir.path()).await;
+    let ext = loaded(&svc, dir.path(), "jotter");
+    assert_eq!(
+        ext.implementations[0].entry.as_deref(),
+        Some("implementations/jotter.star")
+    );
+    assert_eq!(ext.implementations[0].needs, vec!["sql.read".to_string()]);
+}
+
+/// A scaffolded script implementation of another capability checks clean,
+/// and is red until its verbs are written: its stubs fail the capability's
+/// conformance suite.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scaffolded_script_implementation_is_red_until_its_verbs_are_written() {
+    let dir = project().await;
+    scaffold(
+        dir.path(),
+        Kind::implementation("knowledge").unwrap(),
+        "shelf",
+        Some("oxplow:oxplow/request?id=req1"),
+    )
+    .unwrap();
+    let report = check(
+        dir.path(),
+        "shelf",
+        &ExtensionCatalog::new(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(report.ok, "{}", render_findings(&report, Format::Text));
+    let report = test_extension(dir.path(), "shelf", false).await.unwrap();
+    assert!(
+        report.ran.iter().any(|r| r == "knowledge suite"),
+        "{:?}",
+        report.ran
+    );
+    assert!(
+        report
+            .error_lines()
+            .iter()
+            .any(|e| e.contains("knowledge conformance")),
+        "{:?}",
+        report.errors
+    );
+    assert!(Kind::implementation("vcs").is_err());
+}
+
 /// The fields `scripts/record-just-works.sh` strips from a recorded
 /// `run.json`: the author's machine (denied commands carry local paths),
 /// the session and the cost.

@@ -416,6 +416,20 @@ pub fn check_starlark(path: &str, script: &str) -> Result<(), String> {
 /// Whether `script` parses and defines each of `functions` at the top
 /// level of its module; a message naming the first one missing.
 pub fn check_starlark_defines(path: &str, script: &str, functions: &[&str]) -> Result<(), String> {
+    let defined = top_level_defs(path, script)?;
+    for name in functions {
+        if !defined.iter().any(|d| d == name) {
+            return Err(format!(
+                "must define `{name}` (`def {name}(x):`) at the top level"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The functions `script` (the file at `path`) defines at the top level of
+/// its module, in order; a message when it doesn't parse.
+pub fn top_level_defs(path: &str, script: &str) -> Result<Vec<String>, String> {
     use starlark::syntax::ast::StmtP;
     use starlark::syntax::{AstModule, Dialect};
     let ast = AstModule::parse(path, script.to_string(), &Dialect::Standard)
@@ -424,17 +438,13 @@ pub fn check_starlark_defines(path: &str, script: &str, functions: &[&str]) -> R
         StmtP::Statements(stmts) => stmts.iter().collect::<Vec<_>>(),
         _ => vec![ast.statement()],
     };
-    for name in functions {
-        let defines = top
-            .iter()
-            .any(|s| matches!(&s.node, StmtP::Def(d) if d.name.ident == *name));
-        if !defines {
-            return Err(format!(
-                "must define `{name}` (`def {name}(x):`) at the top level"
-            ));
-        }
-    }
-    Ok(())
+    Ok(top
+        .iter()
+        .filter_map(|s| match &s.node {
+            StmtP::Def(d) => Some(d.name.ident.clone()),
+            _ => None,
+        })
+        .collect())
 }
 
 /// Run a Starlark script against `input`. The script must define

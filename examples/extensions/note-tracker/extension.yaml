@@ -1,0 +1,31 @@
+manifest: 2
+name: note-tracker
+description: A task tracker written as a script — one Starlark function per verb — that keeps its notes in oxplow's own record.
+engine: ">=0.7"
+version: 0.1.0
+intent:
+  purpose: >-
+    Show a capability implemented by a script: the task tracker's verbs
+    (create, update, transition) are functions of trackers/notes.star, called
+    through the same dispatch as a built-in's and a provider's. Choose it in
+    Settings → Capabilities and the task commands file notes in it.
+  origin: null
+  examples:
+    - name: files-a-note
+      input: { sql: "SELECT title, stage, state FROM v_task WHERE provider = 'notes'" }
+      expect: chosen as the task tracker, a created task is a note in its first stage, and a transition moves it
+# The script reads its own notes back from v_task.
+permissions: [sql.read]
+implementations:
+  - capability: task_tracker
+    id: notes
+    title: Notes
+    description: Notes kept by a script, in oxplow's own record.
+    entry: trackers/notes.star
+    needs: [sql.read]
+    config: { prefix: n }
+    id_pattern: "n\\d+"
+    stages:
+      - { id: jotted, title: Jotted, bucket: todo }
+      - { id: working, title: Working, bucket: in_progress }
+      - { id: settled, title: Settled, bucket: done }

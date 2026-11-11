@@ -637,88 +637,33 @@ pub(super) async fn suite(
                 ) => {}
             other => return Err(format!("it didn't start: {other:?}")),
         }
-        let findings = match spec.capability.as_str() {
-            providers::tasks::TaskTrackerHost::CAPABILITY => {
-                let provider = svc.tasks.get(&spec.id).map_err(|e| e.to_string())?;
-                // Every create files on the active tracker (tsk1058): the
-                // throwaway host's is the one under test.
-                svc.config
-                    .write()
-                    .map_err(|e| e.to_string())?
-                    .active_providers
-                    .insert("task_tracker".into(), provider.id.clone());
-                // …and published, as a `oxplow.config.set` would: the interface
-                // reads the active list's items.
-                publish_generation(&svc).await?;
-                oxplow_app::task_tracker_conformance::suite(
-                    &svc.tasks_client(),
-                    &provider.id,
-                    provider.features,
-                    None,
-                    &oxplow_app::task_tracker_conformance::ServicesProbe(&svc),
-                    &Actor::Human,
-                )
-                .await
-            }
-            providers::agent_harness::HarnessHost::CAPABILITY => {
-                // Its launch looks for programs where the kit's
-                // environment would: its PATH, then the install dirs.
-                oxplow_app::harness_conformance::suite(
-                    &svc,
-                    &spec.id,
-                    &json!({}),
-                    &kit_search_path(env),
-                )
-                .await
-            }
-            providers::knowledge::KnowledgeHost::CAPABILITY => {
-                // The instance under test is the project's knowledge store;
-                // its record follows it once the switch is delivered, which
-                // must happen before the suite writes (a late delivery
-                // would empty what it wrote).
-                svc.config
-                    .write()
-                    .map_err(|e| e.to_string())?
-                    .active_providers
-                    .insert(spec.capability.clone(), spec.id.clone());
-                publish_generation(&svc).await?;
-                svc.event_pump.run_once().await.map_err(|e| e.to_string())?;
-                oxplow_app::task_tracker_conformance::SuiteRun {
-                    findings: oxplow_app::knowledge_conformance::suite(&svc, &Actor::Human).await,
-                    left: Vec::new(),
-                }
-            }
-            providers::snapshots::SnapshotsHost::CAPABILITY => {
-                // The instance under test is the project's snapshots, and
-                // the captures follow it now (the throwaway host's pump
-                // may not have delivered the switch yet).
-                svc.config
-                    .write()
-                    .map_err(|e| e.to_string())?
-                    .active_providers
-                    .insert(spec.capability.clone(), spec.id.clone());
-                publish_generation(&svc).await?;
-                oxplow_app::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
-                let provider = svc
-                    .snapshots
-                    .get(&spec.id)
-                    .ok_or_else(|| format!("`{}` isn't a snapshot implementation", spec.id))?;
-                let stream = svc
-                    .snapshot_captures
-                    .primary()
-                    .ok_or("the throwaway project has no worktree to mark")?
-                    .stream_id()
-                    .to_owned();
-                oxplow_app::snapshot_conformance::suite(&svc, provider.as_ref(), stream).await
-            }
-            other => return Err(format!("no conformance suite for `{other}`")),
-        };
+        let findings = capability_suite(&svc, &spec.capability, &spec.id, env).await?;
         svc.providers
             .stop(&spec.approval_name(&ext.namespace))
             .await;
         Ok::<_, String>(findings)
     };
-    match run.await {
+    let failed = |e: String| {
+        error(
+            "extension.yaml",
+            None,
+            "suite.host_failed",
+            format!("provider `{}` couldn't run under a host: {e}", spec.id),
+        )
+        .fix("see the message")
+    };
+    conformance_findings(&spec.capability, run.await.map_err(failed), report);
+}
+
+/// What a capability's conformance run came to, in the report: what it
+/// left in the implementation's own system, and each failed check — or why
+/// it couldn't run.
+fn conformance_findings(
+    capability: &str,
+    run: Result<oxplow_app::task_tracker_conformance::SuiteRun, Diagnostic>,
+    report: &mut TestReport,
+) {
+    match run {
         Ok(run) => {
             report.left.extend(run.left);
             for f in run.findings {
@@ -727,23 +672,132 @@ pub(super) async fn suite(
                         "extension.yaml",
                         None,
                         "suite.conformance",
-                        format!(
-                            "{} conformance `{}`: {}",
-                            spec.capability, f.check, f.message
-                        ),
+                        format!("{capability} conformance `{}`: {}", f.check, f.message),
                     )
-                    .fix(format!("the provider's `{}` handling", f.check)),
+                    .fix(format!("the implementation's `{}` handling", f.check)),
                 );
             }
         }
-        Err(e) => report.errors.push(
-            error(
-                "extension.yaml",
-                None,
-                "suite.host_failed",
-                format!("provider `{}` couldn't run under a host: {e}", spec.id),
-            )
-            .fix("see the message"),
-        ),
+        Err(e) => report.errors.push(e),
     }
+}
+
+/// The conformance suite of a script implementation (`implementations:`
+/// with a script as its `entry`), through a throwaway host as a provider's
+/// runs: on an oxplow of its own, the implementation chosen as the
+/// project's (a many-capability's is active as declared), then its
+/// capability's suite.
+pub(super) async fn script_suite(
+    host: &Host,
+    decl: &oxplow_app::extension::extensions::implementations::ImplementationDecl,
+    env: &host::HostEnv,
+    report: &mut TestReport,
+) {
+    report.ran.push(format!("{} suite", decl.capability));
+    let run = async {
+        let fork = host.fork().await?;
+        let svc = fork.svc.clone();
+        if oxplow_domain::capability::spec(&decl.capability).is_some_and(|c| c.choosable) {
+            svc.config
+                .write()
+                .map_err(|e| e.to_string())?
+                .active_providers
+                .insert(decl.capability.clone(), decl.id.clone());
+        }
+        publish_generation(&svc).await?;
+        capability_suite(&svc, &decl.capability, &decl.id, env).await
+    };
+    let failed = |e: String| {
+        error(
+            "extension.yaml",
+            None,
+            "suite.host_failed",
+            format!(
+                "`{}` implementation `{}` couldn't run under a host: {e}",
+                decl.capability, decl.id
+            ),
+        )
+        .fix("see the message")
+    };
+    conformance_findings(&decl.capability, run.await.map_err(failed), report);
+}
+
+/// Run `capability`'s conformance suite on `svc` against its
+/// implementation `id` (an instance's or a script's, already published).
+async fn capability_suite(
+    svc: &Arc<oxplow_app::Services>,
+    capability: &str,
+    id: &str,
+    env: &host::HostEnv,
+) -> Result<oxplow_app::task_tracker_conformance::SuiteRun, String> {
+    Ok(match capability {
+        providers::tasks::TaskTrackerHost::CAPABILITY => {
+            let provider = svc.tasks.get(id).map_err(|e| e.to_string())?;
+            // Every create files on the active tracker (tsk1058): the
+            // throwaway host's is the one under test.
+            svc.config
+                .write()
+                .map_err(|e| e.to_string())?
+                .active_providers
+                .insert("task_tracker".into(), provider.id.clone());
+            // …and published, as a `oxplow.config.set` would: the interface
+            // reads the active list's items.
+            publish_generation(svc).await?;
+            oxplow_app::task_tracker_conformance::suite(
+                &svc.tasks_client(),
+                &provider.id,
+                provider.features,
+                None,
+                &oxplow_app::task_tracker_conformance::ServicesProbe(svc),
+                &Actor::Human,
+            )
+            .await
+        }
+        providers::agent_harness::HarnessHost::CAPABILITY => {
+            // Its launch looks for programs where the kit's
+            // environment would: its PATH, then the install dirs.
+            oxplow_app::harness_conformance::suite(svc, id, &json!({}), &kit_search_path(env)).await
+        }
+        providers::knowledge::KnowledgeHost::CAPABILITY => {
+            // The one under test is the project's knowledge store;
+            // its record follows it once the switch is delivered, which
+            // must happen before the suite writes (a late delivery
+            // would empty what it wrote).
+            svc.config
+                .write()
+                .map_err(|e| e.to_string())?
+                .active_providers
+                .insert(capability.to_string(), id.to_string());
+            publish_generation(svc).await?;
+            svc.event_pump.run_once().await.map_err(|e| e.to_string())?;
+            oxplow_app::task_tracker_conformance::SuiteRun {
+                findings: oxplow_app::knowledge_conformance::suite(svc, &Actor::Human).await,
+                left: Vec::new(),
+            }
+        }
+        providers::snapshots::SnapshotsHost::CAPABILITY => {
+            // The one under test is the project's snapshots, and
+            // the captures follow it now (the throwaway host's pump
+            // may not have delivered the switch yet).
+            svc.config
+                .write()
+                .map_err(|e| e.to_string())?
+                .active_providers
+                .insert(capability.to_string(), id.to_string());
+            publish_generation(svc).await?;
+            oxplow_app::snapshots::apply_active_policy(&svc.snapshots, &svc.snapshot_captures);
+            let provider = svc
+                .snapshots
+                .get(id)
+                .ok_or_else(|| format!("`{id}` isn't a snapshot implementation"))?;
+            let stream = svc
+                .snapshot_captures
+                .primary()
+                .ok_or("the throwaway project has no worktree to mark")?
+                .stream_id()
+                .to_owned();
+            oxplow_app::snapshot_conformance::suite(svc, provider.as_ref(), stream).await
+        }
+        other => return Err(format!("no conformance suite for `{other}`")),
+    })
 }

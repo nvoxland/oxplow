@@ -602,7 +602,7 @@ panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see extensions-commands.md "Commands")
 resources: …        # kinds of thing a URI can name (see extensions-events.md "Resources"); each has an optional one-sentence `description:`
 event_types: …      # its own namespace's event types (stable; see extensions-events.md "Event types", P8)
-implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults); each has an optional one-sentence `description:`
+implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults): a built-in (`entry: "oxplow:<name>"`), an AI provider's Rust kind (`provider:`), or a script of the extension (`entry: <file>.star`, `needs:`) for any capability with verbs (see extensions-commands.md "Implementations"); each has an optional one-sentence `description:`
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see extensions-events.md "Effects")

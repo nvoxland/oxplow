@@ -27,7 +27,8 @@ use oxplow_domain::knowledge::{Kept, KnowledgeProvider, KnowledgeRegistry, PageC
 use oxplow_domain::{CommandError, DomainError, InputValidator};
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
+use super::endpoint::Endpoint;
+use super::registry::{CapabilityHost, PreparedProviderCapability};
 
 /// The knowledge side of the host: a started instance is a store in
 /// `Services.knowledge`, under its id.
@@ -46,8 +47,8 @@ impl CapabilityHost for KnowledgeHost {
         self.0.has(id)
     }
 
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
-        let declared = &instance.declared;
+    fn prepare(&self, instance: &Arc<dyn Endpoint>) -> Result<PreparedProviderCapability, String> {
+        let declared = instance.declared();
         let features = declared
             .capabilities
             .iter()
@@ -85,7 +86,7 @@ impl CapabilityHost for KnowledgeHost {
 }
 
 pub struct ExternalKnowledge {
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     /// Each contract verb's compiled input schema.
     verbs: BTreeMap<&'static str, InputValidator>,
 }
@@ -93,7 +94,7 @@ pub struct ExternalKnowledge {
 impl ExternalKnowledge {
     fn failed(&self, message: impl std::fmt::Display) -> CommandError {
         CommandError::Failed {
-            message: format!("knowledge store `{}`: {message}", self.instance.name),
+            message: format!("knowledge store `{}`: {message}", self.instance.name()),
         }
     }
 
@@ -112,7 +113,7 @@ impl ExternalKnowledge {
         schema.check(&input).map_err(|e| match e {
             CommandError::Invalid { field, message } => CommandError::Invalid {
                 field,
-                message: format!("{} `{verb}`: {message}", self.instance.id),
+                message: format!("{} `{verb}`: {message}", self.instance.id()),
             },
             other => other,
         })?;
@@ -155,7 +156,7 @@ impl ExternalKnowledge {
 #[async_trait]
 impl KnowledgeProvider for ExternalKnowledge {
     fn id(&self) -> &str {
-        &self.instance.id
+        self.instance.id()
     }
 
     async fn write_page(

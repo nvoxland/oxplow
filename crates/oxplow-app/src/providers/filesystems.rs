@@ -35,7 +35,8 @@ use oxplow_domain::{CommandError, InputValidator};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::registry::{CapabilityHost, Instance, PreparedProviderCapability};
+use super::endpoint::Endpoint;
+use super::registry::{CapabilityHost, PreparedProviderCapability};
 
 /// The filesystem side of the host: a started instance is a filesystem in
 /// `Services.filesystems`, under `<extension>:<instance id>`.
@@ -59,12 +60,12 @@ impl FileSystemsHost {
 
 /// The id an instance's filesystem has: the `filesystem` param of the file
 /// URIs it serves. Refused when it falls in oxplow's own namespace.
-fn filesystem_id(instance: &Instance) -> Result<String, String> {
-    let extension = &instance.ext.name;
+fn filesystem_id(instance: &dyn Endpoint) -> Result<String, String> {
+    let extension = instance.extension();
     if extension == "oxplow" {
         return Err("a filesystem id can't be in the `oxplow:` namespace".into());
     }
-    Ok(format!("{extension}:{}", instance.id))
+    Ok(format!("{extension}:{}", instance.id()))
 }
 
 impl CapabilityHost for FileSystemsHost {
@@ -78,8 +79,8 @@ impl CapabilityHost for FileSystemsHost {
         false
     }
 
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String> {
-        let declared = &instance.declared;
+    fn prepare(&self, instance: &Arc<dyn Endpoint>) -> Result<PreparedProviderCapability, String> {
+        let declared = instance.declared();
         let capability = declared
             .capabilities
             .iter()
@@ -88,7 +89,7 @@ impl CapabilityHost for FileSystemsHost {
         let features = Some(capability.features.clone())
             .filter(|f| !f.is_null())
             .unwrap_or_else(|| json!({}));
-        let id = filesystem_id(instance)?;
+        let id = filesystem_id(instance.as_ref())?;
         let writable = features.get(WRITABLE).and_then(Value::as_bool) == Some(true);
         let mut verbs = BTreeMap::new();
         for verb in FILESYSTEM.verbs {
@@ -111,7 +112,7 @@ impl CapabilityHost for FileSystemsHost {
         });
         let registry = self.registry.clone();
         let published = self.published.clone();
-        let instance_id = instance.id.clone();
+        let instance_id = instance.id().to_string();
         Ok(PreparedProviderCapability::new(features, move || {
             published.lock().insert(instance_id, id);
             registry.register(adapter);
@@ -127,7 +128,7 @@ impl CapabilityHost for FileSystemsHost {
 
 pub struct ExternalFileSystem {
     id: String,
-    instance: Arc<Instance>,
+    instance: Arc<dyn Endpoint>,
     features: &'static [&'static str],
     /// Each declared contract verb's compiled input schema.
     verbs: BTreeMap<&'static str, InputValidator>,

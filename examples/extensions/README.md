@@ -15,6 +15,7 @@ and runs its fixtures; `tests/examples.rs` adds only what the SDK reports about 
 | [schema-review](schema_review/) | A collector's facts about schema migrations (DDL per file, by its own dimension) and a page on a request's diff that lists the migration files it changed. |
 | [session-history](session_history/) | Adding a section to a core page: earlier prompts from the current thread, mounted on New Session after its start form. |
 | [commit-history](commit_history/) | A page with no code: typed params in the toolbar (a date range, a search, a switch) narrow the commits, and clicking one fills the next section with its files. |
+| [note-tracker](note-tracker/) | A capability implemented by a script: a task tracker whose verbs are Starlark functions, chosen in Settings → Capabilities and called through the same dispatch as a built-in's and a provider's. Its test runs the task tracker conformance suite. |
 
 ## What the trials prove
 
