@@ -97,7 +97,9 @@ Link types:
 - `oxplow_read { uri }` — one item: its row, its links and its comments.
 - `oxplow_next_task { thread: "thr3" }` — what to pick up next: the ready
   items assigned to the thread (an epic with its ready descendants, or the
-  ready items), else the pool (`role: pool`), most pressing first.
+  ready items), else the pool (`role: pool`), most pressing first. Every
+  thread's ready queue is `v_oxplow_ready_queue` (`thread_id` NULL for
+  the pool, `ord` 1 next).
 - `oxplow_thread_tasks { thread }` — what is assigned to a thread and what
   it finished, with the requests that worked on each.
 - `oxplow_query_sql` over `v_task` (`uri`, `title`, `body`, `state` — the

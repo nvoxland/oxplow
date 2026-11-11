@@ -453,8 +453,12 @@ async fn handle_hook_inner(
     ) {
         // A fresh start, or a compaction a harness reports only after the
         // fact (opencode posts PostCompact, never PreCompact): what the
-        // session was told is gone, so the next prompt says it again.
-        if event == "SessionStart" || event == "PostCompact" {
+        // session was told is gone, so the next prompt says it again. An
+        // ended session's records go with it.
+        if matches!(
+            event.as_str(),
+            "SessionStart" | "PostCompact" | "SessionEnd"
+        ) {
             ctx.services
                 .agent_context
                 .reset_session(session_id.as_deref());

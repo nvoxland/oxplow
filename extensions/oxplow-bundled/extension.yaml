@@ -58,6 +58,16 @@ datasets:
       - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
+  - name: ready_queue
+    version: 1
+    description: "What to pick up next, as `next-task` picks it. Ready means `todo` with no open blocker. Per thread: its assigned ready items in its queue's order; when the first is an epic, it and its ready descendants as one unit (`role` `epic`, `child`), else every ready one that isn't an epic (`ready`). The pool (`thread_id` NULL, `role` `pool`): ready items assigned to nobody that aren't epics, the most pressing first."
+    fields:
+      - { name: thread_id, type: INTEGER, doc: "The thread whose queue it is in (v_thread.id); NULL for the pool." }
+      - { name: uri, type: TEXT, doc: "The task." }
+      - { name: title, type: TEXT, doc: "Its title." }
+      - { name: native_id, type: TEXT, doc: "Its tracker's own id (`tsk42`)." }
+      - { name: role, type: TEXT, doc: "`epic`, `child`, `ready` or `pool`." }
+      - { name: ord, type: NUM, doc: "Its place: 1 is next." }
   - name: task_workflow
     version: 1
     description: "How this project's agents use tasks (oxtask's setting, one row): `workflow` is `agent_tracks` (the agent tracks everything), `person_files` (the person files, the agent works them), `custom` (the project's own extension says) or `off`; `definition_of_done` is the project's text, empty for none. Set with `oxplow.tasks.set_workflow`."
@@ -142,9 +152,10 @@ configuration:
           workflow:
             type: string
             enum: [off, person_files, agent_tracks, custom]
-            description: "off: agents get no task instructions; person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
+            description: "off: oxtask tells agents nothing about tasks (the tracker's own commands stay); person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
           definitionOfDone:
             type: string
+            maxLength: 1000
             description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
   defaults:
     changeInterest: { complexityWeight: 0.6, parameterWeight: 0.4, longFunctionLines: 60, longFunctionScale: 40 }
@@ -166,12 +177,13 @@ commands:
     op: compare_exchange
     example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 2}, "values": {"struggle": {"repeatedEdits": 4}}}, "personal": null}
   - name: tasks.set_workflow
-    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here. Applies to agent sessions started after it."
+    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here, for the project. The task state and the reminder follow at the next prompt; the skills offered change for agent sessions started after it. A person's own setting of the workflow, when there is one, still wins for them (the result says so)."
     input_schema:
       type: object
       properties:
         workflow: { type: string, enum: [off, person_files, agent_tracks, custom], description: "The workflow preset." }
-        definition_of_done: { type: string, contentMediaType: text/markdown, description: "What done means here, one item per line; empty for none." }
+        definition_of_done: { type: string, contentMediaType: text/markdown, maxLength: 1000, description: "What done means here, one item per line; empty for none." }
+      minProperties: 1
       additionalProperties: false
     example: {"workflow": "person_files", "definition_of_done": "Tests pass.\nCommitted."}
     entry: handlers/set_workflow.star
@@ -248,7 +260,8 @@ context:
       ),
       up_next AS (
         SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
-        FROM (SELECT * FROM mine WHERE state = 'todo' ORDER BY rank IS NULL, rank, created_at LIMIT 3)
+        FROM (SELECT title, native_id FROM v_oxplow_ready_queue
+              WHERE thread_id = :thread_id ORDER BY ord LIMIT 3)
       ),
       done_means AS (SELECT trim(definition_of_done) AS d FROM v_oxplow_task_workflow)
       SELECT coalesce('In progress on this thread: ' || active.s || '.', 'Nothing is in progress on this thread.')

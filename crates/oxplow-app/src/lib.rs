@@ -1344,6 +1344,16 @@ impl Services {
         let (context_changes, _) = tokio::sync::watch::channel(0u64);
         event_pump.register_async(Arc::new(context_watch::ContextChanges {
             changed: context_changes.clone(),
+            contexts_declared: {
+                let (catalog, root) = (extension_catalog.clone(), layout.project_dir.clone());
+                Arc::new(move || {
+                    catalog
+                        .live_snapshot(&root)
+                        .extensions()
+                        .iter()
+                        .any(|e| e.enabled && !e.contexts.is_empty())
+                })
+            },
         }));
         // The vocabulary reads the active task tracker's own ids in text
         // (`tsk42`), as that list declares them; from the first read, and

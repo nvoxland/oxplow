@@ -51,14 +51,13 @@ pub enum ConfigReader {
     Datasets,
     /// A skill is offered by a setting (`when:`).
     Skills,
-    /// An agent context is sent by a setting (`when:`), or its query calls
-    /// `config()`.
-    Contexts,
 }
 
-/// What of `extension` reads its own configuration: the one list of
-/// configuration readers. A new contribution kind that depends on a setting
-/// adds itself here.
+/// What of `extension` reads its own configuration into what is
+/// published: the one list of configuration readers. A new contribution
+/// kind whose published form depends on a setting adds itself here. An
+/// agent context is not one: its `when:` and `config()` are read at each
+/// delivery, so a write needs no republish.
 pub fn configuration_readers(
     extension: &crate::extension::extensions::Extension,
 ) -> Vec<ConfigReader> {
@@ -70,14 +69,9 @@ pub fn configuration_readers(
         .iter()
         .any(|dataset| datasets::config_reads(&dataset.sql).is_ok_and(|reads| !reads.is_empty()));
     let skills = extension.skills.iter().any(|skill| skill.when.is_some());
-    let contexts = extension.contexts.iter().any(|context| {
-        context.when.is_some()
-            || datasets::config_reads(&context.query).is_ok_and(|reads| !reads.is_empty())
-    });
     [
         (datasets, ConfigReader::Datasets),
         (skills, ConfigReader::Skills),
-        (contexts, ConfigReader::Contexts),
     ]
     .into_iter()
     .filter_map(|(reads, reader)| reads.then_some(reader))

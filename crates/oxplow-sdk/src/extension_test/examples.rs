@@ -642,11 +642,27 @@ pub(super) async fn context_example(
     }
     host.current().await;
     let from = format!("{}/{id}", ext.namespace);
-    let text = oxplow_app::agent_context::extension_contexts(&host.svc, &thread)
-        .await
-        .into_iter()
-        .find(|c| c.from == from)
-        .map(|c| c.text);
+    use oxplow_app::agent_context::Reading;
+    let reading = match oxplow_app::agent_context::extension_contexts(&host.svc, &thread).await {
+        Ok(contexts) => contexts
+            .into_iter()
+            .find(|c| c.from == from)
+            .map_or(Reading::Silent, |c| c.reading),
+        Err(why) => Reading::Failed(why),
+    };
+    let text = match reading {
+        Reading::Says(text) => Some(text),
+        Reading::Silent => None,
+        // A failure is the fixture's error, never "nothing to say".
+        Reading::Failed(why) => {
+            return report.errors.push(error(
+                shown,
+                None,
+                "context.failed",
+                format!("context `{id}` couldn't be read: {why}"),
+            ));
+        }
+    };
     if let Some(t) = &text {
         let over = t.chars().count();
         if over > oxplow_app::agent_context::CONTEXT_BUDGET {

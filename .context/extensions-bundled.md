@@ -292,7 +292,10 @@ screens and the holder's add the review and analysis:
   a task, discovered work is a backlog task linked `discovered_from`, and
   done includes the definition of done. In every preset but `off`, while oxtask is
   the active tracker, its agent context `task-state` tells the agent the
-  thread's task in progress, the next three `todo` in its queue and the
+  thread's task in progress, the next three in its ready queue (bundled's
+  `v_oxplow_ready_queue`, the one definition `next-task` reads too: `todo`
+  with no open blocker, an epic with its children as one unit, the pool
+  with `thread_id` NULL) and the
   definition of done (nothing when there is none of them; core's
   `CONTEXT_CLEARED` tells an agent told before): once, then on change, and again after
   a compaction (extensions-commands.md "agent contexts"). Fixtures:

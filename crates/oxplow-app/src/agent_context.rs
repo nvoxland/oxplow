@@ -307,16 +307,26 @@ impl AgentContext {
         thread_id: &ThreadId,
         session_id: Option<&str>,
     ) -> Vec<(String, String)> {
-        let current = extension_contexts(svc, thread_id).await;
-        // One the session was sent that says nothing now tells it so, once:
-        // what it said no longer holds. Recorded as sent like any block, so
-        // the same text coming back differs from it and is news again.
+        // Nothing is known when the generation can't be read: nothing new is
+        // said and nothing taken back.
+        let Ok(current) = extension_contexts(svc, thread_id).await else {
+            return Vec::new();
+        };
+        // One the session was sent that is silent now (or gone, with its
+        // extension) tells it so, once: what it said no longer holds. One
+        // that failed takes nothing back. Recorded as sent like any block,
+        // so the same text coming back differs from it and is news again.
+        let still = |from: &str| {
+            current
+                .iter()
+                .any(|c| c.from == from && !matches!(c.reading, Reading::Silent))
+        };
         let mut cleared: Vec<(String, String)> = session_id
             .and_then(|session| {
                 let state = self.state.lock();
                 state.last_extension_context.get(session).map(|sent| {
                     sent.iter()
-                        .filter(|(from, _)| !current.iter().any(|c| &c.from == *from))
+                        .filter(|(from, _)| !still(from))
                         .map(|(from, previous)| (from.clone(), previous.clone()))
                         .collect::<Vec<_>>()
                 })
@@ -331,9 +341,12 @@ impl AgentContext {
         cleared.sort();
         let changed: Vec<(String, String, bool)> = current
             .into_iter()
-            .map(|c| {
-                let (text, cut) = cut_to(&c.text, CONTEXT_BUDGET);
-                (c.from, text, cut)
+            .filter_map(|c| match c.reading {
+                Reading::Says(text) => {
+                    let (text, cut) = cut_to(&text, CONTEXT_BUDGET);
+                    Some((c.from, text, cut))
+                }
+                Reading::Silent | Reading::Failed(_) => None,
             })
             .filter(|(from, text, cut)| {
                 self.would_emit_extension_context(
@@ -465,31 +478,43 @@ pub const CONTEXT_CUT: &str = "… (cut: over its budget)";
 /// say: what it said before no longer holds.
 pub const CONTEXT_CLEARED: &str = "Nothing now: what this said before no longer holds.";
 
-/// What one extension's agent context says for a thread now, uncut:
-/// who says it (`<namespace>/<id>`) and its text.
+/// What one extension's agent context reads for a thread now: who says
+/// it (`<namespace>/<id>`) and its [`Reading`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionContext {
     pub from: String,
-    pub text: String,
+    pub reading: Reading,
 }
 
-/// Every enabled extension's agent context (`context:`) for `thread`
-/// whose needs are met and whose query has something to say: its first
-/// row's `text`, trimmed, when not empty. By namespace, then as each
-/// extension declares them. A query that fails is logged and says
-/// nothing. Not a nudge: nothing is recorded, muted or counted.
-pub async fn extension_contexts(svc: &Services, thread: &ThreadId) -> Vec<ExtensionContext> {
-    match svc
-        .sql
+/// An agent context's reading. Only `Silent` takes back what a session
+/// was sent: a reading that failed says nothing about the facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reading {
+    /// Its text, trimmed and uncut.
+    Says(String),
+    /// Nothing to say: no row, an empty text, its `needs` or `when:` not met.
+    Silent,
+    /// Its query or its settings couldn't be read (why).
+    Failed(String),
+}
+
+/// Every enabled extension's agent context (`context:`) for `thread`, read
+/// now: what its first row's `text` says (trimmed), silent (no row, an
+/// empty text, its `needs` or `when:` not met), or failed (logged). By
+/// namespace, then as each extension declares them. `Err` when the
+/// generation can't be read: then nothing is known. Not a nudge: nothing
+/// is recorded, muted or counted.
+pub async fn extension_contexts(
+    svc: &Services,
+    thread: &ThreadId,
+) -> Result<Vec<ExtensionContext>, String> {
+    svc.sql
         .read_generation(extension_contexts_in_generation(svc, thread))
         .await
-    {
-        Ok(contexts) => contexts,
-        Err(error) => {
+        .map_err(|error| {
             warn!(%error, "agent context generation read failed");
-            Vec::new()
-        }
-    }
+            error.to_string()
+        })
 }
 
 async fn extension_contexts_in_generation(
@@ -528,19 +553,38 @@ async fn extension_contexts_in_generation(
     ];
     let mut out = Vec::new();
     for ext in &extensions {
-        for c in ext.contexts.iter().filter(|c| {
-            active.unmet(&c.needs).is_empty()
-                && c.when.as_ref().is_none_or(|when| {
-                    settings
-                        .get(&ext.namespace)
-                        .is_some_and(|values| when.holds(values))
-                })
-        }) {
+        for c in &ext.contexts {
             let from = format!("{}/{}", ext.namespace, c.id);
+            let mut read = |reading| {
+                out.push(ExtensionContext {
+                    from: from.clone(),
+                    reading,
+                })
+            };
+            if !active.unmet(&c.needs).is_empty() {
+                read(Reading::Silent);
+                continue;
+            }
+            if let Some(when) = &c.when {
+                // A `when:` needs the extension's configuration, so settings
+                // missing here are settings that couldn't be read.
+                match settings.get(&ext.namespace) {
+                    None => {
+                        read(Reading::Failed("its settings can't be read".into()));
+                        continue;
+                    }
+                    Some(values) if !when.holds(values) => {
+                        read(Reading::Silent);
+                        continue;
+                    }
+                    Some(_) => {}
+                }
+            }
             let query = match svc.sql.with_extension_config(ext, &c.query).await {
                 Ok(query) => query,
                 Err(error) => {
                     warn!(context = %from, %error, "agent context configuration failed");
+                    read(Reading::Failed(error.to_string()));
                     continue;
                 }
             };
@@ -556,20 +600,26 @@ async fn extension_contexts_in_generation(
                 Ok(r) => r,
                 Err(error) => {
                     warn!(context = %from, %error, "agent context query failed");
+                    read(Reading::Failed(error.to_string()));
                     continue;
                 }
             };
             let Some(i) = result.columns.iter().position(|c| c == TEXT_COLUMN) else {
                 warn!(context = %from, "agent context query returned no `text` column");
+                read(Reading::Failed(
+                    "its query returned no `text` column".into(),
+                ));
                 continue;
             };
             let text = match result.rows.first().map(|r| &r[i]) {
                 Some(SqlCell::Text(t)) => t.trim().to_string(),
-                _ => continue,
+                _ => String::new(),
             };
-            if !text.is_empty() {
-                out.push(ExtensionContext { from, text });
-            }
+            read(if text.is_empty() {
+                Reading::Silent
+            } else {
+                Reading::Says(text)
+            });
         }
     }
     out
@@ -1032,6 +1082,36 @@ mod tests {
         assert!(changes.has_changed().unwrap());
     }
 
+    /// While an extension declares an agent context (oxtask's task state),
+    /// any command may change what it reads: a task assigned to the thread
+    /// tells the watchers, so a harness with no prompt hook (Codex) has it
+    /// before the next turn.
+    #[tokio::test]
+    async fn a_command_tells_the_context_watchers_while_a_context_is_declared() {
+        use oxplow_domain::Actor;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let svc = &*fx.svc;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: now\n    doc: d.\n    query: SELECT 'x' AS text\n",
+        )
+        .await;
+        let mut changes = svc.context_changes.subscribe();
+        changes.mark_unchanged();
+        svc.commands
+            .run(
+                &Actor::Human,
+                "oxplow.thread.rename",
+                serde_json::json!({ "thread": fx.thread.to_string(), "title": "Renamed" }),
+                false,
+            )
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert!(changes.has_changed().unwrap());
+    }
+
     /// What the person collected in the thread's context basket reaches
     /// the next prompt of any agent in the thread once — pages as
     /// mentions, text quoted with where it came from — and the basket is
@@ -1305,6 +1385,32 @@ mod tests {
         );
     }
 
+    /// A context whose query fails says nothing new and takes nothing
+    /// back: the session keeps what it was told, and once the query reads
+    /// again unchanged, nothing is repeated.
+    #[tokio::test]
+    async fn a_failed_extension_context_takes_nothing_back() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        with_context(
+            &fx.svc,
+            "state",
+            "  - id: now\n    doc: The thread's title; Broken fails.\n    query: SELECT CASE WHEN title = 'Broken' THEN json_extract('not json', '$') ELSE 'on ' || title END AS text FROM v_thread WHERE id = :thread_id\n",
+        )
+        .await;
+        let ctx = AgentContext::default();
+        assert_eq!(prompt(&ctx, &fx).await.len(), 1);
+        retitle(&fx.svc, fx.thread, "Broken").await;
+        assert!(
+            prompt(&ctx, &fx).await.is_empty(),
+            "no retraction on a failure"
+        );
+        retitle(&fx.svc, fx.thread, "Thread").await;
+        assert!(
+            prompt(&ctx, &fx).await.is_empty(),
+            "the session still holds it"
+        );
+    }
+
     /// A context the extension's own setting offers (`when:`) is sent only
     /// while the setting holds; the defaults count when nothing is stored.
     #[tokio::test]
@@ -1320,6 +1426,68 @@ mod tests {
         assert_eq!(
             prompt(&AgentContext::default(), &fx).await,
             vec!["<context from=\"state/shown\">\nalpha says\n</context>".to_string()]
+        );
+    }
+
+    /// A stored setting that turns a context off takes it back once, and
+    /// one whose `needs` stop being met (no task tracker) does too.
+    #[tokio::test]
+    async fn a_context_turned_off_by_its_setting_or_its_needs_is_taken_back() {
+        use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
+        let fx = crate::test_fixtures::services_with_thread().await;
+        write_context(
+            &fx.svc,
+            "state",
+            "permissions: [agent.write]\nconfiguration:\n  version: 1\n  schema: { type: object, additionalProperties: false, properties: { mode: { type: string, enum: [alpha, beta] } } }\n  defaults: { mode: alpha }\n",
+            "  - id: shown\n    doc: Said in alpha.\n    when: { config: /mode, in: [alpha] }\n    query: SELECT 'alpha says' AS text\n  - id: tasks\n    doc: Said with a tracker.\n    needs: [task_tracker]\n    query: SELECT 'tracked' AS text\n",
+        );
+        crate::test_fixtures::activate(&fx.svc).await;
+        let ctx = AgentContext::default();
+        assert_eq!(prompt(&ctx, &fx).await.len(), 2);
+        SqliteExtensionConfigStore::new(fx.svc.db.clone())
+            .compare_exchange(
+                ConfigNamespace::new(
+                    "state".into(),
+                    oxplow_domain::extension_state::Scope::Project,
+                )
+                .unwrap(),
+                None,
+                1,
+                serde_json::json!({ "mode": "beta" }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            prompt(&ctx, &fx).await,
+            vec![format!(
+                "<context from=\"state/shown\">\n{CONTEXT_CLEARED}\n</context>"
+            )]
+        );
+        fx.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.capability.choose",
+                serde_json::json!({ "capability": "task_tracker", "provider": "none" }),
+                true,
+            )
+            .await
+            .unwrap();
+        fx.svc.event_pump.run_once().await.unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
+        assert!(
+            !fx.svc
+                .capabilities
+                .snapshot(&crate::config_service::read_config(&fx.svc.config))
+                .unmet(&["task_tracker".to_string()])
+                .is_empty(),
+            "no task tracker now"
+        );
+        assert_eq!(
+            prompt(&ctx, &fx).await,
+            vec![format!(
+                "<context from=\"state/tasks\">\n{CONTEXT_CLEARED}\n</context>"
+            )]
         );
     }
 

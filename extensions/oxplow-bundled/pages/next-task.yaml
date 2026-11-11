@@ -9,48 +9,14 @@ answers:
 loaders:
   next_task:
     sql: |
-      WITH items AS (
-        SELECT * FROM v_task WHERE assignee = uri('oxplow/thread', 'id', :thread)),
-      held AS (
-        SELECT l.to_uri FROM v_task_link l JOIN v_task b ON b.uri = l.from_uri
-        WHERE l.link_type = 'blocks' AND b.state NOT IN ('done', 'canceled')),
-      epics AS (SELECT DISTINCT parent_uri AS uri FROM items WHERE parent_uri IS NOT NULL),
-      ready AS (
-        SELECT * FROM items WHERE state = 'todo' AND uri NOT IN (SELECT to_uri FROM held)),
-      head AS (
-        SELECT uri FROM ready ORDER BY rank IS NULL, rank, created_at LIMIT 1),
-      below(uri) AS (
-        SELECT i.uri FROM items i JOIN head h ON i.parent_uri = h.uri
-        UNION SELECT i.uri FROM items i JOIN below b ON i.parent_uri = b.uri),
-      mine AS (
-        SELECT r.uri, r.title,
-               CASE WHEN r.uri IN (SELECT uri FROM head) AND r.uri IN (SELECT uri FROM epics) THEN 'epic'
-                    WHEN r.uri IN (SELECT uri FROM below) THEN 'child'
-                    ELSE 'ready' END AS role,
-               r.rank, r.created_at
-        FROM ready r
-        WHERE CASE WHEN (SELECT uri FROM head) IN (SELECT uri FROM epics)
-                   THEN r.uri IN (SELECT uri FROM head) OR r.uri IN (SELECT uri FROM below)
-                   ELSE r.uri NOT IN (SELECT uri FROM epics) END),
-      -- Nothing assigned and ready: the pool, any thread's to take, the
-      -- most pressing first.
-      pool AS (
-        SELECT p.uri, p.title, 'pool' AS role, p.rank, p.created_at,
-               CASE json_extract(CASE WHEN json_valid(p.native) THEN p.native END, '$.priority')
-                 WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END AS urgency
-        FROM v_task p
-        WHERE NOT EXISTS (SELECT 1 FROM mine)
-          AND p.assignee IS NULL AND p.state = 'todo'
-          AND p.uri NOT IN (SELECT to_uri FROM held)
-          AND p.uri NOT IN (SELECT parent_uri FROM v_task WHERE parent_uri IS NOT NULL))
+      WITH me AS (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)),
+      mine AS (SELECT q.* FROM v_oxplow_ready_queue q JOIN me ON q.thread_id = me.id)
       SELECT uri, title, role FROM (
-        SELECT uri, title, role, 0 AS grp,
-               row_number() OVER (ORDER BY role = 'child', rank IS NULL, rank, created_at) AS ord
-        FROM mine
+        SELECT uri, title, role, 0 AS grp, ord FROM mine
         UNION ALL
-        SELECT uri, title, role, 1,
-               row_number() OVER (ORDER BY urgency, rank IS NULL, rank, created_at)
-        FROM pool)
+        -- Nothing assigned and ready: the pool, any thread's to take.
+        SELECT uri, title, role, 1, ord FROM v_oxplow_ready_queue
+        WHERE thread_id IS NULL AND NOT EXISTS (SELECT 1 FROM mine))
       ORDER BY grp, ord
 view:
   from: next_task

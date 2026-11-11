@@ -555,9 +555,10 @@ context:
 
 - **`when: { config: <pointer>, in: [..] }`** sends it only while a
   setting of the extension's own holds, checked at load and at delivery
-  as a skill's `when:` (settings that can't be read fail closed: it isn't
-  sent). A settings write republishes (contexts are configuration
-  readers).
+  as a skill's `when:` (settings that can't be read are a failed reading:
+  nothing is sent and nothing taken back). Read at each delivery, so a
+  settings write needs no republish: a context is not a configuration
+  reader.
 - **The query** is the extension's SQL (`config('/ptr')` reads its own
   settings). Its first row's `text`, trimmed, is what the agent is told;
   no row, a NULL or an empty text says nothing. `:request_id` is the
@@ -571,11 +572,20 @@ context:
   then on change**, the session context's rule (agent-model.md). A
   compaction or a fresh start (`reset_session`) forgets what was sent,
   so the next prompt carries every context again. A context the session
-  was sent that says nothing now tells it so once (`CONTEXT_CLEARED`:
-  what it said no longer holds; an agent told of a task in progress
-  learns it closed), recorded as sent, so the same text coming back is
-  sent again. A session never sent it hears nothing. The records are in
-  memory, like the session context's: a daemon restart costs one repeat.
+  was sent that is silent now (no row, an empty text, its `needs` or
+  `when:` not met, its extension gone) tells it so once
+  (`CONTEXT_CLEARED`: what it said no longer holds; an agent told of a
+  task in progress learns it closed), recorded as sent, so the same text
+  coming back is sent again. A session never sent it hears nothing. A
+  reading that **failed** (its query, its settings, the generation)
+  sends nothing and takes nothing back (`agent_context::Reading`). The
+  records are in memory, like the session context's: a daemon restart
+  costs one repeat, and a retraction that was due across it is lost.
+- **A harness with no prompt hook** (Codex) is given its context between
+  turns, when `context_changes` bumps (`context_watch.rs`). While an
+  enabled extension declares a context, every `command.executed` bumps
+  it (a context's query may read what any command changed); an unchanged
+  build injects nothing.
 - **Budget**: `CONTEXT_BUDGET` (1,500 characters) per context, then
   `CONTEXTS_BUDGET` (3,000) for all that a prompt carries; a cut text
   ends with the `CONTEXT_CUT` line. Only changed contexts count, so one

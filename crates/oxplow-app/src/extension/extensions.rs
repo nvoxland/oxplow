@@ -6581,6 +6581,7 @@ commands:
                 "co_change_pair",
                 "deviation",
                 "finished_cleared",
+                "ready_queue",
                 "struggle",
                 "task_workflow",
                 "thread_tasks"

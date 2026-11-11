@@ -629,7 +629,7 @@ ui:                  # what it adds to the core UI (a command's own `ui:` puts i
   decorators: …      # labels from its datasets on core URIs (stable since P10; see extensions-slots.md "Decorators")
   replacements: …    # a page in place of a named core component (see extensions-slots.md "Replacements")
 advisories:  [...]   # see extensions-commands.md "Advisories"
-context:     [...]   # text for the agent's context, sent once then on change (`{ id, doc, needs?, query }` returning `text`; needs `agent.write`); see extensions-commands.md "Agent context"
+context:     [...]   # text for the agent's context, sent once then on change (`{ id, doc, needs?, when?, query }` returning `text`; needs `agent.write`); see extensions-commands.md "Agent context"
 datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<namespace>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see extensions-commands.md "Commands")

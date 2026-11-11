@@ -368,3 +368,29 @@ async fn a_compaction_brings_the_context_back_on_the_next_prompt() {
     let after = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
     golden("prompt_context_first", &after, &root);
 }
+
+/// A harness that reports a compaction only after the fact (opencode posts
+/// PostCompact, never PreCompact) gets the context again on the next
+/// prompt, as a PreCompact gives it.
+#[tokio::test]
+async fn a_post_compact_brings_the_context_back_on_the_next_prompt() {
+    let (cp, svc, root, _dir) = boot().await;
+    let tid = seed_thread(&svc).await;
+    let prompt = || serde_json::json!({ "prompt": "go", "session_id": "s1" });
+    let first = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &first, &root);
+    assert_eq!(
+        post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await,
+        serde_json::json!({})
+    );
+    post(
+        &cp,
+        &svc,
+        "PostCompact",
+        tid,
+        serde_json::json!({ "session_id": "s1", "trigger": "auto" }),
+    )
+    .await;
+    let after = post(&cp, &svc, "UserPromptSubmit", tid, prompt()).await;
+    golden("prompt_context_first", &after, &root);
+}

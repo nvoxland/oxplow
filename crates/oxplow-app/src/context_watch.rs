@@ -4,7 +4,9 @@
 //! injection, between turns. The context changes while no turn runs — a
 //! handoff sent to the thread, another agent arriving in its worktree, a
 //! decision recorded, something put in the thread's context basket — and the agent should have it before the person's
-//! next prompt, not after that turn ends. This pump consumer bumps
+//! next prompt, not after that turn ends. While an enabled extension
+//! declares an agent context (`context:`), whose query may read anything,
+//! every command counts as such a change. This pump consumer bumps
 //! [`Services::context_changes`](crate::Services) when the log records
 //! one of the facts the context reads; each session that watches it builds
 //! its context again, and the "once, then on change" baselines
@@ -36,6 +38,8 @@ pub fn changes_context(event_type: &str) -> bool {
 
 pub struct ContextChanges {
     pub changed: watch::Sender<u64>,
+    /// Whether an enabled extension declares an agent context now.
+    pub contexts_declared: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 #[async_trait::async_trait]
@@ -50,11 +54,13 @@ impl AsyncEventConsumer for ContextChanges {
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
         let payload = &event.envelope.payload;
-        // Any command is logged; only a few change the context.
+        // Any command is logged; only a few change the context, unless an
+        // extension's context may read what any of them changed.
         if event.envelope.event_type == "command.executed"
             && !payload["command"]
                 .as_str()
                 .is_some_and(|c| CHANGING_COMMANDS.contains(&c))
+            && !(self.contexts_declared)()
         {
             return Ok(());
         }

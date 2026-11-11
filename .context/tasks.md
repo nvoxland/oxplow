@@ -311,7 +311,9 @@ what is assigned to a thread and what it finished, with the requests that worked
 `oxplow/next-task` (the tool `oxplow_next_task`, param `thread: "thr3"`)
 for what to pick up next: the ready items assigned to the thread (an epic
 with its ready descendants, or every ready non-epic item; open `blocks`
-links hold an item), else the pool, by priority (`role: pool`). Starting
+links hold an item), else the pool, by priority (`role: pool`); both
+read bundled's `v_oxplow_ready_queue`, as oxtask's task-state context
+does for its "Up next". Starting
 one assigns it to the thread. A controller agent routes work with
 `oxplow.task.assign`. None of them belongs to an implementation, so the tool list never
 changes with a switch; with none they read empty. A source

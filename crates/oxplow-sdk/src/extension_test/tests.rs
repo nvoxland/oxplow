@@ -2483,6 +2483,22 @@ expect: {{ text: {want} }}
         wrong.contains("fixtures/next.yaml: context `next` said"),
         "{wrong}"
     );
+    // A query that fails is the fixture's error, never "nothing to say".
+    let manifest =
+        std::fs::read_to_string(root.join(".oxplow/extensions/acme/extension.yaml")).unwrap();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest.replace(
+            "SELECT 'Next: ' || title AS text",
+            "SELECT json_extract('not json', '$') || title AS text",
+        ),
+    );
+    let failed = errors("null", given).await;
+    assert!(
+        failed.contains("context `next` couldn't be read"),
+        "{failed}"
+    );
 }
 
 /// A page's `ui:` step runs its custom component's own code in the

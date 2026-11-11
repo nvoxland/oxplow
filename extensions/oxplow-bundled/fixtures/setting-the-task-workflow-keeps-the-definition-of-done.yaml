@@ -17,3 +17,14 @@ expect:
 steps:
   - when: { command: oxplow.tasks.set_workflow, input: { workflow: sometimes } }
     expect: { ok: false }
+  # An empty input changes nothing, so it is refused.
+  - when: { command: oxplow.tasks.set_workflow, input: {} }
+    expect: { ok: false }
+  # A person's own workflow still wins for them: the project's write says so.
+  - given:
+      - command: oxplow.review_policy.write
+        input: { schema_version: 2, personal: { expected: null, values: { tasks: { workflow: agent_tracks } } } }
+  - when: { command: oxplow.tasks.set_workflow, input: { workflow: person_files } }
+    expect:
+      ok: true
+      result: { tasks: { workflow: person_files }, personal_workflow: agent_tracks }

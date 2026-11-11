@@ -2,7 +2,8 @@
 # project's agents use tasks (oxtask's workflow preset) and what "done"
 # means here, written to the project's settings. It reads the settings'
 # stamps and composes the extension's compare-and-swap write, so a change
-# made since is refused, never overwritten.
+# made since is refused, never overwritten. When the person's own layer
+# sets the workflow too, the result names it (it still wins for them).
 
 def transform(x):
     input = x["input"]
@@ -19,6 +20,11 @@ def transform(x):
     merged = dict(layer.get("tasks") or {})
     merged.update(tasks)
     layer["tasks"] = merged
+    result = {"tasks": tasks}
+    # A person's own workflow still wins for them: say so.
+    personal = (read["layers"]["personal"] or {}).get("tasks") or {}
+    if tasks.get("workflow") != None and personal.get("workflow") != None:
+        result["personal_workflow"] = personal["workflow"]
     return {
         "commands": [{
             "name": "oxplow.review_policy.write",
@@ -28,5 +34,5 @@ def transform(x):
                 "personal": None,
             },
         }],
-        "result": {"tasks": tasks},
+        "result": result,
     }
