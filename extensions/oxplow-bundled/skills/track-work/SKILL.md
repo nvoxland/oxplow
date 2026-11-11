@@ -38,10 +38,16 @@ to something else, move the first task back (`todo`, or `blocked` with a
 comment that says why) before you start the next. Work that belongs to an
 epic is its child task, not the epic.
 
+A task is one item: the harness's own plan or todo list is for the steps
+inside it, not a second list of tasks. Work you find that this task does
+not cover is a follow-up: file it on the backlog, linked `discovered_from` the task,
+unless you do it now as part of this one.
+
 ## When it is done
 
 Move it to `done` when it is fully done: the change is made, tests pass,
-and it is committed if the project commits. Not when a step is done, and
+it is committed if the project commits, and the project's definition of
+done holds when it has one. Not when a step is done, and
 not when you stop to ask the person something. If the person stops it,
 `canceled`.
 

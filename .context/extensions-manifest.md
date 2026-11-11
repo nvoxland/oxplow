@@ -325,8 +325,12 @@ smaller. There is no permissive fallback, external retrieval or secret lookup.
 manifest defaults and private Project/Personal override rows, resolves them in
 that order, validates the effective schema and reports per-leaf origins.
 `extension_config.read` is distinct from core app-settings `config.read`.
-Native operations are `snapshot` (effective values, origins and layer stamps)
-and `inspect` (stamps only, including old schema versions). Scripts declare
+Native operations are `snapshot` (effective values, origins, layer stamps,
+and `layers: { project, personal }`, each layer's values as stored or
+null) and `inspect` (stamps only, including old schema versions). A write
+replaces a whole layer, so a script that changes one key merges it into
+`layers.project` and writes the result back (oxtask's
+`tasks.set_workflow`). Scripts declare
 `needs: [extension_config.read]` and call
 `scope("extension_config.read", {})`. Composers read their existing connection;
 effects, collectors and provider host calls use an owned DB read per call.

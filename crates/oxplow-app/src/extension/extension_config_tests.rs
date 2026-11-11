@@ -590,6 +590,10 @@ async fn a_script_reads_its_own_configuration() {
     let peeked = run(&fx, "alpha.config.peek", json!({})).await.unwrap();
     assert_eq!(peeked["result"]["values"]["limit"], json!(12));
     assert_eq!(peeked["result"]["origins"]["/limit"], json!("project"));
+    // Each layer as stored, so a script can change one key and write the
+    // rest of the layer back (a write replaces the whole layer).
+    assert_eq!(peeked["result"]["layers"]["project"], json!({"limit": 12}));
+    assert_eq!(peeked["result"]["layers"]["personal"], Value::Null);
     // Another extension's script reads its own namespace, never alpha's.
     declare(
         fx._dir.path(),

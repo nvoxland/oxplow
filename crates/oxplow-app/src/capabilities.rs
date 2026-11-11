@@ -2351,4 +2351,58 @@ commands:
         );
         assert!(!skills.join("on-a").exists(), "on-a is no longer offered");
     }
+
+    /// oxtask's skills follow the project's task workflow: by default the
+    /// agent tracks its work (`track-work`); when the person files tasks
+    /// the agent works them (`work-tasks`); with `custom` only the queue
+    /// (`next-task`), the project's own skill says the rest; `off` offers
+    /// none of them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oxtask_offers_the_skills_of_the_projects_task_workflow() {
+        let fx = crate::test_fixtures::services_developing_oxplow().await;
+        crate::extension::extension_deploy::deploy(&fx.svc, "oxplow-bundled", true)
+            .await
+            .expect("bundled deploys from its source");
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        let offered = || async {
+            let text = fx
+                .svc
+                .sql
+                .read_generation(super::agent_text(&fx.svc))
+                .await
+                .unwrap();
+            let mut names: Vec<String> = text
+                .skills
+                .iter()
+                .chain(&text.commands)
+                .map(|s| s.name.clone())
+                .filter(|n| ["track-work", "work-tasks", "next-task"].contains(&n.as_str()))
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(offered().await, ["next-task", "track-work"], "the default");
+        let store = SqliteExtensionConfigStore::new(fx.svc.db.clone());
+        let mut expected = None;
+        for (workflow, skills) in [
+            ("person_files", &["next-task", "work-tasks"][..]),
+            ("custom", &["next-task"][..]),
+            ("off", &[][..]),
+        ] {
+            let values = json!({ "tasks": { "workflow": workflow } });
+            expected = Some(
+                store
+                    .compare_exchange(
+                        ConfigNamespace::new("oxplow".into(), Scope::Project).unwrap(),
+                        expected,
+                        2,
+                        values,
+                    )
+                    .await
+                    .unwrap()
+                    .stamp(),
+            );
+            assert_eq!(offered().await, skills, "{workflow}");
+        }
+    }
 }

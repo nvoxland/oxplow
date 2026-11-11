@@ -936,6 +936,11 @@ export type AgentContextDecl = {
 	doc: string,
 	/**  What it needs active (`task_tracker`); without it, it doesn't run. */
 	needs: string[],
+	/**
+	 *  The extension's own setting that offers it (as a skill's `when:`);
+	 *  `None`: always.
+	 */
+	when: ConfigCondition | null,
 	query: string,
 };
 

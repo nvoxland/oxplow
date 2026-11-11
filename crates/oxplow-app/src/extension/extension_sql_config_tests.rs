@@ -78,7 +78,7 @@ async fn set_threshold(fx: &ThreadFixture, edits: i64) {
             &Actor::Human,
             "oxplow.review_policy.write",
             json!({
-                "schema_version": 1,
+                "schema_version": 2,
                 "project": {
                     "expected": expected,
                     "values": { "struggle": { "repeatedEdits": edits } }

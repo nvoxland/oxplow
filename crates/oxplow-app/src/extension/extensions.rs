@@ -6566,6 +6566,7 @@ commands:
             [
                 "oxplow.review_policy.read",
                 "oxplow.review_policy.write",
+                "oxplow.tasks.set_workflow",
                 "oxplow.tasks.clear_finished",
                 "oxplow.task.new"
             ]

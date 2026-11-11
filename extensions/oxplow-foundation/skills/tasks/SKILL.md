@@ -6,8 +6,10 @@ description: The project's task tracker — when filing a task is worth it, the 
 # Tasks
 
 The project has a task tracker (the one the person chose). How much of
-your work to track as tasks is that tracker's opinion: its own skill says
-so when it has one. oxplow records your turns and requests either way.
+your work to track as tasks is the project's choice, set in that tracker:
+its own skill says so when it has one, and with none, file only what the
+person asks for or a follow-up. oxplow records your turns and requests
+either way.
 
 ## When an item is worth filing
 

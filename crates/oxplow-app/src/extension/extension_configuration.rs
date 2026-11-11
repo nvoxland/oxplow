@@ -81,6 +81,16 @@ pub struct ConfigurationSnapshot {
     pub stamps: Stamps,
     #[serde(flatten)]
     pub resolved: ResolvedConfig,
+    /// Each override layer as stored (`null`: none): a write replaces a
+    /// whole layer, so a caller changing one key writes the rest back.
+    pub layers: LayerValues,
+}
+
+/// The project and personal layers' own values, as stored.
+#[derive(Clone, Serialize)]
+pub struct LayerValues {
+    pub project: Option<Value>,
+    pub personal: Option<Value>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -163,6 +173,10 @@ impl ConfigurationHost {
         Ok(ConfigurationSnapshot {
             stamps: stamps(declaration.version, &project, &personal),
             resolved,
+            layers: LayerValues {
+                project: project.as_ref().map(|l| l.values().clone()),
+                personal: personal.as_ref().map(|l| l.values().clone()),
+            },
         })
     }
 

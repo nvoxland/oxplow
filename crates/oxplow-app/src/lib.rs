@@ -2312,6 +2312,7 @@ mod tests {
                 // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
                 "oxplow.tasks.clear_finished",
+                "oxplow.tasks.set_workflow",
             ]
         );
     }

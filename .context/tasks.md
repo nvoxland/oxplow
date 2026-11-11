@@ -319,6 +319,12 @@ guard (`source_guards::only_oxplows_implementation_names_its_task_list`)
 pins the few production files that may name oxplow's task store,
 service or datasets.
 
+**How much an agent tracks is the project's choice**, not core's: the
+foundation `tasks` skill says only how to file and read. The active
+tracker's own skills carry the workflow; oxtask's is the setting
+`tasks.workflow` (agent tracks everything, the person files, custom, off;
+[extensions-bundled.md](./extensions-bundled.md) "task workflow").
+
 ## The capability
 
 `oxplow_domain::tasks`:

@@ -268,11 +268,30 @@ screens and the holder's add the review and analysis:
   (`request_task` links threads' requests, a person's command is in no
   turn), so showing one would be a guess. Fixtures:
   `assigned-to-you-*`.
-  oxtask's opinion that an agent tracks its work as tasks is its
-  `track-work` skill (offered only while oxtask is the active tracker)
-  and its `untracked-work` advisory: a request that changed files (a
-  claimed or sole `v_turn_file`) while the thread had no task in
-  progress is reminded once per request. It is `oxplow-bundled`'s, beside its
+  How an agent uses tasks is the project's **task workflow**, the
+  setting `tasks.workflow` of bundled's `configuration:` (version 2),
+  with `tasks.definitionOfDone` (free text; empty is none). Set both with
+  `oxplow.tasks.set_workflow { workflow?, definition_of_done? }` (a
+  script: it merges into the project layer, keeping the other settings).
+  The presets, by what oxtask offers (`when:` on each skill, offered only
+  while oxtask is the active tracker):
+  - `agent_tracks` (default): the `track-work` skill (take or file a task
+    for new work, in progress before editing, done when fully done) and
+    the `untracked-work` advisory: a request that changed files (a
+    claimed or sole `v_turn_file`) while the thread had no task in
+    progress is reminded once per request.
+  - `person_files`: the `work-tasks` skill (work what is assigned or
+    queued; file only follow-ups or when asked); no reminder.
+  - `custom`: only `/next-task`; the project's own extension supplies its
+    skill.
+  - `off`: none of them.
+  Both working skills say: the harness's own plan list is for steps inside
+  a task, discovered work is a backlog task linked `discovered_from`, and
+  done includes the definition of done. Fixtures:
+  `the-reminder-is-only-for-the-agent-tracks-workflow`,
+  `setting-the-task-workflow-keeps-the-definition-of-done`; the skills per
+  preset are the Rust test
+  `oxtask_offers_the_skills_of_the_projects_task_workflow`. It is `oxplow-bundled`'s, beside its
   `thread_tasks` dataset and `tasks.clear_finished` command, with a `panel:`
   fixture. Still in the holder: Waiting on You (`waiting-on-me`, a badge)
   and Comments (`comments-panel`). Each moves the same way: its parts, a

@@ -92,7 +92,7 @@ ui:
     - { page: task-tokens, at: oxplow/task-detail.sections }
     - { page: item-shared-work, at: oxplow/task-detail.sections }
 configuration:
-  version: 1
+  version: 2
   schema:
     type: object
     additionalProperties: false
@@ -122,10 +122,23 @@ configuration:
         properties:
           repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
+      tasks:
+        type: object
+        additionalProperties: false
+        description: How this project's agents use oxtask's tasks.
+        properties:
+          workflow:
+            type: string
+            enum: [off, person_files, agent_tracks, custom]
+            description: "off: agents get no task instructions; person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
+          definitionOfDone:
+            type: string
+            description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
   defaults:
     changeInterest: { complexityWeight: 0.6, parameterWeight: 0.4, longFunctionLines: 60, longFunctionScale: 40 }
     coChange: { minShared: 3, windowDays: 180, maxFilesPerCommit: 50, dormantDays: 90 }
     struggle: { repeatedEdits: 5, failedCommands: 3 }
+    tasks: { workflow: agent_tracks, definitionOfDone: "" }
 commands:
   # This extension's review-policy settings (`configuration:` above), through
   # the host's configuration scope. A person sets them; a change republishes
@@ -136,10 +149,22 @@ commands:
     op: snapshot
     example: {}
   - name: review_policy.write
-    summary: Set the review policy's project or personal settings (a compare-and-swap on the stamps `review_policy.read` returns).
+    summary: Set this extension's project or personal settings — the review policy and the task workflow (a compare-and-swap on the stamps `review_policy.read` returns).
     scope: extension_config.write
     op: compare_exchange
-    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"struggle": {"repeatedEdits": 4}}}, "personal": null}
+    example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 2}, "values": {"struggle": {"repeatedEdits": 4}}}, "personal": null}
+  - name: tasks.set_workflow
+    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here. Applies to agent sessions started after it."
+    input_schema:
+      type: object
+      properties:
+        workflow: { type: string, enum: [off, person_files, agent_tracks, custom], description: "The workflow preset." }
+        definition_of_done: { type: string, description: "What done means here, one item per line; empty for none." }
+      additionalProperties: false
+    example: {"workflow": "person_files", "definition_of_done": "Tests pass.\nCommitted."}
+    entry: handlers/set_workflow.star
+    needs: [extension_config.read]
+    access: write
   - name: tasks.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
     input_schema:
@@ -180,11 +205,16 @@ panels:
 # oxplow-foundation running there is no task tracker. Its agent skill is the
 # ready queue (`/oxplow:next-task`).
 skills:
-  - { name: next-task, kind: command, file: commands/next-task.md }
-  # oxtask's opinion: an agent tracks what it works on as tasks.
-  - { name: track-work, file: skills/track-work/SKILL.md }
+  # How an agent uses tasks is the project's task workflow (`tasks.workflow`):
+  # `off` offers none of these; `custom` only the queue, the project's own
+  # skill saying the rest.
+  - { name: next-task, kind: command, file: commands/next-task.md, when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] } }
+  # The agent tracks what it works on as tasks (the default).
+  - { name: track-work, file: skills/track-work/SKILL.md, when: { config: /tasks/workflow, in: [agent_tracks] } }
+  # The person files the tasks; the agent works them.
+  - { name: work-tasks, file: skills/work-tasks/SKILL.md, when: { config: /tasks/workflow, in: [person_files] } }
 implementations:
-  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work], description: "The task tracker that oxplow keeps itself." }
+  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work, work-tasks], description: "The task tracker that oxplow keeps itself." }
 advisories:
   # oxtask's opinion (the `track-work` skill): an agent tracks what it works
   # on as tasks. At the first edit of a request (a file an edit call named or
@@ -201,6 +231,8 @@ advisories:
              || 'work the person will want to see on the Work panel, take or file its task and '
              || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
       WHERE :request_id IS NOT NULL
+        -- Only in the workflow where the agent tracks everything.
+        AND config('/tasks/workflow') = 'agent_tracks'
         AND EXISTS (SELECT 1 FROM v_capability_provider
                      WHERE capability = 'task_tracker' AND provider = 'oxtask' AND active = 1)
         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
