@@ -1312,10 +1312,40 @@ mod codex {
             sent[start..start + 3],
             ["thread/start", "thread/goal/set", "thread/goal/clear"]
         );
+        // The goal is set paused: an active goal makes Codex run a turn on
+        // its own with no prompt (recorded on 0.167.1 and checked live: an
+        // active goal starts one, a paused goal still writes the rollout and
+        // starts none), which costs quota and is nobody's turn.
+        let goal = fake
+            .received()
+            .into_iter()
+            .find(|v| v["method"] == "thread/goal/set")
+            .unwrap();
+        assert_eq!(goal["params"]["status"], "paused");
         let (rig, fake) = open_codex(Host::default(), "thread/resume").await;
         assert!(!methods(&fake).iter().any(|m| m.starts_with("thread/goal")));
         // Named once the session it names is recorded.
         assert_eq!(rig.host.log(), ["started thr-x", "named Earlier work"]);
+    }
+
+    /// A turn Codex starts by itself (no `userMessage`) is nobody's prompt:
+    /// its calls and end are recorded, but no person's turn opens for it.
+    #[tokio::test]
+    async fn a_turn_with_no_prompt_is_not_a_persons_turn() {
+        let (rig, fake) = open_codex(Host::default(), "thread/start").await;
+        fake.push(note("turn/started", json!({"turn": {"id": "u0"}})));
+        fake.push(note(
+            "turn/completed",
+            json!({"turn": {"id": "u0", "status": "completed"}}),
+        ));
+        for _ in 0..50 {
+            if rig.host.count("turn_ended") > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(rig.host.count("turn_ended"), 1, "{:?}", rig.host.log());
+        assert_eq!(rig.host.count("turn_started"), 0, "{:?}", rig.host.log());
     }
 
     /// How many context items the daemon was given so far.

@@ -42,7 +42,10 @@ pub struct CodexOpen {
 
 /// What a new thread's goal is set to, and cleared from, to write its
 /// rollout: a thread nothing has persisted can't be resumed, and Codex's
-/// TUI attaches by resuming.
+/// TUI attaches by resuming. The goal is set `paused`: an active goal makes
+/// Codex run a turn with no prompt (recorded on the 0.167.1 daemon, and
+/// reproduced with a goal set and nothing else), which spends quota and is
+/// nobody's turn; a paused one writes the rollout and starts none.
 const PERSIST_GOAL: &str = "oxplow opened this thread";
 
 #[derive(Default)]
@@ -183,7 +186,7 @@ impl CodexConnection {
     /// it leaves none behind.
     async fn persist(&self, thread: &str) -> Result<(), String> {
         let persist = |params| self.server.request("thread/goal/set", params);
-        persist(json!({"threadId": thread, "objective": PERSIST_GOAL}))
+        persist(json!({"threadId": thread, "objective": PERSIST_GOAL, "status": "paused"}))
             .await
             .map_err(|e| format!("saving the new thread: {e}"))?;
         self.server

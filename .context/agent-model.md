@@ -877,8 +877,17 @@ thread id appended. The thread's id is the session's resume id.
 **The observer.** The chat session's actor (`chat/session.rs`) over
 Codex's `conn::Connection`, with no view. It:
 
-- persists a new thread before answering (`thread/goal/set` then
-  `thread/goal/clear`), so the TUI can resume it;
+- persists a new thread before answering (`thread/goal/set` with
+  `status: "paused"`, then `thread/goal/clear`), so the TUI can resume it.
+  The goal is paused because an **active** goal makes Codex run a turn
+  with no prompt (it reads skills and asks "What would you like me to work
+  on?", on the person's quota). Recorded on the 0.167.1 daemon, where
+  `turn/started` follows the goal's clear before oxplow's inject is even
+  sent, and reproduced with a goal set and nothing else; a paused goal
+  writes the rollout and starts no turn (pinned by
+  `a_new_thread_is_saved_so_the_tui_can_resume_it`). A turn that starts
+  with no `userMessage` anyway is nobody's prompt: no turn of the person's
+  opens (`a_turn_with_no_prompt_is_not_a_persons_turn`);
 - passes only messages naming its thread (the daemon also sends a
   client what concerns other threads, Codex's title-generation thread
   among them);
