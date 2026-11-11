@@ -1026,6 +1026,27 @@ mod tests {
         assert_eq!(all, vec![(Some(a), S::Idle), (Some(b), S::AwaitingUser)]);
     }
 
+    /// A subagent's start, finish, kind, turn and calls are read in one
+    /// pass over the subagent events and one over the calls that name one,
+    /// not by a subquery per subagent: that re-read the events (their id is
+    /// inside the payload) and scanned every tool call for each of
+    /// thousands of subagents, past `query_sql`'s 5 s.
+    #[test]
+    fn the_subagent_model_reads_events_and_calls_once() {
+        let db = Database::in_memory();
+        let plan: Vec<String> = db
+            .with_conn(|conn| {
+                let mut stmt = conn.prepare("EXPLAIN QUERY PLAN SELECT * FROM v_subagent")?;
+                let rows = stmt.query_map([], |r| r.get::<_, String>(3))?;
+                rows.collect()
+            })
+            .unwrap();
+        assert!(
+            !plan.iter().any(|step| step.contains("CORRELATED")),
+            "{plan:#?}"
+        );
+    }
+
     /// A session's status is found from its own events, newest first, not by
     /// walking every status change ever logged: the view backs what a person
     /// waits on, and the log only grows.
