@@ -10,7 +10,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
 use tracing::info;
 
-mod embedded {
+pub(crate) mod embedded {
     refinery::embed_migrations!("migrations");
 }
 

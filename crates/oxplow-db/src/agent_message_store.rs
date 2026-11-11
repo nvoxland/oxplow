@@ -18,11 +18,6 @@ pub const MATCH_WINDOW_SECONDS: i64 = 600;
 /// work on it for a while).
 pub const IDLE_MATCH_WINDOW_SECONDS: i64 = 3600;
 
-/// The `text_hash` of the row that records a send's `notify_when_idle` ask:
-/// a marker, not any message's hash (a notice has no text to match on, only
-/// the session that went idle).
-const IDLE_ASK: &str = "oxplow:agent_message:notify_when_idle";
-
 /// The content hash two ends of a message are matched on.
 pub fn text_hash(text: &str) -> String {
     crate::event_content_store::hash(text.trim().as_bytes())
@@ -54,27 +49,22 @@ pub fn record_sent_tx(conn: &Connection, sent: &Sent<'_>) -> Result<(), DomainEr
         notify_when_idle,
         at,
     } = *sent;
-    let hashes = [
-        Some(text_hash(text)),
-        notify_when_idle.then(|| IDLE_ASK.to_string()),
-    ];
-    for hash in hashes.into_iter().flatten() {
-        conn.execute(
-            "INSERT INTO agent_message (thread_id, agent_session_id, turn_id, call_id, recipient,
-                                        text_hash, sent_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                thread.value(),
-                session.map(|s| s.value()),
-                turn.map(|t| t.value()),
-                call,
-                recipient,
-                hash,
-                ts_to_string(at)
-            ],
-        )
-        .map_err(map_sql_err)?;
-    }
+    conn.execute(
+        "INSERT INTO agent_message (thread_id, agent_session_id, turn_id, call_id, recipient,
+                                    text_hash, sent_at, notify_when_idle)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            thread.value(),
+            session.map(|s| s.value()),
+            turn.map(|t| t.value()),
+            call,
+            recipient,
+            text_hash(text),
+            ts_to_string(at),
+            notify_when_idle
+        ],
+    )
+    .map_err(map_sql_err)?;
     Ok(())
 }
 
@@ -90,7 +80,12 @@ pub fn find_sent_tx(
     text: &str,
     at: Timestamp,
 ) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
-    find_tx(conn, &text_hash(text), None, at, MATCH_WINDOW_SECONDS)
+    find_tx(
+        conn,
+        Which::Text(&text_hash(text)),
+        at,
+        MATCH_WINDOW_SECONDS,
+    )
 }
 
 /// The send an idle notice about session `name` received at `at` matches:
@@ -102,21 +97,34 @@ pub fn find_idle_ask_tx(
     name: &str,
     at: Timestamp,
 ) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
-    find_tx(conn, IDLE_ASK, Some(name), at, IDLE_MATCH_WINDOW_SECONDS)
+    find_tx(conn, Which::IdleAsk(name), at, IDLE_MATCH_WINDOW_SECONDS)
+}
+
+/// What a match looks for: a send of this text hash not yet received, or a
+/// send to this recipient that asked for an idle notice not yet answered.
+enum Which<'a> {
+    Text(&'a str),
+    IdleAsk(&'a str),
 }
 
 fn find_tx(
     conn: &Connection,
-    hash: &str,
-    recipient: Option<&str>,
+    which: Which<'_>,
     at: Timestamp,
     window: i64,
 ) -> Result<Option<(i64, AgentTurnId)>, DomainError> {
+    let (hash, recipient) = match which {
+        Which::Text(hash) => (Some(hash), None),
+        Which::IdleAsk(name) => (None, Some(name)),
+    };
     let mut stmt = conn
         .prepare(
             "SELECT m.id, m.turn_id FROM agent_message m
-              WHERE m.text_hash = ?1 AND m.received_turn_id IS NULL AND m.turn_id IS NOT NULL
-                AND (?4 IS NULL OR m.recipient = ?4)
+              WHERE m.turn_id IS NOT NULL
+                AND CASE WHEN ?4 IS NULL
+                         THEN m.text_hash = ?1 AND m.received_turn_id IS NULL
+                         ELSE m.recipient = ?4 AND m.notify_when_idle = 1
+                              AND m.idle_notice_turn_id IS NULL END
                 AND julianday(m.sent_at) <= julianday(?2)
                 AND julianday(m.sent_at) >= julianday(?2) - ?3 / 86400.0
                 AND NOT EXISTS (
@@ -137,6 +145,21 @@ fn find_tx(
         [(id, turn)] => Some((id, AgentTurnId::new(turn))),
         _ => None,
     })
+}
+
+/// The idle notice that answers send `sent` joined turn `notice`: its ask
+/// is spent.
+pub fn mark_idle_notice_tx(
+    conn: &Connection,
+    sent: i64,
+    notice: AgentTurnId,
+) -> Result<(), DomainError> {
+    conn.execute(
+        "UPDATE agent_message SET idle_notice_turn_id = ?2 WHERE id = ?1",
+        params![sent, notice.value()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
 }
 
 /// Send `sent` was received in turn `received`: a match is spent.
@@ -203,5 +226,53 @@ mod tests {
             .unwrap();
         assert_eq!(found.0, None, "the denied send alone is no match");
         assert!(found.1.is_some(), "the send that ran matches alone");
+    }
+
+    /// V27 gives an ask for an idle notice its own columns: a row written
+    /// with the old marker hash is folded into the send's row (the ask, and
+    /// the turn the notice joined) and removed, so no marker is left.
+    #[test]
+    fn v27_folds_the_old_marker_rows_into_their_sends() {
+        let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::database::embedded::migrations::runner()
+            .set_target(refinery::Target::Version(26))
+            .run(&mut conn)
+            .unwrap();
+        let marker = "oxplow:agent_message:notify_when_idle";
+        conn.execute_batch(&format!(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', 'a', 'a');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at) VALUES (1, 1, 't', 'a', 'a');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (1, 1, 'p', 'a'), (2, 1, 'q', 'a');
+             INSERT INTO agent_message (id, thread_id, turn_id, call_id, recipient, text_hash, sent_at, received_turn_id) VALUES
+               (1, 1, 1, 'c1', 'asked', 'h1', 'a', NULL),
+               (2, 1, 1, 'c1', 'asked', '{marker}', 'a', 2),
+               (3, 1, 1, 'c2', 'waiting', 'h2', 'a', NULL),
+               (4, 1, 1, 'c2', 'waiting', '{marker}', 'a', NULL),
+               (5, 1, 1, 'c3', 'plain', 'h3', 'a', NULL);"
+        ))
+        .unwrap();
+        crate::database::embedded::migrations::runner()
+            .run(&mut conn)
+            .unwrap();
+        let rows: Vec<(i64, String, i64, Option<i64>)> = conn
+            .prepare(
+                "SELECT id, text_hash, notify_when_idle, idle_notice_turn_id
+                   FROM agent_message ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (1, "h1".into(), 1, Some(2)),
+                (3, "h2".into(), 1, None),
+                (5, "h3".into(), 0, None),
+            ]
+        );
     }
 }

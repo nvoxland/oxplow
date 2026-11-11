@@ -2004,10 +2004,10 @@ arrives as a prompt starting `[Cross-session idle notice] "<session name>"`
 session (no socket, no message), never a person's prompt
 (`an_idle_notice_is_a_peers_and_not_a_persons_prompt`). It has no text
 to match on, so it is linked by who it names: a `SendMessage` with
-`notify_when_idle` also records a marker row in `agent_message`
-(`text_hash` is a fixed marker, `recipient` the call's `to`), and the notice
-joins the turn of the one unmatched marker for that session name within an
-hour (`cause_basis` `matched`; none or two for one name link nothing, and a
+`notify_when_idle` says so on its `agent_message` row (V27:
+`notify_when_idle`, and `idle_notice_turn_id` once answered; `recipient` is
+the call's `to`), and the notice joins the turn of the one unanswered ask to
+that session name within an hour (`cause_basis` `matched`; none or two for one name link nothing, and a
 denied or failed call is no candidate). Pinned by
 `an_idle_notice_is_matched_to_the_send_that_asked_for_it` and the recorded
 exchange. A send to a recipient given as a session id, not its name, is not

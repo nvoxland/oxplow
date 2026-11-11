@@ -674,7 +674,11 @@ fn record_tx(
             };
             open_if_none(&mut applied, &opening)?;
             if let (Some((row, _)), Some(turn)) = (sent, applied.turn) {
-                agent_message_store::mark_received_tx(conn, row, turn)?;
+                if message.is_some() {
+                    agent_message_store::mark_received_tx(conn, row, turn)?;
+                } else {
+                    agent_message_store::mark_idle_notice_tx(conn, row, turn)?;
+                }
             }
             status = Some((AgentStatusState::Running, None));
         }
