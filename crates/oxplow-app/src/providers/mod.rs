@@ -28,6 +28,8 @@ pub mod sync;
 pub mod tasks;
 
 #[cfg(test)]
+mod script_capabilities;
+#[cfg(test)]
 mod tests;
 
 pub use host::HostError;

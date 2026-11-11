@@ -625,6 +625,21 @@ fn script_decl(
     })
 }
 
+/// Why a capability with a provider contract still takes no script, when
+/// its verbs can't be answered by a pure function of its input and
+/// oxplow's datasets (`None`: it can).
+fn script_unsupported(capability: &str) -> Option<&'static str> {
+    match capability {
+        "snapshots" => Some(
+            "its `mark` reads the stream's worktree and hashes every file, and its `read_at` \
+             returns bytes it kept, but a script runs pure — it can't read the tree \
+             (`tree.read`), and it keeps nothing between calls. Implement it as a provider \
+             (`providers:`), a process that can",
+        ),
+        _ => None,
+    }
+}
+
 /// The verbs a script implementation of `spec` answers: its provider
 /// contract, or why a script can't implement it.
 fn script_contract(
@@ -632,6 +647,15 @@ fn script_contract(
     entry: &str,
     what: &str,
 ) -> Result<&'static oxplow_domain::capability::ProviderContract, Box<Diagnostic>> {
+    if let Some(why) = script_unsupported(spec.id) {
+        return Err(problem(
+            "implementation.script_unsupported",
+            format!(
+                "{what}: entry `{entry}` is a script, and a script can't implement `{}`: {why}",
+                spec.id
+            ),
+        ));
+    }
     spec.provider.ok_or_else(|| {
         problem(
             "implementation.script_no_verbs",
@@ -980,6 +1004,31 @@ mod tests {
         let err = script_contract(spec, "x.star", "`vcs` implementation `jj`").unwrap_err();
         assert_eq!(err.code, "implementation.script_no_verbs");
         assert!(err.message.contains("`vcs` has none"), "{}", err.message);
+    }
+
+    /// A snapshots implementation marks a stream's worktree and keeps what
+    /// it marked. A script runs pure, with no `tree.read` and nowhere to
+    /// keep bytes, so it can do neither: it is refused at load, naming the
+    /// reason, rather than failing on its first mark.
+    #[test]
+    fn a_snapshots_script_is_refused_with_the_reason() {
+        let read = |rel: &str| {
+            (rel == "s.star").then(|| {
+                "def mark(x):\n    return {}\ndef changed(x):\n    return {}\n".to_string()
+            })
+        };
+        let (decls, errors) = parse_with(
+            "  - { capability: snapshots, id: marks, entry: s.star }\n",
+            &read,
+        );
+        assert!(decls.is_empty(), "{decls:?}");
+        let e = errors.first().expect("refused");
+        assert_eq!(e.code, "implementation.script_unsupported");
+        assert!(
+            e.message.contains("worktree") && e.message.contains("`snapshots`"),
+            "{}",
+            e.message
+        );
     }
 
     const MARK: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><path d=\"M0 0h8v8z\"/></svg>";

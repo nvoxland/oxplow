@@ -481,6 +481,11 @@ async fn a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompt
     );
     assert!(turns[1].prompt.contains("all tests passed"));
     assert!(turns[2].prompt.starts_with("[Cross-session idle notice]"));
+    // The idle notice joins the turn whose `SendMessage` asked for it
+    // (`notify_when_idle`); the peer's reply names no send and links none.
+    let started = events_of(&r, "agent.turn.started").await;
+    assert_eq!(started[2]["cause_turn"], turns[0].id.to_string());
+    assert!(started[1]["cause_turn"].is_null());
 }
 
 /// A replay's turns, oldest first: source, outcome, error, question and

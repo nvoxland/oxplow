@@ -1205,6 +1205,7 @@ pub(super) async fn observe_turn(host: &Host, body: &Value) -> Result<(), String
             socket: None,
             message: text.clone(),
             text: text.unwrap_or_default(),
+            idle_notice: false,
         }),
         (None, Some(subagent), None) => Some(oxplow_domain::agent::observe::Prompt::Handback {
             subagent,

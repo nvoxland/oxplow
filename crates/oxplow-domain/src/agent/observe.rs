@@ -59,6 +59,10 @@ pub enum Prompt {
         /// The prompt as the harness delivered it.
         #[serde(default)]
         text: String,
+        /// Whether this is the idle notice a `notify_when_idle` send asked
+        /// for (no socket, no message): its cause is that send.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        idle_notice: bool,
     },
     /// A job the agent started in the background reported back (Claude
     /// Code's task notification). `call` is the harness's id of the tool

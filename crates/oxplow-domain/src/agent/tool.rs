@@ -103,6 +103,10 @@ pub struct SentMessage {
     pub to: String,
     /// The message's text.
     pub text: String,
+    /// Whether the sender asked to be told when the recipient is idle
+    /// (Claude Code's `notify_when_idle`).
+    #[serde(default)]
+    pub notify_when_idle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]

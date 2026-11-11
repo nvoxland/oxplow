@@ -275,7 +275,8 @@ implementations:
   may call: `scope_calls::check_command_need`, so no `tree.read`),
   `script_missing`, `script_invalid` (doesn't parse, or calls a scope it
   doesn't need), `script_items` (stages/fields/id pattern),
-  `script_missing_verb` (a verb the contract requires for the declared
+  `script_unsupported` (a capability whose verbs a pure script can't
+  answer: snapshots), `script_missing_verb` (a verb the contract requires for the declared
   features), `script_declares` (a feature or `data` the capability
   doesn't have). A built-in refuses the script-only keys
   (`implementation.built_in_needs`, `built_in_declares`), and an AI
@@ -283,6 +284,32 @@ implementations:
   `oxplow extension test` runs the capability's conformance suite against
   it on a throwaway oxplow, chosen there, as it does a provider's program
   ([extensions-sdk.md](./extensions-sdk.md)).
+
+  **Which capabilities a script can implement** (each but the task
+  tracker is held by a test in `providers/script_capabilities.rs`, a small
+  extension against the capability's conformance suite):
+  - `knowledge` works: `write_page`, `delete_page` and `link` answer the
+    page's `knowledge.page.recorded@2`; `delete_page` and `link` read the
+    page back from `v_knowledge_page` / `v_knowledge_body` (`sql.read`).
+    It passes `knowledge_conformance::suite` once chosen. The record's
+    `updated_at` is the script's to state (core stamps its own row).
+  - `agent_harness` works for a terminal harness: `launch` answers a
+    `pty` spec (the identity env passed on, never on the command line),
+    `tool_use` and `render` map hooks. It is registered by id beside the
+    built-ins and passes `harness_conformance::suite`. What a script can't
+    do is look for the harness's program on `search_path` (no file
+    access): it names the command and lets the shell find it.
+  - `filesystem` works for a tree the script knows (a fixed one, or one
+    it computes): `stat`, `read` (base64: the script encodes), `list`;
+    it passes the filesystem checks, read-only. The sandbox has no bytes
+    type or base64 builtin, so a script holds bytes as lists of ints.
+  - `snapshots` is **refused at load** (`implementation.script_unsupported`,
+    naming why): `mark` must read the stream's worktree and hash every file
+    and `read_at` must return bytes it kept, but a script is pure — no
+    `tree.read` (`check_command_need`) and nothing kept between calls. A
+    snapshots implementation that needs those is a provider (`providers:`).
+    `implementations::script_unsupported` is where a capability whose verbs
+    a pure script can't answer is named.
 - **An `ai_provider` names its Rust kind** with `provider:` instead of
   `entry:` (`implementations::provider_decl`, `Source::ProviderKind`):
   one of `oxplow_ai_rig::KINDS` (`anthropic`, `openai`,
