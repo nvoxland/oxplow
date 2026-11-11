@@ -1142,7 +1142,13 @@ fixtures' shape: a header `{recorded, codex, note}` first (`codex` is
 params, emittedAtMs}` for a notification (a server request adds `id`),
 `{sent, params}` for what oxplow sent, `{response}` / `{error}` for the
 answer, `{answered: id, result}` for oxplow's answer to a server request.
-Both the chat connection and a thread listing record to the file. Trim it
+Every line but the header also carries `conn` (a number per connection)
+and `purpose` (`observer`: the session's connection, `listing`: a thread
+picker's). Each line is one `write_all` under a process-wide lock, so
+connections writing at once never interleave. The daemon broadcasts
+(`thread/started`, `thread/status/changed`, …) reach every connection;
+only the observer records what it hears unasked, so a broadcast is in the
+file once, and a listing's lines are its own `sent` / `response` ones. Trim it
 to the case, scrub paths and ids like the other fixtures, and read it back
 with `chat::codex::tests::parse_recording`
 (`a_session_recorded_by_the_client_replays_like_the_fixture`).

@@ -105,7 +105,7 @@ pub struct AppServer {
     answers: Answers,
     next_id: Arc<AtomicU64>,
     closed: watch::Receiver<bool>,
-    recording: Option<Arc<Path>>,
+    recording: Option<Arc<Recording>>,
 }
 
 /// The file a session's traffic is recorded to: `OXPLOW_CODEX_DEBUG`, the
@@ -120,39 +120,92 @@ fn recording_from_env() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Appends one JSON line to the recording. Best-effort: a write that
+/// The connection that records what the daemon broadcasts: a session's.
+/// Every connection receives each broadcast (`thread/started`,
+/// `thread/status/changed`, …), so only this one writes what it hears; the
+/// others write only what they send and what they are answered.
+pub const OBSERVER: &str = "observer";
+/// A short-lived connection that lists threads.
+pub const LISTING: &str = "listing";
+
+/// One connection's part in a recording: the file, a number that tells its
+/// lines from other connections', and what it is for.
+struct Recording {
+    path: PathBuf,
+    conn: u64,
+    purpose: &'static str,
+}
+
+/// Held across every write to a recording file, from every connection.
+static WRITE: Mutex<()> = Mutex::new(());
+static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
+
+/// Writes one line, whole, under [`WRITE`]. Best-effort: a write that
 /// fails is dropped, never an error for the session.
 fn append(path: &Path, line: &Value) {
+    let _held = lock(&WRITE);
+    write_line(path, line);
+}
+
+/// One `write_all` of the whole line: lines of connections writing at once
+/// can't interleave.
+fn write_line(path: &Path, line: &Value) {
     use std::io::Write;
+    let mut text = line.to_string();
+    text.push('\n');
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
     {
-        let _ = writeln!(f, "{line}");
+        let _ = f.write_all(text.as_bytes());
     }
 }
 
-/// The first line of a new recording (a file that is empty or missing):
-/// when it was made, with which Codex (not known at connect time, so
-/// `null`), and a note for whoever trims it into a fixture.
-#[cfg(unix)]
-fn begin_recording(path: &Path) {
-    if std::fs::metadata(path)
-        .map(|m| m.len() > 0)
-        .unwrap_or(false)
-    {
-        return;
+impl Recording {
+    fn new(path: &Path, purpose: &'static str) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            conn: NEXT_CONN.fetch_add(1, Ordering::Relaxed),
+            purpose,
+        }
     }
-    let today: String = oxplow_domain::Timestamp::now()
-        .to_string()
-        .chars()
-        .take(10)
-        .collect();
-    append(
-        path,
-        &json!({"recorded": today, "codex": Value::Null, "note": ""}),
-    );
+
+    /// A line tagged with this connection (`conn`, `purpose`).
+    fn write(&self, mut line: Value) {
+        line["conn"] = json!(self.conn);
+        line["purpose"] = json!(self.purpose);
+        append(&self.path, &line);
+    }
+
+    /// Whether this connection records what the daemon sends it unasked.
+    fn hears_broadcasts(&self) -> bool {
+        self.purpose == OBSERVER
+    }
+
+    /// The first line of a new recording (a file that is empty or
+    /// missing): when it was made, with which Codex (not known at connect
+    /// time, so `null`), and a note for whoever trims it into a fixture.
+    /// Checked and written under the lock, so only one connection writes it.
+    #[cfg(unix)]
+    fn begin(&self) {
+        let _held = lock(&WRITE);
+        if std::fs::metadata(&self.path)
+            .map(|m| m.len() > 0)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let today: String = oxplow_domain::Timestamp::now()
+            .to_string()
+            .chars()
+            .take(10)
+            .collect();
+        write_line(
+            &self.path,
+            &json!({"recorded": today, "codex": Value::Null, "note": ""}),
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -165,8 +218,8 @@ fn now_ms() -> u64 {
 
 impl AppServer {
     fn record(&self, line: Value) {
-        if let Some(path) = &self.recording {
-            append(path, &line);
+        if let Some(recording) = &self.recording {
+            recording.write(line);
         }
     }
 
@@ -188,7 +241,18 @@ impl AppServer {
         socket: &Path,
         program: Option<&Path>,
     ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
-        Self::connect_recording(socket, program, recording_from_env().as_deref()).await
+        Self::connect_for(socket, program, OBSERVER).await
+    }
+
+    /// [`Self::connect`] for a `purpose` ([`OBSERVER`], [`LISTING`]): what
+    /// its lines in a recording are tagged with.
+    #[cfg(unix)]
+    pub async fn connect_for(
+        socket: &Path,
+        program: Option<&Path>,
+        purpose: &'static str,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
+        Self::connect_recording(socket, program, recording_from_env().as_deref(), purpose).await
     }
 
     /// [`Self::connect`], recording every message sent and received to
@@ -198,6 +262,7 @@ impl AppServer {
         socket: &Path,
         program: Option<&Path>,
         record: Option<&Path>,
+        purpose: &'static str,
     ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
         let stream = match tokio::net::UnixStream::connect(socket).await {
             Ok(s) => s,
@@ -217,7 +282,7 @@ impl AppServer {
                 })?
             }
         };
-        Self::over(stream, record).await
+        Self::over(stream, record, purpose).await
     }
 
     /// Run the client over an open stream to the daemon's socket.
@@ -225,6 +290,7 @@ impl AppServer {
     async fn over(
         stream: tokio::net::UnixStream,
         record: Option<&Path>,
+        purpose: &'static str,
     ) -> Result<(Self, mpsc::UnboundedReceiver<ServerMessage>), String> {
         let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
             .max_message_size(Some(MAX_MESSAGE))
@@ -238,9 +304,9 @@ impl AppServer {
         let (messages, received) = mpsc::unbounded_channel();
         let answers: Answers = Arc::default();
         let (closed_tx, closed) = watch::channel(false);
-        let recording: Option<Arc<Path>> = record.map(Arc::from);
-        if let Some(path) = &recording {
-            begin_recording(path);
+        let recording = record.map(|path| Arc::new(Recording::new(path, purpose)));
+        if let Some(recording) = &recording {
+            recording.begin();
         }
         tokio::spawn(async move {
             while let Some(m) = outgoing.recv().await {
@@ -259,8 +325,13 @@ impl AppServer {
                     _ => continue,
                 };
                 if let Ok(v) = serde_json::from_str::<Value>(text.as_str()) {
-                    if let Some(path) = &heard {
-                        append(path, &heard_line(&v));
+                    if let Some(recording) = &heard {
+                        // A broadcast arrives on every connection: one
+                        // records it. Answers are each connection's own.
+                        let answer = v.get("method").is_none();
+                        if answer || recording.hears_broadcasts() {
+                            recording.write(heard_line(&v));
+                        }
                     }
                     route(v, &pending, &messages);
                 }
@@ -656,9 +727,10 @@ mod tests {
             _ => Err(format!("no {method}")),
         });
         let file = home.path().join("session.jsonl");
-        let (server, mut messages) = AppServer::connect_recording(&fake.socket, None, Some(&file))
-            .await
-            .unwrap();
+        let (server, mut messages) =
+            AppServer::connect_recording(&fake.socket, None, Some(&file), OBSERVER)
+                .await
+                .unwrap();
         server
             .request("thread/list", json!({"cwd": "/w"}))
             .await
@@ -672,7 +744,7 @@ mod tests {
         };
         server.respond(&id, json!({"decision": "decline"})).unwrap();
         fake.wait_for(|v| v.get("id") == Some(&json!(7))).await;
-        let (again, _) = AppServer::connect_recording(&fake.socket, None, Some(&file))
+        let (again, _) = AppServer::connect_recording(&fake.socket, None, Some(&file), LISTING)
             .await
             .unwrap();
         drop(again);
@@ -706,7 +778,7 @@ mod tests {
         ));
 
         let written = std::fs::read_to_string(&file).unwrap();
-        let (quiet, _) = AppServer::connect_recording(&fake.socket, None, None)
+        let (quiet, _) = AppServer::connect_recording(&fake.socket, None, None, LISTING)
             .await
             .unwrap();
         quiet.request("thread/list", json!({})).await.unwrap();
@@ -715,6 +787,83 @@ mod tests {
             written,
             "no recording, no writes"
         );
+    }
+
+    /// Connections recording to one file at once write only whole lines,
+    /// each tagged with its connection, and a broadcast (which every
+    /// connection receives) is in the file once, from the observer.
+    #[tokio::test]
+    async fn concurrent_connections_write_whole_tagged_lines_and_a_broadcast_once() {
+        let home = short_dir();
+        let fake = FakeAppServer::start(home.path(), |_, _| Ok(json!({"ok": true})));
+        let file = home.path().join("session.jsonl");
+        let (observer, mut heard) =
+            AppServer::connect_recording(&fake.socket, None, Some(&file), OBSERVER)
+                .await
+                .unwrap();
+        let mut listings = Vec::new();
+        for _ in 0..3 {
+            listings.push(
+                AppServer::connect_recording(&fake.socket, None, Some(&file), LISTING)
+                    .await
+                    .unwrap(),
+            );
+        }
+        let big = "x".repeat(20_000);
+        for n in 0..40 {
+            fake.push(json!({"method": "thread/status/changed", "params": {"threadId": "t", "n": n, "pad": big}}));
+        }
+        let mut asks = Vec::new();
+        for (server, _) in &listings {
+            let server = server.clone();
+            let big = big.clone();
+            asks.push(tokio::spawn(async move {
+                for _ in 0..40 {
+                    server
+                        .request("thread/list", json!({"pad": big}))
+                        .await
+                        .unwrap();
+                }
+            }));
+        }
+        for _ in 0..40 {
+            observer
+                .request("thread/read", json!({"pad": big}))
+                .await
+                .unwrap();
+        }
+        for ask in asks {
+            ask.await.unwrap();
+        }
+        for _ in 0..40 {
+            heard.recv().await.unwrap();
+        }
+        for (_, rx) in &mut listings {
+            for _ in 0..40 {
+                rx.recv().await.unwrap();
+            }
+        }
+        let lines: Vec<Value> = std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("a whole JSON line"))
+            .collect();
+        let broadcasts: Vec<&Value> = lines
+            .iter()
+            .filter(|l| l["method"] == "thread/status/changed")
+            .collect();
+        assert_eq!(broadcasts.len(), 40, "once, not once per connection");
+        assert!(broadcasts.iter().all(|l| l["purpose"] == "observer"));
+        let conns: std::collections::HashSet<u64> = lines
+            .iter()
+            .filter(|l| l.get("recorded").is_none())
+            .map(|l| l["conn"].as_u64().expect("tagged"))
+            .collect();
+        assert_eq!(conns.len(), 4, "every connection's own lines are there");
+        assert!(lines
+            .iter()
+            .filter(|l| l["purpose"] == "listing")
+            .all(|l| l.get("method").is_none()));
     }
 
     /// A resumed thread's answer runs to tens of megabytes (full turns
