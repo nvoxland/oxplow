@@ -308,14 +308,27 @@ impl AgentContext {
         session_id: Option<&str>,
     ) -> Vec<(String, String)> {
         let current = extension_contexts(svc, thread_id).await;
-        // One that says nothing now is forgotten: when it says the same
-        // thing again, it's news again.
-        if let Some(session) = session_id {
-            let mut state = self.state.lock();
-            if let Some(sent) = state.last_extension_context.get_mut(session) {
-                sent.retain(|from, _| current.iter().any(|c| &c.from == from));
-            }
-        }
+        // One the session was sent that says nothing now tells it so, once:
+        // what it said no longer holds. Recorded as sent like any block, so
+        // the same text coming back differs from it and is news again.
+        let mut cleared: Vec<(String, String)> = session_id
+            .and_then(|session| {
+                let state = self.state.lock();
+                state.last_extension_context.get(session).map(|sent| {
+                    sent.iter()
+                        .filter(|(from, _)| !current.iter().any(|c| &c.from == *from))
+                        .map(|(from, previous)| (from.clone(), previous.clone()))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|(from, previous)| {
+                let block = context_block(&from, CONTEXT_CLEARED, false);
+                (previous != block).then_some((from, block))
+            })
+            .collect();
+        cleared.sort();
         let changed: Vec<(String, String, bool)> = current
             .into_iter()
             .map(|c| {
@@ -331,7 +344,7 @@ impl AgentContext {
             })
             .collect();
         let mut left = CONTEXTS_BUDGET;
-        let mut out = Vec::new();
+        let mut out = cleared;
         for (from, text, cut) in changed {
             if left == 0 {
                 break;
@@ -448,6 +461,9 @@ pub const CONTEXT_BUDGET: usize = 1_500;
 pub const CONTEXTS_BUDGET: usize = 3_000;
 /// The line that ends a cut agent context.
 pub const CONTEXT_CUT: &str = "… (cut: over its budget)";
+/// What an agent context the session was sent says once it has nothing to
+/// say: what it said before no longer holds.
+pub const CONTEXT_CLEARED: &str = "Nothing now: what this said before no longer holds.";
 
 /// What one extension's agent context says for a thread now, uncut:
 /// who says it (`<namespace>/<id>`) and its text.
@@ -1174,13 +1190,17 @@ mod tests {
         .unwrap();
     }
 
-    /// The `<context from=..>` blocks of a prompt's context, in order.
+    /// The `<context from=..>` blocks of a prompt's context, in order: the
+    /// test's own extensions', not the shipped ones' (`oxplow/`, oxtask's
+    /// task state).
     fn contexts(text: &str) -> Vec<String> {
         let mut out = Vec::new();
         let mut rest = text;
         while let Some(start) = rest.find("<context from=") {
             let end = rest[start..].find("</context>").unwrap() + start + "</context>".len();
-            out.push(rest[start..end].to_string());
+            if !rest[start..].starts_with("<context from=\"oxplow/") {
+                out.push(rest[start..end].to_string());
+            }
             rest = &rest[end..];
         }
         out
@@ -1252,11 +1272,12 @@ mod tests {
         assert_eq!(prompt(&ctx, &fx).await.len(), 1);
     }
 
-    /// A context that stops saying anything is forgotten for the session:
-    /// when it says the same thing again later, it's sent again (the agent
-    /// may have acted on its absence).
+    /// A context that stops saying anything tells the session once that
+    /// what it said no longer holds (an agent told of a task in progress
+    /// learns it closed); a session never told of it hears nothing. When it
+    /// says the same thing again later, it's sent again.
     #[tokio::test]
-    async fn an_extension_context_that_went_away_is_sent_again_when_it_returns() {
+    async fn an_extension_context_that_went_away_says_so_once_and_is_sent_again_when_it_returns() {
         let fx = crate::test_fixtures::services_with_thread().await;
         with_context(
             &fx.svc,
@@ -1267,7 +1288,16 @@ mod tests {
         let ctx = AgentContext::default();
         assert_eq!(prompt(&ctx, &fx).await.len(), 1);
         retitle(&fx.svc, fx.thread, "Gone").await;
-        assert!(prompt(&ctx, &fx).await.is_empty());
+        assert_eq!(
+            prompt(&ctx, &fx).await,
+            vec![format!(
+                "<context from=\"state/now\">\n{CONTEXT_CLEARED}\n</context>"
+            )]
+        );
+        assert!(prompt(&ctx, &fx).await.is_empty(), "said once");
+        // A fresh session was never told of it: nothing to take back.
+        ctx.reset_session(Some("s1"));
+        assert!(prompt(&ctx, &fx).await.is_empty(), "nothing to clear");
         retitle(&fx.svc, fx.thread, "Thread").await;
         assert_eq!(
             prompt(&ctx, &fx).await,

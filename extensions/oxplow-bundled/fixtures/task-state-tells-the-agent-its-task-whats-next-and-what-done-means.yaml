@@ -1,0 +1,16 @@
+# oxtask's task state, told to the agent once and again when it changes:
+# the thread's task in progress, the next three in its queue, and the
+# project's definition of done. Another thread's work is not in it.
+given:
+  - { command: oxplow.task.create, input: { title: Fix login, assignee: thr1 }, bind: active }
+  - { command: oxplow.task.transition, input: { uri: $active.uri, to: in_progress } }
+  - { command: oxplow.task.create, input: { title: Write docs, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Add tests, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Refactor, assignee: thr1 } }
+  - { command: oxplow.task.create, input: { title: Someday, assignee: thr1 } }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Other }, bind: other }
+  - { command: oxplow.task.create, input: { title: Not mine, assignee: $other.id } }
+  - { command: oxplow.tasks.set_workflow, input: { definition_of_done: "Tests pass.\nCommitted." } }
+when: { context: task-state }
+expect:
+  text: "In progress on this thread: \"Fix login\" (tsk1).\nUp next: \"Write docs\" (tsk2), \"Add tests\" (tsk3), \"Refactor\" (tsk4).\nDone means:\nTests pass.\nCommitted."

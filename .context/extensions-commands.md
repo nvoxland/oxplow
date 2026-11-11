@@ -570,9 +570,11 @@ context:
   differs from what that agent session last received from it: **once,
   then on change**, the session context's rule (agent-model.md). A
   compaction or a fresh start (`reset_session`) forgets what was sent,
-  so the next prompt carries every context again. A context that says
-  nothing now is forgotten for the session, so the same text coming back
-  is sent again. The records are in
+  so the next prompt carries every context again. A context the session
+  was sent that says nothing now tells it so once (`CONTEXT_CLEARED`:
+  what it said no longer holds; an agent told of a task in progress
+  learns it closed), recorded as sent, so the same text coming back is
+  sent again. A session never sent it hears nothing. The records are in
   memory, like the session context's: a daemon restart costs one repeat.
 - **Budget**: `CONTEXT_BUDGET` (1,500 characters) per context, then
   `CONTEXTS_BUDGET` (3,000) for all that a prompt carries; a cut text

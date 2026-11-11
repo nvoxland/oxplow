@@ -217,6 +217,39 @@ skills:
   - { name: track-work, file: skills/track-work/SKILL.md, when: { config: /tasks/workflow, in: [agent_tracks] } }
   # The person files the tasks; the agent works them.
   - { name: work-tasks, file: skills/work-tasks/SKILL.md, when: { config: /tasks/workflow, in: [person_files] } }
+# What the agent should know now, while oxtask is the active tracker and
+# the project's workflow uses tasks: the thread's task in progress, the
+# next three in its queue, and the project's definition of done; nothing
+# when there is none of them (core tells an agent that was told before
+# that it no longer holds). Sent once, then on change, and again after a
+# compaction.
+context:
+  - id: task-state
+    doc: "The thread's task in progress, the next three in its queue, and the project's definition of done."
+    needs: [task_tracker]
+    when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] }
+    query: |
+      WITH here AS (SELECT uri('oxplow/thread', 'id', 'thr' || :thread_id) AS uri),
+      mine AS (
+        SELECT w.title, w.native_id, w.state, w.rank, w.created_at
+        FROM v_task w, here WHERE w.assignee = here.uri
+      ),
+      active AS (
+        SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
+        FROM (SELECT * FROM mine WHERE state = 'in_progress' ORDER BY rank IS NULL, rank, created_at)
+      ),
+      up_next AS (
+        SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
+        FROM (SELECT * FROM mine WHERE state = 'todo' ORDER BY rank IS NULL, rank, created_at LIMIT 3)
+      ),
+      done_means AS (SELECT trim(coalesce(config('/tasks/definitionOfDone'), '')) AS d)
+      SELECT coalesce('In progress on this thread: ' || active.s || '.', 'Nothing is in progress on this thread.')
+             || coalesce(char(10) || 'Up next: ' || up_next.s || '.', '')
+             || CASE WHEN done_means.d <> '' THEN char(10) || 'Done means:' || char(10) || done_means.d ELSE '' END AS text
+      FROM active, up_next, done_means
+      WHERE (active.s IS NOT NULL OR up_next.s IS NOT NULL OR done_means.d <> '')
+        AND EXISTS (SELECT 1 FROM v_capability_provider p
+                     WHERE p.capability = 'task_tracker' AND p.provider = 'oxtask' AND p.active = 1)
 implementations:
   - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work, work-tasks], description: "The task tracker that oxplow keeps itself." }
 advisories:

@@ -290,7 +290,13 @@ screens and the holder's add the review and analysis:
   - `off`: none of them.
   Both working skills say: the harness's own plan list is for steps inside
   a task, discovered work is a backlog task linked `discovered_from`, and
-  done includes the definition of done. Fixtures:
+  done includes the definition of done. In every preset but `off`, while oxtask is
+  the active tracker, its agent context `task-state` tells the agent the
+  thread's task in progress, the next three `todo` in its queue and the
+  definition of done (nothing when there is none of them; core's
+  `CONTEXT_CLEARED` tells an agent told before): once, then on change, and again after
+  a compaction (extensions-commands.md "agent contexts"). Fixtures:
+  `task-state-*`. Fixtures:
   `the-reminder-is-only-for-the-agent-tracks-workflow`,
   `setting-the-task-workflow-keeps-the-definition-of-done`; the skills per
   preset are the Rust test
