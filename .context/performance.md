@@ -1389,6 +1389,32 @@ JOIN v_agent_turn t` makes it `SEARCH page_ref USING INDEX
 idx_page_ref_target` first: no turn work when nothing names the task, one
 pass over the turns per mention.
 
+## Every page's queries, timed (measured 2026-11-11)
+
+Each SQL loader of oxplow-foundation's and oxplow-bundled's pages, parts
+and queries (268), run alone through `oxplow_query_sql` on this repo's
+database, earlier loaders it reads inlined as CTEs. A batch of pages run
+in parallel through `oxplow_run_page` logged 2–5 s for the metric pages;
+alone they are under 50 ms, so time one query at a time. What was slow and
+what changed:
+
+| Loader | Before | After | Why |
+|---|---|---|---|
+| `v_subagent` (thread-sessions) | 3.5–4 s, past 5 s for a whole column | one pass | a subquery per subagent re-read the subagent events (id inside the payload) and scanned every tool call (no index by subagent); now grouped once each (`the_subagent_model_reads_events_and_calls_once`) |
+| shared-work-rows, a thread | 2.0 s | 35 ms | items joined `v_task` by uri before grouping; group first, title after |
+| shared-work-rows, a 225-request task | 2–4 s | 135 ms | the task's files read from the files in; `CROSS JOIN` from its requests out |
+| diff-view `row`, a turn / no subject | 1.1–1.6 s | 6–25 ms | next to the turn arm, `rq` walked every turn, each scanning every turn for its request's first; driven from the request id now |
+| diff-view `row`, a 24-turn request | 2.1 s | ~0.5 s | the same, and its `turn_end` takes found from its turns |
+| branch-status `status`, `marks` | ~160 ms each | 6 ms | the divergence pinned in a join's `ON`, which narrows nothing (semantic-layer.md "Narrowed by the query") |
+
+Left as they are: `v_agent_conversation` (~420 ms: listing opencode's
+sessions runs `opencode session list`, a process start, on every read; the
+agent-session, new-session and saved-conversations pages wait on it), the
+streams page's `apart` (~170 ms: it compares every branch with the base,
+as a per-row head can't narrow it), item-requests on a 225-request task
+(~250 ms, a file confidence check per file), task-rows `items` (~150 ms,
+every task).
+
 ## File watching at scale (measured 2026-11-06)
 
 `cargo run --example profile_watch --release -p oxplow-app -- --root <dir>`

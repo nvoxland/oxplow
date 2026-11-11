@@ -36,7 +36,11 @@ loaders:
              coalesce(d.ahead > 0, 0) AND t.id IS NOT NULL AS can_merge_out
       FROM v_branch b
       LEFT JOIN v_stream w ON w.id = :stream_id AND w.kind = 'worktree' AND :base <> b.name
-      LEFT JOIN v_branch_divergence d ON w.id IS NOT NULL AND d.base = :base AND d.head = :branch
+      -- The pair read in its own WHERE: only there does the live dataset
+      -- see `base = … AND head = …` and compare the one pair, not every
+      -- branch against the default.
+      LEFT JOIN (SELECT ahead, behind FROM v_branch_divergence
+                 WHERE base = :base AND head = :branch) d ON w.id IS NOT NULL
       LEFT JOIN v_stream t ON w.id IS NOT NULL AND t.branch = :base AND t.archived_at IS NULL
       WHERE b.kind = 'local' AND b.name = :branch
     params:
@@ -57,7 +61,9 @@ loaders:
         FROM v_branch b WHERE b.kind = 'local' AND b.name = :branch
         UNION ALL
         SELECT 2, :base, d.ahead, d.behind, NULL
-        FROM v_stream w JOIN v_branch_divergence d ON d.base = :base AND d.head = :branch
+        FROM v_stream w
+        JOIN (SELECT ahead, behind FROM v_branch_divergence
+              WHERE base = :base AND head = :branch) d ON 1
         WHERE w.id = :stream_id AND w.kind = 'worktree' AND :base <> :branch
       )
       SELECT ord, -1 AS sub, against, against AS text, NULL AS tone,
