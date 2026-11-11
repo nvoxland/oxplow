@@ -1278,6 +1278,114 @@ mod tests {
         assert!(last_start < last_end, "the exit starts no turn");
     }
 
+    /// Every Codex turn has `turn/moderationMetadata` notifications (Codex's
+    /// own moderation verdict on the prompt and output: nothing oxplow acts on,
+    /// so they are ignored) and a `thread/settings/updated` before it (read
+    /// deliberately: its `model` and `effort` are what the turn ends on).
+    #[test]
+    fn moderation_is_ignored_and_settings_are_read() {
+        let text = include_str!("../../tests/fixtures/codex/approval.jsonl");
+        let mut state = State::default();
+        let (mut moderation, mut settings, mut ended_on) = (0, 0, None);
+        for line in text.lines().skip(1) {
+            let v: Value = serde_json::from_str(line).unwrap();
+            if let Some(id) = v.pointer("/response/thread/id").and_then(Value::as_str) {
+                state.thread = Some(id.to_string());
+            }
+            let (Some(method), None) = (v.get("method").and_then(Value::as_str), v.get("id"))
+            else {
+                continue;
+            };
+            let params = v.get("params").cloned().unwrap_or(Value::Null);
+            let out = on_message(
+                &ServerMessage::Notification {
+                    method: method.into(),
+                    params,
+                },
+                &mut state,
+            );
+            match method {
+                "turn/moderationMetadata" => {
+                    moderation += 1;
+                    assert!(out.is_empty(), "moderation says nothing");
+                }
+                "thread/settings/updated" => {
+                    settings += 1;
+                    assert!(out.is_empty(), "settings say nothing by themselves");
+                }
+                _ => {}
+            }
+            for incoming in out {
+                if let Incoming::PromptDone(Ok(end)) = incoming {
+                    ended_on = end.run;
+                }
+            }
+        }
+        assert!(moderation > 0 && settings > 0, "the recording has both");
+        let run = ended_on.expect("the turn ends with the model it ran on");
+        assert_eq!(run.model.as_deref(), Some("gpt-6.1-sol"));
+    }
+
+    /// The recorded failed turn (`failed_turn.jsonl`, an invalid API key): ten
+    /// `error` notifications with `willRetry: true` ("Reconnecting... n/5",
+    /// over WebSockets and then HTTPS), a `warning`, the thread's status
+    /// `systemError`, a last `error` with `willRetry: false`, and
+    /// `turn/completed` `failed` with `turn.error` and no items. The turn ends
+    /// once, as failed, with the final error's words; a retry ends nothing; the
+    /// `systemError` status is no wait on the person.
+    #[test]
+    fn a_recorded_failed_turn_ends_once_with_the_final_error() {
+        let log = replay(include_str!("../../tests/fixtures/codex/failed_turn.jsonl"));
+        let ends: Vec<&String> = log
+            .iter()
+            .filter(|l| l.starts_with("turn ended") || l.starts_with("turn failed"))
+            .collect();
+        assert_eq!(ends.len(), 1, "one end, not one per retry: {log:?}");
+        assert!(
+            ends[0].starts_with("turn failed httpConnectionFailed: unexpected status 401"),
+            "the final error's class and message: {}",
+            ends[0]
+        );
+        assert!(!ends[0].contains("Reconnecting"), "a retry is not the end");
+        assert_eq!(log.iter().filter(|l| *l == "turn started").count(), 1);
+        assert_eq!(log.last().unwrap(), ends[0], "it ends the recording's turn");
+        assert!(
+            !log.iter().any(|l| l.starts_with("waiting")),
+            "systemError is not waiting on the person"
+        );
+    }
+
+    /// An `error` notification is a retry (`willRetry`) or the turn's last word;
+    /// either way the turn's end is `turn/completed`, so neither ends it.
+    #[test]
+    fn an_error_notification_ends_no_turn() {
+        let mut state = State {
+            thread: Some("t".into()),
+            running: true,
+            ..State::default()
+        };
+        for will_retry in [true, false] {
+            let out = on_message(
+                &ServerMessage::Notification {
+                    method: "error".into(),
+                    params: json!({"threadId": "t", "turnId": "u", "willRetry": will_retry,
+                        "error": {"message": "Reconnecting... 2/5"}}),
+                },
+                &mut state,
+            );
+            assert!(out.is_empty());
+        }
+        let out = on_message(
+            &ServerMessage::Notification {
+                method: "thread/status/changed".into(),
+                params: json!({"threadId": "t", "status": {"type": "systemError"}}),
+            },
+            &mut state,
+        );
+        assert!(out.is_empty());
+        assert!(state.running, "only turn/completed ends the turn");
+    }
+
     /// The recorded subagent (`subagent.jsonl`): the spawn is only
     /// `subAgentActivity` items (no spawn collab call), the `wait` names no
     /// agent, and the child's thread has no `thread/started`. The child is
@@ -1962,6 +2070,26 @@ mod tests {
             r#"Files changed"#,
             r#"`fileChange` paths and diffs; `turn/diff/updated`"#,
             r#"`fileChange` paths and diffs; `turn/diff/updated` not read"#,
+        ),
+        (
+            r#"Moderation of a turn"#,
+            r#"`turn/moderationMetadata` (Codex's verdict on the prompt and output)"#,
+            r#"not read"#,
+        ),
+        (
+            r#"The model and effort a thread runs on"#,
+            r#"`thread/settings/updated` `threadSettings.model` / `effort`, before the turn; the open result's `thread.model`"#,
+            r#"`TurnRun.model` / `effort` on the turn's end"#,
+        ),
+        (
+            r#"A thread that is not the session's"#,
+            r#"`thread/started` (Codex's ephemeral naming thread, no parent), `thread/status/changed` and `thread/closed` for it or for an earlier session's thread (`notLoaded`)"#,
+            r#"not read: only a message naming the session's thread, or a child it spawned, passes"#,
+        ),
+        (
+            r#"A turn's retries and failure"#,
+            r#"`error` notifications (`willRetry`), a `warning`, `thread/status/changed` `systemError`, then `turn/completed` `failed`"#,
+            r#"only the `turn/completed` ends the turn (once, `Errored`); `error`, `warning` and `systemError` say nothing"#,
         ),
         (
             r#"Compaction"#,

@@ -339,6 +339,39 @@ mod tests {
         );
     }
 
+    /// A turn that ends because its agent went away (Codex's daemon
+    /// restarting under it: an `Interrupt`, not a `Stop`) abandons the call it
+    /// left running too: a call whose `item/completed` can never come is not
+    /// `running` for ever.
+    #[tokio::test]
+    async fn an_interrupted_turn_abandons_the_call_in_flight() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        let ingest = |h: HookEnvelope| svc.hook_ingest.ingest(h);
+        ingest(hook(f.thread, HookKind::UserPromptSubmit, json!({})))
+            .await
+            .unwrap();
+        ingest(hook(
+            f.thread,
+            HookKind::PreToolUse,
+            json!({"tool_name": "Bash", "tool_input": {"command": "sleep 40"}, "tool_use_id": "t1"}),
+        ))
+        .await
+        .unwrap();
+        ingest(hook(f.thread, HookKind::Interrupt, json!({})))
+            .await
+            .unwrap();
+        svc.event_pump.run_once().await.unwrap();
+        assert_eq!(
+            rows(
+                svc,
+                "SELECT call_id, state, ended_at IS NOT NULL FROM v_tool_call"
+            )
+            .await,
+            json!([["t1", "abandoned", 1]])
+        );
+    }
+
     /// A call's row opens at its request and closes at its finish, with the
     /// harness's timing; a denied call has a row that never ran; a call its
     /// turn ended with is abandoned; a finish with no request still records.

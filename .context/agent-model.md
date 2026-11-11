@@ -949,6 +949,44 @@ own Codex home, with no turn before the person's prompt):
   open turn); no turn opens. Pinned by
   `a_recorded_background_terminal_finishes_its_call_and_wakes_nothing`.
 
+- *Failed turn* (`failed_turn.jsonl`, an invalid API key; pinned by
+  `a_recorded_failed_turn_ends_once_with_the_final_error` and, through a
+  session, `a_recorded_failed_turn_is_one_errored_turn`). After
+  `turn/started`: ten `error` notifications with `willRetry: true`
+  (`Reconnecting... n/5`, over WebSockets, then HTTPS after a `warning`
+  "Falling back from WebSockets to HTTPS transport"), `thread/status/changed`
+  `systemError`, an `error` with `willRetry: false`, and `turn/completed`
+  `failed` with `turn.error` and no items. Only that last message ends the
+  turn: once, `Errored`, with the final error's class and message. The
+  retries, the warning and `systemError` say nothing (the status is no wait
+  on the person).
+- *Other threads on the daemon.* The daemon sends every connection what
+  concerns every thread. After each user message Codex starts an ephemeral
+  naming thread (`ephemeral: true`, no parent, its own model) that arrives as
+  `thread/started` and closes a minute later; a thread of an earlier session
+  arrives as `notLoaded` and `thread/closed`. A message passes only when it
+  names the session's thread (`threadId`) or one of its children, and a
+  `thread/started` only registers a child that names the session's thread as
+  its parent, so neither opens a thread, session, turn or job (pinned by
+  `another_thread_on_the_daemon_is_not_this_sessions`, which replays all five
+  recordings through a session).
+- *Per-turn bookkeeping.* `turn/moderationMetadata` (Codex's verdict on the
+  prompt and output) is not read; `thread/settings/updated` is, for its
+  `model` and `effort` (`moderation_is_ignored_and_settings_are_read`).
+- *The daemon restarts mid-session.* The daemon self-updates (0.166.0 →
+  0.167.1 in one recording session); the restart killed a background process
+  and its `item/completed` never came
+  (`codex-background-terminal.jsonl.daemon-restart` in the local recordings).
+  The observer's connection closes, so the session ends: the host gets an
+  interrupt, which ends the open turn `interrupted` and abandons the calls
+  it left running (`tool_call.project` does that for any turn end, `Stop`
+  or `Interrupt`), so nothing stays `running` for ever. The observer does not
+  reconnect by itself (the TUI died with the daemon); the next open resumes
+  the thread on the daemon that came back. Pinned by
+  `a_daemon_restart_mid_turn_interrupts_the_turn_and_the_call_in_flight`,
+  `a_restarted_daemon_is_observed_again_on_the_next_open` and
+  `an_interrupted_turn_abandons_the_call_in_flight`.
+
 It stays open when the TUI exits (the PTY's exit ingests the
 `SessionEnd`), so a reopened TUI attaches to a held thread; it closes
 with the session or its thread (`SessionProcesses::kill`). After an
@@ -1566,9 +1604,8 @@ two equal; written from the app-server protocol and the recordings in
 `tests/fixtures/codex/`; an approval and an interrupted turn are recorded
 (`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.166.0);
 a background terminal (`background_terminal.jsonl`) and a spawned child
-(`subagent.jsonl`) are too; a failed turn
-has not been recorded yet, so that row is pinned by synthetic
-notifications, not a recording):
+(`subagent.jsonl`) are too, and so is a failed turn (`failed_turn.jsonl`,
+an invalid API key):
 
 | Fact | Codex reports | oxplow reads |
 |---|---|---|
@@ -1581,6 +1618,10 @@ notifications, not a recording):
 | Messages inside an agent tree | `senderThreadId` on a collab item | not read |
 | A background terminal | `processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list` | nothing of its own: an ordinary shell call, whose `item/completed` may land after the turn's end (recorded on the call, no job, no turn) |
 | Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
+| Moderation of a turn | `turn/moderationMetadata` (Codex's verdict on the prompt and output) | not read |
+| The model and effort a thread runs on | `thread/settings/updated` `threadSettings.model` / `effort`, before the turn; the open result's `thread.model` | `TurnRun.model` / `effort` on the turn's end |
+| A thread that is not the session's | `thread/started` (Codex's ephemeral naming thread, no parent), `thread/status/changed` and `thread/closed` for it or for an earlier session's thread (`notLoaded`) | not read: only a message naming the session's thread, or a child it spawned, passes |
+| A turn's retries and failure | `error` notifications (`willRetry`), a `warning`, `thread/status/changed` `systemError`, then `turn/completed` `failed` | only the `turn/completed` ends the turn (once, `Errored`); `error`, `warning` and `systemError` say nothing |
 | Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
 
 **What a shell call reports it changed.** Claude Code's Bash
