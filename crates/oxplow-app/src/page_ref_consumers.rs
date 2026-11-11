@@ -197,8 +197,8 @@ mod tests {
                 edges(conn),
                 vec![
                     "comment_file_ref oxplow:oxplow/file?path=src/b.rs",
+                    "file_mention oxplow:oxplow/file?path=src/app.rs",
                     "task_link:parent_of oxplow:oxplow/task?id=ENG-2&provider=issues",
-                    "wiki_file_ref oxplow:oxplow/file?path=src/app.rs",
                 ]
             );
             // A read back restating the item without its link.
@@ -218,7 +218,7 @@ mod tests {
                 edges(conn),
                 vec![
                     "comment_file_ref oxplow:oxplow/file?path=src/b.rs",
-                    "wiki_file_ref oxplow:oxplow/file?path=src/app.rs",
+                    "file_mention oxplow:oxplow/file?path=src/app.rs",
                 ]
             );
             run("UPDATE task SET deleted_at = 't'")?;

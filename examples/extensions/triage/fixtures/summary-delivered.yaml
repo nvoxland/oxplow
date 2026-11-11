@@ -14,6 +14,6 @@ expect:
   effects:
     - { id: triage/publish-summary, state: ok }
   commands: [oxplow.knowledge.write_page]
-  pages: ["oxplow:oxplow/wiki?slug=triage-summary"]
+  pages: ["oxplow:oxplow/knowledge?id=triage-summary&store=oxwiki"]
 model:
   replies: ["One bug TODO and two cleanups."]

@@ -48,9 +48,9 @@ that exists is refused):
   A `knowledge` provider answers `write_page { slug, title?,
   body, verified_files, removed_files }` → `{ page }`, `delete_page { slug }` and
   `link { page, target }`, each also answering the page's
-  `knowledge.page.recorded@2` event `{ page: { uri: "oxplow:oxplow/wiki?slug=<slug>", title,
+  `knowledge.page.recorded@2` event `{ page: { uri: "oxplow:oxplow/knowledge?id=<slug>&store=oxwiki", title,
   body, uris, updated_at, deleted? } }` (`uris`: the body's links as `oxplow:oxplow/file?path=…` /
-  `oxplow:oxplow/wiki?slug=…`), and a `knowledge_pages` collector of the same rows;
+  `oxplow:oxplow/knowledge?id=…&store=…`), and a `knowledge_pages` collector of the same rows;
 - `implementation` — a capability implemented by a script instead of a
   program: an `implementations:` entry whose `entry` is a Starlark file
   (`implementations/<id>.star`) with one function per verb, for the same

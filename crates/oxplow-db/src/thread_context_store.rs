@@ -311,7 +311,9 @@ mod tests {
                         tx,
                         thread,
                         &NewItem {
-                            source_uri: Some(format!("oxplow:oxplow/wiki?slug={n}")),
+                            source_uri: Some(format!(
+                                "oxplow:oxplow/knowledge?id={n}&store=oxwiki"
+                            )),
                             ..NewItem::default()
                         },
                     )?);
@@ -334,7 +336,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             removed.source_uri.as_deref(),
-            Some("oxplow:oxplow/wiki?slug=1")
+            Some("oxplow:oxplow/knowledge?id=1&store=oxwiki")
         );
         let cleared = db
             .transaction(move |tx| clear_tx(tx, thread))

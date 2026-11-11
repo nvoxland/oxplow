@@ -43,7 +43,7 @@ pub struct AddInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// What it's anchored to: a page's URI
-    /// (`oxplow:oxplow/wiki?slug=some-page`, `oxplow:oxplow/file?path=src/a.rs`).
+    /// (`oxplow:oxplow/knowledge?id=some-page&store=oxwiki`, `oxplow:oxplow/file?path=src/a.rs`).
     pub target: String,
     /// The text it's about.
     #[serde(default)]
@@ -421,7 +421,7 @@ mod tests {
     }
 
     fn comment_on(stream: &str, thread: Option<&str>) -> Value {
-        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::wiki_uri("a-page"),
+        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::knowledge_uri("oxwiki", "a-page"),
                             "quote": "the words", "body": "what about this?" });
         if let Some(t) = thread {
             v["thread"] = json!(t);

@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { readTasksByRef } from "./tasks.js";
 
 /**
- * Shared in-memory task ref → title map. The wiki/markdown renderer
+ * Shared in-memory task ref → title map. The markdown renderer
  * uses this to display a task link with the item's real title
  * instead of its id, whichever list it's on.
  *
- * Unlike the wiki cache (which lists every page up front), items are
- * resolved **lazily per ref** via `readTasksByRef`, so a wiki page
+ * Unlike the knowledge cache (which lists every page up front), items are
+ * resolved **lazily per ref** via `readTasksByRef`, so a knowledge page
  * that links a handful of items doesn't pull the whole list. A resolved
  * miss is cached as `null` so a stale/deleted ref doesn't refetch on every
  * render. Components subscribe via `useTaskRef(ref)`.

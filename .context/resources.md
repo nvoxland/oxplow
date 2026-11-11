@@ -6,7 +6,7 @@ reads a URI, where URIs are stored, and the migration that moved every
 stored name onto them.
 
 **The words.** A **resource** is a kind of thing in oxplow — a file, a
-wiki page, a request, a task, an extension's pull request — named
+knowledge page, a request, a task, an extension's pull request — named
 `<namespace>/<name>` (`oxplow/file`, `github/pr`). A **URI** names one
 thing of a resource: `oxplow:oxplow/request?id=req12`. The direction is the
 web's: a URI names the thing, a page that shows it is one **renderer** of
@@ -36,10 +36,10 @@ fields that hold a URI are named `uri` (V101); prose says URI.
 
 | Where | Build | Read |
 |---|---|---|
-| Rust | `oxplow_domain::uri::build::{request_uri, file_uri, wiki_uri, task_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `task_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{REQUEST, FILE, …}` |
+| Rust | `oxplow_domain::uri::build::{request_uri, file_uri, knowledge_uri, task_uri, …}`; `keyed(resource, value)` for a resource named by its key param; `of(resource, &[(k, v)])` / `of_with_view` for one known only at run time | `parse_as::<T>(uri, resource)` (the key, typed), `id_of` (the key), `param_of(uri, resource, name)`, `parse_resource` (keeps the view), `resource_of`, `task_of_uri` → `(provider, id)`, `file_of_uri` → `(path, rev, lines)`; resource names are `uri::resources::{REQUEST, FILE, …}` |
 | SQL (datasets, pages, scripts' queries) | the owning dataset's `uri` column; to build one, `uri('oxplow/request', 'id', 'req' \|\| id)` (a NULL value leaves its param out, so `uri()` is never NULL: over a `LEFT JOIN`, `CASE WHEN x.id IS NULL THEN NULL ELSE uri(…) END`) | `SELECT URI`, `WHERE uri = :uri`, `JOIN … ON x.uri = y.subject`; `uri_param(URI, 'id')`, `uri_resource(URI)` |
 | Starlark (commands, effects, collectors, policies, mappings) | `uri.build("oxplow/file", path = p, view = {"lines": "3-9"})` (a param a string or an int; `None` leaves it out) | `uri.parse(u)` → `{resource, params, view}`, `uri.param(u, name, resource=)`, `uri.id(u, resource=)`, `uri.resource(u)`, `uri.is_uri(v)`, `uri.contribution(u)` |
-| TS (desktop) | `uri/uri.ts` builders (`wikiUri`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
+| TS (desktop) | `uri/uri.ts` builders (`knowledgeUri(store, id)`, `taskUri(provider, id)`, `fileUri(path, rev)`, `fileLinesUri`, `pageUri(page, params, view)`, `metricUri`, `withUriView`, `viewParamsOfUri`, `resourceUri(resource, params, view)`, …) | `parseUri`, `identityOf`, `typeOf` (the resource), `paramOf`, `viewOf`, `idOf(uri, resource)`, `keyOf`, `taskOf`, `isExternal` |
 
 **Guards.** `apps/desktop/src/uri/uri.guard.test.ts` (TS),
 `source_guards::refs_are_built_and_parsed_through_the_grammar` (Rust) and
@@ -64,7 +64,7 @@ saying the id it names.
 | `event`, `job_run` | the UUID |
 | `collector`, `job` | the contribution id: `triage/todos` |
 | `commit`, vcs.head.moved `from` / `to` | the sha |
-| knowledge.page.* `page` | the slug |
+| knowledge.page.* `page` | the page's URI (`oxplow:oxplow/knowledge?id=…&store=…`) |
 
 **What stays a URI:** a field that can name anything (`uri` when it isn't
 fixed, `target`, `subject`, `evidence`, comment `context_chain` /
@@ -136,8 +136,8 @@ oxplow:github/pr?id=12
 **Key params.** A resource named by one value has a key param
 (`build::key_param`): `id` for a stored record (`request?id=req1`,
 `thread?id=thr3`, `turn?id=trn1`), a word for the value's shape
-(`commit?sha=`, `wiki?slug=`, `branch?name=`, `extension?name=`,
-`ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`), and
+(`commit?sha=`, `branch?name=`, `extension?name=`,
+`ai_model?name=`, `config?key=`, `nudge?kind=`, `consumer?name=`; a knowledge page has two, `knowledge?id=<id>&store=<store>`, built by `knowledge_uri(store, id)` and read by `knowledgeOf`), and
 the resource's own name for a contribution (`page?page=work`, `command?command=oxplow.file.save`,
 `collector?collector=triage/todos`, `effect?effect=acme/notify`,
 `resource?resource=github/pr`). Resources with several identity params
@@ -218,7 +218,7 @@ resources:
 
 `ref_resolver::resolve_ref(svc, uri)` → `RefSummary { uri, resource,
 title, detail, body_excerpt, resolved }`: richer resolvers for tasks,
-commits, files, directories, wiki pages and findings; any other resource
+commits, files, directories, knowledge pages and findings; any other resource
 through its declaration's `resolve` view and `title` column, by `uri`.
 Nothing resolves it → `resolved: false`.
 
@@ -244,7 +244,7 @@ into a URI: a URI passes through when its resource is declared; one of
 the active list's ids → its task; `git:abc1234` and a bare sha → a
 commit; `dir:src/` → `dir?path=src`; `finding:fnd-1`; a declared
 `wikilink.prefix` (`pr:12` → `oxplow:github/pr?id=12`); `src/a.rs@HEAD:42`
-→ `file?path=src/a.rs&rev=git:HEAD#lines=42`; a kebab slug → a wiki page.
+→ `file?path=src/a.rs&rev=git:HEAD#lines=42`; a kebab slug → an oxwiki page; `<store>:<id>` with an enabled store's id → that store's page.
 `word:tail` with no declared prefix is not a slug; it names nothing.
 `ClassifiedWikilink` carries `canonical` and the typed `Reference`, so the
 graph writer and the link checker never drift. The desktop's
@@ -257,7 +257,7 @@ graph writer and the link checker never drift. The desktop's
   closest_vcs_rev, vcs_rev_exact)`, keyed `(source_uri, target_uri,
   ref_type)`; `PageRefEdge { source, target, … }`. Every end is an
   identity (no view); a file edge's version pin rides in its columns, not
-  its URI. The writers are `page_ref_projections` (wiki pages, notes,
+  its URI. The writers are `page_ref_projections` (knowledge pages, notes,
   handoffs, tasks' bodies, comments and links, findings, commits, and agent turns: a person's
   prompt's references, `ref_type = prompt_mention`, written when the
   prompt is delivered) — each owns its source's slice.
@@ -291,8 +291,8 @@ they were.
 `task_link.from_uri` / `to_uri`, `oxtask_link.to_uri`,
 `fact_subject.uri`, `search_entry.uri` (was `ref_id`), `bookmark.uri`,
 `symbol.uri`, `change_function.uri`.
-`wiki_page.file_refs_json` / `dir_refs_json` became `files_json` /
-`dirs_json`: a wiki citation is a file path, so its names say `files`
+`wiki_page.file_refs_json` / `dir_refs_json` (the table is `knowledge_page` now) became `files_json` /
+`dirs_json`: a knowledge page's citation is a file path, so its names say `files`
 (`verify_refs` is now `oxplow.knowledge.verify_files`, with `files`,
 `verified_files`, `removed_files`). Events: stored `task.recorded`
 rows moved to v3 (`item.uri`, `item.parent_uri`) and

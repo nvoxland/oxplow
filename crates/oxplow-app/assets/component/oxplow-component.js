@@ -183,7 +183,7 @@
       // Run a command this component declares in `commands`, as the person
       // looking at it; one that asks is confirmed by them, in oxplow.
       invoke: (command, input) => call({ method: "invoke", command, input: input === undefined ? {} : input }),
-      // Open one of oxplow's pages (`oxplow:oxplow/wiki?slug=intro`), as a
+      // Open one of oxplow's pages (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`), as a
       // browser follows a link; `{ newTab: true }` opens it in a new tab (a
       // Cmd-click), `{ replace: true }` in place of the page (Back skips it).
       navigate: (uri, options) =>

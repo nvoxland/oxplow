@@ -12,7 +12,7 @@ For a source build, see
 
 Oxplow stores local data and runtime files under `.oxplow/`, including
 `local.sqlite`, snapshots, and generated agent integration files. The
-built-in knowledge provider also uses `.oxplow/wiki/` when selected.
+knowledge store oxwiki also keeps its pages in `.oxplow/oxwiki/`.
 
 The **primary** stream uses the project directory and its current
 branch. Additional streams have separate worktree directories.

@@ -68,21 +68,34 @@ pub async fn get_blob_storage_bytes(svc: &Services) -> Result<ByteSize, IpcError
     Ok(ByteSize::new(total))
 }
 
-/// For each snapshot id in the input list, the wiki slugs whose
-/// body changed in that snapshot. Drives the Local History
-/// dashboard's wiki badges. Cheaper than fetching the full
-/// `file_snapshot` rows per snapshot.
-pub async fn list_wiki_slugs_for_snapshots(
+/// An oxwiki page whose file changed in a snapshot.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct SnapshotKnowledgePage {
+    pub snapshot_id: SnapshotId,
+    /// The page's URI (`oxplow:oxplow/knowledge?id=<slug>&store=oxwiki`).
+    pub uri: String,
+}
+
+/// For each snapshot id in the input list, the oxwiki pages whose file
+/// changed in that snapshot. Drives the Local History dashboard's
+/// knowledge badges. Cheaper than fetching the full `file_snapshot` rows
+/// per snapshot.
+pub async fn list_knowledge_pages_for_snapshots(
     svc: &Services,
     snapshot_ids: Vec<SnapshotId>,
-) -> Result<Vec<(SnapshotId, String)>, IpcError> {
+) -> Result<Vec<SnapshotKnowledgePage>, IpcError> {
     let rows = svc
         .snapshot_store
-        .list_wiki_slugs_for_snapshots(snapshot_ids.into_iter().map(SnapshotId::value).collect())
+        .list_knowledge_pages_for_snapshots(
+            snapshot_ids.into_iter().map(SnapshotId::value).collect(),
+        )
         .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, slug)| (SnapshotId::new(id), slug))
+        .map(|(id, uri)| SnapshotKnowledgePage {
+            snapshot_id: SnapshotId::new(id),
+            uri,
+        })
         .collect())
 }
 

@@ -1,4 +1,4 @@
-import { wikiUri } from "../../uri/uri.js";
+import { knowledgeUri } from "../../uri/uri.js";
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render } from "@testing-library/react";
 
@@ -31,7 +31,7 @@ afterEach(() => {
   relocated.length = 0;
 });
 
-const config = { streamId: "str1", threadId: null, target: wikiUri("page") };
+const config = { streamId: "str1", threadId: null, target: knowledgeUri("oxwiki", "page") };
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 250)));
 
 test("a settled document stores a moved anchor once", async () => {

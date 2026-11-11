@@ -1,4 +1,4 @@
-//! Drift detail for a wiki page's file ref (#112).
+//! Drift detail for a knowledge page's file ref, whichever store keeps it.
 //!
 //! `v_knowledge_ref` (its `stale` rows) tells the agent *which* refs
 //! drifted; this answers *what* drifted —
@@ -16,17 +16,18 @@ use oxplow_db::{SqlitePageRefStore, SqliteSnapshotStore};
 use oxplow_domain::DomainError;
 use serde::Serialize;
 
-/// Cap on the returned diff. A wiki ref that drifted enormously isn't
+/// Cap on the returned diff. A file ref that drifted enormously isn't
 /// worth dumping in full into the agent's context — it should re-read
 /// the file at that point.
 const MAX_DIFF_BYTES: usize = 16_000;
 
-/// Outcome of a drift query for one `(wiki page, file ref)` pair.
+/// Outcome of a drift query for one `(knowledge page, file ref)` pair.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct WikiRefDrift {
-    pub slug: String,
+pub struct KnowledgeDrift {
+    /// The page's URI.
+    pub page: String,
     pub path: String,
-    /// Snapshot the `wiki → file` edge was pinned to. `None` when the
+    /// Snapshot the `page → file` edge was pinned to. `None` when the
     /// ref carries no pin yet.
     pub pinned_snapshot_id: Option<i64>,
     /// `drifted` (diff present) | `unchanged` | `not_a_ref` (the page
@@ -41,10 +42,10 @@ pub struct WikiRefDrift {
     pub truncated: bool,
 }
 
-impl WikiRefDrift {
-    fn bare(slug: &str, path: &str, pin: Option<i64>, status: &str) -> Self {
+impl KnowledgeDrift {
+    fn bare(page: &str, path: &str, pin: Option<i64>, status: &str) -> Self {
         Self {
-            slug: slug.to_string(),
+            page: page.to_string(),
             path: path.to_string(),
             pinned_snapshot_id: pin,
             status: status.to_string(),
@@ -54,26 +55,24 @@ impl WikiRefDrift {
     }
 }
 
-/// Compute drift for a single wiki file ref. Pure-ish: only reads
+/// Compute drift for one of a knowledge page's file refs. Pure-ish: only reads
 /// (page_ref pin, snapshot tree, blob content, working-tree file).
-pub async fn compute_wiki_ref_drift(
+pub async fn compute_knowledge_drift(
     page_refs: &SqlitePageRefStore,
     snapshots: &SqliteSnapshotStore,
     content: &crate::snapshot_content::SnapshotContent,
     project_dir: &Path,
-    slug: &str,
+    page: &str,
     path: &str,
-) -> Result<WikiRefDrift, DomainError> {
-    // Locate the wiki → file edge and its pin.
-    let edges = page_refs
-        .list_outbound(&oxplow_domain::uri::build::wiki_uri(slug), None)
-        .await?;
+) -> Result<KnowledgeDrift, DomainError> {
+    // Locate the page → file edge and its pin.
+    let edges = page_refs.list_outbound(page, None).await?;
     let file = oxplow_domain::uri::build::file_uri(path);
     let Some(edge) = edges.into_iter().find(|e| e.target == file) else {
-        return Ok(WikiRefDrift::bare(slug, path, None, "not_a_ref"));
+        return Ok(KnowledgeDrift::bare(page, path, None, "not_a_ref"));
     };
     let Some(pin) = edge.local_snapshot_id else {
-        return Ok(WikiRefDrift::bare(slug, path, None, "no_pin"));
+        return Ok(KnowledgeDrift::bare(page, path, None, "no_pin"));
     };
 
     // Pinned content: the file's blob as of the pinned snapshot. Absent
@@ -82,12 +81,12 @@ pub async fn compute_wiki_ref_drift(
     let pinned = match tree.get(path) {
         Some(entry) => match entry.content_ref() {
             // Oversize: tracked by size only, no bytes to diff.
-            None => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
+            None => return Ok(KnowledgeDrift::bare(page, path, Some(pin), "binary")),
             Some(content) => content,
         },
         None => {
             // Absent at the pin ⇒ added since ⇒ pinned side is empty.
-            return drifted_or_unchanged(slug, path, pin, String::new(), project_dir);
+            return drifted_or_unchanged(page, path, pin, String::new(), project_dir);
         }
     };
     let pinned = match content.read_ref(&pinned) {
@@ -100,7 +99,7 @@ pub async fn compute_wiki_ref_drift(
                 .await?
                 .is_some()
             {
-                return Ok(WikiRefDrift::bare(slug, path, Some(pin), "no_contents"));
+                return Ok(KnowledgeDrift::bare(page, path, Some(pin), "no_contents"));
             }
             return Err(DomainError::Storage(format!(
                 "snapshot read {path}@{pin}: {e}"
@@ -109,30 +108,30 @@ pub async fn compute_wiki_ref_drift(
     };
     let pinned = match String::from_utf8(pinned) {
         Ok(s) => s,
-        Err(_) => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
+        Err(_) => return Ok(KnowledgeDrift::bare(page, path, Some(pin), "binary")),
     };
-    drifted_or_unchanged(slug, path, pin, pinned, project_dir)
+    drifted_or_unchanged(page, path, pin, pinned, project_dir)
 }
 
 /// Compare the pinned text with the working-tree file.
 fn drifted_or_unchanged(
-    slug: &str,
+    page: &str,
     path: &str,
     pin: i64,
     pinned: String,
     project_dir: &Path,
-) -> Result<WikiRefDrift, DomainError> {
+) -> Result<KnowledgeDrift, DomainError> {
     // Current content: the working-tree file. Missing ⇒ deleted ⇒ empty.
     let current = match std::fs::read(project_dir.join(path)) {
         Ok(bytes) => match String::from_utf8(bytes) {
             Ok(s) => s,
-            Err(_) => return Ok(WikiRefDrift::bare(slug, path, Some(pin), "binary")),
+            Err(_) => return Ok(KnowledgeDrift::bare(page, path, Some(pin), "binary")),
         },
         Err(_) => String::new(),
     };
 
     if pinned == current {
-        return Ok(WikiRefDrift::bare(slug, path, Some(pin), "unchanged"));
+        return Ok(KnowledgeDrift::bare(page, path, Some(pin), "unchanged"));
     }
     let (diff, truncated) = unified_diff(
         &pinned,
@@ -141,8 +140,8 @@ fn drifted_or_unchanged(
         &format!("{path} (current)"),
         MAX_DIFF_BYTES,
     );
-    Ok(WikiRefDrift {
-        slug: slug.to_string(),
+    Ok(KnowledgeDrift {
+        page: page.to_string(),
         path: path.to_string(),
         pinned_snapshot_id: Some(pin),
         status: "drifted".to_string(),
@@ -269,13 +268,13 @@ mod tests {
             })
             .await
             .unwrap();
-        // Pin the wiki→file edge at that snapshot.
+        // Pin the page→file edge at that snapshot.
         page_refs
             .upsert_edge(
                 PageRefEdge::new(
-                    oxplow_domain::uri::build::wiki_uri("intro"),
+                    oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
                     oxplow_domain::uri::build::file_uri("src/x.rs"),
-                    "wiki_file_ref",
+                    "knowledge_file_ref",
                 )
                 .with_version(snap, None, false),
             )
@@ -285,12 +284,12 @@ mod tests {
         // Drifted: disk differs from the pinned blob.
         std::fs::create_dir_all(project.join("src")).unwrap();
         std::fs::write(project.join("src/x.rs"), "alpha\nBETA\ngamma\n").unwrap();
-        let drift = compute_wiki_ref_drift(
+        let drift = compute_knowledge_drift(
             &page_refs,
             &snapshots,
             &content(&blobs, project),
             project,
-            "intro",
+            &oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
             "src/x.rs",
         )
         .await
@@ -302,12 +301,12 @@ mod tests {
 
         // Unchanged: disk matches the pinned blob.
         std::fs::write(project.join("src/x.rs"), pinned).unwrap();
-        let same = compute_wiki_ref_drift(
+        let same = compute_knowledge_drift(
             &page_refs,
             &snapshots,
             &content(&blobs, project),
             project,
-            "intro",
+            &oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
             "src/x.rs",
         )
         .await
@@ -316,12 +315,12 @@ mod tests {
         assert!(same.unified_diff.is_none());
 
         // not_a_ref: the page doesn't reference this path.
-        let nr = compute_wiki_ref_drift(
+        let nr = compute_knowledge_drift(
             &page_refs,
             &snapshots,
             &content(&blobs, project),
             project,
-            "intro",
+            &oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
             "src/other.rs",
         )
         .await
@@ -377,20 +376,20 @@ mod tests {
         page_refs
             .upsert_edge(
                 PageRefEdge::new(
-                    oxplow_domain::uri::build::wiki_uri("intro"),
+                    oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
                     oxplow_domain::uri::build::file_uri("src/x.rs"),
-                    "wiki_file_ref",
+                    "knowledge_file_ref",
                 )
                 .with_version(snap, None, false),
             )
             .await
             .unwrap();
-        let drift = compute_wiki_ref_drift(
+        let drift = compute_knowledge_drift(
             &page_refs,
             &snapshots,
             &content(&blobs, project),
             project,
-            "intro",
+            &oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
             "src/x.rs",
         )
         .await
@@ -410,18 +409,18 @@ mod tests {
         // Edge with no version pin.
         page_refs
             .upsert_edge(PageRefEdge::new(
-                oxplow_domain::uri::build::wiki_uri("intro"),
+                oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
                 oxplow_domain::uri::build::file_uri("src/x.rs"),
-                "wiki_file_ref",
+                "knowledge_file_ref",
             ))
             .await
             .unwrap();
-        let drift = compute_wiki_ref_drift(
+        let drift = compute_knowledge_drift(
             &page_refs,
             &snapshots,
             &content(&blobs, tmp.path()),
             tmp.path(),
-            "intro",
+            &oxplow_domain::uri::build::knowledge_uri("oxwiki", "intro"),
             "src/x.rs",
         )
         .await

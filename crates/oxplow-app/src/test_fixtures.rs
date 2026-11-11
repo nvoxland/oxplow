@@ -288,14 +288,6 @@ async fn developing_oxplow() -> (tempfile::TempDir, Arc<crate::Services>) {
 /// A stream and a thread's session over booted `svc`.
 async fn with_thread(dir: tempfile::TempDir, svc: Arc<crate::Services>) -> ThreadFixture {
     svc.streams.ensure_primary().await.unwrap();
-    // Activation logged the capability choices; the knowledge switch has
-    // heard them before a test reads the wiki.
-    svc.event_pump
-        .settle(
-            &[crate::knowledge::KnowledgeSwitch::NAME],
-            std::time::Duration::from_secs(5),
-        )
-        .await;
     let thread = ThreadId::new(1);
     let session = open_session(&svc, thread).await;
     ThreadFixture {

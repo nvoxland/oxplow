@@ -5,6 +5,8 @@ import { act, render, waitFor } from "@testing-library/react";
 // writes page refs) is one re-read of the page list, not one per commit —
 // and a change while a read is running is still read afterwards.
 
+import { knowledgeUri } from "./uri/uri.js";
+
 const realApi = { ...(await import("./api.js")) }; // a copy: `mock.module` patches a loaded module in place
 const realKnowledge = { ...(await import("./knowledge.js")) }; // a copy: `mock.module` patches a loaded module in place
 let reads = 0;
@@ -12,10 +14,10 @@ let title = "Local Snapshots";
 const listeners: Array<(e: Record<string, unknown>) => void> = [];
 mock.module("./knowledge.js", () => ({
   ...realKnowledge,
-  readWikiPages: async () => {
+  readKnowledgePages: async () => {
     reads++;
     return {
-      pages: [{ slug: "local-snapshots", title }],
+      pages: [{ uri: "oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki", title }],
       reads: { datasets: ["v_knowledge_page"], tables: [], measures: [] },
     };
   },
@@ -31,15 +33,15 @@ mock.module("./api.js", () => ({
 // event subscription for the life of the process, so one an earlier file used
 // (a Markdown render reads the page list through the real api) is already
 // subscribed to that file's events, not this file's.
-const { useWikiTitle } = (await import("./wikiTitleCache.js?fresh")) as typeof import("./wikiTitleCache.js");
+const { useKnowledgeTitle } = (await import("./knowledgeTitleCache.js?fresh")) as typeof import("./knowledgeTitleCache.js");
 
 function Title() {
-  return <span data-testid="t">{useWikiTitle("local-snapshots") ?? "…"}</span>;
+  return <span data-testid="t">{useKnowledgeTitle(knowledgeUri("oxwiki", "local-snapshots")) ?? "…"}</span>;
 }
 
 const changed = { kind: "datasetsChanged", datasets: ["v_knowledge_page"] };
 
-test("a burst of wiki changes is one re-read, and the last change is seen", async () => {
+test("a burst of knowledge changes is one re-read, and the last change is seen", async () => {
   const view = render(<Title />);
   await waitFor(() => expect(view.getByTestId("t").textContent).toBe("Local Snapshots"));
   expect(reads).toBe(1);

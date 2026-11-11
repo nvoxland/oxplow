@@ -205,21 +205,23 @@ any other is `InvalidInput`. Every file's `modified_at` is a fixed
 `1700000000000`; folders are implied by file paths.
 
 **As a knowledge provider** (`OXPLOW_FAKE_CAPABILITY=knowledge`) it
-declares `knowledge_declarations()` — the `knowledge` capability (no
-features), the verbs `write_page { slug, title?, body, verified_files,
-removed_files }` → `{ page: "wiki:<slug>" }`, `delete_page { slug }` and
-`link { page, target }` → `{}` (each `confirm: never`, `access: record`,
-inputs `additionalProperties: false`), the event type
-`knowledge.page.recorded@2`, a `knowledge_pages` collector over entity
+declares `knowledge_declarations()` — the `knowledge` capability with
+`features: { edit: true }` and `data: { kinds: [note] }`, the verbs
+`write_page { id?, title?, body, verified_files, removed_files }` →
+`{ id }` and `delete_page { id }` (each `confirm: never`, `access:
+record`, inputs `additionalProperties: false`), the event type
+`knowledge.page.recorded@3`, a `knowledge_pages` collector over entity
 `knowledge_page` (`discover` lists it), and the same `team` config; the
 event's schema is core's. Pages live in its state
 like items do. Every verb answers the page's record as that event:
-`{ page: { uri: "oxplow:oxplow/wiki?slug=<slug>", title, body, uris, updated_at, deleted? } }`.
+`{ page: { uri: "oxplow:oxplow/knowledge?id=<id>&store=<store>", kind?, url?, author?, title, body, uris, updated_at, deleted } }`.
 `uris` is the body's `[[…]]` interiors in oxplow's grammar (one with a `/`
-or a `.` is `oxplow:oxplow/file?path=<path>`, a bare one `oxplow:oxplow/wiki?slug=<slug>`); the title defaults to
-the slug; `verified_files` and `removed_files` are accepted and ignored (it
-keeps no pins). `link` appends `[[target]]` under a `## Related` heading;
-`delete_page` answers the record with `deleted: true`, and a page that is
+or a `.` is `oxplow:oxplow/file?path=<path>`, `<store>:<id>` that store's
+page, a bare one an oxwiki page); with no `id` it takes one from the title
+(lowercased, other characters `-`); the title defaults to
+the id; `verified_files` and `removed_files` are accepted and ignored (it
+keeps no pins). There is no `link` verb: core adds the link and writes
+the page through `write_page`. `delete_page` answers the record with `deleted: true`, and a page that is
 absent or already deleted is `InvalidInput`. `read` of `knowledge_pages`
 streams the pages changed after the cursor in revision order, each
 followed by a `$/state` checkpoint, as the task tracker's does.
@@ -439,12 +441,12 @@ and whether it keeps items.
 
 | | `task_tracker` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
 |---|---|---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page`, `link` | `stat`, `read`, `list`; `write` ← writable |
+| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page` | `stat`, `read`, `list`; `write` ← writable |
 | verbs run as | `oxplow.task.<verb>` | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
-| declares as `data` | nothing | `env_markers`, `settings` | nothing | nothing | nothing |
-| may emit | `task.recorded@3` | nothing | nothing | `knowledge.page.recorded@2` | nothing |
-| collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@2` `{ page: row }` | nothing |
-| owns URIs | `oxplow/task` with `provider=<instance>` | none | none | `oxplow/wiki` (no `provider` param: the active store's) | none (its id is the `filesystem` param of the file URIs it serves) |
+| declares as `data` | nothing | `env_markers`, `settings` | nothing | `kinds` (`{ id, title, bucket }`; none means `note`); feature `edit` | nothing |
+| may emit | `task.recorded@3` | nothing | nothing | `knowledge.page.recorded@3` | nothing |
+| collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@3` `{ page: row }` | nothing |
+| owns URIs | `oxplow/task` with `provider=<instance>` | none | none | `oxplow/knowledge` (its `store` param names the store) | none (its id is the `filesystem` param of the file URIs it serves) |
 | keeps items (`fields`, `idPattern`) | yes | no | no | no | no |
 
 Each such capability has a **host** (`registry::CapabilityHost`): what
@@ -463,7 +465,7 @@ in `Services.knowledge`; the filesystem's
 logs it as the contract's event with the row under the contract's key,
 that URI the subject and the instance the source (`provider:<id>`: whose
 record it is). A URI of a resource with no `provider` param
-(`oxplow/wiki`) is the active implementation's, so any well-formed one is an
+(`oxplow/knowledge`) is no instance's, so any well-formed one is an
 instance's own (`registry::owns`).
 
 Each host's `prepare` validates declarations and constructs its adapter
@@ -492,22 +494,25 @@ A candidate that is rejected before publication is marked stopped and shut down
 directly; cleanup does not withdraw by name or touch an incumbent's
 maps/database rows. Process supervision starts after publication.
 
-**A knowledge provider** keeps pages (an Obsidian vault, a Confluence or
-MediaWiki space); core keeps the record (`.context/knowledge.md` "The
+**A knowledge provider** is one knowledge store (an Obsidian vault, a
+Confluence or MediaWiki space); several stores run at once, with no
+priority, and oxplow's own store is oxwiki. Core keeps the record (`.context/knowledge.md` "The
 capability"). The page commands check a write against core's record
-first — the slug, every link it adds, the URIs it verifies or removes —
-then invoke the verb: `write_page { slug, title?, body, verified_files,
-removed_files }` (the body in oxplow's markdown, `title` also given), `link
-{ page, target }` (`target` a wikilink's inside), `delete_page { slug }`.
-Each answers the page's `knowledge.page.recorded@2 { page: { uri, title,
-body, uris, updated_at, deleted? } }`: `body` what it keeps (in its own
+first — the id, every link it adds, the URIs it verifies or removes —
+then invoke the verb: `write_page { id?, title?, body, verified_files,
+removed_files }` (the body in oxplow's markdown), `delete_page { id }`.
+A store with `edit` off is never written. Core does the link command
+itself (it adds `- [[target]]` under `## Related` and writes the page
+through `write_page`). The store declares its kinds as `data: { kinds }`.
+Each answers the page's `knowledge.page.recorded@3 { page: { uri, kind?,
+url?, author?, title, body, uris, updated_at, deleted } }`: `body` what it keeps (in its own
 grammar if it likes), `uris` what the page links **in oxplow's grammar**
-(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=other`, a task's URI) — core links and pins
+(`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/knowledge?id=other&store=oxwiki`, a task's URI) — core links and pins
 from those, never parsing a foreign body. A write answering no record of
 the page fails. Core records the row, the edges and the pins from it and
 logs `knowledge.page.written` after the store's own record. Its collector
 streams its pages edited outside oxplow as the same records;
-`knowledge::KnowledgeRecords` restates them while it is the active store
+`knowledge::KnowledgeRecords` restates them while the store is enabled
 (a body the record already holds restates nothing; `deleted` takes the
 page out).
 
@@ -1395,10 +1400,10 @@ and the throwaway host the conformance suite runs in
   `snapshot_conformance::suite` on the primary stream (round-trip, an
   unchanged mark keeps its snapshot, diffs with deletions, turn-end
   anchoring, the budget recorded), which both built-ins pass too; or —
-  the instance made the project's knowledge store, the switch delivered —
+  the instance enabled as a knowledge store —
   `knowledge_conformance::suite` through the page commands (a write lands
   the page, its body and its event; pins go stale and re-pin; a dangling
-  link is refused; a link lands; a delete takes the page), which the wiki
+  link is refused; a link lands; a delete takes the page), which oxwiki
   passes too.
 - **A script implementation's suite** (`suites::script_suite`): for each
   `implementations:` entry whose entry is a script, the same capability

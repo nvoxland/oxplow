@@ -225,7 +225,7 @@ worker unwinds. Thin callers are denied both the helper and its commit method.
 
 **Transactions.** One user-visible action that spans multiple writes
 to the same DB must commit as ONE transaction. The pattern (see the
-`transactional-boundaries-design` wiki page): store write ops are
+`transactional-boundaries-design` knowledge page): store write ops are
 split into sync `*_tx(conn, …)` cores (free functions in the store's
 module, taking `&rusqlite::Connection`); the async store method is a
 thin `db.call` wrapper over its core; multi-write actions compose
@@ -308,7 +308,7 @@ as the type-erased form for polymorphic boundaries (the MCP
 A polymorphic reference is stored as a URI ([resources.md](./resources.md)):
 `page_ref.source_uri`/`target_uri` and `search_entry.uri` (and every
 model's `uri` column) hold `oxplow:<namespace>/<resource>?<params>`
-(`event_log.id` is a UUIDv7, also TEXT). Refs in prose/wiki use the bare
+(`event_log.id` is a UUIDv7, also TEXT). Refs in prose and knowledge pages use the bare
 self-typed sugar, e.g. `[[tsk42]]`.
 
 ## Global state (outside `.oxplow/`)
@@ -593,7 +593,7 @@ The `description` column is the task's single canonical prose body.
 (An earlier developer/executive/terse audience-variant feature added a
 `description_variants` column in V27; it was removed in V29 along with
 a summary-variants column and `comment.section_anchor` — see the
-V29 migration. Tasks and wiki pages now carry one body each.)
+V29 migration. Tasks and knowledge pages now carry one body each.)
 
 `note_count` is a computed column added to every `Task` returned by the
 store (via COUNT subquery over `oxtask_note`). It drives the note badge on
@@ -876,7 +876,7 @@ Everything that compares content goes through typed trees
 content_hash, … }`, `TreeEntry::identity()`), never through an address:
 `diff_snapshots`, `Trees` (`.context/vcs.md`; it knows each cell's class
 instead of guessing from the string's length), change analysis, diff coverage
-and wiki drift. `stats_for_snapshot` / `list_changes_for_snapshot`
+and knowledge page drift. `stats_for_snapshot` / `list_changes_for_snapshot`
 classify by the same identity, so a row whose bytes equal its
 predecessor's is not a change.
 
@@ -896,7 +896,7 @@ commands (`oxplow.stream.create`,
 runtime. Callers resolve the right service via
 `snapshot_captures.get(&stream_id)` (when the stream is known)
 or `snapshot_captures.primary()` (for project-shared surfaces
-like the wiki page watcher and freshness checks). A turn's takes
+like the oxwiki file watch and freshness checks). A turn's takes
 resolve via turn → thread → stream, so they capture against the turn's
 actual worktree — a turn on a worktree stream never bleeds into the
 primary's snapshot history.
@@ -1234,21 +1234,31 @@ boot backfill (`symbol_collector::backfill`) refills an empty index from each
 live stream's latest snapshot. Read as `v_symbol` / `v_symbol_capture`; see
 [language-support.md](./language-support.md) "Symbols".
 
-### `wiki_page` — `WikiPageStore` (`crates/oxplow-db/src/wiki_page_store.rs`)
+### `knowledge_page` — `KnowledgePageStore` (`crates/oxplow-db/src/knowledge_page_store.rs`)
 
-The per-project wiki's pages. The file is the page: it lives at
-`.oxplow/wiki/<slug>.md` (not committed — a personal knowledge base),
-and the row — written with the file in one run — holds its text and
-what's derived from it: `slug`, `title`,
-`body_path`, `body_excerpt`, `body_size_bytes`, the parsed
-`file_refs_json` / `dir_refs_json` (`[[dir:…]]`) /
-`related_notes_json`, `created_at`, `updated_at`, and `body_hash` (V116:
-the hash of the body it was written from), and `body` (V125, P6.E2:
-the text itself, which `v_knowledge_body` publishes). The one writer is
-`wiki_page_store::upsert_tx` / `delete_tx`, inside
-`oxplow.knowledge.write_page`'s transaction or the watcher's — see
+The record of the knowledge capability: one row per page of every store
+(oxwiki and any store an extension adds). Columns: `uri` (PK, the page's
+`oxplow:oxplow/knowledge?id=<id>&store=<store>`), `store`, `id` (the
+store's own page id; oxwiki's slug), `kind` (one of the store's declared
+kinds), `title`, `url`, `author`, `body`, `body_hash`, `excerpt`,
+`body_size_bytes`, `files_json` / `dirs_json` (the parsed file and
+`[[dir:…]]` refs), `created_at` and `updated_at`.
+
+For oxwiki the file is the page: it lives at `.oxplow/oxwiki/<slug>.md`
+(not committed — a personal knowledge base), and the row is written with
+the file in one run (`crates/oxplow-oxwiki`, `OxwikiStore`). For another
+store the row is the record the store's `knowledge.page.recorded@3`
+event made. The writers are `knowledge_page_store::upsert_tx` /
+`delete_tx`, inside `oxplow.knowledge.write_page`'s transaction, the
+oxwiki file watch, or the record consumer — see
 [knowledge.md](./knowledge.md) for the write path, pins and hand-edit
-convergence.
+convergence. A disabled store's rows stay recorded; the dataset hides
+them. V28 dropped `wiki_page` and its sibling tables and deleted the
+wiki's old events, `page_ref` rows, visits, bookmarks, usage events,
+search entries, comments and context items (no data carried over).
+
+`knowledge_page_read (id, uri, thread_id, turn_id, via, at)` records
+reads of a page. It exists, and a later milestone fills it.
 
 ### `page_ref` — unified cross-page reference graph (`crates/oxplow-db/src/page_ref_store.rs`, migration `V11__page_ref.sql`)
 
@@ -1283,9 +1293,9 @@ write cascades: `page_ref` rows
 pointing at that snapshot get their `closest_vcs_rev` set and
 `vcs_rev_exact` flipped to 1. The capture-time resolver lives
 in `oxplow_app::file_ref_version`; callers don't pass any of these
-fields by hand — the wiki sync watcher fills them automatically.
+fields by hand — the oxwiki file sync fills them automatically.
 
-**Wiki sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
+**Page sync preserves unchanged pins.** `sync_from_disk_with_refs_versioned`
 calls `SqlitePageRefStore::merge_source` (NOT `replace_source`).
 Each edge is matched against the existing row by the PK; existing
 edges keep their `local_snapshot_id` / `closest_vcs_rev` /
@@ -1293,14 +1303,14 @@ edges keep their `local_snapshot_id` / `closest_vcs_rev` /
 snapshot pin. Edges removed from the body are deleted. So editing
 unrelated prose doesn't re-stamp every file ref's freshness — the
 pin only advances when the body actively re-adds the ref OR when
-the agent explicitly verifies it (next paragraph). The wiki sync
+the agent explicitly verifies it (next paragraph). The oxwiki sync
 also strips `@<version>` literals (`@disk`, `@HEAD`, `@<sha>`,
 etc.) from `[[…]]` and `(file:…@…)` / `(dir:…@…)` body forms
 before parsing, and writes the normalised body back to disk —
 version state lives in the row, not the prose.
 
 **Verification edges under cited dirs survive a write.** One exception
-to "edges not in the body are deleted": a `wiki_file_ref` edge whose
+to "edges not in the body are deleted": a `knowledge_file_ref` edge whose
 `target_id` is a file under a directory the body cites
 (`[[dir:…]]`) is re-included (`path_under_any_dir`) so `merge_source`
 preserves it and its pin. These are **verification edges**, made by
@@ -1319,19 +1329,19 @@ accurate ([knowledge.md](./knowledge.md)).
 Skill prompt at `crates/oxplow-agent-text/assets/skills/oxplow-wiki-capture/SKILL.md`.
 
 **User-facing Freshness view.** `v_knowledge_ref` (read by
-`knowledge.ts`'s `readWikiFreshness`) joins `page_ref` with the latest
+`knowledge.ts`'s `readKnowledgeFreshness`) joins `page_ref` with the latest
 primary-stream `file_snapshot` per target path, a `stale` flag per ref.
 The foundation's `wiki-freshness` page
-(the `wiki-freshness` page, with `slug=<slug>`) shows
+(with `id=<id>`) shows
 the table with per-ref + per-page "Mark verified" actions, which run
 `oxplow.knowledge.verify_files` (re-writing the page with those refs in
-`verified_files`). The wiki page chrome adds a `Freshness (N stale)` action
+`verified_files`). The knowledge page chrome adds a `Freshness (N stale)` action
 chip that routes to the page.
 
 Every stored `source_uri` / `target_uri` is a canonical URI (see
 `.context/resources.md`), built by the owner's builder
 (`uri::build`) and never concatenated:
-- `oxplow/wiki` — `?slug=<slug>`
+- `oxplow/knowledge` — `?id=<id>&store=<store>`
 - `oxplow/task` — `?id=<id>&provider=<provider>` (`tsk42` / `oxplow`, `ENG-12` / `issues`)
 - `oxplow/file` — `?path=<repo-relative path>`
 - `oxplow/dir` — `?path=<repo-relative path>`, no trailing slash
@@ -1368,8 +1378,8 @@ renamed the `task_…` spellings: a mention is `task_mention` /
 
 | Owner | Source | Slice (`ref_type`s) |
 |---|---|---|
-| `wiki_pages.rs` (`oxplow-app`) | the wiki page's URI | full source — uses `replace_source` |
-| `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `task_mention`, `wikilink`, `wiki_file_ref`, `wiki_dir_ref`, `finding_mention`, `commit_mention` |
+| `pages.rs` (`oxplow-oxwiki`) | the knowledge page's URI | full source — uses `replace_source`; a page's file and dir links are `knowledge_file_ref` / `knowledge_dir_ref`, its wikilinks `wikilink` |
+| `task_refs::restate_tx` (`oxplow-db`), run by the `page_ref.task` consumer on an item's events and by the boot repair — any list's item, from `task` / `task_link` / `task_comment` | the task's URI, body slice | `task_mention`, `wikilink`, `file_mention`, `dir_mention`, `finding_mention`, `commit_mention` |
 | (the same) | link slice | `task_link:<type>` — every type with the prefix, the list's own (V28 dropped the CHECK naming oxplow's six) |
 | (the same) | comment slice: the comments' mentions, as the item's own edges (V28 dropped the old `oxtask_note` sources) | `comment_file_ref`, `comment_dir_ref`, `comment_wikilink`, `comment_task_mention`, `comment_finding_mention`, `comment_commit_mention` |
 | `analytics_stores::SqliteCodeQualityStore::append_finding` | the finding's URI | full source |
@@ -1377,7 +1387,7 @@ renamed the `task_…` spellings: a mention is `task_mention` /
 
 The shared extractor `oxplow_domain::uri::extract(body) ->
 ExtractedRefs` is the single parser used by every writer that
-takes a free-text body, so wiki/task/commit-message ref
+takes a free-text body, so knowledge/task/commit-message ref
 recognition stays in lock-step. Pure projections live in
 `crates/oxplow-db/src/page_ref_projections.rs`.
 
@@ -1398,7 +1408,7 @@ hash of the files that decide a source's edges (`PROJECTION_SOURCES`:
 the backfill, `page_ref_projections.rs`, `task_refs.rs`), not the build, which every dev rebuild changed
 (`needs_repair`; recorded as `asset_state` row `page_ref_repair`):
 between those the writers keep the graph current. A new projection file
-belongs in that list. Wiki bodies and recent commits are covered by their
+belongs in that list. Knowledge page bodies and recent commits are covered by their
 own initial-scan paths and don't need separate backfill. Efforts were
 removed (2026-11-10), and their slice of the graph (touched files, summary
 refs, declared impacts) went with them.
@@ -1604,7 +1614,7 @@ and are registered by `crate::boot` — a test that wants them calls their
 |---|---|---|---|---|
 | `page_ref.task` | sync | `task.created` / `edited` | re-projects a task's body-mention edges | boot |
 | `tool_call.project` | sync | `agent.tool.requested`, `agent.tool.finished`, `agent.turn.ended` | the `agent_tool_call` row (one per call: opened at the request, closed at the finish, abandoned at its turn's end; V6) | boot |
-| `wiki.attribution` | sync | `agent.tool.finished` | marks an edited, indexed wiki page touched by the thread | boot |
+| `knowledge.attribution` | sync | `agent.tool.finished` | marks an edited, indexed knowledge page touched by the thread | boot |
 | `ui.push` | sync | `snapshot.taken` (that recorded files), `vcs.head.moved` | the renderer's `SnapshotTaken` on the UI bus (P7.B6) | boot |
 | `metrics.entity_states` | async | `task.*`, `snapshot.taken`, `collector.synced` | re-captures state entity metrics, throttled per metric (P7.B6) | boot |
 | `config.workspace_filter` | async | `config.changed` (`generated`) | the snapshot captures' filter | boot |
@@ -1706,27 +1716,26 @@ system writer; a bus command will pass its actor's source and its
 V93 also dropped `task_event` (a per-task audit table nothing had written
 since V1) and wiped `page_visit` (its rows carried pre-canonical tab ids).
 
-### `wiki_page_thread_update` — wiki-note thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/wiki_page_thread_updates.rs`)
+### `knowledge_page_touch` — knowledge-page thread-update tracking (table in `crates/oxplow-db/migrations/` + helpers in `crates/oxplow-db/src/knowledge_page_store.rs`)
 
-Per-thread attribution side table for wiki page edits. Notes themselves
-are global (one body per slug, shared across all threads/streams), but
-the rail's "Finished" list filters by which thread last touched each
-note.
+Per-thread attribution side table for knowledge page edits. Pages
+themselves are global (one body per page, shared across all
+threads/streams), but the rail's "Finished" list filters by which thread
+last touched each page.
 
-Columns: `slug, thread_id, updated_at`. PK `(slug, thread_id)` so
-repeated edits in the same thread upsert in place. Index on
-`(thread_id, updated_at DESC)` drives the rail query.
+Columns: `thread_id, uri, last_seen_at`. One row per thread and page, so
+repeated edits in the same thread upsert in place. The `v_knowledge_touch`
+dataset (v4) reads it.
 
-One writer: the `wiki.attribution` pump consumer
-(`knowledge::WikiAttribution`), from `knowledge.page.written` events
-carrying a thread anchor — a command run by an agent's thread
+One writer: the `knowledge.attribution` pump consumer
+(`knowledge::KnowledgeAttribution`), from `knowledge.page.written`
+events carrying a thread anchor — a command run by an agent's thread
 ([knowledge.md](./knowledge.md)).
 
 A hand edit (the watcher) and a person's save from the editor carry no
 thread, so they mark nothing — guessing would be worse than abstaining.
-Deleting a page drops its attribution rows (`slug` references
-`wiki_page` `ON DELETE CASCADE`), so removed pages don't linger on the
-rail under their last author.
+Deleting a page drops its touch rows, so removed pages don't linger on
+the rail under their last author.
 
 ### `usage_event` — `UsageStore` (`crates/oxplow-db/src/analytics_stores.rs`)
 
@@ -1751,7 +1760,7 @@ Current write hookpoints (all in `apps/desktop/src/App.tsx`, all pass both
 `streamId` and `threadId`):
 
 - `wiki-note` — `handleOpenNote` records a visit when a note becomes
-  the active center tab. Nothing reads it any more: the Wiki page's
+  the active center tab. Nothing reads it any more: the Knowledge page's
   "Recently visited" is the `wiki-visited` page over `v_page_visit`.
 - `editor-file` — `handleOpenFile` records a visit when a file
   becomes the active center tab. Not yet surfaced in UI; collected
@@ -2060,7 +2069,7 @@ V128 (P6b.C2; V15 adds `title`, `source`, `available`, `chosen_by`; V16
 the capability's own `capability_title`, `choosable`, `optional`).
 Each capability's implementations and their features (`capability`,
 `provider` — the primary key — `extension`, NULL for core's,
-`features_json`, `active`). Restated whole (`reset`) by the app's
+`features_json`, `kinds_json` (a knowledge store's declared page kinds, `[]` for none; `v_capability_provider` v13 publishes it as `kinds`), `active`). Restated whole (`reset`) by the app's
 `CapabilityRegistry` (`capabilities.rs`) at boot, when the extensions
 change, as an instance starts or stops, and on each reconcile. An
 external provider's `provider` is its **instance
@@ -2246,7 +2255,7 @@ The Work panel's "Finished" group is the bundled extension's
 `thread_tasks` model: the done tasks a request on the thread worked on
 (`v_request_task.thread_id`, `v_task.closed_at`, whichever list is
 active) and the knowledge pages it wrote (`v_knowledge_touch`, over
-`wiki_page_thread_update`), newest first. "Clear" runs
+`knowledge_page_touch`), newest first. "Clear" runs
 `oxplow.tasks.clear_finished`, which logs an event the
 `finished_cleared` model reads, so entries closed before it are hidden
 until something newer lands.
@@ -2254,7 +2263,7 @@ until something newer lands.
 ### `comment` + `comment_message` — `SqliteCommentStore` (`crates/oxplow-db/src/comment_store.rs`, migrations `V22__comments.sql`, `V23__comment_resolved_at.sql`)
 
 Threaded annotations the user anchors to a text selection on any page
-(wiki body, code file lines, task detail). The user collects notes
+(knowledge page body, code file lines, task detail). The user collects notes
 across many points; the agent reviews/responds **only when asked**
 (never force-triggered — no Stop-hook branch, no synthesized tasks).
 
@@ -2356,9 +2365,9 @@ FTS5 virtual table (`tokenize = 'porter unicode61'`, `prefix = '2 3'`) storing
 or removed in place (a `UNIQUE` index over `(kind, uri, COALESCE(stream_id,''))`
 enforces identity, treating global rows' `NULL` stream as `''`).
 
-- `kind` holds a resource (`oxplow/wiki`) that `v_resource` lists as
+- `kind` holds a resource (`oxplow/knowledge`) that `v_resource` lists as
   `searchable` (oxplow's `oxplow/task`, `oxplow/comment`,
-  `oxplow/wiki`, `oxplow/thread`,
+  `oxplow/knowledge`, `oxplow/thread`,
   `oxplow/agent_session`, `oxplow/turn`,
   `oxplow/commit`, `oxplow/page`; an
   extension's, P9.D3), or
@@ -2369,12 +2378,12 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
   entries added, changed or gone; tsk896); core's read `v_search_task`
   (the active task tracker's items, through the interface) / `_comment` /
-  `_wiki` and the feeds for the other resources named above
+  `_knowledge` and the feeds for the other resources named above
   (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
   how a resource gets one, and the models' docs say
   what each indexes and whether archived work is included). Files are upserted by the `search.index` pump consumer from
   `snapshot.taken` (`indexer.rs`).
-- `stream_id` is `NULL` for project-global rows (wiki, a backlog task) and
+- `stream_id` is `NULL` for project-global rows (knowledge pages, a backlog task) and
   the owning stream otherwise. Search filters `stream_id = ?  OR stream_id
   IS NULL`; BM25 weights title above body (`bm25(search_fts, 5.0, 1.0)`).
 - The store is a **derived cache**, never a source of truth: those two

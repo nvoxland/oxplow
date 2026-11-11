@@ -261,7 +261,7 @@ pub struct OpenProjectInput {
 pub struct NavigateInput {
     /// What to show: a page's URI (`oxplow:oxplow/file?path=src/a.rs#lines=12`,
     /// `oxplow:oxplow/task?id=tsk3&provider=oxtask`,
-    /// `oxplow:oxplow/wiki?slug=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
+    /// `oxplow:oxplow/knowledge?id=…&store=…`, `oxplow:oxplow/page?page=<route>`), or a stream's or a
     /// thread's URI to select it. Its `#` is the page's view (a line, a
     /// filter): the same page in another view keeps its tab.
     pub uri: String,

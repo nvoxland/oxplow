@@ -759,19 +759,14 @@ async fn capability_suite(
             oxplow_app::harness_conformance::suite(svc, id, &json!({}), &kit_search_path(env)).await
         }
         providers::knowledge::KnowledgeHost::CAPABILITY => {
-            // The one under test is the project's knowledge store;
-            // its record follows it once the switch is delivered, which
-            // must happen before the suite writes (a late delivery
-            // would empty what it wrote).
-            svc.config
-                .write()
-                .map_err(|e| e.to_string())?
-                .active_providers
-                .insert(capability.to_string(), id.to_string());
+            // Every enabled store is in use at once: once published, the
+            // one under test is one of them, and the suite names it.
             publish_generation(svc).await?;
-            svc.event_pump.run_once().await.map_err(|e| e.to_string())?;
+            if svc.knowledge.get(id).is_none() {
+                return Err(format!("`{id}` isn't an enabled knowledge store"));
+            }
             oxplow_app::task_tracker_conformance::SuiteRun {
-                findings: oxplow_app::knowledge_conformance::suite(svc, &Actor::Human).await,
+                findings: oxplow_app::knowledge_conformance::suite(svc, id, &Actor::Human).await,
                 left: Vec::new(),
             }
         }

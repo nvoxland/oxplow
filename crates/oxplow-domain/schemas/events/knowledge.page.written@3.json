@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.page.written@3`: a knowledge page's row and edges were\nrestated from its body — by `oxplow.knowledge.write_page` / `link` /\n`resync`, or by oxwiki's watcher after a hand edit\n(`system:oxwiki_watch`).",
+  "properties": {
+    "outbound": {
+      "description": "Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`,\n`oxplow:oxplow/knowledge?id=x&store=oxwiki`, …).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "page": {
+      "description": "The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).",
+      "type": "string"
+    },
+    "snapshot": {
+      "description": "The snapshot its new refs are pinned to, when there is one.",
+      "format": "int64",
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "store": {
+      "description": "The store that keeps it (`oxwiki`, an instance's id).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "page",
+    "store",
+    "outbound"
+  ],
+  "title": "KnowledgePageWrittenV3",
+  "type": "object"
+}

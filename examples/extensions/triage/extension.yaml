@@ -23,7 +23,7 @@ intent:
     - name: summary-delivered
       input: { job: summarize }
       expect: the job succeeds, its completion reaches publish-summary, and the triage-summary page is written
-    - name: summary-to-the-wiki
+    - name: summary-to-a-knowledge-page
       input: { event: contribution.job.completed }
       expect: publish-summary writes the triage-summary page
     - name: todo-board
@@ -80,7 +80,7 @@ collectors:
 # extension's permissions. Its answer streams into `v_job_run_output` as it comes; it
 # may look closer at a file (`todos.in_file`) or query oxplow's models
 # (`query_sql`, from `sql.read`) before it answers. When it finishes,
-# `publish-summary` writes the answer to the wiki.
+# `publish-summary` writes the answer as a knowledge page.
 # The model that sorts each TODO: bind `triage/sort` in Settings → AI, or
 # it uses your Decide model.
 ai_profiles:
@@ -149,7 +149,7 @@ commands:
     job: true
 effects:
   - id: publish-summary
-    summary: When a summary job succeeds, write its answer to the wiki page `triage-summary`.
+    summary: When a summary job succeeds, write its answer to the knowledge page `triage-summary`.
     on: [contribution.job.completed]
     where: { job: "triage/summarize" }
     entry: effects/publish_summary.star

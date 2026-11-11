@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import type { ReactNode } from "react";
 
 import { PageNavigationContext, type PageNavigation } from "../tabs/PageNavigationContext.js";
-import { extPageRef, pageTabRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { extPageRef, pageTabRef, knowledgePageRef } from "../tabs/pageRefs.js";
 import type { UiPreference } from "../tauri-bridge/generated/bindings.js";
 import {
   createRememberedStore,
@@ -30,7 +30,7 @@ test("a page's memory is scoped by the page, whatever it shows and however", () 
   expect(pageMemoryScope(extPageRef("acme", "pulls"))).toBe("oxplow:oxplow/page?page=acme/pulls");
   expect(pageMemoryScope(pageTabRef("x/y", { stream_id: 2 }, { range: "7d" }))).toBe("oxplow:oxplow/page?page=x/y");
   // An entity page's is its resource's: every wiki page shares one.
-  expect(pageMemoryScope(wikiPageRef("home"))).toBe("resource:oxplow/wiki");
+  expect(pageMemoryScope(knowledgePageRef("oxwiki", "home"))).toBe("resource:oxplow/knowledge");
 });
 
 test("the store reads what was kept, writes a change once after a pause, and ignores an unchanged one", async () => {

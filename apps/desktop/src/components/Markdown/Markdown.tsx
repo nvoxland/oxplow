@@ -1,6 +1,6 @@
 /**
  * Markdown, the one component every surface draws or edits markdown with
- * (`.context/markdown.md`): a wiki page, a task's body, a request's
+ * (`.context/markdown.md`): a knowledge page, a task's body, a request's
  * summary, a comment, a form's markdown field, a page's `markdown` viz.
  * Given `onChange` or `onCommit` it is the editor, else the viewer; both
  * have the one feature set — wikilinks and ref links that open through

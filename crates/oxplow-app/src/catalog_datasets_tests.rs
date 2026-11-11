@@ -299,10 +299,10 @@ async fn page_ref_edges_are_a_dataset_in_both_directions() {
         .transaction(|tx| {
             tx.execute(
                 "INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource, ref_type)
-                 VALUES (uri('oxplow/wiki', 'slug', 'intro'), uri('oxplow/file', 'path', 'src/app.rs'),
-                         'oxplow/wiki', 'oxplow/file', 'mention'),
-                        (uri('oxplow/wiki', 'slug', 'intro'), uri('oxplow/wiki', 'slug', 'other'),
-                         'oxplow/wiki', 'oxplow/wiki', 'link'),
+                 VALUES ('oxplow:oxplow/knowledge?id=intro&store=oxwiki', uri('oxplow/file', 'path', 'src/app.rs'),
+                         'oxplow/knowledge', 'oxplow/file', 'mention'),
+                        ('oxplow:oxplow/knowledge?id=intro&store=oxwiki', 'oxplow:oxplow/knowledge?id=other&store=oxwiki',
+                         'oxplow/knowledge', 'oxplow/knowledge', 'link'),
                         (uri('oxplow/commit', 'sha', 'abc1234'), uri('oxplow/file', 'path', 'src/app.rs'),
                          'oxplow/commit', 'oxplow/file', 'touches')",
                 [],
@@ -321,17 +321,17 @@ async fn page_ref_edges_are_a_dataset_in_both_directions() {
         .await,
         vec![
             vec![json!("oxplow:oxplow/commit?sha=abc1234"), json!("touches")],
-            vec![json!("oxplow:oxplow/wiki?slug=intro"), json!("mention")],
+            vec![json!("oxplow:oxplow/knowledge?id=intro&store=oxwiki"), json!("mention")],
         ]
     );
     // What a page points at.
     assert_eq!(
         rows(
             &fx,
-            "SELECT target_uri FROM v_page_ref WHERE source_uri = 'oxplow:oxplow/wiki?slug=intro' ORDER BY target_uri"
+            "SELECT target_uri FROM v_page_ref WHERE source_uri = 'oxplow:oxplow/knowledge?id=intro&store=oxwiki' ORDER BY target_uri"
         )
         .await,
-        vec![vec![json!("oxplow:oxplow/file?path=src/app.rs")], vec![json!("oxplow:oxplow/wiki?slug=other")]]
+        vec![vec![json!("oxplow:oxplow/file?path=src/app.rs")], vec![json!("oxplow:oxplow/knowledge?id=other&store=oxwiki")]]
     );
 }
 

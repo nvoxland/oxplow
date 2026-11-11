@@ -1,8 +1,8 @@
 //! `oxplow-dev`: helpers for working on oxplow itself, never shipped.
 //!
-//! `oxplow-dev wiki …` does the same for the project's wiki, through the
-//! `knowledge.*` commands (the wiki as the store, whatever the project
-//! has active).
+//! `oxplow-dev knowledge …` does the same for the project's knowledge
+//! pages, through the `knowledge.*` commands, with oxwiki as the store
+//! (`--store oxwiki`, the one it runs), whatever the project has enabled.
 //!
 //! `oxplow-dev task …` reads and changes oxtask while the project
 //! has no task tracker active (none chosen in Settings → Capabilities). It runs oxplow's own `task.*` commands on a command
@@ -35,11 +35,11 @@ oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
 
-oxplow-dev wiki list                         the pages (slug, title)
-oxplow-dev wiki show <slug>
-oxplow-dev wiki write <slug> [--title T] [--file F]   body from F, else stdin
-oxplow-dev wiki delete <slug>
-oxplow-dev wiki search <text>                pages whose slug, title or body has it
+oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
+oxplow-dev knowledge show <id> [--store S]
+oxplow-dev knowledge write <id> [--title T] [--file F] [--store S]   body from F, else stdin
+oxplow-dev knowledge delete <id> [--store S]
+oxplow-dev knowledge search <text> [--store S]   pages whose id, title or body has it
 oxplow-dev extension status                  what the next boot would run, and what it
                                              would hold back and why (safe while oxplow runs)
 oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app does,
@@ -98,9 +98,9 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
             let tasks = Tasks::open(&project, thread.as_deref())?;
             tasks.run(args.split_off(1)).await
         }
-        Some("wiki") => {
+        Some("knowledge") => {
             let tasks = Tasks::open(&project, thread.as_deref())?;
-            tasks.wiki(args.split_off(1)).await
+            tasks.knowledge(args.split_off(1)).await
         }
         Some("extension") => extension(&project, &args[1..]).await,
         _ => Err(format!("usage:\n{USAGE}")),
@@ -395,23 +395,21 @@ impl Tasks {
         ] {
             bus.add_op(op).map_err(|e| e.to_string())?;
         }
-        // The wiki as the knowledge store, whatever the project has
-        // active: pages are `.oxplow/wiki/<slug>.md`, recorded as the app does.
-        let wiki_id = "oxplow-dev-wiki";
-        let stores = Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
-            move || wiki_id.to_string(),
-        )));
-        stores.register(Arc::new(oxplow_app::knowledge::WikiKnowledge {
-            id: wiki_id.into(),
+        // oxwiki as the knowledge store, whatever the project has enabled:
+        // pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app does.
+        let stores = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
+        stores.register(Arc::new(oxplow_oxwiki::OxwikiStore {
             project_dir: layout.project_dir.clone(),
         }));
+        let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());
+        oxwiki.set(true);
         for op in oxplow_app::knowledge::ops(oxplow_app::knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: Arc::new(oxplow_app::vcs::GitProvider),
             db: db.clone(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
             stores,
-            wiki: Arc::new(oxplow_app::knowledge::WikiFollow::default()),
+            oxwiki,
         })
         .into_iter()
         {
@@ -492,10 +490,12 @@ impl Tasks {
         }
     }
 
-    /// `oxplow-dev wiki …`: the pages through the knowledge commands.
-    async fn wiki(&self, mut args: Vec<String>) -> Result<String, String> {
+    /// `oxplow-dev knowledge …`: the pages through the knowledge commands.
+    async fn knowledge(&self, mut args: Vec<String>) -> Result<String, String> {
         let title = take_flag(&mut args, "--title");
         let file = take_flag(&mut args, "--file");
+        let store = take_flag(&mut args, "--store")
+            .unwrap_or_else(|| oxplow_domain::knowledge::OXWIKI.to_string());
         if let Some(unknown) = args.iter().find(|a| a.starts_with("--")) {
             return Err(format!("unknown option `{unknown}`\nusage:\n{USAGE}"));
         }
@@ -504,10 +504,19 @@ impl Tasks {
                 .cloned()
                 .ok_or_else(|| format!("missing {what}\nusage:\n{USAGE}"))
         };
+        let page_input = |id: String| {
+            let mut input = Map::new();
+            input.insert("store".into(), json!(store));
+            input.insert("id".into(), json!(id));
+            input
+        };
         match args.first().map(String::as_str) {
             Some("list") => {
                 let rows = self
-                    .rows("SELECT slug, title FROM wiki_page ORDER BY slug", vec![])
+                    .rows(
+                        "SELECT id, title FROM knowledge_page WHERE store = ?1 ORDER BY id",
+                        vec![store.clone()],
+                    )
                     .await?;
                 Ok(rows
                     .iter()
@@ -516,23 +525,24 @@ impl Tasks {
                     .join("\n"))
             }
             Some("show") => {
-                let slug = arg(1, "<slug>")?;
+                let id = arg(1, "<id>")?;
                 let rows = self
                     .rows(
-                        "SELECT title, body FROM wiki_page WHERE slug = ?1",
-                        vec![slug.clone()],
+                        "SELECT title, body FROM knowledge_page WHERE store = ?1 AND id = ?2",
+                        vec![store.clone(), id.clone()],
                     )
                     .await?;
-                let r = rows.first().ok_or_else(|| format!("no page `{slug}`"))?;
+                let r = rows.first().ok_or_else(|| format!("no page `{id}`"))?;
                 Ok(r[1].clone())
             }
             Some("search") => {
                 let needle = format!("%{}%", arg(1, "<text>")?);
                 let rows = self
                     .rows(
-                        "SELECT slug, title FROM wiki_page
-                          WHERE slug LIKE ?1 OR title LIKE ?1 OR body LIKE ?1 ORDER BY slug",
-                        vec![needle],
+                        "SELECT id, title FROM knowledge_page
+                          WHERE store = ?1 AND (id LIKE ?2 OR title LIKE ?2 OR body LIKE ?2)
+                          ORDER BY id",
+                        vec![store.clone(), needle],
                     )
                     .await?;
                 Ok(rows
@@ -542,7 +552,7 @@ impl Tasks {
                     .join("\n"))
             }
             Some("write") => {
-                let slug = arg(1, "<slug>")?;
+                let id = arg(1, "<id>")?;
                 let body = match file {
                     Some(path) => {
                         std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?
@@ -554,17 +564,14 @@ impl Tasks {
                         body
                     }
                 };
-                let mut input = Map::new();
-                input.insert("slug".into(), json!(slug));
+                let mut input = page_input(id);
                 input.insert("body".into(), json!(body));
                 put(&mut input, "title", title);
                 self.command("oxplow.knowledge.write_page", input).await
             }
             Some("delete") => {
-                let mut input = Map::new();
-                input.insert("slug".into(), json!(arg(1, "<slug>")?));
                 // Naming the page to delete is the confirmation.
-                self.confirmed_command("oxplow.knowledge.delete_page", input)
+                self.confirmed_command("oxplow.knowledge.delete_page", page_input(arg(1, "<id>")?))
                     .await
             }
             _ => Err(format!("usage:\n{USAGE}")),
@@ -816,33 +823,36 @@ mod tests {
         assert!(err.contains("tsk"), "{err}");
     }
 
-    /// The wiki is read and written through the knowledge commands: a page
-    /// written (body from a file) is listed, shown and found by search, its
-    /// links are checked, a note lands on the thread, and a deleted page is
+    /// Knowledge pages are read and written through the knowledge commands,
+    /// oxwiki the store: a page written (body from a file) is listed, shown
+    /// and found by search, its links are checked, and a deleted page is
     /// gone — the record and the file as the app keeps them.
     #[tokio::test]
-    async fn the_wiki_is_read_and_written_through_the_knowledge_commands() {
+    async fn knowledge_pages_are_read_and_written_through_the_knowledge_commands() {
         let dir = project().await;
         let p = dir.path();
         let body = p.join("body.md");
         std::fs::write(&body, "# Wombats\n\nThey dig burrows.\n").unwrap();
         let body = body.display().to_string();
-        let written = dev(p, &["wiki", "write", "wombats", "--file", &body])
+        let written = dev(p, &["knowledge", "write", "wombats", "--file", &body])
             .await
             .unwrap();
-        assert!(written.contains(r#""page": "wombats""#), "{written}");
-        assert!(p.join(".oxplow/wiki/wombats.md").is_file());
-        assert!(dev(p, &["wiki", "list"])
+        assert!(
+            written.contains(r#""page": "oxplow:oxplow/knowledge?id=wombats&store=oxwiki""#),
+            "{written}"
+        );
+        assert!(p.join(".oxplow/oxwiki/wombats.md").is_file());
+        assert!(dev(p, &["knowledge", "list"])
             .await
             .unwrap()
             .contains("wombats\tWombats"));
-        let shown = dev(p, &["wiki", "show", "wombats"]).await.unwrap();
+        let shown = dev(p, &["knowledge", "show", "wombats"]).await.unwrap();
         assert!(shown.contains("They dig burrows."), "{shown}");
-        assert!(dev(p, &["wiki", "search", "BURROWS"])
+        assert!(dev(p, &["knowledge", "search", "BURROWS"])
             .await
             .unwrap()
             .contains("wombats"));
-        assert!(dev(p, &["wiki", "search", "platypus"])
+        assert!(dev(p, &["knowledge", "search", "platypus"])
             .await
             .unwrap()
             .is_empty());
@@ -850,7 +860,7 @@ mod tests {
         dev(
             p,
             &[
-                "wiki",
+                "knowledge",
                 "write",
                 "wombats",
                 "--title",
@@ -861,28 +871,31 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(dev(p, &["wiki", "list"])
+        assert!(dev(p, &["knowledge", "list"])
             .await
             .unwrap()
             .contains("wombats\tWombat facts"));
         std::fs::write(&body, "# Bad\n\nSee [[file:nope/missing.rs]].\n").unwrap();
-        let err = dev(p, &["wiki", "write", "bad", "--file", &body])
+        let err = dev(p, &["knowledge", "write", "bad", "--file", &body])
             .await
             .unwrap_err();
         assert!(err.contains("nope/missing.rs"), "{err}");
-        assert!(!dev(p, &["wiki", "list"]).await.unwrap().contains("bad"));
-        dev(p, &["wiki", "delete", "wombats"]).await.unwrap();
-        assert!(!p.join(".oxplow/wiki/wombats.md").exists());
-        assert!(dev(p, &["wiki", "list"]).await.unwrap().is_empty());
+        assert!(!dev(p, &["knowledge", "list"])
+            .await
+            .unwrap()
+            .contains("bad"));
+        dev(p, &["knowledge", "delete", "wombats"]).await.unwrap();
+        assert!(!p.join(".oxplow/oxwiki/wombats.md").exists());
+        assert!(dev(p, &["knowledge", "list"]).await.unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn a_bad_wiki_call_says_how_to_call() {
+    async fn a_bad_knowledge_call_says_how_to_call() {
         let dir = project().await;
         for args in [
-            &["wiki", "frobnicate"][..],
-            &["wiki", "show"],
-            &["wiki", "write", "x", "--bogus", "1"],
+            &["knowledge", "frobnicate"][..],
+            &["knowledge", "show"],
+            &["knowledge", "write", "x", "--bogus", "1"],
         ] {
             let err = dev(dir.path(), args).await.unwrap_err();
             assert!(

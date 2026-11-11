@@ -78,7 +78,7 @@ test("a command the daemon says doesn't apply to the ref's row is not offered", 
 });
 
 test("no commands for the page's kind: the menu has Ask and no commands", async () => {
-  const view = await openMenu("oxplow:oxplow/wiki?slug=notes");
+  const view = await openMenu("oxplow:oxplow/knowledge?id=notes&store=oxwiki");
   expect(view.getByTestId("menu-item-page-ask-assistant")).toBeTruthy();
   expect(view.container.querySelector('[data-testid^="menu-item-ref-command-"]')).toBeNull();
 });

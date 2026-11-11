@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { planNavigation } from "./navigation.js";
-import { wikiPageRef } from "./pageRefs.js";
+import { knowledgePageRef } from "./pageRefs.js";
 
 const states = {
   str1: { selectedThreadId: "thr1", threads: [{ id: "thr1" }, { id: "thr2" }] },
@@ -17,17 +17,17 @@ test("a ref opens its page, in the shown stream unless one is named", async () =
 });
 
 test("the pages a ref can name each resolve", async () => {
-  for (const ref of ["oxplow:oxplow/task?id=tsk3&provider=oxtask", "oxplow:oxplow/request?id=req9", "oxplow:oxplow/page?page=oxplow/tasks", "oxplow:oxplow/wiki?slug=overview", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/page?page=git-dashboard"]) {
+  for (const ref of ["oxplow:oxplow/task?id=tsk3&provider=oxtask", "oxplow:oxplow/request?id=req9", "oxplow:oxplow/page?page=oxplow/tasks", "oxplow:oxplow/knowledge?id=overview&store=oxwiki", "oxplow:oxplow/dir?path=src", "oxplow:oxplow/page?page=git-dashboard"]) {
     expect((await planNavigation({ uri: ref }, states, "str1")).page?.id).toBe(ref);
   }
 });
 
 test("a named stream is switched to, and its selected thread shows the page", async () => {
-  const plan = await planNavigation({ uri: "oxplow:oxplow/wiki?slug=overview", stream: "oxplow:oxplow/stream?id=str2" }, states, "str1");
+  const plan = await planNavigation({ uri: "oxplow:oxplow/knowledge?id=overview&store=oxwiki", stream: "oxplow:oxplow/stream?id=str2" }, states, "str1");
   expect(plan.streamId).toBe("str2");
   expect(plan.threadId).toBe("thr5");
-  expect(plan.page?.id).toBe("oxplow:oxplow/wiki?slug=overview");
-  expect((await planNavigation({ uri: "oxplow:oxplow/wiki?slug=overview", stream: "str2" }, states, "str1")).streamId).toBe("str2");
+  expect(plan.page?.id).toBe("oxplow:oxplow/knowledge?id=overview&store=oxwiki");
+  expect((await planNavigation({ uri: "oxplow:oxplow/knowledge?id=overview&store=oxwiki", stream: "str2" }, states, "str1")).streamId).toBe("str2");
 });
 
 test("a bare stream or thread ref selects it and opens nothing", async () => {
@@ -42,10 +42,10 @@ test("a bare stream or thread ref selects it and opens nothing", async () => {
 test("what can't be reached is refused", async () => {
   await expect(planNavigation({ uri: "nonsense" }, states, "str1")).rejects.toThrow();
   await expect(planNavigation({}, states, "str1")).rejects.toThrow(/uri/);
-  await expect(planNavigation({ uri: "oxplow:oxplow/wiki?slug=x", stream: "oxplow:oxplow/stream?id=str9" }, states, "str1")).rejects.toThrow(/no stream/);
+  await expect(planNavigation({ uri: "oxplow:oxplow/knowledge?id=x&store=oxwiki", stream: "oxplow:oxplow/stream?id=str9" }, states, "str1")).rejects.toThrow(/no stream/);
   await expect(planNavigation({ uri: "oxplow:oxplow/thread?id=thr9" }, states, "str1")).rejects.toThrow(/no thread/);
   await expect(planNavigation({ uri: "oxplow:oxplow/stream?id=str9" }, states, "str1")).rejects.toThrow(/no stream/);
-  await expect(planNavigation({ uri: "oxplow:oxplow/wiki?slug=x" }, states, null)).rejects.toThrow(/no stream/);
+  await expect(planNavigation({ uri: "oxplow:oxplow/knowledge?id=x&store=oxwiki" }, states, null)).rejects.toThrow(/no stream/);
 });
 
 // Where a ref opens is the opener's: a handoff opens its thread, whatever
@@ -53,8 +53,8 @@ test("what can't be reached is refused", async () => {
 test("a ref goes where the opener says", async () => {
   const note = await planNavigation({ uri: "oxplow:oxplow/handoff?id=hnd3" }, states, "str1", async () => ({ thread: "thr5" }));
   expect(note).toMatchObject({ streamId: "str2", threadId: "thr5", selectThread: true, page: null });
-  const page = await planNavigation({ uri: "oxplow:oxplow/proposal?id=4" }, states, "str1", async () => ({ tab: wikiPageRef("overview") }));
-  expect(page.page?.id).toBe("oxplow:oxplow/wiki?slug=overview");
+  const page = await planNavigation({ uri: "oxplow:oxplow/proposal?id=4" }, states, "str1", async () => ({ tab: knowledgePageRef("oxwiki", "overview") }));
+  expect(page.page?.id).toBe("oxplow:oxplow/knowledge?id=overview&store=oxwiki");
   await expect(planNavigation({ uri: "oxplow:oxplow/event?id=x" }, states, "str1", async () => ({ unopenable: "no page" }))).rejects.toThrow(/no page/);
 });
 
@@ -65,10 +65,10 @@ test("a window that hasn't loaded its stream looks it up", async () => {
     current: async () => "str2",
     threads: async (id: string) => (id === "str2" ? { selectedThreadId: "thr5", threads: [{ id: "thr5" }] } : undefined),
   };
-  const plan = await planNavigation({ uri: "oxplow:oxplow/wiki?slug=overview" }, {}, null, undefined, lookup);
+  const plan = await planNavigation({ uri: "oxplow:oxplow/knowledge?id=overview&store=oxwiki" }, {}, null, undefined, lookup);
   expect(plan.streamId).toBe("str2");
   expect(plan.threadId).toBe("thr5");
-  expect(plan.page?.id).toBe("oxplow:oxplow/wiki?slug=overview");
+  expect(plan.page?.id).toBe("oxplow:oxplow/knowledge?id=overview&store=oxwiki");
   // Nothing to look up: it still says so.
-  await expect(planNavigation({ uri: "oxplow:oxplow/wiki?slug=overview" }, {}, null)).rejects.toThrow("no stream is shown");
+  await expect(planNavigation({ uri: "oxplow:oxplow/knowledge?id=overview&store=oxwiki" }, {}, null)).rejects.toThrow("no stream is shown");
 });

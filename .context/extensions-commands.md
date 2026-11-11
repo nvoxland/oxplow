@@ -204,7 +204,7 @@ implementations:
   none refuses any config); no built-in takes one now.
 - `entry` names a built-in in core's standard library
   (`capabilities::BUILT_INS`: `oxplow:oxtask`, `oxplow:commit-or-switch`,
-  `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:wiki`), the way a collector names
+  `oxplow:snapshots`, `oxplow:snapshot-hashes`, `oxplow:oxwiki`), the way a collector names
   `oxplow:junit`. A
   built-in's features are core's table's — it's core's code — never the
   manifest's. A built-in whose items' URIs carry a provider id
@@ -301,10 +301,12 @@ implementations:
   **Which capabilities a script can implement** (each but the task
   tracker is held by a test in `providers/script_capabilities.rs`, a small
   extension against the capability's conformance suite):
-  - `knowledge` works: `write_page`, `delete_page` and `link` answer the
-    page's `knowledge.page.recorded@2`; `delete_page` and `link` read the
+  - `knowledge` works: `write_page` and `delete_page` answer the
+    page's `knowledge.page.recorded@3`; `delete_page` reads the
     page back from `v_knowledge_page` / `v_knowledge_body` (`sql.read`).
-    It passes `knowledge_conformance::suite` once chosen. The record's
+    The entry may declare `features: { edit: true }` and
+    `data: { kinds: [...] }`. It is one more store beside oxwiki and passes
+    `knowledge_conformance::suite` once enabled. The record's
     `updated_at` is the script's to state (core stamps its own row).
   - `agent_harness` works for a terminal harness: `launch` answers a
     `pty` spec (the identity env passed on, never on the command line),
@@ -358,7 +360,7 @@ implementations:
   registers it (snapshots' `oxplow`, `oxplow:snapshots`), so it's there
   whatever is disabled, and a manifest declaring that id is an error.
 - `oxplow-foundation` declares the default implementations (the task tracker
-  and knowledge's wiki, `oxplow:wiki`), so they run with
+  and knowledge's oxwiki, `oxplow:oxwiki`), so they run with
   `oxplow-bundled` off; turning the list off is choosing another provider
   (or none) in Settings → Capabilities, not disabling an extension
   (`capabilities::CapabilityRegistry::resolve`, `.context/work-tracking.md`).

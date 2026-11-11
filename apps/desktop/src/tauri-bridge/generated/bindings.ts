@@ -416,7 +416,7 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	listWikiSlugsForSnapshots: (snapshotIds: SnapshotId[]) => typedError<([SnapshotId, string])[], IpcError_Serialize>(__TAURI_INVOKE("list_wiki_slugs_for_snapshots", { snapshotIds })),
+	listKnowledgePagesForSnapshots: (snapshotIds: SnapshotId[]) => typedError<SnapshotKnowledgePage[], IpcError_Serialize>(__TAURI_INVOKE("list_knowledge_pages_for_snapshots", { snapshotIds })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -1168,7 +1168,7 @@ export type BackgroundTask = {
 	result_json: string | null,
 };
 
-export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "notes-resync" | "snapshot" |
+export type BackgroundTaskKind = "vcs" | "code-quality" | "lsp" | "snapshot" |
 /**
  *  Recomputing code metrics over the whole tree (the metric baseline, tsk48).
  *  Slow and CPU-hungry — it must be visible, or "why is oxplow pegging a core?"
@@ -1190,7 +1190,7 @@ export type BacklinkEdge = {
 	source_extra: string | null,
 	/**
 	 *  Human label for the other end (the source of a backlink, the
-	 *  target of an outbound edge): wiki title, task title, commit
+	 *  target of an outbound edge): knowledge page title, task title, commit
 	 *  subject, …. The renderer falls back to the URI when None.
 	 */
 	source_label: string | null,
@@ -1729,7 +1729,7 @@ export type Comment = {
 	 */
 	thread_id: ThreadId | null,
 	/**
-	 *  What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
+	 *  What the comment is on: a URI (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`,
 	 *  a file's, a task's) — the same the `page_ref` graph and tabs
 	 *  use.
 	 */
@@ -3512,8 +3512,11 @@ export type Lifecycle = "stable" | "experimental";
 export type LinkKind =
 /**  `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path. */
 "file" |
-/**  `oxplow:oxplow/wiki?slug=<slug>`. */
-"wiki" |
+/**
+ *  A knowledge page; the value is its URI
+ *  (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+ */
+"knowledge" |
 /**  A git commit; the value is a sha. */
 "commit" |
 /**
@@ -4903,7 +4906,7 @@ export type PageColumn = {
 	unit?: string | null,
 	/**
 	 *  A column of the same row naming an icon drawn before the cell
-	 *  (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+	 *  (`done`, `in_progress`, `epic`, `knowledge`, …; the UI's fixed
 	 *  vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
 	 */
 	icon?: string | null,
@@ -5908,7 +5911,7 @@ export type ScriptsConfig = {
  *  One ranked search result: the URI it found
  *  (`oxplow:oxplow/task?id=tsk7&provider=oxtask`), which the caller
  *  opens the way it opens any URI, and its resource. `stream_id` is `None`
- *  for project-global entities (wiki pages); `score` is the BM25 score
+ *  for project-global entities (knowledge pages); `score` is the BM25 score
  *  (lower = better match).
  */
 export type SearchHit = {
@@ -6030,6 +6033,13 @@ export type SlotEdge = "start" | "end";
 
 /**  A `snapshot` row. */
 export type SnapshotId = number;
+
+/**  An oxwiki page whose file changed in a snapshot. */
+export type SnapshotKnowledgePage = {
+	snapshot_id: SnapshotId,
+	/**  The page's URI (`oxplow:oxplow/knowledge?id=<slug>&store=oxwiki`). */
+	uri: string,
+};
 
 /**  One row of the operation log (`snapshot_op`). */
 export type SnapshotOp = {

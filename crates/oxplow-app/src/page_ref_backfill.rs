@@ -36,7 +36,7 @@
 
 use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{finding_edges, note_edges};
+use oxplow_db::page_ref_projections::{body_edges, finding_edges};
 use oxplow_db::{SourceSlice, SqliteCodeQualityStore, SqliteHandoffStore, SqlitePageRefStore};
 use oxplow_domain::vocabulary::VocabularyHandle;
 
@@ -233,7 +233,7 @@ pub async fn run(
         let slices = rows
             .into_iter()
             .map(|(uri, body)| {
-                let edges = note_edges(kinds, &uri, &body);
+                let edges = body_edges(kinds, &uri, &body);
                 slice(uri, None, edges)
             })
             .collect();

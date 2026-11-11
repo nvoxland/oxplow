@@ -25,7 +25,7 @@ pub fn is_ignore_file(path: &Path) -> bool {
 /// language caches, IDE state) is the user's call via the
 /// `generated` config; we don't pretend to know which dirs each
 /// project actually treats as generated. `.oxplow` is handled
-/// separately above — watched for the wiki and for anything
+/// separately above — watched for oxwiki and for anything
 /// `.oxplow/.gitignore` un-ignores with a `!` — not via this segment
 /// list.
 const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
@@ -36,7 +36,7 @@ const DEFAULT_IGNORED_SEGMENTS: &[&str] = &[".git"];
 /// consumers, and the indexer — no consumer keeps its own skip-list.
 ///
 /// A path is ignored when, in precedence order:
-/// 1. it is under `.git`, or under the root's `.oxplow` (except `.oxplow/wiki/`) —
+/// 1. it is under `.git`, or under the root's `.oxplow` (except `.oxplow/oxwiki/`) —
 ///    absolute, never overridable;
 /// 2. otherwise, if it matches an **`include`** entry it is **kept**
 ///    (force-track something `.gitignore` would otherwise drop);
@@ -334,9 +334,9 @@ impl WorkspaceFilter {
 
     /// True if `path` is out of a tree (`oxplow-app`'s `Trees`: a diff,
     /// the working tree, a snapshot's files). The same rules as
-    /// [`Self::ignore`] but git's view of `.oxplow/wiki/`, which oxplow
+    /// [`Self::ignore`] but git's view of `.oxplow/oxwiki/`, which oxplow
     /// watches though git ignores it: a tree answers "what would git
-    /// see?", so the wiki is no one's uncommitted work (tsk1083).
+    /// see?", so oxwiki is no one's uncommitted work (tsk1083).
     pub fn ignore_in_trees(&self, path: &Path, is_dir: bool) -> bool {
         self.decide(path, is_dir, false)
     }
@@ -379,15 +379,15 @@ impl WorkspaceFilter {
                         // what made `project.yaml` invisible even once the
                         // per-file rule was right (tsk176).
                         None => false,
-                        // The wiki is watched. This can't be expressed in
+                        // oxwiki is watched. This can't be expressed in
                         // `.gitignore`: it is deliberately NOT committed, but it
-                        // IS snapshotted (Local History's wiki badges read
-                        // `list_wiki_slugs_for_snapshots`). `.gitignore` answers
+                        // IS snapshotted (Local History's oxwiki badges read
+                        // `list_knowledge_pages_for_snapshots`). `.gitignore` answers
                         // "should this be committed?"; this filter answers
-                        // "should oxplow watch this?" — and for the wiki those
+                        // "should oxplow watch this?" — and for oxwiki those
                         // differ, so the one distinction gitignore can't carry
                         // lives here.
-                        Some("wiki") if watching => false,
+                        Some("oxwiki") if watching => false,
                         // Extension sources are watched for the same reason:
                         // an agent's edits to one are its work (snapshotted,
                         // given to its turn), committed or not. Watching
@@ -559,13 +559,13 @@ mod tests {
     use tempfile::tempdir;
 
     /// tsk1083: git's global excludes file (`core.excludesFile`) counts
-    /// like any `.gitignore`; and the wiki, watched though git ignores it,
+    /// like any `.gitignore`; and oxwiki, watched though git ignores it,
     /// is out of a tree (`ignore_in_trees`): trees are git's view.
     #[test]
-    fn global_excludes_count_and_trees_follow_git_for_the_wiki() {
+    fn global_excludes_count_and_trees_follow_git_for_oxwiki() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("repo");
-        std::fs::create_dir_all(root.join(".oxplow/wiki")).unwrap();
+        std::fs::create_dir_all(root.join(".oxplow/oxwiki")).unwrap();
         std::fs::write(
             root.join(".oxplow/.gitignore"),
             "*\n!.gitignore\n!project.yaml\n",
@@ -582,9 +582,9 @@ mod tests {
         let local = Path::new(".claude/settings.local.json");
         assert!(filter.ignore(local, false));
         assert!(filter.ignore_in_trees(local, false));
-        let wiki = Path::new(".oxplow/wiki/notes.md");
-        assert!(!filter.ignore(wiki, false), "the wiki is watched");
-        assert!(filter.ignore_in_trees(wiki, false), "git ignores it");
+        let oxwiki = Path::new(".oxplow/oxwiki/notes.md");
+        assert!(!filter.ignore(oxwiki, false), "oxwiki is watched");
+        assert!(filter.ignore_in_trees(oxwiki, false), "git ignores it");
         let config = Path::new(".oxplow/project.yaml");
         assert!(!filter.ignore(config, false) && !filter.ignore_in_trees(config, false));
     }
@@ -673,14 +673,14 @@ mod tests {
 
     #[test]
     fn should_ignore_filters_oxplow_and_git() {
-        // Always-on: anything under `.oxplow/` except `.oxplow/wiki/`,
+        // Always-on: anything under `.oxplow/` except `.oxplow/oxwiki/`,
         // and anything under `.git/`. Everything else is the user's
         // call via the `generated` config.
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".oxplow/snapshots/aa/foo.tmp"
         )));
         assert!(!should_ignore_workspace_watch_path(Path::new(
-            ".oxplow/wiki/local-snapshots.md"
+            ".oxplow/oxwiki/local-snapshots.md"
         )));
         assert!(should_ignore_workspace_watch_path(Path::new(
             ".oxplow/local.sqlite"
@@ -734,7 +734,7 @@ mod tests {
     #[test]
     fn workspace_filter_defaults_apply_even_with_empty_user_list() {
         // Defaults are `.git` (segment) and `.oxplow/*` (with a
-        // `.oxplow/wiki/` carve-out). Build dirs are NOT defaults —
+        // `.oxplow/oxwiki/` carve-out). Build dirs are NOT defaults —
         // they require the user to add them to `generated`.
         let f = WorkspaceFilter::default();
         assert!(f.ignore(Path::new(".git/HEAD"), false));
@@ -745,9 +745,9 @@ mod tests {
     }
 
     #[test]
-    fn workspace_filter_oxplow_wiki_passes_through() {
+    fn workspace_filter_oxwiki_passes_through() {
         let f = WorkspaceFilter::default();
-        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
+        assert!(!f.ignore(Path::new(".oxplow/oxwiki/page.md"), false));
         assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));
     }
 
@@ -981,7 +981,7 @@ mod tests {
         // Generalised deliberately: this is NOT a `project.yaml` carve-out.
         // Whatever a project un-ignores in that file becomes visible.
         let dir = tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".oxplow/wiki")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".oxplow/oxwiki")).unwrap();
         std::fs::create_dir_all(dir.path().join(".oxplow/snapshots")).unwrap();
         std::fs::write(
             dir.path().join(".oxplow/.gitignore"),
@@ -1016,8 +1016,8 @@ mod tests {
             "but descend into .oxplow itself"
         );
         assert!(
-            !f.ignore(Path::new(".oxplow/wiki"), true),
-            "and into the wiki"
+            !f.ignore(Path::new(".oxplow/oxwiki"), true),
+            "and into oxwiki"
         );
         // Extension sources are watched; their deployments are not.
         assert!(!f.ignore(Path::new(".oxplow/extensions"), true));
@@ -1027,11 +1027,11 @@ mod tests {
             false
         ));
 
-        // The wiki stays watched. This one CANNOT come from .gitignore:
+        // oxwiki stays watched. This one CANNOT come from .gitignore:
         // it is deliberately not committed, but it IS snapshotted (Local
-        // History's wiki badges), and gitignore can't say "don't commit but
+        // History's oxwiki badges), and gitignore can't say "don't commit but
         // do watch".
-        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
+        assert!(!f.ignore(Path::new(".oxplow/oxwiki/page.md"), false));
     }
 
     #[test]
@@ -1043,6 +1043,6 @@ mod tests {
         let f = WorkspaceFilter::for_project(dir.path(), empty(), empty());
         assert!(f.ignore(Path::new(".oxplow/project.yaml"), false));
         assert!(f.ignore(Path::new(".oxplow/local.sqlite"), false));
-        assert!(!f.ignore(Path::new(".oxplow/wiki/page.md"), false));
+        assert!(!f.ignore(Path::new(".oxplow/oxwiki/page.md"), false));
     }
 }

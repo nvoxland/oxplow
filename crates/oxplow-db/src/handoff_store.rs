@@ -15,7 +15,7 @@ use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::{AgentSessionId, DomainError, Envelope, HandoffId, ThreadId, Timestamp};
 
 use crate::database::{map_sql_err, string_to_ts, ts_to_string, Database};
-use crate::page_ref_projections::note_edges;
+use crate::page_ref_projections::body_edges;
 use crate::page_ref_store::replace_source_tx;
 
 /// Where a handoff stands.
@@ -162,7 +162,7 @@ pub fn send_tx(
     .map_err(map_sql_err)?;
     let id = HandoffId::new(conn.last_insert_rowid());
     let uri = handoff_uri(id);
-    replace_source_tx(conn, &uri, note_edges(kinds, &uri, new.body))?;
+    replace_source_tx(conn, &uri, body_edges(kinds, &uri, new.body))?;
     let handoff = handoff_tx(conn, id)?.ok_or_else(|| {
         DomainError::Invalid(format!("handoff `{id}` vanished in its own transaction"))
     })?;

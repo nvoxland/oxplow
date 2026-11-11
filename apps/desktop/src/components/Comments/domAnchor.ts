@@ -7,7 +7,7 @@
 //! `[start, length)` char span (via the shared `resolveAnchor`) and turn
 //! that span back into a DOM `Range` to paint, without mutating the DOM.
 
-import { commitUri, dirUri, fileUri, wikiUri } from "../../uri/uri.js";
+import { commitUri, dirUri, fileUri, knowledgeUri } from "../../uri/uri.js";
 import { parseMarkdownLink } from "../Markdown/markdownLinks.js";
 
 /// Convert a character span of `root.textContent` into a DOM `Range` by
@@ -56,8 +56,8 @@ export function textContentRange(root: Element, start: number, length: number): 
 export function refFromHref(href: string): string | null {
   const parsed = parseMarkdownLink(href);
   switch (parsed.kind) {
-    case "internal":
-      return wikiUri(parsed.slug);
+    case "knowledge":
+      return knowledgeUri(parsed.store, parsed.id);
     case "file":
       return fileUri(parsed.path);
     case "directory":

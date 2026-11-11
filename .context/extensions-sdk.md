@@ -262,7 +262,7 @@ check already reported is not repeated.
   naming `effects`, `commands` or `pages`
   also delivers the `contribution.job.completed`
   the job logs, asked in a thread: the effects that reacted, the commands
-  they ran and which of the named wiki URIs now exist), a component (`{ component, queries?,
+  they ran and which of the named knowledge page URIs now exist), a component (`{ component, queries?,
   invokes? }`: `load_component`, `run_component_query`,
   `invoke_component_command` as its frame would — `expect: { queries:
   [{ rows }], invokes: [{ ok, refused? }] }`), a form (`{ form: <page>,
@@ -379,8 +379,8 @@ from, in turn — and a fixture's own `requires: [<ext>…]` (a fixture key,
 same meaning as the manifest's) adds more, on an oxplow of that fixture's
 own (an unknown name is a finding). The default extensions are not on:
 oxplow's own pages run complete without them. oxtask
-and wiki are foundation's (always on), so a fixture that makes
-tasks or wiki pages needs nothing extra (`requires:
+and knowledge (oxwiki) are foundation's (always on), so a fixture that makes
+tasks or knowledge pages needs nothing extra (`requires:
 [oxplow-bundled]` only for what bundled adds: its review pages and
 replacements), and a provider's conformance suite, which files work,
 runs on an oxplow of its own — deployed in that order,

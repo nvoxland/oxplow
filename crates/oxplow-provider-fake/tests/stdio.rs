@@ -925,8 +925,13 @@ fn spawn_knowledge(state: Option<&std::path::Path>) -> (Child, Peer, Receiver<In
     (child, peer, incoming)
 }
 
-fn page_write(slug: &str, body: &str) -> Value {
-    json!({ "slug": slug, "body": body, "verified_files": [], "removed_files": [] })
+fn page_write(id: &str, body: &str) -> Value {
+    json!({ "id": id, "body": body, "verified_files": [], "removed_files": [] })
+}
+
+/// A page of the fake (the instance `fake`).
+fn page(id: &str) -> String {
+    oxplow_domain::uri::build::knowledge_uri("fake", id)
 }
 
 #[tokio::test]
@@ -936,14 +941,15 @@ async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
     assert_eq!(declared, oxplow_provider_fake::knowledge_declarations());
     let capability = &declared.capabilities[0];
     assert_eq!(capability.capability, "knowledge");
-    assert_eq!(capability.features, json!({}));
+    assert_eq!(capability.features, json!({ "edit": true }));
+    assert_eq!(capability.data["kinds"][0]["bucket"], "note");
     assert_eq!(
         declared
             .commands
             .iter()
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["write_page", "delete_page", "link"]
+        vec!["write_page", "delete_page"]
     );
     for c in &declared.commands {
         assert_eq!((c.confirm.as_str(), c.access.as_str()), ("never", "record"));
@@ -959,7 +965,7 @@ async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
             declared.event_types[0].event_type.as_str(),
             declared.event_types[0].v
         ),
-        ("knowledge.page.recorded", 2)
+        ("knowledge.page.recorded", 3)
     );
     assert_eq!(
         (
@@ -981,72 +987,56 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
         "write_page",
         page_write(
             "design",
-            "See [[src/lib.rs]] and [[other-page]], [[src/lib.rs]] again.",
+            "See [[src/lib.rs]] and [[other-page]], [[vault:Notes]], [[src/lib.rs]] again.",
         ),
     )
     .await
     .unwrap();
-    assert_eq!(wrote.result, json!({ "page": "design" }));
+    assert_eq!(wrote.result, json!({ "id": "design" }));
     assert_eq!(wrote.events.len(), 1);
     let event = &wrote.events[0];
     assert_eq!(event.event_type, "knowledge.page.recorded");
-    assert_eq!(event.v, 2);
+    assert_eq!(event.v, 3);
+    assert_eq!(event.subject, vec![page("design")]);
+    let record = &event.payload["page"];
+    assert_eq!(record["uri"], page("design"));
+    assert_eq!(record["kind"], "note");
+    assert_eq!(record["title"], "design");
     assert_eq!(
-        event.subject,
-        vec!["oxplow:oxplow/wiki?slug=design".to_string()]
-    );
-    let page = &event.payload["page"];
-    assert_eq!(page["uri"], "oxplow:oxplow/wiki?slug=design");
-    assert_eq!(page["title"], "design");
-    assert_eq!(
-        page["uris"],
+        record["uris"],
         json!([
             "oxplow:oxplow/file?path=src/lib.rs",
-            "oxplow:oxplow/wiki?slug=other-page"
+            "oxplow:oxplow/knowledge?id=other-page&store=oxwiki",
+            "oxplow:oxplow/knowledge?id=Notes&store=vault",
         ])
     );
-    assert!(page.get("deleted").is_none());
-    assert!(page["updated_at"].as_str().unwrap().ends_with('Z'));
+    assert!(record.get("deleted").is_none());
+    assert!(record["updated_at"].as_str().unwrap().ends_with('Z'));
 
-    // A link goes under Related; the record states the new ref.
-    let linked = invoke(
+    // With no id it takes one from the title.
+    let titled = invoke(
         &peer,
         &handle,
-        "link",
-        json!({ "page": "oxplow:oxplow/wiki?slug=design", "target": "oxplow:oxplow/wiki?slug=third" }),
+        "write_page",
+        json!({ "title": "Auth Flow", "body": "x", "verified_files": [], "removed_files": [] }),
     )
     .await
     .unwrap();
-    assert_eq!(linked.result, json!({}));
-    let page = &linked.events[0].payload["page"];
-    assert!(
-        page["body"]
-            .as_str()
-            .unwrap()
-            .contains("## Related\n\n[[third]]"),
-        "{page}"
-    );
-    assert_eq!(
-        page["uris"],
-        json!([
-            "oxplow:oxplow/file?path=src/lib.rs",
-            "oxplow:oxplow/wiki?slug=other-page",
-            "oxplow:oxplow/wiki?slug=third"
-        ])
-    );
+    assert_eq!(titled.result, json!({ "id": "auth-flow" }));
+    assert_eq!(titled.events[0].payload["page"]["uri"], page("auth-flow"));
 
-    let deleted = invoke(&peer, &handle, "delete_page", json!({ "slug": "design" }))
+    let deleted = invoke(&peer, &handle, "delete_page", json!({ "id": "design" }))
         .await
         .unwrap();
     assert_eq!(deleted.result, json!({}));
     assert_eq!(deleted.events[0].payload["page"]["deleted"], json!(true));
 
     for (verb, input) in [
-        ("delete_page", json!({ "slug": "design" })),
-        ("delete_page", json!({ "slug": "nope" })),
+        ("delete_page", json!({ "id": "design" })),
+        ("delete_page", json!({ "id": "nope" })),
         (
-            "link",
-            json!({ "page": "oxplow:oxplow/wiki?slug=nope", "target": "x" }),
+            "write_page",
+            json!({ "body": "x", "verified_files": [], "removed_files": [] }),
         ),
     ] {
         let refused = invoke(&peer, &handle, verb, input).await;
@@ -1119,7 +1109,7 @@ async fn as_a_knowledge_provider_it_streams_changed_pages_and_keeps_them() {
         .collect();
     assert_eq!(
         slugs,
-        vec!["oxplow:oxplow/wiki?slug=b", "oxplow:oxplow/wiki?slug=a"],
+        vec![page("b"), page("a")],
         "in revision order, a's rewrite last"
     );
     assert_eq!(rows[1]["row"]["body"], "uno");

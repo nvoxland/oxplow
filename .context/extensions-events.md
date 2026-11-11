@@ -318,7 +318,7 @@ resource's icon and label). A feed may add a `version` column (a row's
 and body of the changed rows only.
 
 - **What is searchable (the rule).** The named things a person looks up
-  are: oxplow-foundation's tasks, wiki pages, threads, commits,
+  are: oxplow-foundation's tasks, knowledge pages, threads, commits,
   pages, metrics, measures, branches, extensions, dimensions, datasets,
   commands, skills, collectors, jobs, AI profiles, advisories, effects,
   panels, providers, implementations, event types, resources and
@@ -369,7 +369,7 @@ and body of the changed rows only.
   restart and every rewrite read whole. Only a feed whose existing rows no
   insert can change or remove may declare `seq`: today `search_turn` (a turn's start is an insert; its end is an update, so a
   whole read). Every other kind reads whole: its text follows rows an
-  insert elsewhere changes (a task's comments, a wiki body), or it is
+  insert elsewhere changes (a task's comments, a knowledge page body), or it is
   a window (`search_commit`'s last 500: a new commit pushes one out), or it
   is an extension's resource (bounded, and its SQL can say anything).
 - `Assets::sync_search_kinds` keeps them in step with `resource` and the

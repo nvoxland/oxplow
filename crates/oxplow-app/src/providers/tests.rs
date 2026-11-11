@@ -1283,7 +1283,7 @@ fn a_provider_event_names_only_its_own_refs() {
     for bad in [
         "oxplow:oxplow/task?id=tsk1&provider=oxtask",
         "oxplow:oxplow/extension?name=other",
-        "oxplow:oxplow/wiki?slug=page",
+        "oxplow:oxplow/knowledge?id=page&store=oxwiki",
         "oxplow:oxplow/file?path=src/a.rs",
         "garbage",
     ] {
@@ -6652,11 +6652,11 @@ fn write_knowledge_extension(project: &Path, state: &Path) {
     .unwrap();
 }
 
-/// A provider process as the project's knowledge store: a page written
-/// through `oxplow.knowledge.write_page` lands in its service and in core's
-/// record (pinned, its links from the refs it states), a page written
-/// outside oxplow comes in on a sync, a delete takes a page out of both,
-/// and the wiki's files are never touched.
+/// A provider process as one of the project's knowledge stores, beside
+/// oxwiki: a page written through `oxplow.knowledge.write_page` naming it
+/// lands in its service and in core's record (pinned, its links from the
+/// refs it states), a page written outside oxplow comes in on a sync, a
+/// delete takes a page out of both, and oxwiki's files are never touched.
 #[cfg(unix)]
 #[tokio::test]
 async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
@@ -6669,7 +6669,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         serde_json::to_string(&json!({
             "items": {}, "next": 1, "rev": 1, "answered": {},
             "pages": { "outside": { "rev": 1, "record": {
-                "uri": "oxplow:oxplow/wiki?slug=outside", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
+                "uri": "oxplow:oxplow/knowledge?id=outside&store=shelf", "title": "Outside", "body": "# Outside\n\nWritten in the vault.\n",
                 "uris": [], "updated_at": "2026-10-09T00:00:01Z"
             } } }
         }))
@@ -6684,21 +6684,9 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
     assert!(ext.errors.is_empty(), "{:?}", ext.errors);
     deploy(&fx, &ext).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    fx.svc
-        .config
-        .write()
-        .unwrap()
-        .active_providers
-        .insert(crate::knowledge::CAPABILITY.into(), "shelf".into());
     crate::test_fixtures::activate_with_problems(&fx.svc).await;
-    fx.svc
-        .event_pump
-        .settle(
-            &[crate::knowledge::KnowledgeSwitch::NAME],
-            std::time::Duration::from_secs(10),
-        )
-        .await;
-    assert!(!fx.svc.wiki.live());
+    assert_eq!(fx.svc.knowledge.enabled(), ["oxwiki", "shelf"]);
+    let shelf = |id: &str| oxplow_domain::uri::build::knowledge_uri("shelf", id);
 
     // A page written outside oxplow comes in on a sync.
     fx.svc
@@ -6718,7 +6706,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
             std::time::Duration::from_secs(10),
         )
         .await;
-    let page = fx.svc.wiki_page_store.get("outside").await.unwrap();
+    let page = fx.svc.knowledge_pages.get(&shelf("outside")).await.unwrap();
     assert_eq!(page.map(|p| p.title), Some("Outside".into()));
 
     // A write through the command lands in the store and the record.
@@ -6730,23 +6718,23 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .run(
             &Actor::Human,
             crate::knowledge::WRITE_PAGE,
-            json!({ "slug": "design", "body": "# Design\n\nSee [[src/lib.rs]].\n",
+            json!({ "store": "shelf", "id": "design", "body": "# Design\n\nSee [[src/lib.rs]].\n",
                     "verified_files": ["src/lib.rs"] }),
             true,
         )
         .await
         .unwrap();
-    assert_eq!(out.result["page"], "design");
-    assert!(!project.join(".oxplow/wiki/design.md").exists());
+    assert_eq!(out.result["page"], shelf("design"));
+    assert!(!oxplow_oxwiki::page_path(&project, "design").exists());
     let body: Option<String> = fx
         .svc
-        .wiki_page_store
-        .body("design")
+        .knowledge_pages
+        .body(&shelf("design"))
         .await
         .unwrap()
         .map(|(_, body)| body);
     assert_eq!(body.as_deref(), Some("# Design\n\nSee [[src/lib.rs]].\n"));
-    let fresh = crate::knowledge::freshness(&fx.svc.db, "oxplow:oxplow/wiki?slug=design")
+    let fresh = crate::knowledge::freshness(&fx.svc.db, &shelf("design"))
         .await
         .unwrap();
     assert_eq!(
@@ -6755,7 +6743,7 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
     );
     let saved = std::fs::read_to_string(&state).unwrap();
     assert!(
-        saved.contains("oxplow:oxplow/wiki?slug=design"),
+        saved.contains(&shelf("design")),
         "the store kept it: {saved}"
     );
 
@@ -6765,15 +6753,15 @@ async fn a_knowledge_provider_keeps_pages_and_core_records_them() {
         .run(
             &Actor::Human,
             crate::knowledge::DELETE_PAGE,
-            json!({ "slug": "design" }),
+            json!({ "store": "shelf", "id": "design" }),
             true,
         )
         .await
         .unwrap();
     assert!(fx
         .svc
-        .wiki_page_store
-        .get("design")
+        .knowledge_pages
+        .get(&shelf("design"))
         .await
         .unwrap()
         .is_none());

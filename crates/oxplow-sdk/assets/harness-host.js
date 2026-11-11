@@ -830,7 +830,7 @@
   function linkTarget(uri) {
     return uri.replace(/\(/g, "%28").replace(/\)/g, "%29");
   }
-  var wikiUri = (slug) => resourceUri("oxplow/wiki", { slug });
+  var knowledgeUri = (store, id) => resourceUri("oxplow/knowledge", { store, id });
   var commitUri = (sha) => resourceUri("oxplow/commit", { sha });
   var filesystemParam = (filesystem) => filesystem === LOCAL_FS ? null : filesystem;
   var fileUri = (path, rev = null, filesystem = null) => resourceUri("oxplow/file", { path, rev, filesystem: filesystemParam(filesystem) });
@@ -855,6 +855,7 @@
     "ai_profile",
     "effect",
     "advisory",
+    "agent_context",
     "skill",
     "implementation",
     "provider",
@@ -11291,11 +11292,18 @@
     const bare = path.replace(/\/+$/, "");
     return { id: dirUri(bare) };
   }
-  function wikiPageRef(slug) {
-    return { id: wikiUri(slug) };
+  function knowledgePageRef(store, id) {
+    return { id: knowledgeUri(store, id) };
   }
   function gitCommitRef(sha) {
     return { id: commitUri(sha) };
+  }
+
+  // src/knowledgeStoreIds.ts
+  var OXWIKI = "oxwiki";
+  var ids = [];
+  function enabledKnowledgeStoreIds() {
+    return ids;
   }
 
   // src/taskRef.ts
@@ -11392,8 +11400,8 @@
         }
         case "oxplow/commit":
           return p.sha ? { kind: "commit", sha: p.sha } : { kind: "empty" };
-        case "oxplow/wiki":
-          return p.slug ? { kind: "internal", slug: p.slug } : { kind: "empty" };
+        case "oxplow/knowledge":
+          return p.store && p.id ? { kind: "knowledge", store: p.store, id: p.id } : { kind: "empty" };
         case "oxplow/task":
           return taskId(rawHref) === null ? { kind: "empty" } : { kind: "task", ref: identityOf(rawHref) ?? rawHref };
         default: {
@@ -11407,7 +11415,7 @@
       const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
       return {
         kind: "broken",
-        reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for a wiki page)`
+        reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for an oxwiki page, [[store:id]] for another store's)`
       };
     }
     const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -11430,7 +11438,7 @@
     target = target.split("#")[0]?.split("?")[0] ?? "";
     if (target.endsWith(".md"))
       target = target.slice(0, -3);
-    return target ? { kind: "internal", slug: target } : { kind: "empty" };
+    return target ? { kind: "knowledge", store: OXWIKI, id: target } : { kind: "empty" };
   }
   function extensionOf(path) {
     const name = path.split("/").pop() ?? "";
@@ -11544,12 +11552,19 @@
         if (extensionRef) {
           return `[${display}](${linkTarget(extensionRef)})`;
         }
+        const colon = target.indexOf(":");
+        if (colon > 0 && colon < target.length - 1) {
+          const store = target.slice(0, colon);
+          if (store === OXWIKI || enabledKnowledgeStoreIds().includes(store)) {
+            return `[${display}](${linkTarget(knowledgeUri(store, target.slice(colon + 1)))})`;
+          }
+        }
         if (looksLikeFilePath(target)) {
           return `[${display}](${linkTarget(fileTargetUri(target))})`;
         }
         if (looksLikeSlug(target)) {
           const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
-          return `[${display}](${linkTarget(wikiUri(slug))})`;
+          return `[${display}](${linkTarget(knowledgeUri("oxwiki", slug))})`;
         }
         return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
       });
@@ -11557,7 +11572,7 @@
   }
   function refLinkNames(parsed) {
     return {
-      internalSlug: parsed.kind === "internal" ? parsed.slug : null,
+      knowledgeRef: parsed.kind === "knowledge" ? knowledgeUri(parsed.store, parsed.id) : null,
       itemRef: parsed.kind === "task" ? parsed.ref : null,
       extensionRef: parsed.kind === "ref" ? parsed.ref : null
     };
@@ -11573,8 +11588,8 @@
       case "task":
       case "ref":
         return parsed.ref;
-      case "internal":
-        return wikiPageRef(parsed.slug).id;
+      case "knowledge":
+        return knowledgePageRef(parsed.store, parsed.id).id;
       default:
         return null;
     }

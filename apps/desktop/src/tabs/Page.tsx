@@ -66,7 +66,7 @@ export interface PageChip {
   /** Soft background color override. */
   background?: string;
   title?: string;
-  /** Pressing the chip (a wiki page's freshness opens its report). */
+  /** Pressing the chip (a knowledge page's freshness opens its report). */
   onClick?(): void;
 }
 
@@ -100,7 +100,7 @@ export interface PageProps {
    *  backlinks; same shape. */
   outbound?: { count: number; body: ReactNode };
   /** Optional comment navigator node, rendered in the nav bar before
-   *  Backlinks. Comment-bearing pages (file/wiki/task) pass a
+   *  Backlinks. Comment-bearing pages (file/knowledge/task) pass a
    *  `<CommentNavigator targetKind targetId />`. */
   commentsNav?: ReactNode;
   /** Optional nav-bar config. When supplied, the browser-style nav bar

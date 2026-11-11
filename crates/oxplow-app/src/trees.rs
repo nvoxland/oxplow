@@ -1082,14 +1082,14 @@ mod tests {
     async fn the_working_tree_leaves_out_the_git_ignored_wiki() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
-        std::fs::create_dir_all(ws.join(".oxplow/wiki")).unwrap();
+        std::fs::create_dir_all(ws.join(".oxplow/oxwiki")).unwrap();
         std::fs::write(
             ws.join(".oxplow/.gitignore"),
             "*\n!.gitignore\n!project.yaml\n",
         )
         .unwrap();
         let c1 = commit_all(&ws, "c1");
-        std::fs::write(ws.join(".oxplow/wiki/notes.md"), "# Notes\n").unwrap();
+        std::fs::write(ws.join(".oxplow/oxwiki/notes.md"), "# Notes\n").unwrap();
         std::fs::write(ws.join(".oxplow/project.yaml"), "testing:\n  command: x\n").unwrap();
         let d = f
             .svc
@@ -1098,7 +1098,7 @@ mod tests {
             .await
             .unwrap();
         let d = by_path(&d);
-        assert!(!d.contains_key(".oxplow/wiki/notes.md"), "{d:?}");
+        assert!(!d.contains_key(".oxplow/oxwiki/notes.md"), "{d:?}");
         assert!(d.contains_key(".oxplow/project.yaml"), "{d:?}");
     }
 

@@ -6,10 +6,11 @@
  * link may hold (`urlTransform`). The viewer (`MarkdownView`), the editor
  * and a component frame's markdown (`markdownTree`) share it.
  */
-import { fileRef, directoryRef, gitCommitRef, wikiPageRef } from "../../tabs/pageRefs.js";
+import { fileRef, directoryRef, gitCommitRef, knowledgePageRef } from "../../tabs/pageRefs.js";
+import { OXWIKI, enabledKnowledgeStoreIds } from "../../knowledgeStoreIds.js";
 import { WORKING, gitRevision, revisionFromSlot, revisionSlot } from "../../revision.js";
 import { taskId, taskLabel } from "../../taskRef.js";
-import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, linkTarget, commitUri, parseUri, typeOf, wikiUri, withUriView } from "../../uri/uri.js";
+import { dirUri, fileLinesUri, fileUri, identityOf, isOxplowScheme, knowledgeOf, linkTarget, commitUri, parseUri, typeOf, knowledgeUri, withUriView } from "../../uri/uri.js";
 import { RENDERER_VIEW_KEY } from "../../pages/renderers.js";
 import { extensionWikilinkRef, resourceInfo } from "../../resourceStore.js";
 
@@ -39,7 +40,8 @@ export type ParsedLink =
   | { kind: "empty" }
   | { kind: "anchor" }
   | { kind: "external" }
-  | { kind: "internal"; slug: string }
+  /** A knowledge page: its store and its id in that store. */
+  | { kind: "knowledge"; store: string; id: string }
   | {
       kind: "file";
       path: string;
@@ -86,7 +88,7 @@ export function parseGitRefTarget(target: string): string | null {
 }
 
 /**
- * Classify a markdown link href. Shared by WikiPageTab (wiki navigation) and
+ * Classify a markdown link href. Shared by the knowledge page viewer and
  * TaskDetail (tasks modal markdown rendering). Pure — easy to test.
  */
 /**
@@ -99,8 +101,8 @@ export function parsedLinkIconKind(parsed: ParsedLink): string | null {
     case "ref":
       // URI-SWITCH: the icon table is keyed by resource name.
       return typeOf(parsed.ref);
-    case "internal":
-      return "wiki";
+    case "knowledge":
+      return "knowledge";
     case "file":
       return "file";
     case "directory":
@@ -125,7 +127,7 @@ export function parsedLinkIconKind(parsed: ParsedLink): string | null {
  * extension) opens with the page the base's view names
  * (`#oxplow.renderer=`): a README read as a document links to `DEV.md` as
  * a document, where `src/main.rs` opens as what it is. With no base, a
- * relative `.md` link is a wiki slug, as the wiki's own pages mean it.
+ * relative `.md` link is an oxwiki page's id, as oxwiki's own pages mean it.
  */
 export function parseMarkdownLink(rawHref: string, base: string | null = null): ParsedLink {
   if (!rawHref) return { kind: "empty" };
@@ -149,8 +151,8 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
       }
       case "oxplow/commit":
         return p.sha ? { kind: "commit", sha: p.sha } : { kind: "empty" };
-      case "oxplow/wiki":
-        return p.slug ? { kind: "internal", slug: p.slug } : { kind: "empty" };
+      case "oxplow/knowledge":
+        return p.store && p.id ? { kind: "knowledge", store: p.store, id: p.id } : { kind: "empty" };
       case "oxplow/task":
         // Any list's item, by its URI.
         return taskId(rawHref) === null ? { kind: "empty" } : { kind: "task", ref: identityOf(rawHref) ?? rawHref };
@@ -165,7 +167,7 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
     const target = decodeURIComponent(rawHref.slice(INVALID_LINK.length));
     return {
       kind: "broken",
-      reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for a wiki page)`,
+      reason: `Broken link: “${target}” is not a recognized reference (use a task's id, [[some-slug]] for an oxwiki page, [[store:id]] for another store's)`,
     };
   }
   const relativeTo = base !== null && typeOf(base) === "oxplow/file" ? parseUri(base) : null;
@@ -186,7 +188,7 @@ export function parseMarkdownLink(rawHref: string, base: string | null = null): 
   let target = rawHref.replace(/^\.?\//, "");
   target = target.split("#")[0]?.split("?")[0] ?? "";
   if (target.endsWith(".md")) target = target.slice(0, -3);
-  return target ? { kind: "internal", slug: target } : { kind: "empty" };
+  return target ? { kind: "knowledge", store: OXWIKI, id: target } : { kind: "empty" };
 }
 
 /** `path`'s extension, lowercased (`md`); empty with none. */
@@ -236,7 +238,7 @@ export function relativeFilePath(basePath: string, href: string): string {
  *                                                    hex prefix of sha
  *                              → `[[git:sha|label]]` otherwise
  *
- * Plain markdown links (http/https/internal wiki slug with no scheme,
+ * Plain markdown links (http/https/relative slug with no scheme,
  * etc.) are left alone — round-tripping those into `[[ ]]` would be
  * lossy and ambiguous. Image links (`![alt](url)`) are skipped.
  *
@@ -281,7 +283,8 @@ function collapseLinksOutsideInlineCode(text: string): string {
 /**
  * A URI as a link in the editor's spelling — what completion, a drop and a
  * paste put in: `href` its link target, `text` the label
- * `postprocessWikilinks` collapses to the bare wikilink (a wiki page's slug,
+ * `postprocessWikilinks` collapses to the bare wikilink (an oxwiki page's id,
+ * another store's `store:id`,
  * a file's `path[@rev][:line]`, a directory's path, a commit's short sha, a
  * task's id when it is the active list's (`mentionRef`), else its
  * whole URI), so it saves as `[[…]]` and shows its title (`useRefLinkTitle`).
@@ -301,9 +304,11 @@ export function refLinkOf(uri: string, title: string, mentionRef: MentionRef = (
     case "oxplow/dir":
       if (p.path) return { href, text: p.path };
       break;
-    case "oxplow/wiki":
-      if (p.slug) return { href, text: p.slug };
+    case "oxplow/knowledge": {
+      const page = knowledgeOf(uri);
+      if (page) return { href, text: knowledgeLinkText(page.store, page.id) };
       break;
+    }
     case "oxplow/commit":
       if (p.sha) return { href, text: p.sha.slice(0, 7) };
       break;
@@ -334,9 +339,11 @@ function collapseInternalLink(label: string, url: string): string | null {
         if (!p.path) return null;
         return label === p.path ? `[[dir:${p.path}]]` : `[[dir:${p.path}|${label}]]`;
       }
-      case "oxplow/wiki": {
-        if (!p.slug) return null;
-        return label === p.slug ? `[[${p.slug}]]` : `[[${p.slug}|${label}]]`;
+      case "oxplow/knowledge": {
+        const page = knowledgeOf(url);
+        if (!page) return null;
+        const text = knowledgeLinkText(page.store, page.id);
+        return label === text ? `[[${text}]]` : `[[${text}|${label}]]`;
       }
       case "oxplow/commit": {
         const sha = p.sha;
@@ -374,11 +381,11 @@ function collapseInternalLink(label: string, url: string): string | null {
 
 /**
  * Heuristic: does a wikilink target look like a repo file path rather
- * than a wiki note slug? File paths contain a slash or end in a recognizable
- * extension; bare slugs like `architecture` are routed to wiki navigation.
+ * than an oxwiki page id? File paths contain a slash or end in a recognizable
+ * extension; bare slugs like `architecture` are routed to an oxwiki page.
  */
 /**
- * Heuristic: is the target a valid wiki-slug shape? Mirrors the backend
+ * Heuristic: is the target a valid oxwiki-id shape? Mirrors the backend
  * `crates/oxplow-domain/src/refs.rs::looks_like_slug` (kebab/snake, no
  * slash/dot/space, not a bare sha) so the renderer and the MCP link
  * checker agree on what's a real ref vs. a broken one — with the one
@@ -432,7 +439,7 @@ function looksLikeFilePath(target: string): boolean {
   const atIdx = target.indexOf("@");
   const path = atIdx > 0 ? target.slice(0, atIdx) : target;
   if (path.includes("/")) return true;
-  // Tail extension other than .md → file. .md → wiki note.
+  // Tail extension other than .md → file. .md → oxwiki page.
   const dot = path.lastIndexOf(".");
   if (dot <= 0) return false;
   const ext = path.slice(dot + 1).toLowerCase();
@@ -447,7 +454,7 @@ function looksLikeFilePath(target: string): boolean {
  * - `[[path/to/file.ts]]`         → file link
  * - `[[path/to/file.ts:42]]`      → file link with line
  * - `[[path/to/file.ts|label]]`   → file link with custom display text
- * - `[[some-slug]]`               → wiki internal link (note slug)
+ * - `[[some-slug]]`               → oxwiki page link; `[[store:id]]` another store's page
  *
  * Wikilinks inside fenced code blocks or inline code are left alone so
  * documentation about the syntax itself doesn't get rewritten.
@@ -504,13 +511,22 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
       if (extensionRef) {
         return `[${display}](${linkTarget(extensionRef)})`;
       }
+      // `[[store:id]]`: a page of an enabled knowledge store (oxwiki's own
+      // may be written in full).
+      const colon = target.indexOf(":");
+      if (colon > 0 && colon < target.length - 1) {
+        const store = target.slice(0, colon);
+        if (store === OXWIKI || enabledKnowledgeStoreIds().includes(store)) {
+          return `[${display}](${linkTarget(knowledgeUri(store, target.slice(colon + 1)))})`;
+        }
+      }
       if (looksLikeFilePath(target)) {
         // The target may carry `@<version>` and `:<line>`; the file URI
         // names them (`rev`, `#lines`) and parseMarkdownLink reads them
         // back at click time.
         return `[${display}](${linkTarget(fileTargetUri(target))})`;
       }
-      // Slug-shaped → wiki note. Anything else matches no known ref
+      // Slug-shaped → an oxwiki page. Anything else matches no known ref
       // shape (e.g. the GitHub `[[#13]]` form) → a broken link the
       // renderer shows as non-clickable. Encode the target so an odd
       // interior can't break the markdown link.
@@ -518,17 +534,24 @@ function rewriteWikilinksOutsideInlineCode(text: string, mentionRef: MentionRef)
         // Its URI, as every other ref: the editor keeps it as a link and
         // `postprocessWikilinks` gives the `[[slug]]` back.
         const slug = target.endsWith(".md") ? target.slice(0, -3) : target;
-        return `[${display}](${linkTarget(wikiUri(slug))})`;
+        return `[${display}](${linkTarget(knowledgeUri("oxwiki", slug))})`;
       }
       return `[${display}](${INVALID_LINK}${encodeURIComponent(target)})`;
     });
   }).join("");
 }
 
-/** What a link names that has a title: a wiki page, a task, an
+/** How a knowledge page is written in a `[[…]]` link: an oxwiki page by its
+ *  id, another store's page as `store:id`. */
+export function knowledgeLinkText(store: string, id: string): string {
+  return store === OXWIKI && looksLikeSlug(id) ? id : `${store}:${id}`;
+}
+
+/** What a link names that has a title: a knowledge page, a task, an
  *  extension's ref (`refLinkNames`). */
 export interface RefLinkNames {
-  internalSlug: string | null;
+  /** A knowledge page's URI. */
+  knowledgeRef: string | null;
   itemRef: string | null;
   extensionRef: string | null;
 }
@@ -537,16 +560,16 @@ export interface RefLinkNames {
  *  a directory, a commit, a web page). */
 export function refLinkNames(parsed: ParsedLink): RefLinkNames {
   return {
-    internalSlug: parsed.kind === "internal" ? parsed.slug : null,
+    knowledgeRef: parsed.kind === "knowledge" ? knowledgeUri(parsed.store, parsed.id) : null,
     itemRef: parsed.kind === "task" ? parsed.ref : null,
     extensionRef: parsed.kind === "ref" ? parsed.ref : null,
   };
 }
 
-/** What a ref's lookups found: its wiki page's, its task's, its
+/** What a ref's lookups found: its knowledge page's, its task's, its
  *  extension resource's title. */
 export interface RefLookups {
-  wiki: { title: string | null; status: "loading" | "found" | "missing" };
+  knowledge: { title: string | null; status: "loading" | "found" | "missing" };
   item: { title: string | null; status: "loading" | "found" | "missing" };
   extensionTitle: string | null;
 }
@@ -554,21 +577,23 @@ export interface RefLookups {
 /** The title rule itself (`useRefLinkTitle`'s, and a component frame's
  *  `markdownTree`'s), over what the lookups found. */
 export function refLinkTitle(
-  { internalSlug, itemRef, extensionRef }: RefLinkNames,
+  { knowledgeRef, itemRef, extensionRef }: RefLinkNames,
   text: string,
-  { wiki, item, extensionTitle }: RefLookups,
+  { knowledge, item, extensionTitle }: RefLookups,
 ): { title: string | null; brokenReason: string | null } {
+  const page = knowledgeRef ? knowledgeOf(knowledgeRef) : null;
+  const pageText = page ? knowledgeLinkText(page.store, page.id) : null;
   const title =
-    internalSlug && wiki.title && text === internalSlug
-      ? wiki.title
+    pageText && knowledge.title && text === pageText
+      ? knowledge.title
       : itemRef && item.title && (text === taskLabel(itemRef) || text === itemRef)
         ? item.title
         : extensionRef && extensionTitle && extensionWikilinkRef(text) === extensionRef
           ? extensionTitle
           : null;
   const brokenReason =
-    internalSlug && wiki.status === "missing"
-      ? `Broken link: wiki page “${internalSlug}” does not exist`
+    pageText && knowledge.status === "missing"
+      ? `Broken link: knowledge page “${pageText}” does not exist`
       : itemRef && item.status === "missing"
         ? `Broken link: task ${taskLabel(itemRef)} isn't on the active task tracker`
         : null;
@@ -595,8 +620,8 @@ export function linkRef(parsed: ParsedLink): string | null {
     case "task":
     case "ref":
       return parsed.ref;
-    case "internal":
-      return wikiPageRef(parsed.slug).id;
+    case "knowledge":
+      return knowledgePageRef(parsed.store, parsed.id).id;
     default:
       return null;
   }

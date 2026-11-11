@@ -226,12 +226,10 @@ macro_rules! oxplow_command_table {
                 ingest_hook_event => $crate::commands::hooks::ingest_hook_event { envelope: ::oxplow_app::HookEnvelope } -> (),
                 read_event_content => $crate::commands::hooks::read_event_content { event_id: String, body: oxplow_app::event_bodies::EventBodyKey } -> Option<oxplow_app::event_bodies::EventBody>,
                 list_agent_statuses => $crate::commands::hooks::list_agent_statuses {} -> Vec<::oxplow_domain::AgentStatus>,
-                // wiki
                 // events (the log's dead-letter queue)
                 // page_refs
                 list_backlinks => $crate::commands::page_refs::list_backlinks { target: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
                 list_outbound => $crate::commands::page_refs::list_outbound { source: String, limit: Option<u32> } -> Vec<$crate::commands::page_refs::BacklinkEdge>,
-                // wiki_freshness
                 // search
                 search => $crate::commands::search::search { query: String, stream_id: Option<String>, resources: Option<Vec<String>>, limit: Option<u32> } -> Vec<::oxplow_db::SearchHit>,
                 query_sql => $crate::commands::semantic::query_sql { sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, limit: Option<u32>, raw: Option<bool> } -> ::oxplow_db::SqlQueryResult,
@@ -316,7 +314,7 @@ macro_rules! oxplow_command_table {
                 list_snapshot_ops => $crate::commands::snapshot::list_snapshot_ops { stream_id: ::oxplow_domain::StreamId, limit: Option<u32> } -> Vec<::oxplow_db::SnapshotOp>,
                 get_snapshot_stats => $crate::commands::snapshot::get_snapshot_stats { snapshot_id: ::oxplow_domain::SnapshotId } -> ::oxplow_db::SnapshotStats,
                 get_blob_storage_bytes => $crate::commands::snapshot::get_blob_storage_bytes {} -> ::oxplow_domain::ByteSize,
-                list_wiki_slugs_for_snapshots => $crate::commands::snapshot::list_wiki_slugs_for_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<(::oxplow_domain::SnapshotId, String)>,
+                list_knowledge_pages_for_snapshots => $crate::commands::snapshot::list_knowledge_pages_for_snapshots { snapshot_ids: Vec<::oxplow_domain::SnapshotId> } -> Vec<$crate::commands::snapshot::SnapshotKnowledgePage>,
                 list_files_for_snapshot => $crate::commands::snapshot::list_files_for_snapshot { snapshot_id: ::oxplow_domain::SnapshotId } -> Vec<::oxplow_db::FileSnapshot>,
                 get_file_snapshot => $crate::commands::snapshot::get_file_snapshot { file_snapshot_id: ::oxplow_domain::FileSnapshotId } -> Option<::oxplow_db::FileSnapshot>,
                 // background
@@ -448,21 +446,6 @@ mod tests {
             "list_task_efforts",
             "list_recently_finished",
             "clear_recently_finished",
-        ] {
-            let err = dispatch(name, json!({}), &svc).await.unwrap_err();
-            assert_eq!(err.code, "NOT_FOUND", "{name}");
-        }
-    }
-
-    /// P6.E2: the UI reads knowledge pages through the datasets.
-    #[tokio::test]
-    async fn the_wiki_read_rpcs_are_gone() {
-        let (svc, _dir) = services().await;
-        for name in [
-            "list_wiki_pages",
-            "search_wiki_titles",
-            "read_wiki_page_body",
-            "list_wiki_freshness",
         ] {
             let err = dispatch(name, json!({}), &svc).await.unwrap_err();
             assert_eq!(err.code, "NOT_FOUND", "{name}");

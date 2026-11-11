@@ -11,7 +11,7 @@ export function titledPage(specYaml: string, title: string): string {
   return doc.toString();
 }
 
-export function viewWikiBody(title: string, specYaml: string): string {
+export function viewKnowledgeBody(title: string, specYaml: string): string {
   // A source may contain markdown fences: use a longer enclosing fence.
   const ticks = Math.max(3, ...(specYaml.match(/`+/g) ?? []).map((s) => s.length + 1));
   const fence = "`".repeat(ticks);

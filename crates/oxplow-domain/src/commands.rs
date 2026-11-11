@@ -1289,8 +1289,10 @@ mod tests {
         );
         let whole = ui(json!({ "label": "New", "open_after": "{{result.page}}" }));
         assert_eq!(
-            whole.open_after_for(&json!({ "page": "oxplow:oxplow/wiki?slug=lib" })),
-            Ok(Some("oxplow:oxplow/wiki?slug=lib".to_string()))
+            whole.open_after_for(&json!({ "page": "oxplow:oxplow/knowledge?id=lib&store=oxwiki" })),
+            Ok(Some(
+                "oxplow:oxplow/knowledge?id=lib&store=oxwiki".to_string()
+            ))
         );
     }
 

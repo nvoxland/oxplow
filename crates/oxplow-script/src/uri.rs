@@ -224,7 +224,7 @@ mod tests {
         // A guard for an optional value: `uri.is_uri` never fails.
         assert_eq!(
             run(
-                r#"[uri.is_uri("oxplow:oxplow/wiki?slug=x"), uri.is_uri("nope"), uri.is_uri(None)]"#
+                r#"[uri.is_uri("oxplow:oxplow/knowledge?id=x&store=oxwiki"), uri.is_uri("nope"), uri.is_uri(None)]"#
             )
             .unwrap(),
             json!([true, false, false])

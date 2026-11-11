@@ -23,7 +23,7 @@ Built-in sources are a starting point. Every project has its own
 architecture, vocabulary, external systems, and questions. Developers
 and their agents should be able to add what gets collected and analyzed,
 then connect it to the existing record. A deployment event linked to a
-change, a test result linked to a request, and a wiki page linked to the
+change, a test result linked to a request, and a knowledge page linked to the
 affected code together can explain more than any one source alone.
 
 Questions need not start with a dashboard. Ask the agent, inspect the

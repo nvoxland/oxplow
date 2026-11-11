@@ -339,7 +339,7 @@ mod tests {
             true,
             fx.thread,
             vec![ReportedTab {
-                back: vec!["oxplow:oxplow/wiki?slug=home".into()],
+                back: vec!["oxplow:oxplow/knowledge?id=home&store=oxwiki".into()],
                 forward: vec![
                     "oxplow:oxplow/page?page=acme/commits#commit=abc&q=numbat%20bay&range=7d"
                         .into(),
@@ -369,7 +369,7 @@ mod tests {
         );
         assert_eq!(
             open["open"]["back"],
-            json!(["oxplow:oxplow/wiki?slug=home"])
+            json!(["oxplow:oxplow/knowledge?id=home&store=oxwiki"])
         );
         assert_eq!(
             open["open"]["forward"][0],
@@ -431,8 +431,8 @@ mod tests {
             "b",
             false,
             fx.thread,
-            vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
-            "oxplow:oxplow/wiki?slug=home",
+            vec![tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki")],
+            "oxplow:oxplow/knowledge?id=home&store=oxwiki",
         );
         report(
             &fx.svc,
@@ -449,7 +449,10 @@ mod tests {
         assert_eq!(open["open"]["pageId"], "oxplow:oxplow/file?path=src/a.rs");
         assert_eq!(open["open"]["client"], "a");
         assert_eq!(open["open"]["detail"]["line"], 3);
-        assert_eq!(open["others"][0]["pageId"], "oxplow:oxplow/wiki?slug=home");
+        assert_eq!(
+            open["others"][0]["pageId"],
+            "oxplow:oxplow/knowledge?id=home&store=oxwiki"
+        );
 
         let by_tab = run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/page?page=settings" }))
             .await
@@ -461,9 +464,10 @@ mod tests {
             Value::Null,
             "only the shown page publishes detail"
         );
-        let err = run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/wiki?slug=gone" }))
-            .await
-            .unwrap_err();
+        let err =
+            run(json!({ "thread_id": tid, "tab": "oxplow:oxplow/knowledge?id=gone&store=oxwiki" }))
+                .await
+                .unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), .. } if f == "/tab"),
             "{err:?}"
@@ -507,16 +511,22 @@ mod tests {
             true,
             fx.thread,
             vec![
-                tab("oxplow:oxplow/wiki?slug=home", "wiki"),
+                tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki"),
                 tab("oxplow:oxplow/agent_session?id=ses1", "agent_session"),
             ],
-            "oxplow:oxplow/wiki?slug=home",
+            "oxplow:oxplow/knowledge?id=home&store=oxwiki",
         );
         let listed = run(json!({ "scope": "stream" })).await;
         let rows = listed["tabs"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0]["tab"], "oxplow:oxplow/wiki?slug=home");
-        assert_eq!(rows[0]["title"], "oxplow:oxplow/wiki?slug=home title");
+        assert_eq!(
+            rows[0]["tab"],
+            "oxplow:oxplow/knowledge?id=home&store=oxwiki"
+        );
+        assert_eq!(
+            rows[0]["title"],
+            "oxplow:oxplow/knowledge?id=home&store=oxwiki title"
+        );
         assert_eq!(rows[0]["thread"], fx.thread.to_string());
         assert_eq!(
             (rows[0]["selected"].clone(), rows[0]["visible"].clone()),

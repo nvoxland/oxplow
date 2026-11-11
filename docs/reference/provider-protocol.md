@@ -41,15 +41,18 @@ refuse unknown keys (`read_at` only with `contents`):
 - `read_at { handle, path }` → `{ bytes }`, base64: a file's bytes at a
   marked state. An unknown handle or path is `InvalidInput`.
 
-A knowledge provider keeps the project's pages in its own store and
-declares the `knowledge` capability. It answers `write_page { slug, title?,
-body, verified_files, removed_files }` → `{ page }`, `delete_page { slug }`
-and `link { page, target }` → `{}`, and emits `knowledge.page.recorded@2`
-with `{ page: { uri: "oxplow:oxplow/wiki?slug=<slug>", title, body, uris, updated_at,
-deleted? } }` for every page it writes or deletes (each verb answers it,
+A knowledge provider is one knowledge store. It keeps pages in its own
+store and declares the `knowledge` capability. It may declare
+`features: { edit: true }` (a store with edit off is never written by
+oxplow) and `data: { kinds: [{ id, title, bucket }] }`, where `bucket` is
+`note`, `memory` or `instruction` (no kinds means `note`). It answers
+`write_page { id?, title?, body, verified_files, removed_files }` and
+`delete_page { id }`, and emits `knowledge.page.recorded@3`
+with `{ page: { uri: "oxplow:oxplow/knowledge?id=<id>&store=<store>", kind?, url?, author?, title, body, uris, updated_at,
+deleted } }` for every page it writes or deletes (each verb answers it,
 and a `knowledge_pages` collector over the entity `knowledge_page`
 streams them all). `uris` states the page's outbound references in
-oxplow's URIs (`oxplow:oxplow/file?path=<path>`, `oxplow:oxplow/wiki?slug=<slug>`); oxplow never parses a
+oxplow's URIs (`oxplow:oxplow/file?path=<path>`, `oxplow:oxplow/knowledge?id=<id>&store=<store>`); oxplow never parses a
 foreign body.
 
 ## Declaring one

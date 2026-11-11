@@ -91,7 +91,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const page = run?.page ?? null;
   // A shown view is a page file on `oxplow:temp`: what Save reads.
   const viewFile = page?.origin.extension === TEMP_EXTENSION ? `${page.slug}.yaml` : null;
-  const [saveAs, setSaveAs] = useState<"wiki" | "page" | null>(null);
+  const [saveAs, setSaveAs] = useState<"knowledge" | "page" | null>(null);
   // About this page opens over the page's top right, under its ☰.
   const [about, setAbout] = useState(false);
   const open = (uri: string) => {
@@ -141,7 +141,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
     ...(page ? [{ id: "page-about", label: "About this page", standard: true, run: () => setAbout(true) }] : []),
     ...(viewFile ? [
-      { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
+      { id: "view-save-knowledge", label: "Save as knowledge page…", standard: true, run: () => setSaveAs("knowledge") },
       { id: "view-save-page", label: "Save as Page…", standard: true, run: () => setSaveAs("page") },
     ] : []),
     // A page re-runs on its own when oxplow's data changes; Refresh is for

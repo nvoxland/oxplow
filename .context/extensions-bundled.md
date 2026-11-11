@@ -6,7 +6,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 - **Bundled extensions.** There are two (see "The `oxplow-bundled` extension" for the split). `oxplow-foundation` is required: oxplow's own
   commands, AI providers and harness implementations, the default task tracker,
-  snapshots and wiki, and the
+  snapshots and knowledge, and the
   measures, dimensions and metrics oxplow records itself (tokens, requests, tests,
   coverage, analysis, tasks: its `measures:` / `dimensions:` / `metrics:`,
   scope `extension:oxplow-foundation`; the producers' Rust only records the facts).
@@ -65,8 +65,8 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 ## The rule: data in foundation, person-facing screens here
 
-oxplow-foundation holds the data of the task tracker and the wiki: their
-datasets, the `task` and `wiki` resources, the `oxplow:wiki`
+oxplow-foundation holds the data of the task tracker and knowledge: their
+datasets, the `task` and `knowledge` resources, the `oxplow:oxwiki`
 implementation, the bus commands (with no `ui:`), skills and metrics. It has
 no page that a person uses to read or edit them. The task tracker's
 commands (`oxplow.task.*`) and the generic `tasks` skill (`needs:
@@ -76,7 +76,7 @@ skill and the agent's tool pages `next-task` and `thread-tasks`. With only
 foundation running there is no task tracker.
 
 oxplow-bundled holds that UI: the pages above and the menu commands.
-With oxplow-bundled off, a task or wiki link opens core's generic
+With oxplow-bundled off, a task or knowledge page link opens core's generic
 resource page. That is intended. Foundation must never link to a bundled
 page, because it cannot name oxplow-bundled. The Rust test
 `foundation_has_no_task_or_wiki_ui` and
@@ -258,7 +258,7 @@ screens and the holder's add the review and analysis:
   each with what its latest request is doing now (`v_request_task`,
   `v_request.state`: the Now column); Up next the ready and blocked tasks
   assigned to the thread in its queue's order; Finished the done tasks a
-  request on the thread worked on (each once) and wiki pages touched.
+  request on the thread worked on (each once) and knowledge pages touched.
   **Assigned to you** (`assigned`; parts `assigned-panel`, `assigned-line`,
   `assigned-count`; page `assigned-to-you`, whose loaders `lines`, `line`
   and `open_count` the parts read) is the same view for the person: the

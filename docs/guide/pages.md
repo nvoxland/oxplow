@@ -9,13 +9,13 @@ view are all pages.
 The quickest way to get one is to ask your agent: "make me a page of the
 tasks blocked in this stream". It knows the format. For a one-off answer
 it shows a page right beside the conversation (nothing is stored) and you
-can **Save to wiki** or **Save as Page** to keep it.
+can **Save as knowledge page** or **Save as Page** to keep it.
 
 ## The data
 
 Everything oxplow tracks is exposed as read-only SQL views: `v_task`
 (the active task tracker's items, whichever tracker holds them), `v_request`,
-`v_thread`, `v_comment`, `v_wiki_page`, `v_turn_file`, `v_agent_turn`,
+`v_thread`, `v_comment`, `v_knowledge_page`, `v_turn_file`, `v_agent_turn`,
 `v_token_usage`, `v_fact`, and more.
 
 **Explore Data** (launcher → Data) lists every view in its rail. Pick one to
@@ -121,7 +121,7 @@ holds a JSON array whose elements are a string or `{ "text": ..., "hint"?:
 ..., "uri"?: ... }`: drawn inline separated by " · ", the hint on hover, the
 uri a link. `link: { kind, from }`
 makes a cell clickable: `page` (any oxplow URI, such as a task's),
-`file` (with `line:`), `wiki`, `commit`, `metric`. `select: <param>` makes
+`file` (with `line:`), `knowledge`, `commit`, `metric`. `select: <param>` makes
 a click set that param, so a detail section that reads it re-runs: master and
 detail with no code.
 
@@ -201,9 +201,9 @@ and `v_change_duplicate`.
 A dashboard is a page whose view is a `grid` of tiles, in the Dashboards
 category: see [Dashboards](dashboards.md).
 
-### One-off pages in the wiki
+### One-off pages in knowledge
 
-A fenced ` ```oxplow-page ` block in a wiki page (or an agent's
+A fenced ` ```oxplow-page ` block in a knowledge page (or an agent's
 `oxplow_show_page { spec }`) is an inline page: the same YAML, read-only (no
 actions, forms or components), drawn live.
 

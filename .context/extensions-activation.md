@@ -215,7 +215,7 @@ before the DB permit, then held through commit and adapter swaps. Retired proces
 shut down, successful startup health is recorded and initial sync is queued after
 the publication transaction and reader boundary are released. Command owner metadata, command handlers, host config
 and capability state are reserved on the blocking worker before commit and held
-through all map swaps. Wiki/snapshot follow policies use the candidate's captured
+through all map swaps. Knowledge/snapshot follow policies use the candidate's captured
 selection, avoiding recursive capability/config reads while those locks are held.
 Precommit rejection retains the previous active snapshot. A panic after the
 commit (the in-memory maps part swapped, the boundary refusing readers) is

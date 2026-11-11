@@ -155,13 +155,13 @@ The core app is a **skeleton**: the controls you steer with, plus a data
 layer everything else builds on.
 
 - **Controls in core, instruments in extensions.** Core keeps streams,
-  threads, tasks and requests, agent surfaces (terminal harnesses), comments, wiki, diff and file drill-down, and the
+  threads, tasks and requests, agent surfaces (terminal harnesses), comments, knowledge, diff and file drill-down, and the
   page graph (rail, launcher, tabs). Anything that **measures or
   visualizes** is an extension ([extensions.md](./extensions.md)).
 - **All data goes through the [semantic layer](./semantic-layer.md).**
   Sources produce entities and facts, dimensions slice them, metrics
   aggregate them, and read-only `v_*` SQL views are the contract. Core
-  ships common sources (work, wiki, git, LSP, tests, agent sessions…);
+  ships common sources (work, knowledge, git, LSP, tests, agent sessions…);
   users and their agents add more (GitHub, CI…) and build **pages** on
   top.
 - **One extension format for first- and third-party.** Oxplow's own

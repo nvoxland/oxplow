@@ -241,7 +241,7 @@ mod tests {
                 .run(
                     &Actor::Human,
                     ADD,
-                    json!({ "thread": thread, "uri": format!("oxplow:oxplow/wiki?slug=p{n}") }),
+                    json!({ "thread": thread, "uri": format!("oxplow:oxplow/knowledge?id=p{n}&store=oxwiki") }),
                     false,
                 )
                 .await
@@ -283,7 +283,7 @@ mod tests {
             .run(
                 &agent,
                 ADD,
-                json!({ "thread": fx.thread.to_string(), "uri": "oxplow:oxplow/wiki?slug=x" }),
+                json!({ "thread": fx.thread.to_string(), "uri": "oxplow:oxplow/knowledge?id=x&store=oxwiki" }),
                 false,
             )
             .await

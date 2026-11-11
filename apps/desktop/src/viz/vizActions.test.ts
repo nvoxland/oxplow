@@ -49,9 +49,9 @@ test("an action runs its command with the run's params and row", async () => {
 });
 
 test("an action whose command names a page to open opens it once it ran", async () => {
-  const { d, log } = deps(undefined, "oxplow:oxplow/wiki?slug=lib");
+  const { d, log } = deps(undefined, "oxplow:oxplow/knowledge?id=lib&store=oxwiki");
   expect(await performVizAction(action, run, null, null, false, d)).toBe("done");
-  expect(log.slice(-2)).toEqual([`open_after oxplow.task.transition {}`, "open oxplow:oxplow/wiki?slug=lib"]);
+  expect(log.slice(-2)).toEqual([`open_after oxplow.task.transition {}`, "open oxplow:oxplow/knowledge?id=lib&store=oxwiki"]);
 });
 
 const done = { result: {}, audit_id: 1, event_id: null, inverse: null };

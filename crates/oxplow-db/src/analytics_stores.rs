@@ -2131,11 +2131,11 @@ impl SqliteSnapshotStore {
             .await
     }
 
-    /// For each input snapshot id, return the set of wiki slugs whose
-    /// `.md` body changed in that snapshot's file_snapshot rows.
-    /// Cheap targeted query for the Local History dashboard's wiki
-    /// badges — avoids fetching the full file list per snapshot.
-    pub async fn list_wiki_slugs_for_snapshots(
+    /// For each input snapshot id, the oxwiki pages (their URIs) whose
+    /// `.md` file changed in that snapshot's file_snapshot rows. Cheap
+    /// targeted query for the Local History dashboard's knowledge badges —
+    /// avoids fetching the full file list per snapshot.
+    pub async fn list_knowledge_pages_for_snapshots(
         &self,
         snapshot_ids: Vec<i64>,
     ) -> Result<Vec<(i64, String)>, DomainError> {
@@ -2146,10 +2146,11 @@ impl SqliteSnapshotStore {
             .call(move |conn| {
                 let placeholders: Vec<String> =
                     (1..=snapshot_ids.len()).map(|i| format!("?{i}")).collect();
+                let dir = oxplow_domain::knowledge::OXWIKI_DIR;
                 let sql = format!(
                     "SELECT snapshot_id, path FROM file_snapshot \
                      WHERE snapshot_id IN ({}) \
-                       AND path LIKE '.oxplow/wiki/%.md'",
+                       AND path LIKE '{dir}/%.md'",
                     placeholders.join(",")
                 );
                 let mut stmt = conn.prepare(&sql)?;
@@ -2161,11 +2162,17 @@ impl SqliteSnapshotStore {
                     let sid: i64 = row.get("snapshot_id")?;
                     let path: String = row.get("path")?;
                     let slug = path
-                        .strip_prefix(".oxplow/wiki/")
+                        .strip_prefix(oxplow_domain::knowledge::OXWIKI_DIR)
+                        .and_then(|s| s.strip_prefix('/'))
                         .and_then(|s| s.strip_suffix(".md"))
-                        .map(|s| s.to_string())
-                        .unwrap_or(path);
-                    Ok((sid, slug))
+                        .unwrap_or(&path);
+                    Ok((
+                        sid,
+                        oxplow_domain::uri::build::knowledge_uri(
+                            oxplow_domain::knowledge::OXWIKI,
+                            slug,
+                        ),
+                    ))
                 })?;
                 rows.collect::<rusqlite::Result<Vec<_>>>()
             })
@@ -3653,8 +3660,8 @@ mod tests {
             .execute(
                 "INSERT INTO page_ref (source_uri, target_uri, source_resource, target_resource,
                    ref_type, local_snapshot_id, vcs_rev_exact)
-                 VALUES (uri('oxplow/wiki', 'slug', 'w'), uri('oxplow/file', 'path', 'a.txt'),
-                         'oxplow/wiki', 'oxplow/file', 'mention', ?1, 0)",
+                 VALUES ('oxplow:oxplow/knowledge?id=w&store=oxwiki', uri('oxplow/file', 'path', 'a.txt'),
+                         'oxplow/knowledge', 'oxplow/file', 'mention', ?1, 0)",
                 params![base.snapshot_id],
             )
             .unwrap();
@@ -3782,9 +3789,9 @@ mod tests {
                     "INSERT INTO page_ref
                        (source_uri, target_uri, source_resource, target_resource, ref_type,
                         source_extra, local_snapshot_id, closest_vcs_rev, vcs_rev_exact)
-                     VALUES (uri('oxplow/wiki', 'slug', 'intro'),
-                             uri('oxplow/file', 'path', 'src/a.rs'), 'oxplow/wiki', 'oxplow/file',
-                             'wiki_file_ref', NULL, ?1, 'aaaa', 0)",
+                     VALUES ('oxplow:oxplow/knowledge?id=intro&store=oxwiki',
+                             uri('oxplow/file', 'path', 'src/a.rs'), 'oxplow/knowledge', 'oxplow/file',
+                             'knowledge_file_ref', NULL, ?1, 'aaaa', 0)",
                     params![snap_id],
                 )?;
                 Ok(())
@@ -3805,7 +3812,7 @@ mod tests {
                 db_for_check.with_conn(|conn| {
                     let er = conn.query_row(
                         "SELECT closest_vcs_rev, vcs_rev_exact FROM page_ref
-                         WHERE source_uri = uri('oxplow/wiki', 'slug', 'intro')
+                         WHERE source_uri = 'oxplow:oxplow/knowledge?id=intro&store=oxwiki'
                            AND target_uri = uri('oxplow/file', 'path', 'src/a.rs')",
                         [],
                         |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
@@ -3863,7 +3870,7 @@ mod tests {
     async fn page_visit_record_then_recent() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "abc", None, Some(1234), None)
+            .record("oxplow/knowledge", "abc", None, Some(1234), None)
             .await
             .unwrap();
         store
@@ -3879,9 +3886,18 @@ mod tests {
     #[tokio::test]
     async fn page_visit_top_groups_correctly() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("wiki", "a", None, None, None).await.unwrap();
-        store.record("wiki", "a", None, None, None).await.unwrap();
-        store.record("wiki", "b", None, None, None).await.unwrap();
+        store
+            .record("oxplow/knowledge", "a", None, None, None)
+            .await
+            .unwrap();
+        store
+            .record("oxplow/knowledge", "a", None, None, None)
+            .await
+            .unwrap();
+        store
+            .record("oxplow/knowledge", "b", None, None, None)
+            .await
+            .unwrap();
         let top = store.list_top(10, None).await.unwrap();
         assert_eq!(top[0].1, "a");
         assert_eq!(top[0].2, 2);
@@ -3890,9 +3906,15 @@ mod tests {
     #[tokio::test]
     async fn page_visit_forget_clears_only_target() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
-        store.record("wiki", "a", None, None, None).await.unwrap();
-        store.record("wiki", "b", None, None, None).await.unwrap();
-        store.forget_page("wiki", "a").await.unwrap();
+        store
+            .record("oxplow/knowledge", "a", None, None, None)
+            .await
+            .unwrap();
+        store
+            .record("oxplow/knowledge", "b", None, None, None)
+            .await
+            .unwrap();
+        store.forget_page("oxplow/knowledge", "a").await.unwrap();
         let recent = store.list_recent(10, None).await.unwrap();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].page_id, "b");
@@ -3902,14 +3924,17 @@ mod tests {
     async fn page_visit_recent_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "b", None, None, Some("thr2"))
+            .record("oxplow/knowledge", "b", None, None, Some("thr2"))
             .await
             .unwrap();
-        store.record("wiki", "c", None, None, None).await.unwrap();
+        store
+            .record("oxplow/knowledge", "c", None, None, None)
+            .await
+            .unwrap();
         let in_thread = store.list_recent(10, Some("thr1")).await.unwrap();
         assert_eq!(in_thread.len(), 1);
         assert_eq!(in_thread[0].page_id, "a");
@@ -3921,19 +3946,19 @@ mod tests {
     async fn page_visit_top_filters_by_thread() {
         let store = SqlitePageVisitStore::new(Database::in_memory());
         store
-            .record("wiki", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "a", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr1"))
             .await
             .unwrap();
         store
-            .record("wiki", "a", None, None, Some("thr2"))
+            .record("oxplow/knowledge", "a", None, None, Some("thr2"))
             .await
             .unwrap();
         store
-            .record("wiki", "b", None, None, Some("thr1"))
+            .record("oxplow/knowledge", "b", None, None, Some("thr1"))
             .await
             .unwrap();
         let in_thread = store.list_top(10, Some("thr1")).await.unwrap();

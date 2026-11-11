@@ -323,7 +323,7 @@ pub const MANIFEST: &[Capability] = &[
     // ---- agent-only (orchestration / agent affordances) ----
     // One reader for anything a ref names.
     agent("oxplow_read"),
-    agent("oxplow_wiki_ref_drift"),
+    agent("oxplow_knowledge_drift"),
     // ---- collection (observations) ----
     agent("oxplow_code_definition"),
     agent("oxplow_code_hover"),
@@ -403,7 +403,7 @@ pub const MANIFEST: &[Capability] = &[
         "records the person's use of oxplow, as they work",
     ),
     // ---- snapshots (UI presentation helpers) ----
-    dataset("list_wiki_slugs_for_snapshots", &["v_snapshot_file"]),
+    dataset("list_knowledge_pages_for_snapshots", &["v_snapshot_file"]),
     ui(
         "get_blob_storage_bytes",
         "the blob store's size on disk, for Local History's storage card",

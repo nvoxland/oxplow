@@ -1,13 +1,13 @@
 # Writing a wiki page
 
-1. For an existing page, read `.oxplow/wiki/<slug>.md` and merge your
+1. For an existing page, read `.oxplow/oxwiki/<slug>.md` and merge your
    addition into its body. Refs that drifted since they were pinned are
    `v_knowledge_ref` rows with `stale = 1`; `oxplow_wiki_ref_drift` shows what
    changed in one.
 2. Write the whole page with `run_command`:
    `oxplow.knowledge.write_page { slug, body, verified_files, removed_files }`
    (`title` optionally sets the `# ` heading). That one run writes the row,
-   the links and `.oxplow/wiki/<slug>.md`. Every `[[link]]` must resolve: a
+   the links and `.oxplow/oxwiki/<slug>.md`. Every `[[link]]` must resolve: a
    dangling one is refused and named, so fix or drop it and run again.
    - `verified_files`: files you re-read against this body; their freshness
      pins move to now. A file under a `[[dir:…]]` the page cites counts.

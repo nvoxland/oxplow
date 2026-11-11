@@ -20,12 +20,12 @@ import {
 } from "../components/format.js";
 import type { ColumnFormat, VizConfig, PageParam, ColumnLink, VizRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, knowledgePageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { AssistantContext } from "../components/Assistant/assistantApi.js";
-import { parseUri, requestUri } from "../uri/uri.js";
+import { knowledgeOf, parseUri, requestUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -332,8 +332,11 @@ export function cellLinkRef(
         rightVersion: version,
       });
     }
-    case "wiki":
-      return wikiPageRef(s);
+    case "knowledge": {
+      // The page's URI (`v_knowledge_page.uri`).
+      const page = knowledgeOf(s);
+      return page ? knowledgePageRef(page.store, page.id) : null;
+    }
   }
 }
 

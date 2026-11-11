@@ -84,7 +84,7 @@ export function linkMenu(href: string, open: OpenRef, base: string | null = null
     case "task":
       items.push(copy("copy-id", "Copy id", taskLabel(parsed.ref)));
       break;
-    case "internal":
+    case "knowledge":
     case "ref":
       if (target) items.push(copy("copy-link", "Copy link", target));
       break;

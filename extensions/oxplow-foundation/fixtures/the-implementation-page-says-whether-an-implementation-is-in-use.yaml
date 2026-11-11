@@ -1,9 +1,9 @@
 # An implementation page says which capability it implements, whether it is in use and what it can do.
-when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow" } }
+when: { page: oxplow/implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki" } }
 expect:
-  label: oxplow's wiki
+  label: oxwiki
   loaders:
     about:
-      rows: [{ name: "oxplow's wiki", extension: oxplow-foundation }]
+      rows: [{ name: oxwiki, extension: oxplow-foundation }]
     facts:
       rows: [{ capability: Knowledge, in_use: "Yes, this one is in use" }]

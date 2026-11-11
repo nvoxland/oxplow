@@ -9,7 +9,7 @@ structure maps, etc.
 ## Why it exists
 
 Everything else oxplow knows is either **computed by oxplow** (snapshots,
-blame, code-quality scans) or **free text the agent wrote** (wiki). Test
+blame, code-quality scans) or **free text the agent wrote** (knowledge pages). Test
 results, coverage, and static-analysis findings are neither: they're
 *structured* but language/framework/tool-specific, so oxplow can't compute
 them generically. The bet is to split at the **standard-format seam** — the

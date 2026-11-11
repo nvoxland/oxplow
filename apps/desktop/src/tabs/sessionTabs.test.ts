@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 
-import { agentSessionRef, newSessionRef, wikiPageRef } from "./pageRefs.js";
+import { agentSessionRef, newSessionRef, knowledgePageRef } from "./pageRefs.js";
 import type { HarnessListing } from "../tauri-bridge/generated/bindings.js";
 import { emptySession, open, setStrip } from "./session.js";
 import { newThreadTabs, reconcileSessionTabs, storedSessionIsStale } from "./sessionTabs.js";
 
-const wiki = wikiPageRef("a");
+const wiki = knowledgePageRef("oxwiki", "a");
 
 /** The thread's open sessions lead its tabs, in the order they opened; a
  *  closed one's tab goes; other tabs keep their order. */
@@ -26,12 +26,12 @@ test("unchanged tabs come back as the same array", () => {
 
 /** A session opened later still goes ahead of every other tab. */
 test("a session opened later leads the tabs opened before it", () => {
-  const tabs = [agentSessionRef("ses1"), wiki, wikiPageRef("b")];
+  const tabs = [agentSessionRef("ses1"), wiki, knowledgePageRef("oxwiki", "b")];
   expect(reconcileSessionTabs(tabs, [{ id: "ses1" }, { id: "ses2" }])).toEqual([
     agentSessionRef("ses1"),
     agentSessionRef("ses2"),
     wiki,
-    wikiPageRef("b"),
+    knowledgePageRef("oxwiki", "b"),
   ]);
 });
 

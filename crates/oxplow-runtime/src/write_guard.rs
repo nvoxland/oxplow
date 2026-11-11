@@ -1,4 +1,4 @@
-//! The write guard: the two places no agent writes with a tool. A wiki
+//! The write guard: the two places no agent writes with a tool. An oxwiki
 //! page is written by command, and no thread changes another stream's
 //! worktree (the primary checkout included). Within its own worktree any
 //! thread may write — the stream's threads share it, and who works there
@@ -7,12 +7,12 @@
 
 use std::path::{Path, PathBuf};
 
-/// Why an agent may not write `raw_path` itself, when it is a wiki page
-/// (`<project>/.oxplow/wiki/…`): pages are written with the
+/// Why an agent may not write `raw_path` itself, when it is an oxwiki page
+/// (`<project>/.oxplow/oxwiki/…`): pages are written with the
 /// `oxplow.knowledge.write_page` command — validated, linked and audited, the
-/// file following — whatever the thread (P5.C3). A person's hand edit
-/// still converges through the wiki watcher.
-pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> Option<String> {
+/// file following — whatever the thread. A person's hand edit still
+/// converges through oxwiki's watch.
+pub fn oxwiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> Option<String> {
     let (raw, project_dir) = (raw_path?, project_dir?);
     let path = Path::new(raw);
     let abs = if path.is_absolute() {
@@ -20,11 +20,15 @@ pub fn wiki_page_reason(raw_path: Option<&str>, project_dir: Option<&Path>) -> O
     } else {
         project_dir.join(path)
     };
-    is_inside(&abs, &project_dir.join(".oxplow").join("wiki")).then(|| {
+    is_inside(
+        &abs,
+        &project_dir.join(oxplow_domain::knowledge::OXWIKI_DIR),
+    )
+    .then(|| {
         format!(
-            "`{}` is a wiki page: write it with mcp__oxplow__run_command → \
-             `oxplow.knowledge.write_page {{ slug, body, verified_files, removed_files }}` \
-             (it writes the file); `oxplow.knowledge.delete_page {{ slug }}` deletes one.",
+            "`{}` is an oxwiki page: write it with mcp__oxplow__run_command → \
+             `oxplow.knowledge.write_page {{ id, body, verified_files, removed_files }}` \
+             (it writes the file); `oxplow.knowledge.delete_page {{ id }}` deletes one.",
             abs.display()
         )
     })
@@ -74,14 +78,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_wiki_page_is_written_by_command() {
+    fn an_oxwiki_page_is_written_by_command() {
         let project = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(project.path().join(".oxplow/wiki")).unwrap();
-        let target = project.path().join(".oxplow/wiki/captured.md");
+        std::fs::create_dir_all(project.path().join(".oxplow/oxwiki")).unwrap();
+        let target = project.path().join(".oxplow/oxwiki/captured.md");
         std::fs::write(&target, "").unwrap();
-        let reason = wiki_page_reason(target.to_str(), Some(project.path())).expect("refused");
+        let reason = oxwiki_page_reason(target.to_str(), Some(project.path())).expect("refused");
         assert!(reason.contains("oxplow.knowledge.write_page"), "{reason}");
-        assert!(wiki_page_reason(Some("src/a.rs"), Some(project.path())).is_none());
+        assert!(oxwiki_page_reason(Some("src/a.rs"), Some(project.path())).is_none());
     }
 
     /// Another stream's tree is refused, naming it; the thread's own tree

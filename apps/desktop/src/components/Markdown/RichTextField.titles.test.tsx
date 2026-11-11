@@ -1,7 +1,7 @@
 import { afterAll, afterEach, expect, mock, test } from "bun:test";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 
-import { wikiUri } from "../../uri/uri.js";
+import { knowledgeUri } from "../../uri/uri.js";
 
 // A bare ref link shows its title in the editor as in the viewer, while
 // the text it stores stays the slug; the caret inside shows the slug to
@@ -9,21 +9,21 @@ import { wikiUri } from "../../uri/uri.js";
 
 // The title cache is the module's, shared with every other test: stand in
 // for its lookup.
-const realCache = { ...(await import("../../wikiTitleCache.js")) };
+const realCache = { ...(await import("../../knowledgeTitleCache.js")) };
 afterAll(() => {
-  mock.module("../../wikiTitleCache.js", () => realCache);
+  mock.module("../../knowledgeTitleCache.js", () => realCache);
 });
-mock.module("../../wikiTitleCache.js", () => ({
+mock.module("../../knowledgeTitleCache.js", () => ({
   ...realCache,
-  useWikiRef: (slug: string | null | undefined) =>
-    slug === "local-snapshots" ? { title: "Local Snapshots", status: "found" } : { title: null, status: "loading" },
+  useKnowledgeRef: (uri: string | null | undefined) =>
+    uri === knowledgeUri("oxwiki", "local-snapshots") ? { title: "Local Snapshots", status: "found" } : { title: null, status: "loading" },
 }));
 const { RichTextField } = await import("./RichTextField.js");
 const { getMarkdown } = await import("./richTextExtensions.js");
 
 afterEach(cleanup);
 
-const HREF = wikiUri("local-snapshots");
+const HREF = knowledgeUri("oxwiki", "local-snapshots");
 
 async function settle() {
   await act(async () => {
@@ -31,7 +31,7 @@ async function settle() {
   });
 }
 
-test("a bare wiki link shows the page's title, and the stored text stays its slug", async () => {
+test("a bare knowledge link shows the page's title, and the stored text stays its slug", async () => {
   const view = render(<RichTextField value={`See [local-snapshots](${HREF}).`} onChange={() => {}} />);
   await settle();
   await waitFor(() => expect(view.container.querySelector("[data-ref-title]")?.textContent).toBe("Local Snapshots"));

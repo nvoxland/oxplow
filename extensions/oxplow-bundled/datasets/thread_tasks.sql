@@ -9,7 +9,7 @@
 -- Finished is the done tasks the thread was working (v_request_task, basis
 -- assigned or transition: it held the task or moved it; filing, commenting
 -- or being prompted with its id is not working it) since the person last
--- cleared the list, and the wiki pages it touched. An epic is a task with
+-- cleared the list, and the knowledge pages it touched. An epic is a task with
 -- children; it's shown as context, never as up next.
 -- The tasks that have children, found once: an EXISTS per task searched
 -- every task for each.
@@ -50,7 +50,7 @@ finished AS (
     WHERE i.state = 'done' AND rt.thread_id IS NOT NULL AND rt.basis IN ('assigned', 'transition')
   ) WHERE n = 1
   UNION ALL
-  SELECT k.thread_id, p.title, 'wiki', p.uri, k.last_seen_at
+  SELECT k.thread_id, p.title, 'knowledge', p.uri, k.last_seen_at
   FROM ref('knowledge_touch') k JOIN ref('knowledge_page') p ON p.uri = k.page
 ),
 -- s1..s3 order the In progress block: each epic (s1 = 0) with its

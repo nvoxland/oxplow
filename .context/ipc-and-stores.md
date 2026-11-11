@@ -2,7 +2,7 @@
 
 
 What this doc covers: the layered flow you follow whenever a feature
-needs persistence + IPC + UI, with `wiki_page` as a worked example.
+needs persistence + IPC + UI, with `knowledge_page` as a worked example.
 For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
@@ -272,9 +272,9 @@ agent's commands only. Two bodies for one read drift — the deleted
 `validate_extension` dry-ran a check's SQL on the project's database,
 which `oxplow_sdk::check` says a check never does.
 
-## Worked example: `wiki_page`
+## Worked example: `knowledge_page`
 
-Reads of a persisted feature are datasets now (P6): the `wiki_page`
+Reads of a persisted feature are datasets now (P6): the `knowledge_page`
 table is published as `v_knowledge_page` / `v_knowledge_body` /
 `v_knowledge_ref`, the desktop reads them with `querySql`
 (`knowledge.ts`), and writes are `knowledge.*` commands through the bus.
@@ -786,7 +786,7 @@ each other:
    "event_log" — its consumer table lists every reaction to the log
    (agent activity, collection, tokens and search run there since P3).
 
-When a single writer owns the WHOLE source (wiki sync, findings
+When a single writer owns the WHOLE source (oxwiki sync, findings
 write, commit indexer), use the simpler `replace_source` instead.
 
 To add a new source kind to the graph: add a projection helper, a
@@ -794,7 +794,7 @@ ref-type-list helper, construct the page-ref mirror inside the owning
 store's `new()`, and call the slice or full replace from its write
 methods.
 For body-text sources that should pick up the same wikilink rules
-the wiki + tasks use, route through
+knowledge pages and tasks use, route through
 `oxplow_domain::uri::extract` rather than re-implementing the
 parser.
 
@@ -849,7 +849,7 @@ pause.
 The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
 per-domain store. It is **fed**, not written by its callers. Tasks,
-comments, thread notes and wiki pages are searchable resources derived from a dataset
+comments, thread notes and knowledge pages are searchable resources derived from a dataset
 (`v_search_<kind>`): an asset per kind (`kind_search.rs`, tsk864)
 restates the kind whole when a table behind its dataset commits — a move, a
 soft delete, a thread delete included — writing nothing when the rows are

@@ -62,8 +62,8 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "config.scripts",
     "config.workspace_filter",
     "extension_datasets.entities",
+    "knowledge.attribution",
     "knowledge.records",
-    "knowledge.switch",
     "metrics.entity_states",
     "page_ref.task",
     "search.index",
@@ -74,7 +74,6 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "token_usage.turns",
     "tool_call.project",
     "ui.push",
-    "wiki.attribution",
     "tasks.project",
 ];
 

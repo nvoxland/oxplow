@@ -127,15 +127,15 @@ describe("row groups and styling", () => {
 });
 
 describe("cellLinkRef", () => {
-  const cols = ["id", "title", "path", "slug", "request"];
-  const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/request?id=req7"];
+  const cols = ["id", "title", "path", "page", "request"];
+  const row = [42, "Fix it", "src/a.ts", "oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki", "oxplow:oxplow/request?id=req7"];
 
   test("a page link reads its ref from `from`", () => {
     expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/task?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/task?id=E-1&provider=issues");
   });
-  test("file / wiki links default to the column itself", () => {
+  test("file / knowledge links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
-    expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("oxplow:oxplow/wiki?slug=auth-flow");
+    expect(cellLinkRef({ kind: "knowledge", from: null, line: null, base: null, head: null }, "page", row, cols)?.id).toBe("oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki");
   });
   test("a request link opens the request's Changes page from its id", () => {
     const at = (id: number | string) => cellLinkRef({ kind: "request", from: "id", line: null, base: null, head: null }, "title", [id], ["id"]);

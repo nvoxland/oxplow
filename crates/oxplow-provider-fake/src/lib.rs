@@ -510,7 +510,7 @@ struct World {
     snapshot_marks: snapshots::Marks,
     /// A filesystem provider's files.
     files: filesystem::Files,
-    /// A knowledge provider's pages, by slug.
+    /// A knowledge provider's pages, by id.
     pages: knowledge::Pages,
     hooks: Hooks,
     items: BTreeMap<u64, Item>,
@@ -915,7 +915,7 @@ async fn handle(
                     let mut w = world.lock().await;
                     let w = &mut *w;
                     let (result, events) =
-                        knowledge::answer(&mut w.pages, &mut w.rev, &p.command, &p.input)?;
+                        knowledge::answer(&w.id, &mut w.pages, &mut w.rev, &p.command, &p.input)?;
                     json!({ "result": result, "events": events })
                 }
                 _ if matches!(capability, Capability::FileSystem { .. }) => {

@@ -64,7 +64,7 @@ impl PreparedRuntimeAdapters {
     pub(crate) fn publish_maps(self, svc: &Services) {
         self.tasks.publish(&svc.tasks);
         self.harnesses.publish(&svc.harnesses);
-        self.knowledge.publish_maps(&svc.knowledge, &svc.wiki);
+        self.knowledge.publish_maps(&svc.knowledge, &svc.oxwiki);
         self.snapshots
             .publish(&svc.snapshots, &svc.snapshot_captures);
         self.models.publish(svc.ai.providers());
@@ -74,8 +74,7 @@ impl PreparedRuntimeAdapters {
 
     /// Follow explicit selections from the prepared capability candidate,
     /// without resolving through live capability/config callbacks.
-    pub(crate) fn follow_selected(svc: &Services, knowledge: &str, snapshots: &str) {
-        svc.wiki.follow(knowledge);
+    pub(crate) fn follow_selected(svc: &Services, snapshots: &str) {
         crate::snapshots::apply_selected_policy(&svc.snapshots, &svc.snapshot_captures, snapshots);
     }
 }

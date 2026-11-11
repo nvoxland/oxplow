@@ -52,7 +52,7 @@ test("a shown view (a temp page) offers Save and, in About, Definition as Defini
   const { runs } = fakePageRuns(temp);
   const view = render(<PageHost pageKey={{ ...key, page: "temp/v1" }} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
   await view.findByTestId("action-view-save-page");
-  expect(view.getByTestId("action-view-save-wiki").textContent).toContain("Save to wiki");
+  expect(view.getByTestId("action-view-save-knowledge").textContent).toContain("Save as knowledge page");
   fireEvent.click(view.getByTestId("action-page-about"));
   fireEvent.click(await view.findByTestId("page-about-definition"));
   expect(paramOf(opened[0], "path")).toBe("v1.yaml");

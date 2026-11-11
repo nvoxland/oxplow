@@ -219,7 +219,7 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
 /// page commands dispatch to its verbs, each answering the page's
 /// `knowledge.page.recorded@1` (the body it kept and the refs it states),
 /// and its collector streams its pages (edited outside oxplow) as the same
-/// records. Its pages are `oxplow:oxplow/wiki?slug=<slug>`: bare refs, the active store's.
+/// records. Its pages are `oxplow:oxplow/knowledge?id=<slug>&store=oxwiki`: bare refs, the active store's.
 pub const KNOWLEDGE: ProviderContract = ProviderContract {
     verbs: &[
         Verb {
@@ -230,22 +230,41 @@ pub const KNOWLEDGE: ProviderContract = ProviderContract {
             name: "delete_page",
             needs: Need::Always,
         },
-        Verb {
-            name: "link",
-            needs: Need::Always,
-        },
     ],
     dispatch: None,
-    events: &[("knowledge.page.recorded", 2)],
+    events: &[("knowledge.page.recorded", 3)],
     records: Some(Record {
         entity: "knowledge_page",
-        event: ("knowledge.page.recorded", 2),
+        event: ("knowledge.page.recorded", 3),
         key: "page",
     }),
-    resource: Some("oxplow/wiki"),
+    resource: Some("oxplow/knowledge"),
     items: false,
-    data: None,
+    data: Some(KNOWLEDGE_DATA),
 };
+
+/// What a knowledge store declares of itself: its kinds of page, each in
+/// one of core's buckets (`knowledge::KindDecl`); none declared: `note`.
+pub const KNOWLEDGE_DATA: &str = r#"{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kinds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "bucket"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "bucket": { "enum": ["note", "memory", "instruction"] }
+        }
+      }
+    }
+  }
+}"#;
 
 /// An agent harness's (`.context/agent-model.md`): core launches its
 /// sessions through it, has it map its tool hooks and render its answers,
@@ -396,11 +415,11 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
         id: "knowledge",
         title: "Knowledge",
-        choosable: true,
-        optional: true,
-        many: false,
-        default: "oxplow",
-        features: &[],
+        choosable: false,
+        optional: false,
+        many: true,
+        default: "oxwiki",
+        features: &["edit"],
         provider: Some(&KNOWLEDGE),
     },
     CapabilitySpec {
@@ -607,9 +626,9 @@ mod tests {
         }
         assert_eq!(
             choosable().map(|c| c.id).collect::<Vec<_>>(),
-            ["task_tracker", "snapshots", "knowledge"]
+            ["task_tracker", "snapshots"]
         );
-        assert_eq!(spec("knowledge").map(|c| c.optional), Some(true));
+        assert_eq!(spec("knowledge").map(|c| c.optional), Some(false));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
             assert!(
                 !c.choosable && !c.optional,
@@ -624,6 +643,7 @@ mod tests {
                 .map(|c| (c.id, c.default))
                 .collect::<Vec<_>>(),
             [
+                ("knowledge", "oxwiki"),
                 ("agent_harness", "claude"),
                 ("ai_provider", "anthropic"),
                 ("filesystem", "local")
@@ -674,12 +694,12 @@ mod tests {
         let knowledge = contract("knowledge").unwrap();
         assert_eq!(
             knowledge.required(&serde_json::json!({})),
-            ["write_page", "delete_page", "link"]
+            ["write_page", "delete_page"]
         );
-        assert_eq!(knowledge.resource, Some("oxplow/wiki"));
+        assert_eq!(knowledge.resource, Some("oxplow/knowledge"));
         assert_eq!(
             knowledge.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("knowledge_page", ("knowledge.page.recorded", 2), "page"))
+            Some(("knowledge_page", ("knowledge.page.recorded", 3), "page"))
         );
         let snapshots = contract("snapshots").unwrap();
         assert_eq!(

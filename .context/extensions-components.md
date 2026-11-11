@@ -80,7 +80,7 @@ Custom components (the sandboxed frame, protocol, testing a component) and the E
     `oxplow.page.show`. A `spec` is an inline page of the agent's own
     (read-only, no actions or forms). It opens beside the conversation
     as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) and the call returns the page's
-    text. The person saves it with **Save to wiki** or **Save as Page**
+    text. The person saves it with **Save as knowledge page** or **Save as Page**
     (`oxplow.extension.write_page`). Nothing else is stored: there are no
     thread answers and no Keep This. See pages-and-tabs.md "Showing a
     page".

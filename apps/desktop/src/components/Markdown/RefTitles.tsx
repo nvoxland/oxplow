@@ -9,7 +9,7 @@ import { parseMarkdownLink, parsedLinkIconKind, refLinkNames } from "./markdownL
 /**
  * A ref link's title in the editor, as the viewer shows it
  * (`useRefLinkTitle`): a widget drawn before each link that names a titled
- * ref (a wiki page, a task, an extension's ref). Once its title
+ * ref (a knowledge page, a task, an extension's ref). Once its title
  * resolves for a bare link, the widget shows the kind's icon and the title,
  * and CSS hides the link beside it (`.oxplow-ref-title:has([data-ref-title])
  * + a`, in `index.html`) — the stored text stays the slug. With the caret
@@ -26,11 +26,11 @@ export const RefTitles = Extension.create({
         const { from: selFrom, to: selTo } = state.selection;
         const seen = new Map<string, number>();
         for (const run of linkRuns(state.doc)) {
-          // The caret (or a selection) strictly inside: edit the slug.
+          // The caret (or a selection) strictly inside: edit the link text.
           if (selTo > run.from && selFrom < run.to) continue;
           const parsed = parseMarkdownLink(run.href);
           const names = refLinkNames(parsed);
-          if (!names.internalSlug && !names.itemRef && !names.extensionRef) continue;
+          if (!names.knowledgeRef && !names.itemRef && !names.extensionRef) continue;
           const n = seen.get(run.href) ?? 0;
           seen.set(run.href, n + 1);
           out.push(

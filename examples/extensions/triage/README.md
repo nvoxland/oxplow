@@ -38,7 +38,7 @@ collector `todos` (collectors/todos.star):
   the TODOs outside any transaction. Its reply streams into `v_job_run_output`
   as it comes; its model may call `triage.todos.in_file` (a read-only
   command that admits a job) or `query_sql` before answering; when it
-  ends, the `publish-summary` effect writes the answer to the wiki.
+  ends, the `publish-summary` effect writes the answer as a knowledge page.
   `triage.summary.cancel` stops it, keeping what it had written.
 - **Decisions in private state.** Each TODO can be marked keep, fix now
   or won't fix. The decisions live in the extension's own state

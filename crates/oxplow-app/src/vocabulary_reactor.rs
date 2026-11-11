@@ -39,13 +39,22 @@ use oxplow_domain::uri::resources::{ResourceDecl, ResourceRegistry};
 /// What the generation needs of the host to build a vocabulary: the
 /// active task tracker's id recognizer, asked at each build.
 pub struct VocabularyService {
-    /// The active task tracker's id recognizer (its id and `id_pattern`), if
-    /// it declares one: the vocabulary's way of reading `tsk42` in text.
-    task_ids: TaskIds,
+    /// What the vocabulary recognizes in text from the capabilities in use.
+    recognizers: Recognize,
 }
 
-/// The active task tracker's id recognizer, asked at each build.
-pub type TaskIds = Arc<dyn Fn() -> Option<(String, String)> + Send + Sync>;
+/// What text names through the capabilities in use: the active task
+/// tracker's ids (its id and `id_pattern`, when it declares one — how
+/// `tsk42` is read) and the enabled knowledge stores (how
+/// `[[<store>:<id>]]` is read).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Recognizers {
+    pub task_ids: Option<(String, String)>,
+    pub knowledge_stores: Vec<String>,
+}
+
+/// The recognizers, asked at each build.
+pub type Recognize = Arc<dyn Fn() -> Recognizers + Send + Sync>;
 
 /// What one enabled extension brings to the vocabulary.
 #[derive(serde::Serialize)]
@@ -73,7 +82,7 @@ pub type VocabularyErrors = BTreeMap<String, Vec<crate::extension::extensions::D
 pub struct PreparedVocabulary {
     generation: String,
     declared: Declared,
-    task_ids: Option<(String, String)>,
+    recognizers: Recognizers,
 }
 
 impl PreparedVocabulary {
@@ -82,7 +91,7 @@ impl PreparedVocabulary {
     /// use the same planned selection without changing either live registry.
     pub fn prepare(
         snapshot: &CatalogSnapshot,
-        task_ids: Option<(String, String)>,
+        recognizers: Recognizers,
     ) -> Result<Self, VocabularyErrors> {
         let errors: VocabularyErrors = snapshot
             .extensions()
@@ -96,7 +105,7 @@ impl PreparedVocabulary {
         Ok(Self {
             generation: snapshot.generation().to_string(),
             declared: declarations(snapshot.extensions()),
-            task_ids,
+            recognizers,
         })
     }
 
@@ -121,7 +130,11 @@ impl PreparedVocabulary {
             Ok((mut vocabulary, mut errors)) => {
                 // A bad recognizer rejects the candidate instead of
                 // silently dropping recognition.
-                match self.task_ids.as_ref() {
+                vocabulary.resources = vocabulary
+                    .resources
+                    .clone()
+                    .with_knowledge_stores(self.recognizers.knowledge_stores.iter().cloned());
+                match self.recognizers.task_ids.as_ref() {
                     Some((provider, pattern)) => {
                         match vocabulary
                             .resources
@@ -179,8 +192,8 @@ fn declarations(extensions: &[Extension]) -> Declared {
 }
 
 impl VocabularyService {
-    pub fn new(task_ids: TaskIds) -> Self {
-        Self { task_ids }
+    pub fn new(recognizers: Recognize) -> Self {
+        Self { recognizers }
     }
 
     /// Capture declarations and the current host recognizer from one catalog
@@ -190,16 +203,15 @@ impl VocabularyService {
         &self,
         snapshot: &CatalogSnapshot,
     ) -> Result<PreparedVocabulary, VocabularyErrors> {
-        PreparedVocabulary::prepare(snapshot, (self.task_ids)())
+        PreparedVocabulary::prepare(snapshot, (self.recognizers)())
     }
 }
 
-/// `resources` recognizing the active task tracker's ids (`ids`), or none.
-pub fn with_task_ids(
-    resources: ResourceRegistry,
-    ids: Option<&(String, String)>,
-) -> ResourceRegistry {
-    match ids {
+/// `resources` recognizing what `recognizers` say: the active task
+/// tracker's ids (or none) and the enabled knowledge stores.
+pub fn recognizing(resources: ResourceRegistry, recognizers: &Recognizers) -> ResourceRegistry {
+    let resources = resources.with_knowledge_stores(recognizers.knowledge_stores.iter().cloned());
+    match recognizers.task_ids.as_ref() {
         Some((provider, pattern)) => resources
             .clone()
             .with_task_ids(provider, pattern)

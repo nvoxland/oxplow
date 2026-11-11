@@ -9,7 +9,7 @@ import type { MenuItem } from "../../menu.js";
 import { PageKindIcon } from "../../pageKinds.js";
 import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { WORKING } from "../../revision.js";
-import { useWikiRef } from "../../wikiTitleCache.js";
+import { useKnowledgeRef } from "../../knowledgeTitleCache.js";
 import { useTaskRef } from "../../taskTitleCache.js";
 import { useTaskTrackerProfile } from "../../useTaskTrackerProfile.js";
 import { taskRefOfMention } from "../../tasks.js";
@@ -29,16 +29,16 @@ import { useVizStream } from "../../viz/VizStream.js";
 // stays safe to import in non-DOM test environments.
 
 /**
- * Inline anchor wrapper that owns the wiki-title swap. Lives as its
- * own component so `useWikiRef` (a hook) can be called per-link
+ * Inline anchor wrapper that owns the page-title swap. Lives as its
+ * own component so `useKnowledgeRef` (a hook) can be called per-link
  * without violating rules-of-hooks in the parent's render-prop.
  */
-function WikiLinkSpan({
+function RefLinkSpan({
   anchorProps,
   handleLinkClick,
   items,
   iconKind,
-  internalSlug,
+  knowledgeRef,
   itemRef,
   extensionRef,
 }: {
@@ -46,7 +46,7 @@ function WikiLinkSpan({
   handleLinkClick: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   items: MenuItem[];
   iconKind: string | null;
-  internalSlug: string | null;
+  knowledgeRef: string | null;
   /** A task's ref. */
   itemRef: string | null;
   /** A ref of an extension's kind: titled from its kind's dataset. */
@@ -54,7 +54,7 @@ function WikiLinkSpan({
 }) {
   const cm = useRowContextMenu(items);
   const { children, ...rest } = anchorProps;
-  const { title: overrideText, brokenReason } = useRefLinkTitle({ internalSlug, itemRef, extensionRef }, flattenChildrenText(children));
+  const { title: overrideText, brokenReason } = useRefLinkTitle({ knowledgeRef, itemRef, extensionRef }, flattenChildrenText(children));
   if (brokenReason) {
     return <BrokenLink reason={brokenReason}>{children}</BrokenLink>;
   }
@@ -89,10 +89,10 @@ function WikiLinkSpan({
  * link, so a ref not yet resolved isn't briefly flagged.
  */
 export function useRefLinkTitle(names: RefLinkNames, text: string): { title: string | null; brokenReason: string | null } {
-  const wiki = useWikiRef(names.internalSlug);
+  const knowledge = useKnowledgeRef(names.knowledgeRef);
   const item = useTaskRef(names.itemRef);
   const extensionTitle = useExtensionRefTitle(names.extensionRef);
-  return refLinkTitle(names, text, { wiki, item, extensionTitle });
+  return refLinkTitle(names, text, { knowledge, item, extensionTitle });
 }
 
 /**
@@ -375,18 +375,18 @@ export function MarkdownView({ body, base = null, maxHeight, style, className, i
             }
             const items = linkMenu(href, open, base);
             const iconKind = parsedLinkIconKind(parsed);
-            // For internal wiki links written as bare `[[slug]]` (no
-            // `|label`), swap the rendered text from the slug to the
+            // For knowledge links written as bare `[[slug]]` (no
+            // `|label`), swap the rendered text from the id to the
             // page title so readers see "Local Snapshots" not
             // `local-snapshots`. Author-supplied labels are preserved.
-            const { internalSlug, itemRef, extensionRef } = refLinkNames(parsed);
+            const { knowledgeRef, itemRef, extensionRef } = refLinkNames(parsed);
             return (
-              <WikiLinkSpan
+              <RefLinkSpan
                 anchorProps={props}
                 handleLinkClick={handleLinkClick}
                 items={items}
                 iconKind={iconKind}
-                internalSlug={internalSlug}
+                knowledgeRef={knowledgeRef}
                 itemRef={itemRef}
                 extensionRef={extensionRef}
               />

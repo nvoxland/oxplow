@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 
-import { fileUri, wikiUri } from "../../uri/uri.js";
+import { fileUri, knowledgeUri } from "../../uri/uri.js";
 import { getMarkdown } from "./richTextExtensions.js";
 import { insertRefLinks } from "./RichTextField.js";
 import { RichTextField } from "./RichTextField.js";
@@ -30,9 +30,9 @@ test("a pasted URI goes in as its link", async () => {
   act(() => {
     editor.commands.focus("end");
     editor.commands.insertContent(" ");
-    paste(editor, wikiUri("notes"));
+    paste(editor, knowledgeUri("oxwiki", "notes"));
   });
-  expect(getMarkdown(editor)).toBe(`See [notes](${wikiUri("notes")})`);
+  expect(getMarkdown(editor)).toBe(`See [notes](${knowledgeUri("oxwiki", "notes")})`);
 });
 
 test("a web URL pasted over a selection links it", async () => {
@@ -57,9 +57,9 @@ test("dropped refs go in as links, a space between", async () => {
   const editor = await editorOf("See");
   act(() => {
     insertRefLinks(editor, editor.state.doc.content.size - 1, [
-      { uri: wikiUri("notes"), title: "notes" },
+      { uri: knowledgeUri("oxwiki", "notes"), title: "notes" },
       { uri: fileUri("src/a.ts"), title: "src/a.ts" },
     ], () => null);
   });
-  expect(getMarkdown(editor)).toBe(`See [notes](${wikiUri("notes")}) [src/a.ts](${fileUri("src/a.ts")})`);
+  expect(getMarkdown(editor)).toBe(`See [notes](${knowledgeUri("oxwiki", "notes")}) [src/a.ts](${fileUri("src/a.ts")})`);
 });

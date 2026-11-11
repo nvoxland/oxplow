@@ -710,10 +710,6 @@ impl ExtensionActivation {
                         .providers
                         .reserve_generation(&mut providers, &mut running, &config)
                         .map_err(TxError::Aborted)?;
-                    let knowledge = capabilities
-                        .selected("knowledge")
-                        .unwrap_or(oxplow_domain::capability::NONE)
-                        .to_string();
                     let snapshots = capabilities
                         .selected("snapshots")
                         .unwrap_or(oxplow_domain::capability::NONE)
@@ -810,7 +806,7 @@ impl ExtensionActivation {
                     // readers remain excluded by the owned generation writer.
                     let retired = providers.apply();
                     crate::extension::extension_runtime_adapters::PreparedRuntimeAdapters::follow_selected(
-                        &svc, &knowledge, &snapshots,
+                        &svc, &snapshots,
                     );
                     #[cfg(test)]
                     svc.extension_activation

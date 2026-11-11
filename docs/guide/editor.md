@@ -1,9 +1,9 @@
 # Editor and pages
 
 The center of the window is a stack of **page tabs**. Most
-pages are one of: file, diff, task, wiki page,
+pages are one of: file, diff, task, knowledge page,
 finding, dashboard, metric, settings, agent terminal, or
-a panel-style index page (Files, Wiki, Local History, Git
+a panel-style index page (Files, Knowledge, Local History, Git
 History, Metrics, Dashboards, etc.).
 
 ## Tabs are per-thread

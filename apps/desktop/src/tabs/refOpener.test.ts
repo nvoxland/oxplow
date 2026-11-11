@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { commentUri, fileUri, resourceUri, streamUri, threadUri, wikiUri, taskUri } from "../uri/uri.js";
-import { fileRef, wikiPageRef, taskTabRef } from "./pageRefs.js";
+import { commentUri, fileUri, resourceUri, streamUri, threadUri, knowledgeUri, taskUri } from "../uri/uri.js";
+import { fileRef, knowledgePageRef, taskTabRef } from "./pageRefs.js";
 import { refTarget, refTargetNow } from "./refOpener.js";
 
 // Every URI opens by one rule: as itself (its tab's id is the URI, drawn by
@@ -10,7 +10,7 @@ import { refTarget, refTargetNow } from "./refOpener.js";
 test("a URI opens as itself, a thread's or a stream's selects", () => {
   const item = taskUri("oxtask", "tsk1");
   expect(refTargetNow(item)).toEqual({ tab: taskTabRef(item) });
-  expect(refTargetNow(wikiUri("home"))).toEqual({ tab: wikiPageRef("home") });
+  expect(refTargetNow(knowledgeUri("oxwiki", "home"))).toEqual({ tab: knowledgePageRef("oxwiki", "home") });
   expect(refTargetNow(fileUri("src/a.ts"))).toEqual({ tab: fileRef("src/a.ts") });
   expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });
   expect(refTargetNow(streamUri("s1"))).toEqual({ stream: "s1" });
@@ -25,7 +25,7 @@ test("an oxplow resource with no declared page opens as itself too", () => {
 });
 
 test("before the registry is read, a URI opens as itself", () => {
-  expect(refTargetNow(wikiUri("home"))).toEqual({ tab: wikiPageRef("home") });
+  expect(refTargetNow(knowledgeUri("oxwiki", "home"))).toEqual({ tab: knowledgePageRef("oxwiki", "home") });
   expect(refTargetNow(threadUri("thr4"))).toEqual({ thread: "thr4" });
 });
 

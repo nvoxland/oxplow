@@ -530,7 +530,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   reads "(none)".
 
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
-  (kinds: `task`, `file`, `wiki`, `commit`, `metric`, `request`,
+  (kinds: `task`, `file`, `knowledge`, `commit`, `metric`, `request`,
   `page`, `diff-at`, `compare`). `page` opens any oxplow URI. `request`
   takes a request's id (`v_request.id`, or `req<id>`) and opens its
   Changes page, so a column of ids (`v_request_metric_delta.request_id`)
@@ -553,7 +553,7 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   `todo`, `in_progress`, `blocked`, `done`, `canceled`: pass
   `v_task.state`, never a list's own stage), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
-  `conflicted`), the kinds (`epic`, `task`, `wiki`, `file`, `folder`,
+  `conflicted`), the kinds (`epic`, `task`, `knowledge`, `file`, `folder`,
   `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon
   names (`extension_resources::ICONS`), and any page kind's icon. `tone`'s
   value is `accent`, `success`, `warning`, `danger` or `muted`. Values

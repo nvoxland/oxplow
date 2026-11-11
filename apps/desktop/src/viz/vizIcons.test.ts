@@ -18,7 +18,7 @@ test("the icon vocabulary has the work glyphs, kinds and ref-kind icons; unknown
   // The work glyphs are the buckets: a list's own stage names none.
   expect(vizIcon("ready")).toBeNull();
   expect(vizIcon("archived")).toBeNull();
-  for (const name of ["epic", "task", "wiki", "file", "commit", "bug", "git-pull-request"]) {
+  for (const name of ["epic", "task", "knowledge", "file", "commit", "bug", "git-pull-request"]) {
     expect(vizIcon(name), name).not.toBeNull();
     expect(VIZ_ICON_NAMES).toContain(name);
   }

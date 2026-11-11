@@ -41,6 +41,8 @@ mod fact_chain;
 pub mod fact_store;
 pub mod git_store;
 pub mod handoff_store;
+pub mod knowledge_page_store;
+pub mod knowledge_record;
 pub mod op_error_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;
@@ -66,8 +68,6 @@ pub mod thread_store;
 pub mod token_usage_store;
 pub mod tool_call_store;
 pub mod ui_preference_store;
-pub mod wiki_page_store;
-pub mod wiki_page_thread_updates;
 
 pub use agent_nudge_store::{
     AgentNudge, Audience, NewAgentNudge, OnceScope, SqliteAgentNudgeStore,
@@ -109,6 +109,7 @@ pub use fact_store::{
 };
 pub use git_store::{GitBranchRow, GitCommitFileRow, GitCommitRow, GitTagRow, SqliteGitStore};
 pub use handoff_store::SqliteHandoffStore;
+pub use knowledge_page_store::{KnowledgePage, SqliteKnowledgePageStore};
 pub use page_ref_projections::{FileRefVersion, OwnedFileRefVersion};
 pub use page_ref_store::{PageRefEdge, PageRefStore, SourceSlice, SqlitePageRefStore};
 pub use panel_layout_store::{PanelPlacement, SqlitePanelLayoutStore};
@@ -130,5 +131,3 @@ pub use token_usage_store::{
 };
 pub use tool_call_store::{NewToolCall, SqliteToolCallStore};
 pub use ui_preference_store::{SqliteUiPreferenceStore, UiPreference};
-pub use wiki_page_store::{SqliteWikiPageStore, WikiPage};
-pub use wiki_page_thread_updates::{SqliteWikiPageThreadUpdateStore, WikiPageThreadUpdate};

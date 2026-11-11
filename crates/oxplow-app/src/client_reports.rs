@@ -325,8 +325,8 @@ mod tests {
                 1,
                 vec![thread(
                     1,
-                    vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
-                    Some("oxplow:oxplow/wiki?slug=home"),
+                    vec![tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki")],
+                    Some("oxplow:oxplow/knowledge?id=home&store=oxwiki"),
                 )],
             ),
             at(1_000),
@@ -358,7 +358,7 @@ mod tests {
                 .map(|p| (p.client.as_str(), p.page_id.as_str(), p.visible))
                 .collect::<Vec<_>>(),
             [
-                ("a", "oxplow:oxplow/wiki?slug=home", true),
+                ("a", "oxplow:oxplow/knowledge?id=home&store=oxwiki", true),
                 ("b", "oxplow:oxplow/file?path=src/a.rs", false)
             ]
         );
@@ -394,8 +394,8 @@ mod tests {
                 1,
                 vec![thread(
                     1,
-                    vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
-                    Some("oxplow:oxplow/wiki?slug=home"),
+                    vec![tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki")],
+                    Some("oxplow:oxplow/knowledge?id=home&store=oxwiki"),
                 )],
             ),
             at(1_000),
@@ -404,7 +404,7 @@ mod tests {
             r.shown(at(2_000)),
             [(
                 ThreadId::new(1),
-                Some("oxplow:oxplow/wiki?slug=home".to_string())
+                Some("oxplow:oxplow/knowledge?id=home&store=oxwiki".to_string())
             )]
         );
         // A window showing a thread with nothing selected shows none.
@@ -427,10 +427,10 @@ mod tests {
                     thread(
                         1,
                         vec![
-                            tab("oxplow:oxplow/wiki?slug=home", "wiki"),
+                            tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki"),
                             tab("oxplow:oxplow/agent_session?id=ses2", "agent_session"),
                         ],
-                        Some("oxplow:oxplow/wiki?slug=home"),
+                        Some("oxplow:oxplow/knowledge?id=home&store=oxwiki"),
                     ),
                     thread(
                         2,
@@ -448,7 +448,12 @@ mod tests {
                 .map(|t| (t.tab.as_str(), t.selected, t.visible, t.stale))
                 .collect::<Vec<_>>(),
             [
-                ("oxplow:oxplow/wiki?slug=home", true, true, false),
+                (
+                    "oxplow:oxplow/knowledge?id=home&store=oxwiki",
+                    true,
+                    true,
+                    false
+                ),
                 ("oxplow:oxplow/agent_session?id=ses2", false, false, false)
             ]
         );
@@ -472,8 +477,8 @@ mod tests {
                 1,
                 vec![thread(
                     1,
-                    vec![tab("oxplow:oxplow/wiki?slug=home", "wiki")],
-                    Some("oxplow:oxplow/wiki?slug=home"),
+                    vec![tab("oxplow:oxplow/knowledge?id=home&store=oxwiki", "wiki")],
+                    Some("oxplow:oxplow/knowledge?id=home&store=oxwiki"),
                 )],
             ),
             at(0),

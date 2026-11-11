@@ -93,7 +93,7 @@ async fn sweep_stream(
 
 /// Run recovery + seed the primary stream, then spawn the standard
 /// background tasks (snapshot watchers + startup sweep + cleanup,
-/// comment cleanup, workspace + wiki + config watchers, diagnostics,
+/// comment cleanup, workspace + oxwiki + config watchers, diagnostics,
 /// page-ref restate, commit indexer).
 ///
 /// The two awaited steps run synchronously on purpose: the first
@@ -335,38 +335,22 @@ pub async fn run_boot_orchestration(
         });
     }
 
-    // Wiki notes watcher: keeps `wiki_page` rows in sync with
-    // `.oxplow/wiki/<slug>.md` on disk (initial scan + debounced
+    // oxwiki's watch: keeps its record in step with `.oxplow/oxwiki/<slug>.md`
+    // (a scan each time oxwiki becomes an enabled store, then debounced
     // re-syncs on change).
     {
-        let wiki_store = state.wiki_page_store.clone();
-        let wiki_db = state.db.clone();
-        let wiki_vocabulary = state.vocabulary.clone();
-        let wiki_dir = state.layout.project_dir.clone();
-        let wiki = state.wiki.clone();
-        let bts = state.background_tasks.clone();
-        let task = bts.start(StartInput {
-            kind: BackgroundTaskKind::NotesResync,
-            label: "Initial wiki notes scan".into(),
-            ..Default::default()
-        });
-        let task_id = task.id.clone();
+        let sync = oxplow_oxwiki::watch::Sync {
+            db: state.db.clone(),
+            vocabulary: state.vocabulary.clone(),
+            project_dir: state.layout.project_dir.clone(),
+        };
+        let presence = state.oxwiki.clone();
         let watches = state.stream_watches.clone();
         let mut watching = watching.clone();
         tokio::spawn(async move {
             let _ = watching.wait_for(|up| *up).await;
-            // Subscribed before the scan: a change is in it or heard after.
-            let changes = watches.subscribe_primary(crate::wiki_pages_watch::scope());
-            crate::wiki_pages_watch::follow(
-                changes,
-                wiki_dir,
-                wiki_db,
-                wiki_vocabulary,
-                wiki_store,
-                wiki,
-            )
-            .await;
-            bts.complete(&task_id, None);
+            let changes = watches.subscribe_primary(oxplow_oxwiki::watch::scope());
+            oxplow_oxwiki::watch::follow(changes, sync, presence);
         });
     }
 
@@ -557,7 +541,7 @@ pub async fn run_boot_orchestration(
     // LSP diagnostics → `v_diagnostic` (live state; cleared here first).
     crate::lsp_diagnostics::spawn(state.clone());
 
-    // Search: the task / comment / note / wiki kinds are assets
+    // Search: the task / comment / knowledge kinds are assets
     // (`kind_search`, registered by the change loop); files are the
     // `search.index` pump consumer's.
 

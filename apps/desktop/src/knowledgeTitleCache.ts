@@ -1,21 +1,21 @@
 import { useEffect, useState } from "react";
 import { subscribeOxplowEvents } from "./api.js";
-import { readWikiPages } from "./knowledge.js";
+import { readKnowledgePages } from "./knowledge.js";
 import { coalesce, NO_READS, readsChanged } from "./viz/rerun.js";
 import type { Reads } from "./tauri-bridge/generated/bindings.js";
 
 /**
- * Shared in-memory slug → title map. The wiki body markdown renderer
- * uses this to display `[[some-slug]]` wikilinks with the page's real
- * title instead of the raw slug — readers should see "Local Snapshots"
- * not `local-snapshots`.
+ * Shared in-memory page URI → title map. The markdown renderer uses
+ * this to display `[[some-slug]]` wikilinks with the page's real title
+ * instead of the raw id — readers should see "Local Snapshots" not
+ * `local-snapshots`.
  *
  * One load on first subscribe; refreshed when a dataset the read read
  * changes (`readsChanged` over the read's own `reads` — the one rerun
  * rule, outside a component), once a burst of such commits goes quiet
  * (`coalesce`) — a scan storing its findings is many commits, and each
  * read lists every page. A change during a read is read once that one
- * ends. Components subscribe via `useWikiTitle`.
+ * ends. Components subscribe via `useKnowledgeTitle`.
  */
 
 let titles = new Map<string, string>();
@@ -40,10 +40,10 @@ async function refresh(): Promise<void> {
   stale = false;
   inFlight = (async () => {
     try {
-      const result = await readWikiPages();
+      const result = await readKnowledgePages();
       const next = new Map<string, string>();
       for (const p of result.pages) {
-        if (p.slug && p.title) next.set(p.slug, p.title);
+        if (p.uri && p.title) next.set(p.uri, p.title);
       }
       titles = next;
       reads = result.reads;
@@ -74,34 +74,34 @@ function ensureSubscribed() {
  *  `missing` as a broken, non-clickable link. */
 export type RefStatus = "loading" | "found" | "missing";
 
-/** Snapshot `{title, status}` for `slug`. Because the cache lists every
- *  page up front, once `loaded` a slug absent from the map is a real
+/** Snapshot `{title, status}` for the page `uri`. Because the cache lists every
+ *  page up front, once `loaded` a page absent from the map is a real
  *  `missing`; before that it's still `loading`. */
-function wikiRefSnapshot(slug: string | null | undefined): { title: string | null; status: RefStatus } {
-  if (!slug) return { title: null, status: "loading" };
-  if (titles.has(slug)) return { title: titles.get(slug) ?? null, status: "found" };
+function knowledgeRefSnapshot(uri: string | null | undefined): { title: string | null; status: RefStatus } {
+  if (!uri) return { title: null, status: "loading" };
+  if (titles.has(uri)) return { title: titles.get(uri) ?? null, status: "found" };
   return { title: null, status: loaded ? "missing" : "loading" };
 }
 
 /**
- * Resolve a wiki slug to its page title AND existence status. `status`
+ * Resolve a knowledge page's URI to its title AND existence status. `status`
  * is `loading` until the page list loads, then `found` / `missing`
  * (deleted page, stale wikilink). Backs the broken-link rendering.
  */
-export function useWikiRef(slug: string | null | undefined): { title: string | null; status: RefStatus } {
-  const [state, setState] = useState(() => wikiRefSnapshot(slug));
+export function useKnowledgeRef(uri: string | null | undefined): { title: string | null; status: RefStatus } {
+  const [state, setState] = useState(() => knowledgeRefSnapshot(uri));
 
   useEffect(() => {
-    if (!slug) {
+    if (!uri) {
       setState({ title: null, status: "loading" });
       return;
     }
     ensureSubscribed();
-    // Only a real change re-renders: a re-read that left this slug's title
+    // Only a real change re-renders: a re-read that left this page's title
     // and status alone keeps the same state.
     const update = () =>
       setState((prev) => {
-        const next = wikiRefSnapshot(slug);
+        const next = knowledgeRefSnapshot(uri);
         return prev.title === next.title && prev.status === next.status ? prev : next;
       });
     listeners.add(update);
@@ -113,25 +113,25 @@ export function useWikiRef(slug: string | null | undefined): { title: string | n
     return () => {
       listeners.delete(update);
     };
-  }, [slug]);
+  }, [uri]);
 
   return state;
 }
 
-/** The same as `useWikiRef`, awaited (a component frame's markdown, drawn
+/** The same as `useKnowledgeRef`, awaited (a component frame's markdown, drawn
  *  once its titles are known). */
-export async function loadWikiRef(slug: string): Promise<{ title: string | null; status: RefStatus }> {
+export async function loadKnowledgeRef(uri: string): Promise<{ title: string | null; status: RefStatus }> {
   ensureSubscribed();
   if (!loaded) await (inFlight ?? refresh());
-  return wikiRefSnapshot(slug);
+  return knowledgeRefSnapshot(uri);
 }
 
 /**
- * Resolve a wiki slug to its page title. Returns `null` while the
- * cache is still loading or if the slug isn't known (deleted page,
- * stale wikilink, etc.) — callers should fall back to the slug in
+ * Resolve a knowledge page's URI to its title. Returns `null` while the
+ * cache is still loading or if the page isn't known (deleted page,
+ * stale wikilink, etc.) — callers should fall back to the id in
  * that case.
  */
-export function useWikiTitle(slug: string | null | undefined): string | null {
-  return useWikiRef(slug).title;
+export function useKnowledgeTitle(uri: string | null | undefined): string | null {
+  return useKnowledgeRef(uri).title;
 }

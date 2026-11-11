@@ -118,7 +118,7 @@ impl Pending {
 
 /// What a subscription hears beyond, or instead of, every kept path: named
 /// paths from the root, whether the filter keeps them or not. A consumer that
-/// follows a few of a tree's paths (the config, the wiki) shares its stream's
+/// follows a few of a tree's paths (the config, oxwiki) shares its stream's
 /// one watch this way.
 #[derive(Debug, Clone, Default)]
 pub struct Scope {
@@ -513,9 +513,9 @@ mod tests {
     fn a_scope_hears_its_paths_and_the_rescans_that_could_be_its_own() {
         let all = Subscribers::new(vec![PathBuf::from("/r")], vec![PathBuf::from("/r")]);
         let mut everything = all.subscribe(None);
-        let mut wiki = all.subscribe(Some(
+        let mut oxwiki = all.subscribe(Some(
             Scope::default()
-                .dir(".oxplow/wiki")
+                .dir(".oxplow/oxwiki")
                 .file(".oxplow/project.yaml"),
         ));
         let mut root = all.subscribe(Some(Scope::default().top_level()));
@@ -525,29 +525,29 @@ mod tests {
             sorted(everything.try_batch().unwrap()),
             [PathBuf::from("/r/src/a.rs")]
         );
-        assert!(wiki.try_batch().is_none());
+        assert!(oxwiki.try_batch().is_none());
         assert!(root.try_batch().is_none());
 
         all.change(Path::new("/r/.oxplow/project.yaml"), &MODIFIED, false);
         assert!(everything.try_batch().is_none(), "the filter drops it");
-        assert!(wiki.try_batch().is_some(), "named: heard all the same");
+        assert!(oxwiki.try_batch().is_some(), "named: heard all the same");
 
         all.change(Path::new("/r/.git"), &MODIFIED, false);
         assert!(root.try_batch().is_some());
-        assert!(wiki.try_batch().is_none());
+        assert!(oxwiki.try_batch().is_none());
 
         all.rescan(Path::new("/r/src"));
         assert!(everything.try_batch().is_some());
         assert!(
-            wiki.try_batch().is_none(),
-            "lost under src is not the wiki's"
+            oxwiki.try_batch().is_none(),
+            "lost under src is not oxwiki's"
         );
         all.rescan(Path::new("/r/.oxplow"));
-        assert!(wiki.try_batch().is_some());
-        all.rescan(Path::new("/r/.oxplow/wiki/sub"));
-        assert!(wiki.try_batch().is_some());
+        assert!(oxwiki.try_batch().is_some());
+        all.rescan(Path::new("/r/.oxplow/oxwiki/sub"));
+        assert!(oxwiki.try_batch().is_some());
         all.rescan(Path::new("/r"));
-        assert!(wiki.try_batch().is_some());
+        assert!(oxwiki.try_batch().is_some());
     }
 
     /// Every kept path and every rescan, and named paths the filter drops.

@@ -6609,7 +6609,7 @@ commands:
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
         let foundation = ext("oxplow-foundation");
-        for resource in ["oxplow/task", "oxplow/wiki"] {
+        for resource in ["oxplow/task", "oxplow/knowledge"] {
             let renders = |e: &Extension| {
                 e.page_files
                     .iter()

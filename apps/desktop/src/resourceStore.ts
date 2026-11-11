@@ -114,7 +114,7 @@ function acceptsParam(resource: Resource, param: string, id: string): boolean {
  * The URI a `[[…]]` interior names through a resource's sugar: a declared
  * `wikilink:` prefix (`pr:12` → `oxplow:acme/pr?id=12`), or — for a
  * resource of oxplow's whose one param names it — its own name
- * (`turn:trn3`, `wiki:x`). Null when it names none, or the value doesn't
+ * (`turn:trn3`, `acme:x`). Null when it names none, or the value doesn't
  * match the param's pattern, as the backend's wikilink reader checks.
  */
 export function extensionWikilinkRef(interior: string): string | null {

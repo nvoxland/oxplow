@@ -366,9 +366,9 @@ export async function listStreams(): Promise<Stream[]> {
 }
 
 /// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
-/// worktree (project-global hits like wiki always included); `null` searches
+/// worktree (project-global hits like knowledge pages always included); `null` searches
 /// everything. `resources` optionally restricts to searchable resources
-/// (`v_resource.searchable`: `oxplow/wiki`) or `oxplow/file`.
+/// (`v_resource.searchable`: `oxplow/knowledge`) or `oxplow/file`.
 export async function searchSite(
   query: string,
   streamId: string | null,
@@ -854,26 +854,41 @@ export interface RemoteBranchTarget {
   branch: string;
 }
 
-/** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
- *  row, its links and the file, in one audited run. Every `[[link]]` must
- *  resolve (a dangling one is refused, named). `verifiedFiles` are files
- *  re-checked against the page: their freshness pins move to now. */
-export async function writeWikiPage(
-  slug: string,
-  body: string,
-  options?: { verifiedFiles?: string[] },
-): Promise<void> {
-  await runCommand("oxplow.knowledge.write_page", {
-    slug,
-    body,
-    verified_files: options?.verifiedFiles ?? [],
+/** Write a knowledge page — the `oxplow.knowledge.write_page` command: the
+ *  page in its store, its links and its file pins, in one audited run. Every
+ *  `[[link]]` must resolve (a dangling one is refused, named). `store` is
+ *  needed only when several stores are enabled; `id` may be left out (the
+ *  store derives it from `title`). `verifiedFiles` are files re-checked
+ *  against the page: their freshness pins move to now. Returns the page's
+ *  URI. */
+export async function writeKnowledgePage(input: {
+  store?: string;
+  id?: string;
+  title?: string;
+  body: string;
+  verifiedFiles?: string[];
+  removedFiles?: string[];
+}): Promise<string | null> {
+  const result = await runCommand("oxplow.knowledge.write_page", {
+    ...(input.store ? { store: input.store } : {}),
+    ...(input.id ? { id: input.id } : {}),
+    ...(input.title ? { title: input.title } : {}),
+    body: input.body,
+    verified_files: input.verifiedFiles ?? [],
+    ...(input.removedFiles ? { removed_files: input.removedFiles } : {}),
   });
+  const uri = (result.result as { uri?: unknown } | null | undefined)?.uri;
+  return typeof uri === "string" ? uri : null;
 }
 
-/** Delete a wiki page (`oxplow.knowledge.delete_page`, destructive): the person
- *  has confirmed. */
-export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_page", { slug }, confirmed);
+/** Delete a knowledge page (`oxplow.knowledge.delete_page`, destructive): the
+ *  person has confirmed. */
+export async function deleteKnowledgePage(input: { store?: string; id: string }, confirmed: boolean): Promise<void> {
+  await runCommand(
+    "oxplow.knowledge.delete_page",
+    { ...(input.store ? { store: input.store } : {}), id: input.id },
+    confirmed,
+  );
 }
 
 // ---- Comments ----
@@ -1199,16 +1214,17 @@ export async function filesAt(streamId: string, revision: Revision): Promise<str
   return unwrap(await commands.filesAt(streamId || null, revision));
 }
 
-/** For each snapshot id in the input list, the wiki slugs whose
- *  body changed in that snapshot. Drives wiki badges on the
+/** For each snapshot id in the input list, the URIs of the knowledge pages
+ *  whose body changed in that snapshot. Drives knowledge badges on the
  *  Local History dashboard. */
-export async function listWikiSlugsForSnapshots(
+export async function listKnowledgePagesForSnapshots(
   snapshotIds: number[],
-): Promise<Array<{ snapshotId: number; slug: string }>> {
-  const rows = unwrap(
-    await commands.listWikiSlugsForSnapshots(snapshotIds),
-  ) as unknown as Array<[number, string]>;
-  return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
+): Promise<Array<{ snapshotId: number; uri: string }>> {
+  const rows = unwrap(await commands.listKnowledgePagesForSnapshots(snapshotIds)) as unknown as Array<{
+    snapshot_id: number;
+    uri: string;
+  }>;
+  return rows.map((row) => ({ snapshotId: row.snapshot_id, uri: row.uri }));
 }
 
 export interface SnapshotTakenEventPayload {

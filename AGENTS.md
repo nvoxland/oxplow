@@ -129,7 +129,7 @@ or exact mechanics.
 | Request-scoped collection (test-run + diff-coverage observations, report collectors and their bundled parsers, the `testing:` profile, `/oxplow:configure`) | `.context/collection.md` |
 | Resources and their URIs — building, reading, storing or linking any `<kind>:<id>` string in Rust, SQL, Starlark or TS (builders, readers, `uri` columns, dead links); the grammar and type registry; resource / renderer / view | `.context/resources.md` "Using refs" |
 | Commands — the command bus (spec, actors, validate → policy → confirm → run + audit + `command.executed` in one transaction, undo), adding a command | `.context/commands.md` |
-| Knowledge (the wiki) — `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the wiki write guard | `.context/knowledge.md` |
+| Knowledge — the knowledge capability (several stores at once; oxwiki is oxplow's own), `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the oxwiki write guard | `.context/knowledge.md` |
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalTaskTracker`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Tasks — `v_task`, the `TaskTracker` capability and registry, oxtask, the conformance suite | `.context/tasks.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |

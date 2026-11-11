@@ -7,7 +7,7 @@
 //! boot-time backfill replay the exact same mapping from existing rows.
 //!
 //! Every end is a URI (`.context/resources.md`), built here through
-//! `uri::build`: a wiki page's, a task's, a file's, a directory's, a
+//! `uri::build`: a knowledge page's, a task's, a file's, a directory's, a
 //! finding's, a commit's, a thread note's.
 
 use crate::page_ref_store::PageRefEdge;
@@ -15,9 +15,12 @@ use oxplow_domain::uri::build;
 use oxplow_domain::uri::resources::{self as r, ResourceRegistry};
 use oxplow_domain::uri::{extract, RefVersion};
 
-pub const RT_WIKI_FILE: &str = "wiki_file_ref";
-pub const RT_WIKI_DIR: &str = "wiki_dir_ref";
+pub const RT_KNOWLEDGE_FILE: &str = "knowledge_file_ref";
+pub const RT_KNOWLEDGE_DIR: &str = "knowledge_dir_ref";
 pub const RT_WIKILINK: &str = "wikilink";
+/// A text body (a task's, a handoff's) → a file or directory it names.
+pub const RT_BODY_FILE: &str = "file_mention";
+pub const RT_BODY_DIR: &str = "dir_mention";
 pub const RT_BODY_TASK: &str = "task_mention";
 pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
@@ -60,7 +63,7 @@ impl OwnedFileRefVersion {
 /// Stamp the supplied file-version triple onto every edge in
 /// `edges` whose target is a file or directory. Mutates in place
 /// because `with_version` consumes `self`. No-op for non-file
-/// targets — wiki↔task, wiki↔wiki, etc. don't carry a content
+/// targets — page↔task, page↔page, etc. don't carry a content
 /// version.
 pub fn stamp_file_versions(edges: &mut [PageRefEdge], version: FileRefVersion<'_>) {
     for edge in edges.iter_mut() {
@@ -100,7 +103,7 @@ pub const RT_COMMENT_COMMIT: &str = "comment_commit_mention";
 struct MentionTypes {
     file: &'static str,
     dir: &'static str,
-    wiki: &'static str,
+    knowledge: &'static str,
     task: &'static str,
     finding: &'static str,
     commit: &'static str,
@@ -111,7 +114,7 @@ impl MentionTypes {
         [
             self.file,
             self.dir,
-            self.wiki,
+            self.knowledge,
             self.task,
             self.finding,
             self.commit,
@@ -122,9 +125,20 @@ impl MentionTypes {
 }
 
 const BODY_MENTIONS: MentionTypes = MentionTypes {
-    file: RT_WIKI_FILE,
-    dir: RT_WIKI_DIR,
-    wiki: RT_WIKILINK,
+    file: RT_BODY_FILE,
+    dir: RT_BODY_DIR,
+    knowledge: RT_WIKILINK,
+    task: RT_BODY_TASK,
+    finding: RT_BODY_FINDING,
+    commit: RT_BODY_COMMIT,
+};
+
+/// A knowledge page's body: its files and directories are what freshness
+/// pins (`v_knowledge_pin`).
+const KNOWLEDGE_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_KNOWLEDGE_FILE,
+    dir: RT_KNOWLEDGE_DIR,
+    knowledge: RT_WIKILINK,
     task: RT_BODY_TASK,
     finding: RT_BODY_FINDING,
     commit: RT_BODY_COMMIT,
@@ -133,20 +147,21 @@ const BODY_MENTIONS: MentionTypes = MentionTypes {
 const COMMENT_MENTIONS: MentionTypes = MentionTypes {
     file: RT_COMMENT_FILE,
     dir: RT_COMMENT_DIR,
-    wiki: RT_COMMENT_WIKILINK,
+    knowledge: RT_COMMENT_WIKILINK,
     task: RT_COMMENT_TASK,
     finding: RT_COMMENT_FINDING,
     commit: RT_COMMENT_COMMIT,
 };
 
-/// Edges contributed by a wiki page body. Owned by `wiki_pages` sync.
-/// A file edge carries the line and version the link named.
-pub fn wiki_edges(kinds: &ResourceRegistry, slug: &str, body: &str) -> Vec<PageRefEdge> {
-    let source = build::wiki_uri(slug);
+/// Edges contributed by a knowledge page's body (`page` its URI), parsed
+/// as oxplow's markdown. A file edge carries the line and version the link
+/// named.
+pub fn knowledge_edges(kinds: &ResourceRegistry, page: &str, body: &str) -> Vec<PageRefEdge> {
+    let source = page;
     let refs = extract(kinds, body);
     let mut out = Vec::new();
     for fd in &refs.files_detail {
-        let mut edge = PageRefEdge::new(&source, build::file_uri(&fd.path), RT_WIKI_FILE);
+        let mut edge = PageRefEdge::new(source, build::file_uri(&fd.path), RT_KNOWLEDGE_FILE);
         if !(fd.version == RefVersion::Disk && fd.line.is_none()) {
             edge = edge.with_extra(
                 serde_json::json!({
@@ -162,20 +177,20 @@ pub fn wiki_edges(kinds: &ResourceRegistry, slug: &str, body: &str) -> Vec<PageR
         out.push(edge);
     }
     out.extend(
-        mention_edges(kinds, &source, body, &BODY_MENTIONS)
+        mention_edges(kinds, source, body, &KNOWLEDGE_MENTIONS)
             .into_iter()
-            .filter(|e| e.ref_type != RT_WIKI_FILE),
+            .filter(|e| e.ref_type != RT_KNOWLEDGE_FILE),
     );
     out
 }
 
-/// The ref type a wiki page's stated link to `target` is recorded under,
+/// The ref type a knowledge page's stated link to `target` is recorded under,
 /// by what it names; `None` for a resource that isn't a page's link.
 fn stated_type(target: &str) -> Option<&'static str> {
     Some(match build::resource_of(target)?.as_str() {
-        r::FILE => RT_WIKI_FILE,
-        r::DIR => RT_WIKI_DIR,
-        r::WIKI => RT_WIKILINK,
+        r::FILE => RT_KNOWLEDGE_FILE,
+        r::DIR => RT_KNOWLEDGE_DIR,
+        r::KNOWLEDGE => RT_WIKILINK,
         r::TASK => RT_BODY_TASK,
         r::FINDING => RT_BODY_FINDING,
         r::COMMIT => RT_BODY_COMMIT,
@@ -183,19 +198,19 @@ fn stated_type(target: &str) -> Option<&'static str> {
     })
 }
 
-/// Edges of a wiki page whose store states its links (a provider's
-/// record: a file's URI, another page's, a task's, …) rather than a
-/// body core parses. A URI of another resource isn't an edge a page has.
-pub fn stated_edges(slug: &str, uris: &[String]) -> Vec<PageRefEdge> {
-    let source = build::wiki_uri(slug);
+/// Edges of a knowledge page (`page` its URI) whose store states its links
+/// (a provider's record: a file's URI, another page's, a task's, …) rather
+/// than a body core parses. A URI of another resource isn't an edge a page
+/// has.
+pub fn stated_edges(page: &str, uris: &[String]) -> Vec<PageRefEdge> {
     uris.iter()
-        .filter_map(|u| Some(PageRefEdge::new(&source, u, stated_type(u)?)))
+        .filter_map(|u| Some(PageRefEdge::new(page, u, stated_type(u)?)))
         .collect()
 }
 
-/// Edges contributed by a note's body (`source` its URI). Single-owner
-/// source.
-pub fn note_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<PageRefEdge> {
+/// Edges contributed by a text body (`source` its URI: a handoff's, …).
+/// Single-owner source.
+pub fn body_edges(kinds: &ResourceRegistry, source: &str, body: &str) -> Vec<PageRefEdge> {
     mention_edges(kinds, source, body, &BODY_MENTIONS)
 }
 
@@ -260,11 +275,7 @@ fn mention_edges(
             .map(|fd| edge(build::file_uri(&fd.path), types.file)),
     );
     out.extend(refs.dirs.iter().map(|d| edge(build::dir_uri(d), types.dir)));
-    out.extend(
-        refs.wikis
-            .iter()
-            .map(|w| edge(build::wiki_uri(w), types.wiki)),
-    );
+    out.extend(refs.knowledge.into_iter().map(|k| edge(k, types.knowledge)));
     out.extend(
         refs.tasks
             .into_iter()
@@ -316,11 +327,12 @@ mod tests {
     }
 
     #[test]
-    fn wiki_edges_cover_all_kinds() {
+    fn knowledge_edges_cover_all_kinds() {
         let body = "[[src/app.rs]] [[dir:src]] [[architecture]] [[tsk7]] [[finding:fnd-1]] [[git:abcdef0]]";
-        let edges = wiki_edges(&tasks_kinds(), "intro", body);
+        let intro = build::knowledge_uri("oxwiki", "intro");
+        let edges = knowledge_edges(&tasks_kinds(), &intro, body);
         let kinds: std::collections::BTreeSet<_> = edges.iter().map(resource).collect();
-        for k in ["file", "dir", "wiki", "task", "finding", "commit"] {
+        for k in ["file", "dir", "knowledge", "task", "finding", "commit"] {
             assert!(kinds.contains(&format!("oxplow/{k}")), "{k}: {kinds:?}");
         }
         // Every stored target is a URI foundation declares.
@@ -330,7 +342,7 @@ mod tests {
             tasks_kinds()
                 .validate(&r)
                 .unwrap_or_else(|err| panic!("{}: {err}", e.target));
-            assert_eq!(e.source, build::wiki_uri("intro"));
+            assert_eq!(e.source, intro);
         }
         assert!(edges.iter().any(|e| e.target == task("tsk7")));
     }

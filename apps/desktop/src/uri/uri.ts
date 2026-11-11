@@ -173,7 +173,7 @@ export function identityOf(text: string): string | null {
   return u ? formatUri({ ...u, view: {} }) : null;
 }
 
-/** `<extension>/<name>` of `text` (`oxplow/wiki`), or null when it isn't
+/** `<extension>/<name>` of `text` (`oxplow/knowledge`), or null when it isn't
  *  one of oxplow's URIs. */
 export function typeOf(text: string): string | null {
   const u = parseUri(text);
@@ -201,7 +201,6 @@ export function viewOf(text: string, key: string): string | null {
  *  keeps its name in `id`. */
 const KEY_PARAM: Record<string, string> = {
   commit: "sha",
-  wiki: "slug",
   file: "path",
   dir: "path",
   branch: "name",
@@ -230,7 +229,7 @@ const KEY_PARAM: Record<string, string> = {
   panel: "panel",
 };
 
-/** The param that names `resource` (`oxplow/wiki` → `slug`). */
+/** The param that names `resource` (`oxplow/commit` → `sha`). */
 export function keyParamOf(resource: string): string {
   const [extension, name] = resource.split("/");
   return (extension === "oxplow" && name !== undefined ? KEY_PARAM[name] : undefined) ?? "id";
@@ -262,8 +261,16 @@ export function taskOf(text: string): { provider: string; id: string } | null {
   return provider && id ? { provider, id } : null;
 }
 
-/** `text`'s key param, whatever its resource (`thr3` of a thread, the slug
- *  of a wiki page); null when it isn't a URI or lacks it. */
+/** A knowledge page's store and its id in that store; null for anything else. */
+export function knowledgeOf(text: string): { store: string; id: string } | null {
+  const u = parseUri(text);
+  if (!u || typeOf(text) !== "oxplow/knowledge") return null;
+  const { store, id } = u.params;
+  return store && id ? { store, id } : null;
+}
+
+/** `text`'s key param, whatever its resource (`thr3` of a thread, the id
+ *  of a task); null when it isn't a URI or lacks it. */
 export function keyOf(text: string): string | null {
   const resource = typeOf(text);
   return resource === null ? null : idOf(text, resource);
@@ -312,12 +319,12 @@ export function isExternal(text: string): boolean {
 export const threadUri = (id: string): string => resourceUri("oxplow/thread", { id });
 /** A stream (`str1`). */
 export const streamUri = (id: string): string => resourceUri("oxplow/stream", { id });
-/** A wiki comment (`cmt12`). */
+/** A comment (`cmt12`). */
 export const commentUri = (id: string): string => resourceUri("oxplow/comment", { id });
 /** An agent session (`ses3`). */
 export const agentSessionUri = (id: string): string => resourceUri("oxplow/agent_session", { id });
-/** A wiki page (`architecture`). */
-export const wikiUri = (slug: string): string => resourceUri("oxplow/wiki", { slug });
+/** A knowledge page: its store (`oxwiki`) and its id in that store (`architecture`). */
+export const knowledgeUri = (store: string, id: string): string => resourceUri("oxplow/knowledge", { store, id });
 /** A logged event, by its id. */
 export const eventUri = (id: string): string => resourceUri("oxplow/event", { id });
 /** A command proposal (`command_proposal.id`). */

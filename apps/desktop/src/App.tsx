@@ -41,7 +41,7 @@ import { TitleBar } from "./components/TitleBar.js";
 import { showToast } from "./components/toastStore.js";
 import { awaitGitOp, opErrorOf } from "./git-op.js";
 import { UndoToastStack } from "./components/UndoToast.js";
-import { identityOf, keyOf, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
+import { identityOf, keyOf, knowledgeUri, pageUri, paramOf, parseUri, typeOf } from "./uri/uri.js";
 import { nextMode, openWithOf, shellView, tabHint, tabLabel } from "./pages/renderers.js";
 import { chooseRenderer, chooseRoute } from "./pages/pageFiles.js";
 import { drawnByRenderer, renderersCache, useRenderers } from "./pages/useRenderers.js";
@@ -86,7 +86,7 @@ import { PanelRunsProvider } from "./components/Panels/PanelRunsContext.js";
 import { useAlerts } from "./components/Alerts/useAlerts.js";
 import { useAlertToasts } from "./components/Alerts/useAlertToasts.js";
 import { DomCommentLayer } from "./components/Comments/DomCommentLayer.js";
-import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, wikiPageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
+import { agentSessionRef, diskFilePath, fileOf, refFromTabId, directoryRef, externalUrlRef, fileRef, gitCommitRef, pagePayload, recordedPageKind, isPage, diffRef, newSessionRef, newStreamRef, alertsRef, knowledgePageRef, streamSettingsRef, threadSettingsRef, viewParamsOf, withViewParams, fileRefAt } from "./tabs/pageRefs.js";
 import { requestNewThread } from "./new-thread-bus.js";
 import { setAssistantScope } from "./components/Assistant/assistantSession.js";
 import { setSelectedThread } from "./contextBasket.js";
@@ -143,6 +143,7 @@ import { openRef as openRefAt, setWindowRefOpener } from "./tabs/openRef.js";
 import { usePersonCommands } from "./personCommandsStore.js";
 import { personCommands, setPersonCommandsOpener } from "./personCommands.js";
 import { getUiClientId, logUi, setUiLogContext } from "./logger.js";
+import { startKnowledgeStores } from "./knowledgeStores.js";
 
 /// Prompt for a folder and open it as an **existing** project.
 /// `newWindow=false` replaces the current window (this process exits
@@ -313,6 +314,11 @@ export function App() {
     return set;
   }, []);
   const [error, setError] = useState<string | null>(null);
+  // Markdown reads `[[<store>:<id>]]` for the enabled knowledge stores:
+  // know them from the start.
+  useEffect(() => {
+    startKnowledgeStores();
+  }, []);
   // The error banner auto-dismisses; it's transient feedback (e.g. a
   // mistargeted file link), not a persistent state the user must clear.
   useEffect(() => {
@@ -1100,15 +1106,15 @@ export function App() {
   const closeDiffTab = (id: string) => closePageTab(id);
 
 
-  const handleOpenWiki = useCallback((slug: string) => {
+  const handleOpenKnowledge = useCallback((store: string, id: string) => {
     const tid = selectedThread?.id ?? null;
     if (!tid) return;
-    openTab(wikiPageRef(slug));
+    openTab(knowledgePageRef(store, id));
     const sid = stream?.id ?? null;
     if (sid) {
       void recordUsage({
-        kind: "wiki",
-        key: slug,
+        kind: "knowledge",
+        key: knowledgeUri(store, id),
         event: "open",
         streamId: sid,
         threadId: tid,
@@ -1259,7 +1265,7 @@ export function App() {
     // tab already showing it, in that view.
     (openHandlerFor(handlers, typeOf(ref.id)) ?? openAsPageTab)(ref);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleOpenFile, handleOpenWiki, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
+  }, [handleOpenFile, handleOpenKnowledge, openTab, selectedThreadId, selectedThreadSessions, setCenterActive, stream?.id]);
 
   /**
    * Open the ref `ref` (of any kind) where its kind's page says
@@ -1477,7 +1483,7 @@ export function App() {
           const tab = typeof id === "string" ? id : shown;
           const path = tab ? diskFilePath(tab) : null;
           // The page shown that isn't a file saves through its own Save
-          // (`useTabEditing`): a wiki page's draft, say.
+          // (`useTabEditing`): a knowledge page's draft, say.
           const ownSave = typeof id !== "string" && thread === selectedThreadId && tab ? tabSavesRef.current[tab] : undefined;
           if (path === null && ownSave) {
             ownSave();
@@ -1928,7 +1934,7 @@ export function App() {
     openTerminalPath,
     effectiveCenterActive,
     stream,
-    handleOpenWiki,
+    handleOpenKnowledge,
     handleOpenCommit,
     handleOpenExternalUrl,
     selectedThreadId,

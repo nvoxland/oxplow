@@ -72,13 +72,13 @@ pub fn key_param(resource: &str) -> Option<String> {
         match name {
             "commit" => "sha",
             "branch" | "ai_model" | "extension" | "consumer" => "name",
-            "wiki" => "slug",
             "config" => "key",
             "nudge" => "kind",
             "file"
             | "dir"
             | "symbol"
             | "task"
+            | "knowledge"
             | "subagent"
             | "block"
             | "test"
@@ -90,7 +90,7 @@ pub fn key_param(resource: &str) -> Option<String> {
 }
 
 /// An author's short form of one of oxplow's single-key resources —
-/// `<name>:<key>` (`effect:acme/notify`, `oxplow:oxplow/wiki?slug=architecture`,
+/// `<name>:<key>` (`effect:acme/notify`, `commit:4c44d495` →
 /// `oxplow:oxplow/commit?sha=4c44d495`) — as its URI; `None` for anything else. What a
 /// wikilink or a manifest's `after:` may say instead of the whole URI;
 /// what is stored is always the URI.
@@ -159,7 +159,7 @@ pub fn parse_as<T: FromStr>(text: &str, resource: &str) -> Result<T, NotA> {
         .map_err(|_| not_a(text, resource))
 }
 
-/// The resource a URI names (`oxplow/wiki`), or `None` for a string that
+/// The resource a URI names (`oxplow/knowledge`), or `None` for a string that
 /// isn't one of oxplow's URIs.
 pub fn resource_of(text: &str) -> Option<String> {
     OxplowUri::parse(text)
@@ -319,8 +319,16 @@ pub fn symbol_uri_at(path: &str, id: &str, rev: Option<&str>) -> String {
     of(r::SYMBOL, &params)
 }
 
-pub fn wiki_uri(slug: &str) -> String {
-    keyed(r::WIKI, slug)
+/// A knowledge store's page: the store's id and the store's own page id
+/// (oxwiki's slug, a vault path, a uuid).
+pub fn knowledge_uri(store: &str, id: &str) -> String {
+    of(r::KNOWLEDGE, &[("store", store), ("id", id)])
+}
+
+/// The store and the store's page id a knowledge page's URI names.
+pub fn knowledge_of_uri(text: &str) -> Option<(String, String)> {
+    let u = parse_resource(text, r::KNOWLEDGE).ok()?;
+    Some((u.param("store")?.to_string(), u.param("id")?.to_string()))
 }
 
 pub fn comment_uri(id: CommentId) -> String {
@@ -566,7 +574,10 @@ mod tests {
             "oxplow:oxplow/collector?collector=triage/todos"
         );
         assert_eq!(commit_uri("4c44d495"), "oxplow:oxplow/commit?sha=4c44d495");
-        assert_eq!(wiki_uri("auth-flow"), "oxplow:oxplow/wiki?slug=auth-flow");
+        assert_eq!(
+            knowledge_uri("oxwiki", "auth-flow"),
+            "oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki"
+        );
     }
 
     /// A working-tree file of the local filesystem is named as it always
@@ -619,7 +630,16 @@ mod tests {
     /// wanted.
     #[test]
     fn a_uri_reads_back_through_the_grammar() {
-        assert_eq!(id_of(&wiki_uri("a b"), r::WIKI).unwrap(), "a b");
+        assert_eq!(
+            knowledge_of_uri(&knowledge_uri("vault", "a b/c.md")),
+            Some(("vault".to_string(), "a b/c.md".to_string()))
+        );
+        assert_eq!(knowledge_of_uri(&task_uri("oxtask", "tsk1")), None);
+        assert_eq!(
+            key_param("oxplow/knowledge"),
+            None,
+            "a page is named by two"
+        );
         assert_eq!(parse_as::<i64>(&proposal_uri(3), r::PROPOSAL).unwrap(), 3);
         assert_eq!(
             parse_as::<ThreadId>(&thread_uri(ThreadId::new(3)), r::THREAD).unwrap(),
@@ -635,10 +655,13 @@ mod tests {
             "a file has no single key"
         );
         assert!(
-            id_of("oxplow:oxplow/wiki?slug=a#part=x", r::WIKI).is_err(),
+            id_of("oxplow:oxplow/commit?sha=a#part=x", r::COMMIT).is_err(),
             "a view needs parse_resource"
         );
-        assert_eq!(resource_of(&wiki_uri("x")).as_deref(), Some("oxplow/wiki"));
+        assert_eq!(
+            resource_of(&knowledge_uri("oxwiki", "x")).as_deref(),
+            Some("oxplow/knowledge")
+        );
         assert_eq!(resource_of("nope"), None);
         assert_eq!(key_param("acme/pr").as_deref(), Some("id"));
         assert_eq!(key_param("oxplow/page").as_deref(), Some("page"));

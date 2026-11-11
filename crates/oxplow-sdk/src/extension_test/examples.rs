@@ -169,7 +169,7 @@ pub(super) async fn start_effects(host: &Host, ext: &Extension) -> Result<(), St
 /// `commands` or `pages` delivers the `contribution.job.completed` the job
 /// logs to the extension's effects, running there too: the
 /// effects that reacted (`[{ id, state? }]`), the commands they ran
-/// (`[names]`) and which of the named wiki pages (`[uri]`) now exist.
+/// (`[names]`) and which of the named knowledge pages (`[uri]`) now exist.
 pub(super) async fn job_example(
     host: &Host,
     ext: &Extension,

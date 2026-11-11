@@ -59,7 +59,7 @@ const STATUS: Record<string, { glyph: string; tone: VizTone | null; label: strin
 const KINDS: Record<string, { Icon: LucideIcon | null; label: string }> = {
   epic: { Icon: Layers, label: "Epic" },
   task: { Icon: pageKindIconComponent("task"), label: "Task" },
-  wiki: { Icon: pageKindIconComponent("wiki"), label: "Wiki page" },
+  knowledge: { Icon: pageKindIconComponent("knowledge"), label: "Knowledge page" },
   file: { Icon: pageKindIconComponent("file"), label: "File" },
   folder: { Icon: pageKindIconComponent("dir"), label: "Folder" },
   commit: { Icon: pageKindIconComponent("commit"), label: "Commit" },

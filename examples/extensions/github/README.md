@@ -7,7 +7,7 @@ is active), and a **PR Lifetimes** page that draws
 each one as a bar from when it was opened to when it was merged.
 
 A pull request is also a resource a URI can name: `oxplow:github/pr?id=12`,
-or `[[pr:12]]` in a task, a comment or a wiki page. It shows the pull
+or `[[pr:12]]` in a task, a comment or a knowledge page. It shows the pull
 request's title, opens its page, and is found by search.
 
 ## Use it

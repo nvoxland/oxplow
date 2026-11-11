@@ -250,7 +250,7 @@ Every tool foundation declares is named below
 
 | Purpose | Tools |
 |---|---|
-| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — tasks, comments, thread notes, wiki pages, an extension's — and file contents; each hit is a URI) |
+| Read oxplow's data | `oxplow_catalog` (every model with its owner, what it holds and its columns; one model's column docs), `oxplow_query_sql` (one read-only statement over the `v_*` models, live models included — [semantic-layer.md](./semantic-layer.md) "Live models"; its result is also structured content, typed by its output schema), `oxplow_read { uri }`, `oxplow_search` (BM25 over every searchable kind — tasks, comments, thread notes, knowledge pages, an extension's — and file contents; each hit is a URI) |
 | Code and revisions | `oxplow_vcs_log` (a stream's history from any revision, paged, past the index), `oxplow_vcs_status`, `oxplow_vcs_branches`, `oxplow_diff` (versions `working`, `snap:<id>`, `git:<rev>`; `since_fork`), `oxplow_vcs_blame` (through the `Vcs` provider; `working`, `snap:<id>` or `git:<rev>`), `oxplow_code_definition`, `oxplow_code_references`, `oxplow_code_hover`, `oxplow_code_call_hierarchy`, `oxplow_code_symbols` (a file's symbols from its language server, else oxplow's tree-sitter reading of the live file, saying which), `oxplow_code_workspace_symbols` (the editor's language servers, [lsp.md](./lsp.md)), `oxplow_ensure_change` (a change's analysis, then `v_change_*` through `oxplow_query_sql`) |
 | Write | `run_command`, after `list_commands` |
 | Ask a model | `oxplow_ai_decide` (typed questions about some text, on the `decide` role), `oxplow_ai_summarize` (on `summarize`): recorded computations paid with the person's key, as the asking thread ([ai-providers.md](./ai-providers.md)) |
@@ -258,7 +258,7 @@ Every tool foundation declares is named below
 | Show the person | `oxplow_navigate` (takes them to any URI's page, switching stream when needed; by default the shown tab goes there, pushed; `replace` rewrites its entry, `new_tab` opens another) |
 | Common questions, typed | foundation pages with `tool:`: `oxplow_thread_tasks`, `oxplow_next_task`, `oxplow_catalog`, `oxplow_request_summary { request }` (a request at a glance: its facts, tasks, files, tests and coverage, metric changes and commits; foundation's `request-summary`) (each runs `oxplow.page.run` on its page, its params the tool's input: `agent_tools::ToolTarget::Page`). Every other page is `oxplow_find_page` → `oxplow_run_page` (`file-history`, `recent-commits`, `snapshots`, `thread-sessions`, `session-transcript`) |
 | What the person has | `oxplow_list_tabs` (the tabs each of their windows shows, per thread, stream or project: selected, on screen, stale), `oxplow_get_open_page` (the page open in a thread in the window they were in last, the others' beside it, or one listed tab: `page` is its identity, `view` its `#`; the page's run as a tree with their params, and the focused node), `oxplow_list_comments` (their anchored comments, hydrated) |
-| Wiki | `oxplow_wiki_ref_drift` (one stale ref's diff against its pin) |
+| Knowledge | `oxplow_knowledge_drift` (one stale ref of a knowledge page: its diff against its pin) |
 | Extension authoring | `oxplow_validate_extension`, `oxplow_preview_collector`; its tests run in a process of their own, `$OXPLOW_BIN extension test <name>` (`OXPLOW_BIN`: the daemon's binary, set for every agent session) |
 | oxplow's guidance | `oxplow_get_skill { name, reference? }` |
 
@@ -320,7 +320,7 @@ the caller's stream's draft of the extension), and `oxplow_show_page` shows
 it beside the conversation: an existing page with params, or its own
 `spec`, an inline page (read-only: no commands, forms or actions) written as
 a page file on `oxplow:temp` and shown as a tab `page=temp/<id>` that the person can save to
-the wiki (an `oxplow-page` block) or as a page. It returns the page's text.
+a knowledge page (an `oxplow-page` block) or as a page. It returns the page's text.
 `oxplow_run_page_action` presses a page's declared action as the page acting
 for the caller, under the same rules as running the command directly.
 
@@ -355,10 +355,10 @@ package and both fixes: `oxplow.lsp.install_server { package }`
 or an `lsp.servers` entry in `.oxplow/project.yaml`. `v_lsp_server` says
 what's configured, installed and running.
 
-**The wiki and links.** Wiki reads are `oxplow_query_sql` over
+**Knowledge and links.** Knowledge reads are `oxplow_query_sql` over
 `v_knowledge_page` / `v_knowledge_ref` (stale pins) and `v_page_ref` (the
-backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/wiki"]`;
-`oxplow_wiki_ref_drift({ slug, path })` returns one stale ref's unified diff
+backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplow/knowledge"]`;
+`oxplow_knowledge_drift({ store?, id, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
 `oxplow.task.create` / `update` check the `[[…]]` links in the text
@@ -1410,7 +1410,7 @@ for reads, searches, shell, MCP and subagents. The HTTP round trip still
 fires for every tool (Claude's matcher is `"*"`).
 
 **Side-band steps are best-effort by design.** Reactors that decorate a
-call (collection observations, wiki attribution) try and warn: a coverage
+call (collection observations, knowledge attribution) try and warn: a coverage
 parse failure must never fail the hook or block the agent. The durable
 writes they decorate are covered by the transactional invariants in
 [data-model.md](./data-model.md).
@@ -1432,9 +1432,9 @@ route. It is isolation only; nothing waits on tracked work
 ([work-tracking.md](./work-tracking.md)).
 
 **The two rules:** no thread may change another stream's worktree, and
-wiki pages are written by command. Everything else is open to every
+knowledge pages are written by command. Everything else is open to every
 thread: its own stream's worktree, files outside every stream, the shared
-wiki (through `oxplow.knowledge.write_page`), and oxplow's own objects —
+knowledge pages (through `oxplow.knowledge.write_page`), and oxplow's own objects —
 tasks, notes, comments. The bus's `WriteGate` asks only that
 a `Write` command's thread be open; `Record` commands skip it
 ([commands.md](./commands.md) "The pipeline").
@@ -1476,9 +1476,9 @@ or move) is refused in two places, and nowhere else
   every thread (`write_guard::foreign_worktree_reason`, naming the path
   and the tree). Its own stream's worktree, and an absolute path outside
   every stream's (`~/.claude/plans/foo.md`), are allowed.
-- **Wiki pages are written by command.** A direct write to the primary
-  project's `.oxplow/wiki/` is denied for every thread
-  (`write_guard::wiki_page_reason`); pages go through
+- **Knowledge pages are written by command.** A direct write to the primary
+  project's `.oxplow/oxwiki/` (oxwiki's pages) is denied for every thread
+  (`write_guard::oxwiki_page_reason`); pages go through
   `knowledge.write_page`.
 - **Shell isn't classified.** An agent's shell commands aren't checked.
 - MCP tools are never refused here: their writes are commands, gated on
@@ -2230,8 +2230,8 @@ A turn's files are recorded as the work happens, never declared
   shell call's `bashEditDiff` files are `reported`). Paths are relative
   to the thread's worktree; an absolute path (outside it) is never
   claimed. The same event feeds `tool_call.project` (the
-  `agent_tool_call` row) and `wiki.attribution` (an edit of an indexed
-  `.oxplow/wiki/<slug>.md` marks the page touched by the thread).
+  `agent_tool_call` row) and `knowledge.attribution` (an edit of an indexed
+  `.oxplow/oxwiki/<slug>.md` marks the page touched by the thread).
 - **Everything else a turn changed** (shell, codegen, formatters) comes
   from the time join of the turn with the stream's snapshot line
   (`v_turn_file`): no step records it per turn, and changes between

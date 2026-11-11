@@ -93,9 +93,9 @@ was a read/append race: advancing to the latest Main message could skip a peer
 reply posted in between. If such a mailbox is reused, track and acknowledge
 peer message UUIDs individually. A file does not wake an idle session.
 
-### oxplow-dev: tasks and the wiki while the task tracker is none
+### oxplow-dev: tasks and knowledge while the task tracker is none
 
-Snapshots and the wiki are `oxplow-foundation`'s defaults, but
+Snapshots and oxwiki are `oxplow-foundation`'s defaults, but
 oxtask, oxplow's own task tracker, is `oxplow-bundled`'s: disabling it
 (`disableExtensions: [oxplow-bundled]` in `.oxplow/personal.yaml`, never
 committed) leaves no task tracker, as does a project that chose none
@@ -114,12 +114,11 @@ cargo run -q -p oxplow-dev -- task transition tsk12 done
 cargo run -q -p oxplow-dev -- task update tsk12 [--title …] [--body …] [--parent …]
 cargo run -q -p oxplow-dev -- task comment tsk12 "…"
 cargo run -q -p oxplow-dev -- task link tsk12 tsk13 blocks
-cargo run -q -p oxplow-dev -- wiki list
-cargo run -q -p oxplow-dev -- wiki show some-page
-cargo run -q -p oxplow-dev -- wiki write some-page [--title …] [--file body.md]   # body from stdin without --file
-cargo run -q -p oxplow-dev -- wiki delete some-page
-cargo run -q -p oxplow-dev -- --thread thr1 wiki note "…"
-cargo run -q -p oxplow-dev -- wiki search burrows
+cargo run -q -p oxplow-dev -- knowledge list [--store oxwiki]
+cargo run -q -p oxplow-dev -- knowledge show some-page [--store S]
+cargo run -q -p oxplow-dev -- knowledge write some-page [--title …] [--file body.md] [--store S]   # body from stdin without --file
+cargo run -q -p oxplow-dev -- knowledge delete some-page [--store S]
+cargo run -q -p oxplow-dev -- knowledge search burrows [--store S]
 cargo run -q -p oxplow-dev -- extension status
 cargo run -q -p oxplow-dev -- extension deploy                     # everything on whose source changed
 cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extension
@@ -158,13 +157,12 @@ something is held; fix the source if the problem is in it; quit oxplow;
 back to an earlier deployment instead, use `oxplow.extension.rollback`
 from inside oxplow (it needs foundation running).
 
-`wiki` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
-wiki as the store, whatever the project has active (pages are
-`.oxplow/wiki/<slug>.md`, recorded as the app records them, links checked).
-`list`, `show` and `search` read the recorded `wiki_page` rows (`search` is a
-case-insensitive substring over slug, title and body, not the site search
-index). `wiki note` needs a thread (`--thread` or `$OXPLOW_THREAD_ID`).
-`wiki delete` is confirmed by being named.
+`knowledge` runs the `oxplow.knowledge.*` commands on the same bus with oxplow's
+oxwiki as the store (`--store` names it; the default is `oxwiki`), whatever the project has
+enabled (pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app records them,
+links checked). `list`, `show` and `search` read the recorded `knowledge_page`
+rows (`search` is a case-insensitive substring over id, title and body, not
+the site search index). `knowledge delete` is confirmed by being named.
 
 `--help` / `-h` / `help` print this and do nothing, before the database
 is opened; an option a command doesn't take is refused (both used to

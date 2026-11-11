@@ -866,7 +866,13 @@ mod tests {
             .unwrap();
         f.svc
             .page_visit_store
-            .record("wiki", "oxplow:oxplow/wiki?slug=home", None, None, None)
+            .record(
+                "wiki",
+                "oxplow:oxplow/knowledge?id=home&store=oxwiki",
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         let mut want = vec!["v_usage_event", "v_page_visit"];

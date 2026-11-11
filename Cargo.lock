@@ -4585,6 +4585,7 @@ dependencies = [
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",
  "oxplow-oxtask",
+ "oxplow-oxwiki",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
  "oxplow-pty",
@@ -4840,6 +4841,7 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-oxtask",
+ "oxplow-oxwiki",
  "oxplow-sdk",
  "oxplow-workspace-hack",
  "rusqlite",
@@ -4993,6 +4995,7 @@ dependencies = [
  "oxplow-domain",
  "oxplow-git",
  "oxplow-oxtask",
+ "oxplow-oxwiki",
  "oxplow-sdk",
  "oxplow-workspace-hack",
  "rmcp",
@@ -5045,6 +5048,21 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+]
+
+[[package]]
+name = "oxplow-oxwiki"
+version = "0.8.0"
+dependencies = [
+ "async-trait",
+ "oxplow-db",
+ "oxplow-domain",
+ "oxplow-fs-watch",
+ "oxplow-workspace-hack",
+ "rusqlite",
+ "tempfile",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

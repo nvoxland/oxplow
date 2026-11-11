@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { listCommentsForTarget, onRemoteReconnect, subscribeCommentEvents } from "../../api.js";
 import type { CommentThread } from "../../tauri-bridge/generated/bindings.js";
 
-/// Fetch the comment threads anchored to one target URI (a wiki page, a
+/// Fetch the comment threads anchored to one target URI (a knowledge page, a
 /// file, a task) and keep them live: a commit that touches
 /// `v_comment` triggers a refetch, so a reply landed by the agent (a
 /// separate process) or another window shows up without a manual reload.

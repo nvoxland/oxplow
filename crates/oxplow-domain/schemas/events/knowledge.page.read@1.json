@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`knowledge.page.read@1`: an agent read a knowledge page — through\n`oxplow_read` (`via: tool`), or a file of a store's folder (`via:\nfile`). A person's opens are their page visits.",
+  "properties": {
+    "page": {
+      "description": "The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).",
+      "type": "string"
+    },
+    "via": {
+      "description": "How it was read: `tool` or `file`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "page",
+    "via"
+  ],
+  "title": "KnowledgePageReadV1",
+  "type": "object"
+}

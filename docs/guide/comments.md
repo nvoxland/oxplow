@@ -23,12 +23,12 @@ you convert one into work later by flipping its intent.
 
 ## Leaving one
 
-Select text in the editor, a wiki page, or the terminal and comment
+Select text in the editor, a knowledge page, or the terminal and comment
 on the selection. Or right-click a row — a file in the tree, a task,
 a commit in the graph — and choose **Comment…**.
 
 Comments can anchor to file lines, task rows, terminal and agent-pane
-regions, commit rows, the Git dashboard, findings, and wiki text.
+regions, commit rows, the Git dashboard, findings, and knowledge page text.
 
 If your selection contains references — a file path, a directory, a
 commit sha — those are captured alongside the comment, so it knows

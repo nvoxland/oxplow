@@ -203,7 +203,7 @@ the tokens, never inline a font stack.
 | Variable        | Used for                                                          |
 |-----------------|-------------------------------------------------------------------|
 | `--font-ui`     | UI chrome — buttons, menus, labels, tabs, panel headers, sidebars |
-| `--font-prose`  | Long-form body content — `.oxplow-md` (wiki bodies, task descriptions, anywhere `MarkdownView` renders) |
+| `--font-prose`  | Long-form body content — `.oxplow-md` (knowledge page bodies, task descriptions, anywhere `MarkdownView` renders) |
 | `--font-mono`   | Code-shaped surfaces — Monaco, xterm, code blocks, blame columns, file-path chips, tabular IDs, stacktraces |
 
 The prose-vs-UI-vs-mono split mirrors Wikipedia / Metabase: sans for

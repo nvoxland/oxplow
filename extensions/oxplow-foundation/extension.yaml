@@ -114,7 +114,7 @@ intent:
       input: { page: resource, params: { uri: "oxplow:oxplow/resource?resource=oxplow/commit" } }
       expect: a resource kind's URI form and the pages that draw it
     - name: the-implementation-page-says-whether-an-implementation-is-in-use
-      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow" } }
+      input: { page: implementation, params: { uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki" } }
       expect: an implementation's capability, whether it is in use and what it can do
     - name: a-command-row-of-an-extension-links-to-the-commands-page
       input: { page: extension, params: { uri: "oxplow:oxplow/extension?name=oxplow-foundation", name: oxplow-foundation } }
@@ -231,7 +231,7 @@ intent:
       input: { page: resource, params: { uri: 'oxplow:oxplow/resource?resource=oxplow/commit' } }
       expect: its see-also links name the extension that declares it
     - name: the-implementation-page-links-to-its-extension
-      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow' } }
+      input: { page: implementation, params: { uri: 'oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki' } }
       expect: its see-also links name the extension that declares it
     - name: the-measure-page-links-to-its-extension
       input: { page: measure, params: { uri: 'oxplow:oxplow/measure?measure=oxplow.tokens' } }
@@ -282,7 +282,7 @@ intent:
       input: { page: custom-component, params: {uri:"oxplow:oxplow/custom_component?custom_component=oxplow/integrations"} }
       expect: its description is a paragraph above the facts
     - name: the-implementation-page-says-what-it-is-in-a-paragraph-above-its-facts
-      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxplow"} }
+      input: { page: implementation, params: {uri:"oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"} }
       expect: its description is a paragraph above the facts
     - name: the-measure-page-says-what-it-is-in-a-paragraph-above-its-facts
       input: { page: measure, params: {uri:"oxplow:oxplow/measure?measure=oxplow.tokens"} }
@@ -426,13 +426,17 @@ panels:
 # there is one (oxtask's ready-queue skill is oxplow-bundled's).
 skills:
   - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
-# What oxplow runs by default: the task tracker, snapshots
-# and the wiki (a project chooses another provider in Settings), and the agent
-# harnesses and AI providers — core's built-ins, many of each at once (every
-# one of those declared here is active).
+# What oxplow runs by default: snapshots, oxwiki (a knowledge store beside
+# any an extension adds), and the agent harnesses and AI providers — core's
+# built-ins, many of each at once (every one of those declared here is
+# active).
 implementations:
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
-  - { capability: knowledge, id: oxplow, entry: "oxplow:wiki", description: "The wiki that oxplow keeps in the project." }
+  - capability: knowledge
+    id: oxwiki
+    entry: "oxplow:oxwiki"
+    title: oxwiki
+    description: "oxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg, description: "Runs Codex as a coding agent." }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg, description: "Runs OpenCode as a coding agent." }
@@ -616,12 +620,12 @@ resources:
     resolve: task
     searchable: search_task
     icon: check-square
-  - name: wiki
-    description: "A page of the project's wiki."
-    label: Wiki page
-    params: { slug: { required: true, pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$' } }
+  - name: knowledge
+    description: "A page of one of the project's knowledge stores (oxwiki, an extension's)."
+    label: Knowledge page
+    params: { store: { required: true, pattern: '^[a-z][a-z0-9_-]*$' }, id: { required: true } }
     resolve: knowledge_page
-    searchable: search_wiki
+    searchable: search_knowledge
     icon: book-open
   - name: comment
     description: "A comment a person left on a page or a record."
@@ -1149,7 +1153,7 @@ commands:
     example: {}
   # editor.write — the window's; an agent saves in its own thread.
   - name: editor.save
-    summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`). With none it saves the page your thread shows: its file, or the page's own edits (a wiki page's draft)."
+    summary: "Save a file's unsaved changes (`uri`: its tab, `oxplow:oxplow/file?path=src/a.rs`). With none it saves the page your thread shows: its file, or the page's own edits (a knowledge page's draft)."
     scope: editor.write
     op: save
     ui: { label: Save, group: File, shortcut: "Ctrl/Cmd+S", while_typing: true, menu: { bar: file, group: 2_save, order: 10 }, when: "pageDirty" }
@@ -1327,23 +1331,23 @@ commands:
     example: {}
   # knowledge.read
   - name: knowledge.comments
-    summary: "List comments. Threaded annotations the user anchored to a text selection in a page (wiki body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
+    summary: "List comments. Threaded annotations the user anchored to a text selection in a page (knowledge page body, code file line, task detail). `id` is a thread (`thr…`) or stream (`str…`) id; `scope` is inferred from its prefix, so usually pass only `id`. `status` filters: \"all\" (default), \"open\", or \"needs_response\" (open follow-ups whose latest message isn't yours — what the user wants you to act on). Each result carries the anchored `quote`, the message thread, and `intent` (note vs followup). Reply with `oxplow.knowledge.reply_comment { comment, body }`; resolve with `oxplow.knowledge.update_comment { comment, status: \"resolved\" }`."
     scope: knowledge.read
     op: comments
     tool: list_comments
     example: {"id": "str1", "status": "needs_response"}
   - name: knowledge.drift
-    summary: "What a wiki page's file drifted. The unified diff between the snapshot the file was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted files with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per file. Returns `{ slug, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
+    summary: "What a knowledge page's file drifted. The unified diff between the snapshot the file was pinned to and the file's CURRENT on-disk content — so you can read just what drifted instead of re-opening the whole file. Find the drifted files with `oxplow.sql.query` over `v_knowledge_ref` (`stale = 1`; per page, `v_knowledge_page.stale_ref_count`), then call this per file. Returns `{ page, path, pinned_snapshot_id, status, unified_diff, truncated }`; `status` is one of drifted | unchanged | not_a_ref | no_pin | binary | no_contents (the pin was taken by 'Track changes only', which keeps no text)."
     scope: knowledge.read
     op: drift
-    tool: wiki_ref_drift
-    example: {"slug": "architecture", "path": "src/app/main.py"}
+    tool: knowledge_drift
+    example: {"store": "oxwiki", "id": "architecture", "path": "src/app/main.py"}
   # knowledge.write
   - name: knowledge.add_comment
     summary: "Comment on a span of a page (its `target`), with a first message. `intent`: `note` (the agent leaves it alone) or `followup` (the agent should act on it). An agent comments on its own stream, in its own thread."
     scope: knowledge.write
     op: add_comment
-    example: {"stream": "str1", "target": "oxplow:oxplow/wiki?slug=vcs-capability", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
+    example: {"stream": "str1", "target": "oxplow:oxplow/knowledge?id=vcs-capability&store=oxwiki", "quote": "Every provider implements Vcs", "intent": "followup", "body": "This is out of date: GitProvider also implements WorkspaceFiles."}
   - name: knowledge.delete_comment
     summary: "Delete a comment and its messages (`cmt12`). A person is asked first."
     scope: knowledge.write
@@ -1351,16 +1355,16 @@ commands:
     confirm: destructive
     example: {"comment": "cmt12"}
   - name: knowledge.delete_page
-    summary: "Delete a knowledge (wiki) page and its links."
+    summary: "Delete a knowledge page (`id`, of `store`: needed only when several stores are enabled) and its links."
     scope: knowledge.write
     op: delete_page
     confirm: destructive
-    example: {"slug": "auth-flow"}
+    example: {"id": "auth-flow"}
   - name: knowledge.link
-    summary: "Link a knowledge page to a page, file, directory, task or commit (added under its Related heading)."
+    summary: "Link a knowledge page (`id`, of `store`) to a page, file, directory, task or commit: added under its Related heading and written through its store."
     scope: knowledge.write
     op: link
-    example: {"page": "auth-flow", "target": "src/session.rs"}
+    example: {"id": "auth-flow", "target": "src/session.rs"}
   - name: knowledge.relocate_comment
     summary: "Store where a comment's quote (`cmt12`) sits in its page's content now (`selectors_json`), or that it is gone (`orphaned`). The renderer's, after it re-finds the quote."
     scope: knowledge.write
@@ -1372,10 +1376,10 @@ commands:
     op: reply_comment
     example: {"comment": "cmt4", "body": "Fixed in the page."}
   - name: knowledge.resync
-    summary: "Restate a knowledge page from its file on disk (the repair when a row and its file disagree); a missing file deletes the page."
+    summary: "Restate an oxwiki page from its file in .oxplow/oxwiki (the repair when a row and its file disagree); a missing file deletes the page."
     scope: knowledge.write
     op: resync
-    example: {"slug": "auth-flow"}
+    example: {"id": "auth-flow"}
   - name: knowledge.update_comment
     summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
     scope: knowledge.write
@@ -1385,12 +1389,12 @@ commands:
     summary: "Re-pin a page's files to now without rewriting it: `files` are the files you re-read against the page as it stands (all of the page's files when omitted). The page is the one core records; a file the page does not cite is refused."
     scope: knowledge.write
     op: verify_files
-    example: {"slug": "auth-flow", "files": ["src/auth.rs"]}
+    example: {"id": "auth-flow", "files": ["src/auth.rs"]}
   - name: knowledge.write_page
-    summary: "Write a knowledge (wiki) page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files)."
+    summary: "Write a knowledge page: its body, every [[link]] resolving, and the files you re-read against it (verified_files) or took out (removed_files). `store` names where it's kept (needed only when several stores are enabled); `id` is the store's page id (omitted: derived from the title)."
     scope: knowledge.write
     op: write_page
-    example: {"slug": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
+    example: {"id": "auth-flow", "title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting. See [[src/auth.rs]].", "verified_files": ["src/auth.rs"]}
   - name: lsp.restart_server
     summary: "Restart a stream's language server for a language: the session is torn down and started again with the open documents replayed."
     scope: lsp.control
@@ -1481,7 +1485,7 @@ commands:
     tool: find_page
     example: {"question": "which tests failed this week"}
   - name: page.show
-    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save to the wiki or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
+    summary: "Show the person a page beside the conversation. Give `page` (`<extension>/<slug>`, from `oxplow.page.find`) with `params`, or `spec`: a page of your own as YAML (`title`, `loaders:` with sql / rows / page loaders, `view:` with table, list, chart, tree, number or markdown nodes; it only reads) — kept as a page file on `oxplow:temp` (`oxplow:oxplow/page?page=temp/<id>`) the person can save as a knowledge page or as a page. It opens as a tab of your thread when their window is open (`opened`), and returns the page's text so you can keep your prose short."
     scope: pages.show
     op: show
     tool: show_page
@@ -1590,18 +1594,18 @@ commands:
     example: {"instance": "issues/issues", "name": "TOKEN", "sign_in": 3}
   # records.read
   - name: records.read
-    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a task's links and comments, a commit's or a request's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`task:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/request?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/wiki?slug=…`). Content stops at 64 KB, saying so."
+    summary: "Read what a uri names. Its dataset's row (every column), what sits beside it (a task's links and comments, a commit's or a request's files) and, for a body no dataset holds, its content. `oxplow:oxplow/file?path=src/a.rs` reads the working tree; `oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40` a revision's lines (`@snap:<id>` a local-history snapshot); `oxplow:oxplow/event?id=<id>#part=output` (or `#input`, `#prompt`) one of your stream's events' stored bodies; `oxplow:oxplow/page?page=<ext>/<slug>` a page's definition (its YAML, source and deployment); `stream` reads a file or page in another stream's worktree. `oxplow:oxplow/ai_call?id=<id>#part=request` (or `#response`) a recorded dataset call's bodies. Any `uri` a dataset's column holds reads the same way (`task:…`, `oxplow:oxplow/commit?sha=…`, `oxplow:oxplow/request?id=…`, `oxplow:oxplow/thread?id=…`, `oxplow:oxplow/knowledge?id=…&store=…`). Content stops at 64 KB, saying so."
     scope: records.read
     op: read
     tool: read
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs&rev=git:HEAD#lines=10-40"}
   # search.read
   - name: search.find
-    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, wiki pages, comments, thread notes, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (wiki etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/wiki`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
+    summary: "Site-wide BM25 search across every searchable resource (`v_resource.searchable`: tasks, knowledge pages, comments, an extension's) and file contents. Tokens match as stemmed prefixes. `stream_id` scopes file/stream-bound hits to one worktree (knowledge pages etc. always included); omit it to search everything. `resources` optionally restricts to some of those (`oxplow/knowledge`), or `oxplow/file`. Each hit names the `uri` it found and its `resource` (read it with `oxplow_read`, show it with `oxplow_navigate`); best first."
     scope: search.read
     op: search
     tool: search
-    example: {"query": "oauth redirect", "resources": ["oxplow/wiki", "oxplow/task"], "limit": 10}
+    example: {"query": "oauth redirect", "resources": ["oxplow/knowledge", "oxplow/task"], "limit": 10}
   # sql.read
   - name: sql.query
     summary: "Run ONE read-only SQL statement over the published `v_*` datasets. It takes `SELECT`/`WITH` over the views pages and the UI read (`v_dataset` lists them; physical tables are refused). Joins across views are fine. Metrics read as columns of a grid: `SELECT bucket, zone, MEASURE('<metric key>') FROM metric_grid('day'|'week'|'month'[, '<dimension>'])` (keys in v_metric_spec, dimensions in v_dimension). Positional params `?1`, `?2`, … bind from `params`. Returns `{columns, rows, truncated, reads, generation, coverage}`; rows are positional arrays; `truncated` means more rows existed than `limit`. `coverage` names the collector behind each collected model it read and how its last run stands (`current`, `stale`, `failed`, `disabled`, `needs_approval`, `never`): a complete result over a failed collector is still missing data. Writes, PRAGMA, ATTACH and multiple statements are rejected; queries time out after 5s. `v_field` documents every field (column)."
@@ -1840,7 +1844,7 @@ commands:
     ui: { label: "Quick Open…", group: File, shortcut: "Ctrl/Cmd+P", while_typing: true, menu: { bar: file, group: 3_go, order: 10 }, when: "streamShown" }
     example: {}
   - name: window.navigate
-    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, wiki page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
+    summary: "Take the person to a uri: opens and focuses its page (a file's editor, a task, request, knowledge page, directory or `oxplow:oxplow/page?page=<route>`), or selects a `stream:` / `thread:`. `stream` switches to that stream first. Changes what the person sees. Returns `{ opened, stream }`."
     scope: window.show
     op: navigate
     example: {"uri": "oxplow:oxplow/file?path=src/auth.rs"}

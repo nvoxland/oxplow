@@ -1363,7 +1363,7 @@ pub fn check_subject(
 
 /// Whether `r` is one of instance `id`'s own URIs under `contract`: a
 /// URI with a `provider` param (`oxplow:oxplow/task?id=ENG-12&provider=issues`)
-/// is that instance's; one without (`oxplow:oxplow/wiki?slug=x`) is the
+/// is that instance's; one without (`oxplow:oxplow/knowledge?id=x&store=oxwiki`) is the
 /// active implementation's, so any well-formed one is.
 pub(super) fn owns(
     contract: &oxplow_domain::capability::ProviderContract,
@@ -1391,6 +1391,8 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 /// mutate a live registry; publication is a synchronous map change only.
 pub struct PreparedProviderCapability {
     features: Value,
+    /// A knowledge store's kinds of page (its `data.kinds`); `[]` otherwise.
+    kinds: Value,
     publish: Box<dyn FnOnce() + Send>,
 }
 
@@ -1398,8 +1400,19 @@ impl PreparedProviderCapability {
     pub(super) fn new(features: Value, publish: impl FnOnce() + Send + 'static) -> Self {
         Self {
             features,
+            kinds: Value::Array(Vec::new()),
             publish: Box::new(publish),
         }
+    }
+
+    /// With the kinds of page it keeps (a knowledge store's).
+    pub(super) fn with_kinds(mut self, kinds: Value) -> Self {
+        self.kinds = kinds;
+        self
+    }
+
+    pub fn kinds(&self) -> &Value {
+        &self.kinds
     }
 
     pub fn features(&self) -> &Value {

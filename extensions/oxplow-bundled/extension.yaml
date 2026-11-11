@@ -83,15 +83,15 @@ datasets:
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
   - name: thread_tasks
     version: 7
-    description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children), each with what its latest request is doing now; Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the wiki pages it touched, since the list was cleared."
+    description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children), each with what its latest request is doing now; Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: grp, type: TEXT, doc: "`In progress`, `Up next` or `Finished`." }
       - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
-      - { name: icon, type: TEXT, doc: "A viz icon name: a task state (`todo`, `blocked`, `in_progress`, `done`, …), `epic` or `wiki`." }
-      - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, `oxplow:oxplow/wiki?slug=<slug>`)." }
+      - { name: icon, type: TEXT, doc: "A viz icon name: a task state (`todo`, `blocked`, `in_progress`, `done`, …), `epic` or `knowledge`." }
+      - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, a knowledge page's)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
       - { name: active, type: INT, doc: "1 for a task in progress." }
       - { name: activity, type: TEXT, doc: "On a task in progress, what its latest request is doing now (v_request_task, v_request.state): `running`, `waiting_on_person`, `waiting_on_work` or `idle` (none runs, or no request worked on it yet). NULL on any other line. (v7)" }

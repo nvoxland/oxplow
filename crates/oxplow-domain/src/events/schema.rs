@@ -198,12 +198,10 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageRecorded>()
             .expect("core type registers");
+        r.register::<KnowledgePageRead>()
+            .expect("core type registers");
         r.register::<HandoffSent>().expect("core type registers");
         r.register::<HandoffSettled>().expect("core type registers");
-        r.register::<KnowledgeNoteWritten>()
-            .expect("core type registers");
-        r.register::<KnowledgeNoteDeleted>()
-            .expect("core type registers");
         r.register::<KnowledgeCommentWritten>()
             .expect("core type registers");
         r.register::<KnowledgeCommentDeleted>()
@@ -1864,16 +1862,19 @@ impl EventType for ContributionEnabled {
     type Payload = ContributionEnabledV1;
 }
 
-/// `knowledge.page.written@2`: a knowledge page's row and edges were
+/// `knowledge.page.written@3`: a knowledge page's row and edges were
 /// restated from its body — by `oxplow.knowledge.write_page` / `link` /
-/// `resync`, or by the wiki watcher after a hand edit
-/// (`system:wiki_watch`).
+/// `resync`, or by oxwiki's watcher after a hand edit
+/// (`system:oxwiki_watch`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageWrittenV2 {
-    /// The page's slug.
+pub struct KnowledgePageWrittenV3 {
+    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
     pub page: String,
-    /// Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/wiki?slug=x`, …).
+    /// The store that keeps it (`oxwiki`, an instance's id).
+    pub store: String,
+    /// Every ref the page now points at (`oxplow:oxplow/file?path=src/lib.rs`,
+    /// `oxplow:oxplow/knowledge?id=x&store=oxwiki`, …).
     pub outbound: Vec<String>,
     /// The snapshot its new refs are pinned to, when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1883,20 +1884,30 @@ pub struct KnowledgePageWrittenV2 {
 pub struct KnowledgePageWritten;
 impl EventType for KnowledgePageWritten {
     const TYPE: &'static str = "knowledge.page.written";
-    const V: u32 = 2;
-    type Payload = KnowledgePageWrittenV2;
+    const V: u32 = 3;
+    type Payload = KnowledgePageWrittenV3;
 }
 
 /// A knowledge page as a store records it: what a provider's write verb
 /// answers and its collector streams. The body is what it keeps; the refs
 /// are what the page links, in oxplow's grammar (`oxplow:oxplow/file?path=src/lib.rs`,
-/// `oxplow:oxplow/wiki?slug=other`), which core pins and links from — never parsed out of a
-/// body in the store's own grammar.
+/// `oxplow:oxplow/knowledge?id=other&store=vault`), which core pins and links from — never
+/// parsed out of a body in the store's own grammar.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KnowledgePageRecord {
-    /// `oxplow:oxplow/wiki?slug=<slug>`.
+    /// `oxplow:oxplow/knowledge?id=<id>&store=<store>`: the store is the
+    /// recording instance's.
     pub uri: String,
+    /// One of the kinds the store declares; absent: its first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Where the person opens it in the store's own app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Who last changed it, as the store names them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
     pub title: String,
     pub body: String,
     /// What it links, as URIs.
@@ -1908,19 +1919,38 @@ pub struct KnowledgePageRecord {
     pub deleted: bool,
 }
 
-/// `knowledge.page.recorded@2`: a knowledge store's page, as it recorded
+/// `knowledge.page.recorded@3`: a knowledge store's page, as it recorded
 /// it (`.context/knowledge.md` "The capability").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageRecordedV2 {
+pub struct KnowledgePageRecordedV3 {
     pub page: KnowledgePageRecord,
 }
 
 pub struct KnowledgePageRecorded;
 impl EventType for KnowledgePageRecorded {
     const TYPE: &'static str = "knowledge.page.recorded";
-    const V: u32 = 2;
-    type Payload = KnowledgePageRecordedV2;
+    const V: u32 = 3;
+    type Payload = KnowledgePageRecordedV3;
+}
+
+/// `knowledge.page.read@1`: an agent read a knowledge page — through
+/// `oxplow_read` (`via: tool`), or a file of a store's folder (`via:
+/// file`). A person's opens are their page visits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgePageReadV1 {
+    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+    pub page: String,
+    /// How it was read: `tool` or `file`.
+    pub via: String,
+}
+
+pub struct KnowledgePageRead;
+impl EventType for KnowledgePageRead {
+    const TYPE: &'static str = "knowledge.page.read";
+    const V: u32 = 1;
+    type Payload = KnowledgePageReadV1;
 }
 
 /// `ui.op_failed@2`: an operation the person started in the app failed, as
@@ -2004,55 +2034,20 @@ impl EventType for UiOpErrorDismissed {
     type Payload = UiOpErrorMarkV1;
 }
 
-/// `knowledge.page.deleted@2`: a knowledge page is gone, its row and
+/// `knowledge.page.deleted@3`: a knowledge page is gone, its row and
 /// edges with it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct KnowledgePageDeletedV2 {
-    /// The page's slug.
+pub struct KnowledgePageDeletedV3 {
+    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
     pub page: String,
 }
 
 pub struct KnowledgePageDeleted;
 impl EventType for KnowledgePageDeleted {
     const TYPE: &'static str = "knowledge.page.deleted";
-    const V: u32 = 2;
-    type Payload = KnowledgePageDeletedV2;
-}
-
-/// `knowledge.note.written@3`: a thread note was added or its body
-/// changed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgeNoteWrittenV3 {
-    /// The note (`not3`).
-    pub note: String,
-    /// The thread it's on (`thr3`).
-    pub thread: String,
-}
-
-pub struct KnowledgeNoteWritten;
-impl EventType for KnowledgeNoteWritten {
-    const TYPE: &'static str = "knowledge.note.written";
     const V: u32 = 3;
-    type Payload = KnowledgeNoteWrittenV3;
-}
-
-/// `knowledge.note.deleted@3`: a thread note is gone.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct KnowledgeNoteDeletedV3 {
-    /// The note (`not3`).
-    pub note: String,
-    /// The thread it was on (`thr3`).
-    pub thread: String,
-}
-
-pub struct KnowledgeNoteDeleted;
-impl EventType for KnowledgeNoteDeleted {
-    const TYPE: &'static str = "knowledge.note.deleted";
-    const V: u32 = 3;
-    type Payload = KnowledgeNoteDeletedV3;
+    type Payload = KnowledgePageDeletedV3;
 }
 
 /// `handoff.sent@2`: work was handed from one thread to another
@@ -2210,11 +2205,10 @@ mod tests {
                 ("handoff.settled", 2),
                 ("knowledge.comment.deleted", 3),
                 ("knowledge.comment.written", 3),
-                ("knowledge.note.deleted", 3),
-                ("knowledge.note.written", 3),
-                ("knowledge.page.deleted", 2),
-                ("knowledge.page.recorded", 2),
-                ("knowledge.page.written", 2),
+                ("knowledge.page.deleted", 3),
+                ("knowledge.page.read", 1),
+                ("knowledge.page.recorded", 3),
+                ("knowledge.page.written", 3),
                 ("snapshot.taken", 3),
                 ("task.assigned", 1),
                 ("task.commented", 2),

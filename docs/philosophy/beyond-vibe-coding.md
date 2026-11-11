@@ -39,7 +39,7 @@ why this approach was chosen over the alternative, or what was
 tried and rejected. The agent re-explores, sometimes re-introduces
 the rejected approach.
 
-**Oxplow primitive: durable tasks + wiki pages + threads.**
+**Oxplow primitive: durable tasks + knowledge pages + threads.**
 The task is the persistent intent. Notes on it carry rationale
 across turns. When a knowledge store is active, agent guidance encourages retaining
 useful Q&A — rationale, comparisons, walkthroughs — with links back to

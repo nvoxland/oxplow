@@ -2676,7 +2676,7 @@ mod tests {
             "thread_selection",
             "oxtask_note",
             "agent_turn",
-            "wiki_page",
+            "knowledge_page",
             "page_visit",
             "usage_event",
             "code_quality_scan",
@@ -2685,7 +2685,8 @@ mod tests {
             "snapshot",
             "task",
             "oxtask_link",
-            "wiki_page_thread_update",
+            "knowledge_page_touch",
+            "knowledge_page_read",
             "page_ref",
             "comment",
             "comment_message",
@@ -2740,6 +2741,9 @@ mod tests {
             "metric_run",
             "metric_sample",
             "metric_finding",
+            // V28: knowledge pages replace the wiki's.
+            "wiki_page",
+            "wiki_page_thread_update",
         ];
         let mut stmt = conn
             .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")

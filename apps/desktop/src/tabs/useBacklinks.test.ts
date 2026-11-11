@@ -4,12 +4,12 @@ import { dedupeEntriesByTarget, edgeToInboundEntry, edgeToOutboundEntry, graphUr
 import type { BacklinkEntry } from "./backlinkTypes.js";
 import type { BacklinkEdge } from "../api.js";
 import { setResources, type Resource } from "../resourceStore.js";
-import { collectorUri, commitUri, dirUri, fileUri, pageUri, resourceUri, wikiUri, taskUri } from "../uri/uri.js";
+import { collectorUri, commitUri, dirUri, fileUri, pageUri, resourceUri, knowledgeUri, taskUri } from "../uri/uri.js";
 import {
   directoryRef,
   fileRef,
   gitCommitRef,
-  wikiPageRef,
+  knowledgePageRef,
   pageTabRef,
   taskTabRef,
 } from "./pageRefs.js";
@@ -22,7 +22,7 @@ describe("graphUriOf", () => {
   });
 
   test("a wiki page, a file and a directory are theirs, a file without its revision", () => {
-    expect(graphUriOf(wikiPageRef("url-schemes"))).toBe(wikiUri("url-schemes"));
+    expect(graphUriOf(knowledgePageRef("oxwiki", "url-schemes"))).toBe(knowledgeUri("oxwiki", "url-schemes"));
     expect(graphUriOf(fileRef("src/app.ts"))).toBe(fileUri("src/app.ts"));
     expect(graphUriOf(directoryRef("src/components"))).toBe(dirUri("src/components"));
   });
@@ -43,8 +43,10 @@ describe("humanRefType", () => {
   test("body-mention ref_types all collapse to 'mention'", () => {
     for (const rt of [
       "wikilink",
-      "wiki_file_ref",
-      "wiki_dir_ref",
+      "knowledge_file_ref",
+      "knowledge_dir_ref",
+      "file_mention",
+      "dir_mention",
       "task_mention",
       "finding_mention",
       "commit_mention",
@@ -93,15 +95,15 @@ describe("humanRefType", () => {
 });
 
 describe("dedupeEntriesByTarget", () => {
-  test("collapses wiki + on-disk file shadow into a single wiki row", () => {
+  test("collapses an oxwiki page and its on-disk file into one row", () => {
     const entries: BacklinkEntry[] = [
-      { open: "oxplow:oxplow/file?path=.oxplow/wiki/local-snapshots.md", target: "oxplow:oxplow/file?path=.oxplow/wiki/local-snapshots.md", label: ".oxplow/wiki/local-snapshots.md", subtitle: "modified" },
-      { open: "oxplow:oxplow/wiki?slug=local-snapshots", target: "oxplow:oxplow/wiki?slug=local-snapshots", label: "Local Snapshots", subtitle: "created" },
-      { open: "oxplow:oxplow/wiki?slug=local-snapshots", target: "oxplow:oxplow/wiki?slug=local-snapshots", label: "Local Snapshots", subtitle: "mention" },
+      { open: "oxplow:oxplow/file?path=.oxplow/oxwiki/local-snapshots.md", target: "oxplow:oxplow/file?path=.oxplow/oxwiki/local-snapshots.md", label: ".oxplow/oxwiki/local-snapshots.md", subtitle: "modified" },
+      { open: "oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki", target: "oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki", label: "Local Snapshots", subtitle: "created" },
+      { open: "oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki", target: "oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki", label: "Local Snapshots", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
-    expect(out[0].open).toBe("oxplow:oxplow/wiki?slug=local-snapshots");
+    expect(out[0].open).toBe("oxplow:oxplow/knowledge?id=local-snapshots&store=oxwiki");
     expect(out[0].label).toBe("Local Snapshots");
     // Subtitles merged in first-seen order, deduped.
     expect(out[0].subtitle).toBe("modified · created · mention");
@@ -109,8 +111,8 @@ describe("dedupeEntriesByTarget", () => {
 
   test("preserves rows that point at different targets", () => {
     const entries: BacklinkEntry[] = [
-      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "mention" },
-      { open: "oxplow:oxplow/wiki?slug=b", target: "oxplow:oxplow/wiki?slug=b", label: "B", subtitle: "mention" },
+      { open: "oxplow:oxplow/knowledge?id=a&store=oxwiki", target: "oxplow:oxplow/knowledge?id=a&store=oxwiki", label: "A", subtitle: "mention" },
+      { open: "oxplow:oxplow/knowledge?id=b&store=oxwiki", target: "oxplow:oxplow/knowledge?id=b&store=oxwiki", label: "B", subtitle: "mention" },
       { open: "oxplow:oxplow/file?path=src/x.ts", target: "oxplow:oxplow/file?path=src/x.ts", label: "src/x.ts", subtitle: "modified" },
     ];
     const out = dedupeEntriesByTarget(entries);
@@ -119,8 +121,8 @@ describe("dedupeEntriesByTarget", () => {
 
   test("collapses two ref_types pointing at the same wiki page", () => {
     const entries: BacklinkEntry[] = [
-      { open: "oxplow:oxplow/wiki?slug=url-schemes", target: "oxplow:oxplow/wiki?slug=url-schemes", label: "URL Schemes", subtitle: "created" },
-      { open: "oxplow:oxplow/wiki?slug=url-schemes", target: "oxplow:oxplow/wiki?slug=url-schemes", label: "URL Schemes", subtitle: "mention" },
+      { open: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", target: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", label: "URL Schemes", subtitle: "created" },
+      { open: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", target: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", label: "URL Schemes", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out).toHaveLength(1);
@@ -140,8 +142,8 @@ describe("dedupeEntriesByTarget", () => {
 
   test("drops blank subtitles cleanly", () => {
     const entries: BacklinkEntry[] = [
-      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "" },
-      { open: "oxplow:oxplow/wiki?slug=a", target: "oxplow:oxplow/wiki?slug=a", label: "A", subtitle: "mention" },
+      { open: "oxplow:oxplow/knowledge?id=a&store=oxwiki", target: "oxplow:oxplow/knowledge?id=a&store=oxwiki", label: "A", subtitle: "" },
+      { open: "oxplow:oxplow/knowledge?id=a&store=oxwiki", target: "oxplow:oxplow/knowledge?id=a&store=oxwiki", label: "A", subtitle: "mention" },
     ];
     const out = dedupeEntriesByTarget(entries);
     expect(out[0].subtitle).toBe("mention");
@@ -168,7 +170,7 @@ describe("edges to any ref", () => {
   afterEach(() => setResources([]));
   const edge = (over: Partial<BacklinkEdge>): BacklinkEdge => ({
     source: taskUri("oxtask", "tsk1"),
-    target: wikiUri("x"),
+    target: knowledgeUri("oxwiki", "x"),
     ref_type: "task_link:about",
     source_extra: null,
     source_label: null,

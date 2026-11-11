@@ -258,21 +258,21 @@ async fn comment_and_note_reads_over_fresh_project() {
     );
     assert!(commands::generated::list_comments_for_target(
         app.state(),
-        oxplow_domain::uri::build::wiki_uri("some-page")
+        oxplow_domain::uri::build::knowledge_uri("oxwiki", "some-page")
     )
     .await
     .unwrap()
     .is_empty());
 }
 
-// ---- page-ref + search + wiki-freshness reads ----
+// ---- page-ref + search reads ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn page_ref_reads_empty_for_fresh_project() {
     let app = TestApp::build().await;
     assert!(commands::generated::list_backlinks(
         app.state(),
-        oxplow_domain::uri::build::wiki_uri("slug"),
+        oxplow_domain::uri::build::knowledge_uri("oxwiki", "slug"),
         None
     )
     .await
@@ -301,7 +301,7 @@ async fn search_returns_empty_for_fresh_project() {
         app.state(),
         "anything".into(),
         None,
-        Some(vec!["wiki".into()]),
+        Some(vec!["oxplow/knowledge".into()]),
         None
     )
     .await
@@ -322,7 +322,7 @@ async fn snapshot_reads_empty_for_fresh_project() {
             .is_empty()
     );
     assert!(
-        commands::generated::list_wiki_slugs_for_snapshots(app.state(), vec![999.into()])
+        commands::generated::list_knowledge_pages_for_snapshots(app.state(), vec![999.into()])
             .await
             .unwrap()
             .is_empty()

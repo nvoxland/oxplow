@@ -1,9 +1,0 @@
-{
-  "page": "architecture",
-  "outbound": [
-    "file:src/lib.rs",
-    "wiki:vcs",
-    "task:oxplow:tsk42"
-  ],
-  "snapshot": 12
-}

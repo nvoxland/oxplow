@@ -766,8 +766,9 @@ pub enum LauncherCategory {
 pub enum LinkKind {
     /// `oxplow:oxplow/file?path=<path>`; the value is a repo-relative path.
     File,
-    /// `oxplow:oxplow/wiki?slug=<slug>`.
-    Wiki,
+    /// A knowledge page; the value is its URI
+    /// (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+    Knowledge,
     /// A git commit; the value is a sha.
     Commit,
     /// A request's Changes page; the value is a request id (`v_request.id`,
@@ -825,7 +826,7 @@ pub struct PageColumn {
     #[serde(default)]
     pub unit: Option<String>,
     /// A column of the same row naming an icon drawn before the cell
-    /// (`done`, `in_progress`, `epic`, `wiki`, …; the UI's fixed
+    /// (`done`, `in_progress`, `epic`, `knowledge`, …; the UI's fixed
     /// vocabulary, `viz/vizIcons.tsx` — an unknown name draws none).
     #[serde(default)]
     pub icon: Option<String>,

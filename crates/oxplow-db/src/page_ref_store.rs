@@ -2,7 +2,7 @@
 //!
 //! Each row is one directed edge `(source) --ref_type--> (target)`, each
 //! end a URI (`.context/resources.md`). Per-subsystem writers own their
-//! sources' rows (the wiki sync owns every wiki page's, the task save
+//! sources' rows (the knowledge record owns every page's, the task save
 //! path every task's, …). The standard write pattern is
 //! [`SqlitePageRefStore::replace_source`]: delete every row whose source
 //! matches, then re-insert the new edge set in one transaction. The
@@ -10,7 +10,7 @@
 //! outbound — both indexed.
 //!
 //! Each end's resource (`oxplow/file`) is stored beside its URI so a
-//! resource-filtered lookup ("all backlinks from a wiki page") needs no
+//! resource-filtered lookup ("all backlinks from a knowledge page") needs no
 //! parse of the URI.
 
 use async_trait::async_trait;
@@ -153,7 +153,7 @@ impl SqlitePageRefStore {
     /// Diff-merge: preserve version metadata on edges that already
     /// exist (matched on the PK), insert new edges with the caller's
     /// version data, delete edges in storage but not in the new
-    /// set. Atomic. Used by the wiki sync so editing unrelated prose
+    /// set. Atomic. Used by the knowledge record so editing unrelated prose
     /// doesn't re-stamp every file ref's `local_snapshot_id`.
     ///
     /// Semantics:
@@ -184,9 +184,9 @@ impl SqlitePageRefStore {
     /// version data. Unlike `merge_source`/`replace_source`, this
     /// touches exactly one `(source, target, ref_type)` row and never
     /// prunes. Used to **materialize a verification edge** — e.g. a
-    /// wiki page the agent verified against a file it cites only via
+    /// knowledge page the agent verified against a file it cites only via
     /// the file's containing directory, which the body parser would
-    /// not emit. The wiki sync preserves such edges as long as their
+    /// not emit. The knowledge record preserves such edges as long as their
     /// path stays under a cited directory ref.
     pub async fn upsert_edge(&self, edge: PageRefEdge) -> Result<(), DomainError> {
         self.db
@@ -530,10 +530,10 @@ pub fn replace_source_for_ref_types_tx(
 mod tests {
     use super::*;
 
-    use oxplow_domain::uri::build::{file_uri, task_uri, wiki_uri};
+    use oxplow_domain::uri::build::{file_uri, knowledge_uri, task_uri};
 
     fn w(slug: &str) -> String {
-        wiki_uri(slug)
+        knowledge_uri("oxwiki", slug)
     }
 
     fn f(path: &str) -> String {
@@ -547,7 +547,7 @@ mod tests {
     #[tokio::test]
     async fn round_trip_single_edge() {
         let store = SqlitePageRefStore::new(Database::in_memory());
-        let e = edge(&w("architecture"), &f("src/app.rs"), "wiki_file_ref");
+        let e = edge(&w("architecture"), &f("src/app.rs"), "knowledge_file_ref");
         store
             .replace_source(&w("architecture"), vec![e.clone()])
             .await
@@ -563,7 +563,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_edge_inserts_then_overwrites_version() {
         let store = SqlitePageRefStore::new(Database::in_memory());
-        let e = edge(&w("intro"), &f("crates/x/src/lib.rs"), "wiki_file_ref").with_version(
+        let e = edge(&w("intro"), &f("crates/x/src/lib.rs"), "knowledge_file_ref").with_version(
             100,
             Some("aaaa".into()),
             true,
@@ -575,7 +575,7 @@ mod tests {
 
         // Re-verifying overwrites the pin (unlike merge_source, which
         // preserves) — an explicit verification advances the pin.
-        let e2 = edge(&w("intro"), &f("crates/x/src/lib.rs"), "wiki_file_ref").with_version(
+        let e2 = edge(&w("intro"), &f("crates/x/src/lib.rs"), "knowledge_file_ref").with_version(
             200,
             Some("bbbb".into()),
             false,
@@ -594,13 +594,13 @@ mod tests {
         // merge with the same edge (but a different version stamp)
         // must keep the original snapshot id and exact flag.
         let store = SqlitePageRefStore::new(Database::in_memory());
-        let e1 = edge(&w("intro"), &f("a.rs"), "wiki_file_ref").with_version(
+        let e1 = edge(&w("intro"), &f("a.rs"), "knowledge_file_ref").with_version(
             100,
             Some("aaaa".into()),
             true,
         );
         store.merge_source(&w("intro"), vec![e1]).await.unwrap();
-        let e2 = edge(&w("intro"), &f("a.rs"), "wiki_file_ref").with_version(
+        let e2 = edge(&w("intro"), &f("a.rs"), "knowledge_file_ref").with_version(
             200,
             Some("bbbb".into()),
             false,
@@ -616,13 +616,13 @@ mod tests {
     #[tokio::test]
     async fn merge_source_stamps_new_edges_and_deletes_missing() {
         let store = SqlitePageRefStore::new(Database::in_memory());
-        let a = edge(&w("intro"), &f("a.rs"), "wiki_file_ref").with_version(100, None, false);
-        let b = edge(&w("intro"), &f("b.rs"), "wiki_file_ref").with_version(100, None, false);
+        let a = edge(&w("intro"), &f("a.rs"), "knowledge_file_ref").with_version(100, None, false);
+        let b = edge(&w("intro"), &f("b.rs"), "knowledge_file_ref").with_version(100, None, false);
         store.merge_source(&w("intro"), vec![a, b]).await.unwrap();
         // Second merge: drop b.rs, add c.rs. a.rs preserved; b
         // deleted; c.rs newly stamped at snapshot 200.
-        let a2 = edge(&w("intro"), &f("a.rs"), "wiki_file_ref").with_version(200, None, false);
-        let c = edge(&w("intro"), &f("c.rs"), "wiki_file_ref").with_version(200, None, false);
+        let a2 = edge(&w("intro"), &f("a.rs"), "knowledge_file_ref").with_version(200, None, false);
+        let c = edge(&w("intro"), &f("c.rs"), "knowledge_file_ref").with_version(200, None, false);
         store.merge_source(&w("intro"), vec![a2, c]).await.unwrap();
         let out = store.list_outbound(&w("intro"), None).await.unwrap();
         assert_eq!(out.len(), 2);
@@ -639,7 +639,7 @@ mod tests {
     async fn replace_source_is_idempotent() {
         let store = SqlitePageRefStore::new(Database::in_memory());
         let edges = vec![
-            edge(&w("a"), &f("x.rs"), "wiki_file_ref"),
+            edge(&w("a"), &f("x.rs"), "knowledge_file_ref"),
             edge(&w("a"), &task_uri("oxtask", "wi-1"), "task_mention"),
         ];
         store.replace_source(&w("a"), edges.clone()).await.unwrap();
@@ -655,15 +655,18 @@ mod tests {
             .replace_source(
                 &w("a"),
                 vec![
-                    edge(&w("a"), &f("x.rs"), "wiki_file_ref"),
-                    edge(&w("a"), &f("y.rs"), "wiki_file_ref"),
+                    edge(&w("a"), &f("x.rs"), "knowledge_file_ref"),
+                    edge(&w("a"), &f("y.rs"), "knowledge_file_ref"),
                 ],
             )
             .await
             .unwrap();
         // Re-save with only y.rs — x.rs must vanish.
         store
-            .replace_source(&w("a"), vec![edge(&w("a"), &f("y.rs"), "wiki_file_ref")])
+            .replace_source(
+                &w("a"),
+                vec![edge(&w("a"), &f("y.rs"), "knowledge_file_ref")],
+            )
             .await
             .unwrap();
         let inbound_x = store.list_backlinks(&f("x.rs"), None).await.unwrap();
@@ -676,11 +679,17 @@ mod tests {
     async fn replace_source_doesnt_touch_other_sources() {
         let store = SqlitePageRefStore::new(Database::in_memory());
         store
-            .replace_source(&w("a"), vec![edge(&w("a"), &f("x.rs"), "wiki_file_ref")])
+            .replace_source(
+                &w("a"),
+                vec![edge(&w("a"), &f("x.rs"), "knowledge_file_ref")],
+            )
             .await
             .unwrap();
         store
-            .replace_source(&w("b"), vec![edge(&w("b"), &f("x.rs"), "wiki_file_ref")])
+            .replace_source(
+                &w("b"),
+                vec![edge(&w("b"), &f("x.rs"), "knowledge_file_ref")],
+            )
             .await
             .unwrap();
         // Now replace `a` with empty — only `a`'s edges go.
@@ -693,7 +702,7 @@ mod tests {
     #[tokio::test]
     async fn extra_payload_round_trips() {
         let store = SqlitePageRefStore::new(Database::in_memory());
-        let e = edge(&w("a"), &f("x.rs"), "wiki_file_ref")
+        let e = edge(&w("a"), &f("x.rs"), "knowledge_file_ref")
             .with_extra(r#"{"line":42,"version":"@HEAD"}"#);
         store
             .replace_source(&w("a"), vec![e.clone()])
@@ -706,12 +715,15 @@ mod tests {
     #[tokio::test]
     async fn rows_with_mismatched_source_are_skipped() {
         let store = SqlitePageRefStore::new(Database::in_memory());
-        // Caller passes an edge with source wiki b under
-        // a replace_source for wiki a. The mismatched edge
+        // Caller passes an edge with source page b under
+        // a replace_source for page a. The mismatched edge
         // must be dropped, not silently inserted, so writers can't
         // accidentally pollute another owner's slice.
         store
-            .replace_source(&w("a"), vec![edge(&w("b"), &f("x.rs"), "wiki_file_ref")])
+            .replace_source(
+                &w("a"),
+                vec![edge(&w("b"), &f("x.rs"), "knowledge_file_ref")],
+            )
             .await
             .unwrap();
         assert!(store.list_outbound(&w("b"), None).await.unwrap().is_empty());
@@ -729,10 +741,10 @@ mod tests {
             bulk.push(edge(
                 &w("noise"),
                 &f(&format!("noise/{i}.rs")),
-                "wiki_file_ref",
+                "knowledge_file_ref",
             ));
         }
-        bulk.push(edge(&w("noise"), &f("target.rs"), "wiki_file_ref"));
+        bulk.push(edge(&w("noise"), &f("target.rs"), "knowledge_file_ref"));
         store.replace_source(&w("noise"), bulk).await.unwrap();
         let hits = store.list_backlinks(&f("target.rs"), None).await.unwrap();
         assert_eq!(hits.len(), 1);

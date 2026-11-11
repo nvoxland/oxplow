@@ -2,7 +2,7 @@
  *  `TreeDeps`): the active list's ids from its profile, and a ref link's
  *  title by the viewer's rule over the same title caches. */
 import { loadExtensionRefTitle } from "../../resources.js";
-import { loadWikiRef } from "../../wikiTitleCache.js";
+import { loadKnowledgeRef } from "../../knowledgeTitleCache.js";
 import { loadTaskRef } from "../../taskTitleCache.js";
 import { loadTaskTrackerProfile } from "../../useTaskTrackerProfile.js";
 import { taskRefOfMention } from "../../tasks.js";
@@ -14,12 +14,12 @@ export async function liveTreeDeps(): Promise<TreeDeps> {
   return {
     mentionRef: (id) => taskRefOfMention(profile, id),
     refTitle: async (names, text) => {
-      const [wiki, item, extensionTitle] = await Promise.all([
-        names.internalSlug ? loadWikiRef(names.internalSlug) : NONE,
+      const [knowledge, item, extensionTitle] = await Promise.all([
+        names.knowledgeRef ? loadKnowledgeRef(names.knowledgeRef) : NONE,
         names.itemRef ? loadTaskRef(names.itemRef) : NONE,
         names.extensionRef ? loadExtensionRefTitle(names.extensionRef) : null,
       ]);
-      return refLinkTitle(names, text, { wiki, item, extensionTitle });
+      return refLinkTitle(names, text, { knowledge, item, extensionTitle });
     },
   };
 }

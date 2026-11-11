@@ -37,7 +37,7 @@ accessing other directories.
 ## Page
 
 A **page** is anything addressable inside a tab: a description, dashboard,
-page, wiki page, task, file, diff, settings panel, or agent session.
+page, knowledge page, task, file, diff, settings panel, or agent session.
 References and backlinks connect these surfaces so you can move from a
 summary to its supporting evidence.
 
@@ -67,16 +67,16 @@ The active task tracker supplies tasks. A project can use oxtask,
 another task tracker, or none. See
 [Tasks](../guide/tasks.md).
 
-## Wiki page
+## Knowledge page
 
-An optional knowledge provider stores durable explanations and rationale.
-The built-in wiki uses markdown under `.oxplow/wiki/`, indexed in SQLite.
+Knowledge stores keep durable explanations and rationale.
+Oxplow's own store, oxwiki, uses markdown under `.oxplow/oxwiki/`, indexed in SQLite.
 `[[wikilinks]]` connect pages to other pages, repo files, commits, and
 other references.
 
-When a knowledge store is active, agent guidance encourages capturing
-useful understanding there. With no store selected, a question can be
-answered without creating a page. See [Wiki pages](../guide/wiki.md).
+When a knowledge store is enabled, agent guidance encourages capturing
+useful understanding there. With no store enabled, a question can be
+answered without creating a page. See [Knowledge pages](../guide/wiki.md).
 
 ## Change Analysis
 

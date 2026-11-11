@@ -1,6 +1,6 @@
 //! Wikilink validity checker.
 //!
-//! Given a body (wiki page, task summary/description, thread note),
+//! Given a body (knowledge page, task summary/description, handoff),
 //! flags every `[[…]]` wikilink whose target is invalid — either an
 //! **unrecognized ref shape** (e.g. `[[#13]]`, the GitHub form) or a
 //! **recognized ref whose object doesn't exist** (`[[tsk999]]`,
@@ -31,8 +31,8 @@ pub struct LinkWarning {
 }
 
 /// What a link check looks things up in: the database, the project's
-/// files and its revision graph. `this_page` is the wiki page being
-/// written, which may link to itself before its row exists.
+/// files and its revision graph. `this_page` is the knowledge page being
+/// written (its URI), which may link to itself before its row exists.
 pub struct LinkWorld<'a> {
     pub conn: &'a rusqlite::Connection,
     /// The resources links may name (the running vocabulary's).
@@ -66,8 +66,8 @@ pub fn check_links_in(world: &LinkWorld<'_>, body: &str) -> Vec<LinkWarning> {
                 target: link.raw.clone(),
                 reason: format!(
                     "`[[{}]]` is not a recognized reference — use a task's own id \
-                     as its list writes it (never the GitHub `#42` form), `[[some-slug]]` for a \
-                     wiki page, \
+                     as its list writes it (never the GitHub `#42` form), `[[some-slug]]` for an \
+                     oxwiki page, `[[<store>:<id>]]` for another knowledge store's page, \
                      `[[path/to/file.rs]]` for a file, or `[[git:<sha>]]` for a commit",
                     link.raw
                 ),
@@ -274,9 +274,16 @@ fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String
         // Through the interface: the active list's items.
         Reference::Task(uri) => (!exists(world.conn, "SELECT 1 FROM v_task WHERE uri = ?1", uri))
             .then(|| format!("task `{uri}` does not exist")),
-        Reference::Wiki(slug) => (world.this_page != Some(slug.as_str())
-            && !exists(world.conn, "SELECT 1 FROM wiki_page WHERE slug = ?1", slug))
-        .then(|| format!("wiki page `{slug}` does not exist")),
+        Reference::Knowledge { store, id } => {
+            let uri = oxplow_domain::uri::build::knowledge_uri(store, id);
+            (world.this_page != Some(uri.as_str())
+                && !exists(
+                    world.conn,
+                    "SELECT 1 FROM v_knowledge_page WHERE uri = ?1",
+                    &uri,
+                ))
+            .then(|| format!("knowledge page `{id}` of `{store}` does not exist"))
+        }
         Reference::Commit(sha) => world
             .graph
             .resolve(sha)
@@ -410,7 +417,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn flags_missing_wiki_slug_but_not_code_fenced() {
+    async fn flags_missing_knowledge_page_but_not_code_fenced() {
         let dir = git_repo();
         let services = Services::in_memory(dir.path()).await.unwrap();
         // The fenced example must be ignored; only the prose link counts.

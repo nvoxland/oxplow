@@ -1,0 +1,12 @@
+{
+  "page": {
+    "uri": "oxplow:oxplow/knowledge?id=Design.md&store=vault",
+    "kind": "note",
+    "url": "obsidian://open?vault=v&file=Design",
+    "author": "nathan",
+    "title": "Design",
+    "body": "See [[oxwiki:architecture]].",
+    "uris": ["oxplow:oxplow/knowledge?id=architecture&store=oxwiki"],
+    "updated_at": "2026-11-11T10:00:00Z"
+  }
+}

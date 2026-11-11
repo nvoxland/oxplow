@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { listBacklinks, listPageOutbound, type BacklinkEdge } from "../api.js";
 import { refTargetNow } from "./refOpener.js";
-import { contributionOf, fileUri, idOf, identityOf, keyOf, pageUri, paramOf, typeOf, wikiUri } from "../uri/uri.js";
+import { contributionOf, fileUri, idOf, identityOf, keyOf, pageUri, paramOf, typeOf, knowledgeUri } from "../uri/uri.js";
 import type { TabRef } from "./tabState.js";
 import type { BacklinkEntry } from "./backlinkTypes.js";
 
 /**
  * Backlinks for a page. One IPC call to the unified `page_ref`
- * graph; the SQLite reader joins source labels (wiki title, work-
+ * graph; the SQLite reader joins source labels (page title, work-
  * item title, commit subject) at read time so the renderer doesn't
  * need a second round-trip per row.
  *
@@ -140,13 +140,13 @@ function entryFor(edge: BacklinkEdge, uri: string): BacklinkEntry {
  * Collapse rows whose `ref` resolves to the same logical page.
  * Two cases that need this today:
  *
- *  1. A wiki page is referenced both as `wiki:<slug>` (via
- *     `wikilink`) and as `file:.oxplow/wiki/<slug>.md` (via
+ *  1. An oxwiki page is referenced both as its knowledge URI (via
+ *     `wikilink`) and as `file:.oxplow/oxwiki/<slug>.md` (via
  *     `touched_file`). Same underlying entity, two rows.
  *  2. Multiple ref_types pointing at the same target (e.g. a
  *     wikilink edge AND a touched_file edge to the same slug).
  *
- * Strategy: bucket by canonical key, prefer the wiki ref over the
+ * Strategy: bucket by canonical key, prefer the knowledge ref over the
  * file ref when both exist, prefer a non-fallback label, and merge
  * each contributor's subtitle into a `·`-separated chip line. Order
  * within the input is preserved across the first appearance of each
@@ -166,10 +166,10 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
   return order.map((key) => {
     const group = buckets.get(key)!;
     if (group.length === 1) return group[0];
-    // Pick the "best" base entry: wiki kind wins over file when the
-    // file is the on-disk shadow of the same wiki page.
-    const wikiMember = group.find((g) => typeOf(g.target) === "oxplow/wiki");
-    const base = wikiMember ?? group[0];
+    // Pick the "best" base entry: knowledge kind wins over file when the
+    // file is the on-disk shadow of the same oxwiki page.
+    const knowledgeMember = group.find((g) => typeOf(g.target) === "oxplow/knowledge");
+    const base = knowledgeMember ?? group[0];
     // Combine subtitles, dropping empties and duplicates while
     // preserving first-seen order.
     const seen = new Set<string>();
@@ -190,15 +190,15 @@ export function dedupeEntriesByTarget(entries: BacklinkEntry[]): BacklinkEntry[]
 /**
  * Identity key for dedup. Same key ⇒ same logical page.
  *
- * `file:.oxplow/wiki/<slug>.md` is treated as `wiki:<slug>` so the
- * on-disk shadow of a wiki page doesn't render as a sibling row to
- * the wiki tab itself.
+ * `file:.oxplow/oxwiki/<slug>.md` is treated as the oxwiki page `<slug>` so the
+ * on-disk shadow of a page doesn't render as a sibling row to
+ * the page's tab itself.
  */
 function canonicalEntryKey(entry: BacklinkEntry): string {
   const path = idOf(entry.target, "oxplow/file");
   if (path !== null) {
-    const m = /^\.oxplow\/wiki\/(.+)\.md$/.exec(path);
-    if (m) return wikiUri(m[1]!);
+    const m = /^\.oxplow\/oxwiki\/(.+)\.md$/.exec(path);
+    if (m) return knowledgeUri("oxwiki", m[1]!);
   }
   return entry.target;
 }
@@ -226,7 +226,7 @@ function openFor(uri: string, resolved: boolean): string | null {
  *
  *  - **mention** — every body-mention ref_type collapses to this
  *    single label. They all mean "the target was named in some
- *    body text" (description / AC / summary / wiki page), and the
+ *    body text" (description / AC / summary / knowledge page), and the
  *    user doesn't care which body parser found it.
  *
  *  - **action verb** (`created` / `modified` / `deleted` /
@@ -251,8 +251,10 @@ function humanRefType(refType: string, sourceExtra: string | null): string {
     return sub.replace(/_/g, " ");
   }
   switch (refType) {
-    case "wiki_file_ref":
-    case "wiki_dir_ref":
+    case "knowledge_file_ref":
+    case "knowledge_dir_ref":
+    case "file_mention":
+    case "dir_mention":
     case "wikilink":
     case "task_mention":
     case "finding_mention":

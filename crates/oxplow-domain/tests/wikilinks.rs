@@ -4,12 +4,13 @@ use oxplow_domain::uri::resources::ResourceRegistry;
 use oxplow_domain::uri::{canonical_wikilink, classify_wikilinks, OxplowUri, Reference};
 
 /// oxplow-foundation's resources with oxtask as the task tracker
-/// (`tsk<n>`).
+/// (`tsk<n>`) and oxwiki and a vault as the knowledge stores.
 fn tasks() -> ResourceRegistry {
     oxplow_domain::uri::resources::foundation()
         .clone()
         .with_task_ids("oxtask", r"tsk\d+")
         .expect("the pattern compiles")
+        .with_knowledge_stores(["oxwiki", "vault"])
 }
 
 #[test]
@@ -20,12 +21,22 @@ fn wikilink_sugar_translates_to_uris() {
         ("abc1234", "oxplow:oxplow/commit?sha=abc1234"),
         // A resource's own name with its key.
         ("commit:abc1234", "oxplow:oxplow/commit?sha=abc1234"),
-        ("wiki:architecture", "oxplow:oxplow/wiki?slug=architecture"),
+        (
+            "oxwiki:architecture",
+            "oxplow:oxplow/knowledge?id=architecture&store=oxwiki",
+        ),
+        (
+            "vault:Notes/Design.md",
+            "oxplow:oxplow/knowledge?id=Notes/Design.md&store=vault",
+        ),
         ("request:req3", "oxplow:oxplow/request?id=req3"),
         ("dir:src/", "oxplow:oxplow/dir?path=src"),
         ("dir:src", "oxplow:oxplow/dir?path=src"),
         ("finding:f-9", "oxplow:oxplow/finding?id=f-9"),
-        ("architecture", "oxplow:oxplow/wiki?slug=architecture"),
+        (
+            "architecture",
+            "oxplow:oxplow/knowledge?id=architecture&store=oxwiki",
+        ),
         ("src/a.rs", "oxplow:oxplow/file?path=src/a.rs"),
         ("file:src/a.rs", "oxplow:oxplow/file?path=src/a.rs"),
         ("src/a.rs:42", "oxplow:oxplow/file?path=src/a.rs#lines=42"),

@@ -6,7 +6,7 @@ out. The point is that re-deriving any of this is expensive and the traps
 below fail **silently** — a wrong profile looks exactly like a right one.
 
 Detailed capture-by-capture numbers live on the `metric-path-db-contention`
-wiki page. That page is in `.oxplow/wiki/`, which is **gitignored** — so
+knowledge page. That page is in `.oxplow/oxwiki/`, which is **gitignored** — so
 anything that must survive a fresh clone belongs here, not there.
 
 ## The harness: `cube_equivalence`
@@ -55,7 +55,7 @@ and **attach mode freezes the app** — always launch, never attach.
 threads too. By raw sample count a metric-path profile reads as ~90%
 `__psynch_cvwait` — that is threads *sleeping*, not CPU. Weighting by
 `samples.threadCPUDelta` (µs) gives a completely different and correct
-ranking. A historical "43% mutex contention" figure on the wiki page is
+ranking. A historical "43% mutex contention" figure on the knowledge page is
 suspect for exactly this reason.
 
 **2. `--unstable-presymbolicate` is not optional.** Without it the saved
@@ -1067,8 +1067,8 @@ both datasets.
 
 A burst of commits is one re-read in the UI: every reader of change events
 goes through `coalesce` (`apps/desktop/src/viz/rerun.ts`, 100 ms after
-the last event) — `useRerunOnChange`, the wiki title cache
-(`wikiTitleCache.ts`, which also re-reads once after an in-flight read
+the last event) — `useRerunOnChange`, the knowledge title cache
+(`knowledgeTitleCache.ts`, which also re-reads once after an in-flight read
 that missed a change) and `useChange`. A new reader of events adopts it
 rather than re-reading per event. Writers help from their side by
 committing a unit of work once (a duplicate scan stores its findings in

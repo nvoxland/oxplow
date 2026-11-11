@@ -16,13 +16,13 @@ when the stream appears (boot, `oxplow.stream.create`) and ends it, and everythi
 hung off it, when the stream goes (archive, orphan). Off it hang the snapshot
 capture, the workspace announcements and the VCS's refs watch. What follows a
 few paths of the primary worktree subscribes to that same watch with a `Scope`,
-which names paths the filter need not keep: the wiki (`.oxplow/wiki`), the config
+which names paths the filter need not keep: oxwiki (`.oxplow/oxwiki`), the config
 (`.oxplow/project.yaml`, the personal file, `.oxplow/extensions`) and version
 control appearing (what is directly at the root). The only other watch is the
 user-global metrics folder, outside every project.
 
 Boot starts the watches first. What reads the disk at boot (the startup sweep,
-the wiki scan) waits for them, so a change is in what it read or heard after.
+the oxwiki scan) waits for them, so a change is in what it read or heard after.
 
 Every stream then sweeps, one at a time with the primary first (`boot::sweep_all`), so
 what changed in any worktree while oxplow was off is in a snapshot soon after start.
@@ -49,7 +49,7 @@ a rescan by checking the disk there. A rescan comes from:
 |---|---|---|
 | Snapshot capture | dirty | `enqueue_tree_diff(under)`: the startup sweep, limited to a directory |
 | Workspace | `WorkspaceChanged`; one `index_moved` per batch | `WorkspaceChanged` with no path; `index_moved` |
-| Wiki | `sync_page` | `scan_and_sync_all` |
+| Oxwiki | `sync_page` | `scan_and_sync_all` |
 | Config | reload, or restate sources | both |
 | Refs | re-read the state | same |
 
@@ -108,7 +108,7 @@ because a Rust/JS repo gitignores them, not because we name them.
 Two questions, one filter: `ignore` is "should oxplow watch this?" and
 `ignore_in_trees` is "would git see it?" (what `Trees` uses: diffs, the
 working tree, the Git panel). They differ only on
-`.oxplow/wiki/`, which is watched and snapshotted though git ignores it,
+`.oxplow/oxwiki/`, which is watched and snapshotted though git ignores it,
 so it is never reported as uncommitted.
 
 `FsWatcher::watch_workspace` registers the way the OS works (`Registration`):
@@ -277,13 +277,14 @@ loading spinner) by:
 The recursive `fs.watch` falls back to per-subdir watching on platforms
 that don't support recursive mode.
 
-### Wiki
+### Oxwiki
 
-`crates/oxplow-app/src/wiki_pages_watch.rs`: a `Scope` on the primary's watch.
-Each batch of `.md` changes runs `wiki_pages::sync_page` per slug; a rescan runs
+`crates/oxplow-oxwiki/src/watch.rs`: a `Scope` on the primary's watch
+(`.oxplow/oxwiki/`). Each batch of `.md` changes runs `pages::sync_page` per slug
+(`crates/oxplow-oxwiki/src/pages.rs`); a rescan runs
 `scan_and_sync_all`. Every write is treated identically — agent and user edits
-both re-baseline freshness — so this is the single sync path for `wiki_page`
-metadata. See `data-model.md` → `wiki_page`.
+both re-baseline freshness — so this is the single sync path for oxwiki's
+`knowledge_page` metadata. See `data-model.md` → `knowledge_page`.
 
 ### Config
 
@@ -594,7 +595,7 @@ commit into the unified `page_ref` graph (see
 - Diff against parent#0 → one `(commit:<sha>) -- touched_file -->
   (file:<path>)` edge per file.
 - Subject + body run through `oxplow_domain::uri::extract` so the
-  same wikilink + inline-mention rules used by wiki bodies and
+  same wikilink + inline-mention rules used by knowledge page bodies and
   task descriptions also apply to commit messages
   (`wi-…`, `[[architecture]]`, `[[finding:fnd-1]]`, bare 7-40 hex shas).
 - **Linked to the requests that made it** (`commit_links.rs`,

@@ -33,9 +33,9 @@ loaders:
         SELECT n.*,
                (SELECT o.trigger FROM v_snapshot_op o WHERE o.snapshot_id = n.id ORDER BY o.seq LIMIT 1) AS trigger,
                coalesce((SELECT o.over_budget FROM v_snapshot_op o WHERE o.snapshot_id = n.id ORDER BY o.seq LIMIT 1), 0) AS slow,
-               (SELECT group_concat(replace(replace(f.path, '.oxplow/wiki/', ''), '.md', ''), ', ')
+               (SELECT group_concat(replace(replace(f.path, '.oxplow/oxwiki/', ''), '.md', ''), ', ')
                   FROM v_snapshot_file f
-                 WHERE f.snapshot_id = n.id AND f.path LIKE '.oxplow/wiki/%.md') AS wiki,
+                 WHERE f.snapshot_id = n.id AND f.path LIKE '.oxplow/oxwiki/%.md') AS oxwiki,
                (SELECT sum(f.kind = 'added') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS added,
                (SELECT sum(f.kind = 'modified') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS modified,
                (SELECT sum(f.kind = 'deleted') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS deleted,
@@ -69,7 +69,7 @@ loaders:
                         || CASE WHEN r.completed IS NOT NULL AND r.in_flight IS NOT NULL THEN ' · ' ELSE '' END
                         || coalesce('in flight: ' || r.in_flight, ''))
                  WHEN r.initial THEN 'Initial Snapshot'
-                 WHEN r.sha IS NOT NULL OR r.wiki IS NOT NULL THEN ''
+                 WHEN r.sha IS NOT NULL OR r.oxwiki IS NOT NULL THEN ''
                  ELSE 'External change'
                END AS subject,
                coalesce(r.names, substr(r.sha, 1, 7)) AS version,
@@ -80,7 +80,7 @@ loaders:
                  WHEN 'run_measured' THEN 'test or lint run' ELSE r.trigger
                END || CASE WHEN r.slow THEN ' (slow)' ELSE '' END AS why
         FROM rows r)
-      SELECT uri, subject, version, wiki, changes, why, created_at
+      SELECT uri, subject, version, oxwiki, changes, why, created_at
       FROM shown
       WHERE :mode = 'recent'
       ORDER BY rn
@@ -98,9 +98,9 @@ loaders:
         SELECT n.*,
                (SELECT o.trigger FROM v_snapshot_op o WHERE o.snapshot_id = n.id ORDER BY o.seq LIMIT 1) AS trigger,
                coalesce((SELECT o.over_budget FROM v_snapshot_op o WHERE o.snapshot_id = n.id ORDER BY o.seq LIMIT 1), 0) AS slow,
-               (SELECT group_concat(replace(replace(f.path, '.oxplow/wiki/', ''), '.md', ''), ', ')
+               (SELECT group_concat(replace(replace(f.path, '.oxplow/oxwiki/', ''), '.md', ''), ', ')
                   FROM v_snapshot_file f
-                 WHERE f.snapshot_id = n.id AND f.path LIKE '.oxplow/wiki/%.md') AS wiki,
+                 WHERE f.snapshot_id = n.id AND f.path LIKE '.oxplow/oxwiki/%.md') AS oxwiki,
                (SELECT sum(f.kind = 'added') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS added,
                (SELECT sum(f.kind = 'modified') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS modified,
                (SELECT sum(f.kind = 'deleted') FROM v_snapshot_file f WHERE f.snapshot_id = n.id) AS deleted,
@@ -134,7 +134,7 @@ loaders:
                         || CASE WHEN r.completed IS NOT NULL AND r.in_flight IS NOT NULL THEN ' · ' ELSE '' END
                         || coalesce('in flight: ' || r.in_flight, ''))
                  WHEN r.initial THEN 'Initial Snapshot'
-                 WHEN r.sha IS NOT NULL OR r.wiki IS NOT NULL THEN ''
+                 WHEN r.sha IS NOT NULL OR r.oxwiki IS NOT NULL THEN ''
                  ELSE 'External change'
                END AS subject,
                coalesce(r.names, substr(r.sha, 1, 7)) AS version,
@@ -154,7 +154,7 @@ loaders:
       SELECT uri, subject,
              CASE WHEN sha IS NULL THEN 'Uncommitted'
                   ELSE coalesce(names || ' · ', '') || substr(sha, 1, 7) END AS heading,
-             sha, why, changes, wiki, created_at
+             sha, why, changes, oxwiki, created_at
       FROM ranked
       WHERE :mode = 'by-commit' AND (:all OR sha IS NULL OR group_rank <= 10)
       ORDER BY (sha IS NOT NULL), first_rn, rn
@@ -173,8 +173,8 @@ view:
     - key: version
       label: Version
       width: 150
-    - key: wiki
-      label: Wiki
+    - key: oxwiki
+      label: oxwiki pages
       width: 150
     - key: changes
       label: Files
@@ -202,8 +202,8 @@ view:
       link:
         kind: page
         from: uri
-    - key: wiki
-      label: Wiki
+    - key: oxwiki
+      label: oxwiki pages
       width: 150
     - key: changes
       label: Files

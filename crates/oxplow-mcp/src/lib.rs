@@ -358,7 +358,7 @@ impl ServerHandler for OxplowMcp {
         let mut info = ServerConfig::default();
         info.instructions = Some(
             "Oxplow knows this project's work and code: tasks, requests, \
-             test runs and coverage, commits, metrics and the wiki, readable \
+             test runs and coverage, commits, metrics and knowledge pages, readable \
              with `oxplow_query_sql` over the read-only `v_*` datasets (`v_dataset` lists \
              them). Every write is a command (`run_command`).\n\n\
              Answering the person: when they ask to see, list, compare or \
@@ -367,7 +367,7 @@ impl ServerHandler for OxplowMcp {
              (`oxplow_find_page`) and show it with `oxplow_show_page` (that \
              page with params, or your own `spec`: a table, chart or tree). \
              It opens beside the conversation, live; the person can save it \
-             to the wiki. `oxplow_run_page` reads one yourself, and \
+             as a knowledge page. `oxplow_run_page` reads one yourself, and \
              `oxplow_get_open_page` is what they are looking at. Keep the \
              prose around it short, and don't repeat the table as text."
                 .into(),
@@ -1870,26 +1870,26 @@ mod tests {
         assert!(err.message.contains("thread identity"), "{err:?}");
     }
 
-    /// Helper to write a wiki body to disk.
-    async fn seed_wiki(project: &std::path::Path, slug: &str, body: &str) {
-        let wiki_dir = project.join(".oxplow").join("wiki");
-        std::fs::create_dir_all(&wiki_dir).unwrap();
-        std::fs::write(wiki_dir.join(format!("{slug}.md")), body).unwrap();
+    /// Helper to write an oxwiki page's file to disk.
+    async fn seed_oxwiki(project: &std::path::Path, slug: &str, body: &str) {
+        let path = oxplow_oxwiki::page_path(project, slug);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
     }
 
     #[tokio::test]
-    async fn wiki_ref_drift_reports_status_per_ref() {
+    async fn knowledge_drift_reports_status_per_ref() {
         let (proj, svc, server) = boot().await;
-        seed_wiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
-        oxplow_app::wiki_pages::sync_page(&svc.db, &svc.vocabulary, proj.path(), "intro")
+        seed_oxwiki(proj.path(), "intro", "see [[crates/foo.rs]]").await;
+        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, proj.path(), "intro")
             .await
             .unwrap();
         // The file IS referenced but has no pin (no snapshot service in tests).
         let r = call(
             &server,
             &rmcp::model::Extensions::new(),
-            "oxplow_wiki_ref_drift",
-            serde_json::json!({ "slug": "intro", "path": "crates/foo.rs" }),
+            "oxplow_knowledge_drift",
+            serde_json::json!({ "id": "intro", "path": "crates/foo.rs" }),
         )
         .await
         .unwrap();
@@ -1900,8 +1900,8 @@ mod tests {
         let r2 = call(
             &server,
             &rmcp::model::Extensions::new(),
-            "oxplow_wiki_ref_drift",
-            serde_json::json!({ "slug": "intro", "path": "crates/zzz.rs" }),
+            "oxplow_knowledge_drift",
+            serde_json::json!({ "id": "intro", "path": "crates/zzz.rs" }),
         )
         .await
         .unwrap();

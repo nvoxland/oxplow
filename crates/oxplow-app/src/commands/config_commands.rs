@@ -657,21 +657,21 @@ mod tests {
         bus.run(
             &human,
             SET,
-            json!({ "key": "activeProviders", "value": { "knowledge": "none" }, "layer": "personal" }),
+            json!({ "key": "activeProviders", "value": { "task_tracker": "none" }, "layer": "personal" }),
             true,
         )
         .await
         .unwrap();
         assert_eq!(file(&dir), "", "project.yaml untouched");
         let personal = std::fs::read_to_string(dir.path().join(".oxplow/personal.yaml")).unwrap();
-        assert!(personal.contains("knowledge: none"), "{personal}");
+        assert!(personal.contains("task_tracker: none"), "{personal}");
         assert_eq!(
             target
                 .config
                 .read()
                 .unwrap()
                 .personal_active_providers
-                .get("knowledge")
+                .get("task_tracker")
                 .map(String::as_str),
             Some("none")
         );
@@ -1066,7 +1066,7 @@ mod tests {
         let project = || crate::config_service::read_config(&svc.config).active_providers;
         let personal = || crate::config_service::read_config(&svc.config).personal_active_providers;
         run(json!({ "capability": "snapshots", "provider": "contents_store" })).await;
-        run(json!({ "capability": "knowledge", "provider": "none" })).await;
+        run(json!({ "capability": "task_tracker", "provider": "none" })).await;
         assert_eq!(project().len(), 2);
         run(json!({ "capability": "snapshots", "provider": "other", "layer": "personal" })).await;
         assert_eq!(
@@ -1080,7 +1080,7 @@ mod tests {
         );
         run(json!({ "capability": "snapshots" })).await;
         assert!(!project().contains_key("snapshots"));
-        run(json!({ "capability": "knowledge" })).await;
+        run(json!({ "capability": "task_tracker" })).await;
         assert!(project().is_empty());
         run(json!({ "capability": "snapshots", "layer": "personal" })).await;
         assert!(personal().is_empty());

@@ -5,7 +5,7 @@ description: Capturing non-trivial exploratory Q&A into wiki pages — codebase 
 
 # Wiki pages — exploratory capture
 
-The per-project wiki (`.oxplow/wiki/<slug>.md`) holds durable
+The per-project wiki (`.oxplow/oxwiki/<slug>.md`) holds durable
 understanding: how subsystems work, why a design landed, tradeoffs,
 comparisons, recommendations. **Not codebase-only**: any non-trivial
 exploratory Q&A belongs here. Bodies are markdown.
@@ -24,7 +24,7 @@ the same way: `oxplow.knowledge.write_page` is open to every thread.
 
 Don't fragment. Look for an existing topic page first: `oxplow_query_sql` over
 `v_knowledge_page` (`slug`, `title`, `excerpt`, `stale_ref_count`), then
-`oxplow_search` with `resources: ["oxplow/wiki"]`. If a relevant page exists, **append a
+`oxplow_search` with `resources: ["oxplow/knowledge"]`. If a relevant page exists, **append a
 dated section** to it; create a new page only when none fits.
 `references/search-existing.md` has the full lookup, including which
 pages already cite a file.

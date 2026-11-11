@@ -255,7 +255,7 @@ async fn file_diff(svc: &crate::Services, root: &Path, path: &str, from: &str, t
     match (side(from).await, side(to).await) {
         (Ok(old), Ok(new)) if old == new => "(no changes)".to_string(),
         (Ok(old), Ok(new)) => {
-            crate::wiki_drift::unified_diff(
+            crate::knowledge_drift::unified_diff(
                 &old,
                 &new,
                 &format!("{path}@{from}"),

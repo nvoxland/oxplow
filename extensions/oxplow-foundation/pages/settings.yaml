@@ -190,7 +190,6 @@ loaders:
            p AS (SELECT * FROM v_capability_provider WHERE choosable = 1)
       SELECT p.capability, p.capability_title AS capability_title, p.provider, p.title,
              CASE
-               WHEN p.capability = 'knowledge' AND p.source = 'builtin' THEN 'pages as Markdown under .oxplow/wiki, pinned to snapshots'
                WHEN p.capability = 'snapshots' AND json_extract(p.features, '$.contents') = 1 THEN 'reads any file at any point; grows the blob store'
                WHEN p.capability = 'snapshots' THEN 'what changed, never what it said; no blob store growth'
              END AS hint,

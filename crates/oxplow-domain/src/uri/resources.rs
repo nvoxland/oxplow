@@ -3,7 +3,7 @@
 //! oxplow-foundation's included, so no resource is special. A declaration
 //! says what its params are; the registry checks a URI against it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -25,7 +25,9 @@ pub const FILE: &str = "oxplow/file";
 pub const DIR: &str = "oxplow/dir";
 pub const SYMBOL: &str = "oxplow/symbol";
 pub const TASK: &str = "oxplow/task";
-pub const WIKI: &str = "oxplow/wiki";
+/// A knowledge store's page: `store` (the store's id) and `id` (the
+/// store's own page id).
+pub const KNOWLEDGE: &str = "oxplow/knowledge";
 pub const COMMENT: &str = "oxplow/comment";
 pub const EVENT: &str = "oxplow/event";
 pub const PAGE: &str = "oxplow/page";
@@ -234,6 +236,9 @@ pub struct ResourceRegistry {
     /// The active task tracker's own ids, when it declares them: what makes a
     /// loose `tsk42` (or `ENG-12`) in text one of its items.
     task_ids: Option<TaskIds>,
+    /// The enabled knowledge stores' ids: what makes `[[<store>:<id>]]`
+    /// one of their pages.
+    knowledge_stores: BTreeSet<String>,
 }
 
 /// A task tracker's ids, as it declares them (`TaskTracker::id_pattern`).
@@ -266,6 +271,22 @@ impl ResourceRegistry {
     pub fn without_task_ids(mut self) -> Self {
         self.task_ids = None;
         self
+    }
+
+    /// This registry recognizing `[[<store>:<id>]]` for these knowledge
+    /// stores (the enabled ones), set by the app.
+    pub fn with_knowledge_stores<I, S>(mut self, ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.knowledge_stores = ids.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Whether `id` is one of the knowledge stores this registry recognizes.
+    pub fn is_knowledge_store(&self, id: &str) -> bool {
+        self.knowledge_stores.contains(id)
     }
 
     /// `text`, whole, as one of the active task tracker's ids: that item's URI.

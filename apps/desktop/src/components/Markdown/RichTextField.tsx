@@ -42,7 +42,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 /// contenteditable region is carved out of) and the right-click menu;
 /// "Open comment" stays right-click-only so existing comments don't
 /// fight selection/cursor. `target` (a URI) identifies the
-/// page (wiki slug / task id); `streamId` is the hard scope and
+/// page (knowledge page / task id); `streamId` is the hard scope and
 /// `threadId` the origin thread (null for non-thread-bound surfaces).
 export interface RichTextCommentConfig {
   streamId: string;
@@ -134,7 +134,7 @@ export interface RichTextFieldProps {
   /** `data-testid` on the editable surface. */
   testId?: string;
   placeholder?: string;
-  /** Disable headings/blocks for inline-only fields (e.g. a wiki page
+  /** Disable headings/blocks for inline-only fields (e.g. a knowledge page
    *  title). Default false. */
   inlineOnly?: boolean;
   /** Optional className applied to the wrapper. */

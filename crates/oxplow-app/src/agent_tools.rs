@@ -232,6 +232,7 @@ mod tests {
                 "oxplow_find_page",
                 "oxplow_get_open_page",
                 "oxplow_get_skill",
+                "oxplow_knowledge_drift",
                 "oxplow_list_comments",
                 "oxplow_list_tabs",
                 "oxplow_navigate",
@@ -250,7 +251,6 @@ mod tests {
                 "oxplow_vcs_branches",
                 "oxplow_vcs_log",
                 "oxplow_vcs_status",
-                "oxplow_wiki_ref_drift",
             ]
         );
         let query = tools.iter().find(|t| t.name == "oxplow_query_sql").unwrap();

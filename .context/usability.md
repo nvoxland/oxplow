@@ -18,7 +18,7 @@ Things I keep forgetting. Read this before adding any UI.
 > lives in `.context/pages-and-tabs.md`. Plan:
 > `/Users/nvoxland/.claude/plans/the-ui-is-very-delightful-badger.md`.
 
-## Pages are informational: a wiki, a web of information
+## Pages are informational: a wiki-like web of information
 
 oxplow's pages read like a wiki, not like an admin console or a
 spreadsheet. A page is a document about something: headed sections of
@@ -71,7 +71,7 @@ links. Concretely:
 
 ## Markdown is one component
 
-Wherever markdown is read or written — a wiki page, a task's body,
+Wherever markdown is read or written — a knowledge page, a task's body,
 a comment and its composer, a form's markdown field,
 a page's `markdown` viz — it is the one `Markdown` component
 (`.context/markdown.md`), so links, mermaid, code blocks with Copy,
@@ -218,7 +218,7 @@ markdown itself, nor edits it in a `<textarea>`.
   from a menu (which closes, leaving nowhere to ask inline) goes through
   `personCommands.run`: its `NeedsConfirmation` shows the shared
   `CommandConfirm` (`PersonCommandConfirm`, mounted once in `App`). The
-  task page's and wiki page's rail Delete use `InlineConfirm`; the wiki
+  task page's and knowledge page's rail Delete use `InlineConfirm`; the knowledge page
   pane's right-click Delete uses `personCommands`.
 - **What needs the person isn't in the rail.** The dock's Alerts
   icon (`components/Alerts/AlertsDockPanel.tsx`) counts everything that
@@ -567,7 +567,7 @@ markdown itself, nor edits it in a `<textarea>`.
   falls back to — the harness's own name, shown as the placeholder), with
   an "Also rename it in <harness>" box only where the harness can.
 - **A tab whose page holds unsaved edits says ●** before its label (a
-  file, a wiki page's draft — any page body that calls `useTabEditing`).
+  file, a knowledge page's draft — any page body that calls `useTabEditing`).
   File → Save (Ctrl/Cmd+S, `when: pageDirty`) saves the page shown
   through its own Save, and the tab cap never closes such a tab.
 - **Closing a dirty file tab** is fire-and-undo: the close completes
@@ -613,7 +613,7 @@ click is the confirmation — plus saying what is about to happen.
 
 ## Links open where you ask them to
 
-Any link that resolves to a page — wiki, task, file, directory, commit —
+Any link that resolves to a page — knowledge page, task, file, directory, commit —
 supports the browser conventions: **Cmd/Ctrl-click or middle-click opens
 it in a new tab**, plain click navigates in place. The right-click menu
 carries the same pair (Open / Open in new tab) so the gesture is
@@ -866,8 +866,8 @@ declaring *what it is* and mounting the generic layer.
 
 - **`data-ref` marks a region as a typed "context node."** Its value is
   the canonical URI of the thing, the same as tab ids and the `page_ref`
-  graph use ([resources.md](./resources.md)): a file, directory, wiki
-  page, task, commit or finding. Stamp it on the element that *is*
+  graph use ([resources.md](./resources.md)): a file, directory, knowledge page,
+  task, commit or finding. Stamp it on the element that *is*
   that thing (e.g. a task row carries
   `data-ref="oxplow:oxplow/task?id=tsk42&provider=oxtask"`). Nesting is
   meaningful: a file row inside a commit card yields the chain
@@ -1036,13 +1036,13 @@ declaring *what it is* and mounting the generic layer.
   alias shortcuts; extend the launcher. See
   `.context/pages-and-tabs.md` → "One Search".
 - **Launcher search behavior (the tsk52 pass).** The launcher searches
-  the **whole project** for tasks/wiki/notes/comments (cross-stream), but
+  the **whole project** for tasks/knowledge pages/notes/comments (cross-stream), but
   scopes file-body hits to the current stream — another worktree's files
   aren't openable here. Implemented as `searchSite(q, null)` +
   a client-side file-hit stream filter in `buildQuickOpenResults`
   (`quickOpenResults.ts`); filename matches already come from the
   current stream's `v_file` (read once, re-read when what it read changes). An **exact-identity match** — a
-  task id like `tsk30`, or a page/file/wiki name equal to the query —
+  task id like `tsk30`, or a page/file/knowledge page name equal to the query —
   floats to the very top, above the fuzzy pages/commands sections
   (`isExactMatch`). Task ids are searchable because `index_task`
   (`crates/oxplow-app/src/indexer.rs`) folds the id into the FTS body

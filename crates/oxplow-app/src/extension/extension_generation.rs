@@ -125,7 +125,7 @@ impl PreparedExtensionDatabase {
                 )],
             )]));
         }
-        let vocabulary = PreparedVocabulary::prepare(snapshot, capabilities.task_ids())?;
+        let vocabulary = PreparedVocabulary::prepare(snapshot, capabilities.recognizers())?;
         Ok(Self::with_vocabulary(
             snapshot,
             vocabulary,

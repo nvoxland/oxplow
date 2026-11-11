@@ -160,11 +160,11 @@ mod tests {
         assert!(hits.is_empty(), "{}", hits.join("\n"));
     }
 
-    /// oxtask is oxplow-bundled's, the wiki is foundation's: with
+    /// oxtask is oxplow-bundled's, oxwiki is foundation's: with
     /// oxplow-bundled off there is no task tracker (`task.*` is a sink that
-    /// tracks nothing) and the wiki still runs.
+    /// tracks nothing) and oxwiki still runs.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_wiki_runs_and_tasks_are_a_sink_with_bundled_off() {
+    async fn oxwiki_runs_and_tasks_are_a_sink_with_bundled_off() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -195,10 +195,10 @@ mod tests {
             .run(
                 &human,
                 "oxplow.knowledge.write_page",
-                serde_json::json!({ "slug": "notes", "title": "Notes", "body": "Hello." }),
+                serde_json::json!({ "id": "notes", "title": "Notes", "body": "Hello." }),
                 true,
             )
             .await
-            .expect("the wiki runs with bundled off");
+            .expect("oxwiki runs with bundled off");
     }
 }

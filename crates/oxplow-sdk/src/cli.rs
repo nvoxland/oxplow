@@ -813,7 +813,7 @@ mod tests {
             "{manifest}"
         );
         let script = std::fs::read_to_string(ext.join("implementations/shelf.star")).unwrap();
-        for verb in ["write_page", "delete_page", "link"] {
+        for verb in ["write_page", "delete_page"] {
             assert!(script.contains(&format!("def {verb}(x):")), "{script}");
         }
         let (code, _, err) = cli(&[

@@ -19,7 +19,7 @@ import {
   streamUri,
   threadUri,
   typeOf,
-  wikiUri,
+  knowledgeUri,
   taskUri,
 } from "./uri.js";
 
@@ -30,7 +30,7 @@ test("each record is named by its URI", () => {
   expect(streamUri("str1")).toBe("oxplow:oxplow/stream?id=str1");
   expect(commentUri("cmt4")).toBe("oxplow:oxplow/comment?id=cmt4");
   expect(agentSessionUri("ses3")).toBe("oxplow:oxplow/agent_session?id=ses3");
-  expect(wikiUri("architecture")).toBe("oxplow:oxplow/wiki?slug=architecture");
+  expect(knowledgeUri("oxwiki", "architecture")).toBe("oxplow:oxplow/knowledge?id=architecture&store=oxwiki");
   expect(eventUri("0190")).toBe("oxplow:oxplow/event?id=0190");
   expect(proposalUri(7)).toBe("oxplow:oxplow/proposal?id=7");
   expect(configUri("snapshotRetentionDays")).toBe("oxplow:oxplow/config?key=snapshotRetentionDays");
@@ -61,9 +61,9 @@ test("idOf reads the key param of the one resource", () => {
   expect(idOf(threadUri("thr3"), "oxplow/thread")).toBe("thr3");
   expect(idOf(threadUri("thr3"), "oxplow/stream")).toBeNull();
   expect(idOf("thr3", "oxplow/thread")).toBeNull();
-  expect(idOf(wikiUri("a"), "oxplow/wiki")).toBe("a");
+  expect(idOf(threadUri("a"), "oxplow/thread")).toBe("a");
   expect(idOf(pageUri("acme/x", { stream_id: 2 }), "oxplow/page")).toBe("acme/x");
   expect(idOf("oxplow:e2e/item?id=3", "e2e/item")).toBe("3");
   expect(typeOf("oxplow:e2e/item?id=3")).toBe("e2e/item");
-  expect(keyedUri("oxplow/wiki", "a")).toBe(wikiUri("a"));
+  expect(keyedUri("oxplow/thread", "a")).toBe(threadUri("a"));
 });

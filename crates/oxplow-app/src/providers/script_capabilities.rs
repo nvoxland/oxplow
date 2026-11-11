@@ -134,7 +134,7 @@ intent:
   examples:
     - name: writes
       input: { sql: "SELECT 1" }
-      expect: chosen as the knowledge store, pages are recorded
+      expect: a knowledge store beside oxwiki, its pages recorded
 permissions: [sql.read]
 implementations:
   - capability: knowledge
@@ -142,12 +142,16 @@ implementations:
     title: Scripted
     entry: store.star
     needs: [sql.read]
+    features: { edit: true }
+    data: { kinds: [{ id: memo, title: Memo, bucket: memory }] }
 "#;
 
 const KNOWLEDGE: &str = r###"
 # A store that keeps nothing of its own: each answer is the page's whole
-# record (`knowledge.page.recorded@2`), and a later verb reads the page
+# record (`knowledge.page.recorded@3`), and a later verb reads the page
 # back from oxplow's record (`v_knowledge_page`, `v_knowledge_body`).
+
+STORE = "scripted"
 
 def _refs(body):
     out = []
@@ -157,59 +161,54 @@ def _refs(body):
         inner = part.split("]]")[0].strip()
         if not inner:
             continue
-        if "/" in inner or "." in inner:
+        if ":" in inner:
+            store, id = inner.split(":", 1)
+            ref = uri.build("oxplow/knowledge", store = store, id = id)
+        elif "/" in inner or "." in inner:
             ref = uri.build("oxplow/file", path = inner)
         else:
-            ref = uri.build("oxplow/wiki", slug = inner)
+            ref = uri.build("oxplow/knowledge", store = "oxwiki", id = inner)
         if ref not in out:
             out.append(ref)
     return out
 
-def _title(body, slug):
+def _title(body, id):
     for line in body.split("\n"):
         if line.startswith("# "):
             return line[2:].strip()
-    return slug
+    return id
 
-def _recorded(slug, title, body, deleted):
-    page = uri.build("oxplow/wiki", slug = slug)
-    record = {"uri": page, "title": title, "body": body, "uris": _refs(body), "updated_at": "2026-01-01T00:00:00Z"}
+def _recorded(id, title, body, deleted):
+    page = uri.build("oxplow/knowledge", store = STORE, id = id)
+    record = {"uri": page, "kind": "memo", "title": title, "body": body, "uris": _refs(body), "updated_at": "2026-01-01T00:00:00Z"}
     if deleted:
         record["deleted"] = True
-    return {"type": "knowledge.page.recorded", "v": 2, "payload": {"page": record}, "subject": [page]}
+    return {"type": "knowledge.page.recorded", "v": 3, "payload": {"page": record}, "subject": [page]}
 
-def _page(slug):
+def _page(id):
     rows = scope("sql.read", {
         "sql": "SELECT p.title AS title, b.body AS body FROM v_knowledge_page p JOIN v_knowledge_body b ON b.uri = p.uri WHERE p.uri = :uri",
-        "params": {"uri": uri.build("oxplow/wiki", slug = slug)},
+        "params": {"uri": uri.build("oxplow/knowledge", store = STORE, id = id)},
     })
     if not rows:
-        fail("no page %s" % slug)
+        fail("no page %s" % id)
     return rows[0]
 
 def write_page(x):
     i = x["input"]
-    title = i.get("title") or _title(i["body"], i["slug"])
-    return {"result": {"page": i["slug"]}, "events": [_recorded(i["slug"], title, i["body"], False)]}
+    id = i.get("id") or i["title"].lower().replace(" ", "-")
+    body = i["body"]
+    title = i.get("title") or _title(body, id)
+    return {"result": {"id": id}, "events": [_recorded(id, title, body, False)]}
 
 def delete_page(x):
-    slug = x["input"]["slug"]
-    page = _page(slug)
-    return {"result": {}, "events": [_recorded(slug, page["title"], page["body"], True)]}
-
-def link(x):
-    i = x["input"]
-    slug = i["page"]
-    page = _page(slug)
-    body = page["body"].rstrip()
-    if "## Related" not in body:
-        body += "\n\n## Related"
-    body += "\n\n[[%s]]\n" % i["target"]
-    return {"result": {}, "events": [_recorded(slug, page["title"], body, False)]}
+    id = x["input"]["id"]
+    page = _page(id)
+    return {"result": {}, "events": [_recorded(id, page["title"], page["body"], True)]}
 "###;
 
-/// `KNOWLEDGE` (or a variant of it) as the project's knowledge store,
-/// chosen as a person's setting does.
+/// `KNOWLEDGE` (or a variant of it) as one of the project's knowledge
+/// stores, beside oxwiki.
 async fn knowledge_store(script: &str) -> ThreadFixture {
     let fx = activated(
         "script-knowledge",
@@ -217,51 +216,56 @@ async fn knowledge_store(script: &str) -> ThreadFixture {
         &[("store.star", script)],
     )
     .await;
+    assert_eq!(fx.svc.knowledge.enabled(), ["oxwiki", "scripted"]);
+    assert!(fx.svc.oxwiki.present(), "oxwiki stays enabled beside it");
+    fx
+}
+
+/// A script is one of the project's knowledge stores: enabled beside
+/// oxwiki, the page commands that name it reach its verbs, core records
+/// what it answers (its kind, its bucket), and the knowledge conformance
+/// suite passes against it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_script_knowledge_store_conforms() {
+    let fx = knowledge_store(KNOWLEDGE).await;
+    let findings = crate::knowledge_conformance::suite(&fx.svc, "scripted", &Actor::Human).await;
+    assert_eq!(findings, vec![]);
     fx.svc
         .commands
         .run(
             &Actor::Human,
-            "oxplow.capability.choose",
-            json!({ "capability": "knowledge", "provider": "scripted" }),
+            crate::knowledge::WRITE_PAGE,
+            json!({ "store": "scripted", "id": "kept", "body": "# Kept\n" }),
             true,
         )
         .await
         .unwrap();
-    assert!(fx.svc.event_pump.settle_all(Duration::from_secs(10)).await);
-    crate::test_fixtures::activate(&fx.svc).await;
-    // The switch empties core's record: let it finish before any write.
-    fx.svc
-        .event_pump
-        .settle(
-            &[crate::knowledge::KnowledgeSwitch::NAME],
-            Duration::from_secs(10),
+    let rows = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT kind, bucket FROM v_knowledge_page WHERE store = 'scripted'",
+            Vec::new(),
+            None,
         )
-        .await;
-    assert!(!fx.svc.wiki.live(), "the script is the active store");
-    fx
+        .await
+        .unwrap()
+        .rows;
+    use oxplow_db::SqlCell::Text;
+    assert_eq!(rows, vec![vec![Text("memo".into()), Text("memory".into())]]);
 }
 
-/// A script is the project's knowledge store: chosen, the page commands
-/// reach its verbs, core records what it answers, and the knowledge
-/// conformance suite passes against it.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_chosen_script_knowledge_store_conforms() {
-    let fx = knowledge_store(KNOWLEDGE).await;
-    let findings = crate::knowledge_conformance::suite(&fx.svc, &Actor::Human).await;
-    assert_eq!(findings, vec![]);
-}
-
-/// The suite is not vacuous against a script: a store
-/// that drops the link it was asked for is found out.
+/// The suite is not vacuous against a script: a store that drops what was
+/// written under the page's Related heading is found out.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_script_store_that_misrecords_pages_is_found_out() {
     let wrong = KNOWLEDGE.replace(
-        "body += \"\\n\\n[[%s]]\\n\" % i[\"target\"]",
-        "body += \"\\n\"",
+        "    body = i[\"body\"]\n",
+        "    body = i[\"body\"].split(\"\\n## Related\")[0]\n",
     );
     assert_ne!(wrong, KNOWLEDGE);
     let fx = knowledge_store(&wrong).await;
-    let findings = crate::knowledge_conformance::suite(&fx.svc, &Actor::Human).await;
+    let findings = crate::knowledge_conformance::suite(&fx.svc, "scripted", &Actor::Human).await;
     let checks: Vec<_> = findings.iter().map(|f| f.check).collect();
     assert!(checks.contains(&"link"), "{findings:#?}");
 }

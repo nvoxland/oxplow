@@ -160,7 +160,7 @@ native messaging"): taking one moves its item.
 ## No gates
 
 - The edit guard keeps only isolation: another
-  stream's worktree (the primary checkout included), wiki pages (written through `oxplow.knowledge.write_page`).
+  stream's worktree (the primary checkout included), knowledge pages (written through `oxplow.knowledge.write_page`).
   It never asks for tracked work.
 - The Stop hook never refuses a stop.
 - Nothing the agent must call to close work. A request ends when its
@@ -262,8 +262,10 @@ own — heavier ones included (beads as a task tracker).
   other, and a choice is a project default with a personal override.
   Core declares the capabilities (`oxplow_domain::capability`:
   `CapabilitySpec` — choosable, optional, default, the features an
-  implementation may declare): the task tracker and
-  knowledge may be none, snapshots may not, and `vcs` isn't chosen. A
+  implementation may declare): the task tracker
+  may be none, snapshots may not, `vcs` isn't chosen, and knowledge is
+  not chosen either: it is a "many" capability, every declared store is
+  active (`choosable = 0`, no `none`, no `capability.switched`). A
   person's override is `activeProviders` in `.oxplow/personal.yaml`
   (`oxplow.config.set { layer: personal }`).
 - **One active, or many at once.** Most capabilities have one active
@@ -322,7 +324,7 @@ The three in progress:
 |---|---|---|---|
 | Task tracker | yes | oxtask | Task screens stay core components, written against the interface; moving them into the extension is later work |
 | Snapshots | no | keeps everything (core's `oxplow`) | `SnapshotProvider` (`oxplow_domain::snapshot`): mark now, what changed between two points, read a path at a point (bytes only with `contents`). `Services.snapshots` (a `SnapshotRegistry`) answers the active one; every core take (a turn's end, a measured run, an archive) is its mark. Both built-ins are `snapshots::CoreSnapshots`, one capture pipeline under a content policy: `oxplow` keeps every version, `hashes` (bundled, "Track changes only") records identities and keeps no bytes. The captures follow the active one's policy (`SnapshotSwitch` on `capability.switched`, and every reload); a switch changes what's kept from then on, nothing taken before. A provider process implements it too (`providers::snapshots::SnapshotsHost`, `.context/providers.md` "A snapshots provider"): it marks, core records what it reports in the same ledger, and the capture pipeline idles while it's active |
-| Knowledge | yes | oxplow's wiki (bundled, `oxplow:wiki`) | `KnowledgeProvider` (`oxplow_domain::knowledge`): write, delete and link pages, and how current each page's pinned refs are. `Services.knowledge` (a `KnowledgeRegistry`) answers the active one. None is a sink, as the task tracker's is (`knowledge::NoneKnowledge`, core's, always registered): a write lands nowhere and succeeds, so nothing that writes pages is refused. An extension's provider may keep pages elsewhere (an Obsidian vault, a Confluence or MediaWiki server; `.context/knowledge.md` "The capability") |
+| Knowledge | no (a "many" capability: every declared store is active, none is chosen; with none enabled, writes are refused) | oxwiki (foundation, `oxplow:oxwiki`) | `KnowledgeProvider` (`oxplow_domain::knowledge`): write and delete pages, and how current each page's pinned refs are; core adds links itself. `Services.knowledge` (`KnowledgeStores`) holds every enabled store. A store declares kinds (`note`, `memory` or `instruction` bucket) and feature `edit`. An extension may add a store that keeps pages elsewhere (an Obsidian vault, a Confluence or MediaWiki server; `.context/knowledge.md` "The capability") |
 
 ## Status
 

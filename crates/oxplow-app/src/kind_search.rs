@@ -980,7 +980,10 @@ resources:
         let svc = &f.svc;
         for (kind, id) in [
             ("acme/pr", "oxplow:acme/pr?id=12"),
-            ("oxplow/wiki", "oxplow:oxplow/wiki?slug=widgets"),
+            (
+                "oxplow/knowledge",
+                "oxplow:oxplow/knowledge?id=widgets&store=oxwiki",
+            ),
             ("oxplow/task", "oxplow:oxplow/task?id=tsk7&provider=oxtask"),
         ] {
             svc.search_store
@@ -1015,7 +1018,7 @@ resources:
         left.sort();
         assert_eq!(
             left,
-            vec!["oxplow/task", "oxplow/wiki"],
+            vec!["oxplow/knowledge", "oxplow/task"],
             "core's entries are untouched"
         );
         let failures = svc
@@ -1049,8 +1052,8 @@ resources:
             .unwrap();
         svc.search_store
             .upsert(
-                "oxplow/wiki",
-                "oxplow:oxplow/wiki?slug=widgets",
+                "oxplow/knowledge",
+                "oxplow:oxplow/knowledge?id=widgets&store=oxwiki",
                 None,
                 "Widgets",
                 "",
@@ -1081,7 +1084,11 @@ resources:
             .into_iter()
             .map(|h| h.resource)
             .collect();
-        assert_eq!(left, vec!["oxplow/wiki"], "core's entries are untouched");
+        assert_eq!(
+            left,
+            vec!["oxplow/knowledge"],
+            "core's entries are untouched"
+        );
     }
 }
 
@@ -1412,42 +1419,42 @@ mod core_tests {
             .result
     }
 
-    /// Wiki pages: written by command or by hand, gone when deleted.
+    /// Knowledge pages: written by command or by hand, gone when deleted.
     #[tokio::test]
-    async fn wiki_pages_are_indexed() {
+    async fn knowledge_pages_are_indexed() {
         let (svc, dir) = services().await;
         svc.streams.ensure_primary().await.unwrap();
         change_loop(&svc);
         run(
             &svc,
             crate::knowledge::WRITE_PAGE,
-            serde_json::json!({ "slug": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
+            serde_json::json!({ "id": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
         )
         .await;
         eventually("the page is found", || {
-            found(&svc, "sprocket", None, "oxplow/wiki")
+            found(&svc, "sprocket", None, "oxplow/knowledge")
         })
         .await;
         std::fs::write(
-            crate::knowledge::page_path(dir.path(), "gears"),
+            oxplow_oxwiki::page_path(dir.path(), "gears"),
             "# Gears\n\nThe flange holds.\n",
         )
         .unwrap();
-        crate::wiki_pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
+        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
             .await
             .unwrap();
         eventually("a hand edit is found", || {
-            found(&svc, "flange", None, "oxplow/wiki")
+            found(&svc, "flange", None, "oxplow/knowledge")
         })
         .await;
         run(
             &svc,
             crate::knowledge::DELETE_PAGE,
-            serde_json::json!({ "slug": "gears" }),
+            serde_json::json!({ "id": "gears" }),
         )
         .await;
         eventually("the deleted page leaves", || async {
-            entries(&svc, "oxplow/wiki").await.is_empty()
+            entries(&svc, "oxplow/knowledge").await.is_empty()
         })
         .await;
     }

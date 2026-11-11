@@ -2013,7 +2013,7 @@ mod tests {
         );
         assert!(matches!(&done[0], Incoming::PromptDone(Err(e)) if e == "quota"));
         let call = tool_call(
-            &json!({"type": "mcpToolCall", "id": "m1", "server": "oxplow", "tool": "oxplow_read", "status": "completed", "arguments": {"uri": "oxplow:oxplow/wiki?slug=x"}, "result": {"content": []}}),
+            &json!({"type": "mcpToolCall", "id": "m1", "server": "oxplow", "tool": "oxplow_read", "status": "completed", "arguments": {"uri": "oxplow:oxplow/knowledge?id=x&store=oxwiki"}, "result": {"content": []}}),
             "m1".into(),
             true,
         )

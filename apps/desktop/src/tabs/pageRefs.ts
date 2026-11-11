@@ -4,7 +4,8 @@
  * hand-format an id.
  *
  * - An **entity** page's id is the entity's own ref: `file:<path>[@rev]`,
- *   `dir:<path>`, `wiki:<slug>`, `task:oxplow:tsk42`, `commit:<sha>`,
+ *   `dir:<path>`, `oxplow:oxplow/knowledge?id=…&store=…`,
+ *   `task:oxplow:tsk42`, `commit:<sha>`,
  *   `metric:<key>`, `page:<ext>/<slug>[?params]`.
  * - A **declared page** (a manifest's `pages:` entry, not a thing in the
  *   graph) is `page:<id>[?params]` for oxplow's own extension (core-named,
@@ -49,7 +50,8 @@ import {
   snapshotUri,
   turnUri,
   typeOf,
-  wikiUri,
+  knowledgeOf,
+  knowledgeUri,
   type ParamValue,
 } from "../uri/uri.js";
 
@@ -180,8 +182,8 @@ export function directoryRef(path: string): TabRef {
   return { id: dirUri(bare) };
 }
 
-export function wikiPageRef(slug: string): TabRef {
-  return { id: wikiUri(slug) };
+export function knowledgePageRef(store: string, id: string): TabRef {
+  return { id: knowledgeUri(store, id) };
 }
 
 /** A task's page, whichever list it's on: the tab id is its ref
@@ -396,8 +398,11 @@ export function symbolRef(ref: string): TabRef {
   return { id: ref };
 }
 
-export function wikiFreshnessRef(slug: string): TabRef {
-  return pageTabRef("wiki-freshness", { slug });
+/** A knowledge page's freshness report, by the page's URI. */
+export function knowledgeFreshnessRef(uri: string): TabRef {
+  const page = knowledgeOf(uri);
+  if (!page) throw new Error(`not a knowledge page: ${uri}`);
+  return pageTabRef("knowledge-freshness", { store: page.store, id: page.id });
 }
 
 /** The Dashboards index — the list of the user's custom dashboards: the

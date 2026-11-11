@@ -64,7 +64,7 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     case "turn":
     case "request":
       return GitCompare;
-    case "wiki":
+    case "knowledge":
       return BookOpen;
     case "task":
       return CheckSquare;
@@ -157,8 +157,8 @@ function DeclaredPageIcon({ kind, size, ...rest }: PageKindIconProps): ReactElem
  */
 export function pageKindLabel(kind: string, extensions: Extension[] | null = null): string {
   switch (kind) {
-    case "wiki":
-      return "wiki page";
+    case "knowledge":
+      return "knowledge page";
     case "task":
       return "task";
     case "agent_session":

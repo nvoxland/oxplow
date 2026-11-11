@@ -115,7 +115,7 @@ the user guide is `docs/guide/pages.md`.
     the deployed entity collector. `oxplow.extension.deploy` names no
     stream: it deploys the main stream's copy.
     `site_search` is the exception by design: omitted, it searches every
-    stream; it indexes pages as well as the wiki.
+    stream; it indexes pages as well as knowledge pages.
   - **Over IPC (the UI)** they show the live set: `list_extensions`,
     `get_page`, `load_component` and `invoke_component_command` take no
     stream; `open_page`, `run_page` and `run_page_action` take one only for

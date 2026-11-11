@@ -83,8 +83,8 @@ pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<Pa
     for item in refs.tasks {
         out.push(PageRefEdge::new(&source, item, RT_BODY_TASK));
     }
-    for w in refs.wikis {
-        out.push(PageRefEdge::new(&source, build::wiki_uri(&w), RT_WIKILINK));
+    for page in refs.knowledge {
+        out.push(PageRefEdge::new(&source, page, RT_WIKILINK));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
@@ -505,7 +505,7 @@ mod tests {
         let targets: Vec<_> = edges.iter().map(|e| e.target.clone()).collect();
         use oxplow_domain::uri::build;
         assert!(targets.contains(&build::task_uri("oxtask", "tsk42")));
-        assert!(targets.contains(&build::wiki_uri("architecture")));
+        assert!(targets.contains(&build::knowledge_uri("oxwiki", "architecture")));
         assert!(targets.contains(&build::finding_uri("fnd-7")));
     }
 

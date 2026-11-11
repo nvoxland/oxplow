@@ -941,6 +941,9 @@ struct ProviderStarter {
     fixture: String,
     needs: Option<&'static str>,
     data: serde_json::Value,
+    /// The features it starts with on (a knowledge store's `edit`: one
+    /// whose pages can't be written isn't a starting point).
+    on: &'static [&'static str],
 }
 
 fn provider_starter(capability: &str) -> ProviderStarter {
@@ -951,6 +954,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             fixture: "{ uri: $any }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
+            on: &[],
         },
         "agent_harness" => ProviderStarter {
             input: "{ command: render, input: { answer: { kind: ack } } }".to_string(),
@@ -964,6 +968,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                 "env_markers": [],
                 "settings": [],
             }),
+            on: &[],
         },
         "snapshots" => ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
@@ -973,6 +978,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
+            on: &[],
         },
         "filesystem" => ProviderStarter {
             input: "{ command: list, input: { parent: '' } }".to_string(),
@@ -980,14 +986,16 @@ fn provider_starter(capability: &str) -> ProviderStarter {
             fixture: "{ entries: $any }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
+            on: &[],
         },
         "knowledge" => ProviderStarter {
-            input: "{ command: write_page, input: { slug: example, body: '# Example', verified_files: [], removed_files: [] } }"
+            input: "{ command: write_page, input: { id: example, body: '# Example', verified_files: [], removed_files: [] } }"
                 .to_string(),
-            expect: "the page's slug",
-            fixture: "{ page: example }".to_string(),
+            expect: "the page's id",
+            fixture: "{ id: example }".to_string(),
             needs: None,
             data: serde_json::Value::Null,
+            on: &["edit"],
         },
         _ => {
             let verb = oxplow_domain::capability::contract(capability)
@@ -999,6 +1007,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
                 fixture: "$any".to_string(),
                 needs: None,
                 data: serde_json::Value::Null,
+                on: &[],
             }
         }
     }
@@ -1116,25 +1125,21 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
                     "properties": { "path": str_prop, "content": str_prop } }),
         ),
         ("knowledge", "write_page") => (
-            "Write a page, creating it or replacing its body: { page } (the slug), and answer its \
-             `knowledge.page.recorded` event with its `refs` (`oxplow:oxplow/file?path=…` / `oxplow:oxplow/wiki?slug=…`)."
+            "Write a page, creating it or replacing its body — `id` the page's (none: derive one \
+             from the title) — and answer its `knowledge.page.recorded` event: its URI \
+             (`oxplow:oxplow/knowledge?id=…&store=<this instance>`), its `kind` and the `uris` it \
+             links (`oxplow:oxplow/file?path=…`, another page's knowledge URI)."
                 .into(),
-            json!({ "type": "object", "required": ["slug", "body", "verified_files", "removed_files"],
+            json!({ "type": "object", "required": ["body", "verified_files", "removed_files"],
                     "additionalProperties": false,
-                    "properties": { "slug": str_prop, "title": str_prop, "body": str_prop,
+                    "properties": { "id": str_prop, "title": str_prop, "body": str_prop,
                                     "verified_files": { "type": "array", "items": str_prop },
                                     "removed_files": { "type": "array", "items": str_prop } } }),
         ),
         ("knowledge", "delete_page") => (
             "Delete a page: {}, answering its record with `deleted: true`.".into(),
-            json!({ "type": "object", "required": ["slug"], "additionalProperties": false,
-                    "properties": { "slug": str_prop } }),
-        ),
-        ("knowledge", "link") => (
-            "Link a page to a target (a wikilink's interior, such as `other-page` or `src/lib.rs`): {}.".into(),
-            json!({ "type": "object", "required": ["page", "target"],
-                    "additionalProperties": false,
-                    "properties": { "page": str_prop, "target": str_prop } }),
+            json!({ "type": "object", "required": ["id"], "additionalProperties": false,
+                    "properties": { "id": str_prop } }),
         ),
         _ => (
             format!("TODO: what `{verb}` does."),
@@ -1146,7 +1151,8 @@ fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
 /// A provider's starting declarations, from `capability`'s contract
 /// (`.context/providers.md` "What a provider may implement"): the verbs it
 /// always needs (`record` access, no confirmation; declare the others with
-/// their features), every feature off, the events it may emit with core's
+/// their features), every feature off but those its starter turns on (a
+/// knowledge store's `edit`), the events it may emit with core's
 /// schemas, a collector of what it records, and an empty config schema.
 fn provider_declarations(
     name: &str,
@@ -1160,7 +1166,10 @@ fn provider_declarations(
     let features: serde_json::Map<String, serde_json::Value> = spec
         .features
         .iter()
-        .map(|f| (f.to_string(), serde_json::Value::Bool(false)))
+        .map(|f| {
+            let on = provider_starter(capability).on.contains(f);
+            (f.to_string(), serde_json::Value::Bool(on))
+        })
         .collect();
     let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
     InitializeResult {

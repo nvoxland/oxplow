@@ -121,7 +121,7 @@ What core publishes, by where it comes from. Each row names its datasets
 |---|---|---|
 | work | `stream`, `thread`, `task`, `oxtask_note`, `oxtask_link`, `request`, `request_task`, `context_read` | cycle time, lifecycle |
 | collectors | `collector` (each enabled extension's collectors with their trigger, enabled flag, state and last run: a plain view over `contribution`, `collector_run` and `contribution_health`; the machine's network and credential standing are the live `collector_state` / `collector_credential`) | — |
-| knowledge | `wiki_page`, `comment` | freshness |
+| knowledge | `knowledge_page`, `comment` | freshness |
 | git | `commit`, `commit_file`, `commit_task`, `branch`, and change analysis (`change`, `change_file`, `change_function`, `change_import`, `change_duplicate`, `change_test_file`) | churn |
 | snapshots | `snapshot`, `snapshot_op` | — |
 | lsp | `diagnostic` | diagnostic counts by severity |
@@ -792,12 +792,11 @@ and `v_dataset_test` are the catalog of all of them:
 |---|---|
 | `v_stream` | streams (worktrees) |
 | `v_thread` | threads within a stream |
-| `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, P6.E1b) |
-| `v_knowledge_page` / `v_knowledge_ref` | knowledge pages with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
+| `v_knowledge_touch` | which threads wrote which knowledge pages, and when each last did (`page`, `thread_id`, `last_seen_at`; the rail's Finished section, v4) |
+| `v_knowledge_page` / `v_knowledge_ref` | knowledge pages of the enabled stores (v5: `uri, store, id, kind, bucket, title, url, author, excerpt, body_size, outbound_uris, stale_ref_count, updated_at`; a disabled store's pages stay recorded but hidden; the body is `v_knowledge_body`, pins are `v_knowledge_pin` keyed by `page`, search is `v_search_knowledge`) with their outbound refs and `stale_ref_count`, and each page's file refs with their pin and `stale` (P5.C4; knowledge.md) |
 | `v_task` | the active task tracker's items (`uri`, `provider`, `native_id`, `state` (the bucket), `stage` and `stage_title` (the list's own stage, as it declares it), `native` JSON, `parent_uri`), excluding deleted; everything reads it — oxtask has no dataset of its own (`v_task` was removed) and keeps its own fields in `stage` / `native`; oxtask tasks are `task:oxplow:tsk<n>` (V115, P5.C1; data-model.md) |
 | `v_comment` | comment threads, with first-message `body` and `message_count` |
 | `v_comment_message` | each message of a thread, by `comment` (the thread's URI) and `position` from 1, with `author` and `body` |
-| `v_wiki_page` | wiki pages (excerpt; full body is on disk) |
 | `v_snapshot` | worktree snapshots, with `tree_hash` (whole-tree identity, V96) |
 | `v_snapshot_file` | every captured version of a file (`file_snapshot`): its snapshot, stream, path, storage class, size and `content_hash`. A snapshot records only what changed since the stream's previous one, so a file's history is its rows, and `kind` (v2) says what the snapshot did to the path: `added`, `modified`, `deleted`, or NULL when the row changed nothing (P11), and `first_changed_at` / `last_changed_at` (v3) say when the file watcher first and last reported the file changed since the previous take, NULL when the take found the change itself (the startup sweep, a file with no watcher event) |
 | `v_snapshot_op` | the snapshot operation log: one row per take (a new snapshot or an unchanged tree) with `parent_snapshot_id`, `trigger`, thread / turn anchors, `elapsed_ms`, `budget_ms`, `over_budget` (V97) |

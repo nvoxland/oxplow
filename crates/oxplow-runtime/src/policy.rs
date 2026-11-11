@@ -1,6 +1,6 @@
 //! The tool policy every agent transport asks: may this thread run this
 //! tool now? It is isolation only — the write guard (no thread touches
-//! another stream's worktree; wiki pages are written by command). It never
+//! another stream's worktree; oxwiki pages are written by command). It never
 //! asks for tracked work (`.context/work-tracking.md`). The hook route asks
 //! it with Claude-shaped payloads; the ACP client asks it with ACP tool
 //! calls. The answer carries the reason text only; each transport renders
@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::write_guard::{foreign_worktree_reason, wiki_page_reason};
+use crate::write_guard::{foreign_worktree_reason, oxwiki_page_reason};
 
 /// What a tool call would do, as far as the policy cares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +56,7 @@ pub struct PolicyFacts<'a> {
     /// Every other stream's worktree (the primary checkout included). No
     /// thread edits them (workspace isolation).
     pub other_roots: &'a [PathBuf],
-    /// The primary project, whose `.oxplow/wiki` pages every stream shares
+    /// The primary project, whose `.oxplow/oxwiki` pages every stream shares
     /// (written by `oxplow.knowledge.write_page`, never by a tool).
     pub project_dir: &'a Path,
 }
@@ -128,9 +128,9 @@ pub fn decide_tool(intent: &ToolIntent<'_>, facts: &PolicyFacts<'_>) -> PolicyDe
                 .into_owned()
         })
         .collect();
-    // A wiki page is written by command, whatever the thread.
+    // An oxwiki page is written by command, whatever the thread.
     for p in &resolved {
-        if let Some(reason) = wiki_page_reason(Some(p), Some(&project)) {
+        if let Some(reason) = oxwiki_page_reason(Some(p), Some(&project)) {
             return PolicyDecision::Deny {
                 layer: DenyLayer::WriteGuard,
                 reason,
@@ -236,11 +236,11 @@ mod tests {
             layer(&decide(IntentKind::WorktreeWrite, &["/proj-wt/src/a.rs"])),
             Some(DenyLayer::WriteGuard)
         );
-        // The shared wiki is written by command, not by a tool, whatever
+        // oxwiki, shared, is written by command, not by a tool, whatever
         // the thread.
         for d in [
-            decide_in_worktree(&["/proj/.oxplow/wiki/x.md"]),
-            decide(IntentKind::WorktreeWrite, &["/proj/.oxplow/wiki/x.md"]),
+            decide_in_worktree(&["/proj/.oxplow/oxwiki/x.md"]),
+            decide(IntentKind::WorktreeWrite, &["/proj/.oxplow/oxwiki/x.md"]),
         ] {
             assert!(
                 matches!(&d, PolicyDecision::Deny { layer: DenyLayer::WriteGuard, reason }
