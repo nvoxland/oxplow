@@ -534,7 +534,10 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   `replace_tags` / `replace_stream_heads`),
   `visit` (a page the person opened, `PageVisitStore::record`),
   `facts` (findings of a declared measure through `record_facts`) and
-  `retention` (`event_retention::sweep`, run `days` ahead). A step's `when: { sql }` reads the result, since a `steps` entry
+  `retention` (`event_retention::sweep`, run `days` ahead) and
+  `detail_compaction` (`compact_capture_details`, keeping each producer's
+  newest `keep` captures' detail whole). A `turn` with `open: true` gets
+  no `Stop`: it is still running. A step's `when: { sql }` reads the result, since a `steps` entry
   of a command, event or sql fixture takes the earlier kind in `KINDS`.
 - `when: { advisory: <id>, thread? }`, `expect: { lines: [..] }` — the
   extension's advisory run for a thread (the primary one when none) as

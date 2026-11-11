@@ -326,7 +326,8 @@ welded to collection.
   Σn/Σd, not a history blend (V50/tsk13 fixed coverage from V43's wrong
   `non-additive`); only an **accumulating** mean-across-observations ratio
   (one observation per capture, Σ over all captures = the mean) is
-  `non-additive`; a request's figures are semi-additive, `fold: last`), `fold` (`sum` | `last` | `first` | `avg` |
+  `non-additive`; a request's figures are non-additive too — one placed,
+  replacing capture per request, see "Placed, replacing captures"), `fold` (`sum` | `last` | `first` | `avg` |
   `none`, V116 — how the series becomes one number; see "Additivity"),
   `scope`, `description`. (Ratio components ride each fact's num/den; the
   dead V43 `component_role` column is dropped in place by V159, tsk865 —
@@ -343,8 +344,9 @@ welded to collection.
   `oxplow.rule` dim; see "Per-language idiom collectors", tsk30), plus
   the four per-request measures `oxplow.request_tokens`,
   `oxplow.request_cycle_time`, `oxplow.request_test_outcome` and
-  `oxplow.request_time_to_green` (subject kind `request`, per-subject scope,
-  `last` fold — each keeps a request's latest figure) that the foundation's
+  `oxplow.request_time_to_green` (subject kind `request`, `non-additive`,
+  `fold: sum`, `complete` scope — one capture per request, placed at its
+  start and replaced when the request is recorded again) that the foundation's
   `oxplow.request_outcome` collector records each time a turn of a request
   ends; the four `oxplow.tests.{failed_at_close,
   peak_failed,distinct_failed,red_runs}` specs slice `oxplow.request_test_outcome`
@@ -392,7 +394,16 @@ welded to collection.
   > detail_json` — the verbatim per-run payload behind the request's
   > Tests/Coverage view. The capture row and every fact survive, so no metric
   > value, trend point or count can change; that is exactly why it defaults ON
-  > while the fact-deleting prune stays opt-in. Dedup is unaffected —
+  > while the fact-deleting prune stays opt-in. **A test run's detail
+  > (`test-detail`) is slimmed, not NULLed** (2026-11-10): it keeps its counts
+  > and its failed cases, marked `"compacted": true` (no later pass takes it
+  > again), so `v_test_run` still lists the run and `v_test_case` its
+  > failures. The request outcome reads its runs from those: a request
+  > recorded again after a restart's compaction took its older runs would
+  > otherwise re-emit a smaller peak / distinct_failed / red_runs. Only the
+  > passing cases (most of the bytes) go. Pinned by
+  > `compacting_a_test_runs_detail_keeps_its_counts_and_failed_cases` and the
+  > `a-requests-test-outcome-keeps-runs-whose-detail-was-compacted` fixture. Dedup is unaffected —
   > `idempotency_key` is derived from `detail_json` at WRITE time into its own
   > column, so a replayed report still matches after the payload is gone.
   >
@@ -1133,7 +1144,7 @@ Landed:
 |---|---|---|
 | tokens — OTEL | the `token_usage.otlp` consumer (`token_usage.rs::record_reported`) over `agent.tokens.reported`, which the control-plane `POST /v1/metrics` OTLP receiver logs (`otlp_ingest.rs`) | PER-KIND facts on `oxplow.tokens` (one input + one output per model, sliced by the `oxplow.token_kind` dim), producer `otel-tokens`, one capture per export keyed by its event (`otel-tokens:<event id>`; a retransmit logs no second event). The capture carries the event's anchors: the thread (the exporter's session bearer), its stream and the turn the export measured. `agent.tokens.total` sums both kinds; input/output specs filter by `token_kind`. **Source of the token facts** — see [OTEL token tracking](#otel-token-tracking-tsk22) |
 | prompt-cache tokens (tsk73) | same ingest, same capture | Cache kinds (Claude `cacheRead`/`cacheCreation`) land on **`oxplow.cache_tokens`** — a SEPARATE measure, because `agent.tokens.total` is an unfiltered sum over `oxplow.tokens` and cache facts there would silently change its meaning. Plus one per-model **`oxplow.cache_usage`** ratio fact per export: `num = cache_read`, `den = input + cache_read + cache_creation` (prompt-side; output can't be cached) — non-additive, so the cross-time collapse is the cumulative Σn/Σd hit ratio (`agent.tokens.cache_hit_pct`). An export with NO cache telemetry emits no ratio fact (an agent that doesn't report cache reads as "no data", not 0%). **Token-denominated only — never dollars**: the API returns token counts; a locally maintained price table is invalid by construction (Claude Code's OTEL `cost.usage` *estimate* would be the only defensible future dollar source, not ingested today) |
-| request outcome | oxplow-foundation's **`oxplow.request_outcome` collector** (`collectors/request/outcome.star`, `on: [agent.turn.ended]`; core computes none of it) | Each time a turn of a request ends, the request's latest figures, subject the request's URI, on measures that keep a subject's latest (`fold: last`, `captureScope: per-subject`, since a request has no finished moment and a later turn records it again): **`oxplow.request_tokens`** (`v_request.input_tokens + output_tokens` over all its turns — input counts cache reads and writes; none when unmetered; the collector runs `after: [token_usage.turns]`, which records a turn's tokens from its transcript once it ends — before it, about 98% of a turn's tokens weren't in yet), **`oxplow.request_cycle_time`** (first prompt to last activity, ms), four **`oxplow.request_test_outcome`** facts sliced by `oxplow.tests_stat` — `at_close` (failed in its latest run), `peak`, `distinct_failed` (asserted failures have no identity, so never fewer than `peak`), `red_runs` — and **`oxplow.request_time_to_green`** (first red run to the first green after it; none when it never went red or never recovered). Its runs are the `tests` captures whose `turn_id` is one of the request's turns. Metrics: `request.tokens`, `request.cycle_time_ms`, `request.time_to_green_ms`, `oxplow.tests.{failed_at_close,peak_failed,distinct_failed,red_runs}`. Decided 2026-11-10 when efforts went: steering and token waste were effort-only and are gone; history starts fresh. Pinned by `a-requests-outcome-is-recorded-when-its-turn-ends` and `a-request-with-no-test-runs-records-no-test-outcome` |
+| request outcome | oxplow-foundation's **`oxplow.request_outcome` collector** (`collectors/request/outcome.star`, `on: [agent.turn.ended]`; core computes none of it) | Each time a turn of a request ends **and no turn of it is still running** (its input finds no open turn of the request; else the run records nothing for it and the request keeps the figures it had when it last stopped), the request's latest figures, subject the request's URI, as **one capture per request placed at the request's start** (`capture.at` = `v_request.started_at`, the input's `placed_at` column — the one place that choice lives) **that replaces the request's earlier capture** (`capture.replaces` = its URI; see "Placed, replacing captures"). The measures are `non-additive`, `fold: sum`, `complete`, so a period's point is the mean over the requests that started in it, each counted once at its latest figures; a later turn (a job report, a hand-back) updates the figures in the request's start period, never moves it. Decided by the person 2026-11-10 (before: per-subject `fold: last`, which kept every request ever seen in every point — a lifetime mean that went flat; V27 dropped that history). **`oxplow.request_tokens`** (`v_request.input_tokens + output_tokens` over all its turns — input counts cache reads and writes; none when unmetered; the collector runs `after: [token_usage.turns]`, which records a turn's tokens from its transcript once it ends — before it, about 98% of a turn's tokens weren't in yet), **`oxplow.request_cycle_time`** (first prompt to last activity, ms), four **`oxplow.request_test_outcome`** facts sliced by `oxplow.tests_stat` — `at_close` (failed in its latest run), `peak`, `distinct_failed` (asserted failures have no identity, so never fewer than `peak`), `red_runs` — and **`oxplow.request_time_to_green`** (first red run to the first green after it; none when it never went red or never recovered). Its runs are the `tests` captures whose `turn_id` is one of the request's turns. Metrics: `request.tokens`, `request.cycle_time_ms`, `request.time_to_green_ms`, `oxplow.tests.{failed_at_close,peak_failed,distinct_failed,red_runs}`. Decided 2026-11-10 when efforts went: steering and token waste were effort-only and are gone; history starts fresh. Pinned by `a-requests-outcome-is-recorded-when-its-turn-ends`, `a-request-with-no-test-runs-records-no-test-outcome`, `a-requests-outcome-is-placed-at-its-start-and-a-later-turn-replaces-it`, `a-period-of-a-request-metric-counts-each-request-once`, `a-running-request-is-not-recorded-until-it-stops` and `a-requests-test-outcome-keeps-runs-whose-detail-was-compacted` (its runs survive detail compaction: see the compaction box) |
 | turns — transcript (tsk22) | `token_usage.rs::record_token_metrics`, from `on_stop` | a `oxplow.turn` fact per model per Stop (turn COUNT = genuine user prompts). The transcript path **no longer projects `oxplow.tokens`** (OTEL owns those); it still records the per-turn `agent_token_usage` rows (with prompt text OTEL lacks). The Claude harness's transcript parse counts each `message.id` once (tsk22), which removed the ~2–3× overcount from Claude repeating a message's `usage` on every content-block line |
 | nudges (T-B) | `collection.rs::project_nudge_metric` | one `oxplow.nudge` event fact per fired nudge (value 1, subject=the nudge kind) — the `agent.nudges.fired` spec is `Sum(oxplow.nudge)` |
 
@@ -1599,6 +1610,43 @@ one. Derive it from `temporal_semantics` when writing a measure: `semi-additive`
 → `last`, `additive` → `sum`, a non-additive ratio or mean → `sum` (Σn/Σd).
 `temporal_semantics` stays: it decides which captures are current
 (`current_capture_ids`), not how the series folds.
+
+### Placed, replacing captures (V27)
+
+A figure **per thing** (a request) that a trend should **mean per period** —
+each thing once, in its own period, updated in place — is neither a running
+state (`per-subject`, whose every point holds every subject ever seen: a
+lifetime mean) nor one more observation per run (counted once per run). It is
+one capture per thing, which the producer places and replaces:
+
+- **`NewMetricCapture.replaces`** (`metric_capture.replace_key`, V27): what
+  the capture's facts are the figures of. `record_facts_tx` deletes the
+  producer's earlier captures under the same key (`replace_captures_tx`;
+  their facts cascade, a fact a kept chain still holds is rehomed first, as
+  the prune does) in the same transaction as the insert. Producer-scoped:
+  another producer's capture under the key is its own.
+- **`captured_at`** given by the producer: the time the facts are placed at
+  (the request's start), so `metric_bucket` puts the capture in that period.
+- Declare the measures `non-additive`, `fold: sum`, `complete`: each capture
+  is one observation, `AVG(value)` points carry `(Σvalues, count)`, and a
+  bucket's (or headline's) Σn/Σd is the mean over the captures placed in it.
+- A fact collector says both in its output: `{"facts": [...], "capture":
+  {"at": "<RFC 3339>", "replaces": "<key>"}}` (`oxplow_script::collected_of`
+  → `metrics_service::CapturePlace`; a bad `at` fails the run).
+- **The cube.** Its watermark assumes captures arrive in time order, and a
+  placed capture may land behind it. `recube_from_tx` (same transaction)
+  moves a complete-scope measure's watermark back to just before the capture
+  (the next build re-folds from there; reads use the facts until then) and
+  drops a partial-scope measure's cube in the stream when the capture is
+  behind it or replaced others; either bumps the epoch.
+  `a_per_request_mean_is_each_periods_own_and_a_rerecorded_request_keeps_its_period`
+  (metric_cube.rs) pins the means and the cube; 
+  `a_capture_replaces_its_producers_earlier_capture_with_its_key` (fact_store.rs)
+  the replacement.
+
+Which time places a request is the collector's `placed_at` column alone
+(`v_request.started_at`, decided 2026-11-10): switching it to the last turn's
+end is that column plus the fixture comparing the capture to it.
 
 ## Branch tracking
 

@@ -387,11 +387,14 @@ impl MetricCubeBuilder {
     /// watermark, on the same `(captured_at, id)` key the capture list is ordered
     /// by.
     ///
-    /// Assumes captures arrive in time order within a (measure, stream) — true
-    /// because `captured_at` defaults to now() at record time and NO production
-    /// caller overrides it. A backwards clock jump would leave a capture un-folded
-    /// and silently absent from a cube-served series; the escape hatch is a
-    /// rebuild, and the cube is disposable by design.
+    /// Assumes captures arrive in time order within a (measure, stream) —
+    /// `captured_at` defaults to now() at record time. A capture recorded at a
+    /// time it was given (a request's outcome, placed at the request's start)
+    /// or replacing others moves the watermark back in the same transaction
+    /// (`fact_store::recube_from_tx`), so it is folded again from there. A
+    /// backwards clock jump would still leave a capture un-folded and silently
+    /// absent from a cube-served series; the escape hatch is a rebuild, and
+    /// the cube is disposable by design.
     async fn uncubed<'a>(
         &self,
         measure: &Measure,
@@ -2593,5 +2596,92 @@ mod tests {
         );
         builder.build_measure("acme.test_case").await.unwrap();
         assert_cube_answers(&engine, &facts, "acme.test_case", &spec, &oracle).await;
+    }
+
+    /// A per-request mean (non-additive, `avg`) whose captures each replace
+    /// the request's earlier one and are placed at the request's start: a
+    /// period's point is the mean of the requests that started in it, and
+    /// a request recorded again keeps its period with its new figures —
+    /// its old ones leave. The capture lands behind the cube's watermark;
+    /// the cube folds it again rather than serve a period without it.
+    #[tokio::test]
+    async fn a_per_request_mean_is_each_periods_own_and_a_rerecorded_request_keeps_its_period() {
+        use crate::metric_bucket::TimeBucket;
+        use crate::metric_engine::SeriesRead;
+        let (engine, facts, builder) = fixture().await;
+        let m = facts
+            .upsert_measure(oxplow_db::NewMeasure {
+                temporal_semantics: "non-additive".into(),
+                fold: Some("sum".into()),
+                capture_scope: "complete".into(),
+                ..oxplow_db::NewMeasure::new("acme.request_cost", "Request cost")
+            })
+            .await
+            .unwrap();
+        let spec = spec(&facts, "acme.cost", "acme.request_cost", "avg").await;
+        let record = |request: &'static str, started: &'static str, value: f64| {
+            let facts = facts.clone();
+            async move {
+                let subject = format!("oxplow:oxplow/request?id={request}");
+                facts
+                    .record_facts(
+                        NewMetricCapture {
+                            replaces: Some(subject.clone()),
+                            captured_at: Some(ts(started)),
+                            ..NewMetricCapture::done(1, "acme.outcome", "acme")
+                        },
+                        vec![NewFact {
+                            subject: Some(subject),
+                            numerator: Some(value),
+                            denominator: Some(1.0),
+                            ..NewFact::new(m, value)
+                        }],
+                    )
+                    .await
+                    .unwrap();
+            }
+        };
+        let monthly = |engine: MetricEngine, spec: MetricSpec| async move {
+            engine
+                .series_for_spec_read(
+                    &spec,
+                    &SeriesRead {
+                        bucket: Some(TimeBucket::Month),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|p| (p.captured_at.to_string()[..7].to_string(), p.value))
+                .collect::<Vec<_>>()
+        };
+        record("req1", "2026-01-05T09:00:00Z", 10.0).await;
+        record("req2", "2026-01-20T09:00:00Z", 30.0).await;
+        record("req3", "2026-02-03T09:00:00Z", 50.0).await;
+        assert_eq!(
+            monthly(engine.clone(), spec.clone()).await,
+            vec![("2026-01".to_string(), 20.0), ("2026-02".to_string(), 50.0)]
+        );
+        builder.build_measure("acme.request_cost").await.unwrap();
+
+        // A later turn of req1 records it again: it stays in January.
+        record("req1", "2026-01-05T09:00:00Z", 40.0).await;
+        let oracle = oracle(&engine, &spec).await;
+        assert_eq!(
+            oracle.iter().map(|p| p.value).collect::<Vec<_>>(),
+            vec![40.0, 30.0, 50.0],
+            "one point per request, in start order"
+        );
+        assert_eq!(
+            monthly(engine.clone(), spec.clone()).await,
+            vec![("2026-01".to_string(), 35.0), ("2026-02".to_string(), 50.0)]
+        );
+        builder.build_measure("acme.request_cost").await.unwrap();
+        assert_cube_answers(&engine, &facts, "acme.request_cost", &spec, &oracle).await;
+        assert_eq!(
+            monthly(engine.clone(), spec.clone()).await,
+            vec![("2026-01".to_string(), 35.0), ("2026-02".to_string(), 50.0)]
+        );
     }
 }

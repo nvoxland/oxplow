@@ -497,6 +497,12 @@ pub struct NewMetricCapture {
     /// whole write (no duplicate capture, no double-counted facts) and returns
     /// the existing id. `None` (the default) always inserts a fresh row.
     pub idempotency_key: Option<String>,
+    /// What this capture's facts are the figures of (a request's URI, say)
+    /// when it takes the place of the producer's earlier captures of it
+    /// (V27): recording it deletes those captures and their facts in the
+    /// same transaction, so the subject counts once, at this capture's
+    /// `captured_at`. `None` (the default) replaces nothing.
+    pub replaces: Option<String>,
     /// See [`MetricCapture::producer_version`].
     pub producer_version: Option<String>,
     /// See [`MetricCapture::scan_kind`]. Defaults to `delta`; the insert
@@ -534,6 +540,7 @@ impl NewMetricCapture {
             ended_at: None,
             detail_json: None,
             idempotency_key: None,
+            replaces: None,
             producer_version: None,
             scan_kind: "delta".into(),
             turn_id: None,
@@ -871,15 +878,166 @@ pub fn record_facts_tx(
         check_subject(f)?;
         check_dims_tx(conn, f.dims_json.as_deref())?;
     }
+    let replaced = match capture.replaces.as_deref() {
+        Some(key) => replace_captures_tx(conn, &capture.producer, key).map_err(map_sql_err)?,
+        None => Replaced::default(),
+    };
     let capture_id = insert_capture(conn, capture).map_err(map_sql_err)?;
     // A complete-scope measure, and each file a code gauge rescans, stores
     // only what changed (V39 chains, V43 path holds: `fact_chain`).
     crate::fact_chain::write(conn, capture_id, capture, facts).map_err(map_sql_err)?;
+    // A capture placed in the past, or one that took others' place, lands
+    // behind what the cube may have folded already.
+    if capture.captured_at.is_some() || !replaced.ids.is_empty() {
+        let mut measures = replaced.measures;
+        measures.extend(facts.iter().map(|f| f.measure_id));
+        let mut streams = replaced.streams;
+        streams.insert(capture.stream_id);
+        recube_from_tx(
+            conn,
+            &measures,
+            &streams,
+            capture_id,
+            !replaced.ids.is_empty(),
+        )
+        .map_err(map_sql_err)?;
+    }
     if let Some(log) = log {
         let env = (log.build)(capture_id);
         crate::event_log_store::append_unique_tx(conn, &log.vocabulary.current(), &env)?;
     }
     Ok(capture_id)
+}
+
+/// The captures a capture took the place of ([`replace_captures_tx`]):
+/// their ids, and the measures and streams their facts were in.
+#[derive(Debug, Default)]
+struct Replaced {
+    ids: Vec<i64>,
+    measures: std::collections::BTreeSet<i64>,
+    streams: std::collections::BTreeSet<i64>,
+}
+
+/// Delete `producer`'s captures recorded under `key` (`replace_key`), and
+/// their facts: a capture recorded with `replaces: key` takes their place.
+/// A fact one of them stored that a kept capture still holds moves up to
+/// it first, as a prune does.
+fn replace_captures_tx(
+    conn: &rusqlite::Connection,
+    producer: &str,
+    key: &str,
+) -> rusqlite::Result<Replaced> {
+    let mut out = Replaced::default();
+    {
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, stream_id FROM metric_capture WHERE producer = ?1 AND replace_key = ?2",
+        )?;
+        for row in stmt.query_map(params![producer, key], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })? {
+            let (id, stream) = row?;
+            out.ids.push(id);
+            out.streams.insert(stream);
+        }
+    }
+    if out.ids.is_empty() {
+        return Ok(out);
+    }
+    let ids = serde_json::to_string(&out.ids).expect("ids serialize");
+    {
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT measure_id FROM fact
+              WHERE capture_id IN (SELECT value FROM json_each(?1))
+             UNION
+             SELECT measure_id FROM fact_chain
+              WHERE capture_id IN (SELECT value FROM json_each(?1))",
+        )?;
+        for m in stmt.query_map([&ids], |r| r.get::<_, i64>(0))? {
+            out.measures.insert(m?);
+        }
+    }
+    crate::fact_chain::rehome(conn, &out.ids)?;
+    conn.execute(
+        "DELETE FROM metric_capture WHERE id IN (SELECT value FROM json_each(?1))",
+        [&ids],
+    )?;
+    Ok(out)
+}
+
+/// The cube's watermark assumes captures arrive in time order (it folds
+/// what is after it). Capture `capture_id` may land behind it — placed at
+/// a time it was given, or taking replaced captures' place — so each of
+/// `measures` folds it again in `streams`: a complete-scope measure (no
+/// state, each capture its own rows) moves its watermark back to just
+/// before the capture, and the next build re-folds from there; a
+/// partial-scope one (a running state) drops its cube in those streams
+/// when the capture is behind its watermark or `replaced` removed others.
+/// Until a build catches up, its reads use the facts.
+fn recube_from_tx(
+    conn: &rusqlite::Connection,
+    measures: &std::collections::BTreeSet<i64>,
+    streams: &std::collections::BTreeSet<i64>,
+    capture_id: i64,
+    replaced: bool,
+) -> rusqlite::Result<()> {
+    let at: String = conn.query_row(
+        "SELECT captured_at FROM metric_capture WHERE id = ?1",
+        [capture_id],
+        |r| r.get(0),
+    )?;
+    let behind = "measure_id = ?1 AND stream_id = ?2
+                  AND (last_captured_at > ?3 OR (last_captured_at = ?3 AND last_capture_id >= ?4))";
+    let mut moved = false;
+    for &m in measures {
+        let scope: Option<String> = conn
+            .query_row(
+                "SELECT capture_scope FROM measure WHERE id = ?1",
+                [m],
+                |r| r.get(0),
+            )
+            .optional()?;
+        for &s in streams {
+            if scope.as_deref() == Some("complete") {
+                moved |= conn.execute(
+                    &format!(
+                        "UPDATE metric_cube_state SET last_captured_at = ?3, last_capture_id = ?4 - 1
+                          WHERE {behind}"
+                    ),
+                    params![m, s, at, capture_id],
+                )? > 0;
+                continue;
+            }
+            let stale = replaced
+                || conn
+                    .query_row(
+                        &format!("SELECT 1 FROM metric_cube_state WHERE {behind} LIMIT 1"),
+                        params![m, s, at, capture_id],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+            if stale {
+                conn.execute(
+                    "DELETE FROM metric_cube WHERE measure_id = ?1 AND capture_id IN
+                       (SELECT id FROM metric_capture WHERE stream_id = ?2)",
+                    params![m, s],
+                )?;
+                conn.execute(
+                    "DELETE FROM metric_live_fact WHERE measure_id = ?1 AND stream_id = ?2",
+                    params![m, s],
+                )?;
+                moved |= conn.execute(
+                    "DELETE FROM metric_cube_state WHERE measure_id = ?1 AND stream_id = ?2",
+                    params![m, s],
+                )? > 0;
+            }
+        }
+    }
+    if moved {
+        // Fence any build in flight (tsk103).
+        conn.execute("UPDATE metric_cube_epoch SET epoch = epoch + 1", [])?;
+    }
+    Ok(())
 }
 
 /// A fact's dimension keys have one name each — the namespaced one (tsk945):
@@ -972,8 +1130,8 @@ fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite
            (stream_id, thread_id, producer, status, error, scope, trigger, basis_ref,
             provenance, source, snapshot_id, closest_vcs_rev, vcs_rev_exact, branch,
             captured_at, ended_at, detail_json, idempotency_key, producer_version, scan_kind,
-            turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            turn_id, replace_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             c.stream_id,
             c.thread_id,
@@ -996,6 +1154,7 @@ fn insert_capture(conn: &rusqlite::Connection, c: &NewMetricCapture) -> rusqlite
             c.producer_version,
             scan_kind,
             c.turn_id,
+            c.replaces,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -2283,12 +2442,16 @@ impl SqliteFactStore {
     }
 
     /// Compact old per-run drill-in payloads: `NULL` out `detail_json` for
-    /// captures beyond either retention bound. Returns the number compacted.
+    /// captures beyond either retention bound — except a test run's
+    /// (`test-detail`), which keeps its counts and failed cases, marked
+    /// `"compacted": true` (a request's test outcome is read from them, and
+    /// a request recorded again must not lose its old runs). Returns the
+    /// number compacted.
     ///
     /// **Compaction, not deletion (tsk211).** The capture row and every one of
     /// its facts survive, so no metric value, trend point, or count changes —
     /// only the Tests/Coverage detail for old runs is
-    /// lost. That is why this is safe to have ON by default, unlike
+    /// lost (a test run's passing cases). That is why this is safe to have ON by default, unlike
     /// `prune_aged_captures` (which deletes facts and stays opt-in).
     ///
     /// Two bounds, applied together — a capture is compacted if EITHER matches:
@@ -2339,9 +2502,25 @@ impl SqliteFactStore {
                 // captures newest-first so the count cap is per producer rather
                 // than global — a chatty producer must not evict a quiet one's
                 // detail.
+                // A test run's detail keeps what a request's outcome reads from
+                // it (its counts and its failed cases, `v_test_run` /
+                // `v_test_case`), marked `compacted` so no later pass takes
+                // it again; every other kind's goes.
                 let n = conn.execute(
-                    "UPDATE metric_capture SET detail_json = NULL
+                    "UPDATE metric_capture SET detail_json = CASE
+                       WHEN json_extract(detail_json, '$.kind') = 'test-detail' THEN json_set(
+                         CASE WHEN json_type(detail_json, '$.payload.suites') = 'array'
+                           THEN json_set(detail_json, '$.payload.suites', json((
+                             SELECT json_group_array(json(json_set(s.value, '$.cases', json((
+                                      SELECT json_group_array(json(t.value))
+                                        FROM json_each(s.value, '$.cases') t
+                                       WHERE json_extract(t.value, '$.status') = 'failed')))))
+                               FROM json_each(detail_json, '$.payload.suites') s)))
+                           ELSE detail_json END,
+                         '$.compacted', json('true'))
+                       END
                       WHERE detail_json IS NOT NULL
+                        AND json_extract(detail_json, '$.compacted') IS NULL
                         AND id IN (
                           SELECT id FROM (
                             SELECT id, captured_at,
@@ -2351,6 +2530,7 @@ impl SqliteFactStore {
                                    ) AS rn
                               FROM metric_capture
                              WHERE detail_json IS NOT NULL
+                               AND json_extract(detail_json, '$.compacted') IS NULL
                           )
                           WHERE (?1 IS NOT NULL AND rn > ?1)
                              OR (?2 IS NOT NULL AND captured_at < ?2)
@@ -6541,6 +6721,62 @@ mod tests {
         assert_eq!(store.compact_capture_details(None, None).await.unwrap(), 0);
     }
 
+    /// A test run's detail compacts to what a request's outcome reads from
+    /// it — its counts and its failed cases — not to nothing: a request
+    /// recorded again after its older runs compacted counts them as before.
+    /// Once compacted it is not compacted again.
+    #[tokio::test]
+    async fn compacting_a_test_runs_detail_keeps_its_counts_and_failed_cases() {
+        let store = fixture().await;
+        let mut cap = NewMetricCapture::done(1, "tests", "s");
+        cap.captured_at = Some(at("2026-06-10T10:00:00.000000Z"));
+        cap.detail_json = Some(
+            serde_json::json!({
+                "kind": "test-detail",
+                "payload": {
+                    "command": "cargo test", "passed": 1, "failed": 1, "total": 2,
+                    "suites": [{ "name": "s", "cases": [
+                        { "classname": "t", "name": "a", "status": "failed", "message": "boom" },
+                        { "classname": "t", "name": "b", "status": "passed" },
+                    ]}],
+                },
+            })
+            .to_string(),
+        );
+        let id = store.record_facts(cap, vec![]).await.unwrap();
+        assert_eq!(
+            store.compact_capture_details(None, Some(0)).await.unwrap(),
+            1
+        );
+        let detail: serde_json::Value = serde_json::from_str(
+            &store
+                .get_capture(id)
+                .await
+                .unwrap()
+                .unwrap()
+                .detail_json
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            detail,
+            serde_json::json!({
+                "kind": "test-detail",
+                "compacted": true,
+                "payload": {
+                    "command": "cargo test", "passed": 1, "failed": 1, "total": 2,
+                    "suites": [{ "name": "s", "cases": [
+                        { "classname": "t", "name": "a", "status": "failed", "message": "boom" },
+                    ]}],
+                },
+            })
+        );
+        assert_eq!(
+            store.compact_capture_details(None, Some(0)).await.unwrap(),
+            0
+        );
+    }
+
     /// tsk196. The cube's read cache keys on `cube_version`, so the version
     /// must move on EVERY mutation of `metric_cube` — not just the wipes
     /// `cube_epoch` fences. A fold that left the version parked would let the
@@ -7987,5 +8223,62 @@ mod tests {
         assert_eq!(cap.provenance, "observed");
         let rows = store.facts_for_measure(m).await.unwrap();
         assert!(rows[0].branch.is_none());
+    }
+
+    /// A capture recorded with `replaces` takes the place of its producer's
+    /// earlier captures under the same key: they and their facts go, in the
+    /// same transaction, and every other capture stays. It is placed at the
+    /// time it's given (`captured_at`), not when it was written.
+    #[tokio::test]
+    async fn a_capture_replaces_its_producers_earlier_capture_with_its_key() {
+        let store = fixture().await;
+        let m = measure(&store, "acme.request_cost").await;
+        let record = |key: &str, at_: &str, value: f64| {
+            let capture = NewMetricCapture {
+                replaces: Some(key.into()),
+                captured_at: Some(at(at_)),
+                ..NewMetricCapture::done(1, "acme.outcome", "acme")
+            };
+            let fact = NewFact {
+                subject: Some(key.into()),
+                ..NewFact::new(m, value)
+            };
+            store.record_facts(capture, vec![fact])
+        };
+        let req1 = "oxplow:oxplow/request?id=req1";
+        let a1 = record(req1, "2026-01-05T00:00:00Z", 10.0).await.unwrap();
+        let b = record(
+            "oxplow:oxplow/request?id=req2",
+            "2026-02-05T00:00:00Z",
+            30.0,
+        )
+        .await
+        .unwrap();
+        let a2 = record(req1, "2026-01-05T00:00:00Z", 20.0).await.unwrap();
+        // Another producer's capture under the same key is its own.
+        let other = store
+            .record_facts(
+                NewMetricCapture {
+                    replaces: Some(req1.into()),
+                    ..NewMetricCapture::done(1, "acme.other", "acme")
+                },
+                vec![NewFact::new(m, 1.0)],
+            )
+            .await
+            .unwrap();
+        assert!(store.get_capture(a1).await.unwrap().is_none(), "replaced");
+        let kept = store.get_capture(a2).await.unwrap().unwrap();
+        assert_eq!(kept.captured_at, at("2026-01-05T00:00:00Z"));
+        assert!(store.get_capture(b).await.unwrap().is_some());
+        assert!(store.get_capture(other).await.unwrap().is_some());
+        let mut values: Vec<(i64, f64)> = store
+            .facts_for_measure(m)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|f| (f.capture_id, f.value))
+            .collect();
+        values.sort_by_key(|v| v.0);
+        assert_eq!(values, vec![(b, 30.0), (a2, 20.0), (other, 1.0)]);
     }
 }
