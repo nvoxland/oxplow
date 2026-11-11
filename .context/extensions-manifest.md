@@ -56,7 +56,7 @@ the first extension's metric when two declare one key). `version:`, when
 given, is checked by `manifest_v2::valid_version`; a bundled extension's
 version is oxplow's own. Every kind is described: collectors
 (global: a fact collector's id), effects, commands (global: the bus id),
-advisories, skills (global: the name), implementations (global:
+advisories, agent contexts, skills (global: the name), implementations (global:
 `<capability>/<id>`), providers (global: the id, which is also the default
 instance's id, its URIs' segment and its commands' namespace), measures,
 metrics and dimensions (global: the key), datasets (global: the
@@ -71,7 +71,7 @@ replacements and custom components (all mounted, no global name).
 `v_<namespace>_<entity>`), an event type (`<namespace>.<…>`), a command id,
 and every contribution's id — `ContributionId { namespace, kind, local }`,
 `<namespace>/<local>`: pages, panels, effects, collectors, jobs, AI
-profiles (`<namespace>/<profile>` in `ai.yaml`), advisories, custom
+profiles (`<namespace>/<profile>` in `ai.yaml`), advisories, agent contexts, custom
 components, providers and their instances (`extensionInstances:` keys),
 resources — are named by the manifest's `namespace:` (default: the name,
 `-` → `_`). So is what is stored under them: `contribution_health`
@@ -625,6 +625,7 @@ ui:                  # what it adds to the core UI (a command's own `ui:` puts i
   decorators: …      # labels from its datasets on core URIs (stable since P10; see extensions-slots.md "Decorators")
   replacements: …    # a page in place of a named core component (see extensions-slots.md "Replacements")
 advisories:  [...]   # see extensions-commands.md "Advisories"
+context:     [...]   # text for the agent's context, sent once then on change (`{ id, doc, needs?, query }` returning `text`; needs `agent.write`); see extensions-commands.md "Agent context"
 datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<namespace>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see extensions-commands.md "Commands")

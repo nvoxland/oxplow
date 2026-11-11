@@ -821,6 +821,11 @@ resources:
     params: { skill: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     searchable: search_skill
     icon: book-open
+  - name: agent_context
+    description: "A short text that an extension puts in an agent's context when it changes."
+    label: Agent context
+    params: { agent_context: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
+    icon: book-open
   - name: implementation
     description: "One way to provide a capability, such as a task tracker or an agent."
     label: Implementation

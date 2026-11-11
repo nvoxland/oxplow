@@ -217,6 +217,8 @@ pub(super) async fn dispatch(
         event_type_example(ext, ex, t, report);
     } else if let Some(id) = ex.when.get("advisory").and_then(Value::as_str) {
         advisory_example(host, ext, ex, id, report).await;
+    } else if let Some(id) = ex.when.get("context").and_then(Value::as_str) {
+        context_example(host, ext, ex, id, report).await;
     } else if let Some(sql) = ex.when.get("sql").and_then(Value::as_str) {
         sql_example(host, ex, sql, report).await;
     } else if let Some(link) = ex.when.get("wikilink").and_then(Value::as_str) {
@@ -316,6 +318,11 @@ pub(super) const KINDS: &[Kind] = &[
         expect: "{ lines: [text] }",
     },
     Kind {
+        key: "context",
+        when: "{ context: <id>, thread? }",
+        expect: "{ text: <string> | null }",
+    },
+    Kind {
         key: "sql",
         when: "{ sql, params? }",
         expect: "{ rows, columns? }",
@@ -377,6 +384,7 @@ pub(super) fn makes_data(ex: &Example<'_>) -> bool {
         || has("job")
         || has("component")
         || has("advisory")
+        || has("context")
         || (has("event") && !has("effect") && !has("collector"))
 }
 

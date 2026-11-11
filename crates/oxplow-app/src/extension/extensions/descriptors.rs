@@ -226,6 +226,13 @@ pub fn describe(ext: &Extension, manifest: &str) -> Vec<Descriptor> {
         d.global = Some(k.name.clone());
         out.push(d);
     }
+    for c in &ext.contexts {
+        let mut d = new(ContributionKind::AgentContext, &c.id, RunsOn::Agent);
+        d.source = entry("context", "id", &c.id);
+        d.description = Some(c.doc.clone());
+        d.needs = c.needs.clone();
+        out.push(d);
+    }
     // An implementation is chosen by `<capability>/<id>`.
     for i in &ext.implementations {
         let mut d = new(
@@ -598,6 +605,7 @@ fn remove(ext: &mut Extension, c: &Collision) {
         ContributionKind::Job => ext.jobs.retain(|job| job.id != local),
         ContributionKind::AiProfile => ext.ai_profiles.retain(|x| x.id != local),
         ContributionKind::Skill => ext.skills.retain(|x| x.name != local),
+        ContributionKind::AgentContext => ext.contexts.retain(|x| x.id != local),
         ContributionKind::Implementation => {
             let global = c.global.as_str();
             ext.implementations

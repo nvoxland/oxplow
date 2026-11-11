@@ -32,6 +32,7 @@ async fn each_kind_adds_to_an_extension_that_still_checks() {
         ("effect", "on-done"),
         ("component", "board"),
         ("advisory", "heads-up"),
+        ("context", "now"),
         ("skill", "triage-guide"),
     ] {
         let dir = tempfile::tempdir().unwrap();

@@ -83,6 +83,9 @@ pub enum Kind {
     /// Guidance for the coding agent: a query run at a moment, whose rows
     /// reach the agent.
     Advisory,
+    /// Text for the coding agent's context: a query whose `text` reaches the
+    /// agent on a prompt once, then when it changes.
+    Context,
     /// A skill the coding agent loads when it's relevant (`SKILL.md`).
     Skill,
     /// A left-nav panel showing one page compact.
@@ -96,7 +99,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `implementation`, `collector`, `metric`, `command`, `effect`, `component`, `advisory`, `skill`, `panel`, `job` or `query`";
+    pub const NAMES: &'static str = "`page`, `extension`, `provider`, `implementation`, `collector`, `metric`, `command`, `effect`, `component`, `advisory`, `context`, `skill`, `panel`, `job` or `query`";
 
     pub fn parse(s: &str) -> Option<Kind> {
         match s {
@@ -113,6 +116,7 @@ impl Kind {
             "effect" => Some(Kind::Effect),
             "component" => Some(Kind::Component),
             "advisory" => Some(Kind::Advisory),
+            "context" => Some(Kind::Context),
             "skill" => Some(Kind::Skill),
             "page" => Some(Kind::Page),
             "panel" => Some(Kind::Panel),
@@ -324,7 +328,7 @@ pub fn scaffold_with(
             "one row per open task in the stream, newest first",
             Some("{ body: { loaders: { items: { rows: $any } } } }".to_string()),
         ),
-        Kind::Extension | Kind::Advisory | Kind::Skill => {
+        Kind::Extension | Kind::Advisory | Kind::Context | Kind::Skill => {
             ("{}".to_string(), "TODO: what a run should show", None)
         }
         Kind::Provider { capability } => {
@@ -394,7 +398,7 @@ pub fn scaffold_with(
             Some(("handlers/note.star", "Add Note")),
         )?),
         Kind::Effect => Some(contribution::build(kind, name, "on-done", None)?),
-        Kind::Page | Kind::Component | Kind::Advisory | Kind::Skill => {
+        Kind::Page | Kind::Component | Kind::Advisory | Kind::Context | Kind::Skill => {
             Some(contribution::build(kind, name, name, None)?)
         }
         _ => None,
@@ -443,6 +447,7 @@ pub fn scaffold_with(
         | Kind::Effect
         | Kind::Component
         | Kind::Advisory
+        | Kind::Context
         | Kind::Skill => {
             // The permissions line (and what says why) opens the kinds whose
             // scripts or text need one; then the kind's own lists.
@@ -452,6 +457,9 @@ pub fn scaffold_with(
                 }
                 Kind::Advisory => {
                     "# What an advisory says reaches the agent.\npermissions: [agent.write]\n"
+                }
+                Kind::Context => {
+                    "# What a context says reaches the agent.\npermissions: [agent.write]\n"
                 }
                 Kind::Skill => "# A skill is text the agent reads.\npermissions: [agent.write]\n",
                 _ => "",
@@ -790,7 +798,13 @@ pub fn scaffold_with(
         )?,
         Kind::Extension | Kind::Metric => {}
         // Their files are the starter's, written above.
-        Kind::Page | Kind::Command | Kind::Effect | Kind::Component | Kind::Advisory | Kind::Skill => {}
+        Kind::Page
+        | Kind::Command
+        | Kind::Effect
+        | Kind::Component
+        | Kind::Advisory
+        | Kind::Context
+        | Kind::Skill => {}
     }
     Ok(Scaffolded {
         name: name.to_string(),
@@ -1687,6 +1701,7 @@ mod tests {
             Kind::Effect,
             Kind::Component,
             Kind::Advisory,
+            Kind::Context,
             Kind::Skill,
             Kind::Page,
             Kind::Panel,

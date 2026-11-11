@@ -2432,6 +2432,59 @@ expect: {{ lines: {want} }}
     );
 }
 
+/// `when: { context }` runs one of the extension's agent contexts for a
+/// thread as the app would: its `text` is what the agent is told, `null`
+/// when it has nothing to say.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_runs_an_agent_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Says what is next.
+  examples:
+    - { name: next, input: { context: next }, expect: the first task }
+permissions: [agent.write]
+context:
+  - id: next
+    doc: The first task.
+    query: \"SELECT 'Next: ' || title AS text FROM v_task WHERE :thread_id IS NOT NULL ORDER BY title LIMIT 1\"
+",
+    );
+    let fixture = |given: &str, want: &str| {
+        format!(
+            "requires: [oxplow-bundled]\n{given}
+when: {{ context: next }}
+expect: {{ text: {want} }}
+"
+        )
+    };
+    let given = "given: [{ command: oxplow.task.create, input: { title: Fix it } }]";
+    let errors = |want: &'static str, given: &'static str| async move {
+        write(
+            root,
+            ".oxplow/extensions/acme/fixtures/next.yaml",
+            &fixture(given, want),
+        );
+        test_extension(root, "acme", false)
+            .await
+            .unwrap()
+            .error_lines()
+            .join("\n")
+    };
+    assert_eq!(errors("\"Next: Fix it\"", given).await, "");
+    assert_eq!(errors("null", "").await, "", "no task: nothing to say");
+    let wrong = errors("null", given).await;
+    assert!(
+        wrong.contains("fixtures/next.yaml: context `next` said"),
+        "{wrong}"
+    );
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,

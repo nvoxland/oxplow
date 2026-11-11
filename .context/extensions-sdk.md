@@ -127,8 +127,8 @@ check already reported is not repeated.
   is one contribution of a kind: the manifest entries it adds (per top-level
   list: `collectors`, `datasets`, `commands`, …), the permissions its
   scripts need and its files. `scaffold` builds `new <kind>` from a manifest
-  header plus one (the page, collector, command, effect, component, advisory
-  and skill starters; their output is what it always was), and
+  header plus one (the page, collector, command, effect, component, advisory,
+  agent context and skill starters; their output is what it always was), and
   **`add_contribution(root, kind, id, extension)`** (`extension add <kind>
   <id> [<extension>]`) puts one into an extension that exists: the only
   extension under `.oxplow/extensions/`, else the one named. It refuses an
@@ -162,7 +162,7 @@ check already reported is not repeated.
   (`datasets::EntityStub`: a typed temp table under the entity's view);
   `datasets::check_extensions` returns those views (`CheckedDatasets.views`).
   Every later query of the check — command examples' reads,
-  advisories, pages — reads through them as an **overlay**
+  advisories, agent contexts, pages — reads through them as an **overlay**
   (`SqlGateway::with_overlay`, `SqlQuery::temp_views`: recreated on the
   query's own connection and dropped after), so a fresh collector →
   dataset → page checks clean before its first sync and a page may read
@@ -562,6 +562,12 @@ a `KINDS` entry and a `dispatch` arm. The forms:
   the app runs it on its `on:` (`advisories::for_thread`, over the
   thread's newest request), its text line by line, heading included; on an
   oxplow of its own, since it records what it said (`once_per`).
+- `when: { context: <id>, thread? }`, `expect: { text: <string> | null }` —
+  the extension's agent context run for a thread (the primary one when
+  none) as a prompt runs it (`agent_context::extension_contexts`): its
+  text uncut, `null` when it has nothing to say. A text over
+  `CONTEXT_BUDGET` is a warning (`context.over_budget`): the agent gets it
+  cut.
 - `when: { query: <slug | ext/slug>[#loader], params? }`, `expect: { rows,
   columns? }` — a query's last loader, or `<page>#<loader>`: one loader of
   any page file, run alone through `options::source_rows` as an option list

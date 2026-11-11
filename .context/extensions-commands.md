@@ -535,6 +535,60 @@ advisories:
 - The report-less-run nudge stays in core: it's about collection hygiene,
   not an instrument.
 
+## Agent context
+
+An extension tells the coding agent what it should know **now** — the
+task in progress, what is next — with **agent contexts** (`context:` in
+`extension.yaml`; `extensions/agent_contexts.rs`). Where an advisory says
+"something happened" once, a context states the current facts, and the
+agent gets them again whenever they change.
+
+```yaml
+permissions: [agent.write]
+context:
+  - id: task-state
+    doc: What the thread works on now.     # for people: the catalog, the manifest
+    needs: [task_tracker]                  # optional; without it, it doesn't run
+    query: |                               # :thread_id, :stream_id, :request_id (each may be NULL)
+      SELECT 'In progress: ' || title AS text FROM v_task WHERE thread_id = :thread_id ...
+```
+
+- **The query** is the extension's SQL (`config('/ptr')` reads its own
+  settings). Its first row's `text`, trimmed, is what the agent is told;
+  no row, a NULL or an empty text says nothing. `:request_id` is the
+  request of the thread's newest turn.
+- **Delivery** (`AgentContext::build_context`, `agent_context.rs`): on
+  every prompt, after the `<session-context>` block, each enabled
+  extension's contexts whose `needs` are met run for the thread, by
+  namespace and then as declared. Each is wrapped
+  `<context from="<namespace>/<id>">…</context>` and sent only when it
+  differs from what that agent session last received from it: **once,
+  then on change**, the session context's rule (agent-model.md). A
+  compaction or a fresh start (`reset_session`) forgets what was sent,
+  so the next prompt carries every context again. The records are in
+  memory, like the session context's: a daemon restart costs one repeat.
+- **Budget**: `CONTEXT_BUDGET` (1,500 characters) per context, then
+  `CONTEXTS_BUDGET` (3,000) for all that a prompt carries; a cut text
+  ends with the `CONTEXT_CUT` line. Only changed contexts count, so one
+  that didn't fit at all goes on a later prompt, when the others don't
+  repeat. Separate from `NUDGE_BUDGET`.
+- **Not a nudge**: no `agent_nudge` row, no muting, no `hint_stat`; it
+  repeats nothing the agent already has.
+- **Channels**: it rides `prompt_context`. A harness without it gets
+  nothing (and nothing is recorded as sent); Codex gets it in the items
+  injected between turns, the same build.
+- **Permission**: it speaks into the agent's context, so the manifest
+  declares `agent.write` (the loader refuses it otherwise), like an
+  advisory.
+- **Checks**: `id` is lowercase letters, digits and dashes, once per
+  extension; `doc` is required; each need is a capability or feature.
+  `oxplow_validate_extension` (and `oxplow extension check`) dry-runs the
+  query with every param NULL: it must run and return a `text` column.
+  A fixture `when: { context: <id> }` checks its text
+  (extensions-sdk.md), and warns when it is over the budget.
+- A new condition on when a context runs (a setting, say) is a field
+  beside `needs` on `AgentContextDecl`.
+
 ## Agents: the MCP surface
 
 Everything a human can see or build, an agent can see or build too, over

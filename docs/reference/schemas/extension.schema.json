@@ -289,6 +289,17 @@
       },
       "default": null
     },
+    "context": {
+      "description": "Text for the coding agent's context: a query whose `text` the\nagent is sent on a prompt once, then when it changes.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/AgentContextFile"
+      },
+      "default": null
+    },
     "providers": {
       "description": "External providers: programs implementing a capability, whose\noperations its `commands:` declare.",
       "type": [
@@ -2988,6 +2999,38 @@
       "required": [
         "config",
         "in"
+      ]
+    },
+    "AgentContextFile": {
+      "description": "A `context:` entry as the manifest holds it.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Lowercase letters, digits and dashes; the agent sees it as\n`<context from=\"<namespace>/<id>\">`.",
+          "type": "string"
+        },
+        "doc": {
+          "description": "What it tells the agent, in a line.",
+          "type": "string"
+        },
+        "needs": {
+          "description": "Capabilities or features it needs active.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "query": {
+          "description": "SQL returning a `text` column, at most one row; `:thread_id`,\n`:stream_id`, `:request_id` bound (NULL when unknown).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "doc",
+        "query"
       ]
     },
     "ProviderSpec": {

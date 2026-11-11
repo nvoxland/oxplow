@@ -16,7 +16,8 @@ missing `intent`, a Starlark script that doesn't parse or define
 page that isn't there, a command that doesn't exist or an input that doesn't
 fit it, a loader reading one declared after it); the datasets compiled without
 publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
-from the declared contract); and a dry run of every advisory and every command
+from the declared contract); and a dry run of every advisory, every agent context (it must
+return a `text` column) and every command
 example. It **always** dry-runs, on this build's schema with no data —
 never the project's database: a collector's entities stand in empty. It
 does not run a page's loaders: `oxplow_run_page` and `extension test` (which
@@ -99,6 +100,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | effect | `{ effect: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip } \| { reacts: false }` |
 | event_type | `{ event_type, v?, payload }` | `{ valid, upcast? }` |
 | advisory | `{ advisory: <id>, thread? }` | `{ lines: [text] }` |
+| context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
 | wikilink | `{ wikilink }` | `{ uri }` |
 | collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files }` | `{ entities?, events? } \| { facts }` |

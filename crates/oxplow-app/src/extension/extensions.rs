@@ -16,6 +16,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod agent_contexts;
 pub mod ai_profiles;
 pub(crate) mod candidates;
 pub mod config;
@@ -393,6 +394,9 @@ pub struct Extension {
     /// Skills and slash commands it gives the coding agent (`skills:`;
     /// valid ones — invalid ones are in `errors`).
     pub skills: Vec<skills::SkillDecl>,
+    /// What it puts in the coding agent's context (`context:`; valid
+    /// ones — invalid ones are in `errors`).
+    pub contexts: Vec<agent_contexts::AgentContextDecl>,
     /// Another extension's event types its effects and collectors react
     /// to (P9.D1): each resolves when an enabled extension registers the
     /// type (`vocabulary_reactor`).
@@ -1706,6 +1710,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         effects: Vec::new(),
         implementations: Vec::new(),
         skills: Vec::new(),
+        contexts: Vec::new(),
         subscriptions: Vec::new(),
         origin: origin.to_string(),
         ui: ExtensionUi::default(),
@@ -1896,6 +1901,11 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             let (declared, errors) =
                 skills::parse_skills(v, man, &manifest, files, ext.configuration.as_ref());
             ext.skills = declared;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = m.context.as_ref() {
+            let (declared, errors) = agent_contexts::parse_contexts(v, man, &manifest);
+            ext.contexts = declared;
             ext.errors.extend(errors);
         }
         if let Some(v) = m.implementations.as_ref() {
@@ -2621,6 +2631,13 @@ fn needed_permissions(
         };
         out.push((line("skills", i), format!("skill `{}`", skill.name), needed));
     }
+    for (i, c) in ext.contexts.iter().enumerate() {
+        let needed = Permissions {
+            agent: true,
+            ..needs_permissions(&c.needs)
+        };
+        out.push((line("context", i), format!("context `{}`", c.id), needed));
+    }
     for (i, c) in ext.custom_components.iter().enumerate() {
         let needed = Permissions {
             commands: c
@@ -2685,7 +2702,18 @@ fn config_sql(ext: &Extension) -> Vec<(String, Option<String>, &str)> {
             a.query.as_str(),
         )
     });
-    datasets.chain(pages).chain(advisories).collect()
+    let contexts = ext.contexts.iter().map(|c| {
+        (
+            "extension.yaml".to_string(),
+            Some(format!("context `{}`", c.id)),
+            c.query.as_str(),
+        )
+    });
+    datasets
+        .chain(pages)
+        .chain(advisories)
+        .chain(contexts)
+        .collect()
 }
 
 /// A `config('/pointer')` read names a scalar key the extension's own
@@ -3460,6 +3488,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.effects.clear();
     ext.implementations.clear();
     ext.skills.clear();
+    ext.contexts.clear();
     ext.subscriptions.clear();
     ext.advisories.clear();
     ext.measures.clear();
@@ -4150,6 +4179,7 @@ async fn prepare(
             }
         }
     }
+    check_contexts(layer, ext).await;
     check_collector_inputs(layer, ext, read).await;
     let pages = crate::pages::checks::dry_run_all(layer, ext).await;
     // Another extension's page files a reference reads, dry-run once each.
@@ -4284,6 +4314,61 @@ async fn prepare(
         }
     }
     Prepared { pages, overlay }
+}
+
+/// Dry-run each agent context's query with its params NULL and the
+/// declared configuration defaults: it must run and return a `text`
+/// column.
+async fn check_contexts(layer: &crate::sql_gateway::SqlGateway, ext: &mut Extension) {
+    for c in ext.contexts.clone() {
+        let problem = |code: &str, message: String| {
+            Diagnostic::error(code, format!("context `{}`: {message}", c.id))
+                .at("extension.yaml", None)
+                .contribution(format!("{}/{}", ext.namespace, c.id))
+        };
+        let shown = |e: &dyn std::fmt::Display| e.to_string().replacen("invalid value: ", "", 1);
+        let query = match oxplow_db::datasets::substitute_config(
+            &c.query,
+            ext.default_configuration().as_ref(),
+        ) {
+            Ok(query) => query,
+            Err(e) => {
+                ext.errors.push(problem("context.invalid_query", shown(&e)));
+                continue;
+            }
+        };
+        let run = layer
+            .run(
+                oxplow_db::SqlQuery::new(&query)
+                    .named(
+                        agent_contexts::PARAMS
+                            .iter()
+                            .map(|p| (p.to_string(), SqlCell::Null(())))
+                            .collect(),
+                    )
+                    .limit(Some(1)),
+            )
+            .await;
+        match run {
+            Err(e) => ext.errors.push(problem("context.invalid_query", shown(&e))),
+            Ok(r)
+                if !r
+                    .columns
+                    .iter()
+                    .any(|col| col == agent_contexts::TEXT_COLUMN) =>
+            {
+                ext.errors.push(problem(
+                    "context.missing_column",
+                    format!(
+                        "the query must return a `{}` column (columns: {})",
+                        agent_contexts::TEXT_COLUMN,
+                        r.columns.join(", ")
+                    ),
+                ))
+            }
+            Ok(_) => {}
+        }
+    }
 }
 
 /// A collector's `input` query reads published views only: a physical table
@@ -9803,6 +9888,38 @@ commands:
             !errs.contains("low-coverage") && !errs.contains("crossings"),
             "{errs}"
         );
+    }
+
+    /// A check dry-runs each agent context with its params NULL: a query
+    /// that fails, or returns no `text` column, is an error; one that
+    /// returns no row is fine. Each is a contribution in the catalog.
+    #[tokio::test]
+    async fn agent_contexts_are_dry_run_by_the_check() {
+        let (d, ext) = load_x(
+            &[],
+            "permissions: [agent.write]\ncontext:\n  - id: fine\n    doc: Fine.\n    query: SELECT 'x' AS text WHERE :thread_id IS NOT NULL AND :stream_id IS NULL AND :request_id IS NULL\n  - id: notext\n    doc: No text.\n    query: SELECT 'x' AS message\n  - id: broken\n    doc: Broken.\n    query: SELECT nope FROM nowhere\n",
+        );
+        assert_eq!(
+            ext.contexts
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fine", "notext", "broken"]
+        );
+        assert!(ext.contributions.iter().any(|c| c.id.kind
+            == oxplow_domain::contribution::ContributionKind::AgentContext
+            && c.id.local == "fine"
+            && c.description.as_deref() == Some("Fine.")));
+        let v = validate_extension(&layer().await, &cat(), d.path(), "x", None)
+            .await
+            .unwrap();
+        let errs = shown_errors(&v);
+        assert!(
+            errs.contains("context `notext`: the query must return a `text` column"),
+            "{errs}"
+        );
+        assert!(errs.contains("context `broken`"), "{errs}");
+        assert!(!errs.contains("context `fine`"), "{errs}");
     }
 
     #[test]
