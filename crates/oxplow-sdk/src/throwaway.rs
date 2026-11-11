@@ -399,6 +399,9 @@ impl Host {
         // `v_request_metric_delta`), an asset as at boot: recomputed with
         // the materialized datasets before a read.
         oxplow_app::boot::register_stored_analyses(&self.svc);
+        // A settings write republishes the datasets that read it, and a
+        // collector's new entity the ones it lets compile, as at boot.
+        oxplow_app::boot::register_extension_datasets(&self.svc);
         // The one change loop, as at boot: materialized datasets refill.
         oxplow_app::datasets_changed::spawn(
             self.svc.db.clone(),

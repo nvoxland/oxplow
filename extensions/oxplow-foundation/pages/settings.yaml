@@ -674,6 +674,9 @@ view:
           input:
             capability: '{{row.capability}}'
             layer: personal
+      # Where an extension adds its own settings for the project
+      # (oxtask's Task workflow).
+      - { slot: integrations, id: integrations-mounts }
       - id: replacements
         title: Replaced components
         from: replacements

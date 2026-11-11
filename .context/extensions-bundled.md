@@ -296,7 +296,14 @@ screens and the holder's add the review and analysis:
   definition of done (nothing when there is none of them; core's
   `CONTEXT_CLEARED` tells an agent told before): once, then on change, and again after
   a compaction (extensions-commands.md "agent contexts"). Fixtures:
-  `task-state-*`. Fixtures:
+  `task-state-*`. Settings → Integrations shows it as **Task workflow**
+  (`task-workflow-settings`, mounted at `oxplow/settings.integrations`):
+  the four workflows with what the agent does in each, the current one
+  marked, Use This to choose one for the project, and a form for what
+  done means. Both it and `task-state` read the dataset
+  `v_oxplow_task_workflow` (one row: `workflow`, `definition_of_done`).
+  Fixtures: `task-workflow-settings-*`,
+  `the-task-workflow-dataset-reads-the-setting-as-it-changes`. Fixtures:
   `the-reminder-is-only-for-the-agent-tracks-workflow`,
   `setting-the-task-workflow-keeps-the-definition-of-done`; the skills per
   preset are the Rust test

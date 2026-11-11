@@ -212,8 +212,9 @@ pub async fn run_boot_orchestration(
     crate::config_reactors::register(state);
     // Scripts run in workers bounded by the project's `scripts:` config.
     crate::config_reactors::apply_script_limits(&crate::config_service::read_config(&state.config));
-    // A collector that registered a new entity may let a dataset compile.
-    crate::extension::extension_datasets::register(state);
+    // A collector that registered a new entity may let a dataset compile,
+    // and a settings write republishes the datasets that read it.
+    register_extension_datasets(state);
     state.event_pump.clone().spawn();
     // `every:` collectors: the scheduler runs `oxplow.collector.sync` as the system.
     crate::collector_runner::spawn_scheduler(state);
@@ -611,4 +612,11 @@ pub async fn run_boot_orchestration(
 /// throwaway oxplow that runs an extension's examples.
 pub fn register_stored_analyses(state: &std::sync::Arc<crate::Services>) {
     crate::request_analysis::register(state);
+}
+
+/// What republishes extensions' datasets when what they read changes: a
+/// collector's new entity, a settings write (`config()`). Boot registers
+/// it, and so does a throwaway oxplow that runs an extension's examples.
+pub fn register_extension_datasets(state: &std::sync::Arc<crate::Services>) {
+    crate::extension::extension_datasets::register(state);
 }

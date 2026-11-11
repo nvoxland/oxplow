@@ -6582,6 +6582,7 @@ commands:
                 "deviation",
                 "finished_cleared",
                 "struggle",
+                "task_workflow",
                 "thread_tasks"
             ]
         );

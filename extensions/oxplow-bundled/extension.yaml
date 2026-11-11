@@ -58,6 +58,12 @@ datasets:
       - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
+  - name: task_workflow
+    version: 1
+    description: "How this project's agents use tasks (oxtask's setting, one row): `workflow` is `agent_tracks` (the agent tracks everything), `person_files` (the person files, the agent works them), `custom` (the project's own extension says) or `off`; `definition_of_done` is the project's text, empty for none. Set with `oxplow.tasks.set_workflow`."
+    fields:
+      - { name: workflow, type: TEXT, doc: "`agent_tracks`, `person_files`, `custom` or `off`." }
+      - { name: definition_of_done, type: TEXT, doc: "What done means here, one item per line; empty for none." }
   - name: finished_cleared
     version: 2
     key: [thread_id]
@@ -95,6 +101,8 @@ ui:
     # where its agent struggled (empty on a snapshot's or a turn's).
     - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: struggled, at: oxplow/diff-view.sections }
+    # Settings → Integrations: how this project's agents use tasks.
+    - { page: task-workflow-settings, at: oxplow/settings.integrations }
 configuration:
   version: 2
   schema:
@@ -163,7 +171,7 @@ commands:
       type: object
       properties:
         workflow: { type: string, enum: [off, person_files, agent_tracks, custom], description: "The workflow preset." }
-        definition_of_done: { type: string, description: "What done means here, one item per line; empty for none." }
+        definition_of_done: { type: string, contentMediaType: text/markdown, description: "What done means here, one item per line; empty for none." }
       additionalProperties: false
     example: {"workflow": "person_files", "definition_of_done": "Tests pass.\nCommitted."}
     entry: handlers/set_workflow.star
@@ -242,7 +250,7 @@ context:
         SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
         FROM (SELECT * FROM mine WHERE state = 'todo' ORDER BY rank IS NULL, rank, created_at LIMIT 3)
       ),
-      done_means AS (SELECT trim(coalesce(config('/tasks/definitionOfDone'), '')) AS d)
+      done_means AS (SELECT trim(definition_of_done) AS d FROM v_oxplow_task_workflow)
       SELECT coalesce('In progress on this thread: ' || active.s || '.', 'Nothing is in progress on this thread.')
              || coalesce(char(10) || 'Up next: ' || up_next.s || '.', '')
              || CASE WHEN done_means.d <> '' THEN char(10) || 'Done means:' || char(10) || done_means.d ELSE '' END AS text
