@@ -1407,9 +1407,11 @@ what changed:
 | diff-view `row`, a 24-turn request | 2.1 s | ~0.5 s | the same, and its `turn_end` takes found from its turns |
 | branch-status `status`, `marks` | ~160 ms each | 6 ms | the divergence pinned in a join's `ON`, which narrows nothing (semantic-layer.md "Narrowed by the query") |
 
-Left as they are: `v_agent_conversation` (~420 ms: listing opencode's
-sessions runs `opencode session list`, a process start, on every read; the
-agent-session, new-session and saved-conversations pages wait on it), the
+`v_agent_conversation` (~420 ms: listing opencode's sessions runs
+`opencode session list`, a process start, on every read, and its pages
+re-read on every turn) keeps each harness's list until a conversation is
+bound or for 30 s (`saved_conversations.rs`); no other live dataset starts
+a program. Left as they are: the
 streams page's `apart` (~170 ms: it compares every branch with the base,
 as a per-row head can't narrow it), item-requests on a 225-request task
 (~250 ms, a file confidence check per file), task-rows `items` (~150 ms,
