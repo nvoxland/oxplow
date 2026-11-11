@@ -1123,7 +1123,7 @@ impl SnapshotCaptureService {
     /// those get a deletion row when the dirty set is captured.
     ///
     /// Honors the service's `WorkspaceFilter`, so build dirs
-    /// and `.oxplow/` internals are skipped (wiki pages pass through
+    /// and `.oxplow/` internals are skipped (oxwiki pages pass through
     /// because the filter explicitly allows `.oxplow/oxwiki/`).
     ///
     /// Doesn't write anything itself — call `request_snapshot` after

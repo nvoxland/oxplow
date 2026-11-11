@@ -81,7 +81,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model, and `requires: [<extension>…]` for more extensions that fixture
-   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker and wiki; a fixture that needs what `oxplow-bundled`
+   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker and knowledge; a fixture that needs what `oxplow-bundled`
    adds, such as its review pages, says `requires: [oxplow-bundled]`; a name
    that isn't an extension here is an error). Any other key is an error:
    The kinds of fixture (generated from the runner's own list):

@@ -29,7 +29,7 @@ test("a page's memory is scoped by the page, whatever it shows and however", () 
   expect(pageMemoryScope(pageTabRef("tasks", { stream: "str1" }, { state: "open" }))).toBe("oxplow:oxplow/page?page=tasks");
   expect(pageMemoryScope(extPageRef("acme", "pulls"))).toBe("oxplow:oxplow/page?page=acme/pulls");
   expect(pageMemoryScope(pageTabRef("x/y", { stream_id: 2 }, { range: "7d" }))).toBe("oxplow:oxplow/page?page=x/y");
-  // An entity page's is its resource's: every wiki page shares one.
+  // An entity page's is its resource's: every knowledge page shares one.
   expect(pageMemoryScope(knowledgePageRef("oxwiki", "home"))).toBe("resource:oxplow/knowledge");
 });
 

@@ -861,13 +861,13 @@ mod tests {
         tokio::task::yield_now().await;
         f.svc
             .usage_store
-            .record("wiki", serde_json::json!({ "slug": "home" }))
+            .record("oxplow/knowledge", serde_json::json!({ "id": "home" }))
             .await
             .unwrap();
         f.svc
             .page_visit_store
             .record(
-                "wiki",
+                "oxplow/knowledge",
                 "oxplow:oxplow/knowledge?id=home&store=oxwiki",
                 None,
                 None,

@@ -1092,7 +1092,7 @@ resources:
     }
 }
 
-/// Core's kinds (tsk864): tasks, comments, thread notes and wiki pages,
+/// Core's kinds (tsk864): tasks, comments and knowledge pages,
 /// indexed from `v_search_<kind>` by the same assets as an extension's kind.
 #[cfg(test)]
 mod core_tests {

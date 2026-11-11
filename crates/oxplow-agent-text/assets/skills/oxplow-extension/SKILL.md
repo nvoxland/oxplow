@@ -1,6 +1,6 @@
 ---
 name: oxplow-extension
-description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, requests, threads, comments, wiki, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/requests", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_dataset`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
+description: Build oxplow pages and extensions on request: views over oxplow's data (tasks, requests, threads, comments, knowledge pages, snapshots, metrics) that the user sees in the app and can share with their team. Loads when the user asks to "make/build/show me a page/view/report/dashboard/list of X", "a place where I can see X", "track X across threads/requests", "what's waiting on me", or asks to change an existing page. Teaches the semantic layer (`v_dataset`, `oxplow_query_sql`), the `.oxplow/extensions/<name>/` format, and the fixture, check, test, deploy loop.
 ---
 
 # Building oxplow pages

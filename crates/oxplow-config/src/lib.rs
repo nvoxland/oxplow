@@ -26,7 +26,7 @@ pub mod session;
 pub use session::SessionProjects;
 
 /// Project-relative state directory holding oxplow's per-project config
-/// and local data (DB, snapshots, wiki, …).
+/// and local data (DB, snapshots, oxwiki, …).
 pub const OXPLOW_STATE_DIR: &str = ".oxplow";
 
 /// Config file name, inside [`OXPLOW_STATE_DIR`]

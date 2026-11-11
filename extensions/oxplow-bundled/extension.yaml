@@ -205,7 +205,7 @@ commands:
     summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Knowledge Page… opens the form and shows the page it writes."
     scope: knowledge.write
     op: write_page
-    ui: { label: "New Knowledge Page…", group: Knowledge, keywords: [knowledge, wiki, page, note, write], form: "oxplow:oxplow/page?page=new-knowledge-page", open_after: "{{result.page}}" }
+    ui: { label: "New Knowledge Page…", group: Knowledge, keywords: [knowledge, page, note, write], form: "oxplow:oxplow/page?page=new-knowledge-page", open_after: "{{result.page}}" }
     example: {"title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
 custom_components:
   # The Work board: the tasks as cards in a column per stage, its own

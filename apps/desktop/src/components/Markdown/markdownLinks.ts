@@ -403,7 +403,7 @@ function looksLikeSlug(target: string): boolean {
 
 /** The file URI a `[[path[@version][:line]]]` interior names. A `@disk` /
  *  `@local` version is the working tree (no `rev`); anything else is a git
- *  revision (the wiki's authoring syntax — `.context/vcs.md`). */
+ *  revision (oxwiki's authoring syntax — `.context/vcs.md`). */
 function fileTargetUri(target: string): string {
   let body = target;
   let rev: string | null = null;

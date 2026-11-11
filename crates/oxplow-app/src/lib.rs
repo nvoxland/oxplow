@@ -259,7 +259,7 @@ impl AppLayout {
 /// Creates `state_dir` (recursively) and drops a `.gitignore` that ignores
 /// everything in the directory except `project.yaml` (the shareable config)
 /// and the `.gitignore` itself — so a project can commit its oxplow config
-/// while the DB / snapshots / wiki / runtime files stay local. Idempotent:
+/// while the DB / snapshots / oxwiki / runtime files stay local. Idempotent:
 /// an existing `.gitignore` is left untouched. Whether the directory as a
 /// whole is tracked is the host repo's call (its root `.gitignore`); oxplow
 /// doesn't manage that.
@@ -576,7 +576,7 @@ pub struct Services {
     pub search_store: Arc<SqliteSearchStore>,
     /// Per-stream snapshot capture registry. Holds one service per
     /// active stream (each watching its own worktree). Callers that know which stream they're acting on `get(&stream_id)`
-    /// here; those about the primary stream's worktree (the wiki watcher)
+    /// here; those about the primary stream's worktree (the oxwiki watcher)
     /// use `snapshot_captures.primary()`.
     pub snapshot_captures: snapshot_capture_registry::SnapshotCaptureRegistry,
     /// Each stream's one file watch.

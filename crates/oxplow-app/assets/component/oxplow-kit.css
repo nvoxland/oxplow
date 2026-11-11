@@ -201,7 +201,7 @@
 .ox-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Document pages: a title, an intro, then sections. A section is a
-   heading over a rule, no box (wiki style); sections stack apart. */
+   heading over a rule, no box (document style); sections stack apart. */
 .ox-title { margin: 0; font-size: var(--text-2xl); font-weight: var(--weight-bold); line-height: var(--leading-tight); color: var(--text-primary); }
 .ox-intro { margin: var(--space-2) 0 0; color: var(--text-secondary); }
 .ox-section { margin-top: var(--space-6); }

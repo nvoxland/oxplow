@@ -1,7 +1,7 @@
 import { afterAll, expect, mock, test } from "bun:test";
 import { act, render, waitFor } from "@testing-library/react";
 
-// A burst of commits touching the wiki (a scan storing its findings
+// A burst of commits touching knowledge pages (a scan storing its findings
 // writes page refs) is one re-read of the page list, not one per commit —
 // and a change while a read is running is still read afterwards.
 

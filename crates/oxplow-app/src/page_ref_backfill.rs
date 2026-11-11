@@ -28,8 +28,8 @@
 //! writer owns its own slice. The backfill is idempotent: running
 //! it again replaces the same rows it wrote last time.
 //!
-//! Wiki bodies and recent commits are NOT re-projected here —
-//! the wiki watcher's initial scan and the commit indexer's boot
+//! Knowledge page bodies and recent commits are NOT re-projected here —
+//! the oxwiki watcher's initial scan and the commit indexer's boot
 //! pass already hit those paths. This module only covers the
 //! kinds whose data lives entirely in SQLite (tasks, findings,
 //! handoffs).

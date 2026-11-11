@@ -42,7 +42,7 @@ export interface KnowledgeStore {
   edit: boolean;
 }
 
-/** The store of oxplow's own wiki. */
+/** The store of oxplow's own store (oxwiki). */
 export { OXWIKI } from "./knowledgeStoreIds.js";
 
 // Every read returns what it read (`reads`); a consumer re-runs it through

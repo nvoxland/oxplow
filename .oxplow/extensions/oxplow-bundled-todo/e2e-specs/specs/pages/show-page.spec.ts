@@ -32,9 +32,9 @@ async function action(page: Page, id: string) {
   await page.getByTestId(`menu-item-action-${id}`).click();
 }
 
-test("Save to wiki keeps a live oxplow-page block that renders again after reload", async ({ page, daemon }) => {
+test("Save as knowledge page keeps a live oxplow-page block that renders again after reload", async ({ page, daemon }) => {
   await show(page, daemon, source("Saved Bilby Count", "Saved Bilby "));
-  await action(page, "view-save-wiki");
+  await action(page, "view-save-knowledge");
   const form = page.getByTestId("save-view-form").filter({ visible: true });
   await form.getByTestId("save-view-title").fill("Saved Bilby View");
   await form.getByTestId("save-view-title").press("Enter");

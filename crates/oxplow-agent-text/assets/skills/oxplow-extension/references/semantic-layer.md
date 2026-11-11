@@ -3,7 +3,7 @@
 ## Find the data
 
 - `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_task`,
-  `v_request`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
+  `v_request`, `v_comment`, `v_knowledge_page`, `v_snapshot`, `v_measure`,
   `v_capture`, `v_fact`, …) with its doc, and `v_field` documents
   every field (column): `SELECT view, name, sql_type, doc FROM v_field WHERE
   view = 'v_task'`. **Read them first**; don't guess column names.

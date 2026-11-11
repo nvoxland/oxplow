@@ -56,7 +56,7 @@ export function richTextExtensions({
     // GFM tables (block content — off for inline-only fields). tiptap-markdown
     // ships the GFM table serializer + markdown-it parses tables, so adding
     // the standard table nodes is all the round-trip needs. Without these the
-    // editor flattens any table in a wiki page to run-on text on autosave.
+    // editor flattens any table in a knowledge page to run-on text on autosave.
     ...(inlineOnly ? [] : [Table.configure({ resizable: true }), TableRow, TableHeader, TableCell]),
     // Decorations only — opening is via the right-click menu, not click.
     CommentDecorations.configure({ onClickComment: null }),

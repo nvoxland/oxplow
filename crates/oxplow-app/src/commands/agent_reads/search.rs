@@ -21,7 +21,7 @@ pub struct SiteSearchInput {
     /// Free text. Tokens are matched as prefixes (stemmed); ranking is BM25.
     pub query: String,
     /// Scope file/stream-bound hits to one worktree (project-global hits like
-    /// wiki are always included). Omit to search every stream.
+    /// knowledge are always included). Omit to search every stream.
     #[serde(default)]
     pub stream_id: Option<String>,
     /// Restrict to these resources: any `v_resource` lists as `searchable`

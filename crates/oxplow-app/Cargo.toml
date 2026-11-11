@@ -79,7 +79,7 @@ git2 = { workspace = true }
 oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
 
 [dev-dependencies]
-# `#[tokio::test(start_paused = true)]` in wiki_pages.rs needs the paused
+# `#[tokio::test(start_paused = true)]` in the knowledge tests needs the paused
 # clock, which lives behind `test-util` — NOT part of tokio's `full`. This
 # compiled for a while only because a transitive dependency happened to
 # enable the feature and cargo unified it in; a routine `cargo update`

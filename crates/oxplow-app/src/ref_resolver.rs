@@ -5,7 +5,7 @@
 //! carries its target plus a `context_chain` and `referenced` URIs;
 //! before the agent answers a comment we resolve each into a title +
 //! detail + body excerpt so the agent sees *what the highlighted thing
-//! is* (the commit subject, the task title+status, the wiki lead) without
+//! is* (the commit subject, the task title+status, the knowledge page lead) without
 //! a second tool round-trip. Lives in `oxplow-app` because it reaches
 //! across the store/VCS surfaces held by [`Services`].
 
@@ -25,12 +25,12 @@ pub struct RefSummary {
     pub uri: String,
     /// Its resource (`oxplow/task`); empty when it isn't a URI.
     pub resource: String,
-    /// Primary human label — wiki/task title, commit subject.
+    /// Primary human label — knowledge page/task title, commit subject.
     pub title: Option<String>,
     /// Short secondary fact — task status, commit diffstat.
     pub detail: Option<String>,
     /// A lead excerpt of the body — task description, commit message
-    /// body, wiki lead — capped so it stays cheap in the agent's context.
+    /// body, knowledge page lead — capped so it stays cheap in the agent's context.
     pub body_excerpt: Option<String>,
     /// Whether anything resolved it. A URI whose resource or row is gone
     /// — an uninstalled extension's, a deleted record's — is a dead link:

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { Editor } from "@tiptap/react";
 import { getMarkdown, richTextExtensions } from "./richTextExtensions.js";
 
-// Regression: the wiki body is an always-on Tiptap editor, so a GFM table
+// Regression: the knowledge page body is an always-on Tiptap editor, so a GFM table
 // must survive a markdown → editor → markdown round-trip (otherwise opening
 // + autosaving a page with tables flattens them on disk). tiptap-markdown
 // ships the GFM table serializer; this proves it engages once the standard

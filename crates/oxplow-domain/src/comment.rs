@@ -1,5 +1,5 @@
 //! Comments: threaded annotations anchored to a text selection on any
-//! page (wiki body, code file lines, task detail, …).
+//! page (knowledge page body, code file lines, task detail, …).
 //!
 //! A [`Comment`] is the thread anchor + metadata; the back-and-forth
 //! lives in [`CommentMessage`] rows (including the first message). The

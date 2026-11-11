@@ -6614,11 +6614,11 @@ commands:
         }
     }
 
-    /// The task tracker and the wiki are foundation's data and the agent's
-    /// tools, with no screens of its own: a task or wiki link opens the
+    /// The task tracker and knowledge are foundation's data and the agent's
+    /// tools, with no screens of its own: a task or knowledge link opens the
     /// generic resource page, and no menu offers a form that isn't there.
     #[test]
-    fn foundation_has_no_task_or_wiki_ui() {
+    fn foundation_has_no_task_or_knowledge_ui() {
         let dir = tempfile::tempdir().unwrap();
         let exts = load_extensions(dir.path());
         let ext = |name: &str| exts.iter().find(|e| e.name == name).unwrap();
@@ -6658,7 +6658,7 @@ commands:
             "tasks",
             "board",
             "backlog",
-            "wiki-index",
+            "knowledge-index",
             "hand-off",
             "new-task",
         ] {

@@ -462,7 +462,7 @@ pub struct ShowPageInput {
     pub params: Option<BTreeMap<String, Value>>,
     /// Or a page of your own as YAML (`title`, `loaders:` with sql / rows /
     /// page loaders, `view:`; it only reads): kept as a page file on
-    /// `oxplow:temp` (`temp/<id>`) the person can save to the wiki or as a
+    /// `oxplow:temp` (`temp/<id>`) the person can save as a knowledge page or as a
     /// page.
     #[serde(default)]
     pub spec: Option<String>,

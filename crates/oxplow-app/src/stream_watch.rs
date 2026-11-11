@@ -5,7 +5,7 @@
 //! that follows that worktree: the snapshot capture's dirty set, the
 //! announcements on the `EventBus` (`OxplowEvent::WorkspaceChanged`), and the
 //! refs watch through the VCS (`Vcs::watch_refs`, onto `RefMoves`). What follows
-//! a few paths of the primary worktree (the wiki, the config, version control
+//! a few paths of the primary worktree (oxwiki, the config, version control
 //! appearing) subscribes to its watch ([`StreamWatchRegistry::subscribe_primary`]).
 //!
 //! Dropping a stream's entry ([`StreamWatchRegistry::unregister`]) ends its

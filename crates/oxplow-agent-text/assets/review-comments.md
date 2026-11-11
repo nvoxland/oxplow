@@ -2,7 +2,7 @@
 description: Review the user's open follow-up comments and respond to them.
 ---
 
-The user leaves comments anchored to text across pages (wiki bodies,
+The user leaves comments anchored to text across pages (knowledge page bodies,
 code file lines, task details). Some are just notes-to-self; the ones
 marked **follow-up** want you to act.
 

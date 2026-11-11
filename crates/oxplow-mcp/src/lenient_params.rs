@@ -198,7 +198,7 @@ mod tests {
         let mut v = serde_json::json!({
             "touchedFiles": ["a.rs"],
             "id": "tsk1",
-            "impacts": [{ "targetKind": "wiki", "id": "x" }],
+            "impacts": [{ "targetKind": "knowledge", "id": "x" }],
         });
         add_snake_case_aliases(&mut v);
         let map = v.as_object().unwrap();
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(map["id"], "tsk1");
         // Recurses into array elements.
         let impact = &map["impacts"][0];
-        assert_eq!(impact["target_kind"], "wiki");
+        assert_eq!(impact["target_kind"], "knowledge");
     }
 
     #[test]

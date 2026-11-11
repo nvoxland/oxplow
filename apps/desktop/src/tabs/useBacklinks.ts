@@ -292,7 +292,7 @@ function parseExtraField(sourceExtra: string | null, field: string): string | nu
  * Normalize the action vocabulary the backend stores
  * (`created`/`updated`/`deleted`) into the labels the
  * renderer surfaces. Notably: `updated` → "modified" everywhere so
- * a file-change row and a wiki-page-change row read the same way.
+ * a file-change row and a knowledge-page-change row read the same way.
  */
 function normalizeAction(action: string | null): string | null {
   if (!action) return null;

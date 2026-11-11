@@ -221,7 +221,7 @@ exists for actions and links).
   th.title, 'uri', uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr'
   || th.id))`). An agent reads `agent in <label>`, `extension <label>`.
 - `link: { kind, from? }` makes cells clickable: `page` (any URI: a task's `v_task.uri`, `oxplow:oxplow/commit?sha=…`), `file` (a path;
-  `line: <column>`), `wiki` (a slug), `commit`, `metric`, `request` (a
+  `line: <column>`), `knowledge` (a page's URI), `commit`, `metric`, `request` (a
   request's id, `v_request.id`: opens its Changes page).
   `from` names the column holding the id (default: the column itself).
 - `select: <param>`: a click sets that param to the column's value, and
@@ -232,7 +232,7 @@ exists for actions and links).
   with a search param). `expand: <part>` (or a page): opens it under the row, its
   params taking the row's same-named columns.
 - `icon: <column>` draws an icon named by that column's value (a task
-  state, a file status, `epic`, `wiki`, `file`, `folder`, `commit`, …);
+  state, a file status, `epic`, `knowledge`, `file`, `folder`, `commit`, …);
   `tone: <column>`: `accent`, `success`, `warning`, `danger`, `muted`.
   `when: <column>` (a `detail`): the fact is drawn only while that column
   of the row is truthy, as an action's `when`; a fact that holds only

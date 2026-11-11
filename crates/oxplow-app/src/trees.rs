@@ -1076,10 +1076,10 @@ mod tests {
         assert!(deleted.is_empty(), "{deleted:?}");
     }
 
-    /// tsk1083: oxplow watches the wiki though git ignores it, but a tree
-    /// is git's view: the wiki is not uncommitted work.
+    /// tsk1083: oxplow watches oxwiki though git ignores it, but a tree
+    /// is git's view: oxwiki is not uncommitted work.
     #[tokio::test]
-    async fn the_working_tree_leaves_out_the_git_ignored_wiki() {
+    async fn the_working_tree_leaves_out_the_git_ignored_oxwiki() {
         let f = services_with_thread().await;
         let ws = f.svc.layout.project_dir.clone();
         std::fs::create_dir_all(ws.join(".oxplow/oxwiki")).unwrap();

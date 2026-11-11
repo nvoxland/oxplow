@@ -49,7 +49,7 @@ pub struct SnapshotCaptureRegistryConfig {
 pub struct SnapshotCaptureRegistry {
     services: Arc<RwLock<HashMap<StreamId, Arc<SnapshotCaptureService>>>>,
     /// `primary_id` lets a caller about the primary stream fetch its
-    /// service without already knowing its id — the wiki watcher, MCP
+    /// service without already knowing its id — the oxwiki watcher, MCP
     /// file-ref-version resolver, and bootloader logs. Set once at boot.
     primary_id: Arc<RwLock<Option<StreamId>>>,
     /// The `generated` lists now, for *future* `register()` calls.
@@ -251,7 +251,7 @@ impl SnapshotCaptureRegistry {
             .collect()
     }
 
-    /// Mark `id` as the primary stream, for callers about it (the wiki
+    /// Mark `id` as the primary stream, for callers about it (the oxwiki
     /// watcher, the MCP file-ref-version resolver). Must be called after
     /// the corresponding `register` so the lookup actually resolves.
     pub fn set_primary(&self, id: StreamId) {

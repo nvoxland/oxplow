@@ -21,7 +21,7 @@ describe("graphUriOf", () => {
     expect(graphUriOf(taskTabRef(item))).toBe(item);
   });
 
-  test("a wiki page, a file and a directory are theirs, a file without its revision", () => {
+  test("a knowledge page, a file and a directory are theirs, a file without its revision", () => {
     expect(graphUriOf(knowledgePageRef("oxwiki", "url-schemes"))).toBe(knowledgeUri("oxwiki", "url-schemes"));
     expect(graphUriOf(fileRef("src/app.ts"))).toBe(fileUri("src/app.ts"));
     expect(graphUriOf(directoryRef("src/components"))).toBe(dirUri("src/components"));
@@ -119,7 +119,7 @@ describe("dedupeEntriesByTarget", () => {
     expect(out).toHaveLength(3);
   });
 
-  test("collapses two ref_types pointing at the same wiki page", () => {
+  test("collapses two ref_types pointing at the same knowledge page", () => {
     const entries: BacklinkEntry[] = [
       { open: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", target: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", label: "URL Schemes", subtitle: "created" },
       { open: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", target: "oxplow:oxplow/knowledge?id=url-schemes&store=oxwiki", label: "URL Schemes", subtitle: "mention" },
@@ -129,7 +129,7 @@ describe("dedupeEntriesByTarget", () => {
     expect(out[0].subtitle).toBe("created · mention");
   });
 
-  test("file path that doesn't look like a wiki shadow stays a file row", () => {
+  test("file path that doesn't look like a knowledge page stays a file row", () => {
     const entries: BacklinkEntry[] = [
       { open: "oxplow:oxplow/file?path=src/foo.rs", target: "oxplow:oxplow/file?path=src/foo.rs", label: "src/foo.rs", subtitle: "modified" },
       { open: "oxplow:oxplow/file?path=src/foo.rs", target: "oxplow:oxplow/file?path=src/foo.rs", label: "src/foo.rs", subtitle: "mention" },

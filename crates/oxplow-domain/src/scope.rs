@@ -317,14 +317,14 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Read the wiki's comments and the drift of its refs from the code they name.",
+        summary: "Read knowledge pages' comments and the drift of their refs from the code they name.",
     },
     Scope {
         id: "knowledge.write",
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Write the project's wiki: pages, notes, comments and links.",
+        summary: "Write the project's knowledge: pages, notes, comments and links.",
     },
     Scope {
         id: "lsp.control",

@@ -651,7 +651,7 @@ async fn handle_hook_inner(
     // Token usage (tsk104) is counted from the Stop's `agent.turn.ended`
     // by the `token_usage.turns` pump reactor (P3.7), not in the hook.
 
-    // PostToolUse: record the call (wiki attribution, tool call,
+    // PostToolUse: record the call (knowledge attribution, tool call,
     // collection — pump reactors on the event the ingest logged) and
     // hand back any context for the agent (the thread's undelivered
     // nudges).

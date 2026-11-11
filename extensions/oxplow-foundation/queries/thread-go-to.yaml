@@ -45,7 +45,7 @@ loaders:
         SELECT ord, 'Most visited', uri, page_kind, label, NULL, visits FROM top
         WHERE :mode = 'top' AND ord <= CAST(:limit AS INTEGER)
       )
-      -- A wiki page shows its title now, not the one it had then.
+      -- A knowledge page shows its title now, not the one it had then.
       SELECT r.grp,
              coalesce(nullif(trim(w.title), ''), nullif(trim(r.label), ''), r.uri) AS title,
              r.page_kind, r.uri, r.at,

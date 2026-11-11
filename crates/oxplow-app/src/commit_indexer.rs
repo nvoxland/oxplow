@@ -71,7 +71,7 @@ pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<Pa
     }
     // Parsed-message edges. Subject + body run through the shared
     // extractor so the same wikilink + inline-mention rules that
-    // apply to wiki bodies and task descriptions also apply to
+    // apply to knowledge page bodies and task descriptions also apply to
     // commit messages.
     let mut combined = String::new();
     combined.push_str(&detail.info.subject);
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn message_body_picks_up_task_and_wiki_refs() {
+    fn message_body_picks_up_task_and_knowledge_refs() {
         let c = commit(
             "abc1234567890",
             "Resolve tsk42 and clarify [[architecture]]",

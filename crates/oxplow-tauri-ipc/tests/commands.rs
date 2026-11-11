@@ -137,7 +137,7 @@ async fn read_workspace_file_missing_path_errors() {
 
 // ---- Page-visit commands ----
 
-// ---- Wiki commands ----
+// ---- Knowledge commands ----
 
 // ---------------------------------------------------------------------------
 // Broad read-command coverage. The harness boots a real git repo + a primary
