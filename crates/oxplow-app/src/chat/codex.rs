@@ -1246,6 +1246,31 @@ mod tests {
         assert!(!log.iter().any(|l| l.starts_with("turn failed")));
     }
 
+    /// The recorded background terminal (`background_terminal.jsonl`): the
+    /// turn ends at once with the command still running; its
+    /// `item/completed` (exit 0) comes ~40 s later and wakes nothing. It
+    /// finishes the call; no turn starts after the last one's end.
+    #[test]
+    fn a_recorded_background_terminal_finishes_its_call_and_wakes_nothing() {
+        let log = replay(include_str!(
+            "../../tests/fixtures/codex/background_terminal.jsonl"
+        ));
+        assert_eq!(
+            log[log.len() - 3..],
+            [
+                "call Execute InProgress sleep 40 && echo bg-finished",
+                "turn ended completed",
+                "call Execute Completed sleep 40 && echo bg-finished",
+            ]
+        );
+        let last_start = log.iter().rposition(|l| l == "turn started").unwrap();
+        let last_end = log
+            .iter()
+            .rposition(|l| l.starts_with("turn ended"))
+            .unwrap();
+        assert!(last_start < last_end, "the exit starts no turn");
+    }
+
     const CHILD: &str = "01a14232-aaaa-7d40-8466-1ec0e927ef99";
 
     /// The recorded collab thread (`tests/fixtures/codex/collab.jsonl`, Codex
@@ -1863,7 +1888,7 @@ mod tests {
         (
             r#"A background terminal"#,
             r#"`processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list`"#,
-            r#"not read (the call is an ordinary shell call)"#,
+            r#"nothing of its own: an ordinary shell call, whose `item/completed` may land after the turn's end (recorded on the call, no job, no turn)"#,
         ),
         (
             r#"Files changed"#,

@@ -930,6 +930,17 @@ Codex's `conn::Connection`, with no view. It:
   `PostToolUse` with `ok` false) and opens or ends no turn. Pinned by
   `a_recorded_interrupt_ends_the_turn_and_a_late_failed_call_opens_none` and
   `a_late_failed_call_after_an_interrupted_turn_opens_no_turn`.
+- *Background terminal.* Every Codex command is a `commandExecution` with
+  a `processId` and `source: "unifiedExecStartup"`; one the agent leaves
+  running past its turn is only seen as a call whose `item/completed`
+  (`exitCode: 0`, `aggregatedOutput`, `durationMs`) arrives ~40 s after
+  `turn/completed`. **The exit does not wake the agent**: no `turn/started`
+  follows. oxplow records no job for it: nothing says at the call's start
+  that it is a background one, and a job with no report would read as
+  `running` (a request waiting on it) for ever. The finish is the call's
+  (`agent.tool.finished` with its exit code and duration, anchored to no
+  open turn); no turn opens. Pinned by
+  `a_recorded_background_terminal_finishes_its_call_and_wakes_nothing`.
 
 It stays open when the TUI exits (the PTY's exit ingests the
 `SessionEnd`), so a reopened TUI attaches to a held thread; it closes
@@ -1481,8 +1492,9 @@ Recorded in `fixtures/claude/subagent.jsonl` and replayed
 two equal; written from the app-server protocol and the recordings in
 `tests/fixtures/codex/`; an approval and an interrupted turn are recorded
 (`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.167.1);
-a failed turn and a background terminal have not been recorded yet, so
-those rows are pinned by synthetic notifications, not recordings):
+a background terminal is too (`background_terminal.jsonl`); a failed turn
+has not been recorded yet, so that row is pinned by synthetic
+notifications, not a recording):
 
 | Fact | Codex reports | oxplow reads |
 |---|---|---|
@@ -1493,7 +1505,7 @@ those rows are pinned by synthetic notifications, not recordings):
 | The turn that spawned a child | the parent's `turn.id` (the child's `rootTurnId`) | the job's `started_turn`, basis `reported` |
 | A child's tool calls | `item/completed` on the child's own thread | `ToolUse.subagent` of the child, at the finish |
 | Messages inside an agent tree | `senderThreadId` on a collab item | not read |
-| A background terminal | `processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list` | not read (the call is an ordinary shell call) |
+| A background terminal | `processId` and `source` on a `commandExecution`; `thread/backgroundTerminals/list` | nothing of its own: an ordinary shell call, whose `item/completed` may land after the turn's end (recorded on the call, no job, no turn) |
 | Files changed | `fileChange` paths and diffs; `turn/diff/updated` | `fileChange` paths and diffs; `turn/diff/updated` not read |
 | Compaction | `contextCompaction` item | `PostCompact`, with no summary or trigger |
 
