@@ -453,7 +453,7 @@ implementations:
     entry: "oxplow:oxwiki"
     title: oxwiki
     description: "oxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."
-    # Settings → Capabilities turns it off (`oxplow.knowledge.set_oxwiki`):
+    # Settings → Integrations → Knowledge stores turns it off (`oxplow.knowledge.set_oxwiki`):
     # declared still, its pages hidden, its files left alone.
     when: { config: /oxwiki, in: [true] }
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }

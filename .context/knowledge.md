@@ -63,7 +63,9 @@ verified" (`oxplow.knowledge.verify_files`, which writes through it). It:
 1. **resolves the store** (`KnowledgeStores::resolve`): the one `store`
    names, which must be enabled; with none named, the only enabled one.
    Refused naming the fix: "no knowledge store is enabled: turn oxwiki on
-   in Settings → Capabilities, or enable an extension's store"; with
+   in Settings → Integrations → Knowledge stores (or
+   `oxplow.knowledge.set_oxwiki { on: true }`), or enable an extension's
+   store"; with
    several, "name the store: oxwiki, …". A store whose `edit` is off
    refuses;
 2. validates **every `[[link]]` the write adds** — a task, page, file,
@@ -190,7 +192,9 @@ touched by the thread whose command wrote it (`knowledge_page_touch`,
 - **`v_knowledge_page`** — one row per page of an enabled store: `uri`,
   `store`, `id`, `kind`, `bucket`, `title`, `url` (open it in the store's
   own app), `author`, `excerpt`, `body_size`, `outbound_uris` (JSON array
-  of every URI it links to), `stale_ref_count`, `updated_at`.
+  of every URI it links to), `stale_ref_count`, `read_count` (every read,
+  a person's opens too), `agent_read_count` (agents' only),
+  `last_read_at`, `updated_at`.
 - **`v_knowledge_ref`** — each page's file refs: `page`, `path`,
   `pinned_snapshot_id`, `pinned_vcs_rev`, `pinned_vcs_rev_exact`,
   `latest_snapshot_id`, `stale` (over `v_knowledge_pin`, every recorded
@@ -243,9 +247,14 @@ via, at`):
   path — the worktree's when relative, else absolute — that an enabled
   store says is a page's file (`KnowledgeProvider::page_at`; oxwiki:
   `.oxplow/oxwiki/<slug>.md`). A path that is no page's is nothing.
-- `knowledge::KnowledgeReads` (pump consumer `knowledge.reads`) turns both
-  into `knowledge_page_read` rows, only for recorded pages, with the
-  event's thread and turn.
+- One mechanism for both: a file read becomes a `knowledge.page.read {
+  via: file }` too (`knowledge::KnowledgeFileReads`, consumer
+  `knowledge.file_reads`, the tool call its cause), and
+  `knowledge::KnowledgeReads` (`knowledge.reads`) turns every
+  `knowledge.page.read` into a `knowledge_page_read` row, only for recorded
+  pages, with the event's thread and turn. A tool read carries the agent's
+  open turn (`activity_anchors_tx`), so its request counts as one that read
+  a page. A deleted page's reads go with it.
 - **A person opening a page** is their page visit (`page_visit` rows of
   `page_kind = 'oxplow/knowledge'`, `via: open`): no event of its own.
 

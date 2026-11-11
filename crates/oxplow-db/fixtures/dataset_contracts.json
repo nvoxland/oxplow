@@ -16809,6 +16809,11 @@
           "doc": "How many times it was read: by an agent (`oxplow_read`, or its own read of the page's file) and by a person (opening it). Each read is a row of `v_knowledge_read`. (v6)"
         },
         {
+          "name": "agent_read_count",
+          "type": "INT",
+          "doc": "How many of those reads were an agent's (`oxplow_read`, or its own read of the page's file): what agents use, apart from a person flipping to its tab. (v6)"
+        },
+        {
           "name": "last_read_at",
           "type": "TEXT",
           "doc": "When it was last read (RFC 3339); NULL when never. (v6)"

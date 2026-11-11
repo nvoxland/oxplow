@@ -24,7 +24,7 @@ loaders:
                || CASE WHEN r.pinned_vcs_rev IS NULL THEN ''
                        ELSE ' ' || CASE WHEN r.pinned_vcs_rev_exact THEN '=' ELSE '~' END || ' ' || substr(r.pinned_vcs_rev, 1, 8) END AS pinned,
              CASE WHEN r.stale THEN 'stale' ELSE 'fresh' END AS status,
-             CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone
+             CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
       FROM v_knowledge_page p
       JOIN v_knowledge_ref r ON r.page = p.uri
       WHERE p.store = :store AND p.id = :id
@@ -53,6 +53,7 @@ view:
   - id: verify
     label: Mark verified
     command: oxplow.knowledge.verify_files
+    when: stale
     input:
       store: '{{param.store}}'
       id: '{{param.id}}'

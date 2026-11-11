@@ -978,10 +978,12 @@ impl Services {
                 }),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::KnowledgeAttribution),
-                Arc::new(knowledge::KnowledgeReads {
+                Arc::new(knowledge::KnowledgeFileReads {
                     stores: knowledge.clone(),
                     project_dir: layout.project_dir.clone(),
+                    vocabulary: vocabulary.clone(),
                 }),
+                Arc::new(knowledge::KnowledgeReads),
                 // The log's facts the renderer hears (P7.B6).
                 Arc::new(ui_push::UiPush {
                     events: event_bus.clone(),

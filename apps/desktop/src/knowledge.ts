@@ -102,7 +102,7 @@ export async function readKnowledgePage(
 }
 
 /** What the knowledge surfaces say when no store is enabled. */
-export const NO_KNOWLEDGE_STORE = "No knowledge store is enabled — turn oxwiki on in Settings → Capabilities";
+export const NO_KNOWLEDGE_STORE = "No knowledge store is enabled — turn oxwiki on in Settings → Integrations → Knowledge stores";
 
 function jsonOf<T>(raw: SqlCell | undefined, fallback: T): T {
   try {

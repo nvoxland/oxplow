@@ -714,14 +714,17 @@ pub fn source_declaring_page(project: &Path, checkout: &Path, id: &str) -> Optio
     })
 }
 
-/// Settings are the namespace's: the enabled extensions sharing one that
-/// declare `configuration:` each get the one declaration of them all
-/// (`config_schema::merge`). One at another version, or declaring a key an
-/// earlier one does, is a load error and has none.
+/// Settings are the namespace's: the extensions sharing one that declare
+/// `configuration:` each get the one declaration of them all
+/// (`config_schema::merge`). A disabled one's keys are in it too: the
+/// stored settings outlive its being off (bundled's task workflow with
+/// bundled off), and a layer holding them must still read, or every setting
+/// of the namespace would fail closed. One at another version, or declaring
+/// a key an earlier one does, is a load error and has none.
 fn share_configuration(extensions: &mut [Extension]) {
     let mut namespaces: Vec<String> = extensions
         .iter()
-        .filter(|e| e.enabled && e.configuration.is_some())
+        .filter(|e| e.configuration.is_some())
         .map(|e| e.namespace.clone())
         .collect();
     namespaces.sort();
@@ -730,7 +733,7 @@ fn share_configuration(extensions: &mut [Extension]) {
         let at: Vec<usize> = (0..extensions.len())
             .filter(|&i| {
                 let e = &extensions[i];
-                e.enabled && e.namespace == namespace && e.configuration.is_some()
+                e.namespace == namespace && e.configuration.is_some()
             })
             .collect();
         if at.len() < 2 {

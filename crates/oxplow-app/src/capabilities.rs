@@ -938,10 +938,13 @@ impl CapabilityRegistry {
         let mut by_capability = std::collections::BTreeMap::new();
         for spec in capability::CAPABILITIES {
             if spec.many {
-                // Met while any implementation is declared; a feature while
-                // any of them has it.
-                let served: Vec<&Implementation> =
-                    all.iter().filter(|i| i.capability == spec.id).collect();
+                // Met while any implementation is declared and offered (one
+                // a setting turned off serves nothing); a feature while any
+                // of them has it.
+                let served: Vec<&Implementation> = all
+                    .iter()
+                    .filter(|i| i.offered && i.capability == spec.id)
+                    .collect();
                 if served.is_empty() {
                     continue;
                 }
@@ -1359,38 +1362,45 @@ pub(crate) async fn offering_implementations(
     svc: &crate::Services,
     extensions: &[crate::extension::extensions::Extension],
 ) -> Settings {
-    let wanted: Vec<(
-        String,
-        crate::extension::extensions::config_schema::ConfigurationFile,
-    )> = extensions
-        .iter()
-        .filter(|e| e.enabled && e.implementations.iter().any(|i| i.when.is_some()))
-        .filter_map(|e| Some((e.namespace.clone(), e.configuration.clone()?)))
-        .collect();
-    if wanted.is_empty() {
-        return Settings::new();
-    }
+    let extensions = extensions.to_vec();
     svc.db
-        .read(move |conn| {
-            Ok(wanted
-                .into_iter()
-                .filter_map(|(namespace, declaration)| {
-                    match crate::extension::extension_configuration::effective_values(
-                        conn,
-                        &namespace,
-                        &declaration,
-                    ) {
-                        Ok(values) => Some((namespace, values)),
-                        Err(error) => {
-                            tracing::warn!(%namespace, %error, "its settings can't be read; the implementations they offer are off");
-                            None
-                        }
-                    }
-                })
-                .collect())
-        })
+        .read(move |conn| Ok(offering_implementations_tx(conn, &extensions)))
         .await
         .unwrap_or_default()
+}
+
+/// [`offering_implementations`] in the caller's transaction: what the
+/// publication checks, after it commits, against what it was prepared with.
+pub(crate) fn offering_implementations_tx(
+    conn: &rusqlite::Connection,
+    extensions: &[crate::extension::extensions::Extension],
+) -> Settings {
+    let mut out = Settings::new();
+    for e in extensions
+        .iter()
+        .filter(|e| e.enabled && e.implementations.iter().any(|i| i.when.is_some()))
+    {
+        let Some(declaration) = &e.configuration else {
+            continue;
+        };
+        if out.contains_key(&e.namespace) {
+            continue;
+        }
+        match crate::extension::extension_configuration::effective_values(
+            conn,
+            &e.namespace,
+            declaration,
+        ) {
+            Ok(values) => {
+                out.insert(e.namespace.clone(), values);
+            }
+            Err(error) => {
+                let namespace = &e.namespace;
+                tracing::warn!(%namespace, %error, "its settings can't be read; the implementations they offer are off");
+            }
+        }
+    }
+    out
 }
 
 /// The effective configuration of each namespace among `extensions` with a

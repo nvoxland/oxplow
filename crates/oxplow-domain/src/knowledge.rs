@@ -309,8 +309,9 @@ impl KnowledgeStores {
 }
 
 fn none_enabled() -> String {
-    "no knowledge store is enabled: turn oxwiki on in Settings → Capabilities, \
-     or enable an extension's store"
+    "no knowledge store is enabled: turn oxwiki on in Settings → Integrations → \
+     Knowledge stores (or `oxplow.knowledge.set_oxwiki { on: true }`), or enable an \
+     extension's store"
         .to_string()
 }
 

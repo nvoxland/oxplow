@@ -62,11 +62,12 @@ loaders:
       WHERE p.stale_ref_count > 0
       ORDER BY p.stale_ref_count DESC, p.title
   # The last twenty things that happened to a page: it was written, or an
-  # agent read it.
+  # agent or a person read it.
   activity:
     sql: |
       SELECT * FROM (
-        SELECT p.uri, p.id, p.title, 'Written' AS what, p.updated_at AS at, p.store AS who
+        SELECT p.uri, p.id, p.title, 'Written' AS what, p.updated_at AS at,
+               coalesce(p.author, '') AS who
         FROM v_knowledge_page p
         UNION ALL
         SELECT p.uri, p.id, p.title, 'Read', r.at, r.actor || ' (' || r.via || ')'
@@ -74,7 +75,8 @@ loaders:
       ORDER BY at DESC LIMIT 20
   about_file:
     sql: |
-      SELECT p.uri, p.title, p.store, r.stale
+      SELECT p.uri, p.title, p.store,
+             CASE WHEN r.stale THEN 'changed since the page was written' ELSE 'current' END AS stale
       FROM v_knowledge_ref r JOIN v_knowledge_page p ON p.uri = r.page
       WHERE :path <> '' AND r.path = :path
       ORDER BY p.title

@@ -1934,16 +1934,34 @@ impl EventType for KnowledgePageRecorded {
     type Payload = KnowledgePageRecordedV3;
 }
 
+/// How an agent read a knowledge page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadVia {
+    /// Through a tool (`oxplow_read`).
+    Tool,
+    /// Its own read of the page's file (a store whose pages are files).
+    File,
+}
+
+impl ReadVia {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ReadVia::Tool => "tool",
+            ReadVia::File => "file",
+        }
+    }
+}
+
 /// `knowledge.page.read@1`: an agent read a knowledge page — through
-/// `oxplow_read` (`via: tool`), or a file of a store's folder (`via:
-/// file`). A person's opens are their page visits.
+/// `oxplow_read` (`via: tool`), or its own read of the page's file (`via:
+/// file`, caused by the tool call). A person's opens are their page visits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct KnowledgePageReadV1 {
     /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
     pub page: String,
-    /// How it was read: `tool` or `file`.
-    pub via: String,
+    pub via: ReadVia,
 }
 
 pub struct KnowledgePageRead;

@@ -38,18 +38,23 @@ loaders:
   refs:
     sql: |
       SELECT r.path, CASE WHEN r.stale THEN 'changed since this page was written' ELSE 'current' END AS status,
-             CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone
+             CASE WHEN r.stale THEN 'warning' ELSE 'success' END AS tone, r.stale
       FROM v_knowledge_ref r WHERE r.page = :uri
       ORDER BY r.stale DESC, r.path
   # What links here: the tasks, commits and knowledge pages that name it.
   backlinks:
     sql: |
-      SELECT coalesce(w.title, c.subject, k.title, r.source_uri) AS title, r.source_uri AS uri,
+      -- Each title from its own view, pinned in a subquery's WHERE (a join
+      -- on a view's uri column scans the whole view).
+      SELECT coalesce(
+               CASE r.source_resource
+                 WHEN 'oxplow/task' THEN (SELECT w.title FROM v_task w WHERE w.uri = r.source_uri)
+                 WHEN 'oxplow/commit' THEN (SELECT c.subject FROM v_commit c WHERE c.sha = uri_param(r.source_uri, 'sha'))
+                 WHEN 'oxplow/knowledge' THEN (SELECT k.title FROM v_knowledge_page k WHERE k.uri = r.source_uri)
+               END, r.source_uri) AS title,
+             r.source_uri AS uri,
              'Links to this page' AS description
       FROM v_page_ref r
-      LEFT JOIN v_task w ON w.uri = r.source_uri
-      LEFT JOIN v_commit c ON r.source_resource = 'oxplow/commit' AND c.sha = uri_param(r.source_uri, 'sha')
-      LEFT JOIN v_knowledge_page k ON k.uri = r.source_uri
       WHERE r.target_uri = :uri
         AND r.ref_type IN ('wikilink', 'summary_wikilink')
       GROUP BY r.source_uri
@@ -132,6 +137,7 @@ view:
     - id: verify
       label: Mark verified
       command: oxplow.knowledge.verify_files
+      when: stale
       input:
         store: '{{param.store}}'
         id: '{{param.id}}'

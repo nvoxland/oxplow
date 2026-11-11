@@ -80,13 +80,13 @@ pub fn upsert_tx(
     Ok(())
 }
 
-/// Delete `uri`'s row (its touches with it); whether there was one.
+/// Delete `uri`'s row (its touches and its agents' reads with it); whether
+/// there was one. A page written again under the same id starts unread.
 pub fn delete_tx(conn: &rusqlite::Connection, uri: &str) -> Result<bool, DomainError> {
-    conn.execute(
-        "DELETE FROM knowledge_page_touch WHERE uri = ?1",
-        params![uri],
-    )
-    .map_err(crate::database::map_sql_err)?;
+    for table in ["knowledge_page_touch", "knowledge_page_read"] {
+        conn.execute(&format!("DELETE FROM {table} WHERE uri = ?1"), params![uri])
+            .map_err(crate::database::map_sql_err)?;
+    }
     let rows = conn
         .execute("DELETE FROM knowledge_page WHERE uri = ?1", params![uri])
         .map_err(crate::database::map_sql_err)?;

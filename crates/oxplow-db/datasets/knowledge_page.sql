@@ -7,9 +7,9 @@ WITH refs AS (
 -- A page's reads: an agent's and a person's (`v_knowledge_read`'s sources;
 -- that dataset reads this one, so it can't be read here).
 reads AS (
-    SELECT r.uri, r.at FROM source('knowledge_page_read') r
+    SELECT r.uri, r.at, 1 AS agent FROM source('knowledge_page_read') r
     UNION ALL
-    SELECT v.page_id AS uri, v.visited_at AS at FROM source('page_visit') v
+    SELECT v.page_id AS uri, v.visited_at AS at, 0 AS agent FROM source('page_visit') v
     WHERE v.page_kind = 'oxplow/knowledge'
 ),
 store AS (
@@ -37,6 +37,7 @@ SELECT k.uri,
        CAST((SELECT count(DISTINCT p.path) FROM ref('knowledge_pin') p
          WHERE p.page = k.uri AND p.stale = 1) AS INTEGER) AS stale_ref_count,
        CAST((SELECT count(*) FROM reads r WHERE r.uri = k.uri) AS INTEGER) AS read_count,
+       CAST((SELECT count(*) FROM reads r WHERE r.uri = k.uri AND r.agent = 1) AS INTEGER) AS agent_read_count,
        CAST((SELECT max(r.at) FROM reads r WHERE r.uri = k.uri) AS TEXT) AS last_read_at,
        k.updated_at
 FROM source('knowledge_page') k

@@ -25,7 +25,7 @@ use oxplow_db::knowledge_record::{
 use oxplow_db::EventCtx;
 use oxplow_domain::events::schema::{
     AgentToolFinished, AgentToolFinishedV4, KnowledgePageRead, KnowledgePageReadV1,
-    KnowledgePageWritten, KnowledgePageWrittenV3,
+    KnowledgePageWritten, KnowledgePageWrittenV3, ReadVia,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{
@@ -212,7 +212,8 @@ impl crate::event_pump::EventConsumer for KnowledgeAttribution {
 }
 
 /// Log an agent's read of the page `uri` through a tool (`oxplow_read`):
-/// `knowledge.page.read { via: tool }`, as the actor. A read command runs
+/// `knowledge.page.read { via: tool }`, as the actor, anchored to its open
+/// turn (so a request that read a page is one). A read command runs
 /// unrecorded, so it appends this itself.
 pub async fn log_read(
     svc: &crate::Services,
@@ -223,66 +224,58 @@ pub async fn log_read(
         return Ok(());
     };
     let page = knowledge_uri(&store, &id);
-    let vocabulary = svc.vocabulary.current();
-    let env = EventCtx {
-        vocabulary: &vocabulary,
-        source: actor.source(),
-        cause: None,
-    }
-    .typed::<KnowledgePageRead>(&KnowledgePageReadV1 {
-        page: page.clone(),
-        via: "tool".into(),
-    })
-    .with_anchors(actor.anchors())
-    .with_subject([page]);
-    svc.event_log_store.append(env).await.map(|_| ())
+    let (vocabulary, source, actor) = (svc.vocabulary.clone(), actor.source(), actor.clone());
+    svc.db
+        .transaction(move |tx| {
+            let anchors = match &actor {
+                oxplow_domain::Actor::Agent {
+                    thread_id: Some(thread),
+                    session_id,
+                    ..
+                } => oxplow_db::agent_stores::activity_anchors_tx(tx, *thread, *session_id)?,
+                other => other.anchors(),
+            };
+            let vocabulary = vocabulary.current();
+            let env = EventCtx {
+                vocabulary: &vocabulary,
+                source: source.clone(),
+                cause: None,
+            }
+            .typed::<KnowledgePageRead>(&KnowledgePageReadV1 {
+                page: page.clone(),
+                via: ReadVia::Tool,
+            })
+            .with_anchors(anchors)
+            .with_subject([page.clone()]);
+            oxplow_db::event_log_store::append_tx(tx, &vocabulary, &env).map(|_| ())
+        })
+        .await
 }
 
-/// Records agents' reads of knowledge pages (`knowledge_page_read`,
-/// `v_knowledge_read`): each `knowledge.page.read` (an `oxplow_read`), and
-/// each `agent.tool.finished` of a file read whose file is a recorded
-/// page's (a store's `page_at`: oxwiki's `.oxplow/oxwiki/<slug>.md`), as a
-/// read `via: file`. A path is the worktree's (relative) or absolute; one
-/// that is no page is nothing.
-pub struct KnowledgeReads {
+/// An agent reading a page's file with its own tool reads the page: each
+/// `agent.tool.finished` of a file read whose path an enabled store says is
+/// a recorded page's file (`page_at`; oxwiki's `.oxplow/oxwiki/<slug>.md`)
+/// logs `knowledge.page.read { via: file }`, caused by the tool call, with
+/// its anchors. A path is the worktree's (relative) or absolute; one that is
+/// no page is nothing. Every read then reaches the record the same way
+/// ([`KnowledgeReads`]).
+pub struct KnowledgeFileReads {
     pub stores: Arc<KnowledgeStores>,
     pub project_dir: PathBuf,
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
 }
 
-impl KnowledgeReads {
-    pub const NAME: &'static str = "knowledge.reads";
+impl KnowledgeFileReads {
+    pub const NAME: &'static str = "knowledge.file_reads";
 }
 
-fn insert_read(
-    conn: &rusqlite::Connection,
-    uri: &str,
-    via: &str,
-    event: &oxplow_domain::StoredEvent,
-) -> Result<(), DomainError> {
-    let anchors = &event.envelope.anchors;
-    conn.execute(
-        "INSERT INTO knowledge_page_read (uri, thread_id, turn_id, via, at)
-         SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM knowledge_page WHERE uri = ?1)",
-        params![
-            uri,
-            anchors.thread_id.map(|t| t.value()),
-            anchors.turn_id,
-            via,
-            oxplow_db::ts_to_string(event.envelope.at),
-        ],
-    )
-    .map_err(sql)?;
-    Ok(())
-}
-
-impl crate::event_pump::EventConsumer for KnowledgeReads {
+impl crate::event_pump::EventConsumer for KnowledgeFileReads {
     fn name(&self) -> &'static str {
         Self::NAME
     }
 
     fn handles(&self, event_type: &str) -> bool {
-        event_type == <KnowledgePageRead as oxplow_domain::EventType>::TYPE
-            || event_type == <AgentToolFinished as oxplow_domain::EventType>::TYPE
+        event_type == <AgentToolFinished as oxplow_domain::EventType>::TYPE
     }
 
     fn handle(
@@ -290,13 +283,9 @@ impl crate::event_pump::EventConsumer for KnowledgeReads {
         conn: &rusqlite::Connection,
         event: &oxplow_domain::StoredEvent,
     ) -> Result<(), DomainError> {
-        let payload = event.envelope.payload.clone();
-        if event.envelope.event_type == <KnowledgePageRead as oxplow_domain::EventType>::TYPE {
-            let read: KnowledgePageReadV1 = serde_json::from_value(payload)
-                .map_err(|e| DomainError::Invalid(format!("knowledge.page.read payload: {e}")))?;
-            return insert_read(conn, &read.page, &read.via, event);
-        }
-        let Ok(tool) = serde_json::from_value::<AgentToolFinishedV4>(payload) else {
+        let Ok(tool) =
+            serde_json::from_value::<AgentToolFinishedV4>(event.envelope.payload.clone())
+        else {
             return Ok(());
         };
         if tool.kind != oxplow_domain::agent::tool::ToolKind::Read || tool.paths.is_empty() {
@@ -321,6 +310,12 @@ impl crate::event_pump::EventConsumer for KnowledgeReads {
             .iter()
             .filter_map(|id| self.stores.get(id))
             .collect();
+        let vocabulary = self.vocabulary.current();
+        let ev = EventCtx {
+            vocabulary: &vocabulary,
+            source: event.envelope.source.clone(),
+            cause: Some(event.envelope.id.clone()),
+        };
         for path in &tool.paths {
             let path = Path::new(path);
             let path = if path.is_absolute() {
@@ -329,11 +324,66 @@ impl crate::event_pump::EventConsumer for KnowledgeReads {
                 worktree.join(path)
             };
             for store in &stores {
-                if let Some(id) = store.page_at(&path) {
-                    insert_read(conn, &knowledge_uri(store.id(), &id), "file", event)?;
+                let Some(id) = store.page_at(&path) else {
+                    continue;
+                };
+                let page = knowledge_uri(store.id(), &id);
+                if oxplow_db::knowledge_page_store::get_tx(conn, &page)?.is_none() {
+                    continue;
                 }
+                let env = ev
+                    .typed::<KnowledgePageRead>(&KnowledgePageReadV1 {
+                        page: page.clone(),
+                        via: ReadVia::File,
+                    })
+                    .with_anchors(event.envelope.anchors.clone())
+                    .with_subject([page]);
+                ev.append(conn, &env)?;
             }
         }
+        Ok(())
+    }
+}
+
+/// Records every read of a knowledge page an agent made
+/// (`knowledge_page_read`, `v_knowledge_read`) from its
+/// `knowledge.page.read`, with its thread and turn, for recorded pages
+/// only.
+pub struct KnowledgeReads;
+
+impl KnowledgeReads {
+    pub const NAME: &'static str = "knowledge.reads";
+}
+
+impl crate::event_pump::EventConsumer for KnowledgeReads {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == <KnowledgePageRead as oxplow_domain::EventType>::TYPE
+    }
+
+    fn handle(
+        &self,
+        conn: &rusqlite::Connection,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        let read: KnowledgePageReadV1 = serde_json::from_value(event.envelope.payload.clone())
+            .map_err(|e| DomainError::Invalid(format!("knowledge.page.read payload: {e}")))?;
+        let anchors = &event.envelope.anchors;
+        conn.execute(
+            "INSERT INTO knowledge_page_read (uri, thread_id, turn_id, via, at)
+             SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM knowledge_page WHERE uri = ?1)",
+            params![
+                read.page,
+                anchors.thread_id.map(|t| t.value()),
+                anchors.turn_id,
+                read.via.as_str(),
+                oxplow_db::ts_to_string(event.envelope.at),
+            ],
+        )
+        .map_err(sql)?;
         Ok(())
     }
 }

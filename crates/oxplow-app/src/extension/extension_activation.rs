@@ -610,6 +610,11 @@ impl ExtensionActivation {
         let mut failed = crate::extension::extension_catalog::Failed::new();
         let mut gave_way = VocabularyErrors::new();
         let mut restaged = false;
+        // Whether the settings that offer implementations changed after
+        // `prepare` read them (a write since, a carried-forward layer): then
+        // the generation's offered set is stale, and another one follows
+        // its commit.
+        let offer_stale = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let (published, retired, mut held) = loop {
             let (snapshot, mut held) =
                 raw.admitted(svc.extension_catalog.active().as_deref(), &failed);
@@ -658,6 +663,7 @@ impl ExtensionActivation {
                 Err(error) => return Err(error),
             };
             let Prepared {
+                offered,
                 commands,
                 adapters,
                 bundles,
@@ -693,6 +699,7 @@ impl ExtensionActivation {
             let adapters = Mutex::new(Some(adapters));
             let bundles = Mutex::new(Some(bundles));
             let svc = svc.clone();
+            let stale = offer_stale.clone();
             let outcome = db
                 .transaction_with_publication(move |publication| {
                     let mut boundary = boundary.lock().unwrap_or_else(|error| error.into_inner());
@@ -771,6 +778,13 @@ impl ExtensionActivation {
                         publication.transaction()?,
                         published.extensions(),
                     );
+                    stale.store(
+                        crate::capabilities::offering_implementations_tx(
+                            publication.transaction()?,
+                            published.extensions(),
+                        ) != offered,
+                        std::sync::atomic::Ordering::SeqCst,
+                    );
                     // Set this before the commit attempt so an unwind in either commit
                     // or publication cannot expose mismatched database/memory state.
                     boundary.unavailable = true;
@@ -844,6 +858,9 @@ impl ExtensionActivation {
             }
         };
         retired.finish().await;
+        if offer_stale.load(std::sync::atomic::Ordering::SeqCst) {
+            self.request();
+        }
         for (name, why) in gave_way {
             held.entry(name).or_default().extend(why);
         }
@@ -948,6 +965,9 @@ struct Prepared {
     metrics: crate::metrics_service::PreparedMetricCatalog,
     capabilities: crate::capabilities::PreparedCapabilities,
     database: crate::extension::extension_generation::PreparedExtensionDatabase,
+    /// The settings that offered implementations (`when:`) as `prepare`
+    /// read them, outside the transaction.
+    offered: crate::capabilities::Settings,
 }
 
 impl ExtensionActivation {
@@ -1015,6 +1035,7 @@ impl ExtensionActivation {
             )
             .map_err(TxError::Aborted)?;
         Ok(Prepared {
+            offered,
             commands,
             adapters,
             bundles,

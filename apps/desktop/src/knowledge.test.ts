@@ -42,5 +42,5 @@ test("the enabled stores read v_capability_provider rows; a store that does not 
     { store: "oxwiki", title: "oxwiki", kinds: [{ id: "note", title: "Note", bucket: "note" }], edit: true },
     { store: "docs", title: "Docs", kinds: [], edit: false },
   ]);
-  expect(NO_KNOWLEDGE_STORE).toBe("No knowledge store is enabled — turn oxwiki on in Settings → Capabilities");
+  expect(NO_KNOWLEDGE_STORE).toBe("No knowledge store is enabled — turn oxwiki on in Settings → Integrations → Knowledge stores");
 });

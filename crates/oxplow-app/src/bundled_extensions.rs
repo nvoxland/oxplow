@@ -201,4 +201,49 @@ mod tests {
             .await
             .expect("oxwiki runs with bundled off");
     }
+
+    /// The `oxplow` namespace's settings hold bundled's keys (its task
+    /// workflow, say) as well as foundation's: with bundled off they are
+    /// still a valid layer, so oxwiki stays on rather than going off with
+    /// settings nobody can read.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oxwiki_stays_on_with_bundled_off_and_its_settings_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::test_fixtures::init_git_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            format!(
+                "disableExtensions: [{}]\n",
+                crate::test_fixtures::optional_shipped()
+            ),
+        )
+        .unwrap();
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.db
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO extension_config (namespace, scope, schema_version, revision, values_json)
+                     VALUES ('oxplow', 'project', 2, 1, '{\"tasks\":{\"workflow\":\"off\"}}')",
+                    [],
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        assert_eq!(svc.knowledge.enabled(), ["oxwiki"]);
+        let read = svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                "oxplow.settings.read",
+                serde_json::json!({}),
+                false,
+            )
+            .await
+            .expect("the settings read with bundled off");
+        assert_eq!(read.result["values"]["oxwiki"], true, "{}", read.result);
+    }
 }

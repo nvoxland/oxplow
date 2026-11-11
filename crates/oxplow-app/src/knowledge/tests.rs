@@ -999,3 +999,71 @@ async fn a_persons_visit_is_a_read() {
         [("person".into(), "open".into())]
     );
 }
+
+/// A read in an agent's open turn is that turn's: what makes its request
+/// one that read a knowledge page.
+#[tokio::test]
+async fn a_read_in_an_open_turn_is_that_turns() {
+    use oxplow_domain::HookKind;
+    let fx = crate::test_fixtures::services_with_thread().await;
+    run(&fx, WRITE_PAGE, json!({ "id": "arch", "body": "# Arch\n" }))
+        .await
+        .unwrap();
+    fx.svc
+        .hook_ingest
+        .ingest(crate::HookEnvelope {
+            session_title: None,
+            turn_run: None,
+            reading: Default::default(),
+            kind: HookKind::UserPromptSubmit,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+            agent_session_id: Some(fx.session),
+            session_id: Some("native".into()),
+            payload_json: "{}".into(),
+            prompt: None,
+            decision: None::<crate::ToolDecision>,
+            tool: crate::test_fixtures::claude_tool(HookKind::UserPromptSubmit, &json!({})),
+            subagent: None,
+            harness_turn: None,
+        })
+        .await
+        .unwrap();
+    let agent = Actor::Agent {
+        session_id: Some(fx.session),
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    };
+    fx.svc
+        .commands
+        .run(
+            &agent,
+            "oxplow.records.read",
+            json!({ "uri": oxwiki("arch") }),
+            false,
+        )
+        .await
+        .unwrap();
+    let logged = events_of(&fx, "knowledge.page.read").await;
+    assert!(
+        logged[0].envelope.anchors.turn_id.is_some(),
+        "{:?}",
+        logged[0].envelope.anchors
+    );
+    fx.svc.event_pump.run_once().await.unwrap();
+    let page = oxwiki("arch");
+    let turn: Option<i64> = fx
+        .svc
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT turn_id FROM v_knowledge_read WHERE uri = ?1",
+                [page],
+                |r| r.get(0),
+            )
+            .map_err(sql)
+        })
+        .await
+        .unwrap();
+    assert_eq!(turn, logged[0].envelope.anchors.turn_id);
+}
