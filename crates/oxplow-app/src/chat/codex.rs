@@ -1271,6 +1271,68 @@ mod tests {
         assert!(last_start < last_end, "the exit starts no turn");
     }
 
+    /// The recorded subagent (`subagent.jsonl`): the spawn is only
+    /// `subAgentActivity` items (no spawn collab call), the `wait` names no
+    /// agent, and the child's thread has no `thread/started`. The child is
+    /// attributed once, to the parent's turn (its `rootTurnId`); its three
+    /// calls are the child's; its end finishes it before the wait does.
+    #[test]
+    fn a_recorded_subagent_is_attributed_to_the_turn_that_spawned_it() {
+        const PARENT: &str = "01a1c87c-b412-7620-b0ab-0faf5bf09350";
+        const KID: &str = "01a1c87d-057d-7dd1-9418-0d4adeabe5c0";
+        let text = include_str!("../../tests/fixtures/codex/subagent.jsonl");
+        let log = replay(text);
+        let from = log
+            .iter()
+            .position(|l| l.starts_with("subagent started"))
+            .unwrap();
+        assert_eq!(
+            log[from..],
+            [
+                format!("subagent started {KID}"),
+                "collab wait InProgress".to_string(),
+                format!("child {KID} Read Completed"),
+                format!("child {KID} Search Completed"),
+                format!("child {KID} Read Completed"),
+                format!("subagent finished {KID}"),
+                "collab wait Completed".to_string(),
+                "turn ended completed".to_string(),
+            ]
+        );
+        // The turn it is attributed to is the parent's turn that ran when
+        // the spawn showed, and the child's own `rootTurnId` says the same.
+        let mut parent_turn = None;
+        let mut state = State {
+            thread: Some(PARENT.into()),
+            ..State::default()
+        };
+        let mut spawned_in = Vec::new();
+        for m in parse_recording(text) {
+            if let ServerMessage::Notification { method, params } = &m {
+                if method == "turn/started" && params["threadId"] == PARENT {
+                    parent_turn = params["turn"]["id"].as_str().map(str::to_string);
+                }
+                if method == "turn/started" && params["threadId"] == KID {
+                    assert_eq!(
+                        params["turn"]["rootTurnId"].as_str(),
+                        parent_turn.as_deref()
+                    );
+                }
+            }
+            for incoming in on_message(&m, &mut state) {
+                if let Incoming::Subagent {
+                    change: SubagentChange::Started,
+                    spawned_in: turn,
+                    ..
+                } = incoming
+                {
+                    spawned_in.push(turn);
+                }
+            }
+        }
+        assert_eq!(spawned_in, [parent_turn], "once, in the parent's turn");
+    }
+
     const CHILD: &str = "01a14232-aaaa-7d40-8466-1ec0e927ef99";
 
     /// The recorded collab thread (`tests/fixtures/codex/collab.jsonl`, Codex

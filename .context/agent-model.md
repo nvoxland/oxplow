@@ -1065,7 +1065,15 @@ session slot, bearer or process of oxplow's:
   `message` as the result), once per child whichever item says it first.
   Recorded 2026-10-16 on 0.162.1: a spawn shows only as a
   `subAgentActivity` (no `spawnAgent` collab item); `wait` is a
-  `collabAgentToolCall` with no receivers.
+  `collabAgentToolCall` with no receivers. Recorded again on 0.166.0 /
+  0.167.1 (`tests/fixtures/codex/subagent.jsonl`): the same — the spawn is
+  `subAgentActivity` items only, `wait` names no receiver and has empty
+  `agentsStates` although it waited for the child (so it is the parent's
+  own call and starts or finishes no child), and the child's thread has no
+  `thread/started`; the child's `turn/started` carries `rootTurnId` = the
+  parent's `turn.id`, which is the turn the start is attributed to (the
+  parent's running turn when the first `subAgentActivity` shows). Pinned by
+  `a_recorded_subagent_is_attributed_to_the_turn_that_spawned_it`.
 - A `collabAgentToolCall` is also the parent's own tool call, kind
   `subagent`, named by its tool (`wait`, `spawnAgent`, …).
 - A child thread's **finished tool calls** (`item/completed` of a command,
@@ -1492,7 +1500,8 @@ Recorded in `fixtures/claude/subagent.jsonl` and replayed
 two equal; written from the app-server protocol and the recordings in
 `tests/fixtures/codex/`; an approval and an interrupted turn are recorded
 (`approval.jsonl`, `interrupt.jsonl`, Codex CLI 0.166.0 / daemon 0.167.1);
-a background terminal is too (`background_terminal.jsonl`); a failed turn
+a background terminal (`background_terminal.jsonl`) and a spawned child
+(`subagent.jsonl`) are too; a failed turn
 has not been recorded yet, so that row is pinned by synthetic
 notifications, not a recording):
 
