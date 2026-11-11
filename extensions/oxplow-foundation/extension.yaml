@@ -430,6 +430,22 @@ skills:
 # any an extension adds), and the agent harnesses and AI providers — core's
 # built-ins, many of each at once (every one of those declared here is
 # active).
+# Foundation's own settings (Settings): whether oxwiki is one of the
+# project's knowledge stores.
+configuration:
+  # oxplow's own extensions share the namespace's one configuration: its
+  # `version` is theirs too (oxplow-bundled's keys are its own).
+  version: 2
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      oxwiki:
+        type: boolean
+        title: Keep pages in oxwiki
+        description: Whether oxwiki — a wiki of markdown pages in the project's .oxplow/oxwiki folder — is one of the project's knowledge stores. Off, its pages are hidden and its files left alone.
+  defaults:
+    oxwiki: true
 implementations:
   - { capability: snapshots, id: hashes, entry: "oxplow:snapshot-hashes", description: "Saves the project's files as snapshots named by their hashes." }
   - capability: knowledge
@@ -437,6 +453,9 @@ implementations:
     entry: "oxplow:oxwiki"
     title: oxwiki
     description: "oxplow's own knowledge store: a wiki of markdown pages kept in the project's .oxplow/oxwiki folder."
+    # Settings → Capabilities turns it off (`oxplow.knowledge.set_oxwiki`):
+    # declared still, its pages hidden, its files left alone.
+    when: { config: /oxwiki, in: [true] }
   - { capability: agent_harness, id: claude, entry: "oxplow:claude-code", title: Claude, icon: icons/claude.svg, description: "Runs Claude Code as a coding agent." }
   - { capability: agent_harness, id: codex, entry: "oxplow:codex-cli", title: Codex, icon: icons/codex.svg, description: "Runs Codex as a coding agent." }
   - { capability: agent_harness, id: opencode, entry: "oxplow:opencode", title: OpenCode, icon: icons/opencode.svg, description: "Runs OpenCode as a coding agent." }
@@ -885,6 +904,18 @@ resources:
     params: { custom_component: { required: true, pattern: '^[a-z][a-z0-9_]*/[a-z][a-z0-9_.-]*$' } }
     icon: box
 commands:
+  # Foundation's own settings (`configuration:`): read with their stamps,
+  # written as a compare-and-swap on them.
+  - name: settings.read
+    summary: The effective settings of oxplow's own extensions (they share the namespace's one configuration — oxwiki on or off, the review policy, the task workflow), where each came from, and the stamps a write needs.
+    scope: extension_config.read
+    op: snapshot
+    example: {}
+  - name: settings.write
+    summary: Set the project or personal settings of oxplow's own extensions — oxwiki on or off, the review policy, the task workflow (a compare-and-swap on the stamps `oxplow.settings.read` returns).
+    scope: extension_config.write
+    op: compare_exchange
+    example: {"schema_version": 2, "project": {"expected": {"schema_version": 2, "revision": 0}, "values": {"oxwiki": false}}, "personal": null}
   # agent_input.write — the window's agent input.
   - name: agent.draft
     summary: "Put text in the shown thread's agent input, unsent."
@@ -1380,6 +1411,18 @@ commands:
     scope: knowledge.write
     op: resync
     example: {"id": "auth-flow"}
+  - name: knowledge.set_oxwiki
+    summary: "Turn oxwiki — oxplow's own knowledge store, the wiki in .oxplow/oxwiki — on or off for the project. Off, its pages stay recorded but hidden and its files are left alone; on, they are back. A person's own setting, when there is one, still wins for them (the result says so)."
+    input_schema:
+      type: object
+      required: [on]
+      properties:
+        on: { type: boolean, description: "true: oxwiki is one of the project's knowledge stores; false: it is off." }
+      additionalProperties: false
+    example: {"on": false}
+    entry: handlers/set_oxwiki.star
+    needs: [extension_config.read]
+    access: write
   - name: knowledge.update_comment
     summary: "Change a comment (`cmt12`): its `intent`, its `status` (`open` / `resolved`), or re-attach it to a new span (`quote` and `selectors_json` together)."
     scope: knowledge.write

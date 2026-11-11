@@ -400,11 +400,21 @@ advisories' queries — reads its own configuration with
   extension back like a dataset that doesn't compile. **A change republishes:**
   the generation records the configuration it was published with, for every
   extension with a configuration reader (`configuration_readers`: datasets
-  that call `config()`, skills with `when:`; `ConfigSignature`, beside the
+  that call `config()`, skills with `when:`, implementations with `when:`;
+  `ConfigSignature`, beside the
   entity signature), the entities consumer
   checks it after each `command.executed` (`request_config_refresh`; a write
   through `extension_config.write` is one) and requests an activation when it
   differs; a changed definition refills a materialized dataset.
+- **An implementation offered by a setting** (`implementations:` entry with
+  `when: { config, in }`, checked at load like a skill's): the publication
+  reads the extension's effective values once
+  (`capabilities::offering_implementations`, in activation's `prepare`), so
+  the capability rows, the vocabulary's recognizers and the running adapters
+  agree. One whose setting doesn't hold is **declared but off**: its
+  `v_capability_provider` row is `active = 0, chosen_by = 'setting'`, no
+  adapter runs it, a choice can't land on it. foundation's oxwiki
+  (`when: { config: /oxwiki, in: [true] }`) is the first.
 - **Pages and advisories** read the values stored now each time they run
   (`SqlGateway::with_extension_config`), so a change applies to the next
   run with no republish. A check (`oxplow extension check`, the effect report)
@@ -419,8 +429,11 @@ advisories' queries — reads its own configuration with
   division applies to an integer setting (write `1.0 * config(...)` to divide
   as a real).
 
-oxplow-bundled uses it for its review-policy constants;
-`oxplow.review_policy.read` / `.write` are its commands over the scope above.
+oxplow's own extensions share the namespace `oxplow`, so they share one
+configuration (foundation's `oxwiki`, bundled's review-policy constants and
+task workflow, each a key of it, all at one `version`), and one pair of
+commands over the scope above, foundation's (it always runs):
+`oxplow.settings.read` / `.write`.
 The holder (`extensions-bundled.md`) keeps the advisories' settings and
 `oxplow.advisory_policy.read` / `.write`.
 Pinned by `extension_sql_config_tests.rs` and

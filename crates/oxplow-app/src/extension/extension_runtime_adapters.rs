@@ -17,7 +17,11 @@ pub struct PreparedRuntimeAdapters {
 }
 
 impl PreparedRuntimeAdapters {
-    pub fn prepare(svc: &Services, snapshot: &CatalogSnapshot) -> Result<Self, VocabularyErrors> {
+    pub fn prepare(
+        svc: &Services,
+        snapshot: &CatalogSnapshot,
+        settings: &crate::capabilities::Settings,
+    ) -> Result<Self, VocabularyErrors> {
         let load_errors: VocabularyErrors = snapshot
             .extensions()
             .iter()
@@ -27,7 +31,11 @@ impl PreparedRuntimeAdapters {
         if !load_errors.is_empty() {
             return Err(load_errors);
         }
-        let declared = crate::capabilities::declared_by(snapshot.extensions());
+        // What a setting turned off (`when:`) is declared, never run.
+        let declared: Vec<_> = crate::capabilities::declared_by(snapshot.extensions(), settings)
+            .into_iter()
+            .filter(|i| i.offered)
+            .collect();
         let jobs = svc.jobs.prepare_registry(snapshot)?;
         let scripts = svc.providers.prepare_scripts(snapshot)?;
         let mut errors = VocabularyErrors::new();

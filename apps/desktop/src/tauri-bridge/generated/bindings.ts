@@ -3312,6 +3312,8 @@ export type ImplementationDecl = {
 	 *  anything else.
 	 */
 	needs: string[],
+	/**  The setting that offers it (`when:`); `None`: always offered. */
+	when: ConfigCondition | null,
 };
 
 export type ImportDeclaration = {

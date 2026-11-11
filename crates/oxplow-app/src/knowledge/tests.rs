@@ -828,3 +828,174 @@ async fn oxwiki_is_published_as_an_editing_store_of_notes() {
         json!([{ "id": "note", "title": "Note", "bucket": "note" }])
     );
 }
+
+/// The reads of `page`, as `v_knowledge_read` says: `(actor, via)`.
+async fn reads_of(fx: &crate::test_fixtures::ThreadFixture, page: &str) -> Vec<(String, String)> {
+    let page = page.to_string();
+    fx.svc
+        .db
+        .read(move |c| {
+            let mut stmt = c
+                .prepare("SELECT actor, via FROM v_knowledge_read WHERE uri = ?1 ORDER BY at, via")
+                .map_err(sql)?;
+            let rows = stmt
+                .query_map([page], |r| Ok((r.get(0)?, r.get(1)?)))
+                .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
+                .map_err(sql);
+            rows
+        })
+        .await
+        .unwrap()
+}
+
+fn agent(fx: &crate::test_fixtures::ThreadFixture) -> Actor {
+    Actor::Agent {
+        session_id: None,
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    }
+}
+
+/// An agent's `oxplow_read` of a page gives it the page's body, and is a
+/// read of the page: `knowledge.page.read { via: tool }`, counted on the
+/// page. A person's read through the same command isn't an agent's read.
+#[tokio::test]
+async fn an_agents_read_gives_the_body_and_counts_as_a_read() {
+    let fx = crate::test_fixtures::services_with_thread().await;
+    run(
+        &fx,
+        WRITE_PAGE,
+        json!({ "id": "arch", "body": "# Arch\n\nLayers.\n" }),
+    )
+    .await
+    .unwrap();
+    let out = fx
+        .svc
+        .commands
+        .run(
+            &agent(&fx),
+            "oxplow.records.read",
+            json!({ "uri": oxwiki("arch") }),
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.result["content"], "# Arch\n\nLayers.\n");
+    assert_eq!(out.result["row"]["title"], "Arch");
+    let logged = events_of(&fx, "knowledge.page.read").await;
+    assert_eq!(logged.len(), 1);
+    assert_eq!(
+        logged[0].envelope.payload,
+        json!({ "page": oxwiki("arch"), "via": "tool" })
+    );
+    assert_eq!(logged[0].envelope.anchors.thread_id, Some(fx.thread));
+
+    // A person reading it through the command is no agent's read.
+    run(&fx, "oxplow.records.read", json!({ "uri": oxwiki("arch") }))
+        .await
+        .unwrap();
+    fx.svc.event_pump.run_once().await.unwrap();
+    assert_eq!(
+        reads_of(&fx, &oxwiki("arch")).await,
+        [("agent".into(), "tool".into())]
+    );
+    let (count, last): (i64, Option<String>) = {
+        let page = oxwiki("arch");
+        fx.svc
+            .db
+            .read(move |c| {
+                c.query_row(
+                    "SELECT read_count, last_read_at FROM v_knowledge_page WHERE uri = ?1",
+                    [page],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(sql)
+            })
+            .await
+            .unwrap()
+    };
+    assert_eq!(count, 1);
+    assert!(last.is_some());
+}
+
+/// An agent reading a page's file with its own tool reads the page
+/// (`via: file`), whether the path is relative to its worktree or
+/// absolute; a file outside every store's pages is no read, and neither is
+/// a page that isn't recorded.
+#[tokio::test]
+async fn an_agent_reading_a_pages_file_reads_the_page() {
+    use oxplow_domain::events::schema::{AgentToolFinished, AgentToolFinishedV4};
+    let fx = crate::test_fixtures::services_with_thread().await;
+    run(&fx, WRITE_PAGE, json!({ "id": "arch", "body": "# Arch\n" }))
+        .await
+        .unwrap();
+    let absolute = page_path(&fx, "arch").display().to_string();
+    let vocabulary = fx.svc.vocabulary.current();
+    for paths in [
+        vec![".oxplow/oxwiki/arch.md".to_string()],
+        vec![absolute],
+        vec![
+            "src/lib.rs".to_string(),
+            ".oxplow/oxwiki/never-written.md".to_string(),
+        ],
+    ] {
+        let env = oxplow_db::EventCtx {
+            vocabulary: &vocabulary,
+            source: "agent:claude".into(),
+            cause: None,
+        }
+        .typed::<AgentToolFinished>(&AgentToolFinishedV4 {
+            tool: "Read".into(),
+            kind: oxplow_domain::agent::tool::ToolKind::Read,
+            call: None,
+            duration_ms: None,
+            paths,
+            detail: None,
+            command: None,
+            ok: Some(true),
+            exit_code: None,
+            input: None,
+            output: None,
+            subagent: None,
+        })
+        .with_anchors(oxplow_domain::Anchors {
+            thread_id: Some(fx.thread),
+            ..Default::default()
+        });
+        fx.svc.event_log_store.append(env).await.unwrap();
+    }
+    fx.svc.event_pump.run_once().await.unwrap();
+    assert_eq!(
+        reads_of(&fx, &oxwiki("arch")).await,
+        [
+            ("agent".into(), "file".into()),
+            ("agent".into(), "file".into())
+        ]
+    );
+    assert!(reads_of(&fx, &oxwiki("never-written")).await.is_empty());
+}
+
+/// A person opening a page is a read too: their page visits are.
+#[tokio::test]
+async fn a_persons_visit_is_a_read() {
+    use oxplow_db::analytics_stores::PageVisitStore as _;
+    let fx = crate::test_fixtures::services_with_thread().await;
+    run(&fx, WRITE_PAGE, json!({ "id": "arch", "body": "# Arch\n" }))
+        .await
+        .unwrap();
+    fx.svc
+        .page_visit_store
+        .record(
+            "oxplow/knowledge",
+            &oxwiki("arch"),
+            Some("Arch"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reads_of(&fx, &oxwiki("arch")).await,
+        [("person".into(), "open".into())]
+    );
+}

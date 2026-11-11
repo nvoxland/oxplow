@@ -9,7 +9,7 @@
 //! what it kept, the same for every store.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -180,9 +180,9 @@ pub trait KnowledgeProvider: Send + Sync {
     fn features(&self) -> KnowledgeFeatures {
         KnowledgeFeatures::default()
     }
-    /// The folder its pages are files in, when they are: an agent's read
-    /// of a file under it is a read of that page.
-    fn root(&self) -> Option<PathBuf> {
+    /// The page whose file `path` (absolute) is, when its pages are files:
+    /// an agent's read of that file is a read of the page.
+    fn page_at(&self, _path: &Path) -> Option<String> {
         None
     }
     /// Write (create or replace) the page `draft.id` (or the one it derives

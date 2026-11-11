@@ -34,6 +34,7 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `oxplow.extension.write_page`) refuses to write into a bundled
       extension.
 
+- **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page is written, recorded or deleted; the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
 - **The review packet**. Its pages, mounted in
   the `sections` slots of `oxplow/diff-view` (the Changes
@@ -67,7 +68,13 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
 
 oxplow-foundation holds the data of the task tracker and knowledge: their
 datasets, the `task` and `knowledge` resources, the `oxplow:oxwiki`
-implementation, the bus commands (with no `ui:`), skills and metrics. It has
+implementation and its setting (`configuration: oxwiki`, default on; turned
+off by `oxplow.knowledge.set_oxwiki`, a script composing a settings write),
+the bus commands (with no `ui:`), skills and metrics. oxplow's own
+extensions share the namespace `oxplow`, so they share one configuration
+(at one `version`) and one pair of commands over it, foundation's
+`oxplow.settings.read` / `.write`; bundled's task workflow writes through
+them too. It has
 no page that a person uses to read or edit them. The task tracker's
 commands (`oxplow.task.*`) and the generic `tasks` skill (`needs:
 [task_tracker]`) are foundation's, serving any tracker; **oxtask itself is

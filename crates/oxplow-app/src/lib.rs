@@ -963,6 +963,9 @@ impl Services {
         let page_runs = pages::open_runs::PageRuns::default();
         event_bus.reach_open_runs(page_runs.clone());
         let ref_moves = ref_moves::RefMoves::new(event_bus.clone());
+        // Where pages are kept: oxwiki when foundation declares it, a
+        // provider's instance once it runs — every one in use at once.
+        let knowledge = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
         let event_pump = Arc::new(event_pump::EventPump::new(
             db.clone(),
             (*event_log_store).clone(),
@@ -975,6 +978,10 @@ impl Services {
                 }),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::KnowledgeAttribution),
+                Arc::new(knowledge::KnowledgeReads {
+                    stores: knowledge.clone(),
+                    project_dir: layout.project_dir.clone(),
+                }),
                 // The log's facts the renderer hears (P7.B6).
                 Arc::new(ui_push::UiPush {
                     events: event_bus.clone(),
@@ -1276,6 +1283,7 @@ impl Services {
                     fields: serde_json::Value::Array(Vec::new()),
                     stages: serde_json::Value::Array(Vec::new()),
                     kinds: serde_json::Value::Array(Vec::new()),
+                    offered: true,
                     id_pattern: None,
                     icon: None,
                     config: serde_json::json!({}),
@@ -1494,9 +1502,6 @@ impl Services {
         })) {
             commands.add_op(command).expect("core ops register");
         }
-        // Where pages are kept: oxwiki when foundation declares it, a
-        // provider's instance once it runs — every one in use at once.
-        let knowledge = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
         let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());
         event_pump.register_async(Arc::new(providers::knowledge::KnowledgeRecords {
             stores: knowledge.clone(),
@@ -2301,6 +2306,8 @@ mod tests {
                 // calls per input.
                 // Taking a handoff moves its task, then settles it.
                 "oxplow.handoff.resolve",
+                // A settings write for the project, its stamps read first.
+                "oxplow.knowledge.set_oxwiki",
                 "oxplow.tasks.clear_finished",
                 "oxplow.tasks.set_workflow",
             ]

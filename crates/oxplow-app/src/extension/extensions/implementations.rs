@@ -68,6 +68,8 @@ pub struct ImplementationDecl {
     #[serde(skip)]
     #[specta(skip)]
     pub script: Option<ScriptImplementation>,
+    /// The setting that offers it (`when:`); `None`: always offered.
+    pub when: Option<super::config_schema::ConfigCondition>,
 }
 
 /// A capability implementation written as a script (`entry:` a Starlark
@@ -148,6 +150,11 @@ pub(crate) struct ImplementationFile {
     /// whole).
     #[serde(default)]
     id_pattern: Option<String>,
+    /// Offered only while a setting of the extension's own configuration
+    /// is one of `in` (`{ config: /oxwiki, in: [true] }`); otherwise it is
+    /// declared but off.
+    #[serde(default)]
+    when: Option<super::config_schema::ConfigCondition>,
 }
 
 impl ImplementationFile {
@@ -237,6 +244,7 @@ pub fn parse_implementations(
     file: &str,
     manifest: &str,
     read: &dyn Fn(&str) -> Option<String>,
+    configuration: Option<&super::config_schema::ConfigurationFile>,
 ) -> (Vec<ImplementationDecl>, Vec<Diagnostic>) {
     let block = key_line(manifest, "implementations");
     let Some(items) = value.as_sequence() else {
@@ -268,6 +276,15 @@ pub fn parse_implementations(
             }
         };
         let line = item_line;
+        if let Some((code, why)) = f.when.as_ref().and_then(|w| w.problem(configuration)) {
+            errors.push(at(
+                code,
+                file,
+                line,
+                format!("`{}` implementation `{}`: {why}", f.capability, f.id),
+            ));
+            continue;
+        }
         match decl_of(f, read) {
             Ok(d)
                 if out
@@ -437,6 +454,7 @@ fn decl_of(
         description: f.description,
         needs: Vec::new(),
         script: None,
+        when: f.when,
     })
 }
 
@@ -627,6 +645,7 @@ fn script_decl(
             declared,
             spec: provider_spec,
         }),
+        when: f.when,
     })
 }
 
@@ -744,6 +763,7 @@ fn provider_decl(
         description: f.description,
         needs: Vec::new(),
         script: None,
+        when: f.when,
     })
 }
 
@@ -761,7 +781,43 @@ mod tests {
     ) -> (Vec<ImplementationDecl>, Vec<Diagnostic>) {
         let manifest = format!("implementations:\n{yaml}");
         let doc: Value = serde_yaml::from_str(&manifest).unwrap();
-        parse_implementations(&doc["implementations"], "extension.yaml", &manifest, read)
+        parse_implementations(
+            &doc["implementations"],
+            "extension.yaml",
+            &manifest,
+            read,
+            None,
+        )
+    }
+
+    /// A `when:` is checked against the extension's own configuration: one
+    /// naming a key it doesn't declare is refused, one naming a declared
+    /// boolean is kept.
+    #[test]
+    fn a_when_is_checked_against_the_extensions_configuration() {
+        let configuration: super::super::config_schema::ConfigurationFile = serde_yaml::from_str(
+            "version: 1\nschema: { type: object, properties: { store: { type: boolean } } }\ndefaults: { store: true }\n",
+        )
+        .unwrap();
+        let yaml = |pointer: &str| {
+            let manifest = format!(
+                "implementations:\n  - {{ capability: knowledge, id: oxwiki, entry: \"oxplow:oxwiki\", when: {{ config: {pointer}, in: [true] }} }}\n"
+            );
+            let doc: Value = serde_yaml::from_str(&manifest).unwrap();
+            parse_implementations(
+                &doc["implementations"],
+                "extension.yaml",
+                &manifest,
+                &|_| None,
+                Some(&configuration),
+            )
+        };
+        let (decls, errors) = yaml("/store");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(decls[0].when.is_some());
+        let (decls, errors) = yaml("/nope");
+        assert!(decls.is_empty());
+        assert_eq!(errors[0].code, "when.unknown_key", "{errors:?}");
     }
 
     /// An AI provider names the Rust kind it is with `provider:` (no
@@ -1126,6 +1182,7 @@ mod tests {
                 description: None,
                 needs: vec![],
                 script: None,
+                when: None,
             }]
         );
     }

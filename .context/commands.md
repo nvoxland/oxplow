@@ -291,6 +291,9 @@ URI's content), `sql.read/query` (`oxplow.sql.query`), `search.read/search`
 from any revision, past what `v_commit` indexes), `lsp.read/*` (`oxplow.code.*`),
 `changes.read/ensure` (`oxplow.change.ensure`: it writes only the derived
 change cache, so it stays a read), `knowledge.read/{comments,drift}`,
+`records.read/read` of a knowledge page by an agent (it appends
+`knowledge.page.read` to the log itself — a read's returned events go
+nowhere — and stays a read; `.context/knowledge.md` "Reads"),
 `extensions.check/{validate,draft_status,review}` (`oxplow.extension.draft_status`: how a stream's source differs from what runs, `extension_deploy::source_diff`; a review clones the
 candidate into `.oxplow/tmp`; it changes no record),
 `collectors.preview/preview`, and `ai.compute/{decide,summarize}` (recorded

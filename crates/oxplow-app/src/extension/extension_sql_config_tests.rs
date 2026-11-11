@@ -68,7 +68,7 @@ async fn set_threshold(fx: &ThreadFixture, edits: i64) {
     let read = fx
         .svc
         .commands
-        .run(&Actor::Human, "oxplow.review_policy.read", json!({}), false)
+        .run(&Actor::Human, "oxplow.settings.read", json!({}), false)
         .await
         .unwrap();
     let expected = read.result["result"]["stamps"]["project"].clone();
@@ -76,7 +76,7 @@ async fn set_threshold(fx: &ThreadFixture, edits: i64) {
         .commands
         .run(
             &Actor::Human,
-            "oxplow.review_policy.write",
+            "oxplow.settings.write",
             json!({
                 "schema_version": 2,
                 "project": {

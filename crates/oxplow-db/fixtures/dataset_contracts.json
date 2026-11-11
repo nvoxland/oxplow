@@ -372,7 +372,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -432,12 +432,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=\u2026&turn=\u2026`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         }
       ],
       "key": []
@@ -497,12 +497,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=\u2026&turn=\u2026`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -512,7 +512,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         }
       ],
       "key": []
@@ -572,12 +572,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=\u2026&turn=\u2026`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -587,7 +587,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -657,12 +657,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`turn:trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=\u2026&turn=\u2026`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`lens:oxplow/session-transcript?session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -672,7 +672,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -747,12 +747,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=\u2026&turn=\u2026`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -762,7 +762,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -837,12 +837,12 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
           "type": "TEXT",
-          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=\u2026&turn=\u2026`): where a turn opens. NULL for a turn no session claims. (v4)"
+          "doc": "The session's transcript lens opened at this turn (`oxplow:oxplow/lens?lens=oxplow/session-transcript&session=…&turn=…`): where a turn opens. NULL for a turn no session claims. (v4)"
         },
         {
           "name": "model",
@@ -852,7 +852,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -927,7 +927,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -942,7 +942,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1017,7 +1017,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1032,7 +1032,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1107,7 +1107,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1122,7 +1122,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1222,7 +1222,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1237,7 +1237,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1347,7 +1347,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1362,7 +1362,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1467,7 +1467,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1482,7 +1482,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1592,7 +1592,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1607,7 +1607,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1722,7 +1722,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1737,7 +1737,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1857,7 +1857,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -1872,7 +1872,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -1992,7 +1992,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -2007,7 +2007,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -2122,7 +2122,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/turn?id=trn<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "transcript_page",
@@ -2137,7 +2137,7 @@
         {
           "name": "effort",
           "type": "TEXT",
-          "doc": "The reasoning effort the turn ran at (`high`, `medium`, \u2026), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
+          "doc": "The reasoning effort the turn ran at (`high`, `medium`, …), as its harness reported it with the turn's end; NULL while running, or when it said nothing. (v5)"
         },
         {
           "name": "context_tokens",
@@ -2299,7 +2299,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, \u2026"
+          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, …"
         },
         {
           "name": "input_tokens",
@@ -2374,7 +2374,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, \u2026"
+          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, …"
         },
         {
           "name": "input_tokens",
@@ -2454,7 +2454,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, \u2026"
+          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, …"
         },
         {
           "name": "input_tokens",
@@ -2539,7 +2539,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, \u2026"
+          "doc": "What asked: the asking thread's ref (`thread:<id>`) for an agent's MCP call, `collector:<owner>/<id>`, `inferred-decisions`, …"
         },
         {
           "name": "input_tokens",
@@ -2624,7 +2624,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's ref (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, \u2026"
+          "doc": "What asked: the asking thread's ref (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …"
         },
         {
           "name": "input_tokens",
@@ -2709,7 +2709,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, \u2026"
+          "doc": "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, `inferred-decisions`, …"
         },
         {
           "name": "input_tokens",
@@ -2794,7 +2794,7 @@
         {
           "name": "caller",
           "type": "TEXT",
-          "doc": "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, \u2026"
+          "doc": "What asked: the asking thread's URI (`oxplow:oxplow/thread?id=<id>`) for an agent's MCP call, `oxplow:oxplow/collector?collector=<owner>/<id>`, …"
         },
         {
           "name": "input_tokens",
@@ -3260,7 +3260,7 @@
         {
           "name": "producer",
           "type": "TEXT",
-          "doc": "What produced it (collector, gauge, hook\u2026)."
+          "doc": "What produced it (collector, gauge, hook…)."
         },
         {
           "name": "status",
@@ -3340,7 +3340,7 @@
         {
           "name": "producer",
           "type": "TEXT",
-          "doc": "What produced it (collector, gauge, hook\u2026)."
+          "doc": "What produced it (collector, gauge, hook…)."
         },
         {
           "name": "status",
@@ -3537,7 +3537,7 @@
         {
           "name": "in_progress",
           "type": "TEXT",
-          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, \u2026); NULL when none or for other kinds."
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
         }
       ],
       "key": []
@@ -3617,7 +3617,7 @@
         {
           "name": "in_progress",
           "type": "TEXT",
-          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, \u2026); NULL when none or for other kinds."
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
         },
         {
           "name": "elapsed_ms",
@@ -3702,7 +3702,7 @@
         {
           "name": "in_progress",
           "type": "TEXT",
-          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, \u2026); NULL when none or for other kinds."
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
         },
         {
           "name": "elapsed_ms",
@@ -3787,7 +3787,7 @@
         {
           "name": "in_progress",
           "type": "TEXT",
-          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, \u2026); NULL when none or for other kinds."
+          "doc": "For a working tree, git's operation in progress (`merge`, `rebase`, `cherry_pick`, `revert`, …); NULL when none or for other kinds."
         },
         {
           "name": "elapsed_ms",
@@ -4083,7 +4083,7 @@
         {
           "name": "churn_share",
           "type": "REAL",
-          "doc": "Its share of the change's function churn (0\u20131)."
+          "doc": "Its share of the change's function churn (0–1)."
         }
       ],
       "key": []
@@ -4193,7 +4193,7 @@
         {
           "name": "churn_share",
           "type": "REAL",
-          "doc": "Its share of the change's function churn (0\u20131)."
+          "doc": "Its share of the change's function churn (0–1)."
         }
       ],
       "key": []
@@ -4303,7 +4303,7 @@
         {
           "name": "churn_share",
           "type": "REAL",
-          "doc": "Its share of the change's function churn (0\u20131)."
+          "doc": "Its share of the change's function churn (0–1)."
         }
       ],
       "key": []
@@ -4413,7 +4413,7 @@
         {
           "name": "churn_share",
           "type": "REAL",
-          "doc": "Its share of the change's function churn (0\u20131)."
+          "doc": "Its share of the change's function churn (0–1)."
         }
       ],
       "key": []
@@ -4799,7 +4799,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`claim:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v5)"
+          "doc": "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
         }
       ],
       "key": []
@@ -4859,7 +4859,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`claim:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v5)"
+          "doc": "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
         }
       ],
       "key": []
@@ -4924,7 +4924,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`claim:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v5)"
+          "doc": "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
         }
       ],
       "key": []
@@ -4994,7 +4994,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`claim:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v5)"
+          "doc": "`claim:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
         }
       ],
       "key": []
@@ -5064,7 +5064,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/claim?id=<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v5)"
+          "doc": "`oxplow:oxplow/claim?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
         }
       ],
       "key": []
@@ -5134,7 +5134,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/claim?id=<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v5)"
+          "doc": "`oxplow:oxplow/claim?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v5)"
         }
       ],
       "key": []
@@ -5270,12 +5270,12 @@
         {
           "name": "target_kind",
           "type": "TEXT",
-          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, \u2026"
+          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, …"
         },
         {
           "name": "target_id",
           "type": "TEXT",
-          "doc": "Id of that page (path, slug, task id\u2026)."
+          "doc": "Id of that page (path, slug, task id…)."
         },
         {
           "name": "quote",
@@ -5355,12 +5355,12 @@
         {
           "name": "target_kind",
           "type": "TEXT",
-          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, \u2026"
+          "doc": "Kind of page it is anchored to: `file`, `wiki`, `task`, …"
         },
         {
           "name": "target_id",
           "type": "TEXT",
-          "doc": "Id of that page (path, slug, task id\u2026)."
+          "doc": "Id of that page (path, slug, task id…)."
         },
         {
           "name": "quote",
@@ -5420,7 +5420,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`comment:cmt<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`comment:cmt<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5445,7 +5445,7 @@
         {
           "name": "target_resource",
           "type": "TEXT",
-          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/wiki`, `oxplow/task`, \u2026"
+          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/wiki`, `oxplow/task`, …"
         },
         {
           "name": "target",
@@ -5510,7 +5510,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5535,7 +5535,7 @@
         {
           "name": "target_resource",
           "type": "TEXT",
-          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/wiki`, `oxplow/task`, \u2026"
+          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/wiki`, `oxplow/task`, …"
         },
         {
           "name": "target",
@@ -5600,7 +5600,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5625,7 +5625,7 @@
         {
           "name": "target_resource",
           "type": "TEXT",
-          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/knowledge`, `oxplow/task`, \u2026"
+          "doc": "The resource of the page it is anchored to: `oxplow/file`, `oxplow/knowledge`, `oxplow/task`, …"
         },
         {
           "name": "target",
@@ -5690,7 +5690,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/comment?id=cmt<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5797,7 +5797,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`commit:<sha>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`commit:<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5852,7 +5852,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/commit?sha=<sha>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/commit?sha=<sha>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -5907,7 +5907,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/commit?sha=<sha>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/commit?sha=<sha>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -6068,7 +6068,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`dashboard:dsh<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`dashboard:dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -6103,7 +6103,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/dashboard?id=dsh<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/dashboard?id=dsh<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -6138,7 +6138,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/dashboard?id=dsh<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/dashboard?id=dsh<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -6232,7 +6232,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6297,7 +6297,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`effort.confirm_decision` / `effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6362,7 +6362,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6427,7 +6427,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6437,7 +6437,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`decision:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`decision:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         }
       ],
       "key": []
@@ -6497,7 +6497,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6507,7 +6507,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`decision:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`decision:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "effort_ref",
@@ -6577,7 +6577,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6587,7 +6587,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/decision?id=<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`oxplow:oxplow/decision?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "effort_ref",
@@ -6657,7 +6657,7 @@
         {
           "name": "provenance",
           "type": "TEXT",
-          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed \u2014 a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
+          "doc": "`recorded` (the agent recorded it), `inferred` (oxplow proposed it from the effort's activity when the effort closed — a recorded `extract` computation on the `main` role; unconfirmed), or what a reviewer made of an inferred one: `confirmed` or `dismissed` (`oxplow.effort.confirm_decision` / `oxplow.effort.dismiss_decision`)."
         },
         {
           "name": "created_at",
@@ -6667,7 +6667,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/decision?id=<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`oxplow:oxplow/decision?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "effort_uri",
@@ -6714,12 +6714,12 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "The tool behind it (`rustc`, `ts`, `eslint`, \u2026), if given."
+          "doc": "The tool behind it (`rustc`, `ts`, `eslint`, …), if given."
         },
         {
           "name": "code",
           "type": "TEXT",
-          "doc": "Its code (`E0308`, `2304`, \u2026), if given."
+          "doc": "Its code (`E0308`, `2304`, …), if given."
         },
         {
           "name": "line",
@@ -7116,7 +7116,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`effort:eff<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v6)"
+          "doc": "`effort:eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
         }
       ],
       "key": []
@@ -7181,7 +7181,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v6)"
+          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
         }
       ],
       "key": []
@@ -7246,7 +7246,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v6)"
+          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
         }
       ],
       "key": []
@@ -7311,7 +7311,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v6)"
+          "doc": "`oxplow:oxplow/effort?id=eff<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v6)"
         }
       ],
       "key": []
@@ -7555,7 +7555,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`gauge`, `coverage`, `test`, `event`, \u2026"
+          "doc": "`gauge`, `coverage`, `test`, `event`, …"
         },
         {
           "name": "category",
@@ -7570,7 +7570,7 @@
         {
           "name": "agg",
           "type": "TEXT",
-          "doc": "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before\u2192after)."
+          "doc": "How the delta was computed: `files` (over the effort's claimed files), `sum` (in-window total) or `level` (before→after)."
         },
         {
           "name": "baseline",
@@ -7585,7 +7585,7 @@
         {
           "name": "delta",
           "type": "REAL",
-          "doc": "current \u2212 baseline, or the total for `sum`."
+          "doc": "current − baseline, or the total for `sum`."
         },
         {
           "name": "changed",
@@ -7652,7 +7652,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`test-run`, `diff-coverage`, `static-analysis`, \u2026"
+          "doc": "`test-run`, `diff-coverage`, `static-analysis`, …"
         },
         {
           "name": "provenance",
@@ -7726,7 +7726,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Insert order \u2014 the delivery order consumers checkpoint on."
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
           "name": "id",
@@ -7751,7 +7751,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026"
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
           "name": "stream_id",
@@ -7816,7 +7816,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Insert order \u2014 the delivery order consumers checkpoint on."
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
           "name": "id",
@@ -7841,7 +7841,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026"
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
           "name": "stream_id",
@@ -7911,7 +7911,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Insert order \u2014 the delivery order consumers checkpoint on."
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
           "name": "id",
@@ -7936,7 +7936,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026"
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
           "name": "stream_id",
@@ -8001,7 +8001,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`event:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`event:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -8011,7 +8011,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Insert order \u2014 the delivery order consumers checkpoint on."
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
           "name": "id",
@@ -8036,7 +8036,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026"
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
           "name": "stream_id",
@@ -8101,7 +8101,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/event?id=<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/event?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -8111,7 +8111,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Insert order \u2014 the delivery order consumers checkpoint on."
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
           "name": "id",
@@ -8136,7 +8136,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026"
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
           "name": "stream_id",
@@ -8201,7 +8201,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/event?id=<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/event?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -8211,7 +8211,7 @@
         {
           "name": "seq",
           "type": "INTEGER",
-          "doc": "Insert order \u2014 the delivery order consumers checkpoint on."
+          "doc": "Insert order — the delivery order consumers checkpoint on."
         },
         {
           "name": "id",
@@ -8236,7 +8236,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, \u2026"
+          "doc": "What emitted it: `human`, `agent:thr3`, `task_service`, …"
         },
         {
           "name": "stream_id",
@@ -8296,7 +8296,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/event?id=<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/event?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -8335,7 +8335,7 @@
         {
           "name": "namespace",
           "type": "TEXT",
-          "doc": "The event namespace it belongs to (`agent`, `test`, \u2026); sets its retention."
+          "doc": "The event namespace it belongs to (`agent`, `test`, …); sets its retention."
         },
         {
           "name": "size",
@@ -8877,7 +8877,7 @@
         {
           "name": "subject_kind",
           "type": "TEXT",
-          "doc": "The subject ref's kind (`file`, `symbol`, `test`, \u2026): a filter, not an identity."
+          "doc": "The subject ref's kind (`file`, `symbol`, `test`, …): a filter, not an identity."
         },
         {
           "name": "subject",
@@ -8977,7 +8977,7 @@
         {
           "name": "subject_kind",
           "type": "TEXT",
-          "doc": "The subject URI's resource (`oxplow/file`, `oxplow/symbol`, `oxplow/test`, \u2026): a filter, not an identity."
+          "doc": "The subject URI's resource (`oxplow/file`, `oxplow/symbol`, `oxplow/test`, …): a filter, not an identity."
         },
         {
           "name": "subject",
@@ -9077,7 +9077,7 @@
         {
           "name": "subject_kind",
           "type": "TEXT",
-          "doc": "The subject URI's resource (`oxplow/file`, `oxplow/symbol`, `oxplow/test`, \u2026): a filter, not an identity."
+          "doc": "The subject URI's resource (`oxplow/file`, `oxplow/symbol`, `oxplow/test`, …): a filter, not an identity."
         },
         {
           "name": "subject",
@@ -9164,7 +9164,7 @@
         {
           "name": "subject_kind",
           "type": "TEXT",
-          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, \u2026"
+          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, …"
         },
         {
           "name": "temporal_semantics",
@@ -9204,7 +9204,7 @@
         {
           "name": "subject_kind",
           "type": "TEXT",
-          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, \u2026"
+          "doc": "What a fact is about: `symbol`, `file`, `test`, `model`, …"
         },
         {
           "name": "temporal_semantics",
@@ -9256,7 +9256,7 @@
         {
           "name": "aggregation",
           "type": "TEXT",
-          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, \u2026"
+          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …"
         },
         {
           "name": "direction",
@@ -9341,7 +9341,7 @@
         {
           "name": "aggregation",
           "type": "TEXT",
-          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, \u2026"
+          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …"
         },
         {
           "name": "direction",
@@ -9431,7 +9431,7 @@
         {
           "name": "aggregation",
           "type": "TEXT",
-          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, \u2026"
+          "doc": "How facts combine within a capture: count, sum, avg, min, max, last, p95, ratio, …"
         },
         {
           "name": "direction",
@@ -9518,12 +9518,12 @@
         {
           "name": "page_kind",
           "type": "TEXT",
-          "doc": "Page kind (`task`, `file`, `lens`, \u2026)."
+          "doc": "Page kind (`task`, `file`, `lens`, …)."
         },
         {
           "name": "page_id",
           "type": "TEXT",
-          "doc": "Page id (`task:42`, `file:src/a.rs`, \u2026)."
+          "doc": "Page id (`task:42`, `file:src/a.rs`, …)."
         },
         {
           "name": "label",
@@ -9558,12 +9558,12 @@
         {
           "name": "page_kind",
           "type": "TEXT",
-          "doc": "Page kind (`task`, `file`, `lens`, \u2026)."
+          "doc": "Page kind (`task`, `file`, `lens`, …)."
         },
         {
           "name": "page_id",
           "type": "TEXT",
-          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, \u2026)."
+          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
         },
         {
           "name": "label",
@@ -9598,12 +9598,12 @@
         {
           "name": "page_kind",
           "type": "TEXT",
-          "doc": "Page kind (`task`, `file`, `page`, \u2026)."
+          "doc": "Page kind (`task`, `file`, `page`, …)."
         },
         {
           "name": "page_id",
           "type": "TEXT",
-          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, \u2026)."
+          "doc": "Page id (`task:42`, `oxplow:oxplow/file?path=src/a.rs`, …)."
         },
         {
           "name": "label",
@@ -9804,7 +9804,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What was used (`wiki`, \u2026)."
+          "doc": "What was used (`wiki`, …)."
         },
         {
           "name": "payload_json",
@@ -9829,7 +9829,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What was used (`oxplow/knowledge`, \u2026)."
+          "doc": "What was used (`oxplow/knowledge`, …)."
         },
         {
           "name": "payload_json",
@@ -10101,7 +10101,7 @@
         {
           "name": "wikilinks",
           "type": "TEXT",
-          "doc": "JSON array of its `[[prefix:\u2026]]` sugar (`git` for `commit`)."
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
         },
         {
           "name": "resolve",
@@ -10158,7 +10158,7 @@
         {
           "name": "wikilinks",
           "type": "TEXT",
-          "doc": "JSON array of its `[[prefix:\u2026]]` sugar (`git` for `commit`)."
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
         },
         {
           "name": "resolve",
@@ -10215,7 +10215,7 @@
         {
           "name": "wikilinks",
           "type": "TEXT",
-          "doc": "JSON array of its `[[prefix:\u2026]]` sugar (`git` for `commit`)."
+          "doc": "JSON array of its `[[prefix:…]]` sugar (`git` for `commit`)."
         },
         {
           "name": "resolve",
@@ -10391,7 +10391,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`snapshot:<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`snapshot:<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -10431,7 +10431,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -10471,7 +10471,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -10511,7 +10511,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/snapshot?id=<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -10695,7 +10695,7 @@
         {
           "name": "parent_snapshot_id",
           "type": "INTEGER",
-          "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id)."
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
           "name": "trigger",
@@ -10765,7 +10765,7 @@
         {
           "name": "parent_snapshot_id",
           "type": "INTEGER",
-          "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id)."
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
           "name": "trigger",
@@ -10815,7 +10815,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, \u2026); NULL for takes recorded before it was kept. (v2)"
+          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)"
         },
         {
           "name": "contents",
@@ -10845,7 +10845,7 @@
         {
           "name": "parent_snapshot_id",
           "type": "INTEGER",
-          "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id)."
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
           "name": "trigger",
@@ -10895,7 +10895,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, \u2026); NULL for takes recorded before it was kept. (v2)"
+          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)"
         },
         {
           "name": "contents",
@@ -10930,7 +10930,7 @@
         {
           "name": "parent_snapshot_id",
           "type": "INTEGER",
-          "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id)."
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
           "name": "trigger",
@@ -10980,7 +10980,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, \u2026); NULL for takes recorded before it was kept. (v2)"
+          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)"
         },
         {
           "name": "contents",
@@ -11015,7 +11015,7 @@
         {
           "name": "parent_snapshot_id",
           "type": "INTEGER",
-          "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id)."
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
           "name": "trigger",
@@ -11065,7 +11065,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, \u2026); NULL for takes recorded before it was kept. (v2)"
+          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)"
         },
         {
           "name": "contents",
@@ -11100,7 +11100,7 @@
         {
           "name": "parent_snapshot_id",
           "type": "INTEGER",
-          "doc": "Snapshot the worktree was at just before this take; parent \u2192 snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id \u2192 snapshot_id)."
+          "doc": "Snapshot the worktree was at just before this take; parent → snapshot is what THIS take recorded (for a turn's changes use v_agent_turn.start_snapshot_id → snapshot_id)."
         },
         {
           "name": "trigger",
@@ -11145,7 +11145,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, \u2026); NULL for takes recorded before it was kept. (v2)"
+          "doc": "The snapshot implementation that took it (`oxplow`, `hashes`, …); NULL for takes recorded before it was kept. (v2)"
         },
         {
           "name": "contents",
@@ -11252,7 +11252,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`stream:str<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         }
       ],
       "key": []
@@ -11302,7 +11302,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`stream:str<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         },
         {
           "name": "prompt",
@@ -11357,7 +11357,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`stream:str<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`stream:str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         },
         {
           "name": "prompt",
@@ -11417,7 +11417,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/stream?id=str<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/stream?id=str<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         },
         {
           "name": "prompt",
@@ -11477,7 +11477,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/stream?id=str<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v2)"
+          "doc": "`oxplow:oxplow/stream?id=str<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v2)"
         },
         {
           "name": "prompt",
@@ -11621,7 +11621,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`function`, `class`, `method`, `module`, \u2026 (the LSP symbol kinds)."
+          "doc": "`function`, `class`, `method`, `module`, … (the LSP symbol kinds)."
         },
         {
           "name": "container",
@@ -11631,7 +11631,7 @@
         {
           "name": "language",
           "type": "TEXT",
-          "doc": "The language server that reported it (`rust`, `python`, \u2026)."
+          "doc": "The language server that reported it (`rust`, `python`, …)."
         },
         {
           "name": "line",
@@ -11696,7 +11696,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` \u2014 one vocabulary for every language."
+          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` — one vocabulary for every language."
         },
         {
           "name": "container",
@@ -11711,7 +11711,7 @@
         {
           "name": "language",
           "type": "TEXT",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "line",
@@ -11776,7 +11776,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` \u2014 one vocabulary for every language."
+          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` — one vocabulary for every language."
         },
         {
           "name": "container",
@@ -11791,7 +11791,7 @@
         {
           "name": "language",
           "type": "TEXT",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "line",
@@ -11856,7 +11856,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` \u2014 one vocabulary for every language."
+          "doc": "`function`, `method`, `constructor`, `class`, `struct`, `enum`, `enum_member`, `interface`, `trait`, `type`, `field`, `constant`, `variable`, `module`, `namespace` or `macro` — one vocabulary for every language."
         },
         {
           "name": "container",
@@ -11871,7 +11871,7 @@
         {
           "name": "language",
           "type": "TEXT",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "line",
@@ -12017,7 +12017,7 @@
         {
           "name": "classname",
           "type": "",
-          "doc": "Grouping path (module path, file\u00b7class, describe path)."
+          "doc": "Grouping path (module path, file·class, describe path)."
         },
         {
           "name": "name",
@@ -12052,7 +12052,7 @@
         {
           "name": "classname",
           "type": "",
-          "doc": "Grouping path (module path, file\u00b7class, describe path)."
+          "doc": "Grouping path (module path, file·class, describe path)."
         },
         {
           "name": "name",
@@ -12072,7 +12072,7 @@
         {
           "name": "message",
           "type": "",
-          "doc": "What a failed case's report said went wrong: its failure message, then its body (the assertion and where it happened). NULL for a case that didn't fail, one whose report said nothing, and a failure past the per-run cap (64 KB of messages per run, 4 KB each, a cut one ending in `\u2026`)."
+          "doc": "What a failed case's report said went wrong: its failure message, then its body (the assertion and where it happened). NULL for a case that didn't fail, one whose report said nothing, and a failure past the per-run cap (64 KB of messages per run, 4 KB each, a cut one ending in `…`)."
         }
       ],
       "key": []
@@ -12144,7 +12144,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What recorded it (`hook`, `mcp`, \u2026)."
+          "doc": "What recorded it (`hook`, `mcp`, …)."
         },
         {
           "name": "branch",
@@ -12234,7 +12234,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What recorded it (`hook`, `mcp`, \u2026)."
+          "doc": "What recorded it (`hook`, `mcp`, …)."
         },
         {
           "name": "branch",
@@ -12324,7 +12324,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What recorded it (`hook`, `mcp`, \u2026)."
+          "doc": "What recorded it (`hook`, `mcp`, …)."
         },
         {
           "name": "branch",
@@ -12414,7 +12414,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What recorded it (`hook`, `mcp`, \u2026)."
+          "doc": "What recorded it (`hook`, `mcp`, …)."
         },
         {
           "name": "branch",
@@ -12499,7 +12499,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "What recorded it (`hook`, `mcp`, \u2026)."
+          "doc": "What recorded it (`hook`, `mcp`, …)."
         },
         {
           "name": "branch",
@@ -12686,7 +12686,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -12736,12 +12736,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "mark",
           "type": "TEXT",
-          "doc": "The person's colour for its tab \u2014 `amber`, `red`, `green`, `blue` or `violet` \u2014 or NULL when unmarked. It changes nothing else. (v4)"
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
         }
       ],
       "key": []
@@ -12791,12 +12791,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`thread:thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "mark",
           "type": "TEXT",
-          "doc": "The person's colour for its tab \u2014 `amber`, `red`, `green`, `blue` or `violet` \u2014 or NULL when unmarked. It changes nothing else. (v4)"
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
         },
         {
           "name": "prompt",
@@ -12851,12 +12851,12 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/thread?id=thr<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/thread?id=thr<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "mark",
           "type": "TEXT",
-          "doc": "The person's colour for its tab \u2014 `amber`, `red`, `green`, `blue` or `violet` \u2014 or NULL when unmarked. It changes nothing else. (v4)"
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
         },
         {
           "name": "prompt",
@@ -12911,12 +12911,12 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/thread?id=thr<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/thread?id=thr<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         },
         {
           "name": "mark",
           "type": "TEXT",
-          "doc": "The person's colour for its tab \u2014 `amber`, `red`, `green`, `blue` or `violet` \u2014 or NULL when unmarked. It changes nothing else. (v4)"
+          "doc": "The person's colour for its tab — `amber`, `red`, `green`, `blue` or `violet` — or NULL when unmarked. It changes nothing else. (v4)"
         },
         {
           "name": "prompt",
@@ -13357,7 +13357,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -13412,7 +13412,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`collector:<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -13467,7 +13467,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -13522,7 +13522,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v3)"
+          "doc": "`oxplow:oxplow/collector?collector=<owner>/<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v3)"
         }
       ],
       "key": []
@@ -13539,7 +13539,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The provider's name: a task ref's segment (`task:<provider>:\u2026`), `git`."
+          "doc": "The provider's name: a task ref's segment (`task:<provider>:…`), `git`."
         },
         {
           "name": "extension",
@@ -13569,7 +13569,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The provider's name: a task ref's segment (`task:<provider>:\u2026`), `git`."
+          "doc": "The provider's name: a task ref's segment (`task:<provider>:…`), `git`."
         },
         {
           "name": "extension",
@@ -13599,7 +13599,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:\u2026`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:…`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -13649,7 +13649,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:\u2026`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:…`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -13714,7 +13714,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:\u2026`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:…`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -13784,7 +13784,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:\u2026`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:…`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -13859,7 +13859,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:\u2026`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`task:<provider>:…`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -13934,7 +13934,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=\u2026&provider=<provider>`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -14009,7 +14009,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=\u2026&provider=<provider>`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -14089,7 +14089,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=\u2026&provider=<provider>`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -14149,7 +14149,7 @@
         {
           "name": "stages",
           "type": "TEXT",
-          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets \u2014 `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` \u2014 and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
+          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
         },
         {
           "name": "id_pattern",
@@ -14174,7 +14174,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=\u2026&provider=<provider>`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -14234,7 +14234,7 @@
         {
           "name": "stages",
           "type": "TEXT",
-          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets \u2014 `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` \u2014 and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
+          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
         },
         {
           "name": "id_pattern",
@@ -14259,7 +14259,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=\u2026&provider=<provider>`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -14319,7 +14319,7 @@
         {
           "name": "stages",
           "type": "TEXT",
-          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets \u2014 `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` \u2014 and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
+          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
         },
         {
           "name": "id_pattern",
@@ -14344,7 +14344,7 @@
         {
           "name": "provider",
           "type": "TEXT",
-          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=\u2026&provider=<provider>`), a knowledge page's store (`oxwiki`), `git`, `none`."
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), a knowledge page's store (`oxwiki`), `git`, `none`."
         },
         {
           "name": "extension",
@@ -14404,12 +14404,102 @@
         {
           "name": "stages",
           "type": "TEXT",
-          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets \u2014 `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` \u2014 and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
+          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
         },
         {
           "name": "kinds",
           "type": "TEXT",
-          "doc": "A knowledge store's kinds of page, as a JSON array of `{ id, title, bucket }`; each is in one of core's buckets \u2014 `note`, `memory`, `instruction` \u2014 and the first is a page's when its store says none (oxwiki: `note`). `[]` for any other capability. (v13)"
+          "doc": "A knowledge store's kinds of page, as a JSON array of `{ id, title, bucket }`; each is in one of core's buckets — `note`, `memory`, `instruction` — and the first is a page's when its store says none (oxwiki: `note`). `[]` for any other capability. (v13)"
+        },
+        {
+          "name": "id_pattern",
+          "type": "TEXT",
+          "doc": "What a task tracker's own ids look like, a regex matched whole (oxtask: `tsk\\d+`): how its ids are recognized in text, as core's vocabulary recognizes them. NULL when it doesn't say. (v6)"
+        },
+        {
+          "name": "description",
+          "type": "TEXT",
+          "doc": "One sentence saying what this implementation is (`description:` in `implementations:`); NULL when its declaration says nothing or it is core's own. Joins `v_contribution` where `kind = 'implementation'` on `extension` and `local = capability || '.' || provider`."
+        }
+      ],
+      "key": []
+    },
+    "14": {
+      "columns": [
+        {
+          "name": "capability",
+          "type": "TEXT",
+          "doc": "`task_tracker`, `snapshots`, `vcs`, `knowledge`, `agent_harness`, `ai_provider`."
+        },
+        {
+          "name": "provider",
+          "type": "TEXT",
+          "doc": "The implementation's id: what `activeProviders` names, a task ref's segment (`oxplow:oxplow/task?id=…&provider=<provider>`), a knowledge page's store (`oxwiki`), `git`, `none`."
+        },
+        {
+          "name": "extension",
+          "type": "TEXT",
+          "doc": "The extension declaring it; NULL for core's."
+        },
+        {
+          "name": "features",
+          "type": "TEXT",
+          "doc": "The features it declares, as JSON (`task_tracker`: `hierarchy`, `comments`, `links`, `delete`, `idempotent_writes`; `vcs`: `isolated_workspaces`, `remotes`, `rename_detection`; `snapshots`: `contents`)."
+        },
+        {
+          "name": "active",
+          "type": "INTEGER",
+          "doc": "1 on the capability's active implementation."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "How a person names it. (v3)"
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "doc": "How it's loaded: `core`, `builtin`, `external`, `script` (an extension's script implementation), `none`; `unknown` for a choice nothing provides. (v12: `script`)"
+        },
+        {
+          "name": "available",
+          "type": "INTEGER",
+          "doc": "0 for a chosen implementation that isn't there to use. (v3)"
+        },
+        {
+          "name": "chosen_by",
+          "type": "TEXT",
+          "doc": "On the active row, why it's the one: `personal` (a person's own `.oxplow/personal.yaml`), `project` (`activeProviders`), `default`, `fallback` (the choice isn't available), or `declared` on every row of a capability many implementations serve; `setting` on an implementation its extension's setting turned off (`when:` in its declaration: listed, `active = 0`). NULL on the rest. (v3; v14: `setting`)"
+        },
+        {
+          "name": "capability_title",
+          "type": "TEXT",
+          "doc": "How a person names the capability (`Task tracker`). (v4)"
+        },
+        {
+          "name": "choosable",
+          "type": "INTEGER",
+          "doc": "1 when a project chooses the capability's implementation; 0 for one core fixes (`vcs`) or one many serve at once (`knowledge`). (v4)"
+        },
+        {
+          "name": "optional",
+          "type": "INTEGER",
+          "doc": "1 when the capability may be `none`. (v4)"
+        },
+        {
+          "name": "fields",
+          "type": "TEXT",
+          "doc": "Its own fields as a JSON array of `{ name, title, kind: enum|text|number, values? }`: what a task tracker keeps in `native` (oxtask: `priority`)."
+        },
+        {
+          "name": "stages",
+          "type": "TEXT",
+          "doc": "A task tracker's stages, in order, as a JSON array of `{ id, title, bucket }`: what the screens draw (a board's columns, a state picker). Each is in one of core's buckets — `backlog`, `todo`, `in_progress`, `blocked`, `done`, `canceled` — and the first of a bucket is where naming the bucket lands (oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`). `[]` for any other capability. (v10)"
+        },
+        {
+          "name": "kinds",
+          "type": "TEXT",
+          "doc": "A knowledge store's kinds of page, as a JSON array of `{ id, title, bucket }`; each is in one of core's buckets — `note`, `memory`, `instruction` — and the first is a page's when its store says none (oxwiki: `note`). `[]` for any other capability. (v13)"
         },
         {
           "name": "id_pattern",
@@ -14893,7 +14983,7 @@
         {
           "name": "spec",
           "type": "TEXT",
-          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, \u2026); NULL for an existing lens."
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
         },
         {
           "name": "params",
@@ -14953,7 +15043,7 @@
         {
           "name": "spec",
           "type": "TEXT",
-          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, \u2026); NULL for an existing lens."
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
         },
         {
           "name": "params",
@@ -15013,7 +15103,7 @@
         {
           "name": "spec",
           "type": "TEXT",
-          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, \u2026); NULL for an existing lens."
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
         },
         {
           "name": "params",
@@ -15073,7 +15163,7 @@
         {
           "name": "spec",
           "type": "TEXT",
-          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, \u2026); NULL for an existing lens."
+          "doc": "The answer's own lens spec (JSON: title, query, viz, columns, chart, …); NULL for an existing lens."
         },
         {
           "name": "params",
@@ -15125,7 +15215,7 @@
         {
           "name": "agent_kind",
           "type": "TEXT",
-          "doc": "Harness (`claude`, `codex`, \u2026)."
+          "doc": "Harness (`claude`, `codex`, …)."
         },
         {
           "name": "model",
@@ -15195,7 +15285,7 @@
         {
           "name": "agent_kind",
           "type": "TEXT",
-          "doc": "Harness (`claude`, `codex`, \u2026)."
+          "doc": "Harness (`claude`, `codex`, …)."
         },
         {
           "name": "model",
@@ -15267,7 +15357,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, \u2026)."
+          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)."
         },
         {
           "name": "path",
@@ -15277,7 +15367,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, \u2026"
+          "doc": "Short context: the Bash command (truncated), a search pattern, the question an `await_user` call asked, …"
         },
         {
           "name": "ok",
@@ -15322,7 +15412,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, \u2026)."
+          "doc": "Tool name (`Read`, `Edit`, `Bash`, `Grep`, …)."
         },
         {
           "name": "path",
@@ -15332,7 +15422,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: the Bash command (truncated), a search pattern, \u2026"
+          "doc": "Short context: the Bash command (truncated), a search pattern, …"
         },
         {
           "name": "ok",
@@ -15377,7 +15467,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, an ACP agent's title, \u2026)."
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, an ACP agent's title, …)."
         },
         {
           "name": "kind",
@@ -15392,7 +15482,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: a shell command (truncated), a search pattern, \u2026"
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
         },
         {
           "name": "ok",
@@ -15437,7 +15527,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, \u2026)."
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, …)."
         },
         {
           "name": "kind",
@@ -15452,7 +15542,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: a shell command (truncated), a search pattern, \u2026"
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
         },
         {
           "name": "ok",
@@ -15482,7 +15572,7 @@
         {
           "name": "subagent_kind",
           "type": "TEXT",
-          "doc": "That subagent's kind (`Explore`, `task`, \u2026). (v4)"
+          "doc": "That subagent's kind (`Explore`, `task`, …). (v4)"
         }
       ],
       "key": []
@@ -15512,7 +15602,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, \u2026)."
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, …)."
         },
         {
           "name": "kind",
@@ -15527,7 +15617,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: a shell command (truncated), a search pattern, \u2026"
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
         },
         {
           "name": "ok",
@@ -15557,7 +15647,7 @@
         {
           "name": "subagent_kind",
           "type": "TEXT",
-          "doc": "That subagent's kind (`Explore`, `task`, \u2026). (v4)"
+          "doc": "That subagent's kind (`Explore`, `task`, …). (v4)"
         },
         {
           "name": "call_id",
@@ -15612,7 +15702,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, \u2026)."
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, …)."
         },
         {
           "name": "kind",
@@ -15627,7 +15717,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: a shell command (truncated), a search pattern, \u2026"
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
         },
         {
           "name": "ok",
@@ -15657,7 +15747,7 @@
         {
           "name": "subagent_kind",
           "type": "TEXT",
-          "doc": "That subagent's kind (`Explore`, `task`, \u2026). (v4)"
+          "doc": "That subagent's kind (`Explore`, `task`, …). (v4)"
         },
         {
           "name": "call_id",
@@ -15707,7 +15797,7 @@
         {
           "name": "tool",
           "type": "TEXT",
-          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, \u2026)."
+          "doc": "The harness's own name for the tool (`Edit`, `apply_patch`, …)."
         },
         {
           "name": "kind",
@@ -15722,7 +15812,7 @@
         {
           "name": "detail",
           "type": "TEXT",
-          "doc": "Short context: a shell command (truncated), a search pattern, \u2026"
+          "doc": "Short context: a shell command (truncated), a search pattern, …"
         },
         {
           "name": "ok",
@@ -15752,7 +15842,7 @@
         {
           "name": "subagent_kind",
           "type": "TEXT",
-          "doc": "That subagent's kind (`Explore`, `task`, \u2026). (v4)"
+          "doc": "That subagent's kind (`Explore`, `task`, …). (v4)"
         },
         {
           "name": "call_id",
@@ -15884,7 +15974,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_ref",
@@ -15959,7 +16049,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_ref",
@@ -16034,7 +16124,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_ref",
@@ -16109,7 +16199,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_uri",
@@ -16184,7 +16274,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_uri",
@@ -16194,7 +16284,7 @@
         {
           "name": "assignee",
           "type": "TEXT",
-          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none \u2014 who worked on it is its efforts (`v_effort.task`)."
+          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none — who worked on it is its efforts (`v_effort.task`)."
         },
         {
           "name": "rank",
@@ -16264,7 +16354,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_uri",
@@ -16274,7 +16364,7 @@
         {
           "name": "assignee",
           "type": "TEXT",
-          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none \u2014 who worked on it is its efforts (`v_effort.task`)."
+          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none — who worked on it is its efforts (`v_effort.task`)."
         },
         {
           "name": "rank",
@@ -16344,7 +16434,7 @@
         {
           "name": "native",
           "type": "TEXT",
-          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, \u2026)."
+          "doc": "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)."
         },
         {
           "name": "parent_uri",
@@ -16354,7 +16444,7 @@
         {
           "name": "assignee",
           "type": "TEXT",
-          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none \u2014 who worked on it is its requests (`v_request_task`)."
+          "doc": "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none — who worked on it is its requests (`v_request_task`)."
         },
         {
           "name": "rank",
@@ -16642,6 +16732,86 @@
           "name": "stale_ref_count",
           "type": "INT",
           "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the URI was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "RFC 3339 timestamp."
+        }
+      ],
+      "key": []
+    },
+    "6": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "`oxplow:oxplow/knowledge?id=<id>&store=<store>`."
+        },
+        {
+          "name": "store",
+          "type": "TEXT",
+          "doc": "The store that keeps it (`oxwiki`, an instance's id; `v_capability_provider.provider` where `capability = 'knowledge'`)."
+        },
+        {
+          "name": "id",
+          "type": "TEXT",
+          "doc": "The store's own page id (oxwiki's slug, a vault path, a uuid); link it with `[[<id>]]` for oxwiki, `[[<store>:<id>]]` for another store."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "The page's kind, one its store declares (`v_capability_provider.kinds`; oxwiki: `note`)."
+        },
+        {
+          "name": "bucket",
+          "type": "TEXT",
+          "doc": "What its kind is for, as core acts on it: `note`, `memory` or `instruction`."
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "doc": "The page's title (oxwiki: its first `# ` heading, else its slug)."
+        },
+        {
+          "name": "url",
+          "type": "TEXT",
+          "doc": "Where to open it in its store's own app; NULL for oxwiki."
+        },
+        {
+          "name": "author",
+          "type": "TEXT",
+          "doc": "Who last changed it, as its store names them; NULL when the store doesn't say."
+        },
+        {
+          "name": "excerpt",
+          "type": "TEXT",
+          "doc": "Start of the body."
+        },
+        {
+          "name": "body_size",
+          "type": "INTEGER",
+          "doc": "Size of the full body, bytes."
+        },
+        {
+          "name": "outbound_uris",
+          "type": "TEXT",
+          "doc": "JSON array of every ref the page links to (`oxplow:oxplow/file?path=src/lib.rs`, `oxplow:oxplow/knowledge?id=other&store=oxwiki`, `oxplow:oxplow/task?id=tsk42&provider=oxtask`)."
+        },
+        {
+          "name": "stale_ref_count",
+          "type": "INT",
+          "doc": "Its `stale` rows in v_knowledge_ref: file refs whose file has a newer primary-stream snapshot than the one the URI was pinned to (or that were never pinned but have been snapshotted): what may no longer hold."
+        },
+        {
+          "name": "read_count",
+          "type": "INT",
+          "doc": "How many times it was read: by an agent (`oxplow_read`, or its own read of the page's file) and by a person (opening it). Each read is a row of `v_knowledge_read`. (v6)"
+        },
+        {
+          "name": "last_read_at",
+          "type": "TEXT",
+          "doc": "When it was last read (RFC 3339); NULL when never. (v6)"
         },
         {
           "name": "updated_at",
@@ -17014,12 +17184,12 @@
         {
           "name": "events_to",
           "type": "INTEGER",
-          "doc": "For a materialized model: the event log's highest seq when that recompute began \u2014 what its inputs had seen."
+          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen."
         },
         {
           "name": "mode",
           "type": "TEXT",
-          "doc": "For a materialized model: how its last recompute ran \u2014 `full` or `incremental`."
+          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`."
         }
       ],
       "key": []
@@ -17079,12 +17249,12 @@
         {
           "name": "events_to",
           "type": "INTEGER",
-          "doc": "For a materialized model: the event log's highest seq when that recompute began \u2014 what its inputs had seen."
+          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen."
         },
         {
           "name": "mode",
           "type": "TEXT",
-          "doc": "For a materialized model: how its last recompute ran \u2014 `full` or `incremental`."
+          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`."
         }
       ],
       "key": []
@@ -17144,12 +17314,12 @@
         {
           "name": "events_to",
           "type": "INTEGER",
-          "doc": "For a materialized model: the event log's highest seq when that recompute began \u2014 what its inputs had seen."
+          "doc": "For a materialized model: the event log's highest seq when that recompute began — what its inputs had seen."
         },
         {
           "name": "mode",
           "type": "TEXT",
-          "doc": "For a materialized model: how its last recompute ran \u2014 `full` or `incremental`."
+          "doc": "For a materialized model: how its last recompute ran — `full` or `incremental`."
         },
         {
           "name": "ai_context",
@@ -17494,7 +17664,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "How it displays (`gauge`, \u2026)."
+          "doc": "How it displays (`gauge`, …)."
         },
         {
           "name": "language",
@@ -17519,7 +17689,7 @@
         {
           "name": "trigger",
           "type": "TEXT",
-          "doc": "When a gauge runs (`on-snapshot`, \u2026); `auto` for a metric fed by its producer."
+          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer."
         },
         {
           "name": "toggleable",
@@ -17529,7 +17699,7 @@
         {
           "name": "category",
           "type": "TEXT",
-          "doc": "`operational`, `testing`, `static-quality` or `custom` \u2014 how the catalog groups it."
+          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it."
         }
       ],
       "key": []
@@ -17549,7 +17719,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "How it displays (`gauge`, \u2026)."
+          "doc": "How it displays (`gauge`, …)."
         },
         {
           "name": "language",
@@ -17574,7 +17744,7 @@
         {
           "name": "trigger",
           "type": "TEXT",
-          "doc": "When a gauge runs (`on-snapshot`, \u2026); `auto` for a metric fed by its producer."
+          "doc": "When a gauge runs (`on-snapshot`, …); `auto` for a metric fed by its producer."
         },
         {
           "name": "toggleable",
@@ -17584,7 +17754,7 @@
         {
           "name": "category",
           "type": "TEXT",
-          "doc": "`operational`, `testing`, `static-quality` or `custom` \u2014 how the catalog groups it."
+          "doc": "`operational`, `testing`, `static-quality` or `custom` — how the catalog groups it."
         }
       ],
       "key": []
@@ -18023,7 +18193,7 @@
         {
           "name": "language",
           "type": "",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "complexity",
@@ -18088,7 +18258,7 @@
         {
           "name": "language",
           "type": "",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "complexity",
@@ -18153,7 +18323,7 @@
         {
           "name": "language",
           "type": "",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "complexity",
@@ -18218,7 +18388,7 @@
         {
           "name": "language",
           "type": "",
-          "doc": "Its language (`rust`, `typescript`, \u2026)."
+          "doc": "Its language (`rust`, `typescript`, …)."
         },
         {
           "name": "complexity",
@@ -18410,7 +18580,7 @@
         {
           "name": "page_kind",
           "type": "TEXT",
-          "doc": "Its page kind (`page`, `file`, `wiki`, \u2026), for the icon."
+          "doc": "Its page kind (`page`, `file`, `wiki`, …), for the icon."
         },
         {
           "name": "label",
@@ -18455,7 +18625,7 @@
         {
           "name": "page_kind",
           "type": "TEXT",
-          "doc": "Its page kind (`page`, `file`, `wiki`, \u2026), for the icon."
+          "doc": "Its page kind (`page`, `file`, `wiki`, …), for the icon."
         },
         {
           "name": "label",
@@ -18500,7 +18670,7 @@
         {
           "name": "page_kind",
           "type": "TEXT",
-          "doc": "Its page kind (`page`, `file`, `oxplow/knowledge`, \u2026), for the icon."
+          "doc": "Its page kind (`page`, `file`, `oxplow/knowledge`, …), for the icon."
         },
         {
           "name": "label",
@@ -18716,7 +18886,7 @@
         {
           "name": "to_kind",
           "type": "TEXT",
-          "doc": "The target's kind (`task`, `collector`, `effort`, \u2026). (v2)"
+          "doc": "The target's kind (`task`, `collector`, `effort`, …). (v2)"
         },
         {
           "name": "link_type",
@@ -18746,7 +18916,7 @@
         {
           "name": "to_kind",
           "type": "TEXT",
-          "doc": "The target's kind (`task`, `collector`, `effort`, \u2026). (v2)"
+          "doc": "The target's kind (`task`, `collector`, `effort`, …). (v2)"
         },
         {
           "name": "link_type",
@@ -18776,7 +18946,7 @@
         {
           "name": "to_kind",
           "type": "TEXT",
-          "doc": "The target's kind (`task`, `collector`, `request`, \u2026). (v2)"
+          "doc": "The target's kind (`task`, `collector`, `request`, …). (v2)"
         },
         {
           "name": "link_type",
@@ -19319,7 +19489,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         }
       ],
       "key": []
@@ -19404,7 +19574,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "display_name",
@@ -19494,7 +19664,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "native_title",
@@ -19594,7 +19764,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`agent_session:ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "native_title",
@@ -19694,7 +19864,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "native_title",
@@ -19794,7 +19964,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "native_title",
@@ -19889,7 +20059,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "native_title",
@@ -19984,7 +20154,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it. (v4)"
+          "doc": "`oxplow:oxplow/agent_session?id=ses<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it. (v4)"
         },
         {
           "name": "native_title",
@@ -20123,7 +20293,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair task for it \u2014 the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+          "doc": "The open repair task for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []
@@ -20203,7 +20373,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair task for it \u2014 the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+          "doc": "The open repair task for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []
@@ -20283,7 +20453,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair task for it \u2014 the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+          "doc": "The open repair task for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []
@@ -20363,7 +20533,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair task for it \u2014 the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+          "doc": "The open repair task for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []
@@ -20443,7 +20613,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair task for it \u2014 the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+          "doc": "The open repair task for it — the one whose title starts `Repair <extension> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []
@@ -20523,7 +20693,7 @@
         {
           "name": "repair_item",
           "type": "TEXT",
-          "doc": "The open repair task for it \u2014 the one whose title starts `Repair <namespace> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
+          "doc": "The open repair task for it — the one whose title starts `Repair <namespace> <contribution>:`, filed by the bundled repair effect; NULL when none is open."
         }
       ],
       "key": []
@@ -20545,7 +20715,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
         },
         {
           "name": "local",
@@ -20627,7 +20797,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
         },
         {
           "name": "local",
@@ -20704,7 +20874,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
         },
         {
           "name": "local",
@@ -20781,7 +20951,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
         },
         {
           "name": "local",
@@ -20858,7 +21028,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `lens`, …"
         },
         {
           "name": "local",
@@ -20935,7 +21105,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21012,7 +21182,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21089,7 +21259,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21171,7 +21341,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21253,7 +21423,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21340,7 +21510,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21427,7 +21597,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21514,7 +21684,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `metric`, `skill`, `provider`, `page`, …"
         },
         {
           "name": "local",
@@ -21608,7 +21778,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -21755,7 +21925,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -21765,7 +21935,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -21902,7 +22072,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -21912,7 +22082,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22049,7 +22219,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -22059,7 +22229,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22196,7 +22366,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -22206,7 +22376,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22343,7 +22513,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -22353,7 +22523,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22490,7 +22660,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -22500,7 +22670,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22637,7 +22807,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -22647,7 +22817,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22784,7 +22954,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`collector`, `effect`, `command`, `implementation`, \u2026"
+          "doc": "`collector`, `effect`, `command`, `implementation`, …"
         },
         {
           "name": "version",
@@ -22794,7 +22964,7 @@
         {
           "name": "generation",
           "type": "TEXT",
-          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none \u2014 a collector's, an effect's or a job's belongs to its extension's version. (v2)"
+          "doc": "The extension catalog's generation it ran against (`v_*` query results name theirs the same way); NULL for a run that holds none — a collector's, an effect's or a job's belongs to its extension's version. (v2)"
         },
         {
           "name": "actor_kind",
@@ -22953,7 +23123,7 @@
         {
           "name": "invoker",
           "type": "TEXT",
-          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, \u2026"
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
         },
         {
           "name": "run_id",
@@ -23050,7 +23220,7 @@
         {
           "name": "invoker",
           "type": "TEXT",
-          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, \u2026"
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
         },
         {
           "name": "run_id",
@@ -23318,7 +23488,7 @@
         {
           "name": "invoker",
           "type": "TEXT",
-          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, \u2026"
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
         },
         {
           "name": "run_id",
@@ -23358,7 +23528,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`job_run:<id>`: its ref \u2014 what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
+          "doc": "`job_run:<id>`: its ref — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
         }
       ],
       "key": [
@@ -23420,7 +23590,7 @@
         {
           "name": "invoker",
           "type": "TEXT",
-          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, \u2026"
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
         },
         {
           "name": "run_id",
@@ -23460,7 +23630,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/job_run?id=<id>`: its ref \u2014 what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
+          "doc": "`oxplow:oxplow/job_run?id=<id>`: its ref — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
         }
       ],
       "key": [
@@ -23522,7 +23692,7 @@
         {
           "name": "invoker",
           "type": "TEXT",
-          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, \u2026"
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
         },
         {
           "name": "run_id",
@@ -23562,7 +23732,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/job_run?id=<id>`: its URI \u2014 what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
+          "doc": "`oxplow:oxplow/job_run?id=<id>`: its URI — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
         }
       ],
       "key": [
@@ -23624,7 +23794,7 @@
         {
           "name": "invoker",
           "type": "TEXT",
-          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, \u2026"
+          "doc": "Who started it, as an event source: `human`, `agent:thr3`, `effect:<ext>/<id>`, …"
         },
         {
           "name": "run_id",
@@ -23664,7 +23834,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/job_run?id=<id>`: its URI \u2014 what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
+          "doc": "`oxplow:oxplow/job_run?id=<id>`: its URI — what `jobs.read/snapshot`, `jobs.write/cancel` and `oxplow.job_run.cancel` take. (v3)"
         }
       ],
       "key": [
@@ -24155,7 +24325,7 @@
         {
           "name": "viz",
           "type": "TEXT",
-          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, \u2026 "
+          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … "
         },
         {
           "name": "params",
@@ -24170,7 +24340,7 @@
         {
           "name": "launcher_category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL for the default `Lenses`."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`."
         },
         {
           "name": "needs",
@@ -24217,7 +24387,7 @@
         {
           "name": "viz",
           "type": "TEXT",
-          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, \u2026 "
+          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … "
         },
         {
           "name": "params",
@@ -24232,7 +24402,7 @@
         {
           "name": "launcher_category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL for the default `Lenses`."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`."
         },
         {
           "name": "needs",
@@ -24279,7 +24449,7 @@
         {
           "name": "viz",
           "type": "TEXT",
-          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, \u2026 "
+          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … "
         },
         {
           "name": "params",
@@ -24294,7 +24464,7 @@
         {
           "name": "launcher_category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL for the default `Lenses`."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`."
         },
         {
           "name": "needs",
@@ -24341,7 +24511,7 @@
         {
           "name": "viz",
           "type": "TEXT",
-          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, \u2026 "
+          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … "
         },
         {
           "name": "params",
@@ -24356,7 +24526,7 @@
         {
           "name": "launcher_category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL for the default `Lenses`."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`."
         },
         {
           "name": "needs",
@@ -24403,7 +24573,7 @@
         {
           "name": "viz",
           "type": "TEXT",
-          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, \u2026 "
+          "doc": "How it is drawn: `table`, `list`, `chart`, `tree`, `grid`, `form`, `custom`, … "
         },
         {
           "name": "params",
@@ -24418,7 +24588,7 @@
         {
           "name": "launcher_category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL for the default `Lenses`."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL for the default `Lenses`."
         },
         {
           "name": "needs",
@@ -25076,7 +25246,7 @@
         {
           "name": "errors",
           "type": "TEXT",
-          "doc": "Problems reported while loading it, as a JSON array of diagnostics: `{ severity, code, file, line, contribution, message, fix, mismatch, shown }` \u2014 `file` relative to its folder, `code` stable and dotted (`manifest.parse`), `shown` the line a person reads under its source folder; `[]` when healthy. (v8)"
+          "doc": "Problems reported while loading it, as a JSON array of diagnostics: `{ severity, code, file, line, contribution, message, fix, mismatch, shown }` — `file` relative to its folder, `code` stable and dotted (`manifest.parse`), `shown` the line a person reads under its source folder; `[]` when healthy. (v8)"
         },
         {
           "name": "warnings",
@@ -25130,7 +25300,7 @@
         {
           "name": "ref_type",
           "type": "TEXT",
-          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, \u2026)."
+          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, …)."
         },
         {
           "name": "source_extra",
@@ -25180,7 +25350,7 @@
         {
           "name": "ref_type",
           "type": "TEXT",
-          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, \u2026)."
+          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, …)."
         },
         {
           "name": "source_extra",
@@ -25230,7 +25400,7 @@
         {
           "name": "ref_type",
           "type": "TEXT",
-          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, `prompt_mention`: a turn whose prompt pointed at the target, \u2026)."
+          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, `prompt_mention`: a turn whose prompt pointed at the target, …)."
         },
         {
           "name": "source_extra",
@@ -25280,7 +25450,7 @@
         {
           "name": "ref_type",
           "type": "TEXT",
-          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, `prompt_mention`: a turn whose prompt pointed at the target, \u2026)."
+          "doc": "How the source relates to the target (`touched_file`, `wikilink`, `impact`, `task_mention`, `summary_commit_mention`, `prompt_mention`: a turn whose prompt pointed at the target, …)."
         },
         {
           "name": "source_extra",
@@ -25453,7 +25623,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What it is: `anthropic`, `openai`, `openai_compatible`, `openrouter`, `typesafe`, \u2026"
+          "doc": "What it is: `anthropic`, `openai`, `openai_compatible`, `openrouter`, `typesafe`, …"
         },
         {
           "name": "base_url",
@@ -25556,7 +25726,7 @@
         {
           "name": "approved",
           "type": "INT",
-          "doc": "1 when it needs no approval or this machine approved its script as it is now; 0 means `run_collector` is refused until a person approves it in Settings \u2192 Data."
+          "doc": "1 when it needs no approval or this machine approved its script as it is now; 0 means `run_collector` is refused until a person approves it in Settings → Data."
         },
         {
           "name": "network_enforced",
@@ -25566,7 +25736,7 @@
         {
           "name": "version",
           "type": "TEXT",
-          "doc": "Its approval hash as it is now \u2014 what a person's approval names; NULL for a collector needing none."
+          "doc": "Its approval hash as it is now — what a person's approval names; NULL for a collector needing none."
         },
         {
           "name": "disabled",
@@ -26878,7 +27048,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`subagent:ses<n>/<id>`: its ref, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`subagent:ses<n>/<id>`: its ref, the one place SQL spells it — select and join on this."
         }
       ],
       "key": []
@@ -26948,7 +27118,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its ref, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its ref, the one place SQL spells it — select and join on this."
         }
       ],
       "key": []
@@ -27018,7 +27188,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its URI, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`oxplow:oxplow/subagent?agent=<id>&session=ses<n>`: its URI, the one place SQL spells it — select and join on this."
         }
       ],
       "key": []
@@ -27224,7 +27394,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`handoff:hnd<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it."
+          "doc": "`handoff:hnd<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it."
         },
         {
           "name": "from_thread_id",
@@ -27319,7 +27489,7 @@
         {
           "name": "ref",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/handoff?id=hnd<id>`: its ref, the one place SQL spells it \u2014 select and join on this, never rebuild it."
+          "doc": "`oxplow:oxplow/handoff?id=hnd<id>`: its ref, the one place SQL spells it — select and join on this, never rebuild it."
         },
         {
           "name": "from_thread_id",
@@ -27414,7 +27584,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/handoff?id=hnd<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it."
+          "doc": "`oxplow:oxplow/handoff?id=hnd<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it."
         },
         {
           "name": "from_thread_id",
@@ -28144,7 +28314,7 @@
         {
           "name": "scope",
           "type": "TEXT",
-          "doc": "`app`; a page's ref (`page:\u2026`, `lens:\u2026`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
+          "doc": "`app`; a page's ref (`page:…`, `lens:…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
         },
         {
           "name": "key",
@@ -28169,7 +28339,7 @@
         {
           "name": "scope",
           "type": "TEXT",
-          "doc": "`app`; a page's ref (`oxplow:oxplow/page?page=\u2026`, `oxplow:oxplow/lens?lens=\u2026`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
+          "doc": "`app`; a page's ref (`oxplow:oxplow/page?page=…`, `oxplow:oxplow/lens?lens=…`) or `kind:<kind>`; a panel's ref; or `component:<extension>/<id>`."
         },
         {
           "name": "key",
@@ -28194,7 +28364,7 @@
         {
           "name": "scope",
           "type": "TEXT",
-          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=\u2026`, `oxplow:oxplow/lens?lens=\u2026`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`."
+          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=…`, `oxplow:oxplow/lens?lens=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`."
         },
         {
           "name": "key",
@@ -28219,7 +28389,7 @@
         {
           "name": "scope",
           "type": "TEXT",
-          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=\u2026`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`."
+          "doc": "`app`; a page's URI (`oxplow:oxplow/page?page=…`) or `kind:<kind>`; a panel's URI; or `component:<extension>/<id>`."
         },
         {
           "name": "key",
@@ -28795,7 +28965,7 @@
         {
           "name": "author",
           "type": "TEXT",
-          "doc": "Who wrote it: `user`, `agent`, \u2026"
+          "doc": "Who wrote it: `user`, `agent`, …"
         },
         {
           "name": "body",
@@ -29866,7 +30036,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/terminal?id=trm<id>`: its URI, the one place SQL spells it \u2014 select and join on this, never rebuild it."
+          "doc": "`oxplow:oxplow/terminal?id=trm<id>`: its URI, the one place SQL spells it — select and join on this, never rebuild it."
         }
       ],
       "key": []
@@ -30025,7 +30195,7 @@
         {
           "name": "category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL when it is opened only from elsewhere."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL when it is opened only from elsewhere."
         },
         {
           "name": "keywords",
@@ -30122,7 +30292,7 @@
         {
           "name": "category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL when it is opened only from elsewhere."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL when it is opened only from elsewhere."
         },
         {
           "name": "keywords",
@@ -30224,7 +30394,7 @@
         {
           "name": "category",
           "type": "TEXT",
-          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, \u2026); NULL when it is opened only from elsewhere."
+          "doc": "The launcher section it is listed under (`Work`, `Code`, `Activity`, `Data`, …); NULL when it is opened only from elsewhere."
         },
         {
           "name": "keywords",
@@ -30503,12 +30673,12 @@
         {
           "name": "events_to",
           "type": "INTEGER",
-          "doc": "For a materialized dataset: the event log's highest seq when that recompute began \u2014 what its inputs had seen."
+          "doc": "For a materialized dataset: the event log's highest seq when that recompute began — what its inputs had seen."
         },
         {
           "name": "mode",
           "type": "TEXT",
-          "doc": "For a materialized dataset: how its last recompute ran \u2014 `full` or `incremental`."
+          "doc": "For a materialized dataset: how its last recompute ran — `full` or `incremental`."
         },
         {
           "name": "ai_context",
@@ -30731,7 +30901,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "Its resource URI (`oxplow:oxplow/file?path=\u2026` or `\u2026/dir?path=\u2026`, with the `filesystem` and `rev` it is on when they aren't the local default)."
+          "doc": "Its resource URI (`oxplow:oxplow/file?path=…` or `…/dir?path=…`, with the `filesystem` and `rev` it is on when they aren't the local default)."
         },
         {
           "name": "status",
@@ -31524,7 +31694,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What it is, in the harness's word (`subagent`, `shell`, \u2026); NULL when not said."
+          "doc": "What it is, in the harness's word (`subagent`, `shell`, …); NULL when not said."
         },
         {
           "name": "description",
@@ -31559,7 +31729,7 @@
         {
           "name": "status",
           "type": "TEXT",
-          "doc": "How it ended, in the harness's word (`completed`, `failed`, `killed`, \u2026); NULL while running or when not said."
+          "doc": "How it ended, in the harness's word (`completed`, `failed`, `killed`, …); NULL while running or when not said."
         },
         {
           "name": "summary",
@@ -31599,7 +31769,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "What it is, in the harness's word (`subagent`, `shell`, \u2026); NULL when not said."
+          "doc": "What it is, in the harness's word (`subagent`, `shell`, …); NULL when not said."
         },
         {
           "name": "description",
@@ -31639,7 +31809,7 @@
         {
           "name": "status",
           "type": "TEXT",
-          "doc": "How it ended, in the harness's word (`completed`, `failed`, `killed`, \u2026); NULL while running or when not said."
+          "doc": "How it ended, in the harness's word (`completed`, `failed`, `killed`, …); NULL while running or when not said."
         },
         {
           "name": "summary",
@@ -31751,7 +31921,7 @@
         {
           "name": "other_ms",
           "type": "INT",
-          "doc": "The rest of the turn: its duration less the union of its tool calls and its waits, so nothing is counted twice \u2014 mostly the model's own time. NULL where tool_ms is. (v2)"
+          "doc": "The rest of the turn: its duration less the union of its tool calls and its waits, so nothing is counted twice — mostly the model's own time. NULL where tool_ms is. (v2)"
         }
       ],
       "key": []
@@ -31811,7 +31981,7 @@
         {
           "name": "other_ms",
           "type": "INT",
-          "doc": "The rest of the turn: its duration less the union of its tool calls and its waits, so nothing is counted twice \u2014 mostly the model's own time. NULL where tool_ms is. (v2)"
+          "doc": "The rest of the turn: its duration less the union of its tool calls and its waits, so nothing is counted twice — mostly the model's own time. NULL where tool_ms is. (v2)"
         }
       ],
       "key": []
@@ -31833,7 +32003,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it — select and join on this."
         },
         {
           "name": "first_turn",
@@ -31843,7 +32013,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, \u2026)."
+          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, …)."
         },
         {
           "name": "prompt",
@@ -31873,7 +32043,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it — select and join on this."
         },
         {
           "name": "first_turn",
@@ -31883,7 +32053,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, \u2026)."
+          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, …)."
         },
         {
           "name": "prompt",
@@ -31958,7 +32128,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it — select and join on this."
         },
         {
           "name": "first_turn",
@@ -31968,7 +32138,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, \u2026)."
+          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, …)."
         },
         {
           "name": "prompt",
@@ -32023,7 +32193,7 @@
         {
           "name": "state",
           "type": "TEXT",
-          "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool \u2014 v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status)"
+          "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status)"
         }
       ],
       "key": []
@@ -32043,7 +32213,7 @@
         {
           "name": "uri",
           "type": "TEXT",
-          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it \u2014 select and join on this."
+          "doc": "`oxplow:oxplow/request?id=req<id>`: its URI, the one place SQL spells it — select and join on this."
         },
         {
           "name": "first_turn",
@@ -32053,7 +32223,7 @@
         {
           "name": "source",
           "type": "TEXT",
-          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, \u2026)."
+          "doc": "Who started it: the first turn's `source` (`person`, `peer`, `unknown`, …)."
         },
         {
           "name": "prompt",
@@ -32108,7 +32278,7 @@
         {
           "name": "state",
           "type": "TEXT",
-          "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool \u2014 v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row)"
+          "doc": "Where it stands now, read live: `waiting_on_person` (an agent session whose latest turn is the request's waits on the person: a final question, a permission prompt, a question tool — v_agent_session_status), else `running` (one of its turns is open), `waiting_on_work` (none is open, but a job it started has not reported back), `finished`. (v2; v3: waiting read from the session's status; v4: that status read once per query, not per row)"
         }
       ],
       "key": []
@@ -32329,7 +32499,7 @@
         {
           "name": "commit_uri",
           "type": "TEXT",
-          "doc": "The commit's URI (`oxplow:oxplow/commit?sha=\u2026`)."
+          "doc": "The commit's URI (`oxplow:oxplow/commit?sha=…`)."
         },
         {
           "name": "path",
@@ -32406,7 +32576,7 @@
         {
           "name": "kind",
           "type": "TEXT",
-          "doc": "`gauge`, `coverage`, `test`, `event`, \u2026"
+          "doc": "`gauge`, `coverage`, `test`, `event`, …"
         },
         {
           "name": "category",
@@ -32421,7 +32591,7 @@
         {
           "name": "agg",
           "type": "TEXT",
-          "doc": "How the delta was computed: `files` (over the request's files), `sum` (in-window total) or `level` (before\u2192after)."
+          "doc": "How the delta was computed: `files` (over the request's files), `sum` (in-window total) or `level` (before→after)."
         },
         {
           "name": "baseline",
@@ -32436,7 +32606,7 @@
         {
           "name": "delta",
           "type": "REAL",
-          "doc": "current \u2212 baseline, or the total for `sum`."
+          "doc": "current − baseline, or the total for `sum`."
         },
         {
           "name": "changed",
@@ -32603,6 +32773,43 @@
           "name": "version",
           "type": "TEXT",
           "doc": "Changes whenever the row's text does (the page's `updated_at`); a recompute reads the text of rows whose version moved only."
+        }
+      ],
+      "key": []
+    }
+  },
+  "knowledge_read": {
+    "1": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The page (v_knowledge_page.uri)."
+        },
+        {
+          "name": "actor",
+          "type": "TEXT",
+          "doc": "Who read it: `agent` or `person`."
+        },
+        {
+          "name": "thread_id",
+          "type": "INTEGER",
+          "doc": "The thread it was read on (v_thread.id); NULL when no thread was."
+        },
+        {
+          "name": "turn_id",
+          "type": "INTEGER",
+          "doc": "An agent's turn it was read in (v_agent_turn.id); NULL for a person's read or when the turn isn't known."
+        },
+        {
+          "name": "via",
+          "type": "TEXT",
+          "doc": "How: `tool` (`oxplow_read`), `file` (the agent read the page's file itself) or `open` (a person opened it)."
+        },
+        {
+          "name": "at",
+          "type": "TEXT",
+          "doc": "When (RFC 3339)."
         }
       ],
       "key": []

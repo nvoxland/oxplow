@@ -145,6 +145,19 @@ appears** (`OxwikiPresence`, set by the publication that declares it:
 boot's, or turning it back on). While oxwiki is off its files are left
 alone.
 
+## Turning oxwiki off
+
+oxwiki is on by default. foundation's setting `oxwiki` (Settings →
+Integrations → Knowledge stores, which lists every store on or off with
+its kinds and extension; or `oxplow.knowledge.set_oxwiki { on }`) turns it
+off: it stays declared and
+listed (`v_capability_provider` `active = 0`, `chosen_by = 'setting'`), but
+no store runs, its pages are hidden, its watch ignores its folder, `resync`
+is refused and a bare `[[slug]]` names a store that isn't enabled. On
+again, the publication declares it again and its watch rescans the folder.
+(`.context/extensions-manifest.md` "An implementation offered by a
+setting".)
+
 ## Hidden, not deleted
 
 The record keeps every store's pages. `v_knowledge_page` joins the enabled
@@ -185,6 +198,8 @@ touched by the thread whose command wrote it (`knowledge_page_touch`,
 - **`v_knowledge_body`** — `uri`, `body`: each page's markdown, apart from
   `v_knowledge_page` so listing pages never reads bodies.
 - **`v_knowledge_touch`** — which threads wrote which pages.
+- **`v_knowledge_read`** — every read of a page (see "Reads"); the page's
+  `read_count` and `last_read_at` count them.
 - **`v_search_knowledge`** — what site search indexes (`oxplow_search`,
   resource `oxplow/knowledge`); its asset restates the index when
   `knowledge_page` commits.
@@ -211,11 +226,35 @@ its freshness from these datasets by URI; `useKnowledgeStores` (and
 Every read returns what it read (`reads`) and re-reads when one of those
 datasets changes.
 
+## Reads
+
+Reading pages is what knowledge is for, so oxplow observes every read,
+for every store, in `v_knowledge_read` (`uri, actor, thread_id, turn_id,
+via, at`):
+
+- **An agent's `oxplow_read`** (`oxplow.records.read`) of a page returns
+  its row and, as `content`, its body (`v_knowledge_body`). The command
+  logs `knowledge.page.read@1 { page, via: tool }` itself, as the agent
+  (`knowledge::log_read`): a read runs unrecorded, so the events a handler
+  returns would go nowhere (`.context/commands.md`). A person's read
+  through the same command is no agent's read.
+- **An agent reading a page's file with its own tool** (an
+  `agent.tool.finished` of kind `Read`) reads the page, `via: file`: each
+  path — the worktree's when relative, else absolute — that an enabled
+  store says is a page's file (`KnowledgeProvider::page_at`; oxwiki:
+  `.oxplow/oxwiki/<slug>.md`). A path that is no page's is nothing.
+- `knowledge::KnowledgeReads` (pump consumer `knowledge.reads`) turns both
+  into `knowledge_page_read` rows, only for recorded pages, with the
+  event's thread and turn.
+- **A person opening a page** is their page visit (`page_visit` rows of
+  `page_kind = 'oxplow/knowledge'`, `via: open`): no event of its own.
+
 ## The store interface
 
 `oxplow_domain::knowledge::KnowledgeProvider` is a **store**: `id()`,
-`kinds()`, `features()` (`edit`), `root()` (the folder its pages are files
-in, when they are: oxwiki's `.oxplow/oxwiki`), `write_page(call, draft)` →
+`kinds()`, `features()` (`edit`), `page_at(path)` (the page a file is,
+when its pages are files: oxwiki's `.oxplow/oxwiki/<slug>.md`),
+`write_page(call, draft)` →
 `Kept`, `delete_page(call, id)` → its events. A store never sees pins or
 snapshots: the record, links and **freshness are core's**, the same for
 every store (`oxplow_db::knowledge_record`). Adding a link is core's too.

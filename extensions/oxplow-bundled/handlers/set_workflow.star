@@ -27,7 +27,7 @@ def transform(x):
         result["personal_workflow"] = personal["workflow"]
     return {
         "commands": [{
-            "name": "oxplow.review_policy.write",
+            "name": "oxplow.settings.write",
             "input": {
                 "schema_version": read["schema_version"],
                 "project": {"expected": read["project"], "values": layer},
