@@ -28,7 +28,7 @@ Also built: `oxplow.refs.verify`; a rebuild copies the rows in place; a
 disabled store's rows are hidden; a store id two extensions claim refuses
 the later one; a run names the rows it quarantined.
 
-Not yet: child models, the owner's
+Not yet: the provider `read` adapter, child models, the owner's
 `oxplow.model.write`, bare-link patterns, the boot repair over models, the
 tombstone sweep's schedule, and the shipped-extension plumbing (F7).
 This doc is the contract for the rest. The other pieces
@@ -228,9 +228,13 @@ fills:
 - **Cursor.** A collector may return `"cursor": {...}`; it is kept in
   `collector_run.cursor_json` and given back as `x["cursor"]` on the next
   run. A failed run keeps the old cursor.
-- **Providers.** A provider process's `read` stream is turned into the
-  same output for its instance's store. `TasksProjection` and
-  `KnowledgeRecords` go.
+- **Providers (decided 2026-11-12: build the adapter).** A provider
+  process's `read` stream is turned into the same `models` output for its
+  instance's store (its instance id), applied with `models::apply_tx`, so
+  an existing provider tracker (Linear) keeps showing its items with no
+  change to the provider program; its writes become its own commands (one
+  per provider operation, as today). `TasksProjection` and
+  `KnowledgeRecords` go once the adapter stands in for them.
 
 ## Attribution (to settle in Phase 3)
 
