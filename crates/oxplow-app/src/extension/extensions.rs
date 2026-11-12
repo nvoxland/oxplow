@@ -6727,6 +6727,8 @@ commands:
             [
                 "oxplow.tasks.set_workflow",
                 "oxplow.tasks.clear_finished",
+                "oxplow.tasks.assign",
+                "oxplow.tasks.reorder",
                 "oxplow.task.new",
                 "oxplow.knowledge.new_page"
             ]
