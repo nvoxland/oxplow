@@ -1,0 +1,19 @@
+# A turn's end take is labelled, after its row in Local History, with the
+# tasks its request worked on: "completed: <task>"; a request that worked on
+# none is "Unlinked work". (A `row-badge` decorator on snapshot rows;
+# Local History itself reads no task.)
+given:
+  - { command: oxplow.task.create, input: { title: Fix it }, bind: item }
+  - observe: { turn: { prompt: Chat } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h1 }] } }
+  - observe:
+      turn:
+        prompt: Fix it
+        during:
+          - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h2 }] } }
+when: { sql: "SELECT label FROM v_oxplow_snapshot_work_badge ORDER BY label" }
+expect: { rows: [{ label: "completed: Fix it" }, { label: "completed: Unlinked work" }] }
+steps:
+  - when: { sql: "SELECT max(length(label)) <= 40 AS short, count(DISTINCT uri) AS snapshots FROM v_oxplow_snapshot_work_badge" }
+    expect: { rows: [{ short: 1, snapshots: 2 }] }

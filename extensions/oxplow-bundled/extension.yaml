@@ -131,6 +131,24 @@ datasets:
       - { name: title, type: TEXT, doc: "The task's title." }
       - { name: body, type: TEXT, doc: "Its own id (so typing `tsk42` finds it), then its body, then its comments." }
       - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
+  - name: thread_work_badge
+    version: 1
+    description: "A label for each thread that worked on tasks: how many are done and how many still open (\"3 done · 1 open\"), over the tasks its requests worked on. Decorates thread rows (Closed Threads)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The thread's URI." }
+      - { name: label, type: TEXT, doc: "\"3 done · 1 open\"." }
+  - name: session_task_badge
+    version: 1
+    description: "One label per task the requests of a session's turns worked on (its title), in the order they were first worked on. Decorates agent session rows (Thread sessions)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The agent session's URI." }
+      - { name: label, type: TEXT, doc: "A task's title." }
+  - name: snapshot_work_badge
+    version: 1
+    description: "A label per task the request of the turn that took a snapshot worked on: \"completed: X\" for a turn's end take, \"in flight: X\" for another take of a turn. Decorates snapshot rows (Local History)."
+    fields:
+      - { name: uri, type: TEXT, doc: "The snapshot's URI." }
+      - { name: label, type: TEXT, doc: "\"completed: X\" or \"in flight: X\"." }
   - name: thread_tasks
     version: 9
     description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children); Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared. It reads no request, so it changes only when tasks, their requests' links or the thread's knowledge touches do; what a thread's request is doing now is v_request's (the Work panel reads it for its own thread)."
@@ -246,6 +264,12 @@ event_types:
       schema: event_types/finished_cleared.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
 ui:
+  # Task facts on foundation's pages, which read no task: a label after any
+  # cell that links to the thread, session or snapshot.
+  decorators:
+    - { dataset: thread_work_badge, resource: oxplow/thread, placement: row-badge, label: label }
+    - { dataset: session_task_badge, resource: oxplow/agent_session, placement: row-badge, label: label }
+    - { dataset: snapshot_work_badge, resource: oxplow/snapshot, placement: row-badge, label: label }
   # A task's page shows the agent's tokens on it and what another
   # thread shares with it.
   mounts:
@@ -255,6 +279,8 @@ ui:
     - { page: item-shared-work, at: oxplow/task-detail.sections }
     # A request's Changes page shows where it left its task's area and
     # where its agent struggled (empty on a snapshot's or a turn's).
+    - { page: change-task, at: oxplow/diff-view.sections, position: { after: header }, title: Task }
+    - { page: change-task-description, at: oxplow/diff-view.sections, position: { after: header }, title: Description }
     - { page: what-deviated, at: oxplow/diff-view.sections }
     - { page: struggled, at: oxplow/diff-view.sections }
     # Settings → Integrations: how this project's agents use tasks.

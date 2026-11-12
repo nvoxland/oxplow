@@ -1,0 +1,11 @@
+# Closed Threads lists only the stream's closed threads, each with a Reopen
+# action; it reads no task (bundled labels a thread with its work).
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Old }, bind: old }
+  - { command: oxplow.thread.create, input: { stream: str1, title: Live } }
+  - { command: oxplow.thread.close, input: { thread: $old.id } }
+when: { page: closed-threads, params: { stream_id: 1 } }
+expect:
+  loaders:
+    closed_threads: { rows: [{ title: Old }] }
+  nodes: [{ id: closed_threads, kind: viz, actions: [reopen] }]

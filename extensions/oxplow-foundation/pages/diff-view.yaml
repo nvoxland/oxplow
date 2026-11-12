@@ -43,7 +43,7 @@ loaders:
       ), derived AS (
         -- A turn: from the last take at or before it started to its own
         -- turn_end take, else the last take at or before it ended.
-        SELECT 'turn' AS subject, t.id AS turn_row, NULL AS request_row, NULL AS task,
+        SELECT 'turn' AS subject, t.id AS turn_row, NULL AS request_row,
                coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
                           WHERE p.stream_id = th.stream_id AND p.created_at <= t.started_at
                           ORDER BY p.created_at DESC, p.id DESC LIMIT 1), '') AS s,
@@ -59,7 +59,6 @@ loaders:
         UNION ALL
         -- A request: the same, across its turns on the stream.
         SELECT 'request', NULL, rq.id,
-               (SELECT x.task FROM v_request_task x WHERE x.request_id = rq.id ORDER BY x.at, x.task LIMIT 1),
                coalesce((SELECT 'snap:' || p.id FROM v_snapshot p
                           WHERE p.stream_id = rq.stream_id AND p.created_at <= rq.began
                           ORDER BY p.created_at DESC, p.id DESC LIMIT 1), ''),
@@ -76,22 +75,21 @@ loaders:
                                     ORDER BY p.created_at DESC, p.id DESC LIMIT 1), 'working') END
         FROM rq
         UNION ALL
-        SELECT 'snapshot', NULL, NULL, NULL,
+        SELECT 'snapshot', NULL, NULL,
                coalesce((SELECT 'snap:' || max(p.id) FROM v_snapshot p WHERE p.stream_id = n.stream_id AND p.id < n.id), ''),
                'snap:' || n.id
         FROM res, v_snapshot n WHERE res.kind = 'oxplow/snapshot' AND n.id = CAST(res.id AS INTEGER)
         UNION ALL
-        SELECT 'range', NULL, NULL, NULL, '', '' FROM res WHERE res.kind IS NULL
+        SELECT 'range', NULL, NULL, '', '' FROM res WHERE res.kind IS NULL
       ), chosen AS (
         SELECT CASE WHEN coalesce(:end, '') <> '' THEN 'range' ELSE d.subject END AS subject,
                CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.turn_row END AS turn_row,
                CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.request_row END AS request_row,
-               CASE WHEN coalesce(:end, '') <> '' THEN NULL ELSE d.task END AS task,
                CASE WHEN coalesce(:end, '') <> '' THEN CASE WHEN :start = 'none' THEN '' ELSE coalesce(:start, '') END ELSE d.s END AS start_rev,
                CASE WHEN coalesce(:end, '') <> '' THEN :end ELSE d.en END AS end_rev
         FROM derived d
       )
-      SELECT subject, start_rev, end_rev, coalesce(task, '') AS task,
+      SELECT subject, start_rev, end_rev,
              (end_rev = 'working') AS in_progress,
              (SELECT r.id FROM v_change r WHERE r.kind = 'range' AND r.target = start_rev || '..' || end_rev) AS range_change_id,
              CASE WHEN turn_row IS NOT NULL
@@ -106,7 +104,6 @@ loaders:
     - key: subject
     - key: start_rev
     - key: end_rev
-    - key: task
     - key: in_progress
     - key: range_change_id
     - key: change_id
@@ -149,8 +146,6 @@ loaders:
                   WHEN :subject = 'snapshot' THEN 'Snapshot' ELSE 'Comparison' END AS what,
              (SELECT label FROM shown WHERE role = 'from') AS from_label,
              (SELECT label FROM shown WHERE role = 'to') AS to_label,
-             (SELECT w.title FROM v_task w WHERE w.uri = :task) AS item,
-             :task AS item_ref,
              CASE WHEN :in_progress THEN CASE :subject
                   WHEN 'turn' THEN 'Turn is still running - diffing its start snapshot against the live working tree, which keeps changing until the turn ends.'
                   WHEN 'request' THEN 'Request is still running - diffing its start snapshot against the live working tree, which keeps changing until it ends.'
@@ -162,16 +157,8 @@ loaders:
         from: row.start_rev
       end_rev:
         from: row.end_rev
-      task:
-        from: row.task
       in_progress:
         from: row.in_progress
-  description:
-    sql: |
-      SELECT coalesce(w.body, '') AS body FROM v_task w WHERE w.uri = :task AND trim(w.body) <> ''
-    params:
-      task:
-        from: row.task
   concurrent:
     sql: |
       -- The other requests (any thread) whose turns changed a path of this
@@ -250,21 +237,9 @@ view:
       label: From
     - key: to_label
       label: To
-    - key: item
-      label: Task
-      link:
-        kind: page
-        from: item_ref
     - key: note
       label: Note
     empty: No range picked.
-  - id: description
-    title: Description
-    from: description
-    viz: markdown
-    markdown:
-      text: body
-    empty: No description.
   - id: concurrent
     title: Other Requests On These Files
     from: concurrent

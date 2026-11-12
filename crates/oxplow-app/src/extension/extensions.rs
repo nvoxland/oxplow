@@ -6745,12 +6745,15 @@ commands:
                 "finished_cleared",
                 "ready_queue",
                 "search_task_next",
+                "session_task_badge",
+                "snapshot_work_badge",
                 "struggle",
                 "task_comment_next",
                 "task_link_next",
                 "task_next",
                 "task_workflow",
-                "thread_tasks"
+                "thread_tasks",
+                "thread_work_badge"
             ]
         );
         // Every shipped page's SQL and advisory runs against a real schema

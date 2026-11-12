@@ -1,0 +1,15 @@
+# A turn's end take is labelled with the turn that took it: "completed: turn
+# <n>". The tasks that turn's request worked on are oxplow-bundled's labels
+# after the row; this page reads no task.
+given:
+  - observe: { turn: { prompt: Chat } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h1 }] } }
+  - observe: { turn: { prompt: Fix it } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h2 }] } }
+when: { page: oxplow/local-history, params: { stream_id: 1, mode: recent } }
+expect:
+  loaders:
+    recent:
+      rows:
+        - { subject: "completed: turn 2", why: turn end }
+        - { subject: "completed: turn 1", why: turn end }
