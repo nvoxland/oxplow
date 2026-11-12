@@ -24,7 +24,7 @@ import { searchSite } from "../../api.js";
 import { useVizStream } from "../../viz/VizStream.js";
 import { useResources } from "../../resources.js";
 import { readWorkspaceIndex } from "../../workspaceFiles.js";
-import { useTaskTrackerProfile } from "../../useTaskTrackerProfile.js";
+import { useTaskTrackerProfiles } from "../../useTaskTrackerProfiles.js";
 import { taskRefOfMention } from "../../tasks.js";
 import { MarkdownView } from "./MarkdownView.js";
 import { postprocessWikilinks, preprocessWikilinks } from "./markdownLinks.js";
@@ -98,7 +98,7 @@ function MarkdownEditor({
   style,
 }: MarkdownProps) {
   const refKinds = useResources();
-  const profile = useTaskTrackerProfile();
+  const profile = useTaskTrackerProfiles();
   const refSearch = useRefSearch();
   const mentionRef = useCallback((id: string) => taskRefOfMention(profile, id), [profile]);
   // The last text handed out, as stored and as the editor spelled it: the

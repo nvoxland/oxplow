@@ -105,7 +105,7 @@ import { SectionsViz } from "./SectionsViz.js";
 import { Stat } from "../kit/Stat.js";
 import { recordOpError } from "../opErrors.js";
 import { showToast } from "../components/toastStore.js";
-import { actionAnchor, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
+import { skipSummary, actionAnchor, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, truthyCell, type ActionTarget } from "./vizActions.js";
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
 import { InlineError } from "../kit/InlineError.js";
 import { useHistoryState } from "../tabs/useHistoryState.js";
@@ -424,6 +424,7 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
   const press = async (action: DeclaredPageAction, presses: Press[], confirmed: boolean) => {
     setBusy(action.id);
     try {
+      const skipped: string[] = [];
       for (let i = 0; i < presses.length; i++) {
         const p = presses[i]!;
         // A failure shows beside the action's button on this page (a row's
@@ -431,12 +432,14 @@ export function useVizActions(run: ActionTarget, streamId: string | null, runner
         const anchored = { ...deps, anchor: actionAnchor(run.config.id, action.id) };
         const quiet = i < presses.length - 1 ? { ...anchored, toast: () => {} } : anchored;
         const outcome = await performVizAction(action, run, p.row, streamId, confirmed, quiet, p.drop, p.option ?? null);
-        if (typeof outcome === "object") {
+        if (typeof outcome === "object" && "skipped" in outcome) skipped.push(outcome.skipped);
+        else if (typeof outcome === "object") {
           setPending({ action, presses: presses.slice(i), details: outcome.confirm });
           return;
         }
         if (outcome === "failed") break;
       }
+      if (skipped.length > 0) showToast({ message: skipSummary(action.label, skipped, presses.length) });
       setPending(null);
     } finally {
       setBusy(null);

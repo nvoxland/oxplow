@@ -4,7 +4,7 @@ import { createFailureStore, createInlineClaims } from "../commands/actionFailur
 import { createRunner } from "../commands/runForPerson.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bindings.js";
-import { actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
+import { skipSummary, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
 const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.task.transition", input: {}, row: false };
@@ -260,6 +260,11 @@ test("a point action whose row nothing answers says it was skipped, and is not a
     press: async () => ({ result: { skipped: "nothing answers `oxplow/task.move` for this item" }, audit_id: null, event_id: null, inverse: null }),
   };
   const point: PageAction = { id: "mark", label: "Mark", command: null, point: "oxplow/task.move", input: {}, row: true } as PageAction;
-  expect(await performVizAction(point, run, { id: 1 }, null, false, skipping)).toBe("done");
-  expect(log).toEqual(["toast Mark: skipped — nothing answers `oxplow/task.move` for this item"]);
+  expect(await performVizAction(point, run, { id: 1 }, null, false, skipping)).toEqual({ skipped: "nothing answers `oxplow/task.move` for this item" });
+  expect(log).toEqual([]);
+});
+
+test("a run says how many of its rows were skipped", () => {
+  expect(skipSummary("Mark", ["nothing answers it"], 1)).toBe("Mark: skipped — nothing answers it");
+  expect(skipSummary("Mark", ["nothing answers it", "nothing answers it"], 5)).toBe("Mark: 2 of 5 skipped — nothing answers it");
 });

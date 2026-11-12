@@ -11,7 +11,7 @@ import { useOptionalPageNavigation } from "../../tabs/PageNavigationContext.js";
 import { WORKING } from "../../revision.js";
 import { useKnowledgeRef } from "../../knowledgeTitleCache.js";
 import { useTaskRef } from "../../taskTitleCache.js";
-import { useTaskTrackerProfile } from "../../useTaskTrackerProfile.js";
+import { useTaskTrackerProfiles } from "../../useTaskTrackerProfiles.js";
 import { taskRefOfMention } from "../../tasks.js";
 import { useExtensionRefTitle, useResources } from "../../resources.js";
 import { parseMarkdownLink, parsedLinkIconKind, preprocessWikilinks, refLinkNames, refLinkTitle, urlTransform, type RefLinkNames } from "./markdownLinks.js";
@@ -192,7 +192,7 @@ export function MarkdownView({ body, base = null, maxHeight, style, className, i
   // Extensions' ref kinds change what a `[[…]]` names.
   const refKinds = useResources();
   // …and the active task tracker's ids do too.
-  const profile = useTaskTrackerProfile();
+  const profile = useTaskTrackerProfiles();
   const processedBody = useMemo(
     () => preprocessWikilinks(body, (id) => taskRefOfMention(profile, id)),
     [body, refKinds, profile],

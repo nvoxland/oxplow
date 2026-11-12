@@ -161,8 +161,12 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
-	invokeComponentPoint: (id: string, point: string, context: unknown, command: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_point", { id, point, context, command, confirmed, version })),
 	invokeComponentCommand: (id: string, command: string, input: unknown, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_command", { id, command, input, confirmed, version })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
+	invokeComponentPoint: (id: string, point: string, context: unknown, command: string | null, confirmed: boolean, version: string) => typedError<CommandOutcome, IpcError_Serialize>(__TAURI_INVOKE("invoke_component_point", { id, point, context, command, confirmed, version })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
@@ -885,19 +889,6 @@ export type ActionThen =
 "close";
 
 /**
- *  An MCP server as a provider: oxplow's adapter runs `mcp`'s
- *  server and translates through `mapping`, refusing a server whose tools
- *  aren't `tools`.
- */
-export type AdapterSpec = {
-	mcp: McpServer,
-	/**  The Starlark mapping (`transform(x)`), relative to the folder. */
-	mapping: string,
-	/**  The pinned tools (`[{ name, description, inputSchema }]`, JSON). */
-	tools: string,
-};
-
-/**
  *  Guidance an extension gives the coding agent: a query over the semantic
  *  layer, run by core at `on`, with `:thread_id`, `:stream_id`, `:turn_id`,
  *  and `:request_id` (the request of the turn the trigger belongs to)
@@ -974,7 +965,7 @@ export type AgentContextDecl = {
 	 *  catalog.
 	 */
 	doc: string,
-	/**  What it needs active (`task_tracker`); without it, it doesn't run. */
+	/**  What it needs active (`snapshots`); without it, it doesn't run. */
 	needs: string[],
 	/**
 	 *  The extension's own setting that offers it (as a skill's `when:`);
@@ -1265,15 +1256,6 @@ export type BlameLine = {
 	time: number,
 	summary: string,
 };
-
-/**
- *  What a task tracker's stage means to core: the bucket each of its declared
- *  stages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is
- *  filed but not ready, `todo` is ready (what an idle thread may pull),
- *  `in_progress` is started, `blocked` waits on an answer, `done` and
- *  `canceled` are closed — and the screens draw the list's own stages.
- */
-export type Bucket = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "canceled";
 
 /**
  *  What a deploy builds before it copies: `run` in the source folder, as
@@ -1667,7 +1649,7 @@ export type CommandSpec = {
 	access: Access,
 	/**
 	 *  The scopes its handler calls (`sql.read`) and the capabilities, or
-	 *  their features (`task_tracker.comments`), it needs active; unmet, it
+	 *  their features (`snapshots.contents`), it needs active; unmet, it
 	 *  isn't offered and doesn't run (`.context/commands.md`).
 	 */
 	needs: string[],
@@ -1943,7 +1925,7 @@ export type CredentialDecl = {
 	name: string,
 	/**  Obtained by signing in rather than pasted (P9.B3). */
 	oauth: OAuthDecl | null,
-	/**  An inert host-owned secret identity, usable only as a remote MCP bearer. */
+	/**  An inert host-owned secret identity: the value lives in the host's secret store. */
 	secretRef: SecretRef | null,
 };
 
@@ -1969,6 +1951,13 @@ export type CustomComponent_Deserialize = {
 	bundle: string,
 	/**  Commands the component may invoke. */
 	commands: string[],
+	/**
+	 *  Action points it may run (`invokePoint`): whatever command joined
+	 *  the point for the context it gives. The store joining the point is
+	 *  its consent, so no `commands:` permission is needed. Any extension's
+	 *  point.
+	 */
+	actionPoints?: string[],
 	/**
 	 *  It runs its own read-only SQL over the datasets (`querySql`): needs
 	 *  `sql.read` permission.
@@ -1997,6 +1986,13 @@ export type CustomComponent_Serialize = {
 	bundle: string,
 	/**  Commands the component may invoke. */
 	commands: string[],
+	/**
+	 *  Action points it may run (`invokePoint`): whatever command joined
+	 *  the point for the context it gives. The store joining the point is
+	 *  its consent, so no `commands:` permission is needed. Any extension's
+	 *  point.
+	 */
+	actionPoints: string[],
 	/**
 	 *  It runs its own read-only SQL over the datasets (`querySql`): needs
 	 *  `sql.read` permission.
@@ -2251,10 +2247,37 @@ export type DimensionEntry = {
 	 *  `LEFT JOIN v_thread t ON t.id = e.thread_id`.
 	 */
 	join?: string | null,
+	/**
+	 *  A fact dimension an extension's dataset answers: the fact's `by` key
+	 *  (`request_id`, `thread_id`, `turn_id` or `stream_id`) is looked up in
+	 *  the dataset's column of the same name, and the dimension's value is the
+	 *  dataset's `value` column of the first row in `order`. Core names no
+	 *  dataset: with the extension off the dimension is absent and the fact
+	 *  has no value on it.
+	 */
+	from?: DimensionFrom | null,
 	/**  Guidance for an agent reading the dimension. */
 	ai_context?: AiContext | null,
 	/**  One sentence saying what the dimension slices by (`v_dimension.description`). */
 	description?: string | null,
+};
+
+/**  Where a `from:` dimension reads its value (see [`DimensionEntry::from`]). */
+export type DimensionFrom = {
+	/**  The `v_*` view of the dataset that answers. */
+	dataset: string,
+	/**
+	 *  The fact key the dataset is looked up by, and its column of the same
+	 *  name: `request_id`, `thread_id`, `turn_id` or `stream_id`.
+	 */
+	by: string,
+	/**  The dataset column that holds the dimension's value. */
+	value: string,
+	/**
+	 *  A SQL ordering over the dataset's columns; the first row wins. Without
+	 *  it, the dataset's own order.
+	 */
+	order?: string | null,
 };
 
 /**  How the shell draws a point. */
@@ -2896,34 +2919,6 @@ export type Extension_Serialize = {
 	shared: boolean,
 };
 
-/**
- *  One of a task tracker's own fields: kept in an item's `native` under
- *  `name`, declared so screens render and edit it without knowing which
- *  list is active.
- */
-export type FieldDecl = {
-	/**  Its key in `native` (snake_case). */
-	name: string,
-	/**  How a person names it. */
-	title: string,
-	kind: FieldKind,
-	/**
-	 *  An `enum`'s values, in the order they're offered (empty for any
-	 *  other kind).
-	 */
-	values?: string[],
-	/**
-	 *  Set by the list itself (who filed it, when it synced): shown, never
-	 *  edited — a `oxplow.task.update` that names it is refused.
-	 */
-	read_only?: boolean,
-};
-
-/**  What kind of value a declared field holds. */
-export type FieldKind =
-/**  One of `values`. */
-"enum" | "text" | "number";
-
 /**  A field's value a condition compares with. */
 export type FieldValue = boolean | number | null | string;
 
@@ -3363,7 +3358,7 @@ export type ImplementationDecl = {
 	/**  How a person names it; the built-in's own title when absent. */
 	title: string | null,
 	/**
-	 *  The built-in it is (`oxplow:oxtask`); its features are core's to
+	 *  The built-in it is (`oxplow:oxwiki`); its features are core's to
 	 *  say. `None` for an AI provider, which names its kind instead.
 	 */
 	entry: string | null,
@@ -3785,16 +3780,6 @@ MaterializePolicy |
 export type MaterializePolicy =
 /**  Stored in its table and recomputed, whole, when an input changes. */
 "on_change";
-
-/**  How the adapter reaches the MCP server: exactly one of the two. */
-export type McpServer =
-/**  A program in the folder, spoken to over its stdio. */
-({ command: string[] }) & { auth?: never; url?: never } |
-/**
- *  A server reached over streamable HTTP. `auth` names the
- *  credential whose value is sent as its bearer token.
- */
-({ url: string; auth: string | null }) & { command?: never };
 
 /**
  *  One entry in the top-level `measures:` block — the **measure catalog**
@@ -4378,7 +4363,7 @@ export type OxplowConfig = {
 	extensionInstances: { [key in string]: ExtensionInstanceConfig },
 	/**
 	 *  The project's choice of implementation per choosable capability
-	 *  (`activeProviders: { task_tracker: issues, snapshots: hashes }`); a
+	 *  (`activeProviders: { snapshots: hashes }`); a
 	 *  capability absent here keeps its default.
 	 */
 	activeProviders: { [key in string]: string },
@@ -4650,7 +4635,8 @@ export type PageAction_Deserialize = {
 	label: string,
 	/**
 	 *  The command it runs (`oxplow.task.transition`). None for an
-	 *  `open` action, which runs none.
+	 *  `open` action, which runs none. With a `point`, which of the
+	 *  commands that answer the point to run (none: the only one).
 	 */
 	command?: string | null,
 	/**
@@ -4833,7 +4819,8 @@ export type PageAction_Serialize = {
 	label: string,
 	/**
 	 *  The command it runs (`oxplow.task.transition`). None for an
-	 *  `open` action, which runs none.
+	 *  `open` action, which runs none. With a `point`, which of the
+	 *  commands that answer the point to run (none: the only one).
 	 */
 	command: string | null,
 	/**
@@ -5089,7 +5076,7 @@ export type PageColumn = {
 
 /**  A page that didn't run for want of a capability. */
 export type PageInactive = {
-	/**  The needs that aren't met (`task_tracker`, `knowledge`). */
+	/**  The needs that aren't met (`snapshots`, `knowledge`). */
 	needs: string[],
 	/**  What a person reads. */
 	message: string,
@@ -5686,11 +5673,9 @@ export type ProviderSpec = {
 	 */
 	id: string,
 	capability: string,
-	/**  The program, relative to the extension folder — or `adapter`. */
+	/**  The program, relative to the extension folder. */
 	entry?: string | null,
 	args?: string[],
-	/**  An MCP server run through oxplow's adapter, instead of an `entry`. */
-	adapter?: AdapterSpec | null,
 	/**  Host environment variables passed through by name. */
 	env?: string[],
 	/**
@@ -5703,25 +5688,6 @@ export type ProviderSpec = {
 	network?: string[],
 	/**  The checked-in `InitializeResult` (JSON), relative to the folder. */
 	declarations: string,
-	/**
-	 *  What a task tracker's own ids look like (a regex matched whole:
-	 *  `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
-	 *  active task tracker.
-	 */
-	idPattern?: string | null,
-	/**
-	 *  A task tracker's own fields (kept in an item's `native`), so screens
-	 *  render and edit them: `[{ name, title, kind: enum|text|number,
-	 *  values? }]`.
-	 */
-	fields?: FieldDecl[],
-	/**
-	 *  A task tracker's stages, in order, each in one of core's buckets:
-	 *  `[{ id, title, bucket }]` — required for a task tracker, which needs
-	 *  one in each of todo, in_progress and done. The first of a bucket is
-	 *  where naming the bucket lands.
-	 */
-	stages?: StageDecl[],
 	/**
 	 *  The scopes it calls over the protocol (`host/call`,
 	 *  `sql.read` or `state.read`): part of what its approval covers, and the only ones it
@@ -6164,7 +6130,7 @@ export type SkillDecl = {
 	kind: SkillKind,
 	/**  Its markdown, inside the extension. */
 	file: string,
-	/**  What it needs active (`task_tracker`, `task_tracker.comments`). */
+	/**  What it needs active (`snapshots`). */
 	needs: string[],
 	/**
 	 *  The `description:` of its frontmatter: when the agent loads a skill,
@@ -6346,20 +6312,6 @@ export type SqlQueryResult = {
 	coverage?: SourceCoverage[],
 };
 
-/**
- *  One of a task tracker's stages, as it declares them in order: its id (what
- *  a record and an input name), how a person names it, and its bucket. The
- *  first stage of a bucket is that bucket's default — where an input
- *  naming the bucket (`to: done`) lands.
- */
-export type StageDecl = {
-	/**  snake_case, unique in the list (`in_review`). */
-	id: string,
-	/**  How a person names it (`In Review`). */
-	title: string,
-	bucket: Bucket,
-};
-
 /**  One store id or a list of them. */
 export type StoreFilter = string | string[];
 
@@ -6452,23 +6404,6 @@ export type TabReport = {
 export type TabReportAnswer = {
 	/**  The runs it reported that the daemon no longer holds for it. */
 	missingRuns: string[],
-};
-
-/**  What a provider supports beyond create, update and transition. */
-export type TaskTrackerFeatures = {
-	/**  Items nest (a parent ref). */
-	hierarchy: boolean,
-	comments: boolean,
-	links: boolean,
-	/**  Items can be deleted (`oxplow.task.delete`). */
-	delete?: boolean,
-	/**
-	 *  A write sent twice with one idempotency key is done once, the
-	 *  second answered as the first (the protocol's
-	 *  `InvokeParams.idempotency_key`): the host may send a write again
-	 *  when its reply was lost.
-	 */
-	idempotent_writes?: boolean,
 };
 
 /**
@@ -6694,7 +6629,7 @@ export type UiDecorator = {
 	extension: string,
 	/**  The dataset's view (`v_<namespace>_<dataset>`), which has a `ref` column. */
 	view: string,
-	/**  The resource it decorates (`oxplow/task`). */
+	/**  The resource it decorates (`oxplow/thread`). */
 	resource: string,
 	placement: DecoratorPlacement,
 	/**  The view's column holding the text shown. */
@@ -6738,8 +6673,13 @@ export type UiReplacement = {
 	extension: string,
 	/**  The core sub-component it replaces (`task.board`). */
 	target: string,
-	/**  The capability the target belongs to. */
+	/**  The capability the target belongs to; empty for a model's target. */
 	capability: string,
+	/**
+	 *  The shared model the target shows items of (`oxplow/task_record`),
+	 *  for a target of a model rather than a capability.
+	 */
+	model: string | null,
 	/**
 	 *  Only while this extension's provider is the deciding one does it
 	 *  render; otherwise the person's choice among candidates decides.

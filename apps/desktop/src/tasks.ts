@@ -10,7 +10,7 @@
 import { querySql, type SqlCell } from "./api.js";
 import { NO_READS } from "./viz/rerun.js";
 import { taskUri } from "./uri/uri.js";
-import type { Bucket, FieldDecl, Reads, SqlQueryResult, StageDecl, TaskTrackerFeatures } from "./tauri-bridge/generated/bindings.js";
+import type { Bucket, FieldDecl, Reads, SqlQueryResult, StageDecl } from "./tauri-bridge/generated/bindings.js";
 
 /** One of core's six buckets, each of a list's stages in one: what oxplow
  *  acts on. The UI draws the list's stages. */
@@ -104,35 +104,15 @@ export async function readTasksByRef(refs: string[]): Promise<{ items: Task[]; r
   return { items: itemsFromResult(res), reads: res.reads };
 }
 
-// ---- the task model's stores: what they can do and their own fields ----
+// ---- the task model's stores: their stages and their own fields ----
 
-/** A task store's feature flags (the Rust `TaskTrackerFeatures`). */
-export type { FieldDecl, TaskTrackerFeatures };
+export type { FieldDecl };
 
-/** No feature declared. */
-export const NO_FEATURES: Required<TaskTrackerFeatures> = {
-  hierarchy: false,
-  comments: false,
-  links: false,
-  delete: false,
-  idempotent_writes: false,
-};
-
-/** What oxtask (the task model's store) does: items nest, take comments and
- *  links, and are deleted. A project with no live task store does none. */
-const STORE_FEATURES: Required<TaskTrackerFeatures> = {
-  hierarchy: true,
-  comments: true,
-  links: true,
-  delete: true,
-  idempotent_writes: false,
-};
-
-/** What the screens offer: the active list, what it can do and its own
- *  fields. */
+/** What the screens draw for one store: its stages, its own fields and how
+ *  its ids look. It says nothing of what the store can do: the UI offers
+ *  what the store's action points offer. */
 export interface TaskTrackerProfile {
-  provider: string | null;
-  features: Required<TaskTrackerFeatures>;
+  provider: string;
   fields: FieldDecl[];
   /** Its stages, in its order. */
   stages: StageDecl[];
@@ -140,45 +120,55 @@ export interface TaskTrackerProfile {
   idPattern: string | null;
 }
 
-/** The profile `v_model_stage` and `v_model_field_decl` say: the first
- *  store's stages, in its order, and the stores' own fields (oxplow's
- *  `assignee` and `rank` are not a store's). No store: nothing. */
-export function taskTrackerProfileOf(stages: SqlQueryResult, fields: SqlQueryResult, stores?: SqlQueryResult): TaskTrackerProfile {
+/** Each store's profile, by store id (a task's `provider`). */
+export type TaskTrackerProfiles = Record<string, TaskTrackerProfile>;
+
+/** The profiles `v_model_stage`, `v_model_field_decl` (a store's fields
+ *  are under its id as `namespace`; oxplow's `assignee` and `rank` are not
+ *  a store's) and `v_model_store` say: one per store, from that store's
+ *  own rows. No store: none. */
+export function taskTrackerProfilesOf(stages: SqlQueryResult, fields: SqlQueryResult, stores?: SqlQueryResult): TaskTrackerProfiles {
   const at = (r: SqlQueryResult, row: SqlCell[], name: string) => {
     const i = r.columns.indexOf(name);
     return i < 0 ? null : (row[i] ?? null);
   };
-  if (stages.rows.length === 0) return { provider: null, features: NO_FEATURES, fields: [], stages: [], idPattern: null };
-  const provider = String(at(stages, stages.rows[0], "store"));
-  return {
-    provider,
-    features: STORE_FEATURES,
-    fields: fields.rows.map((row) => {
-      const values = jsonOf<unknown>(at(fields, row, "values"), null);
-      return {
-        name: String(at(fields, row, "name")),
-        title: String(at(fields, row, "title")),
-        kind: String(at(fields, row, "kind")),
-        values: Array.isArray(values) ? values.map(String) : [],
-        read_only: Number(at(fields, row, "read_only") ?? 0) === 1,
-      } as FieldDecl;
-    }),
-    stages: stages.rows
-      .filter((row) => String(at(stages, row, "store")) === provider)
-      .map((row) => ({
-        id: String(at(stages, row, "id")),
-        title: String(at(stages, row, "title")),
-        bucket: String(at(stages, row, "bucket")) as Bucket,
-      })),
-    // How the store's ids look, as `v_model_store` says.
-    idPattern: stores
-      ? (() => {
-          const row = stores.rows.find((r) => String(at(stores, r, "store")) === provider);
-          const pattern = row ? at(stores, row, "id_pattern") : null;
-          return pattern ? String(pattern) : null;
-        })()
-      : null,
-  };
+  const ids = new Set<string>();
+  for (const row of stages.rows) ids.add(String(at(stages, row, "store")));
+  if (stores) for (const row of stores.rows) ids.add(String(at(stores, row, "store")));
+  const profiles: TaskTrackerProfiles = {};
+  for (const provider of ids) {
+    const storeRow = stores?.rows.find((r) => String(at(stores, r, "store")) === provider);
+    const pattern = stores && storeRow ? at(stores, storeRow, "id_pattern") : null;
+    profiles[provider] = {
+      provider,
+      fields: fields.rows
+        .filter((row) => String(at(fields, row, "namespace")) === provider)
+        .map((row) => {
+          const values = jsonOf<unknown>(at(fields, row, "values"), null);
+          return {
+            name: String(at(fields, row, "name")),
+            title: String(at(fields, row, "title")),
+            kind: String(at(fields, row, "kind")),
+            values: Array.isArray(values) ? values.map(String) : [],
+            read_only: Number(at(fields, row, "read_only") ?? 0) === 1,
+          } as FieldDecl;
+        }),
+      stages: stages.rows
+        .filter((row) => String(at(stages, row, "store")) === provider)
+        .map((row) => ({
+          id: String(at(stages, row, "id")),
+          title: String(at(stages, row, "title")),
+          bucket: String(at(stages, row, "bucket")) as Bucket,
+        })),
+      idPattern: pattern ? String(pattern) : null,
+    };
+  }
+  return profiles;
+}
+
+/** The profile of a task's own store; null when no store by that id. */
+export function profileOfTask(profiles: TaskTrackerProfiles, task: Pick<Task, "provider">): TaskTrackerProfile | null {
+  return profiles[task.provider] ?? null;
 }
 
 function jsonOf<T>(raw: SqlCell | null, fallback: T): T {
@@ -190,35 +180,38 @@ function jsonOf<T>(raw: SqlCell | null, fallback: T): T {
   }
 }
 
-/** The task ref a loose id in text names on the active list (`tsk42`
- *  with oxtask → `task:oxplow:tsk42`); null when it isn't
- *  one of that list's ids, or the list says nothing about its ids. */
-export function taskRefOfMention(profile: TaskTrackerProfile, id: string): string | null {
-  if (!profile.provider || !profile.idPattern) return null;
-  let re: RegExp;
-  try {
-    re = new RegExp(`^(?:${profile.idPattern})$`);
-  } catch {
-    return null;
+/** The task ref a loose id in text names (`tsk42` with oxtask →
+ *  `task:oxplow:tsk42`): the first store whose id pattern matches it; null
+ *  when none does (a store with no pattern says nothing about its ids). */
+export function taskRefOfMention(profiles: TaskTrackerProfiles, id: string): string | null {
+  for (const profile of Object.values(profiles)) {
+    if (!profile.idPattern) continue;
+    let re: RegExp;
+    try {
+      re = new RegExp(`^(?:${profile.idPattern})$`);
+    } catch {
+      continue;
+    }
+    if (re.test(id)) return taskUri(profile.provider, id);
   }
-  return re.test(id) ? taskUri(profile.provider, id) : null;
+  return null;
 }
 
-/** The task model's profile, and what was read. */
-export async function readTaskTrackerProfile(): Promise<{ profile: TaskTrackerProfile; reads: Reads }> {
+/** The task model's profiles, and what was read. */
+export async function readTaskTrackerProfiles(): Promise<{ profiles: TaskTrackerProfiles; reads: Reads }> {
   const stages = await querySql(
     "SELECT store, id, title, bucket FROM v_model_stage WHERE model = 'oxplow/task_record' ORDER BY store, position",
     [],
-    200,
+    500,
   );
   const fields = await querySql(
-    "SELECT name, title, kind, \"values\", read_only FROM v_model_field_decl WHERE model = 'oxplow/task_record' AND namespace <> 'oxplow' ORDER BY name",
+    "SELECT namespace, name, title, kind, \"values\", read_only FROM v_model_field_decl WHERE model = 'oxplow/task_record' AND namespace <> 'oxplow' ORDER BY namespace, name",
     [],
-    200,
+    500,
   );
   const stores = await querySql("SELECT store, id_pattern FROM v_model_store WHERE model = 'oxplow/task_record'", [], 50);
   return {
-    profile: taskTrackerProfileOf(stages, fields, stores),
+    profiles: taskTrackerProfilesOf(stages, fields, stores),
     reads: {
       datasets: [...new Set([...stages.reads.datasets, ...fields.reads.datasets, ...stores.reads.datasets])],
       tables: [...new Set([...stages.reads.tables, ...fields.reads.tables, ...stores.reads.tables])],
