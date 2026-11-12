@@ -1388,6 +1388,11 @@ export type CollectorRunReport = {
 	rowCounts: { [key in string]: number },
 	/**  A fact collector's facts recorded. */
 	facts: number,
+	/**
+	 *  What a run skipped and why: shared-model rows it quarantined, each
+	 *  naming the row and column.
+	 */
+	problems?: string[],
 };
 
 /**  What runs a collector. */
