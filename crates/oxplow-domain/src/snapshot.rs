@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{StreamId, ThreadId};
-use crate::tasks::ActiveSource;
+use crate::capability::ActiveSource;
 use crate::tree_diff::FileChange;
 
 /// Why a snapshot take happened: one row of the operation log each

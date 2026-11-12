@@ -418,23 +418,16 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
                     processes.kill(session);
                 }
             }));
-            // Its work goes back to nobody: another thread may take it.
-            let mut events = super::task::release_all_tx(
-                ctx.conn,
-                &ctx.actor().source(),
-                &oxplow_domain::uri::build::thread_uri(id),
-            )?;
-            events.push(
-                oxplow_domain::events::Envelope::typed::<
-                    oxplow_domain::events::schema::ThreadClosed,
-                >(
-                    ctx.actor().source(),
-                    &oxplow_domain::events::schema::ThreadClosedV1 {
-                        thread: id.to_string(),
-                    },
-                )
-                .with_subject(vec![thread_uri(id)]),
-            );
+            // Its work goes back to nobody: bundled reacts to `thread.closed`.
+            let events = vec![oxplow_domain::events::Envelope::typed::<
+                oxplow_domain::events::schema::ThreadClosed,
+            >(
+                ctx.actor().source(),
+                &oxplow_domain::events::schema::ThreadClosedV1 {
+                    thread: id.to_string(),
+                },
+            )
+            .with_subject(vec![thread_uri(id)])];
             Ok(HandlerOutput {
                 inverse: call(REOPEN, json!({ "thread": input.thread })),
                 after_commit,

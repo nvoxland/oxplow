@@ -1,0 +1,37 @@
+title: Repair
+description: "The open repair task of a failing or disabled contribution, filed by the repair effect."
+needs:
+- model:oxplow/task_record
+params:
+- name: namespace
+  default: ""
+- name: contribution
+  default: ""
+loaders:
+  repair:
+    sql: |
+      SELECT r.repair_item,
+             'Repair the extension described in [oxplow uri ' || r.repair_item || '] — read it first.' AS ask,
+             (h.state = 'disabled') AS can_repair
+      FROM v_contribution_health h JOIN v_oxplow_contribution_repair r ON r.uri = h.uri
+      WHERE h.namespace = :namespace AND h.contribution = :contribution
+view:
+  id: repair
+  title: Repair
+  from: repair
+  viz: table
+  columns:
+  - key: repair_item
+    label: Repair task
+    link:
+      kind: page
+      from: repair_item
+  empty: No open repair task.
+  actions:
+  - id: repair
+    label: Repair with the Agent
+    command: oxplow.agent.draft
+    row: true
+    when: can_repair
+    input:
+      text: '{{row.ask}}'

@@ -49,7 +49,6 @@ pub mod ref_commands;
 pub mod snapshot;
 mod steps;
 pub mod stream;
-pub mod task;
 pub mod terminal;
 pub mod test_runs;
 pub mod thread;

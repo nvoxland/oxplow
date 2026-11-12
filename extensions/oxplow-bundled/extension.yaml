@@ -74,6 +74,18 @@ datasets:
     fields:
       - { name: workflow, type: TEXT, doc: "`agent_tracks`, `person_files`, `custom` or `off`." }
       - { name: definition_of_done, type: TEXT, doc: "What done means here, one item per line; empty for none." }
+  - name: commit_task
+    version: 1
+    description: "The tasks each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by a store's id pattern), the ones that declared it as an impact, and the ones a request that worked on them made it (`v_commit_request` joined to `v_oxplow_request_link`)."
+    fields:
+      - { name: sha, type: TEXT, doc: "The commit." }
+      - { name: task, type: TEXT, doc: "The task (`v_oxplow_task.uri`)." }
+  - name: contribution_repair
+    version: 1
+    description: "The open repair task of a contribution (the one linked `about` it, not done or canceled), filed by the repair effect."
+    fields:
+      - { name: uri, type: TEXT, doc: "The contribution's URI (`v_contribution_health.uri`)." }
+      - { name: repair_item, type: TEXT, doc: "The open repair task's URI." }
   - name: finished_cleared
     version: 2
     key: [thread_id]
@@ -367,6 +379,7 @@ ui:
   mounts:
     # The request summary's tasks (foundation's page reads no task).
     - { page: request-tasks, at: oxplow/request-summary.sections, position: { after: request }, title: Tasks }
+    - { page: contribution-repair, at: oxplow/contribution-health.repair }
     - { page: task-tokens, at: oxplow/task-detail.sections }
     - { page: item-shared-work, at: oxplow/task-detail.sections }
     # A request's Changes page shows where it left its task's area and

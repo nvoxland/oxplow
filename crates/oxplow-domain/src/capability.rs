@@ -10,7 +10,6 @@
 
 use schemars::JsonSchema;
 
-use crate::tasks::OXTASK;
 use serde::{Deserialize, Serialize};
 
 /// Why a capability's active implementation is the one it is.
@@ -142,41 +141,14 @@ impl ProviderContract {
     }
 }
 
-/// A task tracker's: the `task.<verb>` commands dispatch to its verbs,
-/// it records its items as `task.recorded@3`, and owns
+/// A task tracker's: an external provider program that fills the task
+/// model. It has no verbs core calls (its own system takes the writes); it
+/// records its items as `task.recorded@3`, which the read adapter turns
+/// into rows of `oxplow/task_record`, and owns
 /// `oxplow:oxplow/task?id=…&provider=<instance>`.
 pub const TASK_TRACKER: ProviderContract = ProviderContract {
-    verbs: &[
-        Verb {
-            name: "create",
-            needs: Need::Always,
-        },
-        Verb {
-            name: "update",
-            needs: Need::Always,
-        },
-        Verb {
-            name: "transition",
-            needs: Need::Always,
-        },
-        Verb {
-            name: "link",
-            needs: Need::Feature("links"),
-        },
-        Verb {
-            name: "unlink",
-            needs: Need::Feature("links"),
-        },
-        Verb {
-            name: "comment",
-            needs: Need::Feature("comments"),
-        },
-        Verb {
-            name: "delete",
-            needs: Need::Feature("delete"),
-        },
-    ],
-    dispatch: Some("oxplow.task"),
+    verbs: &[],
+    dispatch: None,
     events: &[("task.recorded", 3)],
     records: Some(Record {
         entity: "task",
@@ -370,6 +342,11 @@ pub const HARNESS_DATA: &str = r#"{
   }
 }"#;
 
+/// Where the active implementation is read from (the config as it is
+/// now), so a person's choice applies to the next call with no copy to
+/// refresh late.
+pub type ActiveSource = std::sync::Arc<dyn Fn() -> String + Send + Sync>;
+
 /// The implementation id of "nothing implements it", for an optional
 /// capability.
 pub const NONE: &str = "none";
@@ -379,10 +356,10 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
         id: "task_tracker",
         title: "Task tracker",
-        choosable: true,
-        optional: true,
-        many: false,
-        default: "oxtask",
+        choosable: false,
+        optional: false,
+        many: true,
+        default: NONE,
         features: &[
             "hierarchy",
             "comments",
@@ -487,7 +464,7 @@ pub fn instance_id_problem(id: &str) -> Option<String> {
         Some(format!(
             "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
         ))
-    } else if id == "oxplow" || id == OXTASK || crate::events::schema::CORE_NAMESPACES.contains(&id)
+    } else if id == "oxplow" || id == "oxtask" || crate::events::schema::CORE_NAMESPACES.contains(&id)
     {
         Some(format!("`{id}` is reserved for oxplow"))
     } else {

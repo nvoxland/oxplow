@@ -7,7 +7,6 @@ use crate::{
 use oxplow_domain::diagnostic::Diagnostic;
 
 pub struct PreparedRuntimeAdapters {
-    tasks: crate::tasks::PreparedTaskTracker,
     harnesses: crate::harnesses::PreparedHarnesses,
     knowledge: crate::knowledge::PreparedKnowledge,
     snapshots: crate::snapshots::PreparedSnapshots,
@@ -51,7 +50,6 @@ impl PreparedRuntimeAdapters {
             return Err(errors);
         }
         Ok(Self {
-            tasks: crate::tasks::prepare_built_ins(&declared, &svc.db),
             harnesses: crate::harnesses::prepare_built_ins(&declared),
             knowledge: crate::knowledge::prepare_built_ins(&declared, &svc.layout.project_dir),
             snapshots: crate::snapshots::prepare_built_ins(
@@ -70,7 +68,6 @@ impl PreparedRuntimeAdapters {
     /// swaps and the database commit. This method alone does not establish a
     /// coherent activation boundary.
     pub(crate) fn publish_maps(self, svc: &Services) {
-        self.tasks.publish(&svc.tasks);
         self.harnesses.publish(&svc.harnesses);
         self.knowledge.publish_maps(&svc.knowledge, &svc.oxwiki);
         self.snapshots

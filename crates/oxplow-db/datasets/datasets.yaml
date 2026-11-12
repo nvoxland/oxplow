@@ -131,7 +131,7 @@
     - { unique: id }
 - name: commit_request
   version: 1
-  description: "The requests a commit's changes came from, per path: the requests on the commit's stream that changed the path since the previous commit that held it, where the file as the work left it is the commit's content (compared by git blob id, reading no bytes). A commit made outside oxplow, or of a file edited again since, has no rows. A commit's requests: `WHERE sha = <sha>`; a request's commits: `WHERE request = <uri>`; join `v_request_task` for the tasks."
+  description: "The requests a commit's changes came from, per path: the requests on the commit's stream that changed the path since the previous commit that held it, where the file as the work left it is the commit's content (compared by git blob id, reading no bytes). A commit made outside oxplow, or of a file edited again since, has no rows. A commit's requests: `WHERE sha = <sha>`; a request's commits: `WHERE request = <uri>`; bundled's `v_oxplow_request_link` joins them to tasks."
   relationships: [{ from: request, to: request.uri }]
   fields:
     - { name: "sha", type: "TEXT", doc: "The commit." }
@@ -147,25 +147,6 @@
     - { not_null: request }
     - { accepted_values: { column: basis, values: [named, reported, observed] } }
     - { accepted_values: { column: confidence, values: [sole, shared] } }
-- name: request_task
-  version: 3
-  description: "The tasks each request worked on, observed, each link with the evidence it rests on: a person's prompt named the task, the agent ran a task command on it in a turn, or it was in progress and assigned to the thread when a turn of the request ended. Nothing here opens, closes or moves a task. One row per (request, task, basis); a request may link several tasks and a task several requests. A task's requests: `WHERE task = <task uri>`."
-  relationships: [{ from: request, to: request.uri }]
-  fields:
-    - { name: "request", type: "TEXT", doc: "The request (`v_request.uri`)." }
-    - { name: "task", type: "TEXT", doc: "The task's URI; it may dangle if its tracker dropped it." }
-    - { name: "basis", type: "TEXT", doc: "`prompt` (a person's prompt in the request named the task), `command` (the agent filed, updated or commented on it in a turn), `transition` (the agent moved it between stages in a turn), `assigned` (in progress and assigned to the thread when a turn of the request ended: the weakest)." }
-    - { name: "turn", type: "TEXT", doc: "The turn the evidence was recorded in (`v_agent_turn.uri`)." }
-    - { name: "thread_id", type: "INT", doc: "That turn's thread (`v_thread.id`): a thread's tasks by request, `WHERE thread_id = <id>`. NULL when no turn was named." }
-    - { name: "at", type: "TEXT", doc: "When the link was recorded (RFC 3339)." }
-    - { name: "turns", type: "INT", doc: "How many turns the request has so far." }
-    - { name: "started_at", type: "TEXT", doc: "When the request's first turn started." }
-    - { name: "last_ended_at", type: "TEXT", doc: "When its latest turn ended; NULL while one runs." }
-    - { name: "request_id", type: "INT", doc: "The request's id (`v_request.id`), to join without a URI." }
-  tests:
-    - { not_null: request }
-    - { not_null: task }
-    - { accepted_values: { column: basis, values: [prompt, command, transition, assigned] } }
 - name: tool_call_path
   version: 1
   description: "The files each tool call named or the harness reported it changed, one row per (call, path): `named` by an edit tool's own input, `reported` by the harness's statement that a shell call changed it (Claude Code's `bashEditDiff`). A shell call that reported nothing has no row: its absence says nothing."
@@ -604,14 +585,6 @@
     - { name: "status", type: "TEXT", doc: "`added`, `modified`, `deleted` or `renamed`." }
     - { name: "additions", type: "INTEGER", doc: "Lines added." }
     - { name: "deletions", type: "INTEGER", doc: "Lines deleted." }
-- name: commit_task
-  version: 4
-  description: "The active task tracker's items each commit was for: the ones its message mentions (`tsk42`, `[[tsk42]]`, by the list's id pattern), the ones that declared it as an impact, and the ones a request that worked on them made it (`v_commit_request` joined to `v_request_task`: the requests whose files it holds, per path)."
-  fields:
-    - { name: "sha", type: "TEXT", doc: "The commit (v_commit.sha)." }
-    - { name: "task", type: "TEXT", doc: "The task (v_task.uri)." }
-  tests:
-    - { relationships: { column: task, to: task, field: uri } }
 - name: context_read
   version: 2
   description: "Which `.context/*.md` project docs the agent read, and when. Compare with the files it changed to spot work done without reading the relevant doc."
@@ -1086,17 +1059,6 @@
   tests:
     - { not_null: uri }
     - { unique: uri }
-- name: search_task
-  version: 4
-  description: "What site search indexes for each of the active task tracker's items (the `task` kind's index is restated from these rows when they change), through the task interface. Deleted items, and items on archived threads or streams, aren't in it. v2: each item's comments follow its body."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "The item's canonical ref (`oxplow:oxplow/task?id=<id>&provider=<provider>`): what a hit opens." }
-    - { name: "title", type: "TEXT", doc: "The item's title." }
-    - { name: "body", type: "TEXT", doc: "Its own id (so typing `tsk42` finds it), then its body." }
-    - { name: "stream_id", type: "TEXT", doc: "Its thread's stream (`str1`); NULL for a backlog item." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
 - name: search_knowledge
   version: 1
   description: "What site search indexes for each knowledge page of an enabled store: the `oxplow/knowledge` kind's index is restated from these rows when they change."
@@ -1303,7 +1265,6 @@
     - { name: "updated_at", type: "TEXT", doc: "When this row last changed." }
     - { name: "dead_letters", type: "", doc: "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `uri`) or of events whose subject names it (its `uri`)." }
     - { name: "fresh", type: "", doc: "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)" }
-    - { name: "repair_item", type: "TEXT", doc: "The open repair task for it — the one whose title starts `Repair <namespace> <contribution>:`, filed by the bundled repair effect; NULL when none is open." }
   tests:
     - { not_null: namespace }
 - name: snapshot
@@ -2014,53 +1975,6 @@
   tests:
     - { not_null: id }
     - { unique: id }
-- name: task
-  version: 8
-  description: "The active task tracker's items — the task interface everything reads, whichever implementation is active (oxtask, a provider's tracker; none: nothing). Deleted items excluded. `state` is the canonical state every list maps to; a list's own fields are in `native` (described by its declared fields). Links are `v_task_link`, comments `v_task_comment`."
-  fields:
-    - { name: "uri", type: "TEXT", doc: "`oxplow:oxplow/task?id=<id>&provider=<provider>` (`oxplow:oxplow/task?id=tsk42&provider=oxtask`)." }
-    - { name: "provider", type: "TEXT", doc: "The implementation it comes from: the active task tracker (`oxplow`, a provider instance)." }
-    - { name: "native_id", type: "TEXT", doc: "The id the list itself knows it by (`tsk42`, `ENG-12`): the URI without `oxplow:oxplow/task?id=&provider=<provider>`. Match a tracker's own rows on this, never by slicing `uri`." }
-    - { name: "title", type: "TEXT", doc: "Title." }
-    - { name: "body", type: "TEXT", doc: "Markdown body." }
-    - { name: "state", type: "TEXT", doc: "Its bucket, what its stage means to core: `backlog` (filed, not ready), `todo` (ready to work on), `in_progress`, `blocked`, `done` or `canceled`." }
-    - { name: "stage", type: "TEXT", doc: "The list's own stage, one it declares (`v_capability_provider.stages`; oxtask: `backlog`, `ready`, `in_progress`, `blocked`, `done`, `canceled`)." }
-    - { name: "stage_title", type: "TEXT", doc: "How the list names its stage (`Ready`)." }
-    - { name: "native", type: "TEXT", doc: "The list's own fields as JSON (its declared fields; oxplow: priority, author, …)." }
-    - { name: "parent_uri", type: "TEXT", doc: "The parent task's URI (an epic); NULL at top level or when the parent is deleted." }
-    - { name: "assignee", type: "TEXT", doc: "Who is going to work on it: a thread (`oxplow:oxplow/thread?id=thr3`; join `v_thread` on `uri`), the person (`oxplow:oxplow/person`), or NULL for nobody (an unassigned `todo` item is the pool any thread may pull from). Core's record, for every list (`oxplow.task.assign`); a done or canceled item has none — who worked on it is its requests (`v_request_task`)." }
-    - { name: "rank", type: "REAL", doc: "Its place in its assignee's queue, or among the unassigned (ascending); NULL orders by `created_at`." }
-    - { name: "closed_at", type: "TEXT", doc: "When it first reached `done` or `canceled` (RFC 3339); NULL while open." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-    - { name: "updated_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { not_null: uri }
-    - { unique: uri }
-    - { accepted_values: { column: state, values: [backlog, todo, in_progress, blocked, done, canceled] } }
-    - { relationships: { column: parent_uri, to: task, field: uri } }
-- name: task_link
-  version: 4
-  description: "Links from the active task tracker's items (`oxplow.task.link`): to another item (`blocks`, `relates_to`, …) or to any ref (`about` a collector, a request, a file). A target needn't resolve — what it names may have been deleted or its extension removed — so join it to its kind's dataset when you need it there."
-  fields:
-    - { name: "from_uri", type: "TEXT", doc: "The item the link is from." }
-    - { name: "to_uri", type: "TEXT", doc: "What it points at: any ref." }
-    - { name: "to_kind", type: "TEXT", doc: "The target's kind (`task`, `collector`, `request`, …). (v2)" }
-    - { name: "link_type", type: "TEXT", doc: "The list's own link type; oxtask: `blocks` (from must finish before to starts), `discovered_from`, `relates_to`, `duplicates`, `supersedes`, `replies_to` or `about` (the item is about the target)." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { relationships: { column: from_uri, to: task, field: uri } }
-- name: task_comment
-  version: 2
-  description: "Comments on the active task tracker's items (`oxplow.task.comment`)."
-  fields:
-    - { name: "id", type: "TEXT", doc: "The list's own id for the comment (oxplow: `oxtask_note:<id>`)." }
-    - { name: "uri", type: "TEXT", doc: "The item it's on." }
-    - { name: "body", type: "TEXT", doc: "Markdown body." }
-    - { name: "author", type: "TEXT", doc: "Who wrote it, as the list records it." }
-    - { name: "created_at", type: "TEXT", doc: "RFC 3339 timestamp." }
-  tests:
-    - { unique: id }
-    - { relationships: { column: uri, to: task, field: uri } }
 - name: knowledge_page
   version: 6
   description: "Knowledge pages: one row per page of every enabled store (oxwiki, an extension's), with what it links to and how many of its file refs have drifted since they were pinned. A disabled store's pages are hidden until it's enabled again. A page's full text is `v_knowledge_body`; search them with the `oxplow_search` tool. (v5: store-qualified pages, several stores, kinds and buckets)"

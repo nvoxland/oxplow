@@ -114,7 +114,6 @@ pub mod otlp_tokens;
 pub mod output_activity;
 pub mod pacing;
 pub mod page_ref_backfill;
-pub mod page_ref_consumers;
 pub mod pages;
 pub mod param_pattern;
 #[cfg(test)]
@@ -160,8 +159,7 @@ pub mod stream_watch;
 mod subagent_tests;
 pub mod symbol_collector;
 pub mod symbol_resolve;
-pub mod task_tracker_conformance;
-pub mod tasks;
+pub mod conformance;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -188,7 +186,6 @@ pub use hook_ingest::{
     HookEnvelope, HookIngestError, HookIngestService, IngestOutcome, ToolDecision,
 };
 pub use oxplow_lsp::{LspError, LspProxy};
-use oxplow_oxtask::SqliteOxtaskStore;
 
 use oxplow_domain::vocabulary::VocabularyHandle;
 use std::path::PathBuf;
@@ -490,7 +487,6 @@ pub struct Services {
     pub thread_store: Arc<SqliteThreadStore>,
     /// A thread's agent sessions (`agent_session`).
     pub agent_session_store: Arc<SqliteAgentSessionStore>,
-    pub task_store: Arc<SqliteOxtaskStore>,
     /// Work handed between threads (`.context/agent-model.md` "Handoffs").
     pub handoff_store: Arc<oxplow_db::SqliteHandoffStore>,
     /// The event log (`.context/data-model.md` "event_log"). Producers
@@ -532,8 +528,6 @@ pub struct Services {
     pub vocabulary_service: Arc<vocabulary_reactor::VocabularyService>,
     /// The command bus: the one write path (`.context/commands.md`).
     pub commands: Arc<commands::CommandBus>,
-    /// The task trackers, by name (`.context/tasks.md`).
-    pub tasks: oxplow_domain::tasks::TaskTrackers,
     /// The agent harnesses the project's extensions declare, by key.
     pub harnesses: oxplow_domain::agent::registry::HarnessRegistry,
     /// Where the harnesses' saved conversations are read: the machine's,
@@ -869,12 +863,6 @@ impl Services {
         }
     }
 
-    /// The `task.*` commands, typed (`tasks::Tasks`): the
-    /// one write surface for every provider's items.
-    pub fn tasks_client(&self) -> tasks::Tasks {
-        tasks::Tasks::new(self.commands.clone())
-    }
-
     /// The tree a thread works in: its stream's worktree (a sibling
     /// directory for a worktree stream), else the project dir. What its
     /// tool paths are relative to (tsk350 policy, tsk386 claims).
@@ -956,7 +944,6 @@ impl Services {
             vocabulary.clone(),
         ));
         let comment_store = Arc::new(SqliteCommentStore::new(db.clone(), vocabulary.clone()));
-        let task_store = Arc::new(SqliteOxtaskStore::new(db.clone()));
         let handoff_store = Arc::new(oxplow_db::SqliteHandoffStore::new(db.clone()));
         let event_log_store = Arc::new(SqliteEventLogStore::new(db.clone(), vocabulary.clone()));
         let extension_activation =
@@ -976,12 +963,6 @@ impl Services {
             db.clone(),
             (*event_log_store).clone(),
             vec![
-                // A list's records reach the interface before an item's
-                // page refs are restated from it.
-                Arc::new(tasks::TasksProjection),
-                Arc::new(page_ref_consumers::PageRefTaskConsumer {
-                    vocabulary: vocabulary.clone(),
-                }),
                 Arc::new(tool_call_reactors::ToolCallProjection),
                 Arc::new(knowledge::KnowledgeAttribution),
                 Arc::new(knowledge::KnowledgeFileReads {
@@ -1424,18 +1405,6 @@ impl Services {
         commands
             .register(commands::compose::sequence_command())
             .expect("command.sequence registers");
-        // The task trackers (`.context/tasks.md`); oxplow's
-        // own, over this bus. Its active one is resolved from the config as
-        // it is now.
-        let tasks = {
-            let (config, capabilities) = (config_arc.clone(), capabilities.clone());
-            oxplow_domain::tasks::TaskTrackers::new(Arc::new(move || {
-                capabilities.active(&config_service::read_config(&config), "task_tracker")
-            }))
-        };
-        // None as a task tracker: the sink every verb reaches while no list is
-        // active (`tasks::none_provider`).
-        tasks.register(tasks::none_provider());
         // A turn's end take becomes a `thread.checkpoint` a policy reads.
         event_pump.register_async(Arc::new(thread_checkpoint::ThreadCheckpointConsumer {
             log: (*event_log_store).clone(),
@@ -1474,19 +1443,8 @@ impl Services {
             db: db.clone(),
             vocabulary: vocabulary.clone(),
         };
-        for command in [
-            commands::task::transition_op(tasks.clone(), db.clone()),
-            commands::task::update_op(tasks.clone(), link_deps.clone()),
-            commands::task::create_op(tasks.clone(), link_deps.clone()),
-            commands::task::link_op(tasks.clone(), link_deps.clone()),
-            commands::task::unlink_op(tasks.clone(), link_deps.clone()),
-            commands::task::comment_op(tasks.clone()),
-            commands::task::reorder_op(tasks.clone()),
-            commands::task::assign_op(tasks.clone()),
-            commands::task::delete_op(tasks.clone()),
-        ]
+        for command in commands::thread::ops(session_processes.clone())
         .into_iter()
-        .chain(commands::thread::ops(session_processes.clone()))
         .chain(commands::agent_session::ops(
             config_target.clone(),
             harnesses.clone(),
@@ -1503,7 +1461,7 @@ impl Services {
         .chain(commands::comment::ops())
         .chain(commands::ui::ops())
         .chain(commands::op_error::ops())
-        .chain(commands::handoff::ops(link_deps.clone(), tasks.clone()))
+        .chain(commands::handoff::ops(link_deps.clone()))
         .chain(commands::stream::ops(commands::stream::StreamDeps {
             streams: streams.clone(),
             snapshot_captures: snapshot_captures.clone(),
@@ -1550,7 +1508,7 @@ impl Services {
             },
             &commands,
             vec![
-                Arc::new(providers::tasks::TaskTrackerHost(tasks.clone())),
+                Arc::new(providers::tasks::TaskTrackerHost::default()),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
                 Arc::new(providers::knowledge::KnowledgeHost {
                     stores: knowledge.clone(),
@@ -1812,7 +1770,6 @@ impl Services {
             stream_store,
             thread_store,
             agent_session_store,
-            task_store,
             handoff_store,
             event_log_store,
             sql,
@@ -1830,7 +1787,6 @@ impl Services {
             extension_checks: Default::default(),
             client_host,
             commands,
-            tasks,
             harnesses,
             saved_conversations,
             session_auth,
@@ -2332,18 +2288,6 @@ mod tests {
                 // A stream's worktree and its capture service (P8.A4).
                 "oxplow.stream.archive",
                 "oxplow.stream.create",
-                // Every task tracker's verbs, oxplow's own included. Who works
-                // on an item and its place in their queue are core's
-                // (`assign`, `reorder`), in the bus's transaction.
-                "oxplow.task.comment",
-                "oxplow.task.create",
-                "oxplow.task.delete",
-                "oxplow.task.link",
-                // bundled's menu entry for create.
-                "oxplow.task.new",
-                "oxplow.task.transition",
-                "oxplow.task.unlink",
-                "oxplow.task.update",
                 // A run's capture, through the collection service (P8.A8).
                 "oxplow.terminal.close",
                 "oxplow.test.record_run",

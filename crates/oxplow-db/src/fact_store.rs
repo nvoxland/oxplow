@@ -1426,21 +1426,14 @@ pub(crate) const FACT_ROW_COLS_SLIM: &str = fact_row_cols!("NULL");
 pub(crate) fn fact_row_mapper<'c>(
     conn: &'c rusqlite::Connection,
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
-    // Turn → (request, task), resolved once per turn a read meets: a
-    // per-row join would cost a lookup on every fact, and a read's facts
-    // come from a few turns.
-    let mut turns: std::collections::HashMap<i64, (Option<i64>, Option<String>)> =
+    // Turn → request, resolved once per turn a read meets: a per-row join
+    // would cost a lookup on every fact, and a read's facts come from a few
+    // turns. (The task a request worked on is not core's to say: the
+    // `oxplow.task` dimension is undecided after the flip.)
+    let mut turns: std::collections::HashMap<i64, Option<i64>> =
         std::collections::HashMap::new();
-    let mut request_of = conn.prepare_cached(
-        "SELECT t.request_id,
-                (SELECT rt.task FROM v_request_task rt
-                  WHERE rt.request_id = t.request_id
-                  ORDER BY CASE rt.basis WHEN 'prompt' THEN 0
-                                         WHEN 'command' THEN 1 WHEN 'edited' THEN 1 WHEN 'filed' THEN 1
-                                         WHEN 'transition' THEN 2 ELSE 3 END, rt.at
-                  LIMIT 1)
-           FROM agent_turn t WHERE t.id = ?1",
-    )?;
+    let mut request_of =
+        conn.prepare_cached("SELECT t.request_id FROM agent_turn t WHERE t.id = ?1")?;
     let mut last: Option<(i64, Timestamp)> = None;
     let mut text = FactText::new(conn);
     Ok(move |row: &rusqlite::Row<'_>| {
@@ -1464,19 +1457,18 @@ pub(crate) fn fact_row_mapper<'c>(
         };
         let mut fact = row_to_fact_row_with(row, captured_at, &mut text)?;
         if let Some(turn) = fact.turn_id {
-            let (request, task) = match turns.get(&turn) {
-                Some(hit) => hit.clone(),
+            let request = match turns.get(&turn) {
+                Some(hit) => *hit,
                 None => {
                     let found = request_of
-                        .query_row([turn], |r| Ok((r.get(0)?, r.get(1)?)))
+                        .query_row([turn], |r| r.get::<_, Option<i64>>(0))
                         .optional()?
-                        .unwrap_or((None, None));
-                    turns.insert(turn, found.clone());
+                        .flatten();
+                    turns.insert(turn, found);
                     found
                 }
             };
             fact.request_id = request;
-            fact.task = task;
         }
         Ok(fact)
     })

@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use oxplow_domain::Actor;
 use serde_json::json;
 
-pub use crate::task_tracker_conformance::Finding;
+pub use crate::conformance::Finding;
 
 /// A page as core records it.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -4,7 +4,6 @@ members = [
     "apps/desktop/src-tauri",
     "crates/oxplow-domain",
     "crates/oxplow-db",
-    "crates/oxplow-oxtask",
     "crates/oxplow-oxwiki",
     "crates/oxplow-config",
     "crates/oxplow-fs-watch",
@@ -173,7 +172,6 @@ oxplow-code-deps = { path = "crates/oxplow-code-deps" }
 oxplow-coverage = { path = "crates/oxplow-coverage" }
 oxplow-script = { path = "crates/oxplow-script" }
 oxplow-db = { path = "crates/oxplow-db" }
-oxplow-oxtask = { path = "crates/oxplow-oxtask" }
 oxplow-oxwiki = { path = "crates/oxplow-oxwiki" }
 oxplow-ai = { path = "crates/oxplow-ai" }
 oxplow-ai-rig = { path = "crates/oxplow-ai-rig" }

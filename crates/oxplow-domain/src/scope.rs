@@ -490,13 +490,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Open, close and focus tabs in a thread's set of tabs — an agent's only in its own thread's.",
     },
     Scope {
-        id: "task_tracker.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Create, update, move, link, comment on and delete tasks.",
-    },
-    Scope {
         id: "terminals.write",
         access: Access::Write,
         host: Host::Daemon,

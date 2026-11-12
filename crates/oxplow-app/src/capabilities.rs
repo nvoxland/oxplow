@@ -8,10 +8,9 @@
 //! - **core**: the fixed ones (the VCS) and, for every optional
 //!   capability, [`NONE`] — nothing implements it;
 //! - **extensions**: `implementations:` naming a built-in in core's
-//!   standard library ([`BUILT_INS`], `entry: oxplow:oxtask`), the way a
-//!   collector names `oxplow:junit`. `oxplow-bundled` declares oxtask,
-//!   the task tracker, and `oxplow-foundation` the other defaults;
-//!   disabling bundled leaves no task tracker;
+//!   standard library ([`BUILT_INS`], `entry: oxplow:oxwiki`), the way a
+//!   collector names `oxplow:junit`. `oxplow-foundation` declares the
+//!   defaults;
 //! - **provider instances** while they run.
 //!
 //! [`CapabilityRegistry::resolve`] picks the active one: a person's own
@@ -34,7 +33,6 @@ use oxplow_domain::capability::{self, NONE};
 use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::stores::StreamStore as _;
-use oxplow_domain::tasks::Bucket;
 use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::DomainError;
 use serde_json::Value;
@@ -44,49 +42,11 @@ use serde_json::Value;
 /// core resolves the name, like a collector's `oxplow:junit`.
 pub const BUILT_INS: &[BuiltIn] = &[
     BuiltIn {
-        entry: "oxplow:oxtask",
-        capability: "task_tracker",
-        provider: Some("oxtask"),
-        title: "oxtask",
-        features: &["hierarchy", "comments", "links", "delete"],
-        id_pattern: Some(r"tsk\d+"),
-        fields: &[
-            BuiltInField {
-                name: "priority",
-                title: "Priority",
-                kind: oxplow_domain::tasks::FieldKind::Enum,
-                values: &["urgent", "high", "medium", "low"],
-                read_only: false,
-            },
-            // Who filed it: set from the actor that created it.
-            BuiltInField {
-                name: "author",
-                title: "Filed by",
-                kind: oxplow_domain::tasks::FieldKind::Enum,
-                values: &["user", "agent"],
-                read_only: true,
-            },
-        ],
-        // Its statuses, each its bucket's only stage.
-        stages: &[
-            ("backlog", "Backlog", Bucket::Backlog),
-            ("ready", "Ready", Bucket::Todo),
-            ("in_progress", "In Progress", Bucket::InProgress),
-            ("blocked", "Blocked", Bucket::Blocked),
-            ("done", "Done", Bucket::Done),
-            ("canceled", "Canceled", Bucket::Canceled),
-        ],
-        config_schema: None,
-    },
-    BuiltIn {
         entry: "oxplow:snapshots",
         capability: "snapshots",
         provider: None,
         title: "Keep every version",
         features: &["contents"],
-        id_pattern: None,
-        fields: &[],
-        stages: &[],
         config_schema: None,
     },
     // The same capture, recording what changed and keeping no bytes.
@@ -96,9 +56,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         provider: None,
         title: "Track changes only",
         features: &[],
-        id_pattern: None,
-        fields: &[],
-        stages: &[],
         config_schema: None,
     },
     // Knowledge: oxwiki, pages as Markdown under `.oxplow/oxwiki`. Its
@@ -109,9 +66,6 @@ pub const BUILT_INS: &[BuiltIn] = &[
         provider: Some("oxwiki"),
         title: "oxwiki",
         features: &["edit"],
-        id_pattern: None,
-        fields: &[],
-        stages: &[],
         config_schema: None,
     },
     // Agent harnesses: what runs in an agent session.
@@ -182,9 +136,6 @@ const fn harness(
         provider: None,
         title,
         features,
-        id_pattern: None,
-        fields: &[],
-        stages: &[],
         config_schema: None,
     }
 }
@@ -194,67 +145,16 @@ const fn harness(
 pub struct BuiltIn {
     pub entry: &'static str,
     pub capability: &'static str,
-    /// The provider id its items' refs carry (`oxplow:oxplow/task?id=…&provider=oxtask`), which
-    /// a declaration of it must use; `None` for a built-in whose
-    /// implementation has no id of its own.
+    /// The provider id its items' refs carry, which a declaration of it
+    /// must use; `None` for a built-in whose implementation has no id of
+    /// its own.
     pub provider: Option<&'static str>,
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
-    /// What its items' own ids look like (a task tracker's; a regex matched
-    /// whole): how a loose id in text or a command is one of its items.
-    pub id_pattern: Option<&'static str>,
-    /// Its own fields (a task tracker's, kept in `native`).
-    pub fields: &'static [BuiltInField],
-    /// A task tracker's stages, in order: `(id, title, bucket)`.
-    pub stages: &'static [(&'static str, &'static str, Bucket)],
     /// The JSON Schema a declaration's `config:` must meet; `None` takes
     /// no config.
     pub config_schema: Option<&'static str>,
-}
-
-/// A built-in's field, as core's table declares it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BuiltInField {
-    pub name: &'static str,
-    pub title: &'static str,
-    pub kind: oxplow_domain::tasks::FieldKind,
-    pub values: &'static [&'static str],
-    pub read_only: bool,
-}
-
-/// A built-in's fields, as an implementation declares them.
-fn built_in_fields(b: &BuiltIn) -> Value {
-    serde_json::to_value(
-        b.fields
-            .iter()
-            .map(|f| oxplow_domain::tasks::FieldDecl {
-                name: f.name.into(),
-                title: f.title.into(),
-                kind: f.kind,
-                values: f.values.iter().map(|v| v.to_string()).collect(),
-                read_only: f.read_only,
-            })
-            .collect::<Vec<_>>(),
-    )
-    .expect("fields serialize")
-}
-
-/// A built-in's stages, as an implementation declares them.
-fn built_in_stages(b: &BuiltIn) -> Value {
-    serde_json::to_value(built_in_stage_decls(b)).expect("stages serialize")
-}
-
-/// A built-in's stages as declarations.
-pub fn built_in_stage_decls(b: &BuiltIn) -> Vec<oxplow_domain::tasks::StageDecl> {
-    b.stages
-        .iter()
-        .map(|(id, title, bucket)| oxplow_domain::tasks::StageDecl {
-            id: (*id).into(),
-            title: (*title).into(),
-            bucket: *bucket,
-        })
-        .collect()
 }
 
 /// A built-in's features, as an implementation declares them.
@@ -674,11 +574,11 @@ impl CapabilityRegistry {
                         extension: None,
                         source: Source::BuiltIn(b.entry),
                         features: built_in_features(b),
-                        fields: built_in_fields(b),
-                        stages: built_in_stages(b),
+                        fields: Value::Array(Vec::new()),
+                        stages: Value::Array(Vec::new()),
                         kinds: serde_json::Value::Array(Vec::new()),
                         offered: true,
-                        id_pattern: b.id_pattern.map(str::to_string),
+                        id_pattern: None,
                         icon: None,
                         config: Value::Object(Default::default()),
                         description: None,
@@ -1079,19 +979,15 @@ impl CapabilityRegistry {
             .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
 
-    /// What loose task ids text names: the active tracker's pattern first,
-    /// then each running provider instance's (its store fills the task
-    /// model whether it is active or not; `ModelRegistry::with_provider_fills`).
-    fn task_ids_from(all: &[Implementation], config: &OxplowConfig) -> Vec<(String, String)> {
-        let id = Self::resolve_from(all, config, "task_tracker").id;
-        let tracker = |i: &&Implementation| i.capability == "task_tracker" && i.offered;
-        let active = all.iter().filter(tracker).filter(|i| i.id == id);
-        let running = all
-            .iter()
-            .filter(tracker)
-            .filter(|i| i.id != id && matches!(i.source, Source::External));
-        active
-            .chain(running)
+    /// What loose task ids text names: each running provider instance's
+    /// pattern (its store fills the task model;
+    /// `ModelRegistry::with_provider_fills`). Stores an extension fills
+    /// declare theirs in `fills.id_pattern`, which the model registry
+    /// holds.
+    fn task_ids_from(all: &[Implementation], _config: &OxplowConfig) -> Vec<(String, String)> {
+        all.iter()
+            .filter(|i| i.capability == "task_tracker" && i.offered)
+            .filter(|i| matches!(i.source, Source::External))
             .filter_map(|i| Some((i.id.clone(), i.id_pattern.clone()?)))
             .collect()
     }
@@ -1305,11 +1201,11 @@ fn declared(
         extension: Some(e.name.clone()),
         source: Source::BuiltIn(b.entry),
         features: built_in_features(b),
-        fields: built_in_fields(b),
-        stages: built_in_stages(b),
+        fields: Value::Array(Vec::new()),
+        stages: Value::Array(Vec::new()),
         kinds: serde_json::Value::Array(Vec::new()),
         offered: true,
-        id_pattern: b.id_pattern.map(str::to_string),
+        id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
         description: d.description.clone(),

@@ -12,11 +12,9 @@
 //!   `handoff.settled@1`; undoes to the state it replaced.
 //!
 //! - `oxplow.handoff.resolve { handoff, outcome, note? }`: how the
-//!   recipient takes or declines one. A composite: taking a handoff that
-//!   hands over a task assigns the item to the recipient thread
-//!   (`oxplow.task.assign`, core's, for every list) and then settles
-//!   it, in one transaction, undone as one. Who may is checked before
-//!   anything is composed, so a stranger's run assigns nothing.
+//!   recipient takes or declines one. A composite over settle; who may is
+//!   checked before anything is composed. Moving a taken handoff's task
+//!   onto the recipient is bundled's (it reacts to `handoff.settled`).
 //!
 //! Nothing here reaches an agent. The recipient thread's agent is given
 //! an open handoff at its next prompt (`agent_context`), and the person
@@ -26,7 +24,6 @@ use std::sync::Arc;
 
 use oxplow_db::handoff_store::{handoff_tx, send_tx, settle_tx, Handoff, HandoffState, NewHandoff};
 use oxplow_domain::run::RunContext;
-use oxplow_domain::tasks::TaskTrackers;
 use oxplow_domain::uri::build::{handoff_uri, thread_uri};
 use oxplow_domain::{Actor, CommandCall, CommandError, HandoffId, ThreadId};
 use rusqlite::OptionalExtension;
@@ -37,7 +34,6 @@ use serde_json::{json, Value};
 use super::comment::author_of;
 use super::compose::{Compose, Composer, Composing, Composition};
 use super::ops::Op;
-use super::task::with_loose_refs;
 use super::thread::acting_thread;
 use super::util::{bare_id, invalid, parse, schema, sql};
 use super::{Handler, HandlerOutput, TxCtx};
@@ -169,15 +165,38 @@ fn acting_for(actor: &Actor) -> Option<Option<ThreadId>> {
     }
 }
 
+/// Whether the task resource's own dataset (its `resolve:` view, whichever
+/// extension declares the resource) holds `item`; no such resource (no
+/// task model) holds nothing.
+fn task_known(ctx: &TxCtx<'_>, item: &str) -> Result<bool, CommandError> {
+    let Some(view) = oxplow_domain::uri::resources::TASK
+        .parse()
+        .ok()
+        .and_then(|r: oxplow_domain::uri::ResourceName| ctx.events.vocabulary.resources.get(&r))
+        .and_then(|decl| decl.resolve.clone())
+    else {
+        return Ok(false);
+    };
+    ctx.conn
+        .query_row(
+            &format!("SELECT 1 FROM \"{}\" WHERE uri = ?1", view.replace('\"', "")),
+            [item],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+        .map_err(sql)
+}
+
 /// `handoff.send { to_thread, body, task?, from_thread? }`.
-pub fn send_op(deps: LinkDeps, tasks: TaskTrackers) -> Op {
+pub fn send_op(deps: LinkDeps) -> Op {
     Op::new(
         "handoffs.write",
         "send",
         schema::<SendInput>(),
         false,
         Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-            let input: SendInput = parse(with_loose_refs(&tasks, input)?)?;
+            let input: SendInput = parse(input)?;
             let from = sending_thread(ctx, input.from_thread.as_deref())?;
             let to: ThreadId = bare_id(
                 &input.to_thread,
@@ -200,16 +219,10 @@ pub fn send_op(deps: LinkDeps, tasks: TaskTrackers) -> Op {
                 return Err(invalid("/body", "say what is handed over"));
             }
             if let Some(item) = &input.task {
-                let known = ctx
-                    .conn
-                    .query_row("SELECT 1 FROM v_task WHERE uri = ?1", [item], |_| Ok(()))
-                    .optional()
-                    .map_err(sql)?
-                    .is_some();
-                if !known {
+                if !task_known(ctx, item)? {
                     return Err(invalid(
                         "/task",
-                        format!("`{item}` isn't an item on the active task tracker"),
+                        format!("`{item}` isn't a task the task model holds"),
                     ));
                 }
             }
@@ -320,9 +333,10 @@ pub fn settle_op() -> Op {
     )
 }
 
-/// `handoff.resolve { handoff, outcome, note? }`: the assign (when taking
-/// hands over an item not assigned to the recipient thread yet), then the
-/// settle.
+/// `handoff.resolve { handoff, outcome, note? }`: the recipient takes or
+/// declines (who may is checked before anything is composed), then the
+/// settle. Moving a taken handoff's task is bundled's, reacting to
+/// `handoff.settled`.
 pub fn resolve_op() -> Op {
     let compose: Arc<Composer> = Arc::new(
         |composing: &Composing<'_>, run: &RunContext, input: &Value| {
@@ -332,23 +346,9 @@ pub fn resolve_op() -> Op {
                 oxplow_domain::uri::resources::HANDOFF,
                 "/handoff",
             )?;
-            let (handoff, item) = composing
+            let handoff = composing
                 .runtime
-                .block_on(composing.db.read(move |tx| {
-                    let Some(h) = handoff_tx(tx, id)? else {
-                        return Ok((None, None));
-                    };
-                    let item = match &h.task {
-                        Some(item) => tx
-                            .query_row("SELECT assignee FROM v_task WHERE uri = ?1", [item], |r| {
-                                r.get::<_, Option<String>>(0)
-                            })
-                            .optional()
-                            .map_err(oxplow_db::map_sql_err)?,
-                        None => None,
-                    };
-                    Ok((Some(h), item))
-                }))
+                .block_on(composing.db.read(move |tx| handoff_tx(tx, id)))
                 .map_err(CommandError::from)?;
             let handoff = handoff
                 .ok_or_else(|| invalid("/handoff", format!("no handoff `{}`", input.handoff)))?;
@@ -358,15 +358,6 @@ pub fn resolve_op() -> Op {
             };
             may_settle(run.actor(), &handoff, to)?;
             let mut calls = Vec::new();
-            if let (HandoffState::Taken, Some(item), Some(assignee)) = (to, &handoff.task, item) {
-                let recipient = oxplow_domain::uri::build::thread_uri(handoff.to_thread_id);
-                if assignee.as_deref() != Some(recipient.as_str()) {
-                    calls.push(CommandCall {
-                        name: super::task::ASSIGN.into(),
-                        input: json!({ "uri": item, "to": recipient }),
-                    });
-                }
-            }
             let mut settle = json!({ "handoff": id.to_string(), "state": to.as_str() });
             if let Some(note) = &input.note {
                 settle["note"] = Value::String(note.clone());
@@ -411,10 +402,9 @@ fn shown(h: &Handoff) -> Value {
     })
 }
 
-/// The handoff commands, for the bus. A loose id in `task` is the
-/// active task tracker's.
-pub fn ops(deps: LinkDeps, tasks: TaskTrackers) -> Vec<Op> {
-    vec![send_op(deps, tasks), settle_op(), resolve_op()]
+/// The handoff commands, for the bus.
+pub fn ops(deps: LinkDeps) -> Vec<Op> {
+    vec![send_op(deps), settle_op(), resolve_op()]
 }
 
 #[cfg(test)]

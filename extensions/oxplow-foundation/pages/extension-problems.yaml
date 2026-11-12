@@ -20,8 +20,6 @@ loaders:
                ELSE 'Failing, ' || h.consecutive_failures || ' in a row.' END AS what,
              h.last_error AS error, h.last_ok_at, h.updated_at,
              (h.state = 'disabled') AS can_enable,
-             (h.state = 'disabled' AND h.repair_item IS NOT NULL) AS can_repair,
-             'Repair the extension described in [oxplow uri ' || coalesce(h.repair_item, '') || '] — read it first.' AS ask,
              NULL AS approves, h.namespace
       -- Health is the namespace's; it is listed under the extension that
       -- declares the contribution now.
@@ -30,7 +28,7 @@ loaders:
       WHERE h.state <> 'ok' AND (NULLIF(:extension, '') IS NULL OR e.name = :extension)
       UNION ALL
       SELECT 'Did not load cleanly', e.name || '/load/' || j.key, e.uri, e.name, 'extension', e.name,
-             NULL, json_extract(j.value, '$.shown'), NULL, NULL, 0, 0, '', NULL, e.namespace
+             NULL, json_extract(j.value, '$.shown'), NULL, NULL, 0, NULL, e.namespace
       FROM v_extension e, json_each(e.errors) j
       WHERE NULLIF(:extension, '') IS NULL OR e.name = :extension
       UNION ALL
@@ -46,7 +44,7 @@ loaders:
                                  AND json_extract(p.input, '$.name') = e.name)
                   THEN 'An agent asked to deploy it: decide that under Needs your decision on the Alerts page.'
                   ELSE 'Deploy it on its page to approve.' END,
-             NULL, NULL, 0, 0, '',
+             NULL, NULL, 0,
              (SELECT json_group_array(json_object(
                        'text', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, 1, instr(j.value, ' — ') - 1) ELSE j.value END,
                        'hint', CASE WHEN instr(j.value, ' — ') > 0 THEN substr(j.value, instr(j.value, ' — ') + 3) END)
@@ -76,13 +74,6 @@ view:
       namespace: '{{row.namespace}}'
       kind: '{{row.kind}}'
       contribution: '{{row.contribution}}'
-  - id: repair
-    label: Repair with the Agent
-    command: oxplow.agent.draft
-    row: true
-    when: can_repair
-    input:
-      text: '{{row.ask}}'
   - id: enable-all
     label: Start All Stopped
     command: oxplow.contribution.enable_all

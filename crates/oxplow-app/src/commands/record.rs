@@ -262,15 +262,6 @@ impl Executed {
     }
 }
 
-/// The task commands an agent runs on a task in a turn: each is evidence
-/// that the turn's request worked on it (`request_task`, basis `command`).
-const TASK_COMMANDS: [&str; 4] = [
-    "oxplow.task.transition",
-    "oxplow.task.create",
-    "oxplow.task.update",
-    "oxplow.task.comment",
-];
-
 /// Inside the run's transaction: the audit row, `command.executed`
 /// pointing at it, the handler's domain events, and the row's event id.
 pub(super) fn record_tx(
@@ -354,40 +345,13 @@ pub(super) fn record_tx(
     executed.id = executed_id;
     executed.cause = cause;
     // An agent's command happened in the turn it has open (a person's, or a
-    // page's, is in no turn). A task command it ran there is evidence the
-    // turn's request worked on that task.
+    // page's, is in no turn).
     if actor.kind() == oxplow_domain::events::schema::ActorKind::Agent {
         if let Some(thread) = actor.thread_id() {
             let turn =
                 oxplow_db::agent_stores::activity_anchors_tx(tx, thread, actor.session_id())?
                     .turn_id;
             executed.anchors.turn_id = turn;
-            if let (Some(turn), true, true) = (
-                turn,
-                failed.is_none(),
-                TASK_COMMANDS.contains(&spec.id.as_str()),
-            ) {
-                let task = [input, &out.result]
-                    .iter()
-                    .find_map(|v| v.get("uri").and_then(Value::as_str))
-                    .filter(|u| {
-                        oxplow_domain::uri::build::resource_of(u).as_deref()
-                            == Some(oxplow_domain::uri::resources::TASK)
-                    });
-                if let Some(task) = task {
-                    oxplow_db::request_links::link_tx(
-                        tx,
-                        oxplow_domain::AgentTurnId::new(turn),
-                        task,
-                        if spec.id == "oxplow.task.transition" {
-                            oxplow_db::request_links::BASIS_TRANSITION
-                        } else {
-                            oxplow_db::request_links::BASIS_COMMAND
-                        },
-                        oxplow_domain::Timestamp::now(),
-                    )?;
-                }
-            }
         }
     }
     append_tx(tx, vocabulary, &executed)?;

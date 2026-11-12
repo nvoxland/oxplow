@@ -48,7 +48,6 @@ use oxplow_domain::vocabulary::VocabularyHandle;
 /// trail makes the backfill observable.
 #[derive(Debug, Default)]
 pub struct BackfillCounts {
-    pub tasks: usize,
     pub findings: usize,
     pub handoffs: usize,
 }
@@ -97,7 +96,6 @@ pub const REPAIR: &str = "page_ref_repair";
 const PROJECTION_SOURCES: &[&str] = &[
     include_str!("page_ref_backfill.rs"),
     include_str!("../../oxplow-db/src/page_ref_projections.rs"),
-    include_str!("../../oxplow-db/src/task_refs.rs"),
 ];
 
 /// A hash of [`PROJECTION_SOURCES`]: the same for every build of the same
@@ -204,33 +202,6 @@ pub async fn run(
     let mut counts = BackfillCounts::default();
     let vocabulary = vocabulary.current();
     let kinds = &vocabulary.resources;
-
-    // 1. Every task's body, link and comment slices, from the
-    //    interface — whichever list it's on.
-    match db.read(|tx| oxplow_db::task_refs::all_refs_tx(tx)).await {
-        Err(e) => tracing::warn!(?e, "page-ref backfill: reading the tasks failed"),
-        Ok(refs) => {
-            for batch in refs.chunks(BATCH) {
-                let batch = batch.to_vec();
-                let n = batch.len();
-                let restated = db
-                    .transaction({
-                        let vocabulary = vocabulary.clone();
-                        move |tx| {
-                            for item in &batch {
-                                oxplow_db::task_refs::restate_tx(tx, &vocabulary.resources, item)?;
-                            }
-                            Ok(())
-                        }
-                    })
-                    .await;
-                match restated {
-                    Ok(()) => counts.tasks += n,
-                    Err(e) => tracing::warn!(?e, "page-ref backfill: a task batch failed"),
-                }
-            }
-        }
-    }
 
     // 2b. Handoffs — one source per row, parsed from its body, as a note.
     if let Ok(rows) = handoffs.list_all_for_backfill().await {

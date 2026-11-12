@@ -110,45 +110,6 @@ impl LinkDeps {
         self.warnings_tx(ctx.conn, &ctx.events.vocabulary.resources, body, thread)
     }
 
-    /// The links in a task's `body` that don't resolve, on a read of
-    /// its own — for any list's write, which runs outside the bus's
-    /// transaction. The worktree is `thread`'s, else the list `item` is on
-    /// as the interface holds it.
-    pub async fn item_warnings(
-        &self,
-        body: String,
-        thread: Option<oxplow_domain::ThreadId>,
-        item: Option<String>,
-    ) -> Vec<LinkWarning> {
-        let deps = self.clone();
-        let read = self
-            .db
-            .read(move |tx| {
-                use rusqlite::OptionalExtension;
-                let thread = match (thread, &item) {
-                    (Some(t), _) => Some(t),
-                    (None, Some(item)) => tx
-                        .query_row(
-                            "SELECT assignee FROM task_assignment WHERE uri = ?1",
-                            [item],
-                            |r| r.get::<_, Option<String>>(0),
-                        )
-                        .optional()
-                        .map_err(oxplow_db::map_sql_err)?
-                        .flatten()
-                        .and_then(|a| oxplow_domain::uri::build::thread_of_uri(&a)),
-                    (None, None) => None,
-                };
-                let vocabulary = deps.vocabulary.current();
-                Ok(deps.warnings_tx(tx, &vocabulary.resources, &body, thread))
-            })
-            .await;
-        read.unwrap_or_else(|error| {
-            tracing::warn!(%error, "checking a task's links failed");
-            Vec::new()
-        })
-    }
-
     fn warnings_tx(
         &self,
         conn: &rusqlite::Connection,

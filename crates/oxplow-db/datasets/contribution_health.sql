@@ -6,10 +6,6 @@ SELECT CAST(h.uri AS TEXT) AS uri, h.namespace, h.contribution, h.kind, h.state,
            AND (d.consumer = h.uri
                 OR EXISTS (SELECT 1 FROM json_each(e.subject) s WHERE s.value = h.uri))) AS dead_letters,
        ((h.next_due_at IS NULL OR h.next_due_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        AND NOT (h.kind = 'collector' AND h.state <> 'ok')) AS fresh,
-       (SELECT w.uri FROM ref('task_link') l JOIN ref('task') w ON w.uri = l.from_uri
-         WHERE l.to_uri = h.uri AND l.link_type = 'about'
-           AND w.state NOT IN ('done', 'canceled')
-         ORDER BY w.uri DESC LIMIT 1) AS repair_item
+        AND NOT (h.kind = 'collector' AND h.state <> 'ok')) AS fresh
 FROM (SELECT *, CAST(uri('oxplow/' || kind, kind, namespace || '/' || contribution) AS TEXT) AS uri
         FROM source('contribution_health')) h

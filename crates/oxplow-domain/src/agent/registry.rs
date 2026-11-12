@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, RwLock};
 
 use super::harness::AgentHarness;
-use crate::tasks::ActiveSource;
+use crate::capability::ActiveSource;
 
 /// A harness key nothing registers.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

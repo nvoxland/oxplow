@@ -4,8 +4,8 @@
 
 oxplow keeps each provider's, collector's and effect's health on this machine
 in `v_contribution_health` (`extension`, `contribution`, `kind`, `state` = `ok` |
-`failing` | `disabled`, `reason`, `last_error`, `dead_letters`, `fresh`,
-`repair_item`). Each collector's last run is in `v_collector_run`
+`failing` | `disabled`, `reason`, `last_error`, `dead_letters`, `fresh`;
+bundled's `v_oxplow_contribution_repair` has the open `repair_item`). Each collector's last run is in `v_collector_run`
 (`status`, `last_run_at`, `error`).
 
 - **Three failures in a row disable it.** A disabled collector doesn't

@@ -4584,7 +4584,6 @@ dependencies = [
  "oxplow-lsp",
  "oxplow-lsp-installer",
  "oxplow-oauth-sim",
- "oxplow-oxtask",
  "oxplow-oxwiki",
  "oxplow-provider-fake",
  "oxplow-provider-protocol",
@@ -4704,7 +4703,6 @@ dependencies = [
  "oxplow-domain",
  "oxplow-harness-fake",
  "oxplow-mcp",
- "oxplow-oxtask",
  "oxplow-provider-fake",
  "oxplow-runtime",
  "oxplow-workspace-hack",
@@ -4840,7 +4838,6 @@ dependencies = [
  "oxplow-config",
  "oxplow-db",
  "oxplow-domain",
- "oxplow-oxtask",
  "oxplow-oxwiki",
  "oxplow-sdk",
  "oxplow-workspace-hack",
@@ -4994,7 +4991,6 @@ dependencies = [
  "oxplow-db",
  "oxplow-domain",
  "oxplow-git",
- "oxplow-oxtask",
  "oxplow-oxwiki",
  "oxplow-sdk",
  "oxplow-workspace-hack",
@@ -5032,22 +5028,6 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "url",
-]
-
-[[package]]
-name = "oxplow-oxtask"
-version = "0.8.0"
-dependencies = [
- "async-trait",
- "oxplow-db",
- "oxplow-domain",
- "oxplow-workspace-hack",
- "rusqlite",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
 ]
 
 [[package]]

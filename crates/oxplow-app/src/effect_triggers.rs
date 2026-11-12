@@ -700,15 +700,11 @@ pub(crate) const RETRY_DELAYS: [Duration; 2] = [Duration::from_secs(10), Duratio
 /// `idempotent_writes`, so — its key the same on every attempt — a write
 /// that landed lands once. A step inside oxplow, or toward any other
 /// provider, waits for a person.
-fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
-    !calls.is_empty()
-        && calls.iter().all(|call| {
-            // A sink (none: the list went away) never takes a retry: the
-            // work was meant for a list, and resending it nowhere would
-            // lose it quietly.
-            crate::commands::task::provider_for(&svc.tasks, &call.name, &call.input)
-                .is_some_and(|p| !p.sink && p.features.idempotent_writes)
-        })
+fn safe_to_resend(_svc: &Services, _calls: &[CommandCall]) -> bool {
+    // Core calls no provider's write any more (a task tracker provider only
+    // fills the model), so no step of a reaction is one that keeps
+    // `idempotent_writes`: a failed attempt waits for a person.
+    false
 }
 
 /// The longest a service's own "try again in" is waited for by itself: a

@@ -660,7 +660,7 @@ pub(super) async fn suite(
 /// it couldn't run.
 fn conformance_findings(
     capability: &str,
-    run: Result<oxplow_app::task_tracker_conformance::SuiteRun, Diagnostic>,
+    run: Result<oxplow_app::conformance::SuiteRun, Diagnostic>,
     report: &mut TestReport,
 ) {
     match run {
@@ -729,7 +729,7 @@ async fn capability_suite(
     capability: &str,
     id: &str,
     env: &host::HostEnv,
-) -> Result<oxplow_app::task_tracker_conformance::SuiteRun, String> {
+) -> Result<oxplow_app::conformance::SuiteRun, String> {
     Ok(match capability {
         providers::tasks::TaskTrackerHost::CAPABILITY => {
             let provider = svc.tasks.get(id).map_err(|e| e.to_string())?;
@@ -765,7 +765,7 @@ async fn capability_suite(
             if svc.knowledge.get(id).is_none() {
                 return Err(format!("`{id}` isn't an enabled knowledge store"));
             }
-            oxplow_app::task_tracker_conformance::SuiteRun {
+            oxplow_app::conformance::SuiteRun {
                 findings: oxplow_app::knowledge_conformance::suite(svc, id, &Actor::Human).await,
                 left: Vec::new(),
             }

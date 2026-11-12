@@ -1343,18 +1343,6 @@ fn log_prompt_tx(
                     continue;
                 }
             }
-            // A task it named is one the turn's request worked on.
-            if oxplow_domain::uri::build::resource_of(&found.target).as_deref()
-                == Some(oxplow_domain::uri::resources::TASK)
-            {
-                oxplow_db::request_links::link_tx(
-                    conn,
-                    turn,
-                    &found.target,
-                    oxplow_db::request_links::BASIS_PROMPT,
-                    Timestamp::now(),
-                )?;
-            }
             oxplow_db::page_ref_store::upsert_edge_tx(
                 conn,
                 &oxplow_db::page_ref_store::PageRefEdge::new(

@@ -316,7 +316,8 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         Ok(())
                     })
                     .await?;
-                // Its threads' tasks go back to nobody.
+                // Its threads' tasks go back to nobody: bundled reacts to the
+                // `stream.archived` event below.
                 let thread_uris: Vec<String> = threads
                     .iter()
                     .map(|t| oxplow_domain::uri::build::thread_uri(t.id))
@@ -335,19 +336,6 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                         .chain(thread_uris.iter().cloned())
                         .collect::<Vec<String>>(),
                 );
-                let released = deps
-                    .db
-                    .read(move |tx| {
-                        let mut events = Vec::new();
-                        for thread in &thread_uris {
-                            events.extend(
-                                super::task::release_all_tx(tx, &source, thread)
-                                    .map_err(|e| oxplow_domain::DomainError::Storage(e.to_string()))?,
-                            );
-                        }
-                        Ok(events)
-                    })
-                    .await?;
                 // Before the worktree goes: its deletion is no one's surprise.
                 deps.stream_watches.unregister(&id);
                 deps.streams
@@ -360,8 +348,7 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 }
                 deps.worktrees.forget(&id).await;
                 deps.snapshot_captures.unregister(&id);
-                let mut events = released;
-                events.push(archived);
+                let events = vec![archived];
                 Ok(HandlerOutput {
                     result: json!({ "stream": input.stream, "archived": true }),
                     events,
