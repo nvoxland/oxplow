@@ -236,6 +236,18 @@ fills:
   per provider operation, as today). `TasksProjection` and
   `KnowledgeRecords` go once the adapter stands in for them.
 
+## A store's folder and worktree streams (decided 2026-11-12)
+
+`.oxplow/` is gitignored, so a store's folder (oxwiki's `.oxplow/oxwiki/`)
+exists only in the primary worktree as far as oxplow is concerned: the
+`files` trigger follows the primary, and `oxplow.extension_files.write`
+resolves a path against the project root, never the caller's checkout.
+So a store's own command (oxwiki's tool, from any stream) always writes the
+primary's folder: no refusal for an agent in a worktree stream, and nothing
+written into a worktree's copy. An agent editing a worktree's copy with its
+own file tools isn't refused either; it just isn't seen, and the store's
+skill says to use its tool.
+
 ## Attribution (to settle in Phase 3)
 
 A store's collector writes the model, so its change events carry the

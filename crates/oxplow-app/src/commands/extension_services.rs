@@ -59,9 +59,31 @@ fn refused(message: String) -> CommandError {
     CommandError::Denied { reason: message }
 }
 
-pub fn ops(services: Arc<ExtensionServices>) -> Vec<Op> {
+/// Run the composer's observers of what it just wrote, as its command, so
+/// the model it fills shows the write when the command returns. A failure
+/// is logged, not raised: the write already happened.
+async fn observe(
+    runner: &crate::collector_runner::CollectorRunner,
+    services: &ExtensionServices,
+    run: &oxplow_domain::run::RunContext,
+    command: &str,
+    wrote: crate::collector_runner::Wrote,
+) {
+    let Ok(extension) = services.composer_name(run, command) else {
+        return;
+    };
+    for problem in runner.observe_written(run, &extension, wrote).await {
+        tracing::warn!(%extension, %problem, "a store's write wasn't observed at once; its next trigger will");
+    }
+}
+
+pub fn ops(
+    services: Arc<ExtensionServices>,
+    runner: crate::collector_runner::CollectorRunner,
+) -> Vec<Op> {
     let store = {
         let services = services.clone();
+        let runner = runner.clone();
         Op::new(
             "store.write",
             "write",
@@ -69,6 +91,7 @@ pub fn ops(services: Arc<ExtensionServices>) -> Vec<Op> {
             false,
             Handler::External(Arc::new(move |invocation: Invocation, input| {
                 let services = services.clone();
+                let runner = runner.clone();
                 Box::pin(async move {
                     let input: StoreWrite = parse(input)?;
                     let batch: Vec<Statement> = input
@@ -89,6 +112,14 @@ pub fn ops(services: Arc<ExtensionServices>) -> Vec<Op> {
                                     CommandError::Failed { message }
                                 }
                             })?;
+                    observe(
+                        &runner,
+                        &services,
+                        &invocation.run,
+                        "oxplow.extension_store.write",
+                        crate::collector_runner::Wrote::OwnStore,
+                    )
+                    .await;
                     Ok(HandlerOutput {
                         result: json!({ "changes": changes }),
                         ..HandlerOutput::default()
@@ -100,6 +131,7 @@ pub fn ops(services: Arc<ExtensionServices>) -> Vec<Op> {
     };
     let write = {
         let services = services.clone();
+        let runner = runner.clone();
         Op::new(
             "files.write",
             "extension_write",
@@ -107,11 +139,23 @@ pub fn ops(services: Arc<ExtensionServices>) -> Vec<Op> {
             false,
             Handler::External(Arc::new(move |invocation: Invocation, input| {
                 let services = services.clone();
+                let runner = runner.clone();
                 Box::pin(async move {
                     let input: FileWrite = parse(input)?;
                     let result = services
                         .write_file(&invocation.run, &input.path, &input.body)
                         .map_err(refused)?;
+                    observe(
+                        &runner,
+                        &services,
+                        &invocation.run,
+                        "oxplow.extension_files.write",
+                        crate::collector_runner::Wrote::File {
+                            path: input.path.clone(),
+                            op: crate::collector_runner::FileOp::Modified,
+                        },
+                    )
+                    .await;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()
@@ -128,11 +172,23 @@ pub fn ops(services: Arc<ExtensionServices>) -> Vec<Op> {
         false,
         Handler::External(Arc::new(move |invocation: Invocation, input| {
             let services = services.clone();
+            let runner = runner.clone();
             Box::pin(async move {
                 let input: FileDelete = parse(input)?;
                 let result = services
                     .delete_file(&invocation.run, &input.path)
                     .map_err(refused)?;
+                observe(
+                    &runner,
+                    &services,
+                    &invocation.run,
+                    "oxplow.extension_files.delete",
+                    crate::collector_runner::Wrote::File {
+                        path: input.path.clone(),
+                        op: crate::collector_runner::FileOp::Removed,
+                    },
+                )
+                .await;
                 Ok(HandlerOutput {
                     result,
                     ..HandlerOutput::default()

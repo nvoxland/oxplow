@@ -1083,6 +1083,21 @@ pub fn contribution_key(owner: &str, id: &str) -> oxplow_db::ContributionKey {
 /// (P7.C2, [`crate::contribution_health`]): a disabled one doesn't run (its
 /// reason as [`RunCollectorError::Disabled`]); a failed run counts — the
 /// third in a row disables it — and a good one starts the count over.
+/// The lock one collector's runs take, per project.
+fn run_lock(root: &Path, owner: &str, id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    > = std::sync::OnceLock::new();
+    let key = format!("{}\u{0}{owner}\u{0}{id}", root.display());
+    LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key)
+        .or_default()
+        .clone()
+}
+
 pub async fn run_collector(
     ctx: &Collectors<'_>,
     parent: &RunContext,
@@ -1104,6 +1119,11 @@ pub async fn run_collector(
         )));
     }
     let run = collector_context(ctx, parent, owner, id)?;
+    // One run of a collector at a time, whichever path starts it (its
+    // trigger, an event, a sync, a store command's write): a snapshot read
+    // before a newer run's write must not land after it.
+    let lock = run_lock(ctx.root, owner, id);
+    let _held = lock.lock().await;
     let started = std::time::Instant::now();
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     let recorded = match &result {
@@ -1232,10 +1252,13 @@ async fn run_collector_once(
             let registry = ctx.models.current();
             let (writer_ext, writer_source) = (declarer.to_string(), source.clone());
             let reconcile = trigger.name() == "start";
+            // An event's run carries its event's anchors; one a command
+            // started (a store's write observed at once) carries the
+            // command's, so its change events are the command's turn's.
             let anchors = trigger
                 .event()
                 .map(|e| e.envelope.anchors.clone())
-                .unwrap_or_default();
+                .unwrap_or_else(|| run.anchors().clone());
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
@@ -1978,7 +2001,73 @@ pub struct CollectorRunner {
     pub metrics: crate::metrics_service::MetricsService,
 }
 
+/// What a store's command just wrote: its own SQLite file, or a file in
+/// one of its folders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Wrote {
+    OwnStore,
+    File { path: String, op: FileOp },
+}
+
 impl CollectorRunner {
+    /// Run `extension`'s collectors that observe what its command just
+    /// wrote, at once and as that command (`run`), so the model it fills
+    /// shows the write when the command returns and its change events carry
+    /// the command's anchors (`.context/models.md` "Attribution"). What
+    /// fails is returned, not raised: the write already happened, and the
+    /// next trigger repairs the model.
+    pub async fn observe_written(
+        &self,
+        run: &RunContext,
+        extension: &str,
+        wrote: Wrote,
+    ) -> Vec<String> {
+        use oxplow_config::collectors::ObserverSource;
+        let root = self.worktrees.resolve(None).await.into_local_path();
+        let ctx = self.collectors(&root);
+        let Some(ext) = ctx
+            .catalog
+            .unpinned(
+                &root,
+                "a store's write is observed by its declared collectors",
+            )
+            .iter()
+            .find(|e| e.name == extension && e.enabled)
+            .cloned()
+        else {
+            return Vec::new();
+        };
+        let mut problems = Vec::new();
+        for c in &ext.collectors {
+            let trigger = c
+                .trigger
+                .sources()
+                .iter()
+                .find_map(|source| match (source, &wrote) {
+                    (ObserverSource::Sqlite { path: None }, Wrote::OwnStore) => {
+                        Some(RunTrigger::Sqlite)
+                    }
+                    (ObserverSource::Files { glob }, Wrote::File { path, op }) => {
+                        oxplow_config::collectors::files_matcher(std::slice::from_ref(glob))
+                            .ok()
+                            .filter(|m| m.is_match(path))
+                            .map(|_| {
+                                RunTrigger::Files(vec![FileChange {
+                                    path: path.clone(),
+                                    op: *op,
+                                }])
+                            })
+                    }
+                    _ => None,
+                });
+            let Some(trigger) = trigger else { continue };
+            if let Err(e) = run_collector(&ctx, run, &ext.namespace, &c.id, trigger).await {
+                problems.push(format!("collector `{}/{}`: {e:?}", ext.namespace, c.id));
+            }
+        }
+        problems
+    }
+
     fn collectors<'a>(&'a self, root: &'a Path) -> Collectors<'a> {
         Collectors {
             root,

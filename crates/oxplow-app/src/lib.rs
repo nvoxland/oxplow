@@ -1694,6 +1694,7 @@ impl Services {
             .chain(commands::extension_jobs::ops(jobs.clone()))
             .chain(commands::extension_services::ops(
                 extension_services.clone(),
+                collector_runner.clone(),
             ))
             .chain(commands::model_commands::ops(
                 extension_services.clone(),

@@ -162,3 +162,77 @@ async fn a_store_id_two_extensions_claim_is_refused() {
         "{text}"
     );
 }
+
+const DB_STORE: &str = "manifest: 2\nname: shelfdb\nintent:\n  purpose: p\nrequires: [shelf]\npermissions: ['commands:oxplow.extension_store.write']\nstorage: { sqlite: true }\nfills:\n  - model: shelf/book\n    stores: [shelfdb]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    needs: [store.sql]\n    on: [{ sqlite: own }]\ncommands:\n  - name: book.add\n    summary: Add a book.\n    input_schema: { type: object }\n    entry: handlers/add.star\n";
+
+/// A store's command that writes its own file is observed at once, as
+/// that command: the model shows the row when the command returns, and its
+/// change event carries the command's anchors (the agent's thread).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(root, ".oxplow/extensions/shelf/extension.yaml", OWNER);
+    write(root, ".oxplow/extensions/shelfdb/extension.yaml", DB_STORE);
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/storage/migrations/V1__book.sql",
+        "CREATE TABLE book (id TEXT PRIMARY KEY, title TEXT NOT NULL);",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/books.star",
+        "def transform(x):\n    rows = scope(\"store.sql\", {\"sql\": \"SELECT id, title FROM book\"})[\"rows\"]\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelfdb\", \"snapshot\": rows}]}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/shelfdb/handlers/add.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.extension_store.write\", \"input\": {\"batch\": [{\"sql\": \"INSERT INTO book (id, title) VALUES (?1, ?2)\", \"params\": [x[\"input\"][\"id\"], x[\"input\"][\"title\"]]}]}}], \"result\": {}}\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    let agent = Actor::Agent {
+        session_id: None,
+        thread_id: Some(fx.thread),
+        stream_id: None,
+    };
+    fx.svc
+        .commands
+        .run(
+            &agent,
+            "shelfdb.book.add",
+            json!({ "id": "dune", "title": "Dune" }),
+            true,
+        )
+        .await
+        .unwrap();
+    let title: String = fx
+        .svc
+        .db
+        .read(|tx| {
+            tx.query_row(
+                "SELECT title FROM v_shelf_book WHERE store = 'shelfdb'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    assert_eq!(title, "Dune", "the row is there when the command returns");
+    let changed: Vec<_> = fx
+        .svc
+        .event_log_store
+        .read_after(0, 1000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.envelope.event_type == "shelf.book.changed")
+        .collect();
+    assert_eq!(changed.len(), 1);
+    assert_eq!(
+        changed[0].envelope.anchors.thread_id,
+        Some(fx.thread),
+        "the change is the command's thread's"
+    );
+}
