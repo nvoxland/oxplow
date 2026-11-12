@@ -24,6 +24,10 @@ pub const RT_BODY_DIR: &str = "dir_mention";
 pub const RT_BODY_TASK: &str = "task_mention";
 pub const RT_BODY_FINDING: &str = "finding_mention";
 pub const RT_BODY_COMMIT: &str = "commit_mention";
+/// A pinned markdown column's file and directory refs (`.context/models.md`
+/// "Markdown bodies"): pinned to a snapshot, read by `v_ref_pin`.
+pub const RT_FILE_PIN: &str = "file_pin";
+pub const RT_DIR_PIN: &str = "dir_pin";
 pub const RT_TOUCHED_FILE: &str = "touched_file";
 pub const RT_FINDING_PATH: &str = "finding_path";
 /// An agent turn → what its prompt pointed at (`@path`, `[oxplow uri …]`,
@@ -143,6 +147,86 @@ const KNOWLEDGE_MENTIONS: MentionTypes = MentionTypes {
     finding: RT_BODY_FINDING,
     commit: RT_BODY_COMMIT,
 };
+
+/// A shared model's pinned markdown column.
+const PINNED_MENTIONS: MentionTypes = MentionTypes {
+    file: RT_FILE_PIN,
+    dir: RT_DIR_PIN,
+    knowledge: RT_WIKILINK,
+    task: RT_BODY_TASK,
+    finding: RT_BODY_FINDING,
+    commit: RT_BODY_COMMIT,
+};
+
+/// The ref types a shared model's markdown columns own on their row's
+/// source: what restating its body replaces.
+pub fn model_body_ref_types(pins: bool) -> Vec<String> {
+    if pins { PINNED_MENTIONS } else { BODY_MENTIONS }.all()
+}
+
+/// A shared model's markdown body edges (`source` its row's URI): the
+/// body mentions, with file and dir refs as pinned refs when `pins`. A
+/// file edge carries the line and version the link named.
+pub fn model_body_edges(
+    kinds: &ResourceRegistry,
+    source: &str,
+    body: &str,
+    pins: bool,
+) -> Vec<PageRefEdge> {
+    let types = if pins {
+        &PINNED_MENTIONS
+    } else {
+        &BODY_MENTIONS
+    };
+    let refs = extract(kinds, body);
+    let mut out = Vec::new();
+    for fd in &refs.files_detail {
+        let mut edge = PageRefEdge::new(source, build::file_uri(&fd.path), types.file);
+        if !(fd.version == RefVersion::Disk && fd.line.is_none()) {
+            edge = edge.with_extra(
+                serde_json::json!({
+                    "line": fd.line,
+                    "version": match &fd.version {
+                        RefVersion::Disk => "disk".to_string(),
+                        RefVersion::Ref(r) => format!("ref:{r}"),
+                    }
+                })
+                .to_string(),
+            );
+        }
+        out.push(edge);
+    }
+    out.extend(
+        mention_edges(kinds, source, body, types)
+            .into_iter()
+            .filter(|e| e.ref_type != types.file),
+    );
+    out
+}
+
+/// A shared model's stated refs (a provider's), as the edges its markdown
+/// would have given: each URI typed by what it names.
+pub fn model_stated_edges(source: &str, uris: &[String], pins: bool) -> Vec<PageRefEdge> {
+    let types = if pins {
+        &PINNED_MENTIONS
+    } else {
+        &BODY_MENTIONS
+    };
+    uris.iter()
+        .filter_map(|u| {
+            let t = match build::resource_of(u)?.as_str() {
+                r::FILE => types.file,
+                r::DIR => types.dir,
+                r::KNOWLEDGE => types.knowledge,
+                r::TASK => types.task,
+                r::FINDING => types.finding,
+                r::COMMIT => types.commit,
+                _ => return None,
+            };
+            Some(PageRefEdge::new(source, u, t))
+        })
+        .collect()
+}
 
 const COMMENT_MENTIONS: MentionTypes = MentionTypes {
     file: RT_COMMENT_FILE,

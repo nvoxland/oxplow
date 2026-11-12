@@ -469,7 +469,7 @@ type StoredEdge = (
 /// Whether `slice`'s source already holds exactly the rows restating it
 /// would write: the same edges, extras and version pins (what
 /// [`replace_source_tx`] / [`replace_source_for_ref_types_tx`] would leave).
-fn slice_is_stored_tx(
+pub fn slice_is_stored_tx(
     conn: &rusqlite::Connection,
     slice: &SourceSlice,
 ) -> Result<bool, DomainError> {

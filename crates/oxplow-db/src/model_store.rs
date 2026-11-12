@@ -65,6 +65,9 @@ pub struct ModelColumn {
     /// An enum's allowed values.
     pub values: Option<Vec<String>>,
     pub markdown: Option<Markdown>,
+    /// A `uri` / `uris` column's edge type: each URI is an edge from the
+    /// row of this ref type.
+    pub edge: Option<String>,
     pub doc: String,
 }
 
@@ -75,6 +78,7 @@ impl ModelColumn {
             ty,
             values: None,
             markdown: None,
+            edge: None,
             doc: String::new(),
         }
     }
@@ -494,6 +498,8 @@ struct Checked {
     id: String,
     cells: Vec<rusqlite::types::Value>,
     fields: BTreeMap<String, String>,
+    /// The refs the store states, instead of parsing its markdown.
+    refs: Option<Vec<String>>,
 }
 
 /// `value` as `column` stores it, or why not.
@@ -578,7 +584,7 @@ fn check_row(
         invalid(format!("model `{}`: row {at} (id {id}): {what}", decl.id()))
     };
     for name in row.keys() {
-        if name != "fields" && decl.column(name).is_none() {
+        if name != "fields" && name != "refs" && decl.column(name).is_none() {
             return Err(fail(format!("column `{name}` isn't declared")));
         }
     }
@@ -598,7 +604,21 @@ fn check_row(
         Some(Value::Object(values)) => check_fields(fields, values).map_err(fail)?,
         Some(other) => return Err(fail(format!("`fields` must be an object, got {other}"))),
     };
-    Ok(Checked { id, cells, fields })
+    let refs = match row.get("refs") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(list)) if list.iter().all(Value::is_string) => Some(
+            list.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect(),
+        ),
+        Some(other) => return Err(fail(format!("`refs` must be a list of URIs, got {other}"))),
+    };
+    Ok(Checked {
+        id,
+        cells,
+        fields,
+        refs,
+    })
 }
 
 /// The stored row of `uri`: its cells in declaration order, and whether
@@ -708,6 +728,15 @@ pub fn sweep_tombstones_tx(
     .map_err(map_sql_err)?;
     conn.execute(
         &format!(
+            "DELETE FROM page_ref WHERE source_uri IN
+               (SELECT uri FROM {} WHERE removed_at IS NOT NULL AND removed_at < ?1)",
+            quote(&decl.table())
+        ),
+        [before],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        &format!(
             "DELETE FROM {} WHERE removed_at IS NOT NULL AND removed_at < ?1",
             quote(&decl.table())
         ),
@@ -738,6 +767,145 @@ fn id_text(v: rusqlite::types::Value) -> String {
     }
 }
 
+/// Whether `decl` pins its markdown refs.
+fn pins(decl: &ModelDecl) -> bool {
+    decl.columns
+        .iter()
+        .any(|c| c.markdown.is_some_and(|m| m.pins))
+}
+
+/// The ref types `decl`'s columns own on a row's source.
+fn owned_ref_types(decl: &ModelDecl) -> Vec<String> {
+    let mut types = if decl.columns.iter().any(|c| c.markdown.is_some()) {
+        crate::page_ref_projections::model_body_ref_types(pins(decl))
+    } else {
+        Vec::new()
+    };
+    types.extend(decl.columns.iter().filter_map(|c| c.edge.clone()));
+    types.sort();
+    types.dedup();
+    types
+}
+
+/// Restate the edges row `uri` projects (its markdown columns' mentions,
+/// or its stated refs, and its edge columns), by diff: pinned refs keep
+/// the pin they have, new ones take the primary stream's latest snapshot,
+/// and a file verified under a still-cited directory stays.
+fn restate_edges_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
+    uri: &str,
+    row: &Checked,
+) -> Result<(), DomainError> {
+    use crate::page_ref_projections::{
+        model_body_edges, model_stated_edges, RT_DIR_PIN, RT_FILE_PIN,
+    };
+    use crate::page_ref_store::{PageRefEdge, SourceSlice};
+    let types = owned_ref_types(decl);
+    if types.is_empty() {
+        return Ok(());
+    }
+    let pinned = pins(decl);
+    let mut edges: Vec<PageRefEdge> = match &row.refs {
+        Some(refs) => model_stated_edges(uri, refs, pinned),
+        None => decl
+            .columns
+            .iter()
+            .zip(&row.cells)
+            .filter(|(c, _)| c.markdown.is_some())
+            .filter_map(|(_, v)| match v {
+                rusqlite::types::Value::Text(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .flat_map(|body| model_body_edges(kinds, uri, body, pinned))
+            .collect(),
+    };
+    for (c, v) in decl.columns.iter().zip(&row.cells) {
+        let (Some(ty), rusqlite::types::Value::Text(t)) = (&c.edge, v) else {
+            continue;
+        };
+        let targets: Vec<String> = match c.ty {
+            ModelType::Uris => serde_json::from_str(t).unwrap_or_default(),
+            _ => vec![t.clone()],
+        };
+        edges.extend(targets.iter().map(|to| PageRefEdge::new(uri, to, ty)));
+    }
+    edges.sort_by(|a, b| (&a.target, &a.ref_type).cmp(&(&b.target, &b.ref_type)));
+    edges.dedup_by(|a, b| a.target == b.target && a.ref_type == b.ref_type);
+    if pinned {
+        let existing: Vec<PageRefEdge> = conn
+            .prepare_cached(
+                "SELECT target_uri, ref_type, source_extra, local_snapshot_id, closest_vcs_rev, vcs_rev_exact
+                 FROM page_ref WHERE source_uri = ?1 AND ref_type IN (?2, ?3)",
+            )
+            .and_then(|mut st| {
+                st.query_map(params![uri, RT_FILE_PIN, RT_DIR_PIN], |r| {
+                    let mut e = PageRefEdge::new(uri, r.get::<_, String>(0)?, r.get::<_, String>(1)?);
+                    e.source_extra = r.get(2)?;
+                    e.local_snapshot_id = r.get(3)?;
+                    e.closest_vcs_rev = r.get(4)?;
+                    e.vcs_rev_exact = r.get::<_, i64>(5)? != 0;
+                    Ok(e)
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()
+            })
+            .map_err(map_sql_err)?;
+        let pin = crate::knowledge_record::pin_tx(conn)?;
+        for e in edges.iter_mut() {
+            if e.ref_type != RT_FILE_PIN && e.ref_type != RT_DIR_PIN {
+                continue;
+            }
+            match existing
+                .iter()
+                .find(|x| x.target == e.target && x.ref_type == e.ref_type)
+            {
+                Some(kept) => {
+                    e.local_snapshot_id = kept.local_snapshot_id;
+                    e.closest_vcs_rev = kept.closest_vcs_rev.clone();
+                    e.vcs_rev_exact = kept.vcs_rev_exact;
+                }
+                None => {
+                    if let Some(id) = pin.snapshot_id {
+                        e.local_snapshot_id = Some(id);
+                        e.closest_vcs_rev = pin.revision.clone();
+                        e.vcs_rev_exact = pin.revision.is_some();
+                    }
+                }
+            }
+        }
+        let dirs: Vec<String> = edges
+            .iter()
+            .filter(|e| e.ref_type == RT_DIR_PIN)
+            .filter_map(|e| {
+                oxplow_domain::uri::build::file_of_uri(&e.target)
+                    .ok()
+                    .map(|f| f.path)
+            })
+            .collect();
+        for kept in existing {
+            let cited = edges
+                .iter()
+                .any(|e| e.target == kept.target && e.ref_type == kept.ref_type);
+            let under = kept.ref_type == RT_FILE_PIN
+                && oxplow_domain::uri::build::file_of_uri(&kept.target)
+                    .is_ok_and(|f| crate::knowledge_record::path_under_any_dir(&f.path, &dirs));
+            if !cited && under {
+                edges.push(kept);
+            }
+        }
+    }
+    let slice = SourceSlice {
+        source: uri.to_string(),
+        ref_types: Some(types.clone()),
+        edges: edges.clone(),
+    };
+    if crate::page_ref_store::slice_is_stored_tx(conn, &slice)? {
+        return Ok(());
+    }
+    crate::page_ref_store::replace_source_for_ref_types_tx(conn, uri, &types, edges)
+}
+
 /// Write `store`'s rows of `decl` (its table must exist: [`ensure_model_tx`]);
 /// `fields` are what the store declared, kept under the store's id. A row
 /// that fails its checks is quarantined (skipped, reported, and never
@@ -747,6 +915,7 @@ fn id_text(v: rusqlite::types::Value) -> String {
 pub fn write_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
     store: &str,
     fields: &[FieldDecl],
     write: &ModelWrite,
@@ -915,6 +1084,9 @@ pub fn write_tx(
                 .and_then(|mut st| st.execute(rusqlite::params_from_iter(values)))
                 .map_err(map_sql_err)?;
         }
+        if !change.changed.is_empty() || row.refs.is_some() {
+            restate_edges_tx(conn, decl, kinds, &uri, &row)?;
+        }
         if put_fields_tx(conn, &model, &uri, store, &row.fields)? {
             change.changed.push("fields".into());
         }
@@ -1005,6 +1177,13 @@ mod tests {
         }
     }
 
+    fn kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
+        oxplow_domain::vocabulary::VocabularyHandle::core()
+            .current()
+            .resources
+            .clone()
+    }
+
     fn rating() -> Vec<FieldDecl> {
         vec![FieldDecl {
             name: "rating".into(),
@@ -1027,7 +1206,7 @@ mod tests {
     ) -> Result<Written, DomainError> {
         db.transaction(move |tx| {
             ensure_model_tx(tx, &book())?;
-            write_tx(tx, &book(), store, &fields, &w)
+            write_tx(tx, &book(), &kinds(), store, &fields, &w)
         })
         .await
     }
@@ -1522,5 +1701,161 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("nope"), "{err}");
+    }
+
+    fn pinned_book() -> ModelDecl {
+        let mut d = book();
+        for c in d.columns.iter_mut() {
+            if c.name == "body" {
+                c.markdown = Some(Markdown { pins: true });
+            }
+        }
+        let mut about = ModelColumn::new("about", ModelType::Uri);
+        about.edge = Some("book.about".into());
+        d.columns.push(about);
+        d
+    }
+
+    async fn write_decl(db: &Database, decl: ModelDecl, rows: Vec<ModelRow>) -> Written {
+        db.transaction(move |tx| {
+            ensure_model_tx(tx, &decl)?;
+            write_tx(
+                tx,
+                &decl,
+                &kinds(),
+                "s",
+                &[],
+                &ModelWrite::Upsert {
+                    rows: rows.clone(),
+                    delete: vec![],
+                    rename: vec![],
+                },
+            )
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn edges(db: &Database, source: &'static str) -> Vec<(String, String, Option<i64>)> {
+        db.read(move |tx| {
+            let mut st = tx
+                .prepare(
+                    "SELECT target_uri, ref_type, local_snapshot_id FROM page_ref
+                     WHERE source_uri = ?1 ORDER BY target_uri, ref_type",
+                )
+                .map_err(map_sql_err)?;
+            let out = st
+                .query_map([source], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(map_sql_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_sql_err)?;
+            Ok(out)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn snapshot(db: &Database) -> i64 {
+        db.transaction(|tx| {
+            tx.execute_batch(
+                "INSERT OR IGNORE INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+                 VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'main', '/r', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+                 INSERT INTO snapshot (stream_id, created_at) VALUES (1, '2026-01-01T00:00:00Z');",
+            )
+            .map_err(map_sql_err)?;
+            Ok(tx.last_insert_rowid())
+        })
+        .await
+        .unwrap()
+    }
+
+    const B1: &str = "oxplow:shelf/book?id=b1&store=s";
+    const A_RS: &str = "oxplow:oxplow/file?path=src/a.rs";
+    const B_RS: &str = "oxplow:oxplow/file?path=src/b.rs";
+
+    /// A markdown column's mentions are edges from the row; a write that
+    /// leaves the body alone rewrites none.
+    #[tokio::test]
+    async fn a_markdown_body_projects_its_mentions_by_diff() {
+        let db = Database::in_memory();
+        write_decl(
+            &db,
+            book(),
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[file:src/a.rs]]"}),
+            )],
+        )
+        .await;
+        assert_eq!(
+            edges(&db, B1).await,
+            vec![(A_RS.to_string(), "file_mention".to_string(), None)]
+        );
+        let mut rx = db.subscribe_changes();
+        write_decl(
+            &db,
+            book(),
+            vec![row(
+                json!({"id": "b1", "title": "t2", "body": "see [[file:src/a.rs]]"}),
+            )],
+        )
+        .await;
+        while let Ok(changed) = rx.try_recv() {
+            assert!(
+                !changed.contains("page_ref"),
+                "an unchanged body rewrote its edges"
+            );
+        }
+    }
+
+    /// A pinned body's file refs are pinned to the primary stream's latest
+    /// snapshot when new and keep their pin through a prose edit; a uri
+    /// column with an edge type is an edge too.
+    #[tokio::test]
+    async fn a_pinned_body_pins_new_refs_and_keeps_old_pins() {
+        let db = Database::in_memory();
+        let first = snapshot(&db).await;
+        write_decl(
+            &db,
+            pinned_book(),
+            vec![row(json!({"id": "b1", "title": "t", "body": "see [[file:src/a.rs]]", "about": "oxplow:shelf/book?id=b0&store=s"}))],
+        )
+        .await;
+        let second = snapshot(&db).await;
+        write_decl(
+            &db,
+            pinned_book(),
+            vec![row(json!({"id": "b1", "title": "t", "body": "now see [[file:src/a.rs]] and [[file:src/b.rs]]", "about": "oxplow:shelf/book?id=b0&store=s"}))],
+        )
+        .await;
+        assert_eq!(
+            edges(&db, B1).await,
+            vec![
+                (A_RS.to_string(), "file_pin".to_string(), Some(first)),
+                (B_RS.to_string(), "file_pin".to_string(), Some(second)),
+                (
+                    "oxplow:shelf/book?id=b0&store=s".to_string(),
+                    "book.about".to_string(),
+                    None
+                ),
+            ]
+        );
+    }
+
+    /// A row's stated refs are its edges in place of its parsed body.
+    #[tokio::test]
+    async fn stated_refs_replace_the_parsed_body() {
+        let db = Database::in_memory();
+        write_decl(
+            &db,
+            book(),
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[file:src/a.rs]]", "refs": [B_RS]}),
+            )],
+        )
+        .await;
+        assert_eq!(
+            edges(&db, B1).await,
+            vec![(B_RS.to_string(), "file_mention".to_string(), None)]
+        );
     }
 }
