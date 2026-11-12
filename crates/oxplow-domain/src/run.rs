@@ -248,6 +248,9 @@ pub struct RunContext {
     /// session running a command for a person (`assistant:ast3`). Its
     /// audit rows say so (`command_audit.via`).
     via: Option<String>,
+    /// An undo replaying an inverse the bus recorded: what its children
+    /// write was authorized when the run it undoes was composed.
+    replaying: bool,
 }
 
 impl RunContext {
@@ -257,6 +260,7 @@ impl RunContext {
             parent: None,
             contribution,
             composed_by: None,
+            replaying: false,
             anchors: actor.anchors(),
             actor,
             subject: Vec::new(),
@@ -507,7 +511,20 @@ impl RunContext {
             host_generation: self.host_generation.clone(),
             decided,
             via: self.via.clone(),
+            replaying: self.replaying,
         }
+    }
+
+    /// This run replays an inverse the bus recorded (an undo): its
+    /// children are trusted as the run they undo was.
+    pub fn replaying_inverse(mut self) -> Self {
+        self.replaying = true;
+        self
+    }
+
+    /// Whether this run is an undo's replay of a recorded inverse.
+    pub fn is_replaying_inverse(&self) -> bool {
+        self.replaying
     }
 
     pub fn run(&self) -> &RunId {

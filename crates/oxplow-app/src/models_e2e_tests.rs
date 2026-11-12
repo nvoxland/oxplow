@@ -111,6 +111,69 @@ async fn a_script_sets_its_own_field_on_a_stores_item() {
     );
 }
 
+/// A script's `set_fields` write is undone with its run: the field goes back
+/// to what it was (a value, then none).
+#[tokio::test(flavor = "multi_thread")]
+async fn undoing_a_scripts_field_write_restores_the_field() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(root, ".oxplow/extensions/shelf/extension.yaml", OWNER);
+    write(root, ".oxplow/extensions/shelves/extension.yaml", STORE);
+    write(
+        root,
+        ".oxplow/extensions/shelves/books.star",
+        "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}]}\n",
+    );
+    write(root, ".oxplow/extensions/scorer/extension.yaml", SCORER);
+    write(
+        root,
+        ".oxplow/extensions/scorer/handlers/score.star",
+        "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.model.set_fields\", \"input\": {\"model\": \"shelf/book\", \"uri\": x[\"input\"][\"uri\"], \"values\": {\"score\": x[\"input\"][\"score\"]}}}], \"result\": {}}\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    let run = |name: &'static str, input: serde_json::Value| {
+        fx.svc.commands.run(&Actor::Human, name, input, false)
+    };
+    run(
+        crate::collector_runner::SYNC,
+        json!({ "collector": "shelves/books" }),
+    )
+    .await
+    .unwrap();
+    let fields = || async {
+        let text: String = fx
+            .svc
+            .db
+            .read(|tx| {
+                tx.query_row("SELECT fields FROM v_shelf_book", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        serde_json::from_str::<serde_json::Value>(&text).unwrap()
+    };
+    let first = run("scorer.book.score", json!({ "uri": DUNE, "score": 9 }))
+        .await
+        .unwrap();
+    let second = run("scorer.book.score", json!({ "uri": DUNE, "score": 4 }))
+        .await
+        .unwrap();
+    assert_eq!(fields().await, json!({ "scorer": { "score": 4 } }));
+    fx.svc
+        .commands
+        .undo(&Actor::Human, second.audit_id.unwrap(), true)
+        .await
+        .unwrap();
+    assert_eq!(fields().await, json!({ "scorer": { "score": 9 } }));
+    fx.svc
+        .commands
+        .undo(&Actor::Human, first.audit_id.unwrap(), true)
+        .await
+        .unwrap();
+    assert_eq!(fields().await, json!({}));
+}
+
 /// A collector that only fills a shared model needs no entities; one with
 /// nowhere to write (no entities, no facts, no fill) is refused at its line.
 #[tokio::test(flavor = "multi_thread")]

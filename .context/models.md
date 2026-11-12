@@ -527,7 +527,11 @@ Every open model keeps per-item values beyond its columns.
     `oxplow.model.set_fields { model, uri, values }` from a command
     (both checked against its `fields:` declaration, into its own
     namespace; a null value removes the field). It logs the change event
-    with `cause: fields`.
+    with `cause: fields`. The command is undoable: it records the values it
+    replaced (null where none) as its inverse, `set_fields` again with
+    `extension` naming the composer. Only an undo's replay may run it that
+    way (`RunContext::is_replaying_inverse`, set by `CommandBus::undo`), so
+    a command composing only `set_fields` calls undoes with its run.
   - A store's `snapshot` restates its own fields only. It never removes
     another namespace's values on an item that is still there. Values go
     with the item (as a tombstone, "Removal").
