@@ -401,27 +401,45 @@ impl CommandUi {
     /// The input a command at an action point runs with, from the point's
     /// `context`: its `input` with each whole `{{context.<key>}}` string
     /// replaced by that key's value (an object entry whose key the context
-    /// lacks is left out), else the whole context.
-    pub fn point_input(&self, context: &serde_json::Map<String, Value>) -> Value {
-        fn bind(v: &Value, ctx: &serde_json::Map<String, Value>) -> Option<Value> {
+    /// lacks is left out), else the whole context. At a point with an
+    /// `item`, `{{uri}}` is the item's URI and `{{uri.<param>}}` one of its
+    /// params (`{{uri.id}}`), as an item command's are.
+    pub fn point_input(
+        &self,
+        context: &serde_json::Map<String, Value>,
+        item: Option<&crate::uri::OxplowUri>,
+    ) -> Value {
+        fn bind(
+            v: &Value,
+            ctx: &serde_json::Map<String, Value>,
+            item: Option<&crate::uri::OxplowUri>,
+        ) -> Option<Value> {
             match v {
                 Value::String(s) => match crate::template::whole_placeholder(s) {
                     Some(p) if p.scope == "context" => ctx.get(&p.name).cloned(),
+                    Some(p) if p.scope == "uri" => {
+                        let item = item?;
+                        if p.name.is_empty() {
+                            Some(Value::String(item.to_string()))
+                        } else {
+                            item.params().get(&p.name).map(|v| Value::String(v.clone()))
+                        }
+                    }
                     _ => Some(v.clone()),
                 },
                 Value::Array(items) => Some(Value::Array(
-                    items.iter().filter_map(|i| bind(i, ctx)).collect(),
+                    items.iter().filter_map(|i| bind(i, ctx, item)).collect(),
                 )),
                 Value::Object(map) => Some(Value::Object(
                     map.iter()
-                        .filter_map(|(k, x)| Some((k.clone(), bind(x, ctx)?)))
+                        .filter_map(|(k, x)| Some((k.clone(), bind(x, ctx, item)?)))
                         .collect(),
                 )),
                 other => Some(other.clone()),
             }
         }
         match &self.input {
-            Some(template) => bind(template, context).unwrap_or(Value::Null),
+            Some(template) => bind(template, context, item).unwrap_or(Value::Null),
             None => Value::Object(context.clone()),
         }
     }
@@ -568,10 +586,13 @@ impl CommandUi {
                     ),
                 );
             }
-            if p.scope == "uri" && self.about.is_none() {
+            if p.scope == "uri" && self.about.is_none() && self.at.is_none() {
                 return bad(
                     "input",
-                    format!("`{{{{{key}}}}}` binds the URI it is about: give it an `about`"),
+                    format!(
+                        "`{{{{{key}}}}}` binds the URI it is about: give it an `about` (or an `at` \
+                         of a point with an `item`)"
+                    ),
                 );
             }
         }
@@ -1509,11 +1530,32 @@ mod tests {
         );
         let ctx = json!({ "thread_id": 3 });
         assert_eq!(
-            u.point_input(ctx.as_object().unwrap()),
+            u.point_input(ctx.as_object().unwrap(), None),
             json!({ "thread": 3, "k": 1 })
         );
         let plain = ui(json!({ "label": "N", "at": "oxplow/task.new" }));
-        assert_eq!(plain.point_input(ctx.as_object().unwrap()), ctx);
+        assert_eq!(plain.point_input(ctx.as_object().unwrap(), None), ctx);
+    }
+
+    /// At a point with an item, `{{uri}}` and `{{uri.<param>}}` bind the
+    /// item's URI and one of its params; without an item they leave the
+    /// key out.
+    #[test]
+    fn a_point_commands_input_binds_its_items_uri() {
+        let u = ui(
+            json!({ "label": "M", "at": "oxplow/task.move", "input": { "id": "{{uri.id}}", "whole": "{{uri}}", "stage": "{{context.stage}}" } }),
+        );
+        assert_eq!(u.problem(), None);
+        let ctx = json!({ "stage": "done" });
+        let item = crate::uri::OxplowUri::parse("oxplow:oxplow/task?id=tsk7&store=oxtask").unwrap();
+        assert_eq!(
+            u.point_input(ctx.as_object().unwrap(), Some(&item)),
+            json!({ "id": "tsk7", "whole": item.to_string(), "stage": "done" })
+        );
+        assert_eq!(
+            u.point_input(ctx.as_object().unwrap(), None),
+            json!({ "stage": "done" })
+        );
     }
 
     /// `open_after` is bound from the run's result by the same tokenizer;

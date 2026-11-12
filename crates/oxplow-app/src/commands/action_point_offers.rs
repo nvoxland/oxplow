@@ -155,7 +155,7 @@ pub fn point_offer(
             input: s
                 .ui
                 .as_ref()
-                .map(|ui| ui.point_input(&context))
+                .map(|ui| ui.point_input(&context, item.as_ref()))
                 .unwrap_or_else(|| Value::Object(context.clone())),
         })
         .collect();

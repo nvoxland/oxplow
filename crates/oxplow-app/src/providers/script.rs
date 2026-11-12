@@ -361,11 +361,11 @@ mod tests {
 
     use crate::test_fixtures::ThreadFixture;
 
-    /// The example's manifest and tracker (`examples/extensions/note-tracker`).
-    const MANIFEST: &str =
-        include_str!("../../../../examples/extensions/note-tracker/extension.yaml");
-    const NOTES: &str =
-        include_str!("../../../../examples/extensions/note-tracker/trackers/notes.star");
+    /// A script task tracker's manifest and script (`testdata/`): the
+    /// capability's script implementation, kept as test data since the
+    /// shipped `note-tracker` example is a store of the task model now.
+    const MANIFEST: &str = include_str!("testdata/script-task-tracker/extension.yaml");
+    const NOTES: &str = include_str!("testdata/script-task-tracker/trackers/notes.star");
 
     /// The note tracker, its script `script`, in the project's extensions,
     /// activated and chosen as the task tracker, as a person's setting does.
