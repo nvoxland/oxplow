@@ -1,9 +1,0 @@
-# Chosen as the task tracker, the script is one: a task the interface files
-# is a note in its first stage, and naming a bucket moves it to that
-# bucket's stage.
-given:
-  - { command: oxplow.capability.choose, input: { capability: task_tracker, provider: notes } }
-  - { command: oxplow.task.create, input: { title: Buy milk }, bind: note }
-  - { command: oxplow.task.transition, input: { uri: $note.uri, to: in_progress } }
-when: { sql: "SELECT title, stage, state FROM v_task WHERE provider = 'notes'" }
-expect: { rows: [{ title: Buy milk, stage: working, state: in_progress }] }

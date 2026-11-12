@@ -3,6 +3,7 @@ name: triage
 description: Sorts the code's TODO comments into bugs, cleanup and features, next to how much open work there is.
 engine: ">=0.7"
 version: 0.1.0
+requires: [oxplow-bundled]
 intent:
   purpose: >-
     Shows what the TODO comments in the code are asking for. Each TODO is

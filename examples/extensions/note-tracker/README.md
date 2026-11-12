@@ -1,30 +1,19 @@
 # note-tracker
 
-A task tracker written as a script. `trackers/notes.star` defines one
-Starlark function per task tracker verb (`create`, `update`,
-`transition`), and `extension.yaml` declares it as an implementation of
-the `task_tracker` capability:
+A task store over markdown notes in `notes/` of the project.
 
-```yaml
-implementations:
-  - capability: task_tracker
-    id: notes
-    entry: trackers/notes.star   # a script, not a built-in
-    needs: [sql.read]            # the scopes it calls
-    stages: [...]                # its workflow, as a provider declares it
-```
+- Fills the shared task model `oxplow/task_record` (bundled's) for the store `notes`.
+- `fills:` declares the store's own workflow: `jotted` (todo), `working`
+  (in progress), `settled` (done), and how its ids look (`note-…`).
+- One collector, triggers `start` and `{files: "notes/*.md"}`. A note is
+  `# Title`, an optional `stage: working` line and the body. Start states a
+  snapshot; a file change upserts, a removed file deletes.
+- The collector only reads (`files.list`, `files.read`) and returns the
+  `models` output. The host applies it.
+- `note.new` joins the `oxplow/task.new` point and writes a note by
+  composing `oxplow.extension_files.write`.
 
-Choose it in Settings → Capabilities (or `oxplow.capability.choose {
-capability: task_tracker, provider: notes }`). The task commands then call
-its functions through the same dispatch they use for oxplow's own tracker
-and for a provider's program.
+It replaces the old script `task_tracker` implementation: a task store is a
+collector that fills the model, not a set of verbs.
 
-Each function gets one dict — `input` (the verb's input), `config` (the
-entry's `config:`), `id` (`notes`) and `key` (the call's idempotency key)
-— and answers `{ result, events?, inverse? }`. The tracker keeps nothing
-of its own: each answer records the note's whole row as a
-`task.recorded@3` event, and a later verb reads the row back from
-`v_task`.
-
-`oxplow extension test` runs its fixture and the task tracker conformance
-suite against it.
+`oxplow extension test` runs its fixtures.

@@ -1,0 +1,13 @@
+# The store's command joins the New Task point; it writes a note file, and the
+# task is in the model as soon as the command returns. A note is found by
+# search like any task.
+requires: [oxplow-bundled]
+when: { command: note_tracker.note.new, input: { title: Buy oat milk, body: Two litres. } }
+expect: { ok: true, result: { path: notes/note-buy-oat-milk.md } }
+steps:
+  - when: { sql: "SELECT id, title, stage, store FROM v_oxplow_task_record" }
+    expect: { rows: [{ id: note-buy-oat-milk, title: Buy oat milk, stage: jotted, store: notes }] }
+  - when: { sql: "SELECT title FROM v_oxplow_search_task WHERE body LIKE '%litres%'" }
+    expect: { rows: [{ title: Buy oat milk }] }
+  - when: { action_point: oxplow/task.new, context: {} }
+    expect: { draws: button, commands: [note_tracker.note.new] }
