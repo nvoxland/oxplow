@@ -246,7 +246,7 @@ pub struct CommandUi {
     /// The ref kind it acts on (`work_item`, `effort`): offered on that
     /// ref's page and rows. `None`: it needs no ref, and search offers it.
     #[serde(default)]
-    pub about: Option<String>,
+    pub about: Option<About>,
     /// A column of `about`'s dataset row (the dataset its resource
     /// resolves through) that must be truthy — not null, 0, `""` or false —
     /// for the command to be offered on a ref of that kind: the same rule
@@ -256,6 +256,14 @@ pub struct CommandUi {
     /// extensions load. Absent, every ref of the kind is offered it.
     #[serde(default)]
     pub about_when: Option<String>,
+    /// The named action point it joins (`<namespace>/<name>`, declared
+    /// by an extension's `action_points:`): the point's page places it,
+    /// and it runs with the point's context as its input. Excludes
+    /// `about` (an item command). Its `input` binds the context's keys
+    /// (`{ parent: "{{context.parent}}" }`, a key the page left out stays
+    /// unset); without one the input is the whole context.
+    #[serde(default)]
+    pub at: Option<String>,
     /// The input it runs with. A string that is exactly `{{stream}}`,
     /// `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
     /// a binding there's nothing for makes it unavailable there.
@@ -294,6 +302,82 @@ pub struct CommandUi {
     pub when: Option<String>,
 }
 
+/// `ui.about`: the resource kind (the short form, a string) or the object
+/// form `{ resource, accepts? }` that also filters the items.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(untagged)]
+pub enum About {
+    Kind(String),
+    Item(AboutItem),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AboutItem {
+    pub resource: String,
+    #[serde(default)]
+    pub accepts: Option<ItemAccepts>,
+}
+
+impl About {
+    /// The resource kind, in either form.
+    pub fn resource(&self) -> &str {
+        match self {
+            Self::Kind(k) => k,
+            Self::Item(i) => &i.resource,
+        }
+    }
+
+    /// The store filter, when the object form gives one.
+    pub fn accepts(&self) -> Option<&ItemAccepts> {
+        match self {
+            Self::Kind(_) => None,
+            Self::Item(i) => i.accepts.as_ref(),
+        }
+    }
+}
+
+/// A `ui.about` command's filter on the item it is offered on.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemAccepts {
+    /// The store ids of the item URI's `store` param it is offered on:
+    /// one id or a list; each is an exact id, or a renderer's `accepts`
+    /// rule (`present`, `absent`, an anchored id pattern).
+    #[serde(default)]
+    pub store: Option<StoreFilter>,
+}
+
+/// One store id or a list of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
+#[serde(untagged)]
+pub enum StoreFilter {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl StoreFilter {
+    /// The rules, as a list.
+    pub fn rules(&self) -> Vec<&str> {
+        match self {
+            Self::One(s) => vec![s.as_str()],
+            Self::Many(v) => v.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+/// Whether `id` is an action point's id: `<namespace>/<name>`, the name
+/// dotted lowercase words (`oxplow/task.new`).
+pub fn is_action_point_id(id: &str) -> bool {
+    let word = |w: &str| {
+        let mut c = w.chars();
+        c.next().is_some_and(|c| c.is_ascii_lowercase())
+            && c.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    id.split_once('/')
+        .is_some_and(|(ns, name)| word(ns) && name.split('.').all(word))
+}
+
 /// What a command's `ui.input` binds from where it runs: the stream and
 /// thread on screen (their bare ids), and the URI it is about (and that
 /// URI's key).
@@ -309,6 +393,34 @@ pub const WINDOW_FORMS: &[&str] = &["new-thread"];
 pub const MENU_BARS: &[&str] = &["file", "edit"];
 
 impl CommandUi {
+    /// The input a command at an action point runs with, from the point's
+    /// `context`: its `input` with each whole `{{context.<key>}}` string
+    /// replaced by that key's value (an object entry whose key the context
+    /// lacks is left out), else the whole context.
+    pub fn point_input(&self, context: &serde_json::Map<String, Value>) -> Value {
+        fn bind(v: &Value, ctx: &serde_json::Map<String, Value>) -> Option<Value> {
+            match v {
+                Value::String(s) => match crate::template::whole_placeholder(s) {
+                    Some(p) if p.scope == "context" => ctx.get(&p.name).cloned(),
+                    _ => Some(v.clone()),
+                },
+                Value::Array(items) => Some(Value::Array(
+                    items.iter().filter_map(|i| bind(i, ctx)).collect(),
+                )),
+                Value::Object(map) => Some(Value::Object(
+                    map.iter()
+                        .filter_map(|(k, x)| Some((k.clone(), bind(x, ctx)?)))
+                        .collect(),
+                )),
+                other => Some(other.clone()),
+            }
+        }
+        match &self.input {
+            Some(template) => bind(template, context).unwrap_or(Value::Null),
+            None => Value::Object(context.clone()),
+        }
+    }
+
     /// What's wrong with it, as `(field, message)` — what a window would
     /// otherwise meet only by its not working.
     pub fn problem(&self) -> Option<(String, String)> {
@@ -317,7 +429,8 @@ impl CommandUi {
         if self.label.trim().is_empty() {
             return bad("label", "a `ui.label` says what a person reads".into());
         }
-        if let Some(kind) = &self.about {
+        if let Some(about) = &self.about {
+            let kind = about.resource();
             if kind.parse::<crate::uri::ResourceName>().is_err() {
                 return bad(
                     "about",
@@ -345,6 +458,35 @@ impl CommandUi {
                         "`{column}` isn't a column name: name one column of the dataset that is \
                          truthy where the command is offered (no `!`, no expression)"
                     ),
+                );
+            }
+        }
+        if let Some(about) = &self.about {
+            if about
+                .accepts()
+                .and_then(|a| a.store.as_ref())
+                .is_some_and(|s| s.rules().is_empty())
+            {
+                return bad(
+                    "about/accepts/store",
+                    "`store` names at least one store id".into(),
+                );
+            }
+        }
+        if let Some(point) = &self.at {
+            if !is_action_point_id(point) {
+                return bad(
+                    "at",
+                    format!(
+                        "`{point}` isn't an action point (`<extension>/<name>`, as `oxplow/task.new`)"
+                    ),
+                );
+            }
+            if self.about.is_some() {
+                return bad(
+                    "at",
+                    "a command joins an action point (`at`) or is about an item (`about`), not both: drop `about`"
+                        .into(),
                 );
             }
         }
@@ -382,6 +524,15 @@ impl CommandUi {
                     "input",
                     format!("`{s}`: a binding is the whole string (`\"{{{{{key}}}}}\"`)"),
                 );
+            }
+            if p.scope == "context" && !p.name.is_empty() {
+                if self.at.is_none() {
+                    return bad(
+                        "input",
+                        format!("`{{{{{key}}}}}` binds an action point's context: give it an `at`"),
+                    );
+                }
+                continue;
             }
             if !UI_INPUT_BINDINGS.contains(&key.as_str()) {
                 return bad(
@@ -1268,6 +1419,80 @@ mod tests {
             assert_eq!(f, field, "{bad}");
             assert!(message.contains(says), "{bad}: {message}");
         }
+    }
+
+    /// `ui.at` joins an action point (its input binds `{{context.<key>}}`)
+    /// and `ui.about` takes the object form with a store filter; each is
+    /// checked where it is declared.
+    #[test]
+    fn at_and_about_accepts_are_checked_where_declared() {
+        for good in [
+            json!({ "label": "New Task", "at": "oxplow/task.new" }),
+            json!({ "label": "New Task", "at": "oxplow/task.new", "input": { "parent": "{{context.parent}}", "n": 1 } }),
+            json!({ "label": "New Task", "at": "oxplow/task.new", "form": "oxplow:oxplow/page?page=new-task" }),
+            json!({ "label": "Fix", "about": { "resource": "oxplow/task" } }),
+            json!({ "label": "Fix", "about": { "resource": "oxplow/task", "accepts": { "store": "oxtask" } } }),
+            json!({ "label": "Fix", "about": { "resource": "oxplow/task", "accepts": { "store": ["a", "b"] } } }),
+        ] {
+            assert_eq!(ui(good.clone()).problem(), None, "{good}");
+        }
+        for (bad, field, says) in [
+            (
+                json!({ "label": "X", "at": "task.new" }),
+                "/ui/at",
+                "action point",
+            ),
+            (
+                json!({ "label": "X", "at": "oxplow/Task New" }),
+                "/ui/at",
+                "action point",
+            ),
+            (
+                json!({ "label": "X", "at": "oxplow/task.new", "about": "oxplow/task" }),
+                "/ui/at",
+                "`about`",
+            ),
+            (
+                json!({ "label": "X", "input": { "p": "{{context.parent}}" } }),
+                "/ui/input",
+                "`at`",
+            ),
+            (
+                json!({ "label": "X", "at": "oxplow/task.new", "input": { "p": "{{uri}}" } }),
+                "/ui/input",
+                "`about`",
+            ),
+            (
+                json!({ "label": "X", "about": { "resource": "oxplow/task", "accepts": { "store": [] } } }),
+                "/ui/about/accepts/store",
+                "at least one",
+            ),
+            (
+                json!({ "label": "X", "about": { "resource": "Task" } }),
+                "/ui/about",
+                "isn't a resource",
+            ),
+        ] {
+            let (f, message) = ui(bad.clone()).problem().expect("refused");
+            assert_eq!(f, field, "{bad}");
+            assert!(message.contains(says), "{bad}: {message}");
+        }
+    }
+
+    /// A point command's input binds the context's keys; a key the page
+    /// left out stays unset.
+    #[test]
+    fn a_point_commands_input_binds_the_context() {
+        let u = ui(
+            json!({ "label": "N", "at": "oxplow/task.new", "input": { "parent": "{{context.parent}}", "thread": "{{context.thread_id}}", "k": 1 } }),
+        );
+        let ctx = json!({ "thread_id": 3 });
+        assert_eq!(
+            u.point_input(ctx.as_object().unwrap()),
+            json!({ "thread": 3, "k": 1 })
+        );
+        let plain = ui(json!({ "label": "N", "at": "oxplow/task.new" }));
+        assert_eq!(plain.point_input(ctx.as_object().unwrap()), ctx);
     }
 
     /// `open_after` is bound from the run's result by the same tokenizer;

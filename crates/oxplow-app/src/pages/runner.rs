@@ -129,6 +129,18 @@ pub struct RunNode {
     /// A `replaceable:` node another extension's page stands in for: that
     /// extension, its run the `embed`.
     pub replaced_by: Option<String>,
+    /// An action point node's point and its context, bound.
+    pub action_point: Option<ActionPointRun>,
+}
+
+/// An action point a run placed: the point and the context the page gave
+/// it (`context:` bound from the page's params and loaders).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionPointRun {
+    pub point: String,
+    #[specta(type = std::collections::BTreeMap<String, oxplow_domain::Json>)]
+    pub context: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 /// A loader that takes this long is named in the log: which part of a page
@@ -309,6 +321,7 @@ impl<'a> PageRunner<'a> {
                     embed: None,
                     error: None,
                     replaced_by: None,
+                    action_point: None,
                 };
                 return Ok(PageRun {
                     page,
@@ -775,6 +788,7 @@ impl<'a> PageRunner<'a> {
                 embed: None,
                 error: None,
                 replaced_by: None,
+                action_point: None,
             };
             match &node.kind {
                 NodeKind::Stack { children } | NodeKind::Grid { children } => {
@@ -798,6 +812,7 @@ impl<'a> PageRunner<'a> {
                             embed: None,
                             error: None,
                             replaced_by: None,
+                            action_point: None,
                         };
                         for mount in self.mounts(&page.id, name) {
                             let r = self
@@ -878,6 +893,12 @@ impl<'a> PageRunner<'a> {
                         }
                     }
                 },
+                NodeKind::ActionPoint { point, context } => {
+                    out.action_point = Some(ActionPointRun {
+                        point: point.clone(),
+                        context: bind_args(context, params, loaders),
+                    });
+                }
                 NodeKind::Viz { .. } | NodeKind::Markdown { .. } | NodeKind::Component { .. } => {}
             }
             out
@@ -1106,6 +1127,7 @@ impl PageRunner<'_> {
             embed: None,
             error: None,
             replaced_by: None,
+            action_point: None,
         };
         match self.find(id) {
             Err(e) => out.error = Some(e.to_string()),
@@ -1387,8 +1409,10 @@ fn on_demand_loaders(page: &Page, shown: &[String]) -> Vec<String> {
     use super::refs::{refs, split, RefSite};
     use super::schema::SeeAlsoDecl;
     fn embed_columns(node: &Node, out: &mut Vec<String>) {
-        if let NodeKind::Embed { params, .. } = &node.kind {
-            for arg in params.values() {
+        if let NodeKind::Embed { params: args, .. } | NodeKind::ActionPoint { context: args, .. } =
+            &node.kind
+        {
+            for arg in args.values() {
                 if let ArgSource::Column { from } = arg {
                     out.push(from.split('.').next().unwrap_or(from).to_string());
                 }

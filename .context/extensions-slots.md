@@ -340,3 +340,61 @@ decision an acceptance took unchecked (any makes it forced). Retention
 keeps envelopes and an extension's payloads go after 30 days at most, so
 a verdict a decorator shows must not live in its payload. It shows; it
 never acts.
+
+## Action points and the store filter
+
+Part of the shared-models work. Built: named action points, the object
+form of `ui.about` with its store filter, and the SDK fixture kinds that
+test them. **Not built:** the per-point default setting (Settings, then a
+split button) and "a store's item commands default to their own stores"
+(it needs `fills:`, which does not exist yet).
+
+**A named action point** is a place where several extensions offer the
+same kind of action ("New Task") and none of them owns the page.
+
+- **Declared by its owner**, in the manifest (`extensions/action_points.rs`):
+  `action_points: [{ name: task.new, label: New Task, doc?, context: {
+  parent?: uri, thread_id?: int } }]`. Its id is `<namespace>/<name>`
+  (`oxplow/task.new`). A context key is typed `string`, `uri`, `int` or
+  `bool`; `name?` marks it optional.
+- **Placed by a page:** a view node `{ action_point: oxplow/task.new,
+  context: { parent: { param: uri } } }`. Its `context` values are bound
+  the way an embed's `params` are (`{ param: x }`, `{ from: loader.col }`
+  or a literal): the run resolves them (`RunNode.action_point`). The node
+  is refused in an inline page.
+- **Joined by a command:** `ui: { at: oxplow/task.new, input: { parent:
+  "{{context.parent}}" } }`. `{{context.<key>}}` is a whole-string binding
+  of the point's context; a key the page left out stays unset. Without an
+  `input` the command gets the whole context. `at` excludes `about`. A
+  command that needs more than the context sets `ui.form`: the form page
+  opens with the context's keys as its params (the path item commands use
+  with `?uri=`).
+- **Drawn by the shell** (`components/ActionPoint.tsx`; the rule
+  `drawsFor`, stated in Rust by `Draws::for_count`): nothing with no
+  contributor, a button with one, a menu (the context menu under a button
+  labelled with the point's label) with several. Menu order: by command id,
+  which starts with the owning extension's namespace.
+- **One list, two kinds of key.** Item commands (`ui.about`) and point
+  commands (`ui.at`) are the same list in the command registry
+  (`commands/ref_commands.rs`: `OfferKey::Item(kind)` or
+  `OfferKey::Point(id)`, `offered`). Search lists neither.
+- **Asked through** IPC `action_point_commands { point, context }`
+  (`commands/action_point_offers.rs`): `{ point, label, draws, commands: [{
+  id, label, input }] }`, each `input` already bound. A context key the
+  point does not declare or of the wrong type is an error; a missing
+  required key offers nothing. Item commands are asked through
+  `ref_commands { uri }` as before. Neither is an MCP tool: an agent lists
+  what it may run with `list_commands`.
+
+**The store filter.** `ui.about` is either the resource kind (a string) or
+`{ resource, accepts?: { store: <id> | [ids] } }`. An item URI's `store`
+param is matched like a renderer's `accepts` rule: an id equal to the
+entry, or `present`, `absent` or an anchored id pattern
+(`pages::renderers::takes`); a list is any-of. The command shows only on
+items whose store passes; an item with no `store` param passes only a
+filter that says `absent`.
+
+**Tests.** A fixture `when: { action_point: <id | name>, context? }` has
+`expect: { draws: none | button | menu, commands?: [ids] }`; `when: {
+item_commands: <uri> }` has `expect: { commands: [ids] }`
+(`oxplow-agent-text/.../references/testing.md`).

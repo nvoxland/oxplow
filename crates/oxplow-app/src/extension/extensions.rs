@@ -16,6 +16,7 @@ use oxplow_db::SqlCell;
 use oxplow_domain::DomainError;
 use serde::{Deserialize, Serialize};
 
+pub mod action_points;
 pub mod ai_profiles;
 pub(crate) mod candidates;
 pub mod config;
@@ -429,6 +430,8 @@ pub struct Extension {
     pub jobs: Vec<jobs::JobDecl>,
     /// Named dataset needs this extension declares.
     pub ai_profiles: Vec<ai_profiles::AiProfileDecl>,
+    /// Action points it declares (`action_points:`; valid ones).
+    pub action_points: Vec<action_points::ActionPointDecl>,
     /// Its `version:` (semver), when it declares one; required to share.
     pub version: Option<String>,
     /// Its contributions as descriptors (`extensions::descriptors`): the
@@ -1718,6 +1721,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         commands: Vec::new(),
         jobs: Vec::new(),
         ai_profiles: Vec::new(),
+        action_points: Vec::new(),
         version: None,
         contributions: Vec::new(),
         configuration: None,
@@ -2067,6 +2071,12 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         if let Some(v) = &m.ai_profiles {
             let (profiles, errors) = ai_profiles::parse_ai_profiles(v, man, &manifest);
             ext.ai_profiles = profiles;
+            ext.errors.extend(errors);
+        }
+        if let Some(v) = &m.action_points {
+            let (points, errors) =
+                action_points::parse_action_points(v, man, &manifest, &ext.namespace);
+            ext.action_points = points;
             ext.errors.extend(errors);
         }
         if let Some(v) = &m.custom_components {
@@ -3423,6 +3433,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.commands.clear();
     ext.jobs.clear();
     ext.ai_profiles.clear();
+    ext.action_points.clear();
     ext.contributions.clear();
 }
 

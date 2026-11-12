@@ -869,6 +869,7 @@ fn kind_name(kind: &NodeKind) -> &'static str {
         NodeKind::Slot { .. } => "slot",
         NodeKind::Markdown { .. } => "markdown",
         NodeKind::Component { .. } => "component",
+        NodeKind::ActionPoint { .. } => "action_point",
     }
 }
 
@@ -902,6 +903,7 @@ fn definition_rows(
         NodeKind::Embed { page, .. } => Some(format!("`{page}`")),
         NodeKind::Slot { name } => Some(format!("`{}.{name}`", run.page.id)),
         NodeKind::Component { component, .. } => Some(format!("`{component}`")),
+        NodeKind::ActionPoint { point, .. } => Some(format!("`{point}`")),
         _ => None,
     };
     let (columns, settings) = match &def.kind {

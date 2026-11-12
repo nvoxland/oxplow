@@ -224,6 +224,11 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::ai_profiles::AiProfileFile>>")]
     pub ai_profiles: Option<Value>,
+    /// Named places where several extensions offer the same kind of
+    /// action; a command joins one with `ui: { at: <id> }`.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::action_points::ActionPointFile>>")]
+    pub action_points: Option<Value>,
     /// Left-nav panels, each showing its pages compact.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PanelFile>>")]

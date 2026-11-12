@@ -45,6 +45,7 @@ pub mod provider_instances;
 pub mod reasoning;
 mod record;
 pub use record::tracking_failed_audit;
+pub mod action_point_offers;
 pub mod ref_commands;
 pub mod review;
 pub mod snapshot;

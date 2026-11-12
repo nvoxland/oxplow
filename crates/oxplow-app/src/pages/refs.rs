@@ -311,7 +311,10 @@ pub fn for_each_ref(page: &mut Page, mut f: impl FnMut(&RefSite, &mut String)) {
                 }
                 actions(&id, &mut config.actions, f);
             }
-            NodeKind::Slot { .. } | NodeKind::Markdown { .. } | NodeKind::Component { .. } => {}
+            NodeKind::Slot { .. }
+            | NodeKind::Markdown { .. }
+            | NodeKind::Component { .. }
+            | NodeKind::ActionPoint { .. } => {}
         }
     }
     params(&mut page.params, &mut f);

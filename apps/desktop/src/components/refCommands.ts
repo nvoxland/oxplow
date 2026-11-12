@@ -21,6 +21,12 @@ export function setRefOfferHost(next: { ctx: OfferContext; deps: OfferDeps } | n
   host = next;
 }
 
+/** The window's offer host, for what draws offers outside a menu (an
+ *  action point); `null` until `App` says how. */
+export function refOfferHost(): { ctx: OfferContext; deps: OfferDeps } | null {
+  return host;
+}
+
 /** `ref`'s commands as of now: the daemon says which apply to it, the
  *  person's command listing says how each is run. Asked as a menu opens,
  *  so a ref's state (a session closed a moment ago) is current. */

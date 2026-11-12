@@ -208,6 +208,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::generated::get_command,
             commands::generated::list_person_commands,
             commands::generated::ref_commands,
+            commands::generated::action_point_commands,
             commands::generated::register_client_host,
             commands::generated::unregister_client_host,
             commands::generated::answer_client_call,

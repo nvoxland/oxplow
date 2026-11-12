@@ -345,6 +345,10 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
   name: the embed's `params`, else the host's param of that name, else
   that column of the host loaders' first rows, in order. Its page actions
   run on the embedded run (`pages/actions.rs`, `locate`).
+- `action_point: <id>` (+ `context: { key: { param: x } | { from:
+  loader.col } | literal }`) places a named action point: the shell draws
+  nothing, a button or a menu of the commands that joined it
+  (extensions-slots.md "Action points and the store filter").
 - `slot` and `component`: below. `markdown: "text"`: static text.
 - `viz` (+ `from: <loader>`, a role block, `columns`, row `actions`,
   `empty`): a `VizConfig` with no query of its own. A viz that reads no

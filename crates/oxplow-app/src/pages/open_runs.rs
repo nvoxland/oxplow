@@ -700,6 +700,7 @@ mod diff_tests {
             embed: None,
             error: None,
             replaced_by: None,
+            action_point: None,
         };
         PageRun {
             inactive: None,
@@ -751,6 +752,7 @@ mod diff_tests {
             embed: Some(Box::new(fixture("child"))),
             error: None,
             replaced_by: None,
+            action_point: None,
         });
         let mut new = old.clone();
         new.rail
@@ -778,6 +780,7 @@ mod diff_tests {
             embed: Some(Box::new(fixture("child"))),
             error: None,
             replaced_by: None,
+            action_point: None,
         });
         let mut new = old.clone();
         new.rail.as_mut().unwrap().embed = None;

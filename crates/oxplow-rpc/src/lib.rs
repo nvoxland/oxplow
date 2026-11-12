@@ -217,6 +217,7 @@ macro_rules! oxplow_command_table {
                 get_command => $crate::commands::bus::get_command { name: String } -> ::oxplow_domain::CommandSpec,
                 list_person_commands => $crate::commands::bus::list_person_commands {} -> Vec<::oxplow_domain::CommandSpec>,
                 ref_commands => $crate::commands::bus::ref_commands { uri: String } -> Vec<String>,
+                action_point_commands => $crate::commands::bus::action_point_commands { point: String, context: ::oxplow_domain::Json } -> ::oxplow_app::commands::action_point_offers::PointOffer,
                 register_client_host => $crate::commands::bus::register_client_host { client: String, scopes: Vec<String> } -> (),
                 unregister_client_host => $crate::commands::bus::unregister_client_host { client: String } -> (),
                 answer_client_call => $crate::commands::bus::answer_client_call { client: String, id: String, result: Option<::oxplow_domain::Json>, error: Option<String> } -> (),

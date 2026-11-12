@@ -591,6 +591,89 @@ pub(super) async fn advisory_example(
     }
 }
 
+/// `when: { action_point: <id>, context? }`: what the named action point
+/// offers for the context among the commands on this oxplow, as the shell
+/// would draw it — `expect: { draws: none | button | menu, commands?: [ids] }`.
+/// A bare name is this extension's own point.
+pub(super) async fn action_point_example(
+    host: &Host,
+    ext: &Extension,
+    ex: &Example<'_>,
+    point: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    let id = if point.contains('/') {
+        point.to_string()
+    } else {
+        format!("{}/{point}", ext.namespace)
+    };
+    let context = ex.when.get("context").cloned().unwrap_or_else(|| json!({}));
+    host.current().await;
+    let offer = match oxplow_app::commands::action_point_offers::action_point_offer(
+        &host.svc, &id, &context,
+    )
+    .await
+    {
+        Ok(offer) => offer,
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e).fix("the example's `when`"))
+        }
+    };
+    let got = json!({
+        "draws": offer.draws,
+        "commands": offer.commands.iter().map(|c| c.id.clone()).collect::<Vec<_>>(),
+    });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("action point `{id}` offered {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("the commands' `ui.at`, or the example's `context` and `expect`")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
+/// `when: { item_commands: <uri> }`: the commands a person is offered
+/// about the item `uri` (their `ui.about`, its store filter and
+/// `about_when` applied) — `expect: { commands: [ids] }`.
+pub(super) async fn item_commands_example(
+    host: &Host,
+    ex: &Example<'_>,
+    uri: &str,
+    report: &mut TestReport,
+) {
+    let shown = ex.shown;
+    host.current().await;
+    let ids = match oxplow_app::commands::ref_commands::ref_commands(&host.svc, uri).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            return report
+                .errors
+                .push(error(shown, None, "example.failed", e).fix("the example's `when`"))
+        }
+    };
+    let got = json!({ "commands": ids });
+    if let Some((path, want, at)) = compare(&ex.expect, &got) {
+        report.errors.push(
+            error(
+                shown,
+                None,
+                "fixture.compare",
+                format!("`{uri}` was offered {at} at `{path}`, the example expects {want}"),
+            )
+            .fix("the commands' `ui.about` and `accepts`, or the example's `expect`")
+            .mismatch(path, want, at),
+        );
+    }
+}
+
 /// Read the published datasets with `when: { sql, params? }` as a page's
 /// loader would — a dataset, a decorator's labels, a metric's grid — through
 /// an inline page of one `sql` loader: `expect: { rows, columns? }`,
