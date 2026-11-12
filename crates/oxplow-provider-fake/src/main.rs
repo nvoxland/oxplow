@@ -1,8 +1,8 @@
-//! `oxplow-provider-fake`: the fake task tracker provider on stdio. Hooks
+//! `oxplow-provider-fake`: the fake external provider on stdio. Hooks
 //! come from `OXPLOW_FAKE_HOOKS` (see the library), and the instance it
 //! is from `OXPLOW_PROVIDER_ID` (`fake` when the host doesn't say), the
-//! capability it implements from `OXPLOW_FAKE_CAPABILITY` (`task_tracker`,
-//! the default, `agent_harness`, `snapshots`, `knowledge` or `filesystem`; a
+//! capability it implements from `OXPLOW_FAKE_CAPABILITY` (`snapshots`,
+//! the default, `agent_harness`, `knowledge` or `filesystem`; a
 //! snapshots provider's feature `contents` and a filesystem provider's
 //! `writable` from `OXPLOW_FAKE_FEATURES`, its files from `OXPLOW_FAKE_FILES`). It exits when serving
 //! ends — at once, since the runtime would otherwise wait on its blocked

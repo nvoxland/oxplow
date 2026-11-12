@@ -1509,7 +1509,6 @@ impl Services {
             },
             &commands,
             vec![
-                Arc::new(providers::tasks::TaskTrackerHost::default()),
                 Arc::new(providers::agent_harness::HarnessHost(harnesses.clone())),
                 Arc::new(providers::knowledge::KnowledgeHost {
                     stores: knowledge.clone(),

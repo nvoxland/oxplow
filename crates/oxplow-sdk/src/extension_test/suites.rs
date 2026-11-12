@@ -89,16 +89,10 @@ pub(super) async fn test_provider(
     let client = match ReferenceClient::start(&launch).await {
         Ok(c) => c,
         Err(e) => {
-            let fix = match &spec.adapter {
-                Some(_) => format!(
-                    "make `{}` an MCP server whose tools are the pinned ones",
-                    spec.program().0
-                ),
-                None => format!(
-                    "make `{}` an executable that speaks the provider protocol",
-                    spec.program().0
-                ),
-            };
+            let fix = format!(
+                "make `{}` an executable that speaks the provider protocol",
+                spec.program().0
+            );
             report
                 .errors
                 .push(error("extension.yaml", None, "suite.launch", format!("{e}")).fix(fix));
@@ -731,12 +725,6 @@ async fn capability_suite(
     env: &host::HostEnv,
 ) -> Result<oxplow_app::conformance::SuiteRun, String> {
     Ok(match capability {
-        // A task tracker provider only fills the task model: core calls
-        // none of its verbs, so there is nothing for a suite to exercise.
-        providers::tasks::TaskTrackerHost::CAPABILITY => oxplow_app::conformance::SuiteRun {
-            findings: Vec::new(),
-            left: Vec::new(),
-        },
         providers::agent_harness::HarnessHost::CAPABILITY => {
             // Its launch looks for programs where the kit's
             // environment would: its PATH, then the install dirs.

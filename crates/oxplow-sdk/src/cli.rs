@@ -18,10 +18,10 @@ usage:
       scaffold .oxplow/extensions/<name>/ with a v2 manifest, an intent
       (--origin = the request/thread ref that asked for it), one example
       and its fixture, and the kind's starter: a page with a row action; a
-      provider of --capability (task_tracker, the default,
-      agent_harness, snapshots, knowledge or filesystem)
+      provider of --capability (snapshots, the default,
+      agent_harness, knowledge or filesystem)
       with its contract's declarations, a stub program and test config; a
-      script implementation of --capability (all but task_tracker): its
+      script implementation of --capability: its
       `implementations:` entry and one Starlark function per verb (stubs to
       write); a Starlark
       collector with a dataset and a page over it; a code metric (--language,
@@ -973,11 +973,6 @@ mod tests {
             serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
         )
         .unwrap();
-        // Its stages, in the scaffold's buckets.
-        let manifest = oxplow_provider_fake::with_its_stages(
-            &std::fs::read_to_string(ext.join("extension.yaml")).unwrap(),
-        );
-        std::fs::write(ext.join("extension.yaml"), manifest).unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
         assert!(
@@ -1006,7 +1001,7 @@ mod tests {
             "{out}"
         );
         assert!(
-            out.contains("ran check, provider fake, discover, read tasks, task_tracker suite"),
+            out.contains("ran check, provider fake, snapshots suite"),
             "{out}"
         );
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
@@ -1015,32 +1010,30 @@ mod tests {
         // Its own questions: the skill file must name what they reach.
         std::fs::write(
             ext.join("questions.yaml"),
-            "- question: File a ticket.\n  skill: README.md\n  reaches: { command: fake.create, input: { title: Hello } }\n",
+            "- question: Mark a tree.\n  skill: README.md\n  reaches: { command: fake.mark, input: { stream: s1, worktree: ., trigger: manual, parent: null } }\n",
         )
         .unwrap();
-        std::fs::write(ext.join("README.md"), "# Fake tracker\n").unwrap();
+        std::fs::write(ext.join("README.md"), "# Fake snapshots\n").unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 1, "{out}");
-        assert!(out.contains(".oxplow/extensions/fake/questions.yaml: question 1 (\"File a ticket.\"): skill `README.md` never names `fake.create`"), "{out}");
+        assert!(out.contains(".oxplow/extensions/fake/questions.yaml: question 1 (\"Mark a tree.\"): skill `README.md` never names `fake.mark`"), "{out}");
         std::fs::write(
             ext.join("README.md"),
-            "# Fake tracker\n\nFile one with `fake.create`.\n",
+            "# Fake snapshots\n\nMark one with `fake.mark`.\n",
         )
         .unwrap();
         let (code, out, _) = test_on_a_fresh_service(dir.path(), &["test", "fake", "--root", root]);
         assert_eq!(code, 0, "{out}");
         assert!(
-            out.contains(
-                "ran check, provider fake, discover, read tasks, task_tracker suite, questions"
-            ),
+            out.contains("ran check, provider fake, snapshots suite, questions"),
             "{out}"
         );
 
         // A changed golden is a diff at its line.
         let golden = ext.join("fixtures/transcripts/fake.jsonl");
         let text = std::fs::read_to_string(&golden).unwrap();
-        let line = text.lines().position(|l| l.contains("\"First\"")).unwrap() + 1;
-        std::fs::write(&golden, text.replace("\"First\"", "\"Second\"")).unwrap();
+        let line = text.lines().position(|l| l.contains("\"str1\"")).unwrap() + 1;
+        std::fs::write(&golden, text.replace("\"str1\"", "\"str2\"")).unwrap();
         let (code, out, _) =
             test_on_a_fresh_service(dir.path(), &["test", "fake", "--json", "--root", root]);
         assert_eq!(code, 1, "{out}");
@@ -1055,11 +1048,11 @@ mod tests {
             e["message"]
                 .as_str()
                 .unwrap()
-                .starts_with("the transcript differs at `/message/params/input/title`"),
+                .starts_with("the transcript differs at `/message/params/input/stream`"),
             "{e}"
         );
         assert_eq!(
-            e["mismatch"]["pointer"], "/message/params/input/title",
+            e["mismatch"]["pointer"], "/message/params/input/stream",
             "{e}"
         );
         assert_eq!(report["root"], ".oxplow/extensions/fake", "{report}");

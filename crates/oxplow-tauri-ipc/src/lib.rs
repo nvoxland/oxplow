@@ -90,8 +90,6 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .typ::<OxplowEvent>()
         .typ::<oxplow_domain::vcs::OpOutcome>()
-        // A provider's task flags (`v_capability_provider.features`).
-        .typ::<oxplow_domain::tasks::TaskTrackerFeatures>()
         // `oxplow.collector.sync`'s result, read through `run_command`.
         .typ::<oxplow_app::collector_runner::CollectorRunReport>()
         // One viz node's config with its loader's rows: what the desktop's

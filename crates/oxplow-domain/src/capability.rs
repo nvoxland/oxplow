@@ -41,7 +41,7 @@ impl ChosenBy {
 /// One capability, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilitySpec {
-    /// `task_tracker`, `knowledge`, …: the key under `activeProviders`.
+    /// `snapshots`, `knowledge`, …: the key under `activeProviders`.
     pub id: &'static str,
     /// How a person names it.
     pub title: &'static str,
@@ -140,25 +140,6 @@ impl ProviderContract {
             .collect()
     }
 }
-
-/// A task tracker's: an external provider program that fills the task
-/// model. It has no verbs core calls (its own system takes the writes); it
-/// records its items as `task.recorded@3`, which the read adapter turns
-/// into rows of `oxplow/task_record`, and owns
-/// `oxplow:oxplow/task?id=…&provider=<instance>`.
-pub const TASK_TRACKER: ProviderContract = ProviderContract {
-    verbs: &[],
-    dispatch: None,
-    events: &[("task.recorded", 3)],
-    records: Some(Record {
-        entity: "task",
-        event: ("task.recorded", 3),
-        key: "item",
-    }),
-    resource: Some("oxplow/task"),
-    items: true,
-    data: None,
-};
 
 /// A snapshot implementation's (`.context/providers.md` "A snapshots
 /// provider"): core asks it to mark a stream's worktree and what changed
@@ -354,22 +335,6 @@ pub const NONE: &str = "none";
 /// Every capability core declares.
 pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
-        id: "task_tracker",
-        title: "Task tracker",
-        choosable: false,
-        optional: false,
-        many: true,
-        default: NONE,
-        features: &[
-            "hierarchy",
-            "comments",
-            "links",
-            "delete",
-            "idempotent_writes",
-        ],
-        provider: Some(&TASK_TRACKER),
-    },
-    CapabilitySpec {
         id: "snapshots",
         title: "Snapshots",
         choosable: true,
@@ -522,7 +487,7 @@ pub fn model_need(need: &str) -> Option<&str> {
 }
 
 /// Check one declared need: a scope (`sql.read`,
-/// [`crate::scope`]), a capability (`task_tracker`), one of its
+/// [`crate::scope`]), a capability (`snapshots`), one of its
 /// features (`snapshots.contents`), as core declares them, or a shared
 /// model with a live store (`model:oxplow/task_record`).
 pub fn check_need(need: &str) -> Result<(), String> {
@@ -622,10 +587,7 @@ mod tests {
                 c.id
             );
         }
-        assert_eq!(
-            choosable().map(|c| c.id).collect::<Vec<_>>(),
-            ["task_tracker", "snapshots"]
-        );
+        assert_eq!(choosable().map(|c| c.id).collect::<Vec<_>>(), ["snapshots"]);
         assert_eq!(spec("knowledge").map(|c| c.optional), Some(false));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
             assert!(
@@ -651,9 +613,8 @@ mod tests {
         assert!(spec("nope").is_none());
     }
 
-    /// What a process may implement is what core gives a contract: the
-    /// task tracker, snapshots, knowledge, an agent harness
-    /// and a filesystem. The rest are core's or built-ins'.
+    /// What a process may implement is what core gives a contract:
+    /// snapshots, knowledge, an agent harness and a filesystem. The rest are core's or built-ins'.
     #[test]
     fn a_process_implements_only_a_capability_with_a_contract() {
         assert_eq!(
@@ -662,13 +623,7 @@ mod tests {
                 .filter(|c| c.provider.is_some())
                 .map(|c| c.id)
                 .collect::<Vec<_>>(),
-            [
-                "task_tracker",
-                "snapshots",
-                "knowledge",
-                "agent_harness",
-                "filesystem"
-            ]
+            ["snapshots", "knowledge", "agent_harness", "filesystem"]
         );
         assert!(contract("vcs").is_none() && contract("nope").is_none());
     }
@@ -677,18 +632,6 @@ mod tests {
     /// feature is one the capability declares.
     #[test]
     fn a_contracts_verbs_follow_the_declared_features() {
-        let work = contract("task_tracker").unwrap();
-        assert_eq!(
-            work.required(&serde_json::json!({})),
-            ["create", "update", "transition"]
-        );
-        assert_eq!(
-            work.required(&serde_json::json!({"links": true, "comments": false})),
-            ["create", "update", "transition", "link", "unlink"]
-        );
-        // Who works on an item and its place in their queue are core's.
-        assert!(work.verb("assign").is_none() && work.verb("reorder").is_none());
-        assert!(work.verb("estimate").is_none());
         let knowledge = contract("knowledge").unwrap();
         assert_eq!(
             knowledge.required(&serde_json::json!({})),
@@ -726,20 +669,6 @@ mod tests {
         }
     }
 
-    /// A task tracker owns its items' refs and streams them as records.
-    #[test]
-    fn a_contract_says_what_its_provider_owns_and_emits() {
-        let work = contract("task_tracker").unwrap();
-        assert_eq!(work.events, [("task.recorded", 3)]);
-        assert_eq!(work.resource, Some("oxplow/task"));
-        assert_eq!(
-            work.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("task", ("task.recorded", 3), "item"))
-        );
-        assert_eq!(work.dispatch, Some("oxplow.task"));
-        assert!(work.items);
-    }
-
     #[test]
     fn an_instance_id_is_lowercase_snake_case_and_not_oxplows() {
         assert_eq!(instance_id_problem("linear_2"), None);
@@ -750,12 +679,12 @@ mod tests {
 
     #[test]
     fn a_need_names_a_capability_or_one_of_its_features() {
-        assert!(check_need("task_tracker").is_ok());
+        assert!(check_need("snapshots").is_ok());
         assert!(check_need("snapshots.contents").is_ok());
         assert!(check_need("teleport")
             .unwrap_err()
             .contains("isn't a capability"));
-        assert!(check_need("task_tracker.flying")
+        assert!(check_need("snapshots.flying")
             .unwrap_err()
             .contains("isn't a feature"));
     }

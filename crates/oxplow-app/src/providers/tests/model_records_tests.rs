@@ -8,32 +8,13 @@ use serde_json::Value;
 use super::*;
 use crate::providers::model_records::ModelRecords;
 
-const TASK_STORE: &str = "fake";
+/// The store the fake provider's pages are recorded under: its instance id.
+const STORE: &str = "fake";
 
-/// The fixture with the fake tracker running; it declares one field of
-/// its own, `points`.
+/// The fixture with the fake knowledge provider running.
 #[cfg(unix)]
-async fn running_tracker() -> ThreadFixture {
-    let fx = services_with_thread().await;
-    let project = fx.svc.layout.project_dir.clone();
-    write_extension(&project, "");
-    let manifest = project.join(".oxplow/extensions/tracker/extension.yaml");
-    let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(
-        &manifest,
-        text.replacen(
-            "    stages: [",
-            "    fields: [{ name: points, title: Points, kind: number }]\n    stages: [",
-            1,
-        ),
-    )
-    .unwrap();
-    let ext = extension(&project);
-    deploy(&fx, &ext).await;
-    crate::test_fixtures::activate(&fx.svc).await;
-    enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
-    first_read(&fx).await;
-    fx
+async fn running_knowledge() -> ThreadFixture {
+    enabled_knowledge().await.0
 }
 
 async fn settled(fx: &ThreadFixture) {
@@ -81,120 +62,12 @@ async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn a_recorded_task_lands_in_the_record_model_and_a_deleted_one_goes() {
-    let fx = running_tracker().await;
-    let item = invoke_on(
-        &fx,
-        INSTANCE,
-        "create",
-        json!({ "title": "theirs", "body": "see it", "stage": "doing", "native": { "points": 3 } }),
-    )
-    .await
-    .unwrap()
-    .result["uri"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    invoke_on(
-        &fx,
-        INSTANCE,
-        "link",
-        json!({ "uri": item, "target": "oxplow:oxplow/file?path=src/lib.rs", "link_type": "relates_to" }),
-    )
-    .await
-    .unwrap();
-    invoke_on(
-        &fx,
-        INSTANCE,
-        "comment",
-        json!({ "uri": item, "body": "first!" }),
-    )
-    .await
-    .unwrap();
-    sync_fake(&fx).await;
-    settled(&fx).await;
-
-    let task = rows(
-        &fx,
-        &format!(
-            "SELECT id, title, body, state, stage, stage_title, fields FROM v_oxplow_task_record WHERE store = '{TASK_STORE}'"
-        ),
-    )
-    .await;
-    assert_eq!(task.len(), 1, "{task:?}");
-    let t = &task[0];
-    assert_eq!(t[1], json!("theirs"));
-    assert_eq!(t[2], json!("see it"));
-    assert_eq!(t[3], json!("in_progress"));
-    assert_eq!(t[4], json!("doing"));
-    assert_eq!(t[5], json!("Doing"));
-    assert!(t[6].to_string().contains("points"), "{}", t[6]);
-    let links = rows(
-        &fx,
-        &format!(
-            "SELECT \"to\", type FROM v_oxplow_task_record_links WHERE store = '{TASK_STORE}'"
-        ),
-    )
-    .await;
-    assert_eq!(
-        links,
-        vec![vec![
-            json!("oxplow:oxplow/file?path=src/lib.rs"),
-            json!("relates_to")
-        ]]
-    );
-    let comments = rows(
-        &fx,
-        &format!("SELECT body FROM v_oxplow_task_record_comments WHERE store = '{TASK_STORE}'"),
-    )
-    .await;
-    assert_eq!(comments, vec![vec![json!("first!")]]);
-
-    // A move restates the row; closing sets when.
-    invoke_on(
-        &fx,
-        INSTANCE,
-        "transition",
-        json!({ "uri": item, "to": "shipped" }),
-    )
-    .await
-    .unwrap();
-    sync_fake(&fx).await;
-    settled(&fx).await;
-    let moved = rows(
-        &fx,
-        &format!(
-            "SELECT state, closed_at IS NOT NULL FROM v_oxplow_task_record WHERE store = '{TASK_STORE}'"
-        ),
-    )
-    .await;
-    assert_eq!(moved, vec![vec![json!("done"), json!(1)]]);
-
-    // Its change event is logged.
-    let changed = logged(&fx, "oxplow.task_record.changed").await;
-    assert!(!changed.is_empty());
-
-    invoke_on(&fx, INSTANCE, "delete", json!({ "uri": item }))
-        .await
-        .unwrap();
-    sync_fake(&fx).await;
-    settled(&fx).await;
-    let gone = rows(
-        &fx,
-        &format!("SELECT id FROM v_oxplow_task_record WHERE store = '{TASK_STORE}'"),
-    )
-    .await;
-    assert!(gone.is_empty(), "{gone:?}");
-}
-
-#[cfg(unix)]
-#[tokio::test]
 async fn with_no_model_declared_the_adapter_does_nothing_and_fails_nothing() {
-    let fx = running_tracker().await;
+    let fx = running_knowledge().await;
     // Bundled off: no model is declared.
     fx.svc.models.swap(crate::models::ModelRegistry::default());
-    create_on(&fx, INSTANCE, "x").await.unwrap();
-    sync_fake(&fx).await;
+    page_on(&fx, INSTANCE, "x").await.unwrap();
+    sync_pages(&fx).await.unwrap();
     settled(&fx).await;
     let dead = rows(
         &fx,
@@ -205,7 +78,11 @@ async fn with_no_model_declared_the_adapter_does_nothing_and_fails_nothing() {
     )
     .await;
     assert_eq!(dead, vec![vec![json!(0)]]);
-    let held = rows(&fx, "SELECT id FROM v_oxplow_task_record").await;
+    let held = rows(
+        &fx,
+        &format!("SELECT id FROM v_oxplow_knowledge_record WHERE store = '{STORE}'"),
+    )
+    .await;
     assert!(held.is_empty(), "{held:?}");
 }
 
@@ -272,23 +149,20 @@ async fn a_recorded_page_lands_in_the_knowledge_record_model_with_its_refs_as_ed
 #[cfg(unix)]
 #[tokio::test]
 async fn a_record_for_a_store_an_extension_fills_writes_nothing() {
-    let fx = running_tracker().await;
+    let fx = running_knowledge().await;
     let mut registry = fx.svc.models.current().as_ref().clone();
     for fill in registry.fills.iter_mut().filter(|f| f.provider) {
         fill.provider = false;
     }
     fx.svc.models.swap(registry);
-    invoke_on(
-        &fx,
-        INSTANCE,
-        "create",
-        json!({ "title": "theirs", "stage": "doing" }),
-    )
-    .await
-    .unwrap();
-    sync_fake(&fx).await;
+    page_on(&fx, INSTANCE, "theirs").await.unwrap();
+    sync_pages(&fx).await.unwrap();
     settled(&fx).await;
-    let held = rows(&fx, "SELECT id FROM v_oxplow_task_record").await;
+    let held = rows(
+        &fx,
+        &format!("SELECT id FROM v_oxplow_knowledge_record WHERE store = '{STORE}'"),
+    )
+    .await;
     assert!(held.is_empty(), "{held:?}");
 }
 
@@ -297,42 +171,34 @@ async fn a_record_for_a_store_an_extension_fills_writes_nothing() {
 #[cfg(unix)]
 #[tokio::test]
 async fn records_made_while_there_was_no_fill_appear_when_the_fill_returns() {
-    let fx = running_tracker().await;
+    let fx = running_knowledge().await;
     let full = fx.svc.models.current().as_ref().clone();
     // A publication with bundled off: no fill, so its markers go.
     reconcile(&fx, &crate::models::ModelRegistry::default()).await;
     fx.svc.models.swap(crate::models::ModelRegistry::default());
-    let kept = invoke_on(
-        &fx,
-        INSTANCE,
-        "create",
-        json!({ "title": "kept", "stage": "doing" }),
-    )
-    .await
-    .unwrap()
-    .result["uri"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let gone = create_on(&fx, INSTANCE, "gone").await.unwrap();
-    invoke_on(&fx, INSTANCE, "delete", json!({ "uri": gone }))
+    page_on(&fx, INSTANCE, "kept").await.unwrap();
+    let gone = page_on(&fx, INSTANCE, "gone").await.unwrap();
+    invoke_on(&fx, INSTANCE, "delete_page", json!({ "id": gone }))
         .await
         .unwrap();
-    sync_fake(&fx).await;
+    sync_pages(&fx).await.unwrap();
     settled(&fx).await;
     // Bundled back on: the next publication states what the log holds.
     fx.svc.models.swap(full.clone());
-    assert!(rows(&fx, "SELECT id FROM v_oxplow_task_record")
-        .await
-        .is_empty());
-    reconcile(&fx, &full).await;
-    let tasks = rows(
+    assert!(rows(
         &fx,
-        &format!("SELECT title FROM v_oxplow_task_record WHERE store = '{TASK_STORE}'"),
+        &format!("SELECT id FROM v_oxplow_knowledge_record WHERE store = '{STORE}'")
+    )
+    .await
+    .is_empty());
+    reconcile(&fx, &full).await;
+    let pages = rows(
+        &fx,
+        &format!("SELECT title FROM v_oxplow_knowledge_record WHERE store = '{STORE}'"),
     )
     .await;
-    assert_eq!(tasks, vec![vec![json!("kept")]], "{kept:?}");
-    let changes = logged(&fx, "oxplow.task_record.changed").await;
+    assert_eq!(pages, vec![vec![json!("kept")]]);
+    let changes = logged(&fx, "oxplow.knowledge_record.changed").await;
     let first = changes.len();
     assert!(
         changes.iter().any(|c| c["cause"] == json!("reconcile")),
@@ -340,7 +206,10 @@ async fn records_made_while_there_was_no_fill_appear_when_the_fill_returns() {
     );
     // A second publication states nothing more.
     reconcile(&fx, &full).await;
-    assert_eq!(logged(&fx, "oxplow.task_record.changed").await.len(), first);
+    assert_eq!(
+        logged(&fx, "oxplow.knowledge_record.changed").await.len(),
+        first
+    );
     let marker = rows(
         &fx,
         "SELECT asset FROM asset_state WHERE asset LIKE 'model_reconcile:%'",

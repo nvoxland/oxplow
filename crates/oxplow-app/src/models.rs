@@ -132,7 +132,6 @@ impl ModelRegistry {
 /// model's rows by `providers::model_records`.
 pub fn provider_model(capability: &str) -> Option<&'static str> {
     match capability {
-        "task_tracker" => Some("oxplow/task_record"),
         "knowledge" => Some("oxplow/knowledge_record"),
         _ => None,
     }

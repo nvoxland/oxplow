@@ -32,19 +32,5 @@ An extension with an **external provider** (`providers:` — a program that
    The extension declares `process.run` (and its `network`
    hosts and `secrets`), which a person approves when it is deployed, and
    enables the provider in Settings → Integrations; you can't do either.
-   A task tracker is a **backend for the project's own work**,
-   with the visibility the person wants (a local tracker like beads), not
-   a team's tracker: when it's the active one, every new item goes there.
    `$OXPLOW_BIN extension new provider` scaffolds a complete one (manifest,
    `provider.json` and a fake program): change its shape.
-   An existing **MCP server** can be the provider instead of a program:
-   `adapter: { mcp: { command: [bin/server] }, mapping: mcp/x.star,
-   tools: mcp/tools.json }` in place of `entry` — oxplow's adapter runs
-   the server, `check` refuses it unless its tools equal the pinned
-   `tools.json`, and `transform(x)` in the mapping turns each verb into a
-   tool call (`x.phase` `invoke`) and the tool's output into the answer
-   (`invoked`; `read` / `records` for a collector). A server that
-   already runs elsewhere is `mcp: { url: https://…, auth: NAME }`
-   instead of `command`: https only (http on loopback), its host in
-   `network`, and `auth` one of the provider's `credentials` (sent as the
-   bearer token).

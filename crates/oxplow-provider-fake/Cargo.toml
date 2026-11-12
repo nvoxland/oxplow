@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "A scripted task tracker provider for oxplow's provider host and conformance tests"
+description = "A scripted external provider for oxplow's provider host and conformance tests"
 
 [[bin]]
 name = "oxplow-provider-fake"

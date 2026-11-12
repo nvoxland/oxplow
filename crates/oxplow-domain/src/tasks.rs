@@ -1,8 +1,5 @@
-//! What an external task provider's program declares and states
-//! (`.context/tasks.md`): its stages and their buckets, its fields, what
-//! it supports, and the items it records. A provider only fills the task
-//! model (`oxplow/task_record`, bundled's): its items reach everything else
-//! as rows of the model; its own writes are its program's.
+//! What a store of the shared task model declares of its workflow
+//! (`.context/tasks.md`): its stages and their buckets, and its fields.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -205,105 +202,6 @@ pub fn fields_problem(fields: &[FieldDecl]) -> Option<String> {
     })
 }
 
-/// What a provider supports beyond create, update and transition.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, specta::Type,
-)]
-pub struct TaskTrackerFeatures {
-    /// Items nest (a parent ref).
-    pub hierarchy: bool,
-    pub comments: bool,
-    pub links: bool,
-    /// Items can be deleted (`oxplow.task.delete`).
-    #[serde(default)]
-    pub delete: bool,
-    /// A write sent twice with one idempotency key is done once, the
-    /// second answered as the first (the protocol's
-    /// `InvokeParams.idempotency_key`): the host may send a write again
-    /// when its reply was lost.
-    #[serde(default)]
-    pub idempotent_writes: bool,
-}
-
-/// One of an item's links, as its provider records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LinkRecord {
-    /// What it points at: another item (`oxplow:oxplow/task?id=<id>&provider=<provider>`), or
-    /// any ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`).
-    pub target: String,
-    /// The list's own type (oxplow: `blocks`, `discovered_from`,
-    /// `relates_to`, `duplicates`, `supersedes`, `replies_to`, `about`).
-    pub link_type: String,
-}
-
-/// One of an item's comments, as its provider records it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct CommentRecord {
-    /// The provider's own id for it, unique on the item.
-    pub id: String,
-    pub body: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub author: Option<String>,
-    /// RFC 3339; absent, when the host recorded it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<String>,
-}
-
-/// An item as its provider now has it — what `v_task` holds, and
-/// what a provider's `task.recorded` event carries. Who it's
-/// assigned to and its place in that queue are core's, never a
-/// provider's. `links` and `comments` are stated when the provider keeps them: absent, the
-/// host keeps what it has; present, it's the whole set.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskRecord {
-    /// `oxplow:oxplow/task?id=<id>&provider=<provider>`.
-    pub uri: String,
-    pub title: String,
-    #[serde(default)]
-    pub body: String,
-    /// Which of the list's declared stages it's in (its bucket is core's
-    /// lookup).
-    pub stage: String,
-    /// Provider-specific fields.
-    #[serde(default)]
-    pub native: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_uri: Option<String>,
-    /// Gone at the provider.
-    #[serde(default)]
-    pub deleted: bool,
-    /// Its links (from it to others), the whole set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub links: Option<Vec<LinkRecord>>,
-    /// Its comments, the whole set.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub comments: Option<Vec<CommentRecord>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum TaskTrackerError {
-    #[error("`{0}` isn't a task ref (task:<provider>:<id>)")]
-    NotARef(String),
-    #[error("no task tracker provider `{provider}`; registered: {}", registered.join(", "))]
-    UnknownProvider {
-        provider: String,
-        registered: Vec<String>,
-    },
-    #[error("{provider} tasks don't support {feature}")]
-    Unsupported { provider: String, feature: String },
-}
-
-/// The provider a task's URI names.
-pub fn provider_of(item_ref: &str) -> Result<String, TaskTrackerError> {
-    crate::uri::build::task_of_uri(item_ref)
-        .filter(|(p, id)| !p.is_empty() && !id.is_empty())
-        .map(|(p, _)| p)
-        .ok_or_else(|| TaskTrackerError::NotARef(item_ref.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,35 +283,5 @@ mod tests {
         assert!(bad.contains("ready, doing, in_review, shipped"), "{bad}");
         assert_eq!(bucket_of(&stages, "in_review"), Some(Bucket::InProgress));
         assert_eq!(bucket_of(&stages, "nope"), None);
-    }
-
-    #[test]
-    fn a_record_round_trips_under_its_wire_names() {
-        let record = TaskRecord {
-            uri: "oxplow:oxplow/task?id=W-1&provider=fake".into(),
-            title: "t".into(),
-            body: String::new(),
-            stage: "doing".into(),
-            native: serde_json::json!({ "points": 3 }),
-            parent_uri: None,
-            deleted: false,
-            links: None,
-            comments: None,
-        };
-        let json = serde_json::to_value(&record).unwrap();
-        assert_eq!(json["uri"], "oxplow:oxplow/task?id=W-1&provider=fake");
-        assert_eq!(json["stage"], "doing");
-        assert_eq!(serde_json::from_value::<TaskRecord>(json).unwrap(), record);
-    }
-
-    /// A provider that declares no `delete` reads as `false` (older
-    /// declarations have no such flag).
-    #[test]
-    fn features_default_delete_to_false() {
-        let f: TaskTrackerFeatures = serde_json::from_value(serde_json::json!({
-            "hierarchy": true, "comments": false, "links": false
-        }))
-        .unwrap();
-        assert!(!f.delete);
     }
 }

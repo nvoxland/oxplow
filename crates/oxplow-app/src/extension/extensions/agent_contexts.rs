@@ -8,7 +8,7 @@
 //! context:
 //!   - id: task-state
 //!     doc: What the thread works on now.
-//!     needs: [task_tracker]
+//!     needs: [snapshots]
 //!     query: SELECT 'In progress: ' || title AS text FROM ... WHERE thread_id = :thread_id
 //! ```
 //!
@@ -38,7 +38,7 @@ pub struct AgentContextDecl {
     /// What it tells the agent, for a person reading the manifest or the
     /// catalog.
     pub doc: String,
-    /// What it needs active (`task_tracker`); without it, it doesn't run.
+    /// What it needs active (`snapshots`); without it, it doesn't run.
     pub needs: Vec<String>,
     /// The extension's own setting that offers it (as a skill's `when:`);
     /// `None`: always.
@@ -155,13 +155,13 @@ mod tests {
     /// unknown need and an unknown key are errors at their lines.
     #[test]
     fn contexts_parse_and_report_their_problems() {
-        let text = "context:\n  - { id: state, doc: Now., needs: [task_tracker], query: SELECT 'x' AS text }\n  - { id: Bad Id, doc: D., query: SELECT 1 }\n  - { id: state, doc: Again., query: SELECT 1 }\n  - { id: nodoc, doc: ' ', query: SELECT 1 }\n  - { id: needy, doc: D., needs: ['no such thing!'], query: SELECT 1 }\n  - { id: extra, doc: D., query: SELECT 1, when: x }\n";
+        let text = "context:\n  - { id: state, doc: Now., needs: [snapshots], query: SELECT 'x' AS text }\n  - { id: Bad Id, doc: D., query: SELECT 1 }\n  - { id: state, doc: Again., query: SELECT 1 }\n  - { id: nodoc, doc: ' ', query: SELECT 1 }\n  - { id: needy, doc: D., needs: ['no such thing!'], query: SELECT 1 }\n  - { id: extra, doc: D., query: SELECT 1, when: x }\n";
         let (ok, errors) = parse(text);
         assert_eq!(
             ok.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
             vec!["state"]
         );
-        assert_eq!(ok[0].needs, vec!["task_tracker".to_string()]);
+        assert_eq!(ok[0].needs, vec!["snapshots".to_string()]);
         let codes: Vec<&str> = errors.iter().map(|e| e.code.as_str()).collect();
         assert_eq!(
             codes,

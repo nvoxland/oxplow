@@ -43,14 +43,13 @@ pub struct VocabularyService {
     recognizers: Recognize,
 }
 
-/// What text names through the capabilities in use: the active task
-/// tracker's ids (its id and `id_pattern`, when it declares one — how
-/// `tsk42` is read) and the enabled knowledge stores (how
-/// `[[<store>:<id>]]` is read).
+/// What text names through what is in use: the live task stores' ids (a
+/// store's `id_pattern`, how `tsk42` is read — from the model registry) and
+/// the enabled knowledge stores (how `[[<store>:<id>]]` is read).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recognizers {
-    /// `(store, pattern)` per task store whose ids text may name loosely,
-    /// the active tracker's first: the first match wins.
+    /// `(store, pattern)` per task store whose ids text may name loosely;
+    /// the first match wins.
     pub task_ids: Vec<(String, String)>,
     pub knowledge_stores: Vec<String>,
 }

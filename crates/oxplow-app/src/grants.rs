@@ -108,7 +108,7 @@ mod tests {
     /// A script's request is the scopes it needs, not the capabilities.
     #[test]
     fn a_scripts_request_is_its_scopes() {
-        let r = script_request(&["sql.read".into(), "task_tracker.comments".into()]);
+        let r = script_request(&["sql.read".into(), "snapshots".into()]);
         assert_eq!(r.scopes, ["sql.read".to_string()].into());
         assert!(r.program.is_none());
     }

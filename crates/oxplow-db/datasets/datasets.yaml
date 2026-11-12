@@ -1248,7 +1248,7 @@
     - { not_null: resource }
     - { unique: resource }
 - name: contribution_health
-  version: 6
+  version: 7
   description: "Each extension contribution's health on this machine: a provider instance, a collector or an effect, under one failure policy — three failures in a row disable it until a person runs `oxplow.contribution.enable`."
   fields:
     - { name: "uri", type: "TEXT", doc: "The contribution's URI (`effect:tracker/fake`): the same as its `v_contribution.uri`." }

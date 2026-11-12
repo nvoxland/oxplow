@@ -20702,6 +20702,81 @@
         }
       ],
       "key": []
+    },
+    "7": {
+      "columns": [
+        {
+          "name": "uri",
+          "type": "TEXT",
+          "doc": "The contribution's URI (`effect:tracker/fake`): the same as its `v_contribution.uri`."
+        },
+        {
+          "name": "namespace",
+          "type": "TEXT",
+          "doc": "The namespace it is named in (its extension's): a contribution keeps its health when it moves to another extension in the namespace."
+        },
+        {
+          "name": "contribution",
+          "type": "TEXT",
+          "doc": "The provider's, collector's or effect's id within it."
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "doc": "`provider`, `collector` or `effect`."
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "doc": "`ok`, `failing` or `disabled`."
+        },
+        {
+          "name": "reason",
+          "type": "TEXT",
+          "doc": "Why it's disabled."
+        },
+        {
+          "name": "consecutive_failures",
+          "type": "INTEGER",
+          "doc": "Failures since its last success."
+        },
+        {
+          "name": "last_ok_at",
+          "type": "TEXT",
+          "doc": "When it last succeeded (RFC 3339)."
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "doc": "Its last failure."
+        },
+        {
+          "name": "mean_ms",
+          "type": "REAL",
+          "doc": "A moving average of its successful runs or calls, in milliseconds."
+        },
+        {
+          "name": "next_due_at",
+          "type": "TEXT",
+          "doc": "When it should next run (a schedule's next slot), if it runs on one."
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "doc": "When this row last changed."
+        },
+        {
+          "name": "dead_letters",
+          "type": "",
+          "doc": "Events it couldn't handle and that wait for a person: dead letters of its consumer (its `uri`) or of events whose subject names it (its `uri`)."
+        },
+        {
+          "name": "fresh",
+          "type": "",
+          "doc": "1 unless a scheduled run is overdue (`next_due_at` has passed) or a collector's last run failed (`state` isn't `ok`): its data is then the last good run's, not current. (v3)"
+        }
+      ],
+      "key": []
     }
   },
   "contribution": {

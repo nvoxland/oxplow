@@ -107,7 +107,7 @@ fn mark() -> bool {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ChooseProviderInput {
-    /// The capability (`task_tracker`, `snapshots`, `knowledge`, …).
+    /// The capability (`snapshots`, `knowledge`, …).
     pub capability: String,
     /// The implementation to use; absent or blank: the default (the
     /// project's, for a personal choice).

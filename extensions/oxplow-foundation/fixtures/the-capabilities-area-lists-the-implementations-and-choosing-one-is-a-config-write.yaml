@@ -8,21 +8,21 @@ expect:
       rows:
         contains:
           # Every capability has its default row.
-          - { capability: task_tracker, provider: "", is_default: 1 }
-          - { capability: task_tracker, provider: none, can_choose: 1 }
+          - { capability: snapshots, provider: "", is_default: 1 }
+          - { capability: snapshots, provider: hashes, can_choose: 1 }
 steps:
   - press:
       action: use-project
       node: capabilities
-      row: { capability: task_tracker, provider: none, can_choose: 1, is_default: 0 }
+      row: { capability: snapshots, provider: hashes, can_choose: 1, is_default: 0 }
     expect: { ok: true }
-  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'task_tracker' AND active = 1" }
-    expect: { rows: [{ provider: none, chosen_by: project }] }
+  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'snapshots' AND active = 1" }
+    expect: { rows: [{ provider: hashes, chosen_by: project }] }
   # The default row resets it.
   - press:
       action: default-project
       node: capabilities
-      row: { capability: task_tracker, provider: "", can_choose: 0, is_default: 1 }
+      row: { capability: snapshots, provider: "", can_choose: 0, is_default: 1 }
     expect: { ok: true }
-  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'task_tracker' AND active = 1" }
-    expect: { rows: [{ provider: none, chosen_by: fallback }] }
+  - when: { sql: "SELECT provider, chosen_by FROM v_capability_provider WHERE capability = 'snapshots' AND active = 1" }
+    expect: { rows: [{ provider: oxplow, chosen_by: default }] }

@@ -26,15 +26,22 @@ pub(crate) fn fake_bin() -> PathBuf {
     bin
 }
 
-/// A private extension declaring the fake as its task tracker provider,
+/// A private extension declaring the fake as its snapshots provider,
 /// its entry a script running the fake with `hooks`.
 #[cfg(unix)]
 pub(crate) fn write_extension(project: &Path, hooks: &str) {
+    write_extension_as(project, hooks, "snapshots");
+}
+
+/// [`write_extension`] with the fake in `capability` mode (`snapshots`, or
+/// `knowledge` for the tests that need a collector to read).
+#[cfg(unix)]
+pub(crate) fn write_extension_as(project: &Path, hooks: &str, capability: &str) {
     let dir = project.join(".oxplow/extensions").join(EXT);
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     std::fs::write(
         dir.join("extension.yaml"),
-        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake tracker\n  examples: [{ name: a }]\ncommands:\n  - name: item.estimate\n    summary: Set a task's points.\n    provider: fake\n    op: estimate\n    ui: { label: \"Estimate in Fake…\", group: Tracker, about: oxplow/task, input: { uri: \"{{uri}}\", points: 3 } }\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: task_tracker\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n",
+        "manifest: 2\nname: tracker\nintent:\n  purpose: the fake provider\n  examples: [{ name: a }]\npermissions: [process.run]\nproviders:\n  - id: fake\n    capability: CAPABILITY\n    entry: bin/provider\n    declarations: provider.json\n".replace("CAPABILITY", capability),
     )
     .unwrap();
     let script = dir.join("bin/provider");
@@ -44,7 +51,7 @@ pub(crate) fn write_extension(project: &Path, hooks: &str) {
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nOXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
+            "#!/bin/sh\nOXPLOW_FAKE_CAPABILITY={capability} OXPLOW_FAKE_HOOKS='{hooks}' OXPLOW_FAKE_STATE=\"{}/fake-state-$OXPLOW_PROVIDER_ID.json\" exec '{}' \"$@\"\n",
             state.display(),
             fake_bin().display()
         ),
@@ -52,11 +59,9 @@ pub(crate) fn write_extension(project: &Path, hooks: &str) {
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    // `plain-writes` declares no `idempotent_writes`: what is approved.
-    let declared = if hooks.split(',').any(|h| h.trim() == "plain-writes") {
-        oxplow_provider_fake::plain_declarations()
-    } else {
-        oxplow_provider_fake::declarations()
+    let declared = match capability {
+        "knowledge" => oxplow_provider_fake::knowledge_declarations(),
+        _ => oxplow_provider_fake::declarations(),
     };
     std::fs::write(
         dir.join("provider.json"),

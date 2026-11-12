@@ -445,8 +445,7 @@ impl Instance {
             let name = c.name.as_str();
             if let Some(reference) = &c.secret_ref {
                 let current = || {
-                    self.spec.is_host_secret_bearer(c)
-                        && self.host_calls.authority_current()
+                    self.host_calls.authority_current()
                         && self
                             .deps
                             .catalog
@@ -1426,7 +1425,7 @@ impl PreparedProviderCapability {
 }
 
 pub trait CapabilityHost: Send + Sync {
-    /// The capability it hosts (`task_tracker`).
+    /// The capability it hosts (`snapshots`).
     fn capability(&self) -> &'static str;
     /// Whether `id` already names one of this capability's
     /// implementations: an instance can't take it.

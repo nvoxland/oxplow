@@ -2739,11 +2739,7 @@ fn needed_permissions(
     let lines = manifest_v2::ManifestLines::new(manifest);
     let line = |kind: &str, i: usize| lines.item(kind, i);
     for (i, p) in ext.providers.iter().enumerate() {
-        let runs = p.entry.is_some()
-            || matches!(
-                p.adapter.as_ref().map(|a| &a.mcp),
-                Some(crate::providers::spec::McpServer::Command { .. })
-            );
+        let runs = p.entry.is_some();
         let needed = Permissions {
             process: runs,
             network: p.network.clone(),
@@ -4854,7 +4850,7 @@ mod tests {
             ("effects:\n  - id: a\n    summary: S.\n    on: [task.state_changed]\n    entry: e.star\n  - id: b\n    bogus: 1\n", "effect"),
             ("collectors:\n  - id: a\n    runtime: starlark\n    entry: c.star\n  - id: b\n    bogus: 1\n", "collector"),
             ("skills:\n  - name: a\n    file: a.md\n  - name: b\n    bogus: 1\n", "skill"),
-            ("implementations:\n  - id: a\n    capability: task_tracker\n  - id: b\n    bogus: 1\n", "implementation"),
+            ("implementations:\n  - id: a\n    capability: snapshots\n  - id: b\n    bogus: 1\n", "implementation"),
         ] {
             let d = tempfile::tempdir().unwrap();
             let manifest = format!("manifest: 2\nname: x\nintent:\n  purpose: p\n{block}");
@@ -5715,7 +5711,7 @@ columns: [{ key: title }]
             "provider.json",
             &serde_json::to_string(&oxplow_provider_fake::declarations()).unwrap(),
         );
-        let body = "providers:\n  - id: tracker\n    capability: task_tracker\n    entry: bin/provider\n    declarations: provider.json\n    stages: [{ id: icebox, title: Icebox, bucket: backlog }, { id: ready, title: Ready, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: stuck, title: Stuck, bucket: blocked }, { id: shipped, title: Shipped, bucket: done }, { id: dropped, title: Dropped, bucket: canceled }]\n    network: [api.example.com]\n";
+        let body = "providers:\n  - id: tracker\n    capability: snapshots\n    entry: bin/provider\n    declarations: provider.json\n    network: [api.example.com]\n";
         let errors = permission_errors(
             dir.path(),
             &format!("manifest: 2\nname: acme\nintent:\n  purpose: x\n{body}"),

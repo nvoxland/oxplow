@@ -6,7 +6,7 @@
 //! same way; a call to one the command didn't declare is refused.
 //!
 //! Not to be confused with [`crate::capability`]: the swappable slots a
-//! project chooses an implementation of (`task_tracker`, `snapshots`). A
+//! project chooses an implementation of (`snapshots`). A
 //! command's `needs` may name both; each name is looked up in its own
 //! catalog.
 
@@ -597,6 +597,6 @@ mod tests {
             strongest_access(&needs(&["sql.read", "tabs.write"])),
             Some(Access::Read)
         );
-        assert_eq!(strongest_access(&needs(&["task_tracker"])), None);
+        assert_eq!(strongest_access(&needs(&["snapshots"])), None);
     }
 }

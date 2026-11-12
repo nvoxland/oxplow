@@ -164,7 +164,7 @@ pub struct CommandSpec {
     pub atomicity: Atomicity,
     pub access: Access,
     /// The scopes its handler calls (`sql.read`) and the capabilities, or
-    /// their features (`task_tracker.comments`), it needs active; unmet, it
+    /// their features (`snapshots.contents`), it needs active; unmet, it
     /// isn't offered and doesn't run (`.context/commands.md`).
     pub needs: Vec<String>,
     /// How a person meets it — label, group, where it's offered and how

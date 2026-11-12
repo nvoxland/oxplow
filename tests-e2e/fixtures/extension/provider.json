@@ -6,74 +6,48 @@
   },
   "capabilities": [
     {
-      "capability": "task_tracker",
+      "capability": "snapshots",
       "features": {
-        "hierarchy": true,
-        "comments": true,
-        "links": true,
-        "delete": true,
-        "idempotent_writes": true
+        "contents": false
       }
     }
   ],
   "commands": [
     {
-      "name": "create",
-      "summary": "Create a task.",
+      "name": "mark",
+      "summary": "Mark the worktree's state.",
       "input_schema": {
         "type": "object",
         "required": [
-          "title"
+          "stream",
+          "worktree",
+          "trigger"
         ],
         "additionalProperties": false,
         "properties": {
-          "title": {
+          "stream": {
             "type": "string"
           },
-          "body": {
+          "worktree": {
             "type": "string"
           },
-          "parent_uri": {
+          "trigger": {
             "type": "string"
           },
-          "stage": {
-            "type": "string",
-            "enum": [
-              "icebox",
-              "ready",
-              "doing",
-              "stuck",
-              "shipped",
-              "dropped"
+          "thread": {
+            "type": "string"
+          },
+          "turn": {
+            "type": "integer"
+          },
+          "budget_ms": {
+            "type": "integer"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
             ]
-          },
-          "native": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "points": {
-                "type": "integer"
-              }
-            }
-          },
-          "links": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "target",
-                "link_type"
-              ],
-              "additionalProperties": false,
-              "properties": {
-                "target": {
-                  "type": "string"
-                },
-                "link_type": {
-                  "type": "string"
-                }
-              }
-            }
           }
         }
       },
@@ -82,196 +56,28 @@
       "undoable": false
     },
     {
-      "name": "update",
-      "summary": "Edit a task's title, body, parent, stage or points.",
+      "name": "changed",
+      "summary": "What changed between two marked states.",
       "input_schema": {
         "type": "object",
         "required": [
-          "uri"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "body": {
-            "type": "string"
-          },
-          "parent_uri": {
-            "type": "string"
-          },
-          "stage": {
-            "type": "string",
-            "enum": [
-              "icebox",
-              "ready",
-              "doing",
-              "stuck",
-              "shipped",
-              "dropped"
-            ]
-          },
-          "native": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "points": {
-                "type": "integer"
-              }
-            }
-          }
-        }
-      },
-      "confirm": "never",
-      "access": "record",
-      "undoable": false
-    },
-    {
-      "name": "transition",
-      "summary": "Move a task to one of its stages.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "uri",
+          "stream",
+          "from",
           "to"
         ],
         "additionalProperties": false,
         "properties": {
-          "uri": {
+          "stream": {
             "type": "string"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "to": {
-            "type": "string",
-            "enum": [
-              "icebox",
-              "ready",
-              "doing",
-              "stuck",
-              "shipped",
-              "dropped"
-            ]
-          }
-        }
-      },
-      "confirm": "never",
-      "access": "record",
-      "undoable": true
-    },
-    {
-      "name": "link",
-      "summary": "Link a task to another, or to any ref it is about.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "uri",
-          "target",
-          "link_type"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
             "type": "string"
-          },
-          "target": {
-            "type": "string"
-          },
-          "link_type": {
-            "type": "string"
-          }
-        }
-      },
-      "confirm": "never",
-      "access": "record",
-      "undoable": false
-    },
-    {
-      "name": "unlink",
-      "summary": "Remove a task's link.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "uri",
-          "target",
-          "link_type"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
-            "type": "string"
-          },
-          "target": {
-            "type": "string"
-          },
-          "link_type": {
-            "type": "string"
-          }
-        }
-      },
-      "confirm": "never",
-      "access": "record",
-      "undoable": false
-    },
-    {
-      "name": "comment",
-      "summary": "Comment on a task.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "uri",
-          "body"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
-            "type": "string"
-          },
-          "body": {
-            "type": "string"
-          }
-        }
-      },
-      "confirm": "never",
-      "access": "record",
-      "undoable": false
-    },
-    {
-      "name": "delete",
-      "summary": "Delete a task.",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "uri"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
-            "type": "string"
-          }
-        }
-      },
-      "confirm": "never",
-      "access": "record",
-      "undoable": false
-    },
-    {
-      "name": "estimate",
-      "summary": "Set a task's points (a fake-only command).",
-      "input_schema": {
-        "type": "object",
-        "required": [
-          "uri",
-          "points"
-        ],
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
-            "type": "string"
-          },
-          "points": {
-            "type": "integer"
           }
         }
       },
@@ -280,148 +86,8 @@
       "undoable": false
     }
   ],
-  "event_types": [
-    {
-      "type": "task.recorded",
-      "v": 3,
-      "schema": {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "title": "TaskRecordedV3",
-        "description": "`task.recorded@3`: a list's item as it now stands — how every\nlist's items reach the task interface (the `tasks.project`\nconsumer upserts it by ref), with its links and comments when it\nstates them. A list's verbs answer with it. Who it's assigned to and\nits place in their queue aren't a list's: core records them\n(`task.assigned`).",
-        "type": "object",
-        "properties": {
-          "item": {
-            "$ref": "#/$defs/TaskRecord"
-          }
-        },
-        "additionalProperties": false,
-        "required": [
-          "item"
-        ],
-        "$defs": {
-          "TaskRecord": {
-            "description": "An item as its provider now has it — what `v_task` holds, and\nwhat a provider's `task.recorded` event carries. Who it's\nassigned to and its place in that queue are core's, never a\nprovider's. `links` and `comments` are stated when the provider keeps them: absent, the\nhost keeps what it has; present, it's the whole set.",
-            "type": "object",
-            "properties": {
-              "uri": {
-                "description": "`oxplow:oxplow/task?id=<id>&provider=<provider>`.",
-                "type": "string"
-              },
-              "title": {
-                "type": "string"
-              },
-              "body": {
-                "type": "string",
-                "default": ""
-              },
-              "stage": {
-                "description": "Which of the list's declared stages it's in (its bucket is core's\nlookup).",
-                "type": "string"
-              },
-              "native": {
-                "description": "Provider-specific fields.",
-                "default": null
-              },
-              "parent_uri": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "deleted": {
-                "description": "Gone at the provider.",
-                "type": "boolean",
-                "default": false
-              },
-              "links": {
-                "description": "Its links (from it to others), the whole set.",
-                "type": [
-                  "array",
-                  "null"
-                ],
-                "items": {
-                  "$ref": "#/$defs/LinkRecord"
-                }
-              },
-              "comments": {
-                "description": "Its comments, the whole set.",
-                "type": [
-                  "array",
-                  "null"
-                ],
-                "items": {
-                  "$ref": "#/$defs/CommentRecord"
-                }
-              }
-            },
-            "additionalProperties": false,
-            "required": [
-              "uri",
-              "title",
-              "stage"
-            ]
-          },
-          "LinkRecord": {
-            "description": "One of an item's links, as its provider records it.",
-            "type": "object",
-            "properties": {
-              "target": {
-                "description": "What it points at: another item (`oxplow:oxplow/task?id=<id>&provider=<provider>`), or\nany ref the item is about (`oxplow:oxplow/collector?collector=triage/hot`, `oxplow:oxplow/effort?id=eff12`).",
-                "type": "string"
-              },
-              "link_type": {
-                "description": "The list's own type (oxplow: `blocks`, `discovered_from`,\n`relates_to`, `duplicates`, `supersedes`, `replies_to`, `about`).",
-                "type": "string"
-              }
-            },
-            "additionalProperties": false,
-            "required": [
-              "target",
-              "link_type"
-            ]
-          },
-          "CommentRecord": {
-            "description": "One of an item's comments, as its provider records it.",
-            "type": "object",
-            "properties": {
-              "id": {
-                "description": "The provider's own id for it, unique on the item.",
-                "type": "string"
-              },
-              "body": {
-                "type": "string"
-              },
-              "author": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "created_at": {
-                "description": "RFC 3339; absent, when the host recorded it.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "additionalProperties": false,
-            "required": [
-              "id",
-              "body"
-            ]
-          }
-        }
-      }
-    }
-  ],
-  "collectors": [
-    {
-      "name": "tasks",
-      "entity": "task",
-      "description": "Every task, after the cursor."
-    }
-  ],
+  "event_types": [],
+  "collectors": [],
   "config_schema": {
     "type": "object",
     "required": [

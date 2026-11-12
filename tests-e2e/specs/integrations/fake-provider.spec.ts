@@ -1,12 +1,11 @@
-import { ipc, run, until } from "../../support/daemon.js";
+import { ipc, until } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { inFrame, open, shown } from "../../support/ui.js";
 
 // Only what the shell shows: the Integrations frame's config form (oxplow's
-// `openForm`), check, toggle and sync. A provider only fills the task model
-// (no task tracker is chosen): that an item comes back on a sync into the
-// model is the provider tests' (`providers/tests.rs`).
-test("a person configures, checks, enables and syncs the fake tracker from Integrations", async ({ page, daemon }) => {
+// `openForm`), check and toggle. What a provider does once it runs is the provider
+// tests' (`providers/tests.rs`).
+test("a person configures, checks and enables the fake provider from Integrations", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings#area=integrations");
   // Integrations is oxplow-foundation's own component, in a frame; the
   // config form, like every form it opens, is oxplow's (`openForm`).
@@ -28,16 +27,6 @@ test("a person configures, checks, enables and syncs the fake tracker from Integ
     return out.rows.length === 1;
   });
   await expect(integrations.getByTestId("integration-status-e2e/fake")).toContainText("Ready");
-  // An item in the fake's own system, so the frame's sync has one to bring.
-  await run(daemon, "e2e.fake.create", { title: "Kiwi from the fake", stage: "ready" });
-  // An external item reaches oxplow's models through its collector's read.
-  // Integrations is the last section of a long page, and the choices above
-  // changed the Capabilities table over it: the frame may now be below the
-  // fold, where the browser doesn't run its animation frames, and a click
-  // waits for the button to be stable by those. A person scrolls to it.
-  integrations = await inFrame(page, "Integrations");
-  await integrations.getByTestId("integration-sync-e2e/fake-tasks").click();
-  await expect(integrations.getByTestId("integration-collector-e2e/fake-tasks")).toContainText(/1 record/);
 });
 
 // A command the frame runs that fails says so once. One that names a field

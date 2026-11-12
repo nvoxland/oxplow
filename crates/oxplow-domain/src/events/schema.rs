@@ -187,7 +187,6 @@ impl EventSchemaRegistry {
         r.register::<TaskLinked>().expect("core type registers");
         r.register::<TaskUnlinked>().expect("core type registers");
         r.register::<TaskCommented>().expect("core type registers");
-        r.register::<TaskRecorded>().expect("core type registers");
         r.register::<TaskStateChanged>()
             .expect("core type registers");
         r.register::<TaskAssigned>().expect("core type registers");
@@ -832,7 +831,7 @@ impl EventType for FileDeleted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilitySwitchedV1 {
-    /// `task_tracker`, `snapshots`, `knowledge`.
+    /// `snapshots`, `knowledge`.
     pub capability: String,
     /// The implementation id that was active (`none` for nothing).
     pub from: String,
@@ -1748,25 +1747,6 @@ impl EventType for TaskCommented {
     type Payload = TaskCommentedV2;
 }
 
-/// `task.recorded@3`: a list's item as it now stands — how every
-/// list's items reach the task interface (the `tasks.project`
-/// consumer upserts it by ref), with its links and comments when it
-/// states them. A list's verbs answer with it. Who it's assigned to and
-/// its place in their queue aren't a list's: core records them
-/// (`task.assigned`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TaskRecordedV3 {
-    pub item: crate::tasks::TaskRecord,
-}
-
-pub struct TaskRecorded;
-impl EventType for TaskRecorded {
-    const TYPE: &'static str = "task.recorded";
-    const V: u32 = 3;
-    type Payload = TaskRecordedV3;
-}
-
 /// `task.assigned@1`: who is going to work on an item, or its place
 /// in their queue, changed (`oxplow.task.assign`, `.reorder`; a
 /// closed item or a closed thread's releases it). Core's record, for every
@@ -2326,7 +2306,6 @@ mod tests {
                 ("task.deleted", 2),
                 ("task.edited", 2),
                 ("task.linked", 2),
-                ("task.recorded", 3),
                 ("task.state_changed", 1),
                 ("task.unlinked", 1),
                 ("terminal.closed", 1),

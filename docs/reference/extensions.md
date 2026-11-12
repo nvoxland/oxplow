@@ -26,11 +26,11 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 `new` takes a kind instead of `extension` to start from that kind's
 starter: `page`, `collector`, `command`, `effect`, `provider`,
 `component`, `advisory`, `skill` or `panel`. A provider takes `--capability` for what it
-implements: `task_tracker` (the default),
-`agent_harness` (a harness that tells its subagents apart also declares
-the `subagents` feature; see the provider protocol), `snapshots` (its
+implements: `snapshots` (the default; its
 example marks a one-file tree under `fixtures/tree`; the `contents`
-feature adds `read_at`) or `knowledge` (its example writes a page). Each
+feature adds `read_at`),
+`agent_harness` (a harness that tells its subagents apart also declares
+the `subagents` feature; see the provider protocol) or `knowledge` (its example writes a page). Each
 scaffold checks clean and passes `test` as written; an `advisory` or
 `skill` has no example `test` can run (it runs pages, collectors,
 commands, effects and providers), so `test` notes that and nothing more.
@@ -205,13 +205,7 @@ Host secret references are identity-only objects:
 References can be stored as non-secret settings, and copying them to another
 extension or project does not copy access.
 
-The first supported consumer is a remote MCP HTTP provider. Declare
-`auth: OXPLOW_MCP_BEARER` in `adapter.mcp`, and a credential with
-`name: OXPLOW_MCP_BEARER` and `secretRef: <the reference object>`. A person must
-approve the extension's permissions when it is deployed. The shipped HTTP transport sends the
-bearer; extension scripts cannot read its value. References are refused for
-package programs, stdio servers and OAuth credentials. Settings → Extensions
-lists each declared reference with Set… and Revoke.
+Settings → Extensions lists each declared reference with Set… and Revoke.
 
 ### What it can declare
 

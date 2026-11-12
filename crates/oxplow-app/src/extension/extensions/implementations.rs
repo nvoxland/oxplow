@@ -23,7 +23,7 @@
 //! `oxplow_domain::capability::ProviderContract`): the script defines one
 //! function per verb, which core calls through the same dispatch as an
 //! external provider's (`providers::script`). It declares what a provider
-//! declares of itself — `features:`, `data:`, a task tracker's `stages:`,
+//! declares of itself — `features:`, `data:`, an item-keeping capability's `stages:`,
 //! `fields:` and `id_pattern:` — and the scopes it calls in `needs:`.
 
 use oxplow_domain::diagnostic::Diagnostic;
@@ -139,14 +139,14 @@ pub(crate) struct ImplementationFile {
     #[serde(default)]
     #[schemars(with = "Option<serde_json::Value>")]
     data: Option<Value>,
-    /// A script task tracker's stages, in order, each in one of core's
+    /// A script item-keeping capability's stages, in order, each in one of core's
     /// buckets (one in each of todo, in_progress and done).
     #[serde(default)]
     stages: Vec<oxplow_domain::tasks::StageDecl>,
-    /// A script task tracker's own fields (kept in an item's `native`).
+    /// A script item-keeping capability's own fields (kept in an item's `native`).
     #[serde(default)]
     fields: Vec<oxplow_domain::tasks::FieldDecl>,
-    /// What a script task tracker's own ids look like (a regex matched
+    /// What a script item-keeping capability's own ids look like (a regex matched
     /// whole).
     #[serde(default)]
     id_pattern: Option<String>,
@@ -557,7 +557,6 @@ fn script_decl(
         capability: f.capability.clone(),
         entry: Some(entry.to_string()),
         args: Vec::new(),
-        adapter: None,
         env: Vec::new(),
         credentials: Vec::new(),
         network: Vec::new(),
@@ -986,17 +985,17 @@ mod tests {
             (
                 format!("  - {{ capability: snapshots, id: marks, entry: snaps/s.star, needs: [sql.read], {STAGES} }}\n"),
                 "implementation.script_items",
-                "stages are a task tracker's".into(),
+                "stages are an item-keeping capability's".into(),
             ),
             (
                 "  - { capability: knowledge, id: notes, entry: snaps/s.star, needs: [sql.read], stages: [{ id: open, title: Open, bucket: todo }] }\n".into(),
                 "implementation.script_items",
-                "stages are a task tracker's".into(),
+                "stages are an item-keeping capability's".into(),
             ),
             (
                 snap(", id_pattern: \"n\\\\d+\""),
                 "implementation.script_items",
-                "id_pattern is a task tracker's".into(),
+                "id_pattern is an item-keeping capability's".into(),
             ),
             (
                 snap(", config: [a]"),

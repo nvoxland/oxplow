@@ -1,5 +1,5 @@
-//! P5.D2: a `Peer` drives the fake provider over real stdio — initialize,
-//! check, invoke, read (records and state), cancel, and the hooks.
+//! A `Peer` drives the fake provider over real stdio — initialize, check,
+//! invoke, read (records and state), cancel, and the hooks.
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -12,14 +12,32 @@ use serde_json::{json, Value};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc::Receiver;
 
+/// The fake in its default mode (snapshots) with `hooks`.
 fn spawn(hooks: &str) -> (Child, Peer, Receiver<Incoming>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"))
+    spawn_as("snapshots", "fake", hooks, None)
+}
+
+/// The fake of `capability`, as instance `id`, with `hooks`; `token` is the
+/// credential `FAKE_TOKEN` it holds.
+fn spawn_as(
+    capability: &str,
+    id: &str,
+    hooks: &str,
+    token: Option<&str>,
+) -> (Child, Peer, Receiver<Incoming>) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"));
+    command
+        .env("OXPLOW_FAKE_CAPABILITY", capability)
         .env("OXPLOW_FAKE_HOOKS", hooks)
+        .env("OXPLOW_PROVIDER_ID", id)
+        .env_remove("FAKE_TOKEN")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .expect("spawn the fake");
+        .kill_on_drop(true);
+    if let Some(token) = token {
+        command.env("FAKE_TOKEN", token);
+    }
+    let mut child = command.spawn().expect("spawn the fake");
     let stdout = child.stdout.take().expect("piped stdout");
     let stdin = child.stdin.take().expect("piped stdin");
     let (peer, incoming) = Peer::spawn(stdout, stdin);
@@ -85,62 +103,36 @@ async fn keyed(
     .await
 }
 
-/// The refs of every item it has, by a read from the start.
-async fn refs(peer: &Peer, handle: &Handle, incoming: &mut Receiver<Incoming>) -> Vec<String> {
-    let result: ReadResult = peer
-        .call(
-            method::READ,
-            &ReadParams {
-                handle: handle.clone(),
-                collector: "tasks".into(),
-                state: None,
-            },
-        )
-        .await
-        .expect("read");
-    let mut refs = Vec::new();
-    while refs.len() < result.records as usize {
-        if let Some(Incoming::Notification { method, params }) = incoming.recv().await {
-            if method == notify::RECORD {
-                refs.push(
-                    params["row"]["uri"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                );
-            }
-        }
-    }
-    refs
+/// A snapshots `mark` of `dir` (the fake marks whatever is in it).
+fn mark_of(dir: &std::path::Path, stream: &str) -> Value {
+    json!({ "stream": stream, "worktree": dir, "trigger": "turn_end" })
 }
 
-/// P10: the fake declares `idempotent_writes` and keeps it: a write sent
-/// twice with one key is done once, and both answers are the same. A key
-/// reused for another write is refused. `forget-keys` breaks the promise
-/// (what the kit must catch); `plain-writes` doesn't make it.
+/// An idempotency key makes a write happen once: sent again it is answered
+/// as the first was (so the next `mark` is the second, not the third). A
+/// key reused for another write is refused. Without a key, every send is a
+/// write.
 #[tokio::test]
 async fn the_same_key_writes_once_and_answers_alike() {
-    let (_child, peer, mut incoming) = spawn("");
-    let declared = initialize(&peer).await;
-    assert_eq!(
-        declared.capabilities[0].features["idempotent_writes"],
-        json!(true)
-    );
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one").unwrap();
+    let (_child, peer, _incoming) = spawn("");
+    initialize(&peer).await;
     let handle = check(&peer).await;
-    let input = json!({ "title": "Once" });
-    let first = keyed(&peer, &handle, "create", input.clone(), Some("k-1"))
+    let input = mark_of(dir.path(), "s1");
+    let first = keyed(&peer, &handle, "mark", input.clone(), Some("k-1"))
         .await
         .unwrap();
-    let again = keyed(&peer, &handle, "create", input, Some("k-1"))
+    let again = keyed(&peer, &handle, "mark", input.clone(), Some("k-1"))
         .await
         .unwrap();
     assert_eq!(first, again);
-    assert_eq!(refs(&peer, &handle, &mut incoming).await.len(), 1);
+    assert_eq!(first.result["handle"], "m1");
     let reused = keyed(
         &peer,
         &handle,
-        "create",
-        json!({ "title": "Other" }),
+        "mark",
+        mark_of(dir.path(), "other"),
         Some("k-1"),
     )
     .await;
@@ -148,48 +140,20 @@ async fn the_same_key_writes_once_and_answers_alike() {
         matches!(&reused, Err(ProtocolError::InvalidInput { field, .. }) if field == "/idempotency_key"),
         "{reused:?}"
     );
-    // Without a key, every send is a write.
-    invoke(&peer, &handle, "create", json!({ "title": "Twice" }))
-        .await
-        .unwrap();
-    invoke(&peer, &handle, "create", json!({ "title": "Twice" }))
-        .await
-        .unwrap();
-    assert_eq!(refs(&peer, &handle, &mut incoming).await.len(), 3);
-
-    // `forget-keys`: it declares the promise and doesn't keep it.
-    let (_child, forgetful, mut incoming) = spawn("forget-keys");
-    initialize(&forgetful).await;
-    let handle = check(&forgetful).await;
-    for _ in 0..2 {
-        keyed(
-            &forgetful,
-            &handle,
-            "create",
-            json!({ "title": "Once" }),
-            Some("k-1"),
-        )
-        .await
-        .unwrap();
-    }
-    assert_eq!(refs(&forgetful, &handle, &mut incoming).await.len(), 2);
-
-    // `plain-writes`: it doesn't declare it.
-    let (_child, plain, _incoming) = spawn("plain-writes");
-    let declared = initialize(&plain).await;
-    assert_eq!(
-        declared.capabilities[0].features["idempotent_writes"],
-        json!(false)
-    );
-    assert_eq!(declared, oxplow_provider_fake::plain_declarations());
+    // Without a key, every send is a write: m1 was made once, so this is m2.
+    let next = invoke(&peer, &handle, "mark", input.clone()).await.unwrap();
+    assert_eq!(next.result["handle"], "m2");
+    let last = invoke(&peer, &handle, "mark", input).await.unwrap();
+    assert_eq!(last.result["handle"], "m3");
 }
 
-/// P10: `lose-reply` — the next write lands but its answer never comes (a
-/// reply lost on the way); sent again with its key, it is answered as the
-/// first would have been, and it was done once.
+/// `lose-reply` — the next write lands but its answer never comes (a reply
+/// lost on the way); sent again with its key, it is answered as the first
+/// would have been, and it was done once.
 #[tokio::test]
 async fn a_lost_reply_is_answered_when_its_write_is_sent_again() {
-    let (_child, peer, mut incoming) = spawn("lose-reply");
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, peer, _incoming) = spawn("lose-reply");
     initialize(&peer).await;
     let handle = check(&peer).await;
     let lost = tokio::time::timeout(
@@ -197,8 +161,8 @@ async fn a_lost_reply_is_answered_when_its_write_is_sent_again() {
         keyed(
             &peer,
             &handle,
-            "create",
-            json!({ "title": "Lost" }),
+            "mark",
+            mark_of(dir.path(), "s1"),
             Some("k-1"),
         ),
     )
@@ -207,19 +171,24 @@ async fn a_lost_reply_is_answered_when_its_write_is_sent_again() {
     let answered = keyed(
         &peer,
         &handle,
-        "create",
-        json!({ "title": "Lost" }),
+        "mark",
+        mark_of(dir.path(), "s1"),
         Some("k-1"),
     )
     .await
     .unwrap();
-    assert_eq!(answered.events.len(), 1);
-    assert_eq!(refs(&peer, &handle, &mut incoming).await.len(), 1);
+    assert_eq!(answered.result["handle"], "m1");
+    let next = invoke(&peer, &handle, "mark", mark_of(dir.path(), "s1"))
+        .await
+        .unwrap();
+    assert_eq!(next.result["handle"], "m2", "the write was done once");
 }
 
 #[tokio::test]
 async fn a_peer_drives_the_fake_over_stdio() {
-    let (_child, peer, mut incoming) = spawn("");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one").unwrap();
+    let (_child, peer, _incoming) = spawn("");
     let declared = initialize(&peer).await;
     assert_eq!(declared, oxplow_provider_fake::declarations());
     assert_eq!(
@@ -243,93 +212,33 @@ async fn a_peer_drives_the_fake_over_stdio() {
         .unwrap();
     assert_eq!(bad.problems[0].path, "/team");
     assert!(bad.handle.is_none());
+    let result: CheckResult = peer
+        .call(
+            method::CHECK,
+            &CheckParams {
+                config: json!({ "team": "core" }),
+                credentials: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.handle, Some(Handle("fake:core".into())));
     let handle = check(&peer).await;
 
-    // invoke: the result and the event the host logs.
-    let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
+    // invoke: the result, and no event.
+    let marked = invoke(&peer, &handle, "mark", mark_of(dir.path(), "s1"))
         .await
         .unwrap();
     assert_eq!(
-        created.result,
-        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake" })
+        marked.result,
+        json!({ "handle": "m1", "unchanged": false, "file_count": 1 })
     );
-    assert_eq!(created.events[0].event_type, "task.recorded");
-    assert_eq!(created.events[0].payload["item"]["stage"], "ready");
-    invoke(&peer, &handle, "create", json!({ "title": "Second" }))
-        .await
-        .unwrap();
-    let moved = invoke(
-        &peer,
-        &handle,
-        "transition",
-        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake", "to": "doing" }),
-    )
-    .await
-    .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["stage"], "doing");
-    let refused = invoke(
-        &peer,
-        &handle,
-        "transition",
-        json!({ "uri": "oxplow:oxplow/task?id=W-9&provider=fake", "to": "shipped" }),
-    )
-    .await
-    .unwrap_err();
+    assert!(marked.events.is_empty());
+    let refused = invoke(&peer, &handle, "nope", json!({})).await.unwrap_err();
     assert!(
-        matches!(refused, ProtocolError::InvalidInput { ref field, .. } if field == "/uri"),
+        matches!(refused, ProtocolError::InvalidInput { ref field, .. } if field == "/command"),
         "{refused:?}"
     );
-
-    // read: each changed item (in the order it changed) then a
-    // checkpoint, before the result; resuming skips them.
-    let read: ReadResult = peer
-        .call(
-            method::READ,
-            &ReadParams {
-                handle: handle.clone(),
-                collector: "tasks".into(),
-                state: None,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(read.records, 2);
-    let mut streamed = Vec::new();
-    let mut state = None;
-    while let Ok(Some(Incoming::Notification { method, params })) =
-        tokio::time::timeout(Duration::from_millis(200), incoming.recv()).await
-    {
-        assert_eq!(
-            validate(for_message(&method, false).unwrap(), &params),
-            Ok(())
-        );
-        match method.as_str() {
-            notify::RECORD => streamed.push(params["row"]["uri"].clone()),
-            notify::STATE => state = Some(params["state"].clone()),
-            other => panic!("unexpected {other}"),
-        }
-    }
-    // W-1 changed last (its transition), so it comes after W-2.
-    assert_eq!(
-        streamed,
-        vec![
-            json!("oxplow:oxplow/task?id=W-2&provider=fake"),
-            json!("oxplow:oxplow/task?id=W-1&provider=fake")
-        ]
-    );
-    assert_eq!(state, Some(json!({ "cursor": 3, "seen": 2 })));
-    let resumed: ReadResult = peer
-        .call(
-            method::READ,
-            &ReadParams {
-                handle: handle.clone(),
-                collector: "tasks".into(),
-                state,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(resumed.records, 0);
 
     // cancel: a slow invoke comes back Cancelled.
     peer.notify("fake/hooks", json!({ "hooks": "slow:5000" }))
@@ -338,7 +247,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
     let call = peer
         .start(
             method::INVOKE,
-            json!({ "handle": handle, "command": "create", "input": { "title": "Slow" } }),
+            json!({ "handle": handle, "command": "mark", "input": mark_of(dir.path(), "s1") }),
         )
         .await
         .unwrap();
@@ -348,6 +257,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
 
 #[tokio::test]
 async fn the_hooks_script_failures_and_crashes() {
+    let dir = tempfile::tempdir().unwrap();
     let (_child, peer, _incoming) = spawn("fail-next:2,bad-declarations");
     let declared = initialize(&peer).await;
     assert_ne!(
@@ -355,6 +265,7 @@ async fn the_hooks_script_failures_and_crashes() {
         oxplow_provider_fake::declarations(),
         "bad-declarations"
     );
+    assert!(declared.commands.iter().any(|c| c.name == "undeclared"));
     for _ in 0..2 {
         let failed: Result<CheckResult, _> = peer
             .call(
@@ -371,7 +282,7 @@ async fn the_hooks_script_failures_and_crashes() {
         );
     }
     let handle = check(&peer).await;
-    assert!(invoke(&peer, &handle, "create", json!({ "title": "ok" }))
+    assert!(invoke(&peer, &handle, "mark", mark_of(dir.path(), "s1"))
         .await
         .is_ok());
 
@@ -381,11 +292,34 @@ async fn the_hooks_script_failures_and_crashes() {
     assert_eq!(child.wait().await.unwrap().code(), Some(3));
 }
 
-/// P7.A3: the read hooks — `progress` (each `$/progress` fits its
-/// golden), `read-fail-after:<n>` (checkpointed records, then a failure)
-/// and `bad-record` (another provider's item).
+/// A `rate-limit:<ms>` refuses the next write once, saying when to retry.
 #[tokio::test]
-async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
+async fn a_rate_limit_refuses_one_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, peer, _incoming) = spawn("rate-limit:250");
+    initialize(&peer).await;
+    let handle = check(&peer).await;
+    let limited = invoke(&peer, &handle, "mark", mark_of(dir.path(), "s1")).await;
+    assert!(
+        matches!(
+            &limited,
+            Err(ProtocolError::RateLimited {
+                retry_after_ms: Some(250),
+                ..
+            })
+        ),
+        "{limited:?}"
+    );
+    assert!(invoke(&peer, &handle, "mark", mark_of(dir.path(), "s1"))
+        .await
+        .is_ok());
+}
+
+/// The read hooks, on the knowledge mode's collector — `progress` (each
+/// `$/progress` fits its golden) and `read-fail-after:<n>` (checkpointed
+/// records, then a failure).
+#[tokio::test]
+async fn the_read_hooks_stream_progress_and_fail_midway() {
     async fn read(
         peer: &Peer,
         handle: &Handle,
@@ -396,7 +330,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
                 method::READ,
                 &ReadParams {
                     handle: handle.clone(),
-                    collector: "tasks".into(),
+                    collector: "knowledge_pages".into(),
                     state: None,
                 },
             )
@@ -413,11 +347,11 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
         }
         (result, seen)
     }
-    let (_child, peer, mut incoming) = spawn("progress");
+    let (_child, peer, mut incoming) = spawn_as("knowledge", "fake", "progress", None);
     initialize(&peer).await;
     let handle = check(&peer).await;
-    for title in ["a", "b", "c"] {
-        invoke(&peer, &handle, "create", json!({ "title": title }))
+    for id in ["a", "b", "c"] {
+        invoke(&peer, &handle, "write_page", page_write(id, "x"))
             .await
             .unwrap();
     }
@@ -445,68 +379,41 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
         .collect();
     assert_eq!(states.len(), 2, "checkpointed before failing");
 
-    let (_child, peer, mut incoming) = spawn("bad-record");
+    // A snapshots provider has no collector to read.
+    let (_child, peer, _incoming) = spawn("");
     initialize(&peer).await;
     let handle = check(&peer).await;
-    let (_, seen) = read(&peer, &handle, &mut incoming).await;
-    assert_eq!(
-        seen[0].1["row"]["uri"],
-        "oxplow:oxplow/task?id=X-1&provider=other"
+    let refused: Result<ReadResult, _> = peer
+        .call(
+            method::READ,
+            &ReadParams {
+                handle,
+                collector: "knowledge_pages".into(),
+                state: None,
+            },
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(ProtocolError::InvalidInput { .. })),
+        "{refused:?}"
     );
 }
 
-/// P9.B1: the fake is whichever instance the host says it is — its refs
-/// carry `OXPLOW_PROVIDER_ID` — and, under `needs:<NAME>`, its `check`
-/// says when the credential `<NAME>` didn't reach it.
+/// The fake is whichever instance the host says it is — its refs carry
+/// `OXPLOW_PROVIDER_ID` — and, under `needs:<NAME>`, its `check` says when
+/// the credential `<NAME>` didn't reach it.
 #[tokio::test]
 async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() {
-    let spawn_as = |id: &str, hooks: &str, token: Option<&str>| {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"));
-        command
-            .env("OXPLOW_FAKE_HOOKS", hooks)
-            .env("OXPLOW_PROVIDER_ID", id)
-            .env_remove("FAKE_TOKEN")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .kill_on_drop(true);
-        if let Some(token) = token {
-            command.env("FAKE_TOKEN", token);
-        }
-        let mut child = command.spawn().expect("spawn the fake");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stdin = child.stdin.take().expect("piped stdin");
-        let (peer, incoming) = Peer::spawn(stdout, stdin);
-        (child, peer, incoming)
-    };
-    let (_child, peer, _incoming) = spawn_as("fake_second", "", None);
+    let dir = tempfile::tempdir().unwrap();
+    let (_child, peer, _incoming) = spawn_as("knowledge", "fake_second", "", None);
     initialize(&peer).await;
     let handle = check(&peer).await;
-    let created = invoke(&peer, &handle, "create", json!({ "title": "First" }))
+    let written = invoke(&peer, &handle, "write_page", page_write("one", "x"))
         .await
         .unwrap();
     assert_eq!(
-        created.result["uri"],
-        "oxplow:oxplow/task?id=W-1&provider=fake_second"
-    );
-    let moved = invoke(
-        &peer,
-        &handle,
-        "transition",
-        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake_second", "to": "shipped" }),
-    )
-    .await;
-    assert!(moved.is_ok(), "{moved:?}");
-    // Another instance's ref isn't one of its items.
-    let foreign = invoke(
-        &peer,
-        &handle,
-        "transition",
-        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake", "to": "shipped" }),
-    )
-    .await;
-    assert!(
-        matches!(foreign, Err(ProtocolError::InvalidInput { .. })),
-        "{foreign:?}"
+        written.events[0].payload["page"]["uri"],
+        oxplow_domain::uri::build::knowledge_uri("fake_second", "one")
     );
 
     let checked = |peer: Peer| async move {
@@ -522,18 +429,18 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
             .expect("check");
         result
     };
-    let (_c1, without, _i1) = spawn_as("fake", "needs:FAKE_TOKEN", None);
+    let (_c1, without, _i1) = spawn_as("snapshots", "fake", "needs:FAKE_TOKEN", None);
     initialize(&without).await;
     let result = checked(without).await;
     assert!(result.handle.is_none());
     assert_eq!(result.problems[0].path, "/credentials/FAKE_TOKEN");
-    let (_c2, with, _i2) = spawn_as("fake", "needs:FAKE_TOKEN", Some("s3cret"));
+    let (_c2, with, _i2) = spawn_as("snapshots", "fake", "needs:FAKE_TOKEN", Some("s3cret"));
     initialize(&with).await;
     assert!(checked(with).await.handle.is_some());
 
-    // P9.B3: under `accepts:<NAME>=<value>` its service takes that token
-    // and no other — `check` and `invoke` answer `Auth` otherwise.
-    let (_c3, stale, _i3) = spawn_as("fake", "accepts:FAKE_TOKEN=at-2", Some("at-1"));
+    // Under `accepts:<NAME>=<value>` its service takes that token and no
+    // other — `check` and `invoke` answer `Auth` otherwise.
+    let (_c3, stale, _i3) = spawn_as("snapshots", "fake", "accepts:FAKE_TOKEN=at-2", Some("at-1"));
     initialize(&stale).await;
     let refused = stale
         .call::<_, CheckResult>(
@@ -551,10 +458,10 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         ),
         "{refused:?}"
     );
-    let (_c4, fresh, _i4) = spawn_as("fake", "accepts:FAKE_TOKEN=at-2", Some("at-2"));
+    let (_c4, fresh, _i4) = spawn_as("snapshots", "fake", "accepts:FAKE_TOKEN=at-2", Some("at-2"));
     initialize(&fresh).await;
     let handle = check(&fresh).await;
-    assert!(invoke(&fresh, &handle, "create", json!({ "title": "x" }))
+    assert!(invoke(&fresh, &handle, "mark", mark_of(dir.path(), "s1"))
         .await
         .is_ok());
     // Told mid-session that the service moved on, the same process is refused.
@@ -562,7 +469,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         .notify("fake/hooks", json!({ "hooks": "accepts:FAKE_TOKEN=at-3" }))
         .await
         .unwrap();
-    let refused = invoke(&fresh, &handle, "create", json!({ "title": "y" })).await;
+    let refused = invoke(&fresh, &handle, "mark", mark_of(dir.path(), "s1")).await;
     assert!(
         matches!(
             &refused,
@@ -572,7 +479,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
     );
 }
 
-/// Its snapshots mode (`OXPLOW_FAKE_CAPABILITY=snapshots`): a fake that
+/// Its snapshots mode (`OXPLOW_FAKE_CAPABILITY=snapshots`, the default): a fake that
 /// marks a directory, tells what changed between marks, and (with
 /// `OXPLOW_FAKE_FEATURES=contents`) gives a file's bytes back.
 fn spawn_snapshots(features: &str) -> (Child, Peer) {

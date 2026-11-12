@@ -344,6 +344,25 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
         )
         .map_err(sql)?;
     }
+    // The old task commands leave the command log: their audit rows (with the
+    // inverses an undo would run), and the proposals waiting on them. Core has
+    // no `oxplow.task.*` any more; no history of them is kept.
+    tx.execute(
+        "DELETE FROM command_proposal WHERE command LIKE 'oxplow.task.%'",
+        [],
+    )
+    .map_err(sql)?;
+    tx.execute(
+        "UPDATE command_audit SET undone_by = NULL WHERE undone_by IN
+           (SELECT id FROM command_audit WHERE command LIKE 'oxplow.task.%')",
+        [],
+    )
+    .map_err(sql)?;
+    tx.execute(
+        "DELETE FROM command_audit WHERE command LIKE 'oxplow.task.%'",
+        [],
+    )
+    .map_err(sql)?;
     // Who made what, from the event log (`event_log_type_seq`): the thread of
     // a task's `task.created` event, and of each `task.commented` event by the
     // note it names. Events with no thread were a person's or the system's.
@@ -1117,6 +1136,44 @@ mod tests {
         move_to_oxtask(dir.path(), false, false, false)
             .await
             .unwrap();
+    }
+
+    /// The old task commands leave the command log with the move: their audit
+    /// rows and the proposals waiting on them; other commands stay.
+    #[tokio::test]
+    async fn the_move_deletes_the_old_task_commands_from_the_log() {
+        let dir = project().await;
+        seed(dir.path());
+        let m = main_db(dir.path());
+        m.execute_batch(
+            "INSERT INTO command_audit (id, at, command, actor_kind, input_json, outcome, inverse_json)
+               VALUES (901, 't', 'oxplow.task.create', 'human', '{}', 'ok', '{}'),
+                      (902, 't', 'oxplow.task.transition', 'human', '{}', 'ok', NULL),
+                      (903, 't', 'oxplow.thread.rename', 'human', '{}', 'ok', NULL);
+             UPDATE command_audit SET undone_by = 902 WHERE id = 901;
+             INSERT INTO command_proposal (created_at, command, input_json, actor_kind, key, preview_json, decision)
+               VALUES ('t', 'oxplow.task.delete', '{}', 'agent', 'k1', '{}', 'pending'),
+                      ('t', 'oxplow.thread.close', '{}', 'agent', 'k2', '{}', 'pending');",
+        )
+        .unwrap();
+        drop(m);
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
+        let m = main_db(dir.path());
+        let commands = |table: &str| -> Vec<String> {
+            let mut st = m
+                .prepare(&format!(
+                    "SELECT command FROM {table} WHERE command LIKE 'oxplow.%' ORDER BY command"
+                ))
+                .unwrap();
+            st.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(commands("command_audit"), vec!["oxplow.thread.rename"]);
+        assert_eq!(commands("command_proposal"), vec!["oxplow.thread.close"]);
     }
 
     #[tokio::test]

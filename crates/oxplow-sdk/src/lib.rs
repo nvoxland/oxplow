@@ -103,7 +103,7 @@ impl Kind {
         match s {
             "extension" => Some(Kind::Extension),
             "provider" => Some(Kind::Provider {
-                capability: "task_tracker",
+                capability: "snapshots",
             }),
             "implementation" => Some(Kind::Implementation {
                 capability: "knowledge",
@@ -135,8 +135,8 @@ impl Kind {
     /// interface is a set of verbs (its spec carries a provider contract),
     /// the same capabilities a provider may implement.
     pub fn implementation(capability: &str) -> Result<Kind, SdkError> {
-        // A capability with no verbs core calls (a task tracker only fills
-        // the task model) has nothing for a script to implement.
+        // A capability with no verbs core calls has nothing for a script to
+        // implement.
         Self::with_contract(capability, "a script", |p| !p.verbs.is_empty())
             .map(|capability| Kind::Implementation { capability })
     }
@@ -419,20 +419,6 @@ pub fn scaffold_with(
             manifest.push_str(&format!(
                 "providers:\n  - id: {provider_id}\n    capability: {capability}\n    entry: bin/provider\n    declarations: provider.json\n"
             ));
-            if capability == "task_tracker" {
-                // A task tracker's own workflow: one stage in each of core's
-                // buckets to start; rename, add or drop them (a stage in
-                // each of todo, in_progress and done is required).
-                manifest.push_str(
-                    "    stages:\n\
-                     \x20     - { id: backlog, title: Backlog, bucket: backlog }\n\
-                     \x20     - { id: todo, title: To Do, bucket: todo }\n\
-                     \x20     - { id: in_progress, title: In Progress, bucket: in_progress }\n\
-                     \x20     - { id: blocked, title: Blocked, bucket: blocked }\n\
-                     \x20     - { id: done, title: Done, bucket: done }\n\
-                     \x20     - { id: canceled, title: Canceled, bucket: canceled }\n",
-                );
-            }
             if let Some(needs) = starter.needs {
                 manifest.push_str(needs);
             }
@@ -860,16 +846,6 @@ struct ProviderStarter {
 
 fn provider_starter(capability: &str) -> ProviderStarter {
     match capability {
-        // The program declares its own commands (core calls none of a
-        // tracker's), so the example names one to replace.
-        "task_tracker" => ProviderStarter {
-            input: "{ command: create, input: { title: First } }".to_string(),
-            expect: "the new item's URI",
-            fixture: "{ uri: $any }".to_string(),
-            needs: None,
-            data: serde_json::Value::Null,
-            on: &[],
-        },
         "agent_harness" => ProviderStarter {
             input: "{ command: render, input: { answer: { kind: ack } } }".to_string(),
             expect: "its hooks' acknowledgement",
@@ -886,7 +862,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
         },
         "snapshots" => ProviderStarter {
             // A small tree beside the fixtures (`fixtures/tree`) stands in for a worktree.
-            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, on: manual, parent: null } }"
+            input: "{ command: mark, input: { stream: str1, worktree: fixtures/tree, trigger: manual, parent: null } }"
                 .to_string(),
             expect: "a handle for the marked state",
             fixture: "{ handle: $any, unchanged: false, file_count: 1 }".to_string(),
@@ -1669,46 +1645,36 @@ mod tests {
     async fn a_provider_scaffolds_any_capability_by_its_contract() {
         assert_eq!(
             Kind::parse("provider"),
-            Some(Kind::provider("task_tracker").unwrap())
+            Some(Kind::provider("snapshots").unwrap())
         );
         for no_contract in ["vcs", "nope"] {
             let err = Kind::provider(no_contract).unwrap_err().to_string();
             assert!(
                 err.contains(&format!("`{no_contract}`"))
-                    && err.contains("task_tracker")
+                    && err.contains("snapshots")
                     && err.contains("agent_harness"),
                 "{err}"
             );
         }
-        // A task tracker only fills the task model: core calls no verb of
-        // it, so a script has nothing to implement.
-        let err = Kind::implementation("task_tracker")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("`task_tracker`") && err.contains("knowledge"),
-            "{err}"
-        );
-
         let dir = tempfile::tempdir().unwrap();
         scaffold(
             dir.path(),
-            Kind::provider("task_tracker").unwrap(),
+            Kind::provider("snapshots").unwrap(),
             "tracker",
             None,
         )
         .unwrap();
         let d = declarations(dir.path(), "tracker");
-        assert_eq!(d["capabilities"][0]["capability"], "task_tracker");
-        assert_eq!(d["commands"].as_array().map(Vec::len), Some(0));
-        let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
-        assert_eq!(d["event_types"][0]["type"], "task.recorded");
-        assert_eq!(d["event_types"][0]["v"], 3);
-        assert_eq!(
-            Some(&d["event_types"][0]["schema"]),
-            vocabulary.schema("task.recorded", 3)
-        );
-        assert_eq!(d["collectors"][0]["entity"], "task");
+        assert_eq!(d["capabilities"][0]["capability"], "snapshots");
+        let verbs: Vec<&str> = d["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(verbs, ["mark", "changed"]);
+        assert_eq!(d["event_types"].as_array().map(Vec::len), Some(0));
+        assert_eq!(d["collectors"].as_array().map(Vec::len), Some(0));
 
         let dir = tempfile::tempdir().unwrap();
         scaffold(

@@ -739,13 +739,6 @@ mod tests {
             .unwrap();
         let svc = oxplow_app::Services::in_memory(tmp.path()).await.unwrap();
         let text = oxplow_app::capabilities::agent_text(&svc).await;
-        let skill = |name: &str| {
-            text.skill_full_text(name).or_else(|| {
-                oxplow_app::bundled_extensions::BUNDLED
-                    .iter()
-                    .find_map(|b| b.file(name).map(str::to_string))
-            })
-        };
         let shipped: Vec<_> = svc
             .extension_catalog
             .snapshot(tmp.path())
@@ -754,6 +747,27 @@ mod tests {
             .filter(|e| oxplow_app::bundled_extensions::is_reserved(&e.name))
             .cloned()
             .collect();
+        // A skill the agent is offered now, or one a shipped extension
+        // declares whether or not it is offered (bundled's task skills
+        // wait for a live task store).
+        let skill = |name: &str| {
+            text.skill_full_text(name).or_else(|| {
+                shipped
+                    .iter()
+                    .find_map(|e| {
+                        let decl = e.skills.iter().find(|s| s.name == name)?;
+                        oxplow_app::bundled_extensions::BUNDLED
+                            .iter()
+                            .find(|b| b.name == e.name)
+                            .and_then(|b| b.file(&decl.file).map(str::to_string))
+                    })
+                    .or_else(|| {
+                        oxplow_app::bundled_extensions::BUNDLED
+                            .iter()
+                            .find_map(|b| b.file(name).map(str::to_string))
+                    })
+            })
+        };
         let checked = check_pages(&shipped, &skill, Some(&svc)).await;
         let mut errors = checked.error_lines();
         if std::env::var("OXPLOW_LIVE_ANSWERABILITY").as_deref() == Ok("1") {

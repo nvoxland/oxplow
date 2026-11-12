@@ -1262,7 +1262,7 @@ fn calls(items: &[(&str, &str, &str)]) -> Value {
 }
 
 /// Step 0 holds for a composed call as for a direct one: a child
-/// that needs what isn't active (a task tracker, say) is
+/// that needs what isn't active (knowledge, say) is
 /// refused at its place in the calls — whether the composite runs in
 /// one transaction or as steps — and nothing lands.
 #[tokio::test(flavor = "multi_thread")]
@@ -1278,7 +1278,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
     ));
     let (db, bus) = composing_bus_on(db, bus.with_capabilities(registry, config));
     let mut needy = kv_spec("oxplow.kv.needy", Confirm::Never);
-    needy.needs = vec!["task_tracker".into()];
+    needy.needs = vec!["knowledge".into()];
     bus.register(Command::new(needy, kv_set()).unwrap())
         .unwrap();
 
@@ -1308,7 +1308,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
             .unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), message }
-                if f == "/calls/1/name" && message.contains("`oxplow.kv.needy`: Needs: Task tracker")),
+                if f == "/calls/1/name" && message.contains("`oxplow.kv.needy`: Needs: Knowledge")),
             "{why}: {err:?}"
         );
         assert_eq!(kv_value(&db, "a").await, None, "{why}: nothing landed");

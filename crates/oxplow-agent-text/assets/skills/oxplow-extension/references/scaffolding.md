@@ -28,8 +28,8 @@ that exists is refused):
 - `command` — a command whose script comments on a task, on a task's Commands menu;
 - `provider` — an external provider's declarations and a stub program
   (red until you write the program); `--capability <cap>` picks what it
-  implements: `task_tracker` (the default),
-  `snapshots`, `knowledge`, `filesystem` or `agent_harness` (a harness launching agent sessions: its command runs in
+  implements: `snapshots` (the default),
+  `knowledge`, `filesystem` or `agent_harness` (a harness launching agent sessions: its command runs in
   the person's terminal, so the deploy that admits it (`process`) says that; if it can
   tell its subagents apart it declares the `subagents` feature and answers
   the `prompt` and `subagent` verbs).
@@ -54,18 +54,16 @@ that exists is refused):
 - `implementation` — a capability implemented by a script instead of a
   program: an `implementations:` entry whose `entry` is a Starlark file
   (`implementations/<id>.star`) with one function per verb, for the same
-  `--capability` choices as `provider` (a task tracker's works as
-  written; another's verbs are stubs that fail until you write them).
+  `--capability` choices as `provider` (its verbs are stubs that fail
+  until you write them).
   Each function gets `x = { input, config, id, key }` and answers `{ result,
   events?, inverse? }`, as a provider's verb does; it runs in the
   sandbox, calling only the scopes in its `needs:` (granted in
   `permissions:`), and keeps what it needs between calls in what it can
-  read back (a task tracker: the `task.recorded@3` it answers, read from
-  `v_task`). The entry also says what a provider declares: `features:`
-  (one left out is off), `data:`, a task tracker's `stages:`, `fields:`,
-  `id_pattern:`. Choose it in Settings → Capabilities
+  read back. The entry also says what a provider declares: `features:`
+  (one left out is off), `data:`. Choose it in Settings → Capabilities
   (`oxplow.capability.choose`); `extension test` runs its capability's
-  conformance suite. Example: `--from note-tracker`;
+  conformance suite;
 - `effect` — a script reacting to a logged event by composing commands
   (private; runs under the extension's permissions);
 - `job` — model work that runs on its own, outside any transaction: the
@@ -96,7 +94,7 @@ that exists is refused):
 Words used exactly: an **extension** is the folder; a **contribution** is
 one thing it declares (a page, collector, command, effect, provider …); a
 **capability** is a swappable slot a project chooses an implementation of
-(`task_tracker`, `snapshots`); an **implementation** fills
+(`snapshots`, `agent_harness`); an **implementation** fills
 one (a built-in, a script, or a provider's instance); a **provider** is
 the process implementing a capability (an *external provider* speaks the
 provider protocol). A **need** is what a contribution says it requires (a

@@ -1098,7 +1098,7 @@ commands:
     op: mark_generated
     example: {"entry": "dist"}
   - name: capability.choose
-    summary: "Choose which implementation a capability uses (`task_tracker`, `snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
+    summary: "Choose which implementation a capability uses (`snapshots`, …): the project's choice in .oxplow/project.yaml (`activeProviders`), or with `layer: personal` this person's own in .oxplow/personal.yaml. Leave `provider` out to go back to the default (for a personal choice, the same as the project). Logged as config.changed, undoable."
     scope: config.write
     op: choose_provider
     example: {"capability": "snapshots", "provider": "oxplow/diffs"}

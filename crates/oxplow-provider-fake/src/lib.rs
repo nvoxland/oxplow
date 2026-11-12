@@ -1,45 +1,29 @@
-//! A scripted **task tracker provider** speaking oxplow's provider protocol
-//! (P5.D2, `.context/providers.md`) — what the host, the instances and the
-//! conformance kit are tested against, the way the other
-//! test doubles stand in for theirs.
+//! A scripted **external provider** speaking oxplow's provider protocol
+//! (`.context/providers.md`) — what the host, the instances and the
+//! conformance kit are tested against, the way the other test doubles
+//! stand in for theirs. Which capability it implements comes from
+//! `OXPLOW_FAKE_CAPABILITY`; unset, it is a **snapshots** provider.
 //!
-//! It keeps items in memory (`oxplow:oxplow/task?id=W-<n>&provider=<id>`, `<id>` being the
-//! instance the host says it is — `OXPLOW_PROVIDER_ID`, `fake` by
-//! default), in its own stages — `icebox`, `ready`, `doing`, `stuck`,
-//! `shipped`, `dropped`, one in each of core's buckets, as its manifest
-//! declares them ([`STAGES`]). Its config
-//! needs a `team` (a string); a clean `check` returns the handle
-//! `fake:<team>`. The task tracker verbs `create`, `update`, `transition`
-//! (undoable: its inverse moves the item back), `link`, `comment` and
-//! `delete`, over the contract's inputs (`stage` — one of its own — the
-//! fake's `native.points`), plus one command of its own, `estimate` —
-//! each returns `task.recorded` events (the item as it now stands).
-//! Collector `task_tracker` streams every item changed after the cursor
-//! (each write bumps an item's revision; a deleted item stays, marked
-//! `deleted`), in revision order, as `$/record` followed by a `$/state`
-//! checkpoint `{ cursor, seen }` — opaque to the host.
+//! - `snapshots` (the default): declares [`snapshots_declarations`]
+//!   (`read_at` only with `OXPLOW_FAKE_FEATURES=contents`), marks a worktree
+//!   and answers what changed between marks; what it marked stays in
+//!   memory and the `mark`s answered are counted in its state (`marks`).
+//! - `knowledge`: declares [`knowledge_declarations`], keeps pages (in its
+//!   state), and each write answers the page's `knowledge.page.recorded`
+//!   event; collector `knowledge_pages` streams the pages changed after the
+//!   cursor, in revision order, as `$/record` followed by a `$/state`
+//!   checkpoint `{ cursor, seen }` — opaque to the host.
+//! - `filesystem`: declares [`filesystem_declarations`] (`write` only with
+//!   `OXPLOW_FAKE_FEATURES=writable`) and serves an in-memory tree, seeded
+//!   from `OXPLOW_FAKE_FILES` (a JSON object of path → base64).
+//! - `agent_harness`: declares [`harness_declarations`].
 //!
-//! With `OXPLOW_FAKE_STATE` (a file) its service's state — the items and
-//! each idempotency key's answer — is kept there and read back at start,
-//! so it outlives the process as a real service's does; without, it lives
-//! in memory.
-//!
-//! With `OXPLOW_FAKE_CAPABILITY=snapshots` it is a **snapshots provider**
-//! (`snapshots`): it declares [`snapshots_declarations`] (`read_at` only
-//! with `OXPLOW_FAKE_FEATURES=contents`), marks a worktree and answers what
-//! changed between marks; what it marked stays in memory and the `mark`s
-//! answered are counted in its state (`marks`).
-//!
-//! With `OXPLOW_FAKE_CAPABILITY=knowledge` it is a **knowledge provider**
-//! (`knowledge`): it declares [`knowledge_declarations`], keeps pages
-//! (in its state, as items are), and each write answers the page's
-//! `knowledge.page.recorded` event; collector `knowledge_pages` streams
-//! the pages changed after the cursor.
-//!
-//! With `OXPLOW_FAKE_CAPABILITY=filesystem` it is a **filesystem provider**
-//! (`filesystem`): it declares [`filesystem_declarations`] (`write` only
-//! with `OXPLOW_FAKE_FEATURES=writable`) and serves an in-memory tree,
-//! seeded from `OXPLOW_FAKE_FILES` (a JSON object of path → base64).
+//! Every mode has the same config (it needs a `team`, a string; a clean
+//! `check` returns the handle `fake:<team>`), takes the instance it is
+//! from `OXPLOW_PROVIDER_ID` (`fake` by default), and has the hooks below.
+//! With `OXPLOW_FAKE_STATE` (a file) its service's state is kept there and
+//! read back at start, so it outlives the process as a real service's
+//! does; without, it lives in memory.
 //!
 //! Two notifications act at once: `fake/changed { collectors? }` makes
 //! it send the host `host/changed` (what a webhook would), and
@@ -48,8 +32,9 @@
 //! **Hooks**, from `OXPLOW_FAKE_HOOKS` at start or a `fake/hooks { hooks }`
 //! notification later (comma-separated). A notification **replaces** the
 //! hooks — `""` clears them — keeping only what the fake declared at
-//! `initialize` (`plain-writes`, `bad-declarations`), which a running
-//! process can't take back (tsk1001):
+//! `initialize` (`bad-declarations`), which a running process can't take
+//! back. They act in every mode; the ones on a `read` need a collector,
+//! which only the knowledge mode has:
 //! - `fail-next:<n>` — the next `n` `check` / `invoke` / `read` calls fail
 //!   (`Internal`);
 //! - `slow-check:<ms>` — every `check` takes `ms` first;
@@ -60,57 +45,51 @@
 //! - `shutdown-file:<path>` — a `shutdown` writes `<path>` before it
 //!   answers; `ignore-shutdown` — a `shutdown` is answered and it keeps
 //!   running;
-//! - `checkpoint-at-end` — a read sends one `$/state`, after its last
-//!   record;
-//! - `bad-declarations` — `initialize` declares an extra command the
-//!   checked-in declarations don't have;
-//! - `progress` — a `read` sends `$/progress` before each record, then
-//!   takes 100 ms over it (as a long read would);
+//! - `bad-declarations` — `initialize` declares an extra command (named
+//!   `undeclared`) the checked-in declarations don't have;
 //! - `rate-limit:<ms>` — the next `invoke` or `read` is refused
 //!   `RateLimited` with `retry_after_ms: <ms>`;
-//! - `read-fail-after:<n>` — a `read` fails (`Internal`) after streaming
-//!   (and checkpointing) `n` records;
-//! - `bad-record` — a `read` streams a record of another provider's item;
-//! - `stale-read` — a `read` streams each item with its title prefixed
-//!   `stale ` (what it reads back isn't what its writes recorded);
-//! - `stuck-cursor` — every `$/state` checkpoint is `{ cursor: 0 }`, so a
-//!   read from it streams everything again;
 //! - `needs:<NAME>` — `check` reports a problem unless the credential
 //!   `<NAME>` reached the process;
 //! - `accepts:<NAME>=<value>` — `check`, `invoke` and `read` answer `Auth`
 //!   naming `<NAME>` unless the credential `<NAME>` the process holds is
-//!   `<value>` (its service takes that token and no other).
+//!   `<value>` (its service takes that token and no other);
 //! - `lax-check` — `check` doesn't look at its credentials (the
-//!   `accepts` hook then shows only on `invoke` and `read`, as with a
-//!   service whose check doesn't validate the token);
+//!   `accepts` hook then shows only on `invoke` and `read`);
 //! - `refuse-auth` — `invoke` and `read` answer `Auth` naming no
 //!   credential (a service that doesn't say which token it refused);
 //! - `lose-reply` — the next `invoke` lands but is never answered (a
 //!   reply lost on the way);
-//! - `hold-read-file:<path>` — a `read` waits, after `slow`, until `<path>`
-//!   exists (a test releases it by writing it), sending `$/progress` meanwhile:
-//!   a read that is under way for exactly as long as the test says, with no
-//!   clock;
 //! - `started-file:<path>` — each `invoke` writes `<path>` as it begins
 //!   (before `slow`), so a test knows a call is under way without timing
 //!   it;
-//! - `forget-keys` — it declares `idempotent_writes` but does a write sent
-//!   again with its key a second time (what the kit must catch);
-//! - `plain-writes` (at start) — it doesn't declare `idempotent_writes`
-//!   ([`plain_declarations`]) and ignores keys.
+//! - `host-read` — an `invoke` first reads the host (`host/call`
+//!   `sql.read`, `SELECT 7 AS n`, naming the call's idempotency key) and
+//!   answers what it read beside its result (`read`);
+//! - `config-read` — as `host-read`, but the read is of the provider's own
+//!   extension configuration (`host/call` `extension_config.read`);
+//! - on a knowledge `read`: `checkpoint-at-end` (one `$/state`, after the
+//!   last record), `progress` (`$/progress` before each record, then 100 ms
+//!   over it), `read-fail-after:<n>` (`Internal` after streaming and
+//!   checkpointing `n` records), `stuck-cursor` (every `$/state` is
+//!   `{ cursor: 0 }`) and `hold-read-file:<path>` (a `read` waits, after
+//!   `slow`, until `<path>` exists, sending `$/progress` meanwhile).
 //!
-//! **Idempotent writes:** it declares `idempotent_writes` and keeps it — an
-//! `invoke` sent again with its `idempotency_key` is done once and
-//! answered as the first was; the key sent with another write is
-//! `InvalidInput` at `/idempotency_key`.
+//! **Idempotency keys:** an `invoke` sent again with its `idempotency_key`
+//! is done once and answered as the first was; the key sent with another
+//! write is `InvalidInput` at `/idempotency_key`. (The state's `answered`
+//! is kept, so it holds across a restart.)
+//!
+//! **Generic hooks the app tests can use, by command:** the snapshots
+//! mode's `mark { stream, worktree, trigger }` and `changed { stream,
+//! from, to }` (a `mark` of an empty directory is enough) carry every
+//! invoke hook above; the knowledge mode's `write_page` / `delete_page`
+//! and collector `knowledge_pages` carry those and the read hooks.
 
-use oxplow_domain::vocabulary::Vocabulary;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxplow_domain::events::schema::{EventType, TaskRecorded};
-use oxplow_domain::tasks::{CommentRecord, LinkRecord, TaskRecord};
 use oxplow_provider_protocol::codec::notify;
 use oxplow_provider_protocol::model::*;
 use oxplow_provider_protocol::{Id, Incoming, Peer, ProtocolError};
@@ -130,13 +109,11 @@ pub use snapshots::declarations as snapshots_declarations;
 
 pub const PROVIDER: &str = "fake";
 
-/// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): a task tracker,
-/// the default, or an agent harness
-/// ([`harness_declarations`]), snapshots, knowledge or filesystem provider.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// The capability it implements (`OXPLOW_FAKE_CAPABILITY`): snapshots, the
+/// default, or an agent harness ([`harness_declarations`]), knowledge or
+/// filesystem provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
-    #[default]
-    Tasks,
     AgentHarness,
     /// A snapshots provider; `contents` is its feature of that name
     /// (`OXPLOW_FAKE_FEATURES`, see [`Capability::with_features`]).
@@ -152,18 +129,23 @@ pub enum Capability {
     },
 }
 
+impl Default for Capability {
+    fn default() -> Self {
+        Capability::Snapshots { contents: false }
+    }
+}
+
 impl Capability {
-    /// The capability `name` names (`task_tracker` — also when unset —,
+    /// The capability `name` names (`snapshots` — also when unset —,
     /// `agent_harness`, …).
     pub fn named(name: Option<&str>) -> Result<Self, String> {
-        match name.unwrap_or("task_tracker") {
-            "task_tracker" => Ok(Capability::Tasks),
+        match name.unwrap_or("snapshots") {
             "agent_harness" => Ok(Capability::AgentHarness),
             "snapshots" => Ok(Capability::Snapshots { contents: false }),
             "knowledge" => Ok(Capability::Knowledge),
             "filesystem" => Ok(Capability::FileSystem { writable: false }),
             other => Err(format!(
-                "the fake implements tasks, agent_harness, snapshots, knowledge or filesystem, not `{other}`"
+                "the fake implements agent_harness, snapshots, knowledge or filesystem, not `{other}`"
             )),
         }
     }
@@ -226,8 +208,6 @@ pub struct Hooks {
     pub progress: bool,
     pub rate_limit_ms: Option<u64>,
     pub read_fail_after: Option<u64>,
-    pub bad_record: bool,
-    pub stale_read: bool,
     pub stuck_cursor: bool,
     /// `needs:<NAME>`: `check` reports a problem unless the credential
     /// `<NAME>` reached it (as an environment variable).
@@ -243,19 +223,13 @@ pub struct Hooks {
     pub lax_check: bool,
     /// `lose-reply`: the next `invoke` lands and is never answered.
     pub lose_reply: bool,
-    /// `forget-keys`: a write sent again with its key is done again.
-    pub forget_keys: bool,
-    /// `plain-writes`: it doesn't declare `idempotent_writes`, and ignores
-    /// keys.
-    pub plain_writes: bool,
     /// `started-file:<path>`: each `invoke` writes `<path>` as it begins.
     pub started_file: Option<String>,
     /// `hold-read-file:<path>`: a `read` waits until `<path>` exists.
     pub hold_read_file: Option<String>,
-    /// `host-read`: an `estimate` or an `update` first reads the host
-    /// (`host/call` `sql.read`, `SELECT 7 AS n`, naming its key) and
-    /// answers what it read beside its result (`read`): its own command's
-    /// read, and a capability verb's.
+    /// `host-read`: an `invoke` first reads the host (`host/call`
+    /// `sql.read`, `SELECT 7 AS n`, naming its key) and answers what it
+    /// read beside its result (`read`).
     pub host_read: bool,
     /// `config-read`: as `host-read`, but the read is of the provider's own
     /// extension configuration (`host/call` `extension_config.read`).
@@ -282,7 +256,6 @@ impl Hooks {
     /// declared at `initialize`.
     pub fn replaced(&self, spec: &str) -> Hooks {
         Hooks {
-            plain_writes: self.plain_writes,
             bad_declarations: self.bad_declarations,
             ..Hooks::parse(spec)
         }
@@ -310,12 +283,8 @@ impl Hooks {
                 None if part == "refuse-auth" => self.refuse_auth = true,
                 None if part == "lax-check" => self.lax_check = true,
                 None if part == "lose-reply" => self.lose_reply = true,
-                None if part == "forget-keys" => self.forget_keys = true,
-                None if part == "plain-writes" => self.plain_writes = true,
                 None if part == "bad-declarations" => self.bad_declarations = true,
                 None if part == "progress" => self.progress = true,
-                None if part == "bad-record" => self.bad_record = true,
-                None if part == "stale-read" => self.stale_read = true,
                 None if part == "stuck-cursor" => self.stuck_cursor = true,
                 None if part == "host-read" => self.host_read = true,
                 None if part == "config-read" => self.config_read = true,
@@ -325,30 +294,6 @@ impl Hooks {
             }
         }
     }
-}
-
-/// The fake's stages, as its manifest declares them (`stages:` in
-/// `tests-e2e/fixtures/extension/extension.yaml`): its ids. Core resolves a
-/// bucket to one of them before the fake sees it.
-pub const STAGES: [&str; 6] = ["icebox", "ready", "doing", "stuck", "shipped", "dropped"];
-
-/// `manifest` (a scaffolded provider's, whose stages are named after their
-/// buckets) with the fake's own stage ids: what a test that turns a
-/// scaffold into the fake writes, since the fake takes only its own.
-pub fn with_its_stages(manifest: &str) -> String {
-    [
-        "backlog",
-        "todo",
-        "in_progress",
-        "blocked",
-        "done",
-        "canceled",
-    ]
-    .iter()
-    .zip(STAGES)
-    .fold(manifest.to_string(), |m, (bucket, own)| {
-        m.replace(&format!("{{ id: {bucket},"), &format!("{{ id: {own},"))
-    })
 }
 
 pub(crate) fn command(name: &str, summary: &str, input_schema: Value) -> CommandDecl {
@@ -362,11 +307,11 @@ pub(crate) fn command(name: &str, summary: &str, input_schema: Value) -> Command
     }
 }
 
-/// What `initialize` answers under `bad-declarations`: an extra command
-/// the checked-in [`declarations`] don't list (checking this in instead
-/// is an updated provider's new declarations).
-pub fn bad_declarations() -> InitializeResult {
-    let mut declared = declarations();
+/// What `initialize` answers under `bad-declarations`: the declarations
+/// of its mode plus an extra command the checked-in ones don't list
+/// (checking this in instead is an updated provider's new declarations).
+pub fn bad_declarations(declared: InitializeResult) -> InitializeResult {
+    let mut declared = declared;
     declared.commands.push(command(
         "undeclared",
         "A command the checked-in declarations don't list.",
@@ -375,125 +320,10 @@ pub fn bad_declarations() -> InitializeResult {
     declared
 }
 
-/// What the fake declares — the checked-in declarations a host approves.
+/// What the fake declares by default (snapshots mode) — the checked-in
+/// declarations a host approves.
 pub fn declarations() -> InitializeResult {
-    declared(true)
-}
-
-/// What it declares under `plain-writes`: no `idempotent_writes`.
-pub fn plain_declarations() -> InitializeResult {
-    declared(false)
-}
-
-fn declared(idempotent_writes: bool) -> InitializeResult {
-    let string = json!({ "type": "string" });
-    let stage = json!({ "type": "string", "enum": STAGES });
-    let native = json!({ "type": "object", "additionalProperties": false,
-                         "properties": { "points": { "type": "integer" } } });
-    let recorded_schema = Vocabulary::core()
-        .schema(TaskRecorded::TYPE, TaskRecorded::V)
-        .cloned()
-        .unwrap_or(Value::Null);
-    let mut transition = command(
-        "transition",
-        "Move a task to one of its stages.",
-        json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
-                "properties": { "uri": string, "to": stage } }),
-    );
-    transition.undoable = true;
-    InitializeResult {
-        protocol_version: PROTOCOL_VERSION.into(),
-        provider: Party {
-            name: PROVIDER.into(),
-            version: "1".into(),
-        },
-        capabilities: vec![CapabilityDecl {
-            capability: "task_tracker".into(),
-            features: json!({
-                "hierarchy": true, "comments": true, "links": true, "delete": true, "idempotent_writes": idempotent_writes
-            }),
-            data: serde_json::Value::Null,
-        }],
-        commands: vec![
-            command(
-                "create",
-                "Create a task.",
-                json!({ "type": "object", "required": ["title"], "additionalProperties": false,
-                        "properties": { "title": string, "body": string, "parent_uri": string,
-                                        "stage": stage,
-                                        "native": native,
-                                        "links": { "type": "array", "items": {
-                                            "type": "object",
-                                            "required": ["target", "link_type"],
-                                            "additionalProperties": false,
-                                            "properties": { "target": string,
-                                                            "link_type": string } } } } }),
-            ),
-            command(
-                "update",
-                "Edit a task's title, body, parent, stage or points.",
-                json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
-                        "properties": { "uri": string, "title": string, "body": string,
-                                        "parent_uri": string, "stage": stage,
-                                        "native": native } }),
-            ),
-            transition,
-            command(
-                "link",
-                "Link a task to another, or to any ref it is about.",
-                json!({ "type": "object", "required": ["uri", "target", "link_type"],
-                        "additionalProperties": false,
-                        "properties": { "uri": string, "target": string, "link_type": string } }),
-            ),
-            command(
-                "unlink",
-                "Remove a task's link.",
-                json!({ "type": "object", "required": ["uri", "target", "link_type"],
-                        "additionalProperties": false,
-                        "properties": { "uri": string, "target": string, "link_type": string } }),
-            ),
-            command(
-                "comment",
-                "Comment on a task.",
-                json!({ "type": "object", "required": ["uri", "body"],
-                        "additionalProperties": false,
-                        "properties": { "uri": string, "body": string } }),
-            ),
-            command(
-                "delete",
-                "Delete a task.",
-                json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
-                        "properties": { "uri": string } }),
-            ),
-            command(
-                "estimate",
-                "Set a task's points (a fake-only command).",
-                json!({ "type": "object", "required": ["uri", "points"],
-                        "additionalProperties": false,
-                        "properties": { "uri": string, "points": { "type": "integer" } } }),
-            ),
-        ],
-        event_types: vec![EventTypeDecl {
-            event_type: TaskRecorded::TYPE.into(),
-            v: TaskRecorded::V,
-            schema: recorded_schema,
-        }],
-        collectors: vec![CollectorDecl {
-            name: "tasks".into(),
-            entity: "task".into(),
-            description: "Every task, after the cursor.".into(),
-        }],
-        config_schema: json!({ "type": "object", "required": ["team"],
-                               "properties": { "team": { "type": "string" } } }),
-    }
-}
-
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct Item {
-    record: TaskRecord,
-    /// The world's revision when it last changed: a read streams the
-    /// items changed after its cursor.
-    rev: u64,
+    snapshots_declarations(false)
 }
 
 #[derive(Default)]
@@ -513,8 +343,6 @@ struct World {
     /// A knowledge provider's pages, by id.
     pages: knowledge::Pages,
     hooks: Hooks,
-    items: BTreeMap<u64, Item>,
-    next: u64,
     /// Bumped by every write.
     rev: u64,
     /// Each idempotency key's write — its command and input — and answer.
@@ -522,15 +350,13 @@ struct World {
     in_flight: HashMap<Id, oneshot::Sender<()>>,
     /// Where its service's state is kept (`OXPLOW_FAKE_STATE`), so it
     /// outlives the process as a real service's does — what a re-send
-    /// after a restart is checked against (tsk916). In memory without.
+    /// after a restart is checked against. In memory without.
     state: Option<std::path::PathBuf>,
 }
 
 /// What of the world is its service's — kept across restarts.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Saved {
-    items: BTreeMap<u64, Item>,
-    next: u64,
     rev: u64,
     answered: HashMap<String, (String, Value, Value)>,
     #[serde(default)]
@@ -548,8 +374,6 @@ impl World {
             return;
         };
         let saved = Saved {
-            items: self.items.clone(),
-            next: self.next,
             rev: self.rev,
             answered: self.answered.clone(),
             marks: self.marks,
@@ -575,8 +399,6 @@ impl World {
         else {
             return;
         };
-        self.items = saved.items;
-        self.next = saved.next;
         self.rev = saved.rev;
         self.answered = saved.answered;
         self.marks = saved.marks;
@@ -616,7 +438,6 @@ where
         id: id.to_string(),
         capability,
         hooks: Hooks::parse(hooks),
-        next: 1,
         state,
         ..World::default()
     };
@@ -779,20 +600,16 @@ async fn handle(
                 let w = world.lock().await;
                 (w.hooks.clone(), w.capability)
             };
-            let declared = if capability == Capability::AgentHarness {
-                harness_declarations()
-            } else if capability == Capability::Knowledge {
-                knowledge_declarations()
-            } else if let Capability::Snapshots { contents } = capability {
-                snapshots_declarations(contents)
-            } else if let Capability::FileSystem { writable } = capability {
-                filesystem_declarations(writable)
-            } else if hooks.bad_declarations {
-                bad_declarations()
-            } else if hooks.plain_writes {
-                plain_declarations()
+            let declared = match capability {
+                Capability::AgentHarness => harness_declarations(),
+                Capability::Knowledge => knowledge_declarations(),
+                Capability::Snapshots { contents } => snapshots_declarations(contents),
+                Capability::FileSystem { writable } => filesystem_declarations(writable),
+            };
+            let declared = if hooks.bad_declarations {
+                bad_declarations(declared)
             } else {
-                declarations()
+                declared
             };
             Ok(serde_json::to_value(declared).expect("declarations serialize"))
         }
@@ -839,10 +656,8 @@ async fn handle(
         method::DISCOVER => {
             let p: DiscoverParams = parse(params)?;
             require_handle(&p.handle)?;
-            // A task tracker reads its items, a knowledge store its pages;
-            // a harness reads nothing.
+            // A knowledge store reads its pages; the others read nothing.
             let (name, description) = match world.lock().await.capability {
-                Capability::Tasks => ("task", "A task as the fake has it."),
                 Capability::Knowledge => ("knowledge_page", "A page as the fake keeps it."),
                 _ => return Ok(json!({ "entities": [] })),
             };
@@ -871,12 +686,8 @@ async fn handle(
             }
             slow(world).await;
             let hooks = world.lock().await.hooks.clone();
-            // Under `plain-writes` a key means nothing; `forget-keys`
-            // drops it (breaking the promise it declares).
             let sent_key = p.idempotency_key.clone();
-            let key = p
-                .idempotency_key
-                .filter(|_| !hooks.plain_writes && !hooks.forget_keys);
+            let key = p.idempotency_key;
             if let Some(key) = &key {
                 if let Some((command, input, answer)) = world.lock().await.answered.get(key) {
                     if *command == p.command && *input == p.input {
@@ -888,9 +699,7 @@ async fn handle(
                     });
                 }
             }
-            let read = if (hooks.host_read || hooks.config_read)
-                && matches!(p.command.as_str(), "estimate" | "update")
-            {
+            let read = if hooks.host_read || hooks.config_read {
                 let (scope, args) = if hooks.config_read {
                     ("extension_config.read", json!({}))
                 } else {
@@ -907,21 +716,18 @@ async fn handle(
                 None
             };
             let capability = world.lock().await.capability;
-            let mut answer = match p.command.as_str() {
-                _ if capability == Capability::AgentHarness => {
+            let mut answer = match capability {
+                Capability::AgentHarness => {
                     json!({ "result": harness::answer(&p.command, &p.input)?, "events": [] })
                 }
-                _ if capability == Capability::Knowledge => {
+                Capability::Knowledge => {
                     let mut w = world.lock().await;
                     let w = &mut *w;
                     let (result, events) =
                         knowledge::answer(&w.id, &mut w.pages, &mut w.rev, &p.command, &p.input)?;
                     json!({ "result": result, "events": events })
                 }
-                _ if matches!(capability, Capability::FileSystem { .. }) => {
-                    let Capability::FileSystem { writable } = capability else {
-                        unreachable!()
-                    };
+                Capability::FileSystem { writable } => {
                     let result = world
                         .lock()
                         .await
@@ -929,10 +735,7 @@ async fn handle(
                         .answer(&p.command, &p.input, writable)?;
                     json!({ "result": result, "events": [] })
                 }
-                _ if matches!(capability, Capability::Snapshots { .. }) => {
-                    let Capability::Snapshots { contents } = capability else {
-                        unreachable!()
-                    };
+                Capability::Snapshots { contents } => {
                     let mut w = world.lock().await;
                     let marked = w.marks;
                     let result = w
@@ -943,9 +746,8 @@ async fn handle(
                     }
                     json!({ "result": result, "events": [] })
                 }
-                _ => invoke(world, &p.command, p.input.clone()).await?,
             };
-            if let Some(read) = read {
+            if let Some(read) = read.filter(|_| answer["result"].is_object()) {
                 answer["result"]["read"] = read;
             }
             let mut w = world.lock().await;
@@ -967,13 +769,8 @@ async fn handle(
             refuse_auth(world).await?;
             let p: ReadParams = parse(params)?;
             require_handle(&p.handle)?;
-            let knowledge_mode = world.lock().await.capability == Capability::Knowledge;
-            let (collector, entity) = if knowledge_mode {
-                ("knowledge_pages", "knowledge_page")
-            } else {
-                ("tasks", "task")
-            };
-            if p.collector != collector {
+            let (collector, entity) = ("knowledge_pages", "knowledge_page");
+            if p.collector != collector || world.lock().await.capability != Capability::Knowledge {
                 return Err(ProtocolError::InvalidInput {
                     field: "/collector".into(),
                     message: format!("no collector `{}`", p.collector),
@@ -1004,43 +801,17 @@ async fn handle(
                 .and_then(|s| s.get("seen"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
-            let (hooks, mut rows) = {
+            let (hooks, rows) = {
                 let w = world.lock().await;
-                let mut rows: Vec<(u64, Value)> = if knowledge_mode {
-                    w.pages
-                        .values()
-                        .filter(|page| page.rev > after)
-                        .map(|page| (page.rev, page.record().clone()))
-                        .collect()
-                } else {
-                    w.items
-                        .values()
-                        .filter(|item| item.rev > after)
-                        .map(|item| {
-                            (
-                                item.rev,
-                                serde_json::to_value(&item.record).expect("record serializes"),
-                            )
-                        })
-                        .collect()
-                };
+                let mut rows: Vec<(u64, Value)> = w
+                    .pages
+                    .values()
+                    .filter(|page| page.rev > after)
+                    .map(|page| (page.rev, page.record().clone()))
+                    .collect();
                 rows.sort_by_key(|(rev, _)| *rev);
                 (w.hooks.clone(), rows)
             };
-            if hooks.bad_record {
-                let mut foreign = rows
-                    .first()
-                    .map(|(_, r)| r.clone())
-                    .unwrap_or_else(|| json!({ "title": "x", "stage": "ready" }));
-                foreign["uri"] = json!(oxplow_domain::uri::build::task_uri("other", "X-1"));
-                rows.insert(0, (after + 1, foreign));
-            }
-            if hooks.stale_read {
-                for (_, row) in rows.iter_mut() {
-                    let title = row["title"].as_str().unwrap_or_default().to_string();
-                    row["title"] = json!(format!("stale {title}"));
-                }
-            }
             let total = rows.len();
             for (i, (rev, row)) in rows.into_iter().enumerate() {
                 if hooks.read_fail_after == Some(i as u64) {
@@ -1076,230 +847,4 @@ async fn handle(
         }
         other => Err(ProtocolError::MethodNotFound(other.into())),
     }
-}
-
-/// The number of instance `id`'s item `item_ref`.
-fn number_of(id: &str, item_ref: &str) -> Result<u64, ProtocolError> {
-    oxplow_domain::uri::build::task_of_uri(item_ref)
-        .filter(|(provider, _)| provider == id)
-        .and_then(|(_, item)| item.strip_prefix("W-")?.parse().ok())
-        .ok_or_else(|| ProtocolError::InvalidInput {
-            field: "/uri".into(),
-            message: format!(
-                "`{item_ref}` isn't one of `{id}`'s tasks (oxplow:oxplow/task?id=W-<n>&provider={id})"
-            ),
-        })
-}
-
-fn str_field(input: &Value, field: &str) -> Result<String, ProtocolError> {
-    input
-        .get(field)
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .ok_or_else(|| ProtocolError::InvalidInput {
-            field: format!("/{field}"),
-            message: "required".into(),
-        })
-}
-
-fn recorded(record: &TaskRecord) -> EventDraft {
-    EventDraft {
-        event_type: TaskRecorded::TYPE.into(),
-        v: TaskRecorded::V,
-        payload: json!({ "item": record }),
-        subject: vec![record.uri.clone()],
-    }
-}
-
-/// The stage `input` names at `field`, one of the fake's own; `None` when
-/// it names none.
-fn requested_stage(input: &Value, field: &str) -> Result<Option<String>, ProtocolError> {
-    match input.get(field).and_then(Value::as_str) {
-        None => Ok(None),
-        Some(raw) if STAGES.contains(&raw) => Ok(Some(raw.into())),
-        Some(raw) => Err(ProtocolError::InvalidInput {
-            field: format!("/{field}"),
-            message: format!("`{raw}` isn't a fake stage"),
-        }),
-    }
-}
-
-fn points_of(input: &Value) -> Option<i64> {
-    input
-        .get("native")
-        .and_then(|n| n.get("points"))
-        .and_then(Value::as_i64)
-}
-
-async fn invoke(world: &Shared, command: &str, input: Value) -> Result<Value, ProtocolError> {
-    let mut w = world.lock().await;
-    let mut inverse = None;
-    let (result, events) = match command {
-        "create" => {
-            let title = str_field(&input, "title")?;
-            let parent_ref = input
-                .get("parent_uri")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            if let Some(parent) = &parent_ref {
-                let n = number_of(&w.id, parent)?;
-                if !w.items.get(&n).is_some_and(|i| !i.record.deleted) {
-                    return Err(ProtocolError::InvalidInput {
-                        field: "/parent_uri".into(),
-                        message: format!("no item `{parent}`"),
-                    });
-                }
-            }
-            let stage = requested_stage(&input, "stage")?.unwrap_or_else(|| "ready".into());
-            let n = w.next;
-            w.next += 1;
-            let mut native = json!({ "team": "fake" });
-            if let Some(points) = points_of(&input) {
-                native["points"] = points.into();
-            }
-            let record = TaskRecord {
-                uri: oxplow_domain::uri::build::task_uri(&w.id, &format!("W-{n}")),
-                title,
-                body: input
-                    .get("body")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .into(),
-                stage,
-                native,
-                parent_uri: parent_ref,
-                deleted: false,
-                // It keeps its links and comments, so every record states
-                // them; the links asked for on create come with the item.
-                links: Some(
-                    serde_json::from_value(input.get("links").cloned().unwrap_or(json!([])))
-                        .map_err(|e| ProtocolError::InvalidInput {
-                            field: "/links".into(),
-                            message: e.to_string(),
-                        })?,
-                ),
-                comments: Some(Vec::new()),
-            };
-            let events = vec![recorded(&record)];
-            let result = json!({ "uri": record.uri });
-            w.rev += 1;
-            let rev = w.rev;
-            w.items.insert(n, Item { record, rev });
-            (result, events)
-        }
-        "update" | "transition" | "link" | "unlink" | "comment" | "delete" | "estimate" => {
-            let item_ref = str_field(&input, "uri")?;
-            let n = number_of(&w.id, &item_ref)?;
-            w.rev += 1;
-            let rev = w.rev;
-            let item = w
-                .items
-                .get_mut(&n)
-                .filter(|item| !item.record.deleted)
-                .ok_or_else(|| ProtocolError::InvalidInput {
-                    field: "/uri".into(),
-                    message: format!("no item `{item_ref}`"),
-                })?;
-            let mut result = json!({ "uri": item_ref });
-            match command {
-                "update" => {
-                    if let Some(t) = input.get("title").and_then(Value::as_str) {
-                        item.record.title = t.into();
-                    }
-                    if let Some(b) = input.get("body").and_then(Value::as_str) {
-                        item.record.body = b.into();
-                    }
-                    if let Some(p) = input.get("parent_uri").and_then(Value::as_str) {
-                        item.record.parent_uri = (!p.is_empty()).then(|| p.to_string());
-                    }
-                    if let Some(stage) = requested_stage(&input, "stage")? {
-                        item.record.stage = stage;
-                    }
-                    if let Some(points) = points_of(&input) {
-                        item.record.native["points"] = points.into();
-                    }
-                }
-                "transition" => {
-                    let stage = requested_stage(&input, "to")?.ok_or_else(|| {
-                        ProtocolError::InvalidInput {
-                            field: "/to".into(),
-                            message: "required".into(),
-                        }
-                    })?;
-                    inverse = Some(CommandCall {
-                        command: "transition".into(),
-                        input: json!({ "uri": item_ref, "to": item.record.stage }),
-                    });
-                    item.record.stage = stage;
-                }
-                "link" => {
-                    let link = LinkRecord {
-                        target: str_field(&input, "target")?,
-                        link_type: str_field(&input, "link_type")?,
-                    };
-                    let links = item.record.links.get_or_insert_with(Vec::new);
-                    if !links.contains(&link) {
-                        links.push(link);
-                        inverse = Some(CommandCall {
-                            command: "unlink".into(),
-                            input: input.clone(),
-                        });
-                    }
-                }
-                "unlink" => {
-                    let link = LinkRecord {
-                        target: str_field(&input, "target")?,
-                        link_type: str_field(&input, "link_type")?,
-                    };
-                    let links = item.record.links.get_or_insert_with(Vec::new);
-                    let before = links.len();
-                    links.retain(|l| l != &link);
-                    if links.len() < before {
-                        inverse = Some(CommandCall {
-                            command: "link".into(),
-                            input: input.clone(),
-                        });
-                    }
-                }
-                "comment" => {
-                    let comments = item.record.comments.get_or_insert_with(Vec::new);
-                    let id = format!("c{}", comments.len() + 1);
-                    // The answer names it: the list's own id for the comment.
-                    result["comment"] = Value::String(id.clone());
-                    comments.push(CommentRecord {
-                        id,
-                        body: str_field(&input, "body")?,
-                        author: None,
-                        created_at: None,
-                    });
-                }
-                "estimate" => {
-                    let points = input.get("points").and_then(Value::as_i64).ok_or_else(|| {
-                        ProtocolError::InvalidInput {
-                            field: "/points".into(),
-                            message: "required".into(),
-                        }
-                    })?;
-                    item.record.native["points"] = points.into();
-                }
-                _ => item.record.deleted = true,
-            }
-            // Only a write that happened moves its revision.
-            item.rev = rev;
-            let events = vec![recorded(&item.record)];
-            (result, events)
-        }
-        other => {
-            return Err(ProtocolError::InvalidInput {
-                field: "/command".into(),
-                message: format!("no command `{other}`"),
-            })
-        }
-    };
-    Ok(serde_json::to_value(InvokeResult {
-        result,
-        events,
-        inverse,
-    })
-    .expect("invoke result serializes"))
 }

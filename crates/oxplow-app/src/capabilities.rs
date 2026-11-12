@@ -953,7 +953,7 @@ impl CapabilityRegistry {
 
     fn recognizers_from(
         all: &[Implementation],
-        config: &OxplowConfig,
+        _config: &OxplowConfig,
     ) -> crate::vocabulary_reactor::Recognizers {
         let mut knowledge_stores: Vec<String> = all
             .iter()
@@ -963,7 +963,7 @@ impl CapabilityRegistry {
         knowledge_stores.sort();
         knowledge_stores.dedup();
         crate::vocabulary_reactor::Recognizers {
-            task_ids: Self::task_ids_from(all, config),
+            task_ids: Vec::new(),
             knowledge_stores,
         }
     }
@@ -977,19 +977,6 @@ impl CapabilityRegistry {
             .published_config
             .clone()
             .unwrap_or_else(|| Arc::new(fallback.clone()))
-    }
-
-    /// What loose task ids text names: each running provider instance's
-    /// pattern (its store fills the task model;
-    /// `ModelRegistry::with_provider_fills`). Stores an extension fills
-    /// declare theirs in `fills.id_pattern`, which the model registry
-    /// holds.
-    fn task_ids_from(all: &[Implementation], _config: &OxplowConfig) -> Vec<(String, String)> {
-        all.iter()
-            .filter(|i| i.capability == "task_tracker" && i.offered)
-            .filter(|i| matches!(i.source, Source::External))
-            .filter_map(|i| Some((i.id.clone(), i.id_pattern.clone()?)))
-            .collect()
     }
 
     /// `capability`'s active implementation id under `config`.
@@ -1548,38 +1535,6 @@ mod tests {
         }
     }
 
-    /// Text names each running provider instance's ids that declares a
-    /// pattern (its store fills the task model); a script or built-in
-    /// names none.
-    #[test]
-    fn every_running_task_providers_ids_are_recognized() {
-        let mut linear = builtin("task_tracker", "linear", "x");
-        linear.source = Source::External;
-        linear.id_pattern = Some(r"ENG-\d+".into());
-        let mut jira = builtin("task_tracker", "jira", "x");
-        jira.source = Source::External;
-        jira.id_pattern = Some(r"PRJ-\d+".into());
-        let mut plain = builtin("task_tracker", "plain", "x");
-        plain.source = Source::External;
-        let mut built = builtin("task_tracker", "quiet", "y");
-        built.id_pattern = Some(r"Q\d+".into());
-        let mut hidden = builtin("task_tracker", "hidden", "z");
-        hidden.source = Source::External;
-        hidden.id_pattern = Some(r"H\d+".into());
-        hidden.offered = false;
-        let ids = CapabilityRegistry::task_ids_from(
-            &[linear, jira, plain, built, hidden],
-            &config(&[], &[]),
-        );
-        assert_eq!(
-            ids,
-            vec![
-                ("linear".to_string(), r"ENG-\d+".to_string()),
-                ("jira".to_string(), r"PRJ-\d+".to_string()),
-            ]
-        );
-    }
-
     fn registry(declared: bool) -> CapabilityRegistry {
         let r = CapabilityRegistry::new(Vec::new(), VocabularyHandle::core());
         if declared {
@@ -1791,7 +1746,6 @@ mod tests {
         svc.extension_catalog.changed();
         crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
-        assert_eq!(svc.capabilities.active(&config, "task_tracker"), "none");
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),

@@ -96,7 +96,7 @@ pub struct SeeAlso {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PageInactive {
-    /// The needs that aren't met (`task_tracker`, `knowledge`).
+    /// The needs that aren't met (`snapshots`, `knowledge`).
     pub needs: Vec<String>,
     /// What a person reads.
     pub message: String,

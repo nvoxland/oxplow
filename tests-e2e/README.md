@@ -20,7 +20,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
   `OXPLOW_E2E_PROVIDER_FAKE`). With `OXPLOW_E2E_BIN=target/debug` it builds
   nothing and runs the binaries already there.
 - **`fixtures/extension/`** — the test extension `e2e`, copied into every
-  project before boot: a fake task provider (`bin/provider`, written
+  project before boot: a fake provider (`bin/provider`, written
   then, runs the fake this checkout built; its `provider.json` is checked
   in and kept equal to the fake's declarations by
   `the_suite_fixture_declares_what_the_fake_does`), an effect, a dataset, a
@@ -161,7 +161,7 @@ CORS is permissive for exactly this (`.context/remote-daemon.md`).
 
 `shell/` boot and connecting with a token; `work/` Go To and launcher search; `knowledge/` the comments inbox, the knowledge page's editor (links, toolbar, Save, Source view, inline page fences) and
 an extension's resource; `code/` a commit's diff (file watching over a real daemon is a Rust test, `real_watch_tests.rs`); `data/` extension pages; `settings/`
-Programs approval and the settings pages; `integrations/` the fake tracker's
+Programs approval and the settings pages; `integrations/` the fake provider's
 Integrations frame (the config form, Check, Enable, the task-tracker choice, Sync Now; the data side is `providers/tests.rs`), Delivery (a failed reaction,
 a person's Retry, Backfill) and Approvals (an effect's destructive step);
 `agent/` the Terminal shell; `components/` the github example's PR Lifetimes (frame,

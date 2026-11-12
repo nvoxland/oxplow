@@ -1,16 +1,15 @@
 # Provider protocol
 
 A provider is a program that implements one of oxplow's capabilities
-for it. Today that's the task tracker: a provider can replace oxtask
-with another tracker. oxplow starts the program, talks to it over
+for it (snapshots, knowledge, an agent harness or a filesystem). oxplow starts the program, talks to it over
 stdin/stdout, and reads and writes through it.
 
 ```sh
-oxplow extension new provider my-tracker   # declarations, a stub program, a test config
+oxplow extension new provider my-snapshots   # declarations, a stub program, a test config
 oxplow extension new provider my-agent --capability agent_harness
-oxplow extension new provider my-shutter --capability snapshots
+oxplow extension new provider my-fs --capability filesystem
 oxplow extension new provider my-shelf --capability knowledge
-oxplow extension test my-tracker           # handshake, examples, conformance suite
+oxplow extension test my-snapshots           # handshake, examples, conformance suite
 ```
 
 An agent harness that can tell its subagents apart declares the
@@ -58,10 +57,10 @@ foreign body.
 ## Declaring one
 
 ```yaml
-# .oxplow/extensions/my-tracker/extension.yaml
+# .oxplow/extensions/my-snapshots/extension.yaml
 providers:
-  - id: tracker
-    capability: task_tracker
+  - id: snaps
+    capability: snapshots
     entry: bin/provider            # the program, inside the folder
     declarations: provider.json    # what `initialize` answers, checked in
     env: [HOME]                    # environment variables it may read
@@ -84,10 +83,6 @@ providers:
   your authority.
 - `declarations` is the provider's answer to `initialize`, checked in.
   If the running program says anything else, it doesn't start.
-- A server that speaks MCP can be a provider through oxplow's adapter
-  instead of an `entry`: `adapter: { mcp: { command: [bin/server] } }`,
-  or `{ mcp: { url: … } }` for one already running. A mapping file says
-  which of its tools are the capability's verbs.
 
 ## The wire
 
@@ -153,8 +148,8 @@ The standard JSON-RPC codes, plus:
 - **Exits are noticed.** A process that exits on its own is restarted
   after a backoff. Three failures in a row (calls, starts or exits)
   disable the instance until a person turns it back on.
-- **You emit only your capability's events.** A task tracker's are
-  `task.recorded`, for its own items.
+- **You emit only your capability's events.** A knowledge store's are
+  `knowledge.page.recorded`, for its own pages; a snapshots provider emits none.
 
 ## Testing
 
@@ -162,6 +157,4 @@ The standard JSON-RPC codes, plus:
 config (`fixtures/provider-<id>.yaml`): the handshake against
 `declarations`, every intent example, every message against the
 schemas, a golden transcript (`--bless` writes it) and the
-capability's conformance suite. The task tracker suite creates, updates,
-transitions, links, comments on and deletes an item through you, and
-reads each back.
+capability's conformance suite. Each capability's suite calls its verbs through you and checks the answers.

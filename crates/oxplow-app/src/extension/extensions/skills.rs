@@ -4,10 +4,10 @@
 //!
 //! ```yaml
 //! skills:
-//!   - { name: tasks, file: skills/tasks/SKILL.md, needs: [task_tracker] }
+//!   - { name: tasks, file: skills/tasks/SKILL.md, needs: [snapshots] }
 //!   - { name: next-task, kind: command, file: commands/next-task.md }
 //! implementations:
-//!   - { capability: task_tracker, id: oxtask, entry: oxplow:oxtask, skills: [next-task] }
+//!   - { capability: snapshots, id: oxtask, entry: oxplow:oxtask, skills: [next-task] }
 //! ```
 //!
 //! An implementation that lists a skill owns it: it's offered only while
@@ -52,7 +52,7 @@ pub struct SkillDecl {
     pub kind: SkillKind,
     /// Its markdown, inside the extension.
     pub file: String,
-    /// What it needs active (`task_tracker`, `task_tracker.comments`).
+    /// What it needs active (`snapshots`).
     pub needs: Vec<String>,
     /// The `description:` of its frontmatter: when the agent loads a skill,
     /// what a command does.
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn a_skill_and_a_command_are_declared() {
         let (decls, errors) = parse(
-            "  - { name: tasks, file: s/SKILL.md, needs: [task_tracker] }\n  - { name: next-task, kind: command, file: c.md }\n",
+            "  - { name: tasks, file: s/SKILL.md, needs: [snapshots] }\n  - { name: next-task, kind: command, file: c.md }\n",
             &[("s/SKILL.md", SKILL), ("c.md", "---\ndescription: Next.\n---\nGo.\n")],
         );
         assert!(errors.is_empty(), "{errors:?}");
@@ -287,7 +287,7 @@ mod tests {
                     name: "tasks".into(),
                     kind: SkillKind::Skill,
                     file: "s/SKILL.md".into(),
-                    needs: vec!["task_tracker".into()],
+                    needs: vec!["snapshots".into()],
                     description: "Tasks.".into(),
                     when: None,
                 },

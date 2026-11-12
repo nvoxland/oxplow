@@ -429,49 +429,19 @@ async fn a_scaffolded_provider_is_red_until_a_program_speaks_for_it() {
         serde_json::to_string_pretty(&oxplow_provider_fake::declarations()).unwrap(),
     )
     .unwrap();
-    let manifest = std::fs::read_to_string(ext.join("extension.yaml")).unwrap();
-    std::fs::write(
-        ext.join("extension.yaml"),
-        oxplow_provider_fake::with_its_stages(&manifest),
-    )
-    .unwrap();
     std::fs::write(
         ext.join("fixtures/provider-fake.yaml"),
         "config: { team: core }\n",
-    )
-    .unwrap();
-    std::fs::write(
-        ext.join("fixtures/basic.yaml"),
-        "when: { command: create, input: { title: First } }\nexpect: { uri: $any }\n",
     )
     .unwrap();
     let blessed = kit_on_a_fresh_service(dir.path(), true).await;
     assert_eq!(blessed.error_lines(), Vec::<String>::new());
     let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert_eq!(report.error_lines(), Vec::<String>::new());
-    for ran in ["task_tracker suite", "read tasks", "discover"] {
-        assert!(
-            report.ran.iter().any(|r| r == ran),
-            "{ran}: {:?}",
-            report.ran
-        );
-    }
-
-    // P7.A7: a cursor that doesn't advance — a second read from its last
-    // checkpoint streams everything again — fails the kit.
-    std::fs::write(
-        ext.join("bin/provider"),
-        fake_script(dir.path(), "stuck-cursor"),
-    )
-    .unwrap();
-    let report = kit_on_a_fresh_service(dir.path(), false).await;
     assert!(
-        report
-            .error_lines()
-            .iter()
-            .any(|e| e.contains("collector `tasks`") && e.contains("doesn't advance")),
+        report.ran.iter().any(|r| r == "snapshots suite"),
         "{:?}",
-        report.errors
+        report.ran
     );
 }
 

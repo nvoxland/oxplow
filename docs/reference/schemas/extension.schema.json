@@ -3403,7 +3403,7 @@
           "default": null
         },
         "stages": {
-          "description": "A script task tracker's stages, in order, each in one of core's\nbuckets (one in each of todo, in_progress and done).",
+          "description": "A script item-keeping capability's stages, in order, each in one of core's\nbuckets (one in each of todo, in_progress and done).",
           "type": "array",
           "items": {
             "$ref": "#/definitions/StageDecl"
@@ -3411,7 +3411,7 @@
           "default": []
         },
         "fields": {
-          "description": "A script task tracker's own fields (kept in an item's `native`).",
+          "description": "A script item-keeping capability's own fields (kept in an item's `native`).",
           "type": "array",
           "items": {
             "$ref": "#/definitions/FieldDecl"
@@ -3419,7 +3419,7 @@
           "default": []
         },
         "id_pattern": {
-          "description": "What a script task tracker's own ids look like (a regex matched\nwhole).",
+          "description": "What a script item-keeping capability's own ids look like (a regex matched\nwhole).",
           "type": [
             "string",
             "null"
@@ -3633,7 +3633,7 @@
           "type": "string"
         },
         "entry": {
-          "description": "The program, relative to the extension folder — or `adapter`.",
+          "description": "The program, relative to the extension folder.",
           "type": [
             "string",
             "null"
@@ -3646,18 +3646,6 @@
             "type": "string"
           },
           "default": []
-        },
-        "adapter": {
-          "description": "An MCP server run through oxplow's adapter, instead of an `entry`.",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AdapterSpec"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
         "env": {
           "description": "Host environment variables passed through by name.",
@@ -3688,7 +3676,7 @@
           "type": "string"
         },
         "idPattern": {
-          "description": "What a task tracker's own ids look like (a regex matched whole:\n`[A-Z]+-\\d+`), so a loose id resolves to its item while it's the\nactive task tracker.",
+          "description": "What an item-keeping capability's own ids look like (a regex matched whole:\n`[A-Z]+-\\d+`), so a loose id resolves to its item while it's the\nactive one.",
           "type": [
             "string",
             "null"
@@ -3696,7 +3684,7 @@
           "default": null
         },
         "fields": {
-          "description": "A task tracker's own fields (kept in an item's `native`), so screens\nrender and edit them: `[{ name, title, kind: enum|text|number,\nvalues? }]`.",
+          "description": "An item-keeping capability's own fields (kept in an item's `native`), so screens\nrender and edit them: `[{ name, title, kind: enum|text|number,\nvalues? }]`.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/FieldDecl"
@@ -3704,7 +3692,7 @@
           "default": []
         },
         "stages": {
-          "description": "A task tracker's stages, in order, each in one of core's buckets:\n`[{ id, title, bucket }]` — required for a task tracker, which needs\none in each of todo, in_progress and done. The first of a bucket is\nwhere naming the bucket lands.",
+          "description": "An item-keeping capability's stages, in order, each in one of core's buckets:\n`[{ id, title, bucket }]` — required for an item-keeping capability, which needs\none in each of todo, in_progress and done. The first of a bucket is\nwhere naming the bucket lands.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/StageDecl"
@@ -3725,69 +3713,6 @@
         "id",
         "capability",
         "declarations"
-      ]
-    },
-    "AdapterSpec": {
-      "description": "An MCP server as a provider: oxplow's adapter runs `mcp`'s\nserver and translates through `mapping`, refusing a server whose tools\naren't `tools`.",
-      "type": "object",
-      "properties": {
-        "mcp": {
-          "$ref": "#/definitions/McpServer"
-        },
-        "mapping": {
-          "description": "The Starlark mapping (`transform(x)`), relative to the folder.",
-          "type": "string"
-        },
-        "tools": {
-          "description": "The pinned tools (`[{ name, description, inputSchema }]`, JSON).",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "mcp",
-        "mapping",
-        "tools"
-      ]
-    },
-    "McpServer": {
-      "description": "How the adapter reaches the MCP server: exactly one of the two.",
-      "anyOf": [
-        {
-          "description": "A program in the folder, spoken to over its stdio.",
-          "type": "object",
-          "properties": {
-            "command": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "command"
-          ]
-        },
-        {
-          "description": "A server reached over streamable HTTP. `auth` names the\ncredential whose value is sent as its bearer token.",
-          "type": "object",
-          "properties": {
-            "url": {
-              "type": "string"
-            },
-            "auth": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "additionalProperties": false,
-          "required": [
-            "url"
-          ]
-        }
       ]
     },
     "CredentialDecl": {
