@@ -41,7 +41,7 @@ pub struct EffectDecl {
     pub on: Vec<String>,
     /// Payload fields that must equal these values (the collectors'
     /// `where`).
-    pub filter: BTreeMap<String, String>,
+    pub filter: oxplow_config::collectors::WhereFilter,
     /// The scopes its script calls (`scope(id, args)`,
     /// `.context/commands.md` "Scopes"): `sql.read`.
     pub needs: Vec<String>,
@@ -589,7 +589,10 @@ effects:
         let e = &ext.effects[0];
         assert_eq!(e.name(), "acme/announce-done");
         assert_eq!(e.on, vec!["task.state_changed".to_string()]);
-        assert_eq!(e.filter.get("to").map(String::as_str), Some("done"));
+        assert_eq!(
+            e.filter.get("to").map(Vec::as_slice),
+            Some(["done".to_string()].as_slice())
+        );
         assert_eq!(e.declared_at, ".oxplow/extensions/acme/extension.yaml:5");
     }
 

@@ -443,7 +443,7 @@ effects:
   - id: announce-done          # [a-z0-9-]+, unique in the extension
     summary: Note a finished item on its thread.
     on: [task.state_changed]  # core types, its own, or another extension's ("Event types")
-    where: { to: done }            # optional: payload fields equal to these
+    where: { to: done }            # optional: payload fields equal to these; a list (`to: [done, canceled]`) equals any of them
     needs: [sql.read]              # the scopes its script calls: only what a script can (`scope_calls::CALLABLE`)
     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
     after: [page_ref.task]    # optional: what it runs after on one event ("Ordering")
@@ -454,6 +454,12 @@ the same keys on the entry, one parser (`collectors::parse_trigger`) and
 one matcher (`collectors::fires`, `Trigger::fires`). An effect reacts to
 every matching event, so it takes event types only: no clock, no report
 run, no pacing (`settle`, `at_most`, `idle`, `force` are a collector's).
+A `where:` value is one scalar (the payload field equals it) or a
+non-empty list of scalars (it equals any of them); fields are ANDed. An
+empty list, a nested list or object element and a mapping value are refused
+at check time. The filter runs before a reaction is claimed: an excluded
+event costs no run row and no script run (`EffectTriggers` tests `reacts_to`
+first).
 
 **Loading** (P8.D9) reads `on`/`where` through the collectors'
 `parse_trigger` (one rule for both) against core types and the

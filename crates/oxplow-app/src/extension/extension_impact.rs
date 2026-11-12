@@ -358,7 +358,7 @@ pub struct EffectImpact {
 pub struct EffectTrigger {
     pub on: Vec<String>,
     /// Its `where`.
-    pub filter: BTreeMap<String, String>,
+    pub filter: oxplow_config::collectors::WhereFilter,
     /// The scopes its script calls.
     pub needs: Vec<String>,
 }
@@ -584,7 +584,10 @@ fn trigger_text(t: &EffectTrigger) -> String {
             " where {}",
             t.filter
                 .iter()
-                .map(|(k, v)| format!("{k} = {v}"))
+                .map(|(k, v)| match v.as_slice() {
+                    [one] => format!("{k} = {one}"),
+                    many => format!("{k} in [{}]", many.join(", ")),
+                })
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -3317,7 +3320,7 @@ mod tests {
                     }),
                     after: Some(EffectTrigger {
                         on: vec!["task.state_changed".into()],
-                        filter: [("to".to_string(), "done".to_string())].into(),
+                        filter: [("to".to_string(), vec!["done".to_string()])].into(),
                         needs: Vec::new(),
                     }),
                     outputs: vec![EffectOutput {
