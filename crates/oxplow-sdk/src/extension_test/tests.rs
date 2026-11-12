@@ -4071,7 +4071,10 @@ fills:
     stores: [qstore]
     id_pattern: \"q[0-9]+\"
     stages:
-      - { id: backlog, title: Backlog, state: backlog }
+      - { id: backlog, title: Backlog, bucket: backlog }
+      - { id: next, title: Next, bucket: todo }
+      - { id: working, title: Working, bucket: in_progress }
+      - { id: finished, title: Finished, bucket: done }
 collectors:
   - id: good
     runtime: starlark
