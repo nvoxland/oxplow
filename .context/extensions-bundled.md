@@ -314,6 +314,13 @@ screens and the holder's add the review and analysis:
   with `tasks.definitionOfDone` (free text; empty is none). Set both with
   `oxplow.tasks.set_workflow { workflow?, definition_of_done? }` (a
   script: it merges into the project layer, keeping the other settings).
+  Bundled also holds `oxplow.tasks.assign { uri, to? }` and
+  `oxplow.tasks.reorder { uri, before?|after? }` (scripts over the shared
+  task model's `assignee` and `rank` fields, undone with their run):
+  TEMPORARY names beside core's `oxplow.task.assign` / `.reorder`, which
+  the switch renames them to. `assign` puts the task last in the new
+  assignee's queue; `reorder` ranks it between its neighbours, numbering
+  the whole queue first when a neighbour has no rank.
   The presets, by what oxtask offers (`when:` on each skill, offered only
   while oxtask is the active tracker):
   - `agent_tracks` (default): the `track-work` skill (take or file a task

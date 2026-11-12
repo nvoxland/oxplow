@@ -1,0 +1,26 @@
+# Tasks assigned by an agent starting them have no rank; the first reorder numbers the
+# queue in its shown order with the moved task in its new place, and undo
+# puts the missing ranks back.
+requires: [oxtask]
+given:
+  - observe:
+      turn:
+        prompt: Do three things
+        during:
+          - { command: oxtask.task.create, input: { title: A, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: B, stage: ready }, as: agent }
+          - { command: oxtask.task.create, input: { title: C, stage: ready }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk1, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }
+          - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress }, as: agent }
+when:
+  command: oxplow.tasks.reorder
+  input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
+expect: { ok: true, result: { rank: 1 } }
+steps:
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY rank" }
+    expect: { rows: [{ title: C, rank: 1 }, { title: A, rank: 2 }, { title: B, rank: 3 }] }
+  - when: { undo: oxplow.tasks.reorder }
+    expect: { ok: true }
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY title" }
+    expect: { rows: [{ title: A, rank: null }, { title: B, rank: null }, { title: C, rank: null }] }
