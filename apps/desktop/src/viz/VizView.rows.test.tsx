@@ -74,7 +74,7 @@ const grouped: Partial<VizConfig> = {
   emphasis: "on",
   depth: "d",
   columns: [{ key: "title", label: null, link: link("page", "uri"), unit: null, icon: "status", tone: "hue" }],
-  actions: [{ id: "add", label: "+", command: "oxplow.task.create", input: {}, row: false, group: "Ready" }],
+  actions: [{ id: "add", label: "+", command: "acme.issue.create", input: {}, row: false, group: "Ready" }],
 };
 
 test("a grouped list puts its rows under a heading per value, in order, and the heading has an arrow to its page", () => {
@@ -488,7 +488,7 @@ test("Enter runs the first row action of a row with no link", async () => {
       run={runOf({
         viz: "table",
         columns: [{ key: "title", label: null, link: null, unit: null }],
-        actions: [{ id: "open", label: "Open", command: "oxplow.task.update", input: {}, row: true }],
+        actions: [{ id: "open", label: "Open", command: "acme.issue.update", input: {}, row: true }],
       })}
       onOpenPage={() => {}}
     />,
@@ -509,8 +509,8 @@ test("a click on a row runs the primary action, but not from a link in it", asyn
         viz: "table",
         columns: [{ key: "title", label: null, link: null, unit: null }],
         actions: [
-          { id: "other", label: "Other", command: "oxplow.task.update", input: {}, row: true },
-          { id: "take", label: "Take", command: "oxplow.task.update", input: {}, row: true, primary: true },
+          { id: "other", label: "Other", command: "acme.issue.update", input: {}, row: true },
+          { id: "take", label: "Take", command: "acme.issue.update", input: {}, row: true, primary: true },
         ],
       })}
       onOpenPage={() => {}}

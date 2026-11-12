@@ -135,8 +135,8 @@ test("a table with `hide_header` draws its rows and no header row", () => {
 });
 
 test("declared whole-viz actions are buttons, row actions aren't", () => {
-  const finish = { id: "finish", label: "Finish", command: "oxplow.task.transition", input: {}, row: false };
-  const perRow = { id: "row", label: "Per Row", command: "oxplow.task.transition", input: {}, row: true };
+  const finish = { id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: false };
+  const perRow = { id: "row", label: "Per Row", command: "acme.issue.transition", input: {}, row: true };
   const { getByTestId, queryByTestId } = render(
     <VizView
       run={run({ viz: "table", actions: [finish, perRow] }, ["id"], [[1]])}

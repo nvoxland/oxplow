@@ -33,10 +33,10 @@ afterEach(() => {
 });
 
 const action = (over: Partial<PageAction>): PageAction =>
-  ({ id: "x", label: "X", command: "oxplow.task.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as PageAction;
+  ({ id: "x", label: "X", command: "acme.issue.transition", input: {}, row: true, group: null, form: false, fixed: [], choices: {}, then: "open", when: null, primary: false, drag: false, bulk: false, key: null, ...over }) as PageAction;
 
 const move = action({ id: "move", label: "Move", drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } });
-const reorder = action({ id: "reorder", label: "Reorder", command: "oxplow.task.reorder", drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } });
+const reorder = action({ id: "reorder", label: "Reorder", command: "acme.issue.reorder", drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } });
 const finish = action({ id: "finish", label: "Finish", bulk: true, key: "f", input: { uri: "{{row.uri}}", to: "done" } });
 
 const base = {

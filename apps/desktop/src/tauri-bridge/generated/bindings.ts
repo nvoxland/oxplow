@@ -1611,7 +1611,7 @@ export type CommandOutcome = {
 export type CommandSpec = {
 	/**
 	 *  The command id: `<namespace>.<area>.<verb>`, snake_case —
-	 *  `oxplow.task.transition`, `acme_pr.issue.close`. The namespace
+	 *  `oxplow.thread.mark`, `acme_pr.issue.close`. The namespace
 	 *  is its owner's (`oxplow` for core and oxplow's own extensions, an
 	 *  extension's declared `namespace:` otherwise), so two extensions'
 	 *  areas never collide. (A person reads the command's label, not its
@@ -4634,7 +4634,7 @@ export type PageAction_Deserialize = {
 	id: string,
 	label: string,
 	/**
-	 *  The command it runs (`oxplow.task.transition`). None for an
+	 *  The command it runs (`oxplow.thread.mark`). None for an
 	 *  `open` action, which runs none. With a `point`, which of the
 	 *  commands that answer the point to run (none: the only one).
 	 */
@@ -4818,7 +4818,7 @@ export type PageAction_Serialize = {
 	id: string,
 	label: string,
 	/**
-	 *  The command it runs (`oxplow.task.transition`). None for an
+	 *  The command it runs (`oxplow.thread.mark`). None for an
 	 *  `open` action, which runs none. With a `point`, which of the
 	 *  commands that answer the point to run (none: the only one).
 	 */

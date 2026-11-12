@@ -72,7 +72,7 @@ test("a form opens its page; a background command runs in the background; anothe
   const { d, calls } = deps();
   const offers = commandOffers(
     [
-      spec("oxplow.task.create", { label: "New Task…", form: "oxplow:oxplow/page?page=new-task" }),
+      spec("acme.issue.create", { label: "New Task…", form: "oxplow:oxplow/page?page=new-task" }),
       spec("oxplow.vcs.pull", { label: "Pull Changes", input: { stream: "{{stream}}" }, background: true }),
       spec("oxplow.dashboard.create", {
         label: "New Dashboard…",

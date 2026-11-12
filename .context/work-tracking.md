@@ -106,11 +106,10 @@ its basis (`prompt`, `command`, `transition`, `assigned`) and is written
 when its evidence is recorded. The task → commit edge derives through the
 task's requests.
 
-**Assignment is core's** (`task_assignment`, [tasks.md](./tasks.md)
-"Assignment"). An agent that starts a task (`oxplow.task.transition` to in
-progress), or files one straight into progress naming no assignee
-(`create`), takes it: the command assigns it to the agent's thread in its
-own transaction, whoever had it. There is no effort policy and no
+**Assignment is bundled's** (the `assignee` and `rank` fields of the task model,
+[tasks.md](./tasks.md)). An agent that starts a task (its store's move to in
+progress), or files one straight into progress, takes it: bundled's
+`assign-on-start` effect assigns it to the agent's thread, whoever had it. There is no effort policy and no
 `oxplow.effort.*` command. Nothing in oxplow marks a task done, or moves
 one, because of a request.
 
@@ -123,9 +122,9 @@ them.
 ## Cross-thread ownership
 
 Who is going to work on an item is its assignee — a thread, the person or
-nobody (`v_task.assignee`; `oxplow.task.assign`, core's for
-every list, [tasks.md](./tasks.md) "Assignment") — and there is
-no second one. Who worked on it is its requests (`v_request_task`, below). A done item is nobody's,
+nobody (`v_oxplow_task.assignee`; `oxplow.tasks.assign`, bundled's for
+every store, [tasks.md](./tasks.md) "Assignment") — and there is
+no second one. Who worked on it is its requests (`v_oxplow_request_link`, below). A done item is nobody's,
 and a closed thread's items go back to nobody. Two threads may
 still work on the same thing, and nothing refuses it (below, "No
 gates"). It is made visible, all of it bundled over existing datasets

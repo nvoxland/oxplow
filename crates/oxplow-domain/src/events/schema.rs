@@ -559,7 +559,7 @@ pub enum CommandOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CommandExecutedV5 {
-    /// The command's name (`oxplow.task.transition`, `oxplow.config.set`).
+    /// The command's name (`oxplow.thread.mark`, `oxplow.config.set`).
     pub command: String,
     pub actor_kind: ActorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -90,7 +90,7 @@ test("invoke and navigate resolve with the host's replies", async () => {
   h.init();
   const c = await connecting;
   expect("query" in c).toBe(false);
-  expect(await c.invoke("oxplow.task.transition", { to: "done" })).toEqual({ done: true });
+  expect(await c.invoke("acme.issue.transition", { to: "done" })).toEqual({ done: true });
   expect(await c.navigate("oxplow:oxplow/task?id=tsk1&provider=oxtask")).toBeNull();
   h.close();
 });
@@ -161,7 +161,7 @@ test("an invalid input's refusal names its field", async () => {
   const connecting = connect({ target: h.frame });
   h.init();
   const c = await connecting;
-  await expect(c.invoke("oxplow.task.update", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "" })).rejects.toEqual({
+  await expect(c.invoke("acme.issue.update", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", title: "" })).rejects.toEqual({
     code: "INVALID",
     message: "a title can't be empty",
     field: "/title",

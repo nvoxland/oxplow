@@ -91,7 +91,7 @@ const viz: VizConfig = {
   parts: [],
   launcherCategory: null,
   hidden: false,
-  actions: [{ id: "finish", label: "Finish", command: "oxplow.task.transition", input: {}, row: true }],
+  actions: [{ id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: true }],
   alert: null,
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
@@ -213,7 +213,7 @@ test("an action with options offers each option, the row's own checked", async (
     ...run,
     config: {
       ...viz,
-      actions: [{ id: "mark", label: "Mark", command: "oxplow.task.transition", input: {}, row: true, optionsFrom: "stages", current: "stage" }],
+      actions: [{ id: "mark", label: "Mark", command: "acme.issue.transition", input: {}, row: true, optionsFrom: "stages", current: "stage" }],
     },
     result: { columns: ["uri", "stage"], rows: [["oxplow:oxplow/task?id=tsk1&provider=oxtask", "ready"]], truncated: false },
   };

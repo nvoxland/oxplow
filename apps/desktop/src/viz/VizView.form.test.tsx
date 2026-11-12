@@ -30,7 +30,7 @@ let openAfterPage: string | null = null;
 let actionExtras: Record<string, unknown> = {};
 
 const UPDATE: CommandSpec = {
-  id: "oxplow.task.update",
+  id: "acme.issue.update",
   input_schema: {
     type: "object",
     required: ["uri"],
@@ -39,7 +39,7 @@ const UPDATE: CommandSpec = {
 } as unknown as CommandSpec;
 // The same command with a second editable field.
 const UPDATE_WIDE: CommandSpec = {
-  id: "oxplow.task.update",
+  id: "acme.issue.update",
   input_schema: {
     type: "object",
     required: ["uri"],
@@ -48,7 +48,7 @@ const UPDATE_WIDE: CommandSpec = {
 } as unknown as CommandSpec;
 // A command whose one editable field is a choice.
 const DECIDE: CommandSpec = {
-  id: "oxplow.task.decide",
+  id: "acme.issue.decide",
   input_schema: {
     type: "object",
     required: ["uri"],
@@ -141,7 +141,7 @@ const viz: VizConfig = {
     {
       id: "retitle",
       label: "Retitle…",
-      command: "oxplow.task.update",
+      command: "acme.issue.update",
       input: { uri: "{{row.uri}}", title: "{{row.title}}" },
       row: true,
       group: null,
@@ -260,7 +260,7 @@ test("a form whose one field is a choice still opens the slideover", async () =>
 
 test("a form viz over a loader with no rows draws its empty line instead of its fields", () => {
   const form: VizRun = {
-    config: { ...viz, viz: "form", empty: "Nothing to commit.", form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    config: { ...viz, viz: "form", empty: "Nothing to commit.", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -272,7 +272,7 @@ test("a form viz over a loader with no rows draws its empty line instead of its 
 test("a form viz shows only its fields, keeps its fixed ones, and puts errors under the field", async () => {
   invalidField = "/title";
   const form: VizRun = {
-    config: { ...viz, viz: "form", form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -291,7 +291,7 @@ test("a form viz shows only its fields, keeps its fixed ones, and puts errors un
 // again from the datasets, not from the values it first opened with.
 test("a form viz starts again from the current values after it saves", async () => {
   const form: VizRun = {
-    config: { ...viz, viz: "form", form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -310,7 +310,7 @@ test("a form viz starts again from the current values after it saves", async () 
 test("a form starts again when its run's rows change", async () => {
   const at = (title: string): VizRun =>
     ({
-      config: { ...viz, viz: "form", form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
+      config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"] }, actions: [] },
       params: {},
       result: { columns: ["title"], rows: [[title]], truncated: false },
     }) as unknown as VizRun;
@@ -325,7 +325,7 @@ test("a form starts again when its run's rows change", async () => {
 
 function formViz(then: ActionThen): VizRun {
   return {
-    config: { ...viz, viz: "form", form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"], then }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -367,7 +367,7 @@ function againViz(keep: string[]): VizRun {
     config: {
       ...viz,
       viz: "form",
-      form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
+      form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"], then: "open", again: { label: "Save and Another", keep } },
       actions: [],
     },
     params: {},
@@ -426,7 +426,7 @@ function Tab({ state, children }: { state: Record<string, unknown>; children: Re
 test("an edit form keeps its draft in the tab and saves only when changed", async () => {
   const state: Record<string, unknown> = {};
   const edit: VizRun = {
-    config: { ...viz, viz: "form", form: { command: "oxplow.task.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
+    config: { ...viz, viz: "form", form: { command: "acme.issue.update", defaults: null, fixed: ["uri"], fields: ["title"], mode: "edit" }, actions: [] },
     params: {},
     result: { columns: [], rows: [], truncated: false },
   } as unknown as VizRun;
@@ -464,7 +464,7 @@ test("an edit form keeps its draft in the tab and saves only when changed", asyn
 // schema description), the choices show their labels, and the submit is a
 // primary button beside a Cancel.
 const AGENT: CommandSpec = {
-  id: "oxplow.task.update",
+  id: "acme.issue.update",
   input_schema: {
     type: "object",
     required: ["uri", "title"],

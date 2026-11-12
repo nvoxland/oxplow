@@ -2250,7 +2250,7 @@ enforces identity, treating global rows' `NULL` stream as `''`).
   (`kind_search.rs`: `plan_restate_tx` decides from each entry's `version`
   — the feed's own `version` column, else its title-and-body hash; V77
   renamed V164's `content_hash` — and `apply_restate_tx` writes only
-  entries added, changed or gone; tsk896); bundled's read `v_oxplow_search_task`
+  entries added, changed or gone); bundled's read `v_oxplow_search_task`
   (every store's tasks) / `v_search_comment` / `_knowledge` and the feeds for the other resources named above
   (`models/search_<kind>.sql`; `.context/extensions-events.md` "Resources" says
   how a resource gets one, and the models' docs say

@@ -298,7 +298,7 @@ into that row's stream's worktree.
 
 **Commands.** Every write is a command through `run_command { id, input
 }`. `list_commands` with no arguments is an index of `{ id, summary }`;
-with `id` or `prefix` (`oxplow.task.`) it gives each command's
+with `id` or `prefix` (`oxtask.task.`) it gives each command's
 `input_schema`, an `example` input, whether a person `confirm`s it and
 whether it's `undoable` ([commands.md](./commands.md) "Exposure to
 agents"). A command's `confirm` asks only a person: an agent's run of
@@ -331,7 +331,7 @@ write is a command, and to answer "show me" with `oxplow_find_page` then `oxplow
 repo's docs.
 
 **Tools read the interface.** No tool belongs to one implementation:
-task reads (`oxplow_query_sql` over `v_task`, `oxplow_read` of a task's
+task reads (`oxplow_query_sql` over `v_oxplow_task`, `oxplow_read` of a task's
 URI, the next-task page) go through whichever list is active (empty with
 none), so the tool list never changes with a switch. What an
 implementation owns is commands, offered only while it's active
@@ -361,10 +361,8 @@ backlinks graph, both directions), plus `oxplow_search` with `resources: ["oxplo
 `oxplow_knowledge_drift({ store?, id, path })` returns one stale ref's unified diff
 (`status` drifted, unchanged, not_a_ref, no_pin, binary or no_contents).
 Writes are the `knowledge.*` commands ([knowledge.md](./knowledge.md)).
-`oxplow.task.create` / `update` check the `[[…]]` links in the text
-they keep (`oxplow_app::link_check`) and return `link_warnings`, so the
-agent fixes them in the same turn; `knowledge.write_page` refuses
-instead. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
+`knowledge.write_page` checks the `[[…]]` links in the text it keeps
+(`oxplow_app::link_check`) and refuses a page whose links don't resolve. What counts as a link is `oxplow_domain::uri::classify_wikilinks`
 ([resources.md](./resources.md)).
 
 **Id checks at the boundary.** A tool taking a thread or stream id calls

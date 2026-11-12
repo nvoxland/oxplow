@@ -10,9 +10,9 @@ import { componentBundleUrl, componentMayOpen, createBridgeHost, initMessage, vi
 
 test("frame messages parse into their requests and ready; anything else is refused", () => {
   expect(parseFrameMessage({ type: "ready" })).toEqual({ type: "ready" });
-  expect(parseFrameMessage({ id: "2", method: "invoke", command: "oxplow.task.transition", input: { to: "done" } })).toEqual({
+  expect(parseFrameMessage({ id: "2", method: "invoke", command: "acme.issue.transition", input: { to: "done" } })).toEqual({
     type: "request",
-    request: { id: "2", method: "invoke", command: "oxplow.task.transition", input: { to: "done" } },
+    request: { id: "2", method: "invoke", command: "acme.issue.transition", input: { to: "done" } },
   });
   expect(parseFrameMessage({ id: "3", method: "navigate", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toEqual({
     type: "request",
@@ -197,20 +197,20 @@ function harness(deps: Partial<Parameters<typeof createBridgeHost>[1]> = {}) {
 test("an invoke that asks is confirmed in the host, with what it asks about, then runs confirmed; declined, it's CANCELLED", async () => {
   const asked: [string, string[]][] = [];
   const yes = harness({ confirm: async (command, details) => (asked.push([command, details]), true) });
-  yes.send({ id: "i1", method: "invoke", command: "oxplow.task.transition", input: { to: "done" } });
+  yes.send({ id: "i1", method: "invoke", command: "acme.issue.transition", input: { to: "done" } });
   await yes.settle();
   expect(yes.calls).toEqual([
-    ["invoke", "oxplow.task.transition", { to: "done" }, false],
-    ["invoke", "oxplow.task.transition", { to: "done" }, true],
+    ["invoke", "acme.issue.transition", { to: "done" }, false],
+    ["invoke", "acme.issue.transition", { to: "done" }, true],
   ]);
   expect(yes.received).toEqual([{ id: "i1", ok: true, result: null }]);
-  expect(asked).toEqual([["oxplow.task.transition", ["process — runs programs"]]]);
+  expect(asked).toEqual([["acme.issue.transition", ["process — runs programs"]]]);
   yes.channel.port1.close();
 
   const no = harness({ confirm: async () => false });
-  no.send({ id: "i2", method: "invoke", command: "oxplow.task.transition", input: {} });
+  no.send({ id: "i2", method: "invoke", command: "acme.issue.transition", input: {} });
   await no.settle();
-  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `oxplow.task.transition`." } }]);
+  expect(no.received).toEqual([{ id: "i2", ok: false, error: { code: "CANCELLED", message: "The person didn't confirm `acme.issue.transition`." } }]);
   no.channel.port1.close();
 });
 

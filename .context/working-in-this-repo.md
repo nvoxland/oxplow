@@ -140,23 +140,35 @@ is the one in `extensions/oxtask/handlers/*.star`.
 
 `task move-to-oxtask` is the one-off move of core's tasks into the oxtask
 extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
-fields (`.context/tasks.md`). Run it with oxplow quit, after
-the new binary booted once on the project (so bundled's `task_record` model
-and `request_task_next` model tables exist). Each task keeps its
+fields (`.context/tasks.md`). Run it with oxplow quit, after the new binary
+booted once on the project (so bundled's `task_record` and `request_task`
+model tables exist) and with oxtask enabled. Each task keeps its
 number (so `tsk<N>` and its URI), links and notes go to the store, an
 assignment becomes the `oxplow` fields `assignee` and `rank`, and request
-links go to the `oxplow/request_task_next` model's table (TEMPORARY, renamed at the flip) (basis `command` becomes `edited`; core's `at` and `turn_id` are kept). It reads core's
-tables and deletes nothing there; it refuses when the store already has
-tasks; `--dry-run` does it all and keeps nothing.
+links go to the `oxplow/request_task` model's table (basis `command` becomes
+`edited`; core's `at` and `turn_id` are kept). It refuses when the store
+already has tasks. It reads core's task tables and changes the main database
+in these ways only: it drops the `request_task_next` table an earlier build of
+bundled left; it deletes the command log's `oxplow.task.*` rows (audit rows,
+audit rows whose inverse names one, pending proposals) and nulls the
+`effect_run` references they leave; and it deletes the old `task_link:*` edges of
+`page_ref` (the model writes them again as oxtask fills it). `--dry-run` does
+it all, keeps nothing, and prints the counts of audit rows, proposals and
+edges it would delete.
 
 The move runs as part of the flip (quit oxplow, build the flip, move
 `--replace` under the instance lock, start), never earlier. It takes the
 instance lock as `extension deploy` does and refuses while oxplow runs.
-The main database commits first (every write in it is idempotent), then
-the store file; `--replace` deletes the store file, the `oxplow`-namespace
-fields of the `oxplow/task_record` model and every row of the
-`oxplow/request_task_next` model (store `oxplow`) first, in the same transactions, so a move made earlier can be
-redone (with `--dry-run` it works on a scratch file and keeps nothing).
+Before anything is renamed or written it checks its preconditions (the main
+database opens, bundled's two model tables exist, oxtask is enabled) and
+copies the main database next to itself (`local.sqlite.pre-move-<unix
+seconds>`, a `VACUUM INTO`). The main database commits first (every write in
+it is idempotent), then the store file; `--replace` deletes the
+`oxplow`-namespace fields of the `oxplow/task_record` model and every row of
+the `oxplow/request_task` model (store `oxplow`) first, in the same
+transactions, so a move made earlier can be redone; if the move fails after
+it set the old store file aside, the old file is put back (with `--dry-run`
+it works on a scratch file and keeps nothing).
 Its rules:
 
 - **Authors come from the event log.** A task's author is the `thread_id`

@@ -129,7 +129,7 @@ impl Access {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, JsonSchema)]
 pub struct CommandSpec {
     /// The command id: `<namespace>.<area>.<verb>`, snake_case —
-    /// `oxplow.task.transition`, `acme_pr.issue.close`. The namespace
+    /// `oxplow.thread.mark`, `acme_pr.issue.close`. The namespace
     /// is its owner's (`oxplow` for core and oxplow's own extensions, an
     /// extension's declared `namespace:` otherwise), so two extensions'
     /// areas never collide. (A person reads the command's label, not its
@@ -687,7 +687,7 @@ impl CommandSpec {
         }
         Err(DomainError::Invalid(format!(
             "command id `{id}` must be `<namespace>.<area>.<verb>` in snake_case \
-             (e.g. `oxplow.task.transition`)"
+             (e.g. `oxplow.thread.mark`)"
         )))
     }
 }

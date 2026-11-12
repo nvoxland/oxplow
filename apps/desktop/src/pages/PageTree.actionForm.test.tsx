@@ -16,7 +16,7 @@ import type { CommandSpec, FormStart } from "../tauri-bridge/generated/bindings.
 afterEach(cleanup);
 
 const LINK = {
-  id: "oxplow.task.link",
+  id: "acme.issue.link",
   input_schema: {
     type: "object",
     required: ["uri", "target", "link_type"],

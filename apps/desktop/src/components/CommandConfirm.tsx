@@ -23,7 +23,7 @@ export function CommandConfirm(props: ConfirmProps) {
 interface ConfirmProps {
   /** What the person pressed (`Finish`). */
   label: string;
-  /** The command it runs (`oxplow.task.transition`). */
+  /** The command it runs (`acme.issue.transition`). */
   command: string;
   onConfirm(): void;
   onCancel(): void;

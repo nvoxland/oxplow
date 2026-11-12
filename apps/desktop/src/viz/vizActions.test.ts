@@ -7,7 +7,7 @@ import type { FormStart, PageAction, VizRun } from "../tauri-bridge/generated/bi
 import { skipSummary, actionDoes, actionEnabled, actionOffered, offeredWholePage, openAfterAction, performVizAction, promptField, rowRecord, type VizActionDeps } from "./vizActions.js";
 
 const run = { config: { id: "acme/prs" }, params: { repo: "x" } } as unknown as VizRun;
-const action: PageAction = { id: "finish", label: "Finish", command: "oxplow.task.transition", input: {}, row: false };
+const action: PageAction = { id: "finish", label: "Finish", command: "acme.issue.transition", input: {}, row: false };
 
 /** A runner whose record is the log: `error <label>: <message>`. */
 function runnerTo(log: string[]) {
@@ -44,14 +44,14 @@ test("an action runs its command with the run's params and row", async () => {
   expect(log).toEqual([
     `run acme/prs finish {"repo":"x"} {"id":7} str1 false`,
     "toast ✓ Finish",
-    "open_after oxplow.task.transition {}",
+    "open_after acme.issue.transition {}",
   ]);
 });
 
 test("an action whose command names a page to open opens it once it ran", async () => {
   const { d, log } = deps(undefined, "oxplow:oxplow/knowledge?id=lib&store=oxwiki");
   expect(await performVizAction(action, run, null, null, false, d)).toBe("done");
-  expect(log.slice(-2)).toEqual([`open_after oxplow.task.transition {}`, "open oxplow:oxplow/knowledge?id=lib&store=oxwiki"]);
+  expect(log.slice(-2)).toEqual([`open_after acme.issue.transition {}`, "open oxplow:oxplow/knowledge?id=lib&store=oxwiki"]);
 });
 
 const done = { result: {}, audit_id: 1, event_id: null, inverse: null };

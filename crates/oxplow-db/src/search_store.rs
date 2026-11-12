@@ -177,7 +177,7 @@ pub fn apply_restate_tx(
 /// body)`), in the caller's transaction, each versioned by its title and
 /// body's hash: what a kind whose feed declares no `version` does on each
 /// recompute, and — with none — how a kind leaves the index. Only what
-/// differs is written (tsk896).
+/// differs is written.
 pub fn restate_kind_tx(
     conn: &rusqlite::Connection,
     kind: &str,
@@ -643,7 +643,7 @@ mod tests {
         assert_eq!(gone.remove.len(), 1);
     }
 
-    /// tsk864, tsk896: a restate writes only what differs — the same
+    /// A restate writes only what differs — the same
     /// entries write nothing, an edit to one of three rewrites that one,
     /// and none removes the kind.
     #[tokio::test]

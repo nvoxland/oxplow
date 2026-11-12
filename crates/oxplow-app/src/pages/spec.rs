@@ -1275,7 +1275,7 @@ pub struct PageAction {
     /// Unique within the viz; `oxplow_run_page_action` names it.
     pub id: String,
     pub label: String,
-    /// The command it runs (`oxplow.task.transition`). None for an
+    /// The command it runs (`oxplow.thread.mark`). None for an
     /// `open` action, which runs none. With a `point`, which of the
     /// commands that answer the point to run (none: the only one).
     #[serde(default)]
@@ -1427,7 +1427,7 @@ pub(crate) struct ActionFile {
     /// Unique within the viz.
     id: String,
     label: String,
-    /// The command it runs (`oxplow.task.transition`). One of
+    /// The command it runs (`oxplow.thread.mark`). One of
     /// `command` or `open`.
     #[serde(default)]
     command: Option<String>,

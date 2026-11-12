@@ -138,7 +138,7 @@ const ANONYMOUS_WRITE: &str = "this MCP connection carries no thread identity (i
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RunCommandParams {
     /// The command id, as `list_commands` reports it (`oxplow.config.set`,
-    /// `oxplow.task.transition`).
+    /// `oxplow.thread.mark`).
     pub id: String,
     /// The command's input, matching its `input_schema`.
     #[serde(default)]
