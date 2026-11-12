@@ -182,6 +182,26 @@ effects:
     on: [oxplow.task_record.changed]
     where: { cause: trigger }
     entry: effects/assign_on_start.star
+  # A closed thread's open tasks, and an archived stream's threads', go back
+  # to nobody; a taken handoff's task goes to the recipient. Core did these
+  # on its own tables; before the flip the model holds no live task, so they
+  # find nothing.
+  - id: release-on-thread-close
+    summary: A closed thread's open tasks go back to nobody, last in their queue.
+    on: [thread.closed]
+    needs: [sql.read]
+    entry: effects/release_on_close.star
+  - id: release-on-stream-archive
+    summary: An archived stream's threads' open tasks go back to nobody.
+    on: [stream.archived]
+    needs: [sql.read]
+    entry: effects/release_on_close.star
+  - id: take-handoff-task
+    summary: Taking a handoff moves its task to the receiving thread, last in its queue.
+    on: [handoff.settled]
+    where: { state: taken }
+    needs: [sql.read]
+    entry: effects/take_handoff_task.star
 # Places where several task stores offer one action: a task page draws "New
 # Task" once, whichever stores are on (a button with one, a menu with
 # several). A store's command joins with `ui: { at: oxplow/task.new }`.

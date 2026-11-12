@@ -530,6 +530,15 @@ moved page, metric or dimension keeps its id.
   The decorators' limits hold: a label is at most 40 characters and an
   extension puts at most 3 on one URI.
 
+## Task reactions to thread, stream and handoff events
+
+Three bundled effects keep the task model right when a thread closes, a
+stream archives or a handoff is taken (`effects/release_on_close.star`,
+`effects/take_handoff_task.star`; `.context/models.md` "The switch" step
+7a). They read `task_next` and `v_handoff` through `sql.read` and write
+oxplow's two fields; before the flip the model holds no live task, so they
+do nothing on a live project.
+
 ## Added for extraction
 
 Features added to core because the extraction needed them,
