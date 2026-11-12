@@ -135,6 +135,7 @@ pub async fn move_to_oxtask(
     let _lock = oxplow_app::try_acquire_instance_lock(&layout)
         .map_err(err)?
         .ok_or(running)?;
+    preconditions(project, &layout.state_db_path)?;
     let real_file = layout
         .project_dir
         .join(".oxplow/extensions-data")
@@ -165,8 +166,12 @@ pub async fn move_to_oxtask(
                     .join(", ")
             ));
         }
-        if !dry_run {
-            keep_as_backup(&real_file)?;
+    }
+    let mut kept = None;
+    if !dry_run {
+        copy_main_database(&layout.state_db_path)?;
+        if replace && real_file.exists() {
+            kept = Some(keep_as_backup(&real_file)?);
         }
     }
     let existed = store_file.exists();
@@ -174,7 +179,90 @@ pub async fn move_to_oxtask(
     if dry_run && !existed {
         remove_store(&store_file);
     }
+    if result.is_err() {
+        if let Some(backup) = kept {
+            // The move failed: what was there comes back, and the empty
+            // store the failed run made goes.
+            remove_store(&real_file);
+            restore_backup(&real_file, &backup)?;
+        }
+    }
     result
+}
+
+/// What must hold before anything is renamed, written or deleted: the main
+/// database opens and carries bundled's two model tables (a boot of the new
+/// oxplow made them), and oxtask is enabled (the move fills its store).
+fn preconditions(project: &Path, db_path: &Path) -> Result<(), String> {
+    if !oxplow_config::extension_settings(project).is_enabled(STORE) {
+        return Err(format!(
+            "the {STORE} extension is off in this project: turn it on first (the move fills its store)"
+        ));
+    }
+    let main = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("{}: {e}", db_path.display()))?;
+    for table in [MODEL_TABLE, LINK_MODEL_TABLE] {
+        let there: bool = main
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                [table],
+                |r| r.get(0),
+            )
+            .map_err(err)?;
+        if !there {
+            return Err("bundled's task or request_task model is missing: \
+                        boot the new oxplow once first, with oxplow-bundled enabled"
+                .into());
+        }
+    }
+    Ok(())
+}
+
+/// A consistent copy of the main database next to it, made before the move
+/// deletes anything from it: `local.sqlite.pre-move-<unix seconds>`.
+fn copy_main_database(db_path: &Path) -> Result<std::path::PathBuf, String> {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(err)?
+        .as_secs();
+    // A second run in the same second gets its own file.
+    let copy = (0u32..)
+        .map(|n| {
+            let mut name = db_path.as_os_str().to_owned();
+            name.push(format!(".pre-move-{stamp}"));
+            if n > 0 {
+                name.push(format!("-{n}"));
+            }
+            std::path::PathBuf::from(name)
+        })
+        .find(|p| !p.exists())
+        .expect("an unused name");
+    let main = Connection::open_with_flags(db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(err)?;
+    main.execute("VACUUM INTO ?1", [copy.to_string_lossy().as_ref()])
+        .map_err(|e| format!("copying {}: {e}", db_path.display()))?;
+    Ok(copy)
+}
+
+/// Put the files `keep_as_backup` set aside back where they were.
+fn restore_backup(store_file: &Path, backup: &Backup) -> Result<(), String> {
+    for suffix in ["", "-wal", "-shm"] {
+        let mut from = store_file.to_path_buf().into_os_string();
+        from.push(format!(".bak-{}{suffix}", backup.stamp));
+        let from = std::path::PathBuf::from(from);
+        if !from.exists() {
+            continue;
+        }
+        let mut to = store_file.to_path_buf().into_os_string();
+        to.push(suffix);
+        std::fs::rename(&from, std::path::PathBuf::from(to)).map_err(err)?;
+    }
+    Ok(())
+}
+
+/// A store file set aside by `keep_as_backup`.
+struct Backup {
+    stamp: u64,
 }
 
 /// The numbers of the tasks in the store's file that core's `oxtask` table
@@ -213,7 +301,7 @@ fn tasks_core_lacks(store_file: &Path, db_path: &Path) -> Result<Vec<i64>, Strin
 
 /// Rename the store's file (and its journal files) to a backup next to it:
 /// `oxtask.sqlite.bak-<unix seconds>`.
-fn keep_as_backup(store_file: &Path) -> Result<(), String> {
+fn keep_as_backup(store_file: &Path) -> Result<Backup, String> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(err)?
@@ -229,7 +317,7 @@ fn keep_as_backup(store_file: &Path) -> Result<(), String> {
         to.push(format!(".bak-{stamp}{suffix}"));
         std::fs::rename(&from, std::path::PathBuf::from(to)).map_err(err)?;
     }
-    Ok(())
+    Ok(Backup { stamp })
 }
 
 fn remove_store(store_file: &Path) {
@@ -311,28 +399,12 @@ async fn run(
     ))
 }
 
-fn table_exists(tx: &Transaction<'_>, name: &str) -> Result<bool, DomainError> {
-    tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
-        [name],
-        |r| r.get(0),
-    )
-    .map_err(sql)
-}
-
 fn sql(e: rusqlite::Error) -> DomainError {
     DomainError::Invalid(e.to_string())
 }
 
 /// Read core's tables and write the fields and the entity rows.
 fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> {
-    if !table_exists(tx, MODEL_TABLE)? || !table_exists(tx, LINK_MODEL_TABLE)? {
-        return Err(DomainError::Invalid(
-            "bundled's task or request_task model is missing: \
-             boot the new oxplow once first, with oxplow-bundled enabled"
-                .into(),
-        ));
-    }
     // A build of bundled from before the model was renamed left its table
     // behind; links written there would never be read.
     tx.execute(
@@ -784,6 +856,11 @@ mod tests {
         .unwrap();
         svc.streams.ensure_primary().await.unwrap();
         drop(svc);
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "enableExtensions: [oxtask]\n",
+        )
+        .unwrap();
         // What bundled's first boot makes (the test project loads no
         // extensions): the model's table and the entity's.
         let c = main_db(dir.path());
@@ -1193,6 +1270,63 @@ mod tests {
         };
         assert_eq!(commands("command_audit"), vec!["oxplow.thread.rename"]);
         assert_eq!(commands("command_proposal"), vec!["oxplow.thread.close"]);
+    }
+
+    #[tokio::test]
+    async fn the_move_refuses_while_oxtask_is_off() {
+        let dir = project().await;
+        seed(dir.path());
+        std::fs::write(dir.path().join(".oxplow/personal.yaml"), "").unwrap();
+        let e = move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap_err();
+        assert!(e.contains("oxtask extension is off"), "{e}");
+    }
+
+    /// A copy of the main database is made before the move deletes anything
+    /// from it.
+    #[tokio::test]
+    async fn the_move_copies_the_main_database_first() {
+        let dir = project().await;
+        seed(dir.path());
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
+        let state = oxplow_app::AppLayout::for_project(dir.path()).state_db_path;
+        let prefix = format!("{}.pre-move-", state.file_name().unwrap().to_string_lossy());
+        let copies: Vec<_> = std::fs::read_dir(state.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+            .collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        let copy = Connection::open(copies[0].path()).unwrap();
+        let n: i64 = copy
+            .query_row("SELECT count(*) FROM oxtask", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 5, "the copy still has the old tables' rows");
+    }
+
+    /// A `--replace` that fails puts the old store back, with its tasks.
+    #[tokio::test]
+    async fn a_failed_replace_puts_the_old_store_back() {
+        let dir = project().await;
+        seed(dir.path());
+        move_to_oxtask(dir.path(), false, false, false)
+            .await
+            .unwrap();
+        // A parent no task has: the store refuses it at commit.
+        main_db(dir.path())
+            .execute("UPDATE oxtask SET parent_id = 99 WHERE id = 6", [])
+            .unwrap();
+        let e = move_to_oxtask(dir.path(), false, true, false)
+            .await
+            .unwrap_err();
+        assert!(!e.is_empty());
+        let n: i64 = store(dir.path())
+            .query_row("SELECT count(*) FROM task", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 5, "the first run's store is back");
     }
 
     #[tokio::test]
