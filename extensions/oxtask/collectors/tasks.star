@@ -26,12 +26,14 @@ def sets(where, params):
         links.setdefault(r["task_id"], []).append({"to": r["to_uri"], "type": r["type"]})
     comments = {}
     for r in scope("store.sql", {
-        "sql": "SELECT id, task_id, author, at, body FROM task_comment WHERE deleted = 0 AND task_id IN (SELECT id FROM task WHERE " + where + ") ORDER BY n",
+        "sql": "SELECT id, task_id, author, author_kind, at, body FROM task_comment WHERE deleted = 0 AND task_id IN (SELECT id FROM task WHERE " + where + ") ORDER BY n",
         "params": params,
     })["rows"]:
         c = {"id": r["id"], "at": r["at"], "body": r["body"]}
         if r["author"] != None:
             c["author"] = r["author"]
+        if r["author_kind"] != None:
+            c["author_kind"] = r["author_kind"]
         comments.setdefault(r["task_id"], []).append(c)
     return links, comments
 
@@ -54,14 +56,14 @@ def row(r, links, comments):
     if r["parent"] != None:
         out["parent"] = task_uri(r["parent"])
     fields = {}
-    for k in ["priority", "author"]:
+    for k in ["priority", "author", "author_kind"]:
         if r[k] != None:
             fields[k] = r[k]
     if len(fields) > 0:
         out["fields"] = fields
     return out
 
-COLS = "id, title, body, stage, parent, priority, author, created_at, updated_at, closed_at, seq, deleted"
+COLS = "id, title, body, stage, parent, priority, author, author_kind, created_at, updated_at, closed_at, seq, deleted"
 
 def transform(x):
     cursor = x["cursor"]

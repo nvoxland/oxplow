@@ -20,6 +20,8 @@ CREATE TABLE task (
   parent     TEXT REFERENCES task (id),
   priority   TEXT CHECK (priority IS NULL OR priority IN ('urgent', 'high', 'medium', 'low')),
   author     TEXT,
+  -- Who the author is: a person, an agent or the system.
+  author_kind TEXT CHECK (author_kind IS NULL OR author_kind IN ('person', 'agent', 'system')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   closed_at  TEXT,
@@ -43,6 +45,7 @@ CREATE TABLE task_comment (
   id      TEXT GENERATED ALWAYS AS ('cmt' || n) STORED UNIQUE,
   task_id TEXT NOT NULL REFERENCES task (id),
   author  TEXT,
+  author_kind TEXT CHECK (author_kind IS NULL OR author_kind IN ('person', 'agent', 'system')),
   at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   body    TEXT NOT NULL,
   seq     INTEGER NOT NULL DEFAULT 0,

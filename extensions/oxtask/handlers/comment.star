@@ -1,7 +1,7 @@
 # oxtask.task.comment { id, body }: add a comment. The insert mints the
 # comment's id (`cmt` + the row number), which `finish` reads from the
 # write's `rows`: the result names it and the inverse removes it. The author
-# is who ran the command (`x["actor"]["uri"]`).
+# is who ran the command (`x["actor"]["uri"]`), with its kind (`x["actor"]["kind"]`).
 
 def transform(x):
     i = x["input"]
@@ -9,8 +9,8 @@ def transform(x):
     if len(there) == 0:
         return {"refuse": "no such task " + i["id"]}
     write = {
-        "sql": "INSERT INTO task_comment (task_id, author, body) VALUES (?1, ?2, ?3) RETURNING id",
-        "params": [i["id"], x["actor"]["uri"], i["body"]],
+        "sql": "INSERT INTO task_comment (task_id, author, author_kind, body) VALUES (?1, ?2, ?3, ?4) RETURNING id",
+        "params": [i["id"], x["actor"]["uri"], x["actor"]["kind"], i["body"]],
         "expect_changes": 1,
     }
     return {

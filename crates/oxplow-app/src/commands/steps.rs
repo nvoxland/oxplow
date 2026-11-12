@@ -672,10 +672,25 @@ fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandE
 
 /// A `finish` that failed after every step landed, as the run reports
 /// it: the steps stand.
-fn finish_stopped(name: &str, landed: &[NestedChild], err: &CommandError) -> CommandError {
-    let landed: Vec<String> = landed.iter().map(|c| format!("`{}`", c.name)).collect();
+fn finish_stopped(name: &str, landed_children: &[NestedChild], err: &CommandError) -> CommandError {
+    let landed: Vec<String> = landed_children
+        .iter()
+        .map(|c| format!("`{}`", c.name))
+        .collect();
+    // What the steps answered with rows (a store write's `RETURNING`, the
+    // minted id) stays readable although the run failed.
+    let answered: Vec<String> = landed_children
+        .iter()
+        .filter(|c| c.result["rows"].as_array().is_some_and(|r| !r.is_empty()))
+        .map(|c| format!("`{}` answered rows {}", c.name, c.result["rows"]))
+        .collect();
+    let answered = if answered.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", answered.join("; "))
+    };
     let message = format!(
-        "`{name}`'s finish failed after {} ran — they stand, and the run can't be undone: {err}",
+        "`{name}`'s finish failed after {} ran — they stand{answered}, and the run can't be undone: {err}",
         landed.join(", ")
     );
     match err {
@@ -1105,5 +1120,47 @@ impl CommandBus {
             })
             .await
             .map_err(super::command_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn child(name: &str, result: Value) -> NestedChild {
+        NestedChild {
+            name: name.into(),
+            input: json!({}),
+            result,
+            inverse: None,
+        }
+    }
+
+    /// A finish that fails after its steps landed still tells the caller what
+    /// they answered: a minted id is in a store write's `rows`.
+    #[test]
+    fn a_failed_finish_names_the_rows_its_landed_steps_answered() {
+        let landed = [
+            child(
+                "oxplow.extension_store.write",
+                json!({ "changes": 1, "rows": [[{ "id": "tsk7" }]] }),
+            ),
+            child("oxplow.task.transition", json!({ "uri": "u" })),
+        ];
+        let said = finish_stopped(
+            "x.make",
+            &landed,
+            &CommandError::Failed {
+                message: "boom".into(),
+            },
+        )
+        .to_string();
+        assert!(said.contains("they stand"), "{said}");
+        assert!(
+            said.contains("oxplow.extension_store.write") && said.contains("tsk7"),
+            "{said}"
+        );
+        // A step that answered no rows adds nothing.
+        assert!(!said.contains("oxplow.task.transition` answered"), "{said}");
     }
 }
