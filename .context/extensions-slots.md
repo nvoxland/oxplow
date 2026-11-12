@@ -373,6 +373,18 @@ same kind of action ("New Task") and none of them owns the page.
   `ref_commands { uri }` as before. Neither is an MCP tool: an agent lists
   what it may run with `list_commands`.
 
+**An item point.** A point may name its **item**: `item: uri`, a required
+`uri` context key (`action_points: [{ name: task.move, label: Move, item:
+uri, context: { uri: uri, stage: string } }]`). A command that joins it may
+carry `ui.accepts: { store: <id> | [ids] }` (with `at` only; an item
+command's filter stays in `about`): the point offers it only when the
+item's store passes, by the same rule as below (the store param is the
+item's model's `store_param`). A command with `accepts` at a point with no
+item is never offered; one without `accepts` always is. This is how a
+shared page (bundled's task pages, the Work board) offers "move this
+task" without naming any store: each store joins the point for its own
+items.
+
 **The store filter.** `ui.about` is either the resource kind (a string) or
 `{ resource, accepts?: { store: <id> | [ids] } }`. An item URI's `store`
 param is matched like a renderer's `accepts` rule: an id equal to the

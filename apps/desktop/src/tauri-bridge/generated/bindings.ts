@@ -849,6 +849,11 @@ export type ActionPointDecl = {
 	label: string,
 	doc: string | null,
 	context: ContextKey[],
+	/**
+	 *  The context key (a `uri`) naming the item it acts on: a joined
+	 *  command's `ui.accepts` is checked against that item's store.
+	 */
+	item: string | null,
 };
 
 /**
@@ -1717,6 +1722,12 @@ export type CommandUi = {
 	 *  unset); without one the input is the whole context.
 	 */
 	at?: string | null,
+	/**
+	 *  With `at`, at a point that names its item (`item:`): the stores
+	 *  whose items it acts on (`{ store: <id> | [ids] }`, as `about`'s
+	 *  `accepts`); the point offers it only for an item of one of them.
+	 */
+	accepts?: ItemAccepts | null,
 	/**
 	 *  The input it runs with. A string that is exactly `{{stream}}`,
 	 *  `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;

@@ -2077,6 +2077,18 @@
           ],
           "default": null
         },
+        "accepts": {
+          "description": "With `at`, at a point that names its item (`item:`): the stores\nwhose items it acts on (`{ store: <id> | [ids] }`, as `about`'s\n`accepts`); the point offers it only for an item of one of them.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ItemAccepts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "input": {
           "description": "The input it runs with. A string that is exactly `{{stream}}`,\n`{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;\na binding there's nothing for makes it unavailable there.",
           "default": null
@@ -2441,6 +2453,14 @@
             "$ref": "#/definitions/ContextType"
           },
           "default": {}
+        },
+        "item": {
+          "description": "The context key naming the item it acts on (a required `uri`).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
