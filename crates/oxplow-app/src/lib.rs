@@ -104,7 +104,7 @@ pub mod metric_visibility;
 #[cfg(test)]
 mod metrics_authoring_tests;
 pub mod metrics_service;
-pub mod models;
+pub(crate) mod models;
 pub mod net_sandbox;
 pub mod observe_conformance;
 pub mod on_demand;
@@ -125,7 +125,7 @@ mod reading_data_tests;
 #[cfg(test)]
 mod real_watch_tests;
 pub mod recovery;
-pub mod ref_drift;
+pub(crate) mod ref_drift;
 pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
@@ -568,6 +568,9 @@ pub struct Services {
     pub oxwiki: Arc<oxplow_oxwiki::OxwikiPresence>,
     /// Core's record of every store's pages.
     pub knowledge_pages: Arc<oxplow_db::SqliteKnowledgePageStore>,
+    /// The shared models the enabled extensions declare and fill
+    /// (`.context/models.md`).
+    pub models: models::Models,
     pub page_visit_store: Arc<SqlitePageVisitStore>,
     pub usage_store: Arc<SqliteUsageStore>,
     pub code_quality_store: Arc<SqliteCodeQualityStore>,
@@ -1609,7 +1612,9 @@ impl Services {
             vocabulary: event_log_store.vocabulary().clone(),
             layer: sql.clone(),
         });
+        let models = models::Models::default();
         let collector_runner = collector_runner::CollectorRunner {
+            models: models.clone(),
             project_dir: layout.project_dir.clone(),
             store: collector_store.clone(),
             db: db.clone(),
@@ -1817,6 +1822,7 @@ impl Services {
             feeds,
             oxwiki,
             knowledge_pages,
+            models,
             page_visit_store,
             usage_store,
             code_quality_store,

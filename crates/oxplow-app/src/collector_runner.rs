@@ -106,6 +106,8 @@ pub struct Collectors<'a> {
     /// Where a script that reads the tree (`tree.read`) reads it; `None`
     /// in tests that read none.
     pub trees: Option<std::sync::Arc<dyn crate::services::TreeSource>>,
+    /// The shared models a run's `models` / `fields` output writes.
+    pub models: crate::models::Models,
 }
 
 /// The worktree whose `.oxplow/extensions/` declares the collectors: the
@@ -154,6 +156,7 @@ impl<'a> Collectors<'a> {
             catalog: &svc.extension_catalog,
             ai: svc.ai_compute.clone(),
             trees: Some(std::sync::Arc::new(svc.metrics.clone())),
+            models: svc.models.clone(),
         }
     }
 }
@@ -394,6 +397,7 @@ pub enum Egress {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScriptOutput {
+    #[serde(default)]
     pub entities: BTreeMap<String, Vec<serde_json::Value>>,
     #[serde(default)]
     pub deleted: BTreeMap<String, Vec<serde_json::Value>>,
@@ -402,6 +406,16 @@ pub struct ScriptOutput {
     /// merged"), not a way to act — see [`plan_events`].
     #[serde(default)]
     pub events: Vec<crate::extension::extension_commands::ComposedEvent>,
+    /// Writes to shared models its extension fills (`.context/models.md`
+    /// "The output"), applied with its rows.
+    #[serde(default)]
+    pub models: Vec<crate::models::ModelOutput>,
+    /// Its extension's fields on items of a shared model.
+    #[serde(default)]
+    pub fields: Vec<crate::models::FieldsOutput>,
+    /// The checkpoint the next run gets as `cursor`.
+    #[serde(default)]
+    pub cursor: Option<serde_json::Value>,
 }
 
 impl ScriptOutput {
@@ -1102,7 +1116,12 @@ async fn run_collector_once(
             &spec,
             std::mem::take(&mut o.events),
         )?;
-        Ok((plan_writes(declarer, owner, &spec, o)?, events))
+        let observed = (
+            std::mem::take(&mut o.models),
+            std::mem::take(&mut o.fields),
+            o.cursor.take(),
+        );
+        Ok((plan_writes(declarer, owner, &spec, o)?, events, observed))
     });
     let last_event_id = trigger.event().map(|e| e.seq);
     let run_row = |status: &str, error: Option<String>| CollectorRun {
@@ -1124,9 +1143,19 @@ async fn run_collector_once(
         trigger: trigger.name(),
     };
     let error = match writes {
-        Ok((writes, events)) => {
+        Ok((writes, events, (models, fields, cursor))) => {
             let names: Vec<String> = writes.iter().map(|(t, _)| t.entity.clone()).collect();
-            let ok_run = run_row("ok", None);
+            let ok_run = CollectorRun {
+                cursor,
+                ..run_row("ok", None)
+            };
+            let registry = ctx.models.current();
+            let (writer_ext, writer_source) = (declarer.to_string(), source.clone());
+            let reconcile = trigger.name() == "start";
+            let anchors = trigger
+                .event()
+                .map(|e| e.envelope.anchors.clone())
+                .unwrap_or_default();
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
@@ -1137,11 +1166,42 @@ async fn run_collector_once(
                 .layer
                 .read_generation(ctx.db.transaction(move |tx| {
                     this_run.check_authority().map_err(DomainError::Invalid)?;
-                    let counts: BTreeMap<String, i64> = names
+                    let mut counts: BTreeMap<String, i64> = names
                         .iter()
                         .cloned()
                         .zip(oxplow_db::collector_store::write_rows_tx(tx, &writes)?)
                         .collect();
+                    let vocab = vocabulary.current();
+                    // Its observations of shared models, with its rows or
+                    // not at all; their change events are caused by its
+                    // `collector.synced`, logged below.
+                    let synced_id = oxplow_domain::events::EventId::generate();
+                    if !models.is_empty() || !fields.is_empty() {
+                        let applied = crate::models::apply_tx(
+                            tx,
+                            &registry,
+                            &vocab,
+                            &crate::models::Writer {
+                                extension: &writer_ext,
+                                source: &writer_source,
+                                cause: Some(synced_id.clone()),
+                                anchors: anchors.clone(),
+                                why: if reconcile {
+                                    crate::models::Cause::Reconcile
+                                } else {
+                                    crate::models::Cause::Trigger
+                                },
+                            },
+                            &models,
+                            &fields,
+                        )
+                        .map_err(DomainError::Invalid)?;
+                        for (model, by_op) in applied.counts {
+                            for (op, n) in by_op {
+                                counts.insert(format!("{model}.{op}"), n as i64);
+                            }
+                        }
+                    }
                     let run = CollectorRun {
                         row_counts: counts.clone(),
                         ..ok_run.clone()
@@ -1155,7 +1215,8 @@ async fn run_collector_once(
                         None,
                     )?;
                     let vocabulary = vocabulary.current();
-                    let synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
+                    let mut synced = event.envelope("ok", counts.clone(), 0, elapsed, None);
+                    synced.id = synced_id;
                     oxplow_db::event_log_store::append_tx(tx, &vocabulary, &synced)?;
                     // What it observed, caused by this run: with its rows
                     // or not at all.
@@ -1782,6 +1843,7 @@ async fn produce(
 /// holds one (it's registered while `Services` is built).
 #[derive(Clone)]
 pub struct CollectorRunner {
+    pub models: crate::models::Models,
     pub project_dir: PathBuf,
     pub store: Arc<SqliteCollectorStore>,
     pub db: oxplow_db::Database,
@@ -1810,6 +1872,7 @@ impl CollectorRunner {
             catalog: &self.catalog,
             ai: self.ai.clone(),
             trees: Some(std::sync::Arc::new(self.metrics.clone())),
+            models: self.models.clone(),
         }
     }
 
@@ -2462,6 +2525,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
 
         let report = reviewed_run(&ctx, "my_gh", "gh").await.unwrap();
@@ -2620,6 +2684,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
 
         let list = list_collectors(&ctx).await.unwrap();
@@ -2650,6 +2715,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         let other = list_collectors(&elsewhere).await.unwrap();
         assert!(
@@ -2823,6 +2889,89 @@ pub(crate) mod tests {
             matches!(&err, CommandError::Invalid { message, .. } if message.contains("no collector")),
             "{err:?}"
         );
+    }
+
+    /// A collector's `models` output fills the shared models its extension
+    /// fills, with its run: the rows land, the run's counts name them, and
+    /// its `cursor` is kept for the next run.
+    #[tokio::test]
+    async fn a_collectors_models_output_fills_the_model_and_keeps_its_cursor() {
+        use oxplow_db::model_store::{ModelColumn, ModelDecl, ModelType};
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        extension(
+            &root,
+            "shelves",
+            "manifest: 2\nname: shelves\nintent:\n  purpose: test\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n",
+            &[(
+                "books.star",
+                "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}], \"cursor\": {\"n\": 1}}\n",
+            )],
+        );
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        let mut registry = crate::models::ModelRegistry::default();
+        registry.models.insert(
+            "shelf/book".into(),
+            crate::models::ModelSpec {
+                decl: ModelDecl {
+                    extension: "shelf".into(),
+                    namespace: "shelf".into(),
+                    name: "book".into(),
+                    resource: "shelf/book".into(),
+                    key: "id".into(),
+                    store_param: "store".into(),
+                    columns: vec![
+                        ModelColumn::new("id", ModelType::Text),
+                        ModelColumn::new("title", ModelType::Text),
+                    ],
+                },
+                open: true,
+                change_event: None,
+            },
+        );
+        registry.fills.push(crate::models::FillSpec {
+            extension: "shelves".into(),
+            model: "shelf/book".into(),
+            stores: vec!["shelves".into()],
+            fields: vec![],
+        });
+        fx.svc.models.swap(registry);
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                SYNC,
+                json!({ "collector": "shelves/books" }),
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(
+            out.result.to_string().contains("shelf/book.upserted"),
+            "{}",
+            out.result
+        );
+        let (title, cursor): (String, String) = fx
+            .svc
+            .db
+            .read(|tx| {
+                let title = tx
+                    .query_row("SELECT title FROM v_shelf_book", [], |r| r.get(0))
+                    .map_err(oxplow_db::map_sql_err)?;
+                let cursor = tx
+                    .query_row(
+                        "SELECT cursor_json FROM collector_run WHERE id = 'books'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                Ok((title, cursor))
+            })
+            .await
+            .unwrap();
+        assert_eq!(title, "Dune");
+        assert_eq!(cursor, r#"{"n":1}"#);
     }
 
     /// P7.C2: three failed runs in a row disable a collector; then
@@ -3097,6 +3246,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         let report = run_collector(
             &ctx,
@@ -3211,6 +3361,7 @@ pub(crate) mod tests {
                 oxplow_db::SqliteAiResultStore::new(db.clone()),
             )),
             trees: None,
+            models: Default::default(),
         };
         let report = reviewed_run(&ctx, "work", "star").await.unwrap();
         assert_eq!(report.row_counts["kind"], 3);
@@ -3270,6 +3421,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         let preview = preview_collector(&ctx, "work", "star", None, None)
             .await
@@ -3324,6 +3476,7 @@ pub(crate) mod tests {
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         script(
             &ext,
@@ -3451,6 +3604,7 @@ printf '{{"entities":{{"r":[{{"id":1,"declared":"%s","undeclared":"%s","direct":
             catalog: &Arc::new(crate::extension::extension_catalog::ExtensionCatalog::new()),
             ai: no_ai(),
             trees: None,
+            models: Default::default(),
         };
         assert!(list_collectors(&ctx).await.unwrap()[0].network_enforced);
         reviewed_run(&ctx, "net", "s").await.unwrap();

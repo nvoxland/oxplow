@@ -146,7 +146,6 @@ pub enum Cause {
 /// Who writes, and what its change events are caused by.
 pub struct Writer<'a> {
     pub extension: &'a str,
-    pub namespace: &'a str,
     /// The events' source (the collector's URI).
     pub source: &'a str,
     pub cause: Option<EventId>,
@@ -397,7 +396,6 @@ mod tests {
     fn writer(extension: &'static str, why: Cause) -> Writer<'static> {
         Writer {
             extension,
-            namespace: extension,
             source: "oxplow:oxplow/collector?id=books&owner=shelf-folder",
             cause: None,
             anchors: Anchors::default(),
