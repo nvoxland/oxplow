@@ -1548,25 +1548,34 @@ mod tests {
         }
     }
 
-    /// Text names the active tracker's ids first, then each running
-    /// provider instance's that declares a pattern (its store fills the
-    /// task model whether it is active or not); a script or built-in that
-    /// isn't active names none.
+    /// Text names each running provider instance's ids that declares a
+    /// pattern (its store fills the task model); a script or built-in
+    /// names none.
     #[test]
-    fn every_running_task_providers_ids_are_recognized_the_active_first() {
-        let mut core = builtin("task_tracker", "oxtask", "oxplow:oxtask");
-        core.id_pattern = Some(r"tsk\d+".into());
+    fn every_running_task_providers_ids_are_recognized() {
         let mut linear = builtin("task_tracker", "linear", "x");
         linear.source = Source::External;
         linear.id_pattern = Some(r"ENG-\d+".into());
-        let mut quiet = builtin("task_tracker", "quiet", "y");
-        quiet.id_pattern = Some(r"Q\d+".into());
-        let ids = CapabilityRegistry::task_ids_from(&[core, linear, quiet], &config(&[], &[]));
+        let mut jira = builtin("task_tracker", "jira", "x");
+        jira.source = Source::External;
+        jira.id_pattern = Some(r"PRJ-\d+".into());
+        let mut plain = builtin("task_tracker", "plain", "x");
+        plain.source = Source::External;
+        let mut built = builtin("task_tracker", "quiet", "y");
+        built.id_pattern = Some(r"Q\d+".into());
+        let mut hidden = builtin("task_tracker", "hidden", "z");
+        hidden.source = Source::External;
+        hidden.id_pattern = Some(r"H\d+".into());
+        hidden.offered = false;
+        let ids = CapabilityRegistry::task_ids_from(
+            &[linear, jira, plain, built, hidden],
+            &config(&[], &[]),
+        );
         assert_eq!(
             ids,
             vec![
-                ("oxtask".to_string(), r"tsk\d+".to_string()),
                 ("linear".to_string(), r"ENG-\d+".to_string()),
+                ("jira".to_string(), r"PRJ-\d+".to_string()),
             ]
         );
     }
@@ -1575,7 +1584,8 @@ mod tests {
         let r = CapabilityRegistry::new(Vec::new(), VocabularyHandle::core());
         if declared {
             r.set_declared(vec![
-                builtin("task_tracker", "oxtask", "oxplow:oxtask"),
+                builtin("snapshots", "oxplow", "oxplow:snapshots"),
+                builtin("snapshots", "hashes", "oxplow:snapshot-hashes"),
                 builtin("knowledge", "oxwiki", "oxplow:oxwiki"),
             ]);
         }
@@ -1600,49 +1610,44 @@ mod tests {
     #[test]
     fn a_choice_is_the_persons_then_the_projects_then_the_default() {
         let r = registry(true);
-        let res = |c: &OxplowConfig| r.resolve(c, "task_tracker");
+        let res = |c: &OxplowConfig| r.resolve(c, "snapshots");
         assert_eq!(
             res(&config(&[], &[])),
             Resolved {
-                id: "oxtask".into(),
+                id: "oxplow".into(),
                 chosen_by: ChosenBy::Default,
                 wanted: None
             }
         );
         assert_eq!(
-            res(&config(&[("task_tracker", "none")], &[])).chosen_by,
+            res(&config(&[("snapshots", "hashes")], &[])).chosen_by,
             ChosenBy::Project
         );
-        let both = config(&[("task_tracker", "none")], &[("task_tracker", "oxtask")]);
+        let both = config(&[("snapshots", "hashes")], &[("snapshots", "oxplow")]);
         assert_eq!(
             (res(&both).id.as_str(), res(&both).chosen_by),
-            ("oxtask", ChosenBy::Personal)
+            ("oxplow", ChosenBy::Personal)
         );
     }
 
-    /// A choice that isn't available falls back: an optional capability to
-    /// none, a required one to its default — which core always has, so
-    /// disabling the extension that declares the defaults leaves snapshots
-    /// working.
+    /// A choice that isn't available falls back to the capability's
+    /// default, which core always has, so disabling the extension that
+    /// declares the defaults leaves snapshots working. A capability core
+    /// doesn't know is `none`.
     #[test]
     fn an_unavailable_choice_falls_back() {
         let r = registry(true);
-        let gone = r.resolve(&config(&[("task_tracker", "issues")], &[]), "task_tracker");
+        let gone = r.resolve(&config(&[("snapshots", "issues")], &[]), "snapshots");
         assert_eq!(
             gone,
             Resolved {
-                id: NONE.into(),
+                id: "oxplow".into(),
                 chosen_by: ChosenBy::Fallback,
                 wanted: Some("issues".into())
             }
         );
         let disabled = registry(false);
         let none = config(&[], &[]);
-        assert_eq!(disabled.active(&none, "task_tracker"), NONE);
-        assert_eq!(
-            r.active(&config(&[("task_tracker", "none")], &[]), "task_tracker"),
-            NONE
-        );
         let snapshots = disabled.resolve(&none, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
@@ -1654,15 +1659,16 @@ mod tests {
             ("oxplow", ChosenBy::Fallback)
         );
         assert_eq!(disabled.active(&none, "vcs"), "git");
+        assert_eq!(disabled.active(&none, "no_such_capability"), NONE);
     }
 
     /// A provider instance is available while it runs.
     #[test]
     fn a_running_instance_is_available() {
         let r = registry(true);
-        let c = config(&[("task_tracker", "issues")], &[]);
+        let c = config(&[("snapshots", "issues")], &[]);
         let issues = Implementation {
-            capability: "task_tracker".into(),
+            capability: "snapshots".into(),
             id: "issues".into(),
             title: "Issues".into(),
             extension: Some("tracker".into()),
@@ -1678,9 +1684,9 @@ mod tests {
             description: None,
         };
         r.set_external(issues.clone(), true);
-        assert_eq!(r.active(&c, "task_tracker"), "issues");
+        assert_eq!(r.active(&c, "snapshots"), "issues");
         r.set_external(issues, false);
-        assert_eq!(r.active(&c, "task_tracker"), NONE);
+        assert_eq!(r.active(&c, "snapshots"), "oxplow");
     }
 
     /// A capability many implementations serve: every declared one is
@@ -1769,8 +1775,8 @@ mod tests {
 
     /// With `oxplow-bundled` disabled, the defaults still run: snapshots
     /// are `oxplow-foundation`'s (core's own snapshots default is the
-    /// active row). oxtask is bundled's, so the task tracker
-    /// resolves to none, and filing is a sink rather than a refusal.
+    /// active row). The task tracker has no implementation of core's own:
+    /// it resolves to none.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -1805,17 +1811,6 @@ mod tests {
             serde_json::to_value(&rows.rows).unwrap(),
             serde_json::json!([["hashes", 0, 1, "builtin"], ["oxplow", 1, 1, "builtin"]])
         );
-        let filed = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                crate::commands::task::CREATE,
-                serde_json::json!({ "title": "x" }),
-                false,
-            )
-            .await
-            .expect("filing is a sink with no task tracker, not a refusal");
-        assert_eq!(filed.result["tracked"], false, "{}", filed.result);
     }
 
     /// The rows say which is active and why, and a choice that isn't
@@ -1823,14 +1818,14 @@ mod tests {
     #[tokio::test]
     async fn the_rows_say_what_is_active_and_why() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        let c = config(&[("task_tracker", "issues")], &[]);
+        let c = config(&[("snapshots", "issues")], &[]);
         fx.svc.capabilities.publish(&c, &fx.svc.db).await.unwrap();
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT capability, provider, active, chosen_by, available FROM v_capability_provider
-                  WHERE capability IN ('task_tracker', 'knowledge') ORDER BY capability, provider",
+                  WHERE capability IN ('snapshots', 'knowledge') ORDER BY capability, provider",
                 vec![],
                 None,
             )
@@ -1840,9 +1835,9 @@ mod tests {
             serde_json::to_value(&out.rows).unwrap(),
             serde_json::json!([
                 ["knowledge", "oxwiki", 1, "declared", 1],
-                ["task_tracker", "issues", 0, null, 0],
-                ["task_tracker", "none", 1, "fallback", 1],
-                ["task_tracker", "oxtask", 0, null, 1],
+                ["snapshots", "hashes", 0, null, 1],
+                ["snapshots", "issues", 0, null, 0],
+                ["snapshots", "oxplow", 1, "fallback", 1],
             ])
         );
     }
@@ -1855,7 +1850,7 @@ mod tests {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let default = config(&[], &[]);
-        let off = config(&[("task_tracker", "none")], &[]);
+        let off = config(&[("snapshots", "hashes")], &[]);
         // (Startup logged its own choices; only what follows is checked.)
         let startup = svc
             .db
@@ -1894,136 +1889,29 @@ mod tests {
         assert_eq!(
             switches,
             vec![serde_json::json!({
-                "capability": "task_tracker",
-                "from": "oxtask",
-                "to": "none",
+                "capability": "snapshots",
+                "from": "oxplow",
+                "to": "hashes",
                 "chosen_by": "project",
             })]
         );
     }
 
-    /// With no task tracker, the interface is a sink: every verb is offered
-    /// and succeeds, keeping nothing — a create files nowhere, a change to an
-    /// item (one of another list's, a loose id) changes nothing — and the
-    /// interface reads empty.
-    #[tokio::test]
-    async fn with_no_task_tracker_the_interface_is_a_sink() {
-        use serde_json::json;
-        let fx = crate::test_fixtures::services_with_task().await;
-        let svc = &fx.svc;
-        let agent = oxplow_domain::Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        svc.config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("task_tracker".into(), NONE.into());
-        crate::test_fixtures::activate_with_problems(svc).await;
-        let offered: Vec<String> = svc
-            .commands
-            .list(&agent)
-            .into_iter()
-            .map(|c| c.id)
-            .collect();
-        for name in [
-            "oxplow.task.create",
-            "oxplow.task.transition",
-            "oxplow.task.comment",
-            "oxplow.task.link",
-            "oxplow.task.reorder",
-            "oxplow.task.assign",
-        ] {
-            assert!(offered.iter().any(|n| n == name), "{name} offered");
-        }
-        let run = |name: &'static str, input: serde_json::Value| {
-            let svc = svc.clone();
-            let agent = agent.clone();
-            async move { svc.commands.run(&agent, name, input, false).await.unwrap() }
-        };
-        let task = oxplow_oxtask::task_ref(fx.task);
-        for (name, input) in [
-            (
-                crate::commands::task::CREATE,
-                json!({ "title": "filed nowhere" }),
-            ),
-            (
-                crate::commands::task::NAME,
-                json!({ "uri": task, "to": "done" }),
-            ),
-            (
-                crate::commands::task::NAME,
-                json!({ "uri": fx.task.to_string(), "to": "done" }),
-            ),
-            (
-                crate::commands::task::COMMENT,
-                json!({ "uri": task, "body": "kept nowhere" }),
-            ),
-            (crate::commands::task::REORDER, json!({ "uri": task })),
-            (
-                crate::commands::task::ASSIGN,
-                json!({ "uri": task, "to": null }),
-            ),
-        ] {
-            assert_eq!(
-                run(name, input).await.result["tracked"],
-                json!(false),
-                "{name}"
-            );
-        }
-        use oxplow_oxtask::OxtaskStore as _;
-        let kept = svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(
-            kept.status,
-            oxplow_oxtask::OxtaskStatus::InProgress,
-            "oxplow's task untouched"
-        );
-        let count = svc
-            .sql
-            .query_sql("SELECT count(*) FROM v_task", vec![], None)
-            .await
-            .unwrap();
-        assert_eq!(serde_json::to_value(count.rows).unwrap(), json!([[0]]));
-    }
-
-    /// A feature the active task tracker doesn't declare hides what needs it.
+    /// A feature the chosen snapshots implementation doesn't declare hides
+    /// what needs it.
     #[test]
     fn a_missing_feature_hides_what_needs_it() {
         let r = registry(true);
-        r.set_external(
-            Implementation {
-                capability: "task_tracker".into(),
-                id: "plain".into(),
-                title: "plain".into(),
-                extension: None,
-                source: Source::External,
-                features: serde_json::json!({ "comments": false, "links": true, "delete": true }),
-                fields: serde_json::Value::Array(Vec::new()),
-                stages: serde_json::Value::Array(Vec::new()),
-                kinds: serde_json::Value::Array(Vec::new()),
-                offered: true,
-                id_pattern: None,
-                icon: None,
-                config: serde_json::json!({}),
-                description: None,
-            },
-            true,
-        );
-        let plain = r.snapshot(&config(&[("task_tracker", "plain")], &[]));
         let needs = |n: &str| vec![n.to_string()];
+        let keeping = r.snapshot(&config(&[], &[]));
         assert_eq!(
-            plain.command_refusal("x", &needs("task_tracker.links")),
+            keeping.command_refusal("x", &needs("snapshots.contents")),
             None
         );
-        assert!(plain
-            .command_refusal("x", &needs("task_tracker.comments"))
+        let hashes = r.snapshot(&config(&[("snapshots", "hashes")], &[]));
+        assert!(hashes
+            .command_refusal("x", &needs("snapshots.contents"))
             .is_some());
-        assert_eq!(
-            plain.command_refusal("x", &needs("task_tracker.delete")),
-            None
-        );
     }
 
     /// A provider instance's own commands are offered only while it's the
@@ -2033,7 +1921,7 @@ mod tests {
         let r = registry(true);
         r.set_external(
             Implementation {
-                capability: "task_tracker".into(),
+                capability: "snapshots".into(),
                 id: "fake".into(),
                 title: "Fake".into(),
                 extension: Some("tracker".into()),
@@ -2054,14 +1942,12 @@ mod tests {
         assert!(default
             .command_refusal("fake.sync_now", &[])
             .is_some_and(|m| m.contains("Fake's")));
-        let fake = r.snapshot(&config(&[("task_tracker", "fake")], &[]));
+        let fake = r.snapshot(&config(&[("snapshots", "fake")], &[]));
         assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
     }
 
     /// A runtime already on disk gets what's offered (boot refreshes it
-    /// for an agent that outlived an upgrade, tsk376): core's skills, the
-    /// task tracker skill and oxtask's `/next-task` only while a task
-    /// tracker is active (oxtask for `/next-task`).
+    /// for an agent that outlived an upgrade): core's skills.
     #[tokio::test]
     async fn the_runtimes_skills_follow_what_is_offered() {
         let fx = crate::test_fixtures::services_with_thread().await;
@@ -2092,78 +1978,22 @@ mod tests {
                 "{skill:?}"
             );
         }
-        assert!(skills.join("tasks/SKILL.md").is_file());
-        assert!(commands.join("next-task.md").is_file());
-        svc.config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("task_tracker".into(), NONE.into());
-        crate::test_fixtures::activate_with_problems(svc).await;
-        refresh_agent_text(svc).await;
-        assert!(
-            !skills.join("tasks/SKILL.md").exists(),
-            "no tracker, no skill"
-        );
-        assert!(!commands.join("next-task.md").exists());
         assert!(commands.join("configure.md").is_file());
     }
 
-    /// An implementation's own fields are declared, and published with its
-    /// row: oxtask have a priority, none has none.
-    #[tokio::test]
-    async fn an_implementations_fields_are_published() {
-        let fx = crate::test_fixtures::services_with_thread().await;
-        let out = fx
-            .svc
-            .sql
-            .query_sql(
-                "SELECT provider, fields FROM v_capability_provider
-                  WHERE capability = 'task_tracker' ORDER BY provider",
-                vec![],
-                None,
-            )
-            .await
-            .unwrap();
-        let rows = serde_json::to_value(&out.rows).unwrap();
-        let fields = |provider: &str| -> Value {
-            rows.as_array()
-                .unwrap()
-                .iter()
-                .find(|r| r[0] == provider)
-                .map(|r| serde_json::from_str(r[1].as_str().unwrap()).unwrap())
-                .unwrap()
-        };
-        assert_eq!(
-            fields("oxtask"),
-            serde_json::json!([
-                {
-                    "name": "priority",
-                    "title": "Priority",
-                    "kind": "enum",
-                    "values": ["urgent", "high", "medium", "low"],
-                    "read_only": false
-                },
-                {
-                    "name": "author",
-                    "title": "Filed by",
-                    "kind": "enum",
-                    "values": ["user", "agent"],
-                    "read_only": true
-                }
-            ])
-        );
-        assert_eq!(fields(NONE), serde_json::json!([]));
-    }
-
-    /// Each task tracker's id pattern is published beside it, so a screen
-    /// recognizes its ids in text as core's vocabulary does: oxplow's
-    /// `tsk<n>`, nothing for none.
+    /// A task tracker instance's id pattern is published beside it, so a
+    /// screen recognizes its ids in text as core's vocabulary does.
     #[tokio::test]
     async fn a_task_trackers_id_pattern_is_published() {
         let fx = crate::test_fixtures::services_with_thread().await;
-        let out = fx
-            .svc
+        let svc = &fx.svc;
+        svc.capabilities
+            .set_external(tracker_instance(Some(r"ENG-\d+")), true);
+        svc.capabilities
+            .publish(&config(&[], &[]), &svc.db)
+            .await
+            .unwrap();
+        let out = svc
             .sql
             .query_sql(
                 "SELECT provider, id_pattern FROM v_capability_provider
@@ -2175,38 +2005,61 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            serde_json::json!([[NONE, null], ["oxtask", r"tsk\d+"]])
+            serde_json::json!([["issues", r"ENG-\d+"]])
         );
     }
 
-    /// The vocabulary reads the active task tracker's own ids in text, as it
-    /// declares them: `tsk42` with oxtask, nothing with none.
+    /// The vocabulary reads a running task tracker instance's ids in text,
+    /// as it declares them; once it stops, they are no longer task ids.
     #[tokio::test]
-    async fn the_vocabulary_reads_the_active_lists_ids() {
+    async fn the_vocabulary_reads_a_running_instances_ids() {
         let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let found = || {
             oxplow_domain::uri::extract(
                 &svc.vocabulary.current().resources,
-                "see tsk42 and [[tsk7]]",
+                "see ENG-42 and [[ENG-7]]",
             )
             .tasks
         };
+        assert!(found().is_empty(), "{:?}", found());
+        let instance = tracker_instance(Some(r"ENG-\d+"));
+        svc.capabilities.set_external(instance.clone(), true);
+        svc.capabilities
+            .publish(&config(&[], &[]), &svc.db)
+            .await
+            .unwrap();
+        crate::test_fixtures::activate_with_problems(svc).await;
         assert_eq!(
             found(),
             vec![
-                oxplow_domain::uri::build::task_uri("oxtask", "tsk42"),
-                oxplow_domain::uri::build::task_uri("oxtask", "tsk7"),
+                oxplow_domain::uri::build::task_uri("issues", "ENG-42"),
+                oxplow_domain::uri::build::task_uri("issues", "ENG-7"),
             ]
         );
-        svc.config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("task_tracker".into(), NONE.into());
-        crate::test_fixtures::activate_with_problems(svc).await;
+        svc.capabilities.set_external(instance, false);
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(found().is_empty(), "{:?}", found());
+    }
+
+    /// A running task tracker provider instance, as its host publishes it.
+    fn tracker_instance(id_pattern: Option<&str>) -> Implementation {
+        Implementation {
+            capability: "task_tracker".into(),
+            id: "issues".into(),
+            title: "Issues".into(),
+            extension: Some("tracker".into()),
+            source: Source::External,
+            features: Value::Null,
+            fields: serde_json::Value::Array(Vec::new()),
+            stages: serde_json::Value::Array(Vec::new()),
+            kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
+            id_pattern: id_pattern.map(str::to_string),
+            icon: None,
+            config: serde_json::json!({}),
+            description: None,
+        }
     }
 }
 

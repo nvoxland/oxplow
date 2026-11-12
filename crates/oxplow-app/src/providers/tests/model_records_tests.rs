@@ -30,7 +30,6 @@ async fn running_tracker() -> ThreadFixture {
     .unwrap();
     let ext = extension(&project);
     deploy(&fx, &ext).await;
-    make_active(&fx, "fake").await;
     crate::test_fixtures::activate(&fx.svc).await;
     enable_on(&fx.svc, &ext, &ext.providers[0], json!({ "team": "core" })).await;
     first_read(&fx).await;
@@ -84,31 +83,35 @@ async fn rows(fx: &ThreadFixture, sql: &str) -> Vec<Vec<Value>> {
 #[tokio::test]
 async fn a_recorded_task_lands_in_the_record_model_and_a_deleted_one_goes() {
     let fx = running_tracker().await;
-    let items = fx.svc.tasks_client();
-    let item = items
-        .create(
-            &Actor::Human,
-            crate::tasks::NewItem {
-                title: "theirs".into(),
-                body: "see it".into(),
-                stage: Some("doing".into()),
-                native: Some(json!({ "points": 3 })),
-                ..Default::default()
-            },
-        )
-        .await
+    let item = invoke_on(
+        &fx,
+        INSTANCE,
+        "create",
+        json!({ "title": "theirs", "body": "see it", "stage": "doing", "native": { "points": 3 } }),
+    )
+    .await
+    .unwrap()
+    .result["uri"]
+        .as_str()
         .unwrap()
-        .expect("the list keeps it");
-    items
-        .link(
-            &Actor::Human,
-            &item,
-            "oxplow:oxplow/file?path=src/lib.rs",
-            "relates_to",
-        )
-        .await
-        .unwrap();
-    items.comment(&Actor::Human, &item, "first!").await.unwrap();
+        .to_string();
+    invoke_on(
+        &fx,
+        INSTANCE,
+        "link",
+        json!({ "uri": item, "target": "oxplow:oxplow/file?path=src/lib.rs", "link_type": "relates_to" }),
+    )
+    .await
+    .unwrap();
+    invoke_on(
+        &fx,
+        INSTANCE,
+        "comment",
+        json!({ "uri": item, "body": "first!" }),
+    )
+    .await
+    .unwrap();
+    sync_fake(&fx).await;
     settled(&fx).await;
 
     let task = rows(
@@ -148,10 +151,15 @@ async fn a_recorded_task_lands_in_the_record_model_and_a_deleted_one_goes() {
     assert_eq!(comments, vec![vec![json!("first!")]]);
 
     // A move restates the row; closing sets when.
-    items
-        .transition(&Actor::Human, &item, "shipped")
-        .await
-        .unwrap();
+    invoke_on(
+        &fx,
+        INSTANCE,
+        "transition",
+        json!({ "uri": item, "to": "shipped" }),
+    )
+    .await
+    .unwrap();
+    sync_fake(&fx).await;
     settled(&fx).await;
     let moved = rows(
         &fx,
@@ -166,7 +174,10 @@ async fn a_recorded_task_lands_in_the_record_model_and_a_deleted_one_goes() {
     let changed = logged(&fx, "oxplow.task_record.changed").await;
     assert!(!changed.is_empty());
 
-    items.delete(&Actor::Human, &item, true).await.unwrap();
+    invoke_on(&fx, INSTANCE, "delete", json!({ "uri": item }))
+        .await
+        .unwrap();
+    sync_fake(&fx).await;
     settled(&fx).await;
     let gone = rows(
         &fx,
@@ -182,17 +193,8 @@ async fn with_no_model_declared_the_adapter_does_nothing_and_fails_nothing() {
     let fx = running_tracker().await;
     // Bundled off: no model is declared.
     fx.svc.models.swap(crate::models::ModelRegistry::default());
-    fx.svc
-        .tasks_client()
-        .create(
-            &Actor::Human,
-            crate::tasks::NewItem {
-                title: "x".into(),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    create_on(&fx, INSTANCE, "x").await.unwrap();
+    sync_fake(&fx).await;
     settled(&fx).await;
     let dead = rows(
         &fx,
@@ -276,18 +278,15 @@ async fn a_record_for_a_store_an_extension_fills_writes_nothing() {
         fill.provider = false;
     }
     fx.svc.models.swap(registry);
-    fx.svc
-        .tasks_client()
-        .create(
-            &Actor::Human,
-            crate::tasks::NewItem {
-                title: "theirs".into(),
-                stage: Some("doing".into()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    invoke_on(
+        &fx,
+        INSTANCE,
+        "create",
+        json!({ "title": "theirs", "stage": "doing" }),
+    )
+    .await
+    .unwrap();
+    sync_fake(&fx).await;
     settled(&fx).await;
     let held = rows(&fx, "SELECT id FROM v_oxplow_task_record").await;
     assert!(held.is_empty(), "{held:?}");
@@ -299,35 +298,27 @@ async fn a_record_for_a_store_an_extension_fills_writes_nothing() {
 #[tokio::test]
 async fn records_made_while_there_was_no_fill_appear_when_the_fill_returns() {
     let fx = running_tracker().await;
-    let items = fx.svc.tasks_client();
     let full = fx.svc.models.current().as_ref().clone();
     // A publication with bundled off: no fill, so its markers go.
     reconcile(&fx, &crate::models::ModelRegistry::default()).await;
     fx.svc.models.swap(crate::models::ModelRegistry::default());
-    let kept = items
-        .create(
-            &Actor::Human,
-            crate::tasks::NewItem {
-                title: "kept".into(),
-                stage: Some("doing".into()),
-                ..Default::default()
-            },
-        )
-        .await
+    let kept = invoke_on(
+        &fx,
+        INSTANCE,
+        "create",
+        json!({ "title": "kept", "stage": "doing" }),
+    )
+    .await
+    .unwrap()
+    .result["uri"]
+        .as_str()
         .unwrap()
-        .expect("the list keeps it");
-    let gone = items
-        .create(
-            &Actor::Human,
-            crate::tasks::NewItem {
-                title: "gone".into(),
-                ..Default::default()
-            },
-        )
+        .to_string();
+    let gone = create_on(&fx, INSTANCE, "gone").await.unwrap();
+    invoke_on(&fx, INSTANCE, "delete", json!({ "uri": gone }))
         .await
-        .unwrap()
-        .expect("the list keeps it");
-    items.delete(&Actor::Human, &gone, true).await.unwrap();
+        .unwrap();
+    sync_fake(&fx).await;
     settled(&fx).await;
     // Bundled back on: the next publication states what the log holds.
     fx.svc.models.swap(full.clone());

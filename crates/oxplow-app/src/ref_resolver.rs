@@ -322,50 +322,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolves_task_title_and_status() {
-        let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let task = crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Fix the flaky test", "body": "It fails on CI only.\nSecond line.", "stage": "in_progress" })).await;
-
-        let summary = resolve_ref(&services, &build::task_uri("oxtask", &task.to_string())).await;
-        assert_eq!(summary.resource, "oxplow/task");
-        assert_eq!(summary.title.as_deref(), Some("Fix the flaky test"));
-        assert_eq!(summary.detail.as_deref(), Some("in_progress"));
-        assert!(summary
-            .body_excerpt
-            .as_deref()
-            .unwrap()
-            .starts_with("It fails on CI only."));
-    }
-
-    /// A task resolves through the interface: the active list's
-    /// items only — with none, even oxplow's task is bare.
-    #[tokio::test]
-    async fn a_task_resolves_from_the_active_list_only() {
-        let dir = git_repo_with_commit("init", "");
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let task = crate::test_fixtures::file_item(
-            &services,
-            serde_json::json!({ "title": "Fix the flaky test" }),
-        )
-        .await;
-        services
-            .config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("task_tracker".into(), "none".into());
-        let config = crate::config_service::read_config(&services.config);
-        services
-            .capabilities
-            .publish(&config, &services.db)
-            .await
-            .unwrap();
-        let summary = resolve_ref(&services, &build::task_uri("oxtask", &task.to_string())).await;
-        assert_eq!(summary.title, None);
-    }
-
-    #[tokio::test]
     async fn unknown_task_id_is_bare() {
         let dir = git_repo_with_commit("init", "");
         let services = Services::in_memory(dir.path()).await.unwrap();

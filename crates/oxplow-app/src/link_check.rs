@@ -342,43 +342,6 @@ mod tests {
         );
     }
 
-    /// A task link checks the interface: with no list, an existing
-    /// oxplow task is nothing it can point at.
-    #[tokio::test]
-    async fn a_task_link_checks_the_active_list() {
-        let dir = git_repo();
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let task =
-            crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
-                .await;
-        services
-            .config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("task_tracker".into(), "none".into());
-        let config = crate::config_service::read_config(&services.config);
-        services
-            .capabilities
-            .publish(&config, &services.db)
-            .await
-            .unwrap();
-        let warnings = check_links(&services, &format!("See [[{}]].", task)).await;
-        assert_eq!(warnings.len(), 1, "{warnings:?}");
-    }
-
-    #[tokio::test]
-    async fn accepts_existing_task() {
-        let dir = git_repo();
-        let services = Services::in_memory(dir.path()).await.unwrap();
-        let task =
-            crate::test_fixtures::file_item(&services, serde_json::json!({ "title": "Real task" }))
-                .await;
-        let body = format!("Done in [[{}]].", task);
-        let warnings = check_links(&services, &body).await;
-        assert!(warnings.is_empty(), "got {warnings:?}");
-    }
-
     #[tokio::test]
     async fn flags_missing_knowledge_page_but_not_code_fenced() {
         let dir = git_repo();

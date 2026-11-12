@@ -233,15 +233,6 @@ pub async fn run(
 mod tests {
     use super::*;
     use oxplow_db::Database;
-    use oxplow_domain::stores::{StreamStore, ThreadStore};
-    use oxplow_domain::{Stream, StreamId, StreamKind, Thread, ThreadId, Timestamp};
-    use oxplow_oxtask::OxtaskId;
-    use oxplow_oxtask::OxtaskStore;
-    use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
-
-    fn ts() -> Timestamp {
-        Timestamp::from_unix_ms(1_700_000_000_000)
-    }
 
     /// The repair is needed once per projection code and schema version:
     /// recorded, it isn't again until either changes. A rebuild that left
@@ -323,7 +314,6 @@ mod tests {
             VocabularyHandle::core(),
             page_refs.clone(),
             Sources {
-                db: db.clone(),
                 findings: findings_store,
                 handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
             },
@@ -385,7 +375,6 @@ mod tests {
             .unwrap();
         let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
         let sources = || Sources {
-            db: db.clone(),
             findings: findings_store.clone(),
             handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
         };
@@ -424,176 +413,6 @@ mod tests {
                 }
                 Err(_) => break,
             }
-        }
-    }
-
-    /// Every task is restated from the interface, whichever list
-    /// it's on: its body, its links (the list's own types) and its
-    /// comments.
-    #[tokio::test]
-    async fn backfill_restates_every_task_from_the_interface() {
-        let db = Database::in_memory();
-
-        // Every store mirrors into the ref graph at write time now —
-        // a "bare" writer can't exist. Simulate pre-migration data by
-        // inserting normally, then clearing the projected slice below.
-        let streams = oxplow_db::SqliteStreamStore::new(db.clone());
-        let threads = oxplow_db::SqliteThreadStore::new(db.clone());
-        let bare_items = oxplow_oxtask::SqliteOxtaskStore::new(db.clone());
-
-        streams
-            .upsert(&Stream {
-                id: StreamId::new(1),
-                kind: StreamKind::Primary,
-                title: "x".into(),
-                branch: "main".into(),
-                branch_ref: "refs/heads/main".into(),
-                branch_source: "main".into(),
-                worktree_path: "/r".into(),
-                working_pane: String::new(),
-                talking_pane: String::new(),
-                working_session_id: String::new(),
-                talking_session_id: String::new(),
-                host: oxplow_domain::HostId::LOCAL,
-                custom_prompt: None,
-                created_at: ts(),
-                updated_at: ts(),
-                archived_at: None,
-            })
-            .await
-            .unwrap();
-        threads
-            .upsert(&Thread {
-                id: ThreadId::new(1),
-                stream_id: StreamId::new(1),
-                title: "x".into(),
-                sort_index: 0,
-                summary: String::new(),
-                summary_updated_at: None,
-                closed_at: None,
-                custom_prompt: None,
-                created_at: ts(),
-                updated_at: ts(),
-                archived_at: None,
-                mark: None,
-            })
-            .await
-            .unwrap();
-        let task_id = bare_items
-            .insert(&Oxtask {
-                id: OxtaskId::placeholder(),
-                parent_id: None,
-                title: "fix".into(),
-                description: "see [[src/app.rs]]".into(),
-                status: OxtaskStatus::Ready,
-                priority: OxtaskPriority::Medium,
-                created_by: OxtaskActorKind::User,
-                created_at: ts(),
-                updated_at: ts(),
-                completed_at: None,
-                deleted_at: None,
-                note_count: 0,
-                author: Some(OxtaskAuthor::User),
-            })
-            .await
-            .unwrap();
-        // Its row in the interface, as its record put it there: its stage's
-        // bucket is the list's declaration.
-        let stages = serde_json::to_string(&crate::capabilities::built_in_stage_decls(
-            crate::capabilities::built_in("oxplow:oxtask").unwrap(),
-        ))
-        .unwrap();
-        db.transaction(move |tx| {
-            use crate::event_pump::EventConsumer as _;
-            tx.execute(
-                "INSERT INTO capability_provider
-                   (capability, provider, features_json, active, title, source, available,
-                    capability_title, choosable, optional, stages_json)
-                 VALUES ('task_tracker', 'oxtask', '{}', 1, 'oxtask', 'builtin', 1,
-                         'Task tracker', 1, 1, ?1)",
-                [&stages],
-            )
-            .map_err(oxplow_db::map_sql_err)?;
-            let record = oxplow_oxtask::record::record_tx(tx, task_id)?;
-            crate::tasks::TasksProjection.handle(
-                tx,
-                &oxplow_domain::StoredEvent {
-                    seq: 1,
-                    envelope: oxplow_oxtask::provider::recorded(record),
-                    payload_expired_at: None,
-                },
-            )
-        })
-        .await
-        .unwrap();
-
-        // Another list's item, as its records left it in the interface.
-        db.transaction(|tx| {
-            for sql in [
-                "INSERT INTO task (uri, provider, title, body, state, stage, created_at, updated_at)
-                 VALUES ('oxplow:oxplow/task?id=ENG-12&provider=issues', 'issues', 'Theirs', '', 'todo', 'Todo', 't', 't')",
-                "INSERT INTO task_link (from_uri, to_uri, link_type, created_at)
-                 VALUES ('oxplow:oxplow/task?id=ENG-12&provider=issues', 'oxplow:oxplow/task?id=ENG-7&provider=issues', 'parent_of', 't')",
-                "INSERT INTO task_comment (id, uri, body, created_at)
-                 VALUES ('oxplow:oxplow/task?id=ENG-12&provider=issues#part=c1', 'oxplow:oxplow/task?id=ENG-12&provider=issues', 'see [[src/c.rs]]', 't')",
-            ] {
-                tx.execute(sql, []).map_err(oxplow_db::map_sql_err)?;
-            }
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
-        // Wipe the slices the writes just projected so the table looks
-        // like a DB whose graph was reset.
-        for source in [
-            oxplow_domain::uri::build::task_uri("oxtask", &task_id.to_string()),
-            oxplow_domain::uri::build::task_uri("issues", "ENG-12"),
-        ] {
-            page_refs.replace_source(&source, Vec::new()).await.unwrap();
-        }
-        let pre = page_refs
-            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
-            .await
-            .unwrap();
-        assert!(pre.is_empty());
-
-        let counts = run(
-            VocabularyHandle::core(),
-            page_refs.clone(),
-            Sources {
-                db: db.clone(),
-                findings: Arc::new(SqliteCodeQualityStore::new(db.clone())),
-                handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
-            },
-        )
-        .await;
-        assert_eq!(counts.tasks, 2);
-
-        let post = page_refs
-            .list_backlinks(&oxplow_domain::uri::build::file_uri("src/app.rs"), None)
-            .await
-            .unwrap();
-        assert_eq!(post.len(), 1, "got {post:?}");
-        assert_eq!(
-            post[0].source,
-            oxplow_domain::uri::build::task_uri("oxtask", &task_id.to_string())
-        );
-        // Another provider's task is backfilled too — its link and its
-        // comment.
-        use oxplow_domain::uri::build;
-        for (target, ref_type) in [
-            (build::task_uri("issues", "ENG-7"), "task_link:parent_of"),
-            (build::file_uri("src/c.rs"), "comment_file_ref"),
-        ] {
-            let refs = page_refs.list_backlinks(&target, None).await.unwrap();
-            assert_eq!(
-                refs.iter()
-                    .map(|r| (r.source.clone(), r.ref_type.as_str()))
-                    .collect::<Vec<_>>(),
-                vec![(build::task_uri("issues", "ENG-12"), ref_type)],
-                "{target}"
-            );
         }
     }
 }

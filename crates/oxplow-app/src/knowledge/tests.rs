@@ -48,10 +48,13 @@ async fn recorded(fx: &crate::test_fixtures::ThreadFixture, uri: &str) -> bool {
 /// One run writes the row, the file and the event.
 #[tokio::test]
 async fn one_run_writes_the_row_the_file_and_the_event() {
-    let fx = crate::test_fixtures::services_with_task().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
     std::fs::write(dir(&fx).join("src/lib.rs"), "fn x() {}\n").unwrap();
-    let body = format!("# VCS notes\n\nSee [[src/lib.rs]] and [[{}]].\n", fx.task);
+    let body = format!(
+        "# VCS notes\n\nSee [[src/lib.rs]] and [[{}]].\n",
+        oxplow_domain::uri::build::thread_uri(fx.thread)
+    );
     let out = run(&fx, WRITE_PAGE, json!({ "id": "vcs-notes", "body": body }))
         .await
         .unwrap();

@@ -386,7 +386,11 @@ impl Dev {
             .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
         let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
         let log = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
-        let pump = Arc::new(oxplow_app::event_pump::EventPump::new(db.clone(), log.clone(), vec![]));
+        let pump = Arc::new(oxplow_app::event_pump::EventPump::new(
+            db.clone(),
+            log.clone(),
+            vec![],
+        ));
         // No `with_capabilities`: every registered command is offered,
         // whatever the project has active.
         let bus = Arc::new(CommandBus::new(

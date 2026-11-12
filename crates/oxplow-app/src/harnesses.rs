@@ -215,7 +215,7 @@ mod tests {
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
                 declared("agent_harness", "codex", "oxplow:codex-cli"),
-                declared("task_tracker", "oxplow", "oxplow:oxtask"),
+                declared("knowledge", "oxwiki", "oxplow:oxwiki"),
             ],
         );
         assert_eq!(r.names(), ["claude", "codex"]);

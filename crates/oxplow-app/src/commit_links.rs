@@ -166,11 +166,10 @@ mod tests {
 
     /// The end to end case: a turn changes a file and the work is captured
     /// (the snapshot row keeps the git blob id of the bytes it captured); a
-    /// commit of exactly that content links the request; a commit made outside oxplow, of other content, links nothing;
-    /// and the task the request worked on is the commit's task, derived.
+    /// commit of exactly that content links the request; a commit made outside oxplow, of other content, links nothing.
     #[tokio::test]
-    async fn a_commit_of_a_turns_file_links_its_request_and_derives_its_task() {
-        let f = crate::test_fixtures::services_with_task().await;
+    async fn a_commit_of_a_turns_file_links_its_request() {
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::create_dir_all(root.join("src")).unwrap();
@@ -180,7 +179,7 @@ mod tests {
 
         svc.hook_ingest
             .ingest(hook(
-                &f.fx,
+                &f,
                 HookKind::UserPromptSubmit,
                 Some("fix a"),
                 json!({}),
@@ -191,7 +190,7 @@ mod tests {
         capture(svc, &["src/a.rs"]).await;
         svc.hook_ingest
             .ingest(hook(
-                &f.fx,
+                &f,
                 HookKind::PostToolUse,
                 None,
                 json!({"tool_name": "Edit", "tool_use_id": "t1",
@@ -200,7 +199,7 @@ mod tests {
             .await
             .unwrap();
         svc.hook_ingest
-            .ingest(hook(&f.fx, HookKind::Stop, None, json!({})))
+            .ingest(hook(&f, HookKind::Stop, None, json!({})))
             .await
             .unwrap();
         svc.event_pump.run_once().await.unwrap();
@@ -215,24 +214,6 @@ mod tests {
                 "sole".to_string()
             )]
         );
-        // The task the request worked on is the commit's task.
-        let out = svc
-            .sql
-            .query_sql(
-                "SELECT task FROM v_commit_task WHERE sha = ?1",
-                vec![oxplow_db::SqlCell::Text(sha.clone())],
-                None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            serde_json::to_value(out.rows).unwrap(),
-            json!([[oxplow_domain::uri::build::task_uri(
-                "oxtask",
-                &format!("{}", f.task)
-            )]])
-        );
-
         // Edited outside oxplow and committed: no snapshot row holds it.
         std::fs::write(root.join("src/a.rs"), "fn a() { 2 }\n").unwrap();
         let other = commit_all(&root, "something else");

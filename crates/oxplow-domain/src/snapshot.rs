@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{StreamId, ThreadId};
 use crate::capability::ActiveSource;
+use crate::ids::{StreamId, ThreadId};
 use crate::tree_diff::FileChange;
 
 /// Why a snapshot take happened: one row of the operation log each

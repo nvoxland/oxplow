@@ -723,30 +723,6 @@ mod tests {
         server.call_declared(&caller_of(ext), name, input).await
     }
 
-    /// A task filed as a person through `oxplow.task.create` — on
-    /// `thread`'s list, else the backlog: its id.
-    async fn file_task(
-        services: &Services,
-        thread: Option<oxplow_domain::ThreadId>,
-        title: &str,
-    ) -> oxplow_oxtask::OxtaskId {
-        let mut input = serde_json::json!({ "title": title });
-        if let Some(t) = thread {
-            input["thread"] = serde_json::Value::String(t.to_string());
-        }
-        let out = services
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.task.create",
-                input,
-                false,
-            )
-            .await
-            .unwrap();
-        oxplow_oxtask::oxtask_of_task_ref(out.result["uri"].as_str().unwrap()).unwrap()
-    }
-
     #[tokio::test]
     async fn server_constructs() {
         let (_proj, _svc, _server) = boot().await;
@@ -1065,10 +1041,26 @@ mod tests {
         let (_proj, services, server) = boot().await;
         let stream = services.streams.list_streams().await.unwrap()[0].id;
 
-        // A task to use as the primary target, and another as a context
-        // ancestor (e.g. an epic the row sat under).
-        let primary_task = file_task(&services, None, "Primary item").await;
-        let parent_task = file_task(&services, None, "Parent epic").await;
+        // A thread to use as the primary target, and another as a context
+        // ancestor.
+        let new_thread = |title: &'static str| {
+            let services = services.clone();
+            async move {
+                let out = services
+                    .commands
+                    .run(
+                        &oxplow_domain::Actor::Human,
+                        "oxplow.thread.create",
+                        serde_json::json!({ "stream": stream.to_string(), "title": title }),
+                        false,
+                    )
+                    .await
+                    .unwrap();
+                out.result["id"].as_str().unwrap().to_string()
+            }
+        };
+        let primary = new_thread("Primary item").await;
+        let parent = new_thread("Parent epic").await;
 
         services
             .commands
@@ -1077,10 +1069,10 @@ mod tests {
                 "oxplow.knowledge.add_comment",
                 serde_json::json!({
                     "stream": stream.to_string(),
-                    "target": oxplow_domain::uri::build::task_uri("oxtask", &primary_task.to_string()),
+                    "target": format!("oxplow:oxplow/thread?id={primary}"),
                     "quote": "the highlighted text",
                     "selectors_json": "[]",
-                    "context_chain": [oxplow_domain::uri::build::task_uri("oxtask", &parent_task.to_string())],
+                    "context_chain": [format!("oxplow:oxplow/thread?id={parent}")],
                     "referenced": [oxplow_domain::uri::build::file_uri("src/app.rs")],
                     "intent": "followup",
                     "body": "what about this?",
@@ -1102,11 +1094,10 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
         let row = &parsed.as_array().unwrap()[0];
 
-        // Primary target resolved to the task title.
-        assert_eq!(row["primary"]["resource"], "oxplow/task");
-        assert_eq!(row["primary"]["title"], "Primary item");
+        // Primary target resolved to its resource.
+        assert_eq!(row["primary"]["resource"], "oxplow/thread");
         // Context chain ancestor resolved.
-        assert_eq!(row["context_chain"][0]["title"], "Parent epic");
+        assert_eq!(row["context_chain"][0]["resource"], "oxplow/thread");
         // Referenced file ref present but bare (no first-class label).
         assert_eq!(row["referenced"][0]["resource"], "oxplow/file");
         assert_eq!(
@@ -1305,42 +1296,6 @@ mod tests {
             "{v}"
         );
         assert!(svc.collector_store.list_runs().await.unwrap().is_empty());
-    }
-
-    /// `read` reads a task from the active list, whichever it is: the
-    /// item while oxtask are the list, nothing with none.
-    #[tokio::test]
-    async fn a_task_reads_from_the_active_list() {
-        let (_proj, services, server) = boot().await;
-        let id = file_task(&services, None, "round trip").await;
-        let read = |server: &OxplowMcp| {
-            let server = server.clone();
-            async move {
-                call(
-                    &server,
-                    &rmcp::model::Extensions::new(),
-                    "oxplow_read",
-                    serde_json::json!({ "uri": oxplow_domain::uri::build::task_uri("oxtask", &format!("{id}")) }),
-                )
-                .await
-                .map(|r| serde_json::from_str::<serde_json::Value>(&text_payload(r)).unwrap())
-            }
-        };
-        assert_eq!(read(&server).await.unwrap()["row"]["title"], "round trip");
-        services
-            .config
-            .write()
-            .unwrap()
-            .personal_active_providers
-            .insert("task_tracker".into(), "none".into());
-        let config = oxplow_app::config_service::read_config(&services.config);
-        services
-            .capabilities
-            .publish(&config, &services.db)
-            .await
-            .unwrap();
-        let gone = read(&server).await.unwrap_err();
-        assert!(gone.message.contains("nothing at"), "{gone:?}");
     }
 
     /// A request's parts as the control plane passes them on: the

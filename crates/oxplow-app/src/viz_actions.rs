@@ -1026,12 +1026,12 @@ mod tests {
     };
     use crate::pages::open_runs::PageRuns;
     use crate::pages::runner::{PageRun, RunRequest, RunTarget};
-    use oxplow_oxtask::task_ref;
     use serde_json::json;
 
-    /// A task, and pages over it whose actions run commands.
-    async fn fixture() -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
-        let fx = crate::test_fixtures::services_with_task().await;
+    /// A thread, and pages over it whose actions run commands: the thread's
+    /// `mark` is the state the actions change.
+    async fn fixture() -> (crate::test_fixtures::ThreadFixture, std::path::PathBuf) {
+        let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(ext.join("pages")).unwrap();
@@ -1042,31 +1042,31 @@ mod tests {
         .unwrap();
         std::fs::write(
             ext.join("pages/tasks.yaml"),
-            r#"title: Tasks
+            r#"title: Threads
 params:
   - { name: item, default: "" }
   - { name: open, default: "0" }
 loaders:
   items:
     sql: |
-      SELECT uri, title,
+      SELECT uri, 'thr' || id AS thread, title,
              CASE :open WHEN '1' THEN 1 WHEN 'null' THEN NULL WHEN 'empty' THEN '' ELSE 0 END AS open
-      FROM v_task
+      FROM v_thread
   stages:
     sql: |
-      SELECT 'blocked' AS value, 'Stuck' AS label UNION ALL SELECT 'done', 'Done'
+      SELECT 'red' AS value, 'Stuck' AS label UNION ALL SELECT 'green', 'Done'
 actions:
-  - { id: finish, label: Finish, command: oxplow.task.transition, input: { uri: "{{param.item}}", to: done } }
+  - { id: finish, label: Finish, command: oxplow.thread.mark, input: { thread: "{{param.item}}", mark: green } }
   - { id: push, label: Push, command: oxplow.vcs.push, input: { stream: str1 } }
   - { id: prompt, label: Prompt, command: oxplow.config.set, input: { key: agentPromptAppend, value: be brief } }
 view:
   viz: table
   from: items
   actions:
-    - { id: finish-row, label: Finish, command: oxplow.task.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
-    - { id: finish-open, label: Finish, command: oxplow.task.transition, row: true, when: open, input: { uri: "{{row.uri}}", to: done } }
-    - { id: retitle, label: Retitle…, command: oxplow.task.update, row: true, form: true, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }
-    - { id: mark, label: Mark, command: oxplow.task.transition, row: true, options_from: stages, input: { uri: "{{row.uri}}", to: "{{option.value}}" } }
+    - { id: finish-row, label: Finish, command: oxplow.thread.mark, row: true, input: { thread: "{{row.thread}}", mark: green } }
+    - { id: finish-open, label: Finish, command: oxplow.thread.mark, row: true, when: open, input: { thread: "{{row.thread}}", mark: green } }
+    - { id: retitle, label: Retitle…, command: oxplow.thread.rename, row: true, form: true, fixed: [thread], input: { thread: "{{row.thread}}", title: "{{row.title}}" } }
+    - { id: mark, label: Mark, command: oxplow.thread.mark, row: true, options_from: stages, input: { thread: "{{row.thread}}", mark: "{{option.value}}" } }
 "#,
         )
         .unwrap();
@@ -1084,10 +1084,10 @@ view:
   from: one
   columns: [{ key: title }, { key: open }]
   actions:
-    - { id: make, label: Make, command: oxplow.task.create, when: open, input: { title: "{{row.title}}" } }
-    - { id: plain, label: Plain, command: oxplow.task.create, input: { title: Plain } }
-    - { id: gated, label: Gated, command: oxplow.task.create, enabled: open, input: { title: Gated } }
-    - { id: rename, label: Rename, command: oxplow.task.update, form: true, fixed: [uri], input: { uri: "{{param.item}}", title: "{{row.title}}" } }
+    - { id: make, label: Make, command: oxplow.thread.create, when: open, input: { stream: str1, title: "{{row.title}}" } }
+    - { id: plain, label: Plain, command: oxplow.thread.create, input: { stream: str1, title: Plain } }
+    - { id: gated, label: Gated, command: oxplow.thread.create, enabled: open, input: { stream: str1, title: Gated } }
+    - { id: rename, label: Rename, command: oxplow.thread.rename, form: true, fixed: [thread], input: { thread: "{{param.item}}", title: "{{row.title}}" } }
 "#,
         )
         .unwrap();
@@ -1095,15 +1095,15 @@ view:
             ext.join("pages/board.yaml"),
             r#"title: Board
 loaders:
-  items: { sql: "SELECT uri, title, state FROM v_task" }
+  items: { sql: "SELECT uri, 'thr' || id AS thread, title, COALESCE(mark, 'none') AS state FROM v_thread" }
 view:
   viz: board
   from: items
-  group: { by: state, values: [todo, in_progress, done] }
+  group: { by: state, values: [none, amber, green] }
   actions:
-    - { id: move, label: Move, command: oxplow.task.transition, drag: true, input: { uri: "{{row.uri}}", to: "{{group.value}}" } }
-    - { id: reorder, label: Reorder, command: oxplow.task.reorder, drag: true, input: { uri: "{{row.uri}}", before: "{{before.uri}}", after: "{{after.uri}}" } }
-    - { id: finish, label: Finish, command: oxplow.task.transition, row: true, input: { uri: "{{row.uri}}", to: done } }
+    - { id: move, label: Move, command: oxplow.thread.mark, drag: true, input: { thread: "{{row.thread}}", mark: "{{group.value}}" } }
+    - { id: reorder, label: Reorder, command: oxplow.thread.mark, drag: true, input: { thread: "{{row.thread}}", mark: "{{after.state}}" } }
+    - { id: finish, label: Finish, command: oxplow.thread.mark, row: true, input: { thread: "{{row.thread}}", mark: green } }
 "#,
         )
         .unwrap();
@@ -1111,13 +1111,13 @@ view:
             ext.join("pages/note.yaml"),
             r#"title: Note
 loaders:
-  items: { sql: "SELECT uri, body FROM v_task" }
+  items: { sql: "SELECT uri, 'thr' || id AS thread, COALESCE(prompt, '') AS body FROM v_thread" }
 view:
   viz: markdown
   from: items
   markdown: { text: body }
   actions:
-    - { id: save, label: Save, command: oxplow.task.update, edit: true, fixed: [uri], input: { uri: "{{row.uri}}", body: "{{row.body}}" } }
+    - { id: save, label: Save, command: oxplow.thread.set_prompt, edit: true, fixed: [thread], input: { thread: "{{row.thread}}", prompt: "{{row.body}}" } }
 "#,
         )
         .unwrap();
@@ -1218,9 +1218,12 @@ view:
         }
     }
 
-    /// The row whose `uri` is the fixture's task.
-    fn task_row(fx: &crate::test_fixtures::TaskFixture) -> BTreeMap<String, SqlCell> {
-        BTreeMap::from([("uri".to_string(), SqlCell::Text(task_ref(fx.task)))])
+    /// The row whose `uri` is the fixture's thread.
+    fn thread_row(fx: &crate::test_fixtures::ThreadFixture) -> BTreeMap<String, SqlCell> {
+        BTreeMap::from([(
+            "uri".to_string(),
+            SqlCell::Text(oxplow_domain::uri::build::thread_uri(fx.thread)),
+        )])
     }
 
     /// The form node of `page`'s run with `params`: its start.
@@ -1282,20 +1285,25 @@ view:
             .unwrap()
     }
 
-    async fn state(svc: &crate::Services, task: oxplow_oxtask::OxtaskId) -> String {
-        use oxplow_oxtask::OxtaskStore as _;
-        let t = svc.task_store.get(task).await.unwrap().unwrap();
-        serde_json::to_value(t.status)
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .to_string()
+    /// The thread's `mark`: the state the actions change ("" when unmarked).
+    async fn mark(svc: &crate::Services, thread: oxplow_domain::ThreadId) -> String {
+        use oxplow_domain::stores::ThreadStore as _;
+        let t = svc.thread_store.get(&thread).await.unwrap().unwrap();
+        t.mark
+            .map(|m| {
+                serde_json::to_value(m)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .unwrap_or_default()
     }
 
     async fn column(svc: &crate::Services, item: &str, column: &str) -> String {
         let (item, sql) = (
             item.to_string(),
-            format!("SELECT {column} FROM v_task WHERE uri = ?1"),
+            format!("SELECT {column} FROM v_thread WHERE uri = uri('oxplow/thread', 'id', ?1)"),
         );
         svc.db
             .read(move |c| {
@@ -1311,13 +1319,13 @@ view:
     #[tokio::test]
     async fn an_action_runs_its_command_as_the_page() {
         let (fx, _root) = fixture().await;
-        let item = task_ref(fx.task);
+        let item = fx.thread.to_string();
         Press::on("acme/tasks", None, "finish")
             .params(&[("item", SqlCell::Text(item))])
             .run(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
         let (kind, id) = audit_actor(&fx.svc).await;
         assert_eq!(kind, "page");
         assert_eq!(id.as_deref(), Some("acme/tasks"));
@@ -1327,7 +1335,7 @@ view:
     /// command that joined it answers, for the context the row binds.
     async fn point_page_fixture(
         joined: &[&str],
-    ) -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
+    ) -> (crate::test_fixtures::ThreadFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         let commands: String = joined
@@ -1335,20 +1343,20 @@ view:
             .map(|name| {
                 format!(
                     "  - name: {name}\n    summary: Finish it.\n    input_schema: {{ type: object, \
-                     required: [uri, to], properties: {{ uri: {{ type: string }}, to: {{ type: string }} }} }}\n    \
+                     required: [thread, mark], properties: {{ thread: {{ type: string }}, mark: {{ type: string }} }} }}\n    \
                      entry: handlers/finish.star\n    \
-                     examples:\n      - {{ name: happy, input: {{ uri: \"oxplow:oxplow/task?id=tsk1\", to: done }}, \
-                     expect_commands: [oxplow.task.transition] }}\n    \
+                     examples:\n      - {{ name: happy, input: {{ thread: thr1, mark: green }}, \
+                     expect_commands: [oxplow.thread.mark] }}\n    \
                      ui: {{ label: {name}, at: acme/item.finish, \
-                     input: {{ uri: \"{{{{context.uri}}}}\", to: \"{{{{context.stage}}}}\" }} }}\n"
+                     input: {{ thread: \"{{{{context.thread}}}}\", mark: \"{{{{context.stage}}}}\" }} }}\n"
                 )
             })
             .collect();
         std::fs::write(
             ext.join("extension.yaml"),
             format!(
-                "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\n\
-                 action_points:\n  - {{ name: item.finish, label: Finish, context: {{ uri: uri, stage: string }} }}\n\
+                "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\n\
+                 action_points:\n  - {{ name: item.finish, label: Finish, context: {{ thread: string, stage: string }} }}\n\
                  commands:\n{commands}"
             ),
         )
@@ -1356,8 +1364,8 @@ view:
         std::fs::create_dir_all(ext.join("handlers")).unwrap();
         std::fs::write(
             ext.join("handlers/finish.star"),
-            "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.transition\", \
-             \"input\": {\"uri\": i[\"uri\"], \"to\": i[\"to\"]}}]}\n",
+            "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.mark\", \
+             \"input\": {\"thread\": i[\"thread\"], \"mark\": i[\"mark\"]}}]}\n",
         )
         .unwrap();
         std::fs::write(
@@ -1365,13 +1373,13 @@ view:
             r#"title: Pointed
 loaders:
   items:
-    sql: SELECT uri, title FROM v_task
+    sql: SELECT uri, 'thr' || id AS thread, title FROM v_thread
 view:
   viz: table
   from: items
   actions:
-    - { id: finish-point, label: Finish, point: acme/item.finish, row: true, bulk: true, context: { uri: "{{row.uri}}", stage: done } }
-    - { id: finish-named, label: Finish, point: acme/item.finish, command: acme.item.also, row: true, context: { uri: "{{row.uri}}", stage: done } }
+    - { id: finish-point, label: Finish, point: acme/item.finish, row: true, bulk: true, context: { thread: "{{row.thread}}", stage: green } }
+    - { id: finish-named, label: Finish, point: acme/item.finish, command: acme.item.also, row: true, context: { thread: "{{row.thread}}", stage: green } }
 "#,
         )
         .unwrap();
@@ -1385,11 +1393,11 @@ view:
     async fn a_point_action_runs_the_command_that_answers_it() {
         let (fx, _root) = point_page_fixture(&["item.finish"]).await;
         Press::on("acme/pointed", Some("items"), "finish-point")
-            .row(task_row(&fx))
+            .row(thread_row(&fx))
             .run(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
         let (kind, id) = audit_actor(&fx.svc).await;
         assert_eq!(
             (kind.as_str(), id.as_deref()),
@@ -1404,7 +1412,7 @@ view:
     async fn a_point_action_skips_a_row_nothing_answers_and_needs_a_name_when_several_do() {
         let (fx, _root) = point_page_fixture(&[]).await;
         let skipped = Press::on("acme/pointed", Some("items"), "finish-point")
-            .row(task_row(&fx))
+            .row(thread_row(&fx))
             .run(&fx.svc)
             .await
             .unwrap();
@@ -1413,21 +1421,21 @@ view:
             .unwrap()
             .contains("nothing answers `acme/item.finish`"));
         assert_eq!(skipped.audit_id, None);
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
 
         let (fx, _root) = point_page_fixture(&["item.finish", "item.also"]).await;
         let err = Press::on("acme/pointed", Some("items"), "finish-point")
-            .row(task_row(&fx))
+            .row(thread_row(&fx))
             .run(&fx.svc)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("several answer"), "{err}");
         Press::on("acme/pointed", Some("items"), "finish-named")
-            .row(task_row(&fx))
+            .row(thread_row(&fx))
             .run(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A row action binds the row it was invoked on; a whole-page action
@@ -1435,7 +1443,7 @@ view:
     #[tokio::test]
     async fn a_row_action_binds_its_row() {
         let (fx, _root) = fixture().await;
-        let row = task_row(&fx);
+        let row = thread_row(&fx);
         assert!(Press::on("acme/tasks", Some("items"), "finish-row")
             .run(&fx.svc)
             .await
@@ -1450,7 +1458,7 @@ view:
             .run(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// An action with options runs with the one pressed, bound as
@@ -1458,10 +1466,10 @@ view:
     #[tokio::test]
     async fn an_option_action_binds_the_option_pressed() {
         let (fx, _root) = fixture().await;
-        let press = || Press::on("acme/tasks", Some("items"), "mark").row(task_row(&fx));
+        let press = || Press::on("acme/tasks", Some("items"), "mark").row(thread_row(&fx));
         let missing = press().run(&fx.svc).await.unwrap_err();
         assert!(missing.to_string().contains("say which"), "{missing}");
-        let made_up = press().option("canceled").run(&fx.svc).await.unwrap_err();
+        let made_up = press().option("violet").run(&fx.svc).await.unwrap_err();
         assert!(
             made_up
                 .to_string()
@@ -1469,14 +1477,14 @@ view:
             "{made_up}"
         );
         let other = Press::on("acme/tasks", Some("items"), "finish-row")
-            .row(task_row(&fx))
-            .option("done")
+            .row(thread_row(&fx))
+            .option("green")
             .run(&fx.svc)
             .await
             .unwrap_err();
         assert!(other.to_string().contains("takes no option"), "{other}");
-        press().option("blocked").run(&fx.svc).await.unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "blocked");
+        press().option("red").run(&fx.svc).await.unwrap();
+        assert_eq!(mark(&fx.svc, fx.thread).await, "red");
     }
 
     /// A row the run doesn't hold is refused: the page changed, or the
@@ -1487,13 +1495,13 @@ view:
         let err = Press::on("acme/tasks", Some("items"), "finish-row")
             .row(BTreeMap::from([(
                 "uri".to_string(),
-                SqlCell::Text("oxplow:oxplow/task?id=tsk999999&provider=oxtask".into()),
+                SqlCell::Text("oxplow:oxplow/thread?id=thr999999".into()),
             )]))
             .run(&fx.svc)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("isn't one of node"), "{err}");
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A drop runs the drag action with where the row landed: the group's
@@ -1504,7 +1512,7 @@ view:
     async fn a_drop_runs_the_drag_action_with_where_the_row_landed() {
         let (fx, _root) = fixture().await;
         let run = |action: &'static str, drop: Option<Drop>| {
-            let (svc, row) = (fx.svc.clone(), task_row(&fx));
+            let (svc, row) = (fx.svc.clone(), thread_row(&fx));
             async move {
                 let mut press = Press::on("acme/board", Some("items"), action).row(row);
                 press.drop = drop;
@@ -1514,13 +1522,13 @@ view:
         run(
             "move",
             Some(Drop {
-                group: Some(SqlCell::Text("in_progress".into())),
+                group: Some(SqlCell::Text("amber".into())),
                 ..Drop::default()
             }),
         )
         .await
         .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "in_progress");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "amber");
 
         // Dropped at the end of its list: no row below or above it.
         run("reorder", Some(Drop::default())).await.unwrap();
@@ -1538,21 +1546,21 @@ view:
     }
 
     /// A markdown editor's Save is its edit action: the person's text
-    /// fills the edited field and the fixed `uri` keeps its row's value.
+    /// fills the edited field and the fixed `thread` keeps its row's value.
     #[tokio::test]
     async fn an_editors_save_runs_its_edit_action_with_the_text() {
         let (fx, _root) = fixture().await;
-        let item = task_ref(fx.task);
-        let mut press = Press::on("acme/note", Some("items"), "save").row(task_row(&fx));
+        let item = fx.thread.to_string();
+        let mut press = Press::on("acme/note", Some("items"), "save").row(thread_row(&fx));
         press.input = Some(json!({
-            "uri": "oxplow:oxplow/task?id=tsk999999&provider=oxtask",
-            "body": "## New\n\nThe saved text."
+            "thread": "thr999999",
+            "prompt": "## New\n\nThe saved text."
         }));
         press.run(&fx.svc).await.unwrap();
         assert_eq!(
-            column(&fx.svc, &item, "body").await,
+            column(&fx.svc, &item, "prompt").await,
             "## New\n\nThe saved text.",
-            "the fixed uri kept this item"
+            "the fixed thread kept this item"
         );
     }
 
@@ -1574,7 +1582,7 @@ view:
         let titles = || async {
             svc.sql
                 .query_sql(
-                    "SELECT title FROM v_task WHERE title IN ('Made', 'Plain', 'Forged') ORDER BY title",
+                    "SELECT title FROM v_thread WHERE title IN ('Made', 'Plain', 'Forged') ORDER BY title",
                     vec![],
                     None,
                 )
@@ -1622,13 +1630,13 @@ view:
     #[tokio::test]
     async fn a_one_row_nodes_form_action_starts_from_that_row() {
         let (fx, _root) = fixture().await;
-        let item = task_ref(fx.task);
+        let item = fx.thread.to_string();
         let form = Press::on("acme/one", Some("one"), "rename")
             .params(&[("item", SqlCell::Text(item.clone()))])
             .form(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(form.values, json!({ "uri": item, "title": "Made" }));
+        assert_eq!(form.values, json!({ "thread": item, "title": "Made" }));
     }
 
     /// Where a drop landed binds `{{before.*}}`, `{{after.*}}`, `{{onto.*}}`
@@ -1693,7 +1701,7 @@ view:
     async fn a_row_action_with_when_is_offered_only_on_truthy_rows() {
         let (fx, _root) = fixture().await;
         let run = |open: &'static str| {
-            let (svc, row) = (fx.svc.clone(), task_row(&fx));
+            let (svc, row) = (fx.svc.clone(), thread_row(&fx));
             async move {
                 Press::on("acme/tasks", Some("items"), "finish-open")
                     .params(&[("open", SqlCell::Text(open.into()))])
@@ -1709,9 +1717,9 @@ view:
                 "{closed}: {err:?}"
             );
         }
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
         run("1").await.unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A page acts as its presser and no more: one an agent pressed may run
@@ -1750,31 +1758,29 @@ view:
     #[tokio::test]
     async fn a_form_action_runs_what_the_person_filled_in_keeping_its_fixed_fields() {
         let (fx, _root) = fixture().await;
-        let item = task_ref(fx.task);
+        let item = fx.thread.to_string();
         let old_title = column(&fx.svc, &item, "title").await;
         let start = Press::on("acme/tasks", Some("items"), "retitle")
-            .row(task_row(&fx))
+            .row(thread_row(&fx))
             .form(&fx.svc)
             .await
             .unwrap();
-        assert_eq!(start.command.id, "oxplow.task.update");
-        assert_eq!(start.values, json!({ "uri": item, "title": old_title }));
-        assert_eq!(start.fixed, vec!["uri".to_string()]);
+        assert_eq!(start.command.id, "oxplow.thread.rename");
+        assert_eq!(start.values, json!({ "thread": item, "title": old_title }));
+        assert_eq!(start.fixed, vec!["thread".to_string()]);
 
-        let mut press = Press::on("acme/tasks", Some("items"), "retitle").row(task_row(&fx));
-        press.input = Some(
-            json!({ "uri": "oxplow:oxplow/task?id=tsk999999&provider=oxtask", "title": "New title" }),
-        );
+        let mut press = Press::on("acme/tasks", Some("items"), "retitle").row(thread_row(&fx));
+        press.input = Some(json!({ "thread": "thr999999", "title": "New title" }));
         press.run(&fx.svc).await.unwrap();
         assert_eq!(
             column(&fx.svc, &item, "title").await,
             "New title",
-            "the fixed ref was kept, so this item changed"
+            "the fixed thread was kept, so this item changed"
         );
 
         let mut plain =
             Press::on("acme/tasks", None, "finish").params(&[("item", SqlCell::Text(item))]);
-        plain.input = Some(json!({ "to": "canceled" }));
+        plain.input = Some(json!({ "mark": "violet" }));
         let err = plain.run(&fx.svc).await.unwrap_err();
         assert!(err.to_string().contains("only a form action"), "{err}");
         let err = Press::on("acme/tasks", None, "finish")
@@ -1830,11 +1836,11 @@ view:
     #[tokio::test]
     async fn a_secret_field_is_one_its_command_doesnt_record() {
         let (fx, root) = fixture().await;
-        let item = task_ref(fx.task);
+        let item = fx.thread.to_string();
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/leaky.yaml"),
-            "title: Leaky\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_task WHERE uri = :uri }\n\
-             view: { viz: form, from: item, form: { command: oxplow.task.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [{ name: title, secret: true }] } }\n",
+            "title: Leaky\nparams: [{ name: thread }]\nloaders:\n  item: { sql: \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\" }\n\
+             view: { viz: form, from: item, form: { command: oxplow.thread.rename, defaults: { thread: '{{param.thread}}' }, fixed: [thread], fields: [{ name: title, secret: true }] } }\n",
         )
         .unwrap();
         std::fs::write(
@@ -1844,13 +1850,13 @@ view:
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
-        let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item))]);
+        let params = BTreeMap::from([("thread".to_string(), SqlCell::Text(item))]);
         let refused = form_of(&fx.svc, "acme/leaky", params)
             .await
             .unwrap_err()
             .to_string();
         assert!(
-            refused.contains("`title` is secret but `oxplow.task.update` records it"),
+            refused.contains("`title` is secret but `oxplow.thread.rename` records it"),
             "{refused}"
         );
         let start = form_of(&fx.svc, "acme/kept", BTreeMap::new())
@@ -1865,27 +1871,27 @@ view:
     #[tokio::test]
     async fn a_form_keeps_its_fixed_fields() {
         let (fx, root) = fixture().await;
-        let item = task_ref(fx.task);
+        let item = fx.thread.to_string();
         std::fs::write(
             root.join(".oxplow/extensions/acme/pages/edit.yaml"),
-            "title: Edit\nparams: [{ name: uri }]\nloaders:\n  item: { sql: SELECT title FROM v_task WHERE uri = :uri }\n\
-             view: { viz: form, from: item, form: { command: oxplow.task.update, defaults: { uri: '{{param.uri}}' }, fixed: [uri], fields: [title] } }\n",
+            "title: Edit\nparams: [{ name: thread }]\nloaders:\n  item: { sql: \"SELECT title FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread)\" }\n\
+             view: { viz: form, from: item, form: { command: oxplow.thread.rename, defaults: { thread: '{{param.thread}}' }, fixed: [thread], fields: [title] } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
-        let params = BTreeMap::from([("uri".to_string(), SqlCell::Text(item.clone()))]);
+        let params = BTreeMap::from([("thread".to_string(), SqlCell::Text(item.clone()))]);
         let start = form_of(&fx.svc, "acme/edit", params.clone()).await.unwrap();
-        assert_eq!(start.fixed, vec!["uri".to_string()]);
+        assert_eq!(start.fixed, vec!["thread".to_string()]);
         assert_eq!(
             start.fields,
             Some(vec![crate::pages::spec::FormField::Name("title".into())])
         );
-        assert_eq!(start.values["uri"], json!(item));
+        assert_eq!(start.values["thread"], json!(item));
         submit(
             &fx.svc,
             "acme/edit",
             params,
-            json!({ "uri": "oxplow:oxplow/task?id=tsk999999&provider=oxtask", "title": "Edited" }),
+            json!({ "thread": "thr999999", "title": "Edited" }),
         )
         .await
         .unwrap();
@@ -1963,25 +1969,23 @@ view:
     async fn a_form_submits_its_command_as_the_page() {
         let (fx, root) = fixture().await;
         std::fs::write(
-            root.join(".oxplow/extensions/acme/pages/new-task.yaml"),
-            "title: New Oxtask\nparams: [{ name: body, default: from the form }]\n\
-             view: { viz: form, form: { command: oxplow.task.create, defaults: { body: '{{param.body}}' } } }\n",
+            root.join(".oxplow/extensions/acme/pages/new-thread.yaml"),
+            "title: New Thread\nparams: [{ name: stream, default: str1 }]\n\
+             view: { viz: form, form: { command: oxplow.thread.create, defaults: { stream: '{{param.stream}}' } } }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&fx.svc).await;
         let out = submit(
             &fx.svc,
-            "acme/new-task",
+            "acme/new-thread",
             BTreeMap::new(),
             json!({ "title": "Made by a form" }),
         )
         .await
         .unwrap();
-        let item = out.result["uri"].as_str().unwrap().to_string();
+        assert_eq!(out.result["title"], "Made by a form");
         let (kind, _) = audit_actor(&fx.svc).await;
         assert_eq!(kind, "page");
-        assert_eq!(column(&fx.svc, &item, "title").await, "Made by a form");
-        assert_eq!(column(&fx.svc, &item, "body").await, "from the form");
         // A node that isn't a form can't be submitted.
         let runs = PageRuns::default();
         let (run_id, _) = open(&fx.svc, &runs, "acme/tasks", BTreeMap::new()).await;
@@ -2004,13 +2008,13 @@ view:
                              view: { viz: custom, from: n, custom: { component: board } }\n";
 
     /// P6b.D2: a private extension with a component (`board`) that may
-    /// invoke `oxplow.task.transition`.
-    async fn component_fixture() -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
+    /// invoke `oxplow.thread.mark`.
+    async fn component_fixture() -> (crate::test_fixtures::ThreadFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.task.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, commands: [oxplow.thread.mark] }\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
@@ -2030,14 +2034,14 @@ view:
 
     /// An invoke of `command` from `acme/board`'s frame loaded at `version`.
     fn board_invoke(
-        fx: &crate::test_fixtures::TaskFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         command: &str,
         version: &str,
     ) -> ComponentInvoke {
         ComponentInvoke {
             component: "acme/board".into(),
             command: command.into(),
-            input: serde_json::json!({ "uri": oxplow_oxtask::task_ref(fx.task), "to": "done" }),
+            input: serde_json::json!({ "thread": fx.thread.to_string(), "mark": "green" }),
             on_behalf_of: Actor::Human,
             confirmed: false,
             version: version.into(),
@@ -2053,7 +2057,7 @@ view:
         );
     }
 
-    /// tsk984: what acts is what the frame loaded. A frame keeps acting at
+    /// what acts is what the frame loaded. A frame keeps acting at
     /// the version it loaded whatever the disk says later. A version that
     /// isn't loaded, or is another component's, is refused.
     #[tokio::test]
@@ -2065,7 +2069,7 @@ view:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "oxplow.task.transition", "0123abcd"),
+                board_invoke(&fx, "oxplow.thread.mark", "0123abcd"),
             )
             .await
             .unwrap_err(),
@@ -2075,11 +2079,11 @@ view:
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.task.transition", &loaded),
+            board_invoke(&fx, "oxplow.thread.mark", &loaded),
         )
         .await
         .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// An extension `acme` whose component `board` runs the point
@@ -2088,7 +2092,7 @@ view:
     async fn point_fixture(
         joined: &[&str],
         declares: &str,
-    ) -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
+    ) -> (crate::test_fixtures::ThreadFixture, std::path::PathBuf) {
         let (fx, root) = fixture().await;
         let ext = root.join(".oxplow/extensions/acme");
         let commands: String = joined
@@ -2096,20 +2100,20 @@ view:
             .map(|name| {
                 format!(
                     "  - name: {name}\n    summary: Finish it.\n    input_schema: {{ type: object, \
-                     required: [uri, to], properties: {{ uri: {{ type: string }}, to: {{ type: string }} }} }}\n    \
+                     required: [thread, mark], properties: {{ thread: {{ type: string }}, mark: {{ type: string }} }} }}\n    \
                      entry: handlers/finish.star\n    \
-                     examples:\n      - {{ name: happy, input: {{ uri: \"oxplow:oxplow/task?id=tsk1\", to: done }}, \
-                     expect_commands: [oxplow.task.transition] }}\n    \
+                     examples:\n      - {{ name: happy, input: {{ thread: thr1, mark: green }}, \
+                     expect_commands: [oxplow.thread.mark] }}\n    \
                      ui: {{ label: {name}, at: acme/item.finish, \
-                     input: {{ uri: \"{{{{context.uri}}}}\", to: \"{{{{context.stage}}}}\" }} }}\n"
+                     input: {{ thread: \"{{{{context.thread}}}}\", mark: \"{{{{context.stage}}}}\" }} }}\n"
                 )
             })
             .collect();
         std::fs::write(
             ext.join("extension.yaml"),
             format!(
-                "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\n\
-                 action_points:\n  - {{ name: item.finish, label: Finish, context: {{ uri: uri, stage: string }} }}\n\
+                "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\n\
+                 action_points:\n  - {{ name: item.finish, label: Finish, context: {{ thread: string, stage: string }} }}\n\
                  commands:\n{commands}\
                  custom_components:\n  - {{ id: board, {declares} }}\n"
             ),
@@ -2118,8 +2122,8 @@ view:
         std::fs::create_dir_all(ext.join("handlers")).unwrap();
         std::fs::write(
             ext.join("handlers/finish.star"),
-            "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.transition\", \
-             \"input\": {\"uri\": i[\"uri\"], \"to\": i[\"to\"]}}]}\n",
+            "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.thread.mark\", \
+             \"input\": {\"thread\": i[\"thread\"], \"mark\": i[\"mark\"]}}]}\n",
         )
         .unwrap();
         std::fs::create_dir_all(ext.join("components/board")).unwrap();
@@ -2130,14 +2134,14 @@ view:
     }
 
     fn point_invoke(
-        fx: &crate::test_fixtures::TaskFixture,
+        fx: &crate::test_fixtures::ThreadFixture,
         command: Option<&str>,
         version: &str,
     ) -> ComponentPointInvoke {
         ComponentPointInvoke {
             component: "acme/board".into(),
             point: "acme/item.finish".into(),
-            context: serde_json::json!({ "uri": oxplow_oxtask::task_ref(fx.task), "stage": "done" }),
+            context: serde_json::json!({ "thread": fx.thread.to_string(), "stage": "green" }),
             command: command.map(String::from),
             on_behalf_of: Actor::Human,
             confirmed: false,
@@ -2166,7 +2170,7 @@ view:
             "/point",
             "isn't one of component `board`'s action points",
         );
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A point with one answer runs it with the offer's bound input, as the
@@ -2179,7 +2183,7 @@ view:
         invoke_component_point(&fx.svc, &root, point_invoke(&fx, None, &version))
             .await
             .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
         let (kind, id) = audit_actor(&fx.svc).await;
         assert_eq!(
             (kind.as_str(), id.as_deref()),
@@ -2226,7 +2230,7 @@ view:
             "/command",
             "isn't offered",
         );
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
         invoke_component_point(
             &fx.svc,
             &root,
@@ -2234,7 +2238,7 @@ view:
         )
         .await
         .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A hot update: once a changed bundle is activated, a frame still on
@@ -2259,7 +2263,7 @@ view:
             invoke_component_command(
                 &fx.svc,
                 &root,
-                board_invoke(&fx, "oxplow.task.transition", &old),
+                board_invoke(&fx, "oxplow.thread.mark", &old),
             )
             .await
             .unwrap_err(),
@@ -2267,15 +2271,15 @@ view:
         );
         let new = load_board(&fx, &root).await;
         assert_ne!(new, old);
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
         invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.task.transition", &new),
+            board_invoke(&fx, "oxplow.thread.mark", &new),
         )
         .await
         .unwrap();
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A frame is served from its deployment on disk: an open frame on an
@@ -2311,7 +2315,7 @@ view:
         assert!(file(&second).is_some());
     }
 
-    /// tsk984: the bundle is read as it is served — the extension's folder
+    /// the bundle is read as it is served — the extension's folder
     /// joined with the manifest's `bundle` — so on a case-insensitive disk a
     /// spelling that differs only in case still covers every file it
     /// serves, and an edit is a new version.
@@ -2327,7 +2331,7 @@ view:
         }
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.task.transition] }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, bundle: components/Board, commands: [oxplow.thread.mark] }\n",
         )
         .unwrap();
         std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
@@ -2339,7 +2343,7 @@ view:
         assert_ne!(load_board(&fx, &root).await, first);
     }
 
-    /// P11 (tsk960): a component that declares no commands can only show:
+    /// a component that declares no commands can only show:
     /// whatever it asks to run is refused.
     #[tokio::test]
     async fn a_component_without_commands_can_only_show() {
@@ -2357,7 +2361,7 @@ view:
         let err = invoke_component_command(
             &fx.svc,
             &root,
-            board_invoke(&fx, "oxplow.task.transition", &version),
+            board_invoke(&fx, "oxplow.thread.mark", &version),
         )
         .await
         .unwrap_err();
@@ -2381,7 +2385,7 @@ view:
                 .contains("isn't one of component `board`'s commands"),
             "{err}"
         );
-        let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.task.transition"))
+        let out = invoke_component_command(&fx.svc, &root, invoke("oxplow.thread.mark"))
             .await
             .unwrap();
         let audit = fx
@@ -2397,7 +2401,7 @@ view:
             oxplow_domain::events::schema::ActorKind::Component
         );
         assert_eq!(audit.actor_id.as_deref(), Some("acme/board"));
-        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        assert_eq!(mark(&fx.svc, fx.thread).await, "green");
     }
 
     /// A component that declares `sql: read` runs its own read-only SQL
@@ -2432,14 +2436,14 @@ view:
         );
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.task.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, commands: [oxplow.thread.mark], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;
         let out = ask("SELECT ?1 AS n", version.clone()).await.unwrap();
         assert_eq!(out.rows, vec![vec![SqlCell::Int(2)]]);
         // Read-only, as any query over the datasets is.
-        assert!(ask("DELETE FROM v_task", version).await.is_err());
+        assert!(ask("DELETE FROM v_thread", version).await.is_err());
     }
 
     /// The Timeline's own queries, through the component SQL path.
@@ -2449,7 +2453,7 @@ view:
         let ext = root.join(".oxplow/extensions/acme");
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.task.transition]\ncustom_components:\n  - { id: board, commands: [oxplow.task.transition], sql: read }\n",
+            "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [sql.read, commands:oxplow.thread.mark]\ncustom_components:\n  - { id: board, commands: [oxplow.thread.mark], sql: read }\n",
         )
         .unwrap();
         let version = load_board(&fx, &root).await;
@@ -2495,13 +2499,13 @@ view:
             &fx.svc,
             &root,
             "acme/board",
-            "oxplow.task.transition",
-            serde_json::json!({ "to": "done" }),
+            "oxplow.thread.mark",
+            serde_json::json!({ "mark": "green" }),
             &version,
         )
         .unwrap();
-        assert_eq!(start.command.id, "oxplow.task.transition");
-        assert_eq!(start.values, serde_json::json!({ "to": "done" }));
+        assert_eq!(start.command.id, "oxplow.thread.mark");
+        assert_eq!(start.values, serde_json::json!({ "mark": "green" }));
         let err = component_form(
             &fx.svc,
             &root,
@@ -2526,7 +2530,7 @@ view:
         let version = load_board(&fx, &root).await;
         for input in [
             serde_json::json!([1, 2]),
-            serde_json::json!("done"),
+            serde_json::json!("green"),
             serde_json::json!(7),
         ] {
             let err = invoke_component_command(
@@ -2534,7 +2538,7 @@ view:
                 &root,
                 ComponentInvoke {
                     component: "acme/board".into(),
-                    command: "oxplow.task.transition".into(),
+                    command: "oxplow.thread.mark".into(),
                     input: input.clone(),
                     on_behalf_of: Actor::Human,
                     confirmed: false,
@@ -2548,6 +2552,6 @@ view:
                 "{input}: {err:?}"
             );
         }
-        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        assert_ne!(mark(&fx.svc, fx.thread).await, "green");
     }
 }

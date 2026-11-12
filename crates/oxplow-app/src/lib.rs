@@ -53,6 +53,7 @@ pub mod component_http;
 pub mod config_reactors;
 pub mod config_service;
 pub mod config_watch;
+pub mod conformance;
 pub mod context_watch;
 pub mod contribution_health;
 pub mod credential_lint;
@@ -159,7 +160,6 @@ pub mod stream_watch;
 mod subagent_tests;
 pub mod symbol_collector;
 pub mod symbol_resolve;
-pub mod conformance;
 pub mod terminal_sessions;
 #[cfg(test)]
 pub(crate) mod test_fixtures;
@@ -1444,39 +1444,40 @@ impl Services {
             vocabulary: vocabulary.clone(),
         };
         for command in commands::thread::ops(session_processes.clone())
-        .into_iter()
-        .chain(commands::agent_session::ops(
-            config_target.clone(),
-            harnesses.clone(),
-            session_processes.clone(),
-            chat.clone(),
-            capabilities.clone(),
-        ))
-        .chain(commands::hint::ops())
-        .chain(commands::terminal::ops(
-            db.clone(),
-            terminal_store.clone(),
-            terminal_sessions.clone(),
-        ))
-        .chain(commands::comment::ops())
-        .chain(commands::ui::ops())
-        .chain(commands::op_error::ops())
-        .chain(commands::handoff::ops(link_deps.clone()))
-        .chain(commands::stream::ops(commands::stream::StreamDeps {
-            streams: streams.clone(),
-            snapshot_captures: snapshot_captures.clone(),
-            stream_watches: stream_watches.clone(),
-            ref_moves: ref_moves.clone(),
-            threads: thread_store.clone(),
-            sessions: agent_session_store.clone(),
-            processes: session_processes.clone(),
-            log: event_log_store.clone(),
-            search: search_store.clone(),
-            worktrees: worktrees.clone(),
-            db: db.clone(),
-            terminals: terminal_store.clone(),
-            terminal_sessions: terminal_sessions.clone(),
-        })) {
+            .into_iter()
+            .chain(commands::agent_session::ops(
+                config_target.clone(),
+                harnesses.clone(),
+                session_processes.clone(),
+                chat.clone(),
+                capabilities.clone(),
+            ))
+            .chain(commands::hint::ops())
+            .chain(commands::terminal::ops(
+                db.clone(),
+                terminal_store.clone(),
+                terminal_sessions.clone(),
+            ))
+            .chain(commands::comment::ops())
+            .chain(commands::ui::ops())
+            .chain(commands::op_error::ops())
+            .chain(commands::handoff::ops(link_deps.clone()))
+            .chain(commands::stream::ops(commands::stream::StreamDeps {
+                streams: streams.clone(),
+                snapshot_captures: snapshot_captures.clone(),
+                stream_watches: stream_watches.clone(),
+                ref_moves: ref_moves.clone(),
+                threads: thread_store.clone(),
+                sessions: agent_session_store.clone(),
+                processes: session_processes.clone(),
+                log: event_log_store.clone(),
+                search: search_store.clone(),
+                worktrees: worktrees.clone(),
+                db: db.clone(),
+                terminals: terminal_store.clone(),
+                terminal_sessions: terminal_sessions.clone(),
+            }))
+        {
             commands.add_op(command).expect("core ops register");
         }
         let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());

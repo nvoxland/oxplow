@@ -1430,8 +1430,7 @@ pub(crate) fn fact_row_mapper<'c>(
     // would cost a lookup on every fact, and a read's facts come from a few
     // turns. (The task a request worked on is not core's to say: the
     // `oxplow.task` dimension is undecided after the flip.)
-    let mut turns: std::collections::HashMap<i64, Option<i64>> =
-        std::collections::HashMap::new();
+    let mut turns: std::collections::HashMap<i64, Option<i64>> = std::collections::HashMap::new();
     let mut request_of =
         conn.prepare_cached("SELECT t.request_id FROM agent_turn t WHERE t.id = ?1")?;
     let mut last: Option<(i64, Timestamp)> = None;

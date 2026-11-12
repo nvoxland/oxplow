@@ -4086,10 +4086,6 @@ mod tests {
         use oxplow_db::{Database, SqliteSnapshotStore, SqliteStreamStore};
         use oxplow_domain::stores::StreamStore;
         use oxplow_domain::{Stream, StreamId, StreamKind, Thread, Timestamp};
-        use oxplow_oxtask::OxtaskId;
-        use oxplow_oxtask::OxtaskStore;
-        use oxplow_oxtask::SqliteOxtaskStore;
-        use oxplow_oxtask::{Oxtask, OxtaskActorKind, OxtaskAuthor, OxtaskPriority, OxtaskStatus};
 
         const COBERTURA_50PCT: &str = r#"<?xml version="1.0"?>
 <coverage><packages><package name="p"><classes>
@@ -4287,25 +4283,6 @@ mod tests {
                 .upsert(&thread)
                 .await
                 .unwrap();
-            let task_id = SqliteOxtaskStore::new(db.clone())
-                .insert(&Oxtask {
-                    id: OxtaskId::placeholder(),
-                    parent_id: None,
-                    title: "x".into(),
-                    description: String::new(),
-                    status: OxtaskStatus::InProgress,
-                    priority: OxtaskPriority::Medium,
-                    created_by: OxtaskActorKind::User,
-                    created_at: now,
-                    updated_at: now,
-                    completed_at: None,
-                    deleted_at: None,
-                    note_count: 0,
-                    author: Some(OxtaskAuthor::User),
-                })
-                .await
-                .unwrap();
-
             // The stream's snapshot taker, as boot registers one.
             let blobs = BlobStore::new(project_dir.join(".oxplow/snapshots"));
             let snapshots = Arc::new(SqliteSnapshotStore::new(db.clone()));
@@ -4345,7 +4322,6 @@ mod tests {
                 .unwrap()
                 .expect("start snapshot");
 
-            let _ = task_id;
             let started_at = Timestamp::now();
             seed_turn(&db, TURN, started_at).await;
 

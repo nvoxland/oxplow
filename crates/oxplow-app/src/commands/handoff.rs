@@ -179,7 +179,10 @@ fn task_known(ctx: &TxCtx<'_>, item: &str) -> Result<bool, CommandError> {
     };
     ctx.conn
         .query_row(
-            &format!("SELECT 1 FROM \"{}\" WHERE uri = ?1", view.replace('\"', "")),
+            &format!(
+                "SELECT 1 FROM \"{}\" WHERE uri = ?1",
+                view.replace('\"', "")
+            ),
             [item],
             |_| Ok(()),
         )
@@ -415,9 +418,8 @@ mod tests {
     }
 
     use super::*;
-    use crate::test_fixtures::{new_thread, services_with_task, services_with_thread};
+    use crate::test_fixtures::{new_thread, services_with_thread};
     use oxplow_domain::{StreamId, Thread};
-    use oxplow_oxtask::task_ref;
 
     fn agent_on(thread: ThreadId) -> Actor {
         Actor::Agent {
@@ -478,7 +480,7 @@ mod tests {
 
     /// What a send refuses: an agent naming another thread as its own, its
     /// own thread as the recipient, a closed thread, an empty body, an item
-    /// the task tracker doesn't have, and a person who names no sender.
+    /// the task model doesn't hold, and a person who names no sender.
     #[tokio::test]
     async fn a_send_is_refused_for_what_isnt_a_handoff() {
         let fx = services_with_thread().await;
@@ -642,111 +644,5 @@ mod tests {
         .unwrap();
         assert_eq!(withdrawn.result["handoff"]["state"], "withdrawn");
         assert_eq!(withdrawn.result["handoff"]["note"], Value::Null);
-    }
-
-    /// Taking a handoff that hands over a task assigns the item to
-    /// the recipient's thread in the same run, undone as one. Declining
-    /// assigns nothing and undoes.
-    #[tokio::test]
-    async fn taking_a_handoff_assigns_its_task() {
-        let fx = services_with_task().await;
-        let to = second_thread(&fx.svc).await;
-        let recipient = agent_on(to.id);
-        let send = |body: &str| {
-            json!({
-                "to_thread": to.id.to_string(),
-                "task": task_ref(fx.task),
-                "body": body,
-            })
-        };
-        let assignee = |svc: Arc<crate::Services>| async move {
-            let item = task_ref(fx.task);
-            svc.db
-                .read(move |tx| {
-                    tx.query_row("SELECT assignee FROM v_task WHERE uri = ?1", [item], |r| {
-                        r.get::<_, Option<String>>(0)
-                    })
-                    .map_err(oxplow_db::map_sql_err)
-                })
-                .await
-                .unwrap()
-        };
-        let mine = Some(oxplow_domain::uri::build::thread_uri(fx.thread));
-        let state = |svc: Arc<crate::Services>, h: String| async move {
-            svc.db
-                .read(move |tx| {
-                    tx.query_row(
-                        "SELECT state FROM v_handoff WHERE uri = uri('oxplow/handoff', 'id', ?1)",
-                        [&h],
-                        |r| r.get::<_, String>(0),
-                    )
-                    .map_err(oxplow_db::map_sql_err)
-                })
-                .await
-                .unwrap()
-        };
-        let first = run(&fx.svc, &agent_on(fx.thread), SEND, send("decline me"))
-            .await
-            .unwrap();
-        let declined = handoff_id(&first.result);
-        let out = run(
-            &fx.svc,
-            &recipient,
-            RESOLVE,
-            json!({ "handoff": declined, "outcome": "declined" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            assignee(fx.svc.clone()).await,
-            mine,
-            "declining assigns nothing"
-        );
-        fx.svc
-            .commands
-            .undo(&Actor::Human, out.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        assert_eq!(state(fx.svc.clone(), declined).await, "open");
-
-        let second = run(&fx.svc, &agent_on(fx.thread), SEND, send("take me"))
-            .await
-            .unwrap();
-        let h = handoff_id(&second.result);
-        let err = run(
-            &fx.svc,
-            &agent_on(fx.thread),
-            RESOLVE,
-            json!({ "handoff": h, "outcome": "taken" }),
-        )
-        .await
-        .unwrap_err();
-        assert!(matches!(err, CommandError::Denied { .. }), "{err:?}");
-        assert_eq!(
-            assignee(fx.svc.clone()).await,
-            mine,
-            "a stranger's resolve assigns nothing"
-        );
-
-        let taken = run(
-            &fx.svc,
-            &recipient,
-            RESOLVE,
-            json!({ "handoff": h, "outcome": "taken", "note": "on it" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            assignee(fx.svc.clone()).await,
-            Some(oxplow_domain::uri::build::thread_uri(to.id))
-        );
-        assert_eq!(state(fx.svc.clone(), h.clone()).await, "taken");
-        fx.svc
-            .commands
-            .undo(&Actor::Human, taken.audit_id.unwrap(), false)
-            .await
-            .unwrap();
-        assert_eq!(assignee(fx.svc.clone()).await, mine);
-        assert_eq!(state(fx.svc.clone(), h.clone()).await, "open");
     }
 }

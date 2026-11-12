@@ -239,45 +239,41 @@ pub fn sequence_command() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxplow_domain::stores::ThreadStore as _;
     use oxplow_domain::Actor;
-    use oxplow_oxtask::task_ref;
-    use oxplow_oxtask::OxtaskStore as _;
     use serde_json::json;
 
-    /// Two `task.*` commands as one run by an agent: a task tracker's
-    /// verbs run outside the transaction, so the sequence runs them as
-    /// steps — one audit row naming the sequence with the children in its
-    /// result, the children's events caused by that one
-    /// `command.executed`, and no undo of the whole.
+    /// Two thread commands as one run by a person: the sequence runs them
+    /// in one transaction — one audit row naming the sequence with the
+    /// children in its result, one `command.executed`, and one undo that
+    /// reverses both.
     #[tokio::test]
-    async fn a_sequence_of_task_commands_is_one_audited_run_of_steps() {
-        let fx = crate::test_fixtures::services_with_task().await;
-        let agent = Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        let task = task_ref(fx.task);
+    async fn a_sequence_of_commands_is_one_audited_run() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let thread = fx.thread.to_string();
+        let before = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
         let out = fx
             .svc
             .commands
             .run(
-                &agent,
+                &Actor::Human,
                 SEQUENCE,
                 json!({ "calls": [
-                    { "name": "oxplow.task.update", "input": { "uri": task, "title": "Renamed" } },
-                    { "name": "oxplow.task.transition", "input": { "uri": task, "to": "done" } },
+                    { "name": "oxplow.thread.rename", "input": { "thread": thread, "title": "First" } },
+                    { "name": "oxplow.thread.rename", "input": { "thread": thread, "title": "Second" } },
                 ] }),
                 false,
             )
             .await
             .unwrap();
-        let after = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
-        assert_eq!(after.title, "Renamed");
-        assert_eq!(after.status, oxplow_oxtask::OxtaskStatus::Done);
+        let after = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
+        assert_eq!(after.title, "Second");
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
-        assert_eq!(out.result["children"][1]["name"], "oxplow.task.transition");
-        assert!(out.inverse.is_none(), "steps aren't undoable");
+        assert_eq!(out.result["children"][1]["name"], "oxplow.thread.rename");
+        assert!(
+            out.inverse.is_some(),
+            "a sequence in one transaction undoes"
+        );
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
             .list_recent(20)
@@ -294,18 +290,15 @@ mod tests {
         let executed = events
             .iter()
             .filter(|e| e.envelope.event_type == "command.executed")
-            .collect::<Vec<_>>();
-        assert_eq!(executed.len(), 1);
-        for t in ["task.edited", "task.state_changed"] {
-            let caused = events
-                .iter()
-                .find(|e| e.envelope.event_type == t)
-                .unwrap_or_else(|| panic!("{t} logged"));
-            assert_eq!(
-                caused.envelope.cause.as_ref(),
-                Some(&executed[0].envelope.id),
-                "{t}"
-            );
-        }
+            .count();
+        assert_eq!(executed, 1);
+
+        fx.svc
+            .commands
+            .undo(&Actor::Human, out.audit_id.unwrap(), false)
+            .await
+            .unwrap();
+        let undone = fx.svc.thread_store.get(&fx.thread).await.unwrap().unwrap();
+        assert_eq!(undone.title, before.title);
     }
 }

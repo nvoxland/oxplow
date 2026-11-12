@@ -381,21 +381,20 @@ pub fn spawn(
 mod tests {
     use super::*;
 
-    /// P4.6 (tsk491): a task edit changes the datasets that read
-    /// `task` and the ones that read those — no others.
+    /// A thread edit changes the datasets that read `threads` and the ones
+    /// that read those — no others.
     #[tokio::test]
     async fn a_table_change_reaches_its_datasets_and_their_readers_only() {
-        use oxplow_oxtask::OxtaskStore as _;
-        let f = crate::test_fixtures::services_with_task().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let lineage = Lineage::load(&f.svc.db).await.unwrap();
-        let changed = lineage.affected(&["task".to_string()]);
-        assert!(changed.contains(&"v_task".to_string()), "{changed:?}");
+        let changed = lineage.affected(&["threads".to_string()]);
+        assert!(changed.contains(&"v_thread".to_string()), "{changed:?}");
         assert!(!changed.contains(&"v_snapshot".to_string()), "{changed:?}");
         // Transitive: a dataset reading `v_test_run` changes with its inputs.
         let through = lineage.affected(&["metric_capture".to_string()]);
         assert!(through.contains(&"v_test_run".to_string()));
 
-        // End to end: a task edit is announced for v_task, with a watermark.
+        // End to end: a thread edit is announced for v_thread, with a watermark.
         let watermarks = Arc::new(DatasetWatermarks::default());
         let mut rx = f.svc.events.subscribe_ui();
         spawn(
@@ -407,30 +406,36 @@ mod tests {
             crate::pages::open_runs::PageRuns::default(),
         );
         tokio::task::yield_now().await;
-        let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
-        task.title = "renamed".into();
-        f.svc.task_store.update(&task).await.unwrap();
-        crate::test_fixtures::restate_task(&f.svc, f.task).await;
+        f.svc
+            .commands
+            .run(
+                &oxplow_domain::Actor::Human,
+                crate::commands::thread::RENAME,
+                serde_json::json!({ "thread": f.thread.to_string(), "title": "renamed" }),
+                false,
+            )
+            .await
+            .unwrap();
         let datasets = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 if let Ok(OxplowEvent::DatasetsChanged { datasets }) = rx.recv().await {
-                    if datasets.contains(&"v_task".to_string()) {
+                    if datasets.contains(&"v_thread".to_string()) {
                         return datasets;
                     }
                 }
             }
         })
         .await
-        .expect("DatasetsChanged for v_task");
+        .expect("DatasetsChanged for v_thread");
         assert!(
             !datasets.contains(&"v_snapshot".to_string()),
             "{datasets:?}"
         );
-        assert_eq!(watermarks.freshness(&["v_task".to_string()]).len(), 1);
+        assert_eq!(watermarks.freshness(&["v_thread".to_string()]).len(), 1);
         // A query's result carries its datasets' watermarks.
         let out = crate::sql_gateway::SqlGateway::new(f.svc.db.clone())
             .with_watermarks(watermarks.clone())
-            .query_sql("SELECT count(*) FROM v_task", vec![], None)
+            .query_sql("SELECT count(*) FROM v_thread", vec![], None)
             .await
             .unwrap();
         assert_eq!(
@@ -438,7 +443,7 @@ mod tests {
                 .iter()
                 .map(|m| m.dataset.as_str())
                 .collect::<Vec<_>>(),
-            vec!["v_task"]
+            vec!["v_thread"]
         );
         assert!(watermarks.freshness(&["v_snapshot".to_string()]).is_empty());
     }
@@ -594,8 +599,7 @@ mod tests {
         use oxplow_db::datasets::{
             DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
         };
-        use oxplow_oxtask::OxtaskStore as _;
-        let f = crate::test_fixtures::services_with_task().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let dataset =
             |name: &str, sql: &str, columns: &[(&str, &str)], on_change: bool| DatasetSource {
                 decl: DatasetDecl {
@@ -631,7 +635,7 @@ mod tests {
                 sources: vec![
                     dataset(
                         "titles",
-                        "SELECT uri AS id, title FROM ref('task')",
+                        "SELECT uri AS id, title FROM ref('thread')",
                         &[("id", "TEXT"), ("title", "TEXT")],
                         true,
                     ),
@@ -702,15 +706,27 @@ mod tests {
             panic!("v_acme_titles never read {want}: {:?}", titles().await);
         };
         // Its first build fills it.
-        until_titles("t").await;
+        for _ in 0..200 {
+            if titles().await.len() == 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(titles().await.len(), 1);
         tokio::time::sleep(coalesce * 2).await;
         let _ = announced(&mut rx);
 
-        let mut task = f.svc.task_store.get(f.task).await.unwrap().unwrap();
         for i in 0..5 {
-            task.title = format!("renamed {i}");
-            f.svc.task_store.update(&task).await.unwrap();
-            crate::test_fixtures::restate_task(&f.svc, f.task).await;
+            f.svc
+                .commands
+                .run(
+                    &oxplow_domain::Actor::Human,
+                    crate::commands::thread::RENAME,
+                    serde_json::json!({ "thread": f.thread.to_string(), "title": format!("renamed {i}") }),
+                    false,
+                )
+                .await
+                .unwrap();
         }
         until_titles("renamed 4").await;
         // Long enough for a second refill to have shown, had there been one.
@@ -731,7 +747,7 @@ mod tests {
         use oxplow_db::datasets::{
             DatasetDecl, DatasetField, DatasetSource, ExtensionDatasets, Materialize,
         };
-        let f = crate::test_fixtures::services_with_task().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let dataset = |name: &str, version: u32, sql: &str, title_type: &str, on_change: bool| {
             DatasetSource {
                 decl: DatasetDecl {
@@ -798,7 +814,7 @@ mod tests {
                 .await
                 .unwrap()
         };
-        compile(1, "SELECT uri AS id, title FROM ref('task')", "TEXT").await;
+        compile(1, "SELECT uri AS id, title FROM ref('thread')", "TEXT").await;
         let assets =
             crate::assets::Assets::new(f.svc.db.clone(), std::time::Duration::from_millis(50));
         assets.sync_datasets().await.unwrap();
@@ -807,7 +823,7 @@ mod tests {
 
         compile(
             2,
-            "SELECT uri AS id, title || '' AS title FROM ref('task')",
+            "SELECT uri AS id, title || '' AS title FROM ref('thread')",
             "",
         )
         .await;

@@ -375,12 +375,6 @@ pub fn generated_section(doc: &str, name: &str, generated: &str) {
     );
 }
 
-/// Start effect `id` (`<extension>/<effect>`) at the log's head now: it
-/// reacts to what is logged from here on.
-pub async fn start_effect(svc: &Arc<crate::Services>, id: &str) {
-    crate::effects::start_at_head(&svc.db, id).await.unwrap();
-}
-
 /// The foundation's declared `metrics:` and `dimensions:`, parsed from the
 /// bundled manifest — for a test that seeds the specs the way an activation
 /// would, without a whole `Services`.
