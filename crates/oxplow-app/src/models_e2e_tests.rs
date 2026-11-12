@@ -486,3 +486,55 @@ async fn a_stores_stages_are_read_as_model_stage() {
         .collect();
     assert_eq!(got, vec!["todo:todo", "doing:in_progress", "done:done"]);
 }
+
+/// A model's children are its items' related rows when one is read
+/// (`oxplow_read`): each child set by its name, the item's own only.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_models_children_are_read_beside_its_item() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    let owner = OWNER
+        .replace(
+            "    params: { store: { required: true }, id: { required: true } }\n",
+            "    params: { store: { required: true }, id: { required: true } }\n    resolve: books\ndatasets:\n  - name: books\n    version: 1\n    description: Books.\n    fields:\n      - { name: uri, type: TEXT, doc: u }\n      - { name: title, type: TEXT, doc: t }\n",
+        )
+        .replace(
+            "    columns: { id: text, title: text }\n",
+            "    columns: { id: text, title: text }\n    children:\n      notes:\n        key: [n]\n        columns: { n: text, text: text }\n",
+        );
+    write(root, ".oxplow/extensions/shelf/extension.yaml", &owner);
+    write(
+        root,
+        ".oxplow/extensions/shelf/datasets/books.sql",
+        "SELECT uri, title FROM ref('book')",
+    );
+    write(root, ".oxplow/extensions/shelves/extension.yaml", STORE);
+    write(
+        root,
+        ".oxplow/extensions/shelves/books.star",
+        "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\", \"notes\": [{\"n\": \"1\", \"text\": \"Spice\"}]}, {\"id\": \"emma\", \"title\": \"Emma\", \"notes\": [{\"n\": \"1\", \"text\": \"Bath\"}]}]}]}\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    fx.svc
+        .commands
+        .run(
+            &Actor::Human,
+            crate::collector_runner::SYNC,
+            json!({ "collector": "shelves/books" }),
+            false,
+        )
+        .await
+        .unwrap();
+    let read = crate::ref_read::read(
+        &fx.svc,
+        "oxplow:shelf/book?id=dune&store=shelves",
+        &crate::ref_read::Reader::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let notes = &read.related["notes"];
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!(notes[0]["text"], "Spice");
+}

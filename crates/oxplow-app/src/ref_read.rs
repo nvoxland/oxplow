@@ -46,7 +46,7 @@ pub struct RefRead {
     pub row: Option<Map<String, Value>>,
     /// What sits beside it, by name (`links`, `comments`, `files`).
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub related: BTreeMap<&'static str, Vec<Map<String, Value>>>,
+    pub related: BTreeMap<String, Vec<Map<String, Value>>>,
     /// Its body, for a resource whose body no dataset holds.
     pub content: Option<String>,
     /// The content was cut at [`MAX_CONTENT`].
@@ -171,7 +171,28 @@ pub async fn read(
                     .ok_or_else(|| ReadError::NotFound(reference.clone()))?,
             );
             for (_, name, sql) in RELATED.iter().filter(|(k, _, _)| *k == resource) {
-                out.related.insert(name, rows(svc, sql, &reference).await?);
+                out.related
+                    .insert(name.to_string(), rows(svc, sql, &reference).await?);
+            }
+            // A model's children are its items' related rows, by the child's
+            // name (a name core already lists keeps core's).
+            let models = svc.models.current();
+            for spec in models
+                .models
+                .values()
+                .filter(|m| m.decl.resource == resource)
+            {
+                for child in &spec.decl.children {
+                    if out.related.contains_key(&child.name) {
+                        continue;
+                    }
+                    let sql = format!(
+                        "SELECT * FROM \"{}\" WHERE parent = ?1",
+                        spec.decl.child_view(child).replace('"', "")
+                    );
+                    out.related
+                        .insert(child.name.clone(), rows(svc, &sql, &reference).await?);
+                }
             }
             match (resource.as_str(), part) {
                 (r::EVENT, Some(part)) => {

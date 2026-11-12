@@ -236,7 +236,9 @@ Nothing resolves it → `resolved: false`.
 
 `ref_read::read` (`oxplow_read`, `records.read`) returns `{ uri, resource,
 row, related, content, truncated }`: the `resolve` row, the related lists
-of tasks, commits and requests, a file's text at its `rev` (its
+of tasks, commits and requests (and of any model's item: each of the
+model's children by its name, `SELECT * FROM v_<ns>_<model>_<child> WHERE
+parent = ?1`; a name core lists keeps core's), a file's text at its `rev` (its
 `#lines=` view), an event's or model call's body (`#part=`), a page's
 definition.
 
