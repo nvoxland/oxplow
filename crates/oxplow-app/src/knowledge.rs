@@ -24,8 +24,9 @@ use oxplow_db::knowledge_record::{
 };
 use oxplow_db::EventCtx;
 use oxplow_domain::events::schema::{
-    AgentToolFinished, AgentToolFinishedV4, KnowledgePageRead, KnowledgePageReadV1,
-    KnowledgePageWritten, KnowledgePageWrittenV3, ReadVia,
+    AgentToolFinished, AgentToolFinishedV4, KnowledgePageDrifted, KnowledgePageDriftedV1,
+    KnowledgePageRead, KnowledgePageReadV1, KnowledgePageWritten, KnowledgePageWrittenV3, ReadVia,
+    SnapshotTaken, SnapshotTakenV3,
 };
 use oxplow_domain::events::Envelope;
 use oxplow_domain::knowledge::{
@@ -340,6 +341,93 @@ impl crate::event_pump::EventConsumer for KnowledgeFileReads {
                     .with_subject([page]);
                 ev.append(conn, &env)?;
             }
+        }
+        Ok(())
+    }
+}
+
+/// Says which recorded pages a snapshot of the primary stream drifted: one
+/// `knowledge.page.drifted` per page citing a file the take changed (its
+/// `file_snapshot` rows), caused by the `snapshot.taken`. Staleness is the
+/// primary stream's (`v_knowledge_pin`), so another stream's take is
+/// nothing; so is a take that changed no cited file. What counts stale
+/// pages (bundled's `oxplow.knowledge_pages`) follows these instead of every
+/// snapshot.
+pub struct KnowledgeDrift {
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+}
+
+impl KnowledgeDrift {
+    pub const NAME: &'static str = "knowledge.drift";
+}
+
+impl crate::event_pump::EventConsumer for KnowledgeDrift {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == <SnapshotTaken as oxplow_domain::EventType>::TYPE
+    }
+
+    fn handle(
+        &self,
+        conn: &rusqlite::Connection,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        let Ok(taken) = serde_json::from_value::<SnapshotTakenV3>(event.envelope.payload.clone())
+        else {
+            return Ok(());
+        };
+        if taken.unchanged || taken.file_count == 0 {
+            return Ok(());
+        }
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT pr.source_uri, fs.path
+                   FROM snapshot s
+                   JOIN streams st ON st.id = s.stream_id AND st.kind = 'primary'
+                   JOIN file_snapshot fs ON fs.snapshot_id = s.id
+                   JOIN page_ref pr ON pr.source_resource = 'oxplow/knowledge'
+                                   AND pr.target_resource = 'oxplow/file'
+                                   AND uri_param(pr.target_uri, 'path') = fs.path
+                   JOIN knowledge_page kp ON kp.uri = pr.source_uri
+                  WHERE s.id = ?1
+                  ORDER BY pr.source_uri, fs.path",
+            )
+            .map_err(sql)?;
+        let mut drifted: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for row in stmt
+            .query_map([taken.snapshot], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(sql)?
+        {
+            let (page, path) = row.map_err(sql)?;
+            let paths = drifted.entry(page).or_default();
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        if drifted.is_empty() {
+            return Ok(());
+        }
+        let vocabulary = self.vocabulary.current();
+        let ev = EventCtx {
+            vocabulary: &vocabulary,
+            source: event.envelope.source.clone(),
+            cause: Some(event.envelope.id.clone()),
+        };
+        for (page, paths) in drifted {
+            let env = ev
+                .typed::<KnowledgePageDrifted>(&KnowledgePageDriftedV1 {
+                    page: page.clone(),
+                    snapshot: taken.snapshot,
+                    paths,
+                })
+                .with_anchors(event.envelope.anchors.clone())
+                .with_subject([page]);
+            ev.append(conn, &env)?;
         }
         Ok(())
     }

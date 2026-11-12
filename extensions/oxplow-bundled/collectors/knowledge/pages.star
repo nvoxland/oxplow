@@ -1,6 +1,7 @@
 # How many knowledge pages there are, and how many are stale, restated each
-# time a page is written, recorded or deleted, and when a snapshot lands (a
-# file a page cites drifting is what makes the page stale).
+# time a page is written, recorded or deleted, and when a snapshot changes a
+# file a page cites (`knowledge.page.drifted`: that is what makes a page
+# stale; a snapshot of an uncited file can't move the counts).
 #
 # Gets {"rows": [...]}: one row per (store, bucket) that has pages,
 # {placed_at, day, store, bucket, pages, stale}; one row with a NULL store

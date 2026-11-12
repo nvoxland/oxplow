@@ -1067,3 +1067,70 @@ async fn a_read_in_an_open_turn_is_that_turns() {
         .unwrap();
     assert_eq!(turn, logged[0].envelope.anchors.turn_id);
 }
+
+/// A snapshot of the primary stream that changed a file a recorded page
+/// cites says so: one `knowledge.page.drifted` per such page, naming the
+/// files, caused by the take. A take that changed no cited file, or another
+/// stream's, says nothing (what counts stale pages follows these, not every
+/// snapshot).
+#[tokio::test]
+async fn a_snapshot_that_changes_a_cited_file_drifts_the_page() {
+    use oxplow_domain::events::schema::{
+        KnowledgePageDrifted, KnowledgePageDriftedV1, SnapshotTaken, SnapshotTakenV3,
+    };
+    let fx = crate::test_fixtures::services_with_thread().await;
+    std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
+    std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
+    snapshot_with(&fx, "src/lib.rs").await;
+    run(
+        &fx,
+        WRITE_PAGE,
+        json!({ "id": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n" }),
+    )
+    .await
+    .unwrap();
+    let vocabulary = fx.svc.vocabulary.current();
+    let taken = |snapshot: i64| {
+        oxplow_db::EventCtx {
+            vocabulary: &vocabulary,
+            source: "snapshot".into(),
+            cause: None,
+        }
+        .typed::<SnapshotTaken>(&SnapshotTakenV3 {
+            stream: "str1".into(),
+            snapshot,
+            parent: None,
+            trigger: oxplow_domain::snapshot::SnapshotTrigger::Quiet,
+            unchanged: false,
+            file_count: 1,
+            elapsed_ms: 1,
+            budget_ms: None,
+            over_budget: false,
+        })
+    };
+    let cited = snapshot_with(&fx, "src/lib.rs").await;
+    let uncited = snapshot_with(&fx, "src/other.rs").await;
+    let cause = taken(cited);
+    let cause_id = cause.id.clone();
+    fx.svc.event_log_store.append(cause).await.unwrap();
+    fx.svc.event_log_store.append(taken(uncited)).await.unwrap();
+    fx.svc.event_pump.run_once().await.unwrap();
+
+    let drifted = events_of(
+        &fx,
+        <KnowledgePageDrifted as oxplow_domain::EventType>::TYPE,
+    )
+    .await;
+    assert_eq!(drifted.len(), 1, "{drifted:?}");
+    let payload: KnowledgePageDriftedV1 =
+        serde_json::from_value(drifted[0].envelope.payload.clone()).unwrap();
+    assert_eq!(
+        payload,
+        KnowledgePageDriftedV1 {
+            page: oxwiki("lib"),
+            snapshot: cited,
+            paths: vec!["src/lib.rs".into()],
+        }
+    );
+    assert_eq!(drifted[0].envelope.cause, Some(cause_id));
+}

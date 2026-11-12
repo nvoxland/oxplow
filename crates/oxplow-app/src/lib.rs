@@ -984,6 +984,9 @@ impl Services {
                     vocabulary: vocabulary.clone(),
                 }),
                 Arc::new(knowledge::KnowledgeReads),
+                Arc::new(knowledge::KnowledgeDrift {
+                    vocabulary: vocabulary.clone(),
+                }),
                 // The log's facts the renderer hears (P7.B6).
                 Arc::new(ui_push::UiPush {
                     events: event_bus.clone(),

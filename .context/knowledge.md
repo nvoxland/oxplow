@@ -219,6 +219,16 @@ reads it, and so do the UI's freshness chip and page.
 diff; a pin taken by "Track changes only" (no `contents`) holds an
 identity and no text, so its status is `no_contents`, not an error.
 
+**Drift is an event.** A primary-stream take that changed files a
+recorded page cites appends `knowledge.page.drifted@1 { page, snapshot,
+paths }` per page, caused by the `snapshot.taken`
+(`knowledge::KnowledgeDrift`, consumer `knowledge.drift`), whether or not
+the page was stale already. Another stream's take, or one that changed
+no cited file, says nothing. What re-counts stale pages follows it
+instead of every snapshot (bundled's `oxplow.knowledge_pages`): most takes
+touch no cited file, and each count was a capture every metric reader
+heard.
+
 **The body is in the row** (`knowledge_page.body`). `.oxplow/.gitignore`
 is `*`, so the workspace filter hides oxwiki's files — the file can't be
 the UI's read path. Every write keeps the body with the row.

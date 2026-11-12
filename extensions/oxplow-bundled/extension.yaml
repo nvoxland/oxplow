@@ -324,10 +324,10 @@ collectors:
   # What the project knows: the pages it keeps, restated whenever a page is
   # written, recorded or deleted, and whether a request read any.
   - id: oxplow.knowledge_pages
-    doc: How many knowledge pages there are and how many are stale, by store and bucket, restated when a page is written, recorded or deleted, and when a snapshot lands (a cited file drifting makes a page stale).
+    doc: How many knowledge pages there are and how many are stale, by store and bucket, restated when a page is written, recorded or deleted, and when a snapshot changes a file a page cites (knowledge.page.drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
     runtime: starlark
     entry: collectors/knowledge/pages.star
-    on: [knowledge.page.written, knowledge.page.recorded, knowledge.page.deleted, snapshot.taken]
+    on: [knowledge.page.written, knowledge.page.recorded, knowledge.page.deleted, knowledge.page.drifted]
     input: |
       SELECT n.placed_at, n.day, g.store, g.bucket, g.pages, g.stale
         FROM (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS placed_at, date('now') AS day) n

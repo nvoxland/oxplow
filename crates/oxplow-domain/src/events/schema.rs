@@ -200,6 +200,8 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageRead>()
             .expect("core type registers");
+        r.register::<KnowledgePageDrifted>()
+            .expect("core type registers");
         r.register::<HandoffSent>().expect("core type registers");
         r.register::<HandoffSettled>().expect("core type registers");
         r.register::<KnowledgeCommentWritten>()
@@ -1971,6 +1973,29 @@ impl EventType for KnowledgePageRead {
     type Payload = KnowledgePageReadV1;
 }
 
+/// `knowledge.page.drifted@1`: a snapshot of the primary stream changed
+/// files a recorded knowledge page cites, so what the page says of them may
+/// no longer hold (`v_knowledge_ref.stale`), whether or not it was stale
+/// already. Caused by the `snapshot.taken`. What re-counts stale pages
+/// follows it instead of every snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KnowledgePageDriftedV1 {
+    /// The page (`oxplow:oxplow/knowledge?id=<id>&store=<store>`).
+    pub page: String,
+    /// The snapshot that changed them.
+    pub snapshot: i64,
+    /// The cited files it changed (repo-relative).
+    pub paths: Vec<String>,
+}
+
+pub struct KnowledgePageDrifted;
+impl EventType for KnowledgePageDrifted {
+    const TYPE: &'static str = "knowledge.page.drifted";
+    const V: u32 = 1;
+    type Payload = KnowledgePageDriftedV1;
+}
+
 /// `ui.op_failed@2`: an operation the person started in the app failed, as
 /// the app showed it (`oxplow.ui.report_error`). Its captured stderr and
 /// stdout are the `output` body. v2 adds the run's audit row and an
@@ -2224,6 +2249,7 @@ mod tests {
                 ("knowledge.comment.deleted", 3),
                 ("knowledge.comment.written", 3),
                 ("knowledge.page.deleted", 3),
+                ("knowledge.page.drifted", 1),
                 ("knowledge.page.read", 1),
                 ("knowledge.page.recorded", 3),
                 ("knowledge.page.written", 3),
