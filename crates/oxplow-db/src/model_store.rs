@@ -734,6 +734,17 @@ pub fn ensure_model_for_stores_tx(
     live: Option<&[String]>,
 ) -> Result<(), DomainError> {
     validate(decl)?;
+    // A store that isn't live has no open quarantines: its `start`
+    // snapshot records them again when it comes back.
+    if let Some(live) = live {
+        let stores = serde_json::to_string(live).unwrap_or_else(|_| "[]".into());
+        conn.execute(
+            "DELETE FROM model_quarantine WHERE model = ?1
+               AND store NOT IN (SELECT value FROM json_each(?2))",
+            params![decl.id(), stores],
+        )
+        .map_err(map_sql_err)?;
+    }
     let table = decl.table();
     let want = shape(decl);
     let have: Vec<(String, String)> = conn
@@ -3471,6 +3482,27 @@ mod tests {
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].2, "Dune");
         assert!(live[0].3.as_deref().unwrap().contains("rating"), "{live:?}");
+    }
+
+    /// A store that isn't live (disabled, removed) has no open quarantines:
+    /// its `start` snapshot records them again when it comes back.
+    #[tokio::test]
+    async fn a_store_that_isnt_live_drops_its_quarantines() {
+        let db = Database::in_memory();
+        for store in ["a", "b"] {
+            write(
+                &db,
+                store,
+                vec![],
+                upsert(vec![json!({"id": "1", "pages": "many"})], vec![]),
+            )
+            .await
+            .unwrap();
+        }
+        db.transaction(|tx| ensure_model_for_stores_tx(tx, &book(), Some(&["a".to_string()])))
+            .await
+            .unwrap();
+        assert_eq!(open_quarantines(&db).await, vec![q("a", "1")]);
     }
 
     /// With the live stores named, a store not among them is hidden from

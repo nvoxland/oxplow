@@ -239,7 +239,9 @@ fills:
     and clears it when the key is written good (even unchanged), deleted,
     or renamed from or to, or when a snapshot of that store is applied
     (what it still states badly is quarantined again; what it leaves out
-    is cleared). Another store's or an unrelated write keeps it. The run's
+    is cleared). Another store's or an unrelated write keeps it. A store
+    that isn't live (disabled, removed) loses its quarantines when the
+    live stores are set; its `start` snapshot records them again. The run's
     `problems` and warning log are unchanged; nothing else (collector
     health, advisories) reads the view yet. A malformed output (not the shape above) fails the run.
   - It diffs against what is stored and writes only what changed (the
