@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { fileTask, ipc, run } from "../../support/daemon.js";
 import { expect, test } from "../../support/fixtures.js";
 import { open, shown } from "../../support/ui.js";
@@ -5,6 +8,27 @@ import { open, shown } from "../../support/ui.js";
 // A page re-runs by itself when a dataset it reads changes, and Pin to
 // Dashboard makes a new dashboard page with it as an embed.
 test("a page re-runs when its dataset changes, and pins to a new dashboard", async ({ page, daemon }) => {
+  // The page reads bundled's task dataset, so its extension requires bundled
+  // (write_page scaffolds a manifest without it only when none is there).
+  const dir = join(daemon.project, ".oxplow/extensions/mine");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "extension.yaml"),
+    [
+      "manifest: 2",
+      "name: mine",
+      "description: Pages written from the app",
+      "requires: [oxplow-bundled]",
+      "intent:",
+      "  purpose: Pages saved from answers and dashboards",
+      "  origin: null",
+      "  examples:",
+      "    - name: numbat-tasks",
+      "      input: { page: numbat-tasks }",
+      "      expect: the page opens",
+      "",
+    ].join("\n"),
+  );
   await run(daemon, "oxplow.extension.write_page", {
     extension: "mine",
     page: "numbat-tasks",
