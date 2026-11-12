@@ -42,7 +42,7 @@ models:
   - name: task                 # table model__<ns>__task, view v_<ns>_task
     resource: task             # its rows are this resource (declared in resources:)
     open: true                 # other extensions may fill it (they must say so in fills:)
-    key: [id]                  # the store's native id; the full key is (store, id)
+    key: id                    # one column: the store's native id, the URI's `id`; unique per store
     change_event: tasks.task.changed   # declared in event_types:, one per changed row
     columns:
       title: text
@@ -76,8 +76,9 @@ models:
     pin of an edge that is already there (today's knowledge behaviour,
     `knowledge_record::write_page_tx`). Staleness is then generic:
     `v_ref_pin` (source URI, path, pinned snapshot, latest snapshot,
-    `stale`) over every pinned edge, filtered by the reader on
-    `source_resource`. `knowledge_file_ref` / `knowledge_dir_ref` go.
+    `stale`) over every pinned edge: columns `source`, `source_resource`,
+    `path`, `pinned_snapshot_id`, `latest_snapshot_id`, `stale`; a reader
+    filters on `source_resource`. `knowledge_file_ref` / `knowledge_dir_ref` go.
   - A store whose tool states its own links (a provider) sends a `uris`
     column instead (`refs:` in the row); then the markdown column is not
     parsed (today's `stated` path).
@@ -87,8 +88,8 @@ models:
     `verify_tx`). It never writes the store.
 - **Search.** `search: { title, body }` makes the model's resource
   searchable with no SQL of its own: oxplow generates the searchable
-  dataset (`uri`, `title`, `body`, `version = written_at`). One per
-  model.
+  dataset `v_search_<ns>_<model>` (`uri`, `title`, `body`, `version =
+  written_at`). One per model.
 - **The change event** is declared by the owner (`event_types:`), payload
   `{ uri, store, id, op: upserted | removed, changed: [column…] }`,
   subject the row's URI, anchors from the caller (a command's actor, a
@@ -150,8 +151,8 @@ Every open model keeps per-item values beyond its columns in `fields`.
 - **Declared once.** A store declares its fields in its `fills:` entry
   (`[{ name, title, kind: enum | text | number, values?, read_only? }]`,
   today's `FieldDecl`). Any other extension may declare fields on a model
-  too, in a `fields:` entry with no `stores:` (an extension that scores
-  tasks). Published as `v_model_field_decl` (`model`, `namespace`,
+  too, in a top-level `fields: [{ model: <owner ns>/<model>, fields: [...] }]`
+  (an extension that scores tasks). Published as `v_model_field_decl` (`model`, `namespace`,
   `name`, `title`, `kind`, `values`, `read_only`). Shared screens draw
   fields from it without knowing the store.
 - **Kept apart by namespace.** Values are stored per `(item uri,
@@ -197,6 +198,14 @@ Every open model keeps per-item values beyond its columns in `fields`.
 
 - No generic write verbs: no `task.create` that routes to a store, and no
   standard bindings. Confirm, undo and audit are each store's job.
+- **Rebuilds.** A model's table is a cache of its stores: a changed
+  shape adds new columns in place, and a removed or retyped column
+  rebuilds the table, which the stores refill at their next `start`. A
+  model that is not `open` (its owner's own data: assignment, rank) is
+  never rebuilt with loss: a removed or retyped column is a load error
+  until the owner ships a migration.
+- **The change event's `v_event` row:** `type` is the declared type,
+  `payload` the JSON above.
 - With the owner extension off, its models do not exist; a store that
   requires it is held. The shell still starts.
 - A model's contract (columns, key, types, its change event) is

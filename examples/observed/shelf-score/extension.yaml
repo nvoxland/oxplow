@@ -1,0 +1,39 @@
+manifest: 2
+name: shelf-score
+description: A score from 0 to 10 on any book of any store.
+engine: ">=0.7"
+version: 0.1.0
+requires: [shelf]
+intent:
+  purpose: >-
+    Show a field added by an extension that is not a store. Shelf-score
+    declares `score` on the model with no stores, and writes it with
+    model.fields into its own namespace. A store's reconcile never removes
+    it. It goes only when the book goes.
+  origin: null
+  examples:
+    - name: scoring-a-book-keeps-the-stores-own-fields
+      input: { command: shelf-score.score }
+      expect: both namespaces in fields
+permissions: [model.write]
+fields:
+  - model: shelf/book
+    fields:
+      - { name: score, title: Score, kind: number }
+commands:
+  - name: score
+    summary: Set the score of a book.
+    input_schema:
+      type: object
+      required: [uri, score]
+      properties:
+        uri: { type: string }
+        score: { type: number, minimum: 0, maximum: 10 }
+      additionalProperties: false
+    entry: handlers/score.star
+    needs: [model.write]
+    access: write
+    ui:
+      label: Score
+      about: { resource: shelf/book }
+    example: { uri: "oxplow:shelf/book?id=dune&store=shelf-db", score: 9 }

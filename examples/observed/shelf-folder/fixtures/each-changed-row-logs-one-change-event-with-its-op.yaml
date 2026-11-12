@@ -1,0 +1,24 @@
+enable: [shelf, shelf-folder]
+given:
+  - files:
+      "shelf/dune.md": "# Dune"
+      "shelf/emma.md": "# Emma"
+when: { collector: shelf-folder.books, trigger: start }
+expect: { ok: true }
+steps:
+  - given:
+      - { remove_files: ["shelf/emma.md"] }
+  - when:
+      collector: shelf-folder.books
+      trigger: { files: [{ path: "shelf/emma.md", op: removed }] }
+    expect: { ok: true }
+  - when:
+      sql: |
+        SELECT json_extract(payload, '$.id') AS id, json_extract(payload, '$.op') AS op
+        FROM v_event WHERE type = 'shelf.book.changed'
+        ORDER BY id, op
+    expect:
+      rows:
+        - { id: dune, op: upserted }
+        - { id: emma, op: removed }
+        - { id: emma, op: upserted }

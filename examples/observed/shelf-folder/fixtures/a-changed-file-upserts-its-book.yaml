@@ -1,0 +1,14 @@
+enable: [shelf, shelf-folder]
+given:
+  - { files: { "shelf/dune.md": "# Dune\n\nOld text." } }
+when: { collector: shelf-folder.books, trigger: start }
+expect: { ok: true }
+steps:
+  - given:
+      - { files: { "shelf/dune.md": "# Dune Messiah\n\nNew text." } }
+  - when:
+      collector: shelf-folder.books
+      trigger: { files: [{ path: "shelf/dune.md", op: modified }] }
+    expect: { ok: true, result: { upserted: 1, removed: 0 } }
+  - when: { sql: "SELECT id, title FROM v_shelf_book" }
+    expect: { rows: [{ id: dune, title: Dune Messiah }] }

@@ -334,7 +334,7 @@ Part of the shared-models work ([models.md](./models.md)).
 same kind of action ("New Task") and none of them owns the page.
 
 - **Declared by its owner:** `action_points: [{ name: task.new, label: New
-  Task, doc, context: { parent?: uri, thread_id?: int } }]`. Its id is
+  Task, doc, context: { parent: { type: uri, required: false } } }]`. Its id is
   `<namespace>/<name>` (`oxplow/task.new`).
 - **Placed by a page:** a view node `{ action_point: oxplow/task.new,
   context: { parent: "{{row.uri}}" } }`.

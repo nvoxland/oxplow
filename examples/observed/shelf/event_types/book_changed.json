@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "shelf.book.changed",
+  "description": "One book row was upserted or removed. The subject is the book's URI.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["uri", "store", "id", "op", "changed"],
+  "properties": {
+    "uri": { "type": "string" },
+    "store": { "type": "string" },
+    "id": { "type": "string" },
+    "op": { "enum": ["upserted", "removed"] },
+    "changed": { "type": "array", "items": { "type": "string" } }
+  }
+}
