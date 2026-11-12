@@ -247,7 +247,7 @@ fills:
   per provider operation, as today). `TasksProjection` and
   `KnowledgeRecords` go once the adapter stands in for them.
 
-## A script that composes a store's write (decided 2026-11-12)
+## A script that composes a store's write (decided 2026-11-12, built)
 
 oxtask surfaced it: a script runs once, before its steps, so its `result`
 and `inverse` can't use what its steps answered — a minted task id, so
@@ -261,6 +261,9 @@ undone. To build:
   result?, inverse? }`, which become the run's result and its undo
   (replacing what `transform` said). Pure, like `transform`: no writes, no
   composed commands. A run that stops partway calls no `finish`.
+  Built: `extensions-commands.md` "`finish(x)`" has the rules for the
+  inverse (a steps run checks it after finish returns; an in-transaction run,
+  which undoes itself, refuses one and rolls back) and for reads.
 - **`x["actor"]`** for `transform` and `finish`: who runs it (`{ kind:
   agent | person | system, thread?: <uri>, uri: <uri> }`), so a store
   records its author reliably.
@@ -536,7 +539,7 @@ Every open model keeps per-item values beyond its columns.
   that reverse what it did, and the bus keeps that as the run's undo — the
   same place, the same Undo, the same policy, confirm and audit as a
   built-in one. A run whose script returns no inverse has none. oxtask
-  offers one for each of its writes. (Built: the `inverse` key on a
+  offers one for each of its writes (`create` and `comment` name the row they mint from their `finish`). (Built: the `inverse` key on a
   script command's output, kept by the bus for a steps run — see
   [extensions-commands.md](./extensions-commands.md) "Running" and
   [commands.md](./commands.md) "As steps". The inverse names commands, for

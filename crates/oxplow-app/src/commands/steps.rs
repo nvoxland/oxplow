@@ -33,7 +33,7 @@ use oxplow_domain::{Actor, CommandCall, CommandError, CommandOutcome, CommandSpe
 use oxplow_runtime::policy::PolicyDecision;
 use serde_json::{json, Value};
 
-use super::compose::{Compose, SEQUENCE};
+use super::compose::{Compose, StepAnswer, SEQUENCE};
 use super::{
     finish_undo_claim_tx, log_approved_tx, proposal_store, record_tx, Command, CommandBus,
     Executed, Gates, Handler, HandlerOutput, NestedChild, Resolved, RunOrigin, TxCtx, TxHandler,
@@ -54,6 +54,13 @@ pub(super) struct Composed {
     inverse: Option<CommandCall>,
     /// The scopes composing it called: the run's.
     scopes: BTreeMap<String, u32>,
+    /// The input it was composed from, for its `finish`.
+    input: Value,
+    /// Its `finish`, called once every call landed: it sets the run's
+    /// result and (for steps) its undo.
+    finish: Option<Arc<super::compose::Finisher>>,
+    /// What `finish` reads through.
+    reads: super::compose::Reads,
 }
 
 /// One call of a [`Composed`].
@@ -177,6 +184,8 @@ struct Routed {
 pub(super) struct Router<'a> {
     pub registry: &'a BTreeMap<String, Arc<Command>>,
     pub composing: &'a super::compose::Composing<'a>,
+    /// The same, owned: a routed composition keeps it for its `finish`.
+    pub reads: &'a super::compose::Reads,
     /// What's active: each call needs what a direct one would (step 0).
     pub active: Option<&'a crate::capabilities::Active>,
     pub prechecks: Vec<Pending>,
@@ -234,7 +243,14 @@ impl Router<'_> {
                     ),
                 })
             }
-            Some(inverse) => Some(self.route_inverse(run, inverse, name, at)?),
+            Some(inverse) => Some(route_inverse(
+                self.registry,
+                self.active,
+                run,
+                inverse,
+                name,
+                at,
+            )?),
         };
         Ok(Routed {
             composed: Composed {
@@ -243,82 +259,11 @@ impl Router<'_> {
                 events: composition.events,
                 inverse,
                 scopes: composing.trace().summary(),
+                input: input.clone(),
+                finish: compose.finish.clone(),
+                reads: self.reads.clone(),
             },
             outside,
-        })
-    }
-
-    /// A script's `inverse` as the one call the run's undo is: each call
-    /// names a registered command that writes, is one `parent` may
-    /// compose and its input fits; the undo runs them later, as whoever
-    /// undoes. One call stays as it is; several are a sequence, whose
-    /// steps are `Tx` or `External` commands (a composite that leaves the
-    /// transaction can't be a step of one).
-    fn route_inverse(
-        &self,
-        parent: &RunContext,
-        calls: Vec<CommandCall>,
-        name: &str,
-        at: &str,
-    ) -> Result<CommandCall, CommandError> {
-        let several = calls.len() > 1;
-        for (i, call) in calls.iter().enumerate() {
-            let place = format!("{at}/inverse/commands/{i}");
-            let invalid = |message: String| CommandError::Invalid {
-                field: Some(format!("{place}/name")),
-                message: format!("`{name}`'s inverse: {message}"),
-            };
-            let command = self
-                .registry
-                .get(&call.name)
-                .ok_or_else(|| CommandError::Unknown {
-                    name: call.name.clone(),
-                })?;
-            super::offered(self.active, &command.spec, &format!("{place}/name"))?;
-            if let oxplow_domain::grant::Decision::Denied(why) =
-                parent.decide(oxplow_domain::grant::Need::Command(call.name.clone()))
-            {
-                return Err(CommandError::Denied {
-                    reason: format!("`{name}`'s inverse composing `{}`: {why}", call.name),
-                });
-            }
-            if command.spec.access.reads_only() {
-                return Err(invalid(format!(
-                    "`{}` only reads; an inverse runs commands that write",
-                    call.name
-                )));
-            }
-            if OWN_STORE_WRITES.contains(&call.name.as_str()) {
-                return Err(invalid(format!(
-                    "`{}` can only be composed by the extension's own script, which an undo \
-                     is not; name the extension's own command that makes the write",
-                    call.name
-                )));
-            }
-            if several && matches!(command.handler, Handler::Compose(_)) {
-                return Err(invalid(format!(
-                    "`{}` composes other commands, and an inverse of several calls runs as a \
-                     sequence; name just that one call, or only commands that don't compose",
-                    call.name
-                )));
-            }
-            command.validator.check(&call.input).map_err(|e| match e {
-                CommandError::Invalid { field, message } => CommandError::Invalid {
-                    field: Some(format!("{place}/input{}", field.unwrap_or_default())),
-                    message: format!(
-                        "`{name}`'s inverse: the input doesn't fit `{}`: {message}",
-                        call.name
-                    ),
-                },
-                other => other,
-            })?;
-        }
-        Ok(match <[CommandCall; 1]>::try_from(calls) {
-            Ok([only]) => only,
-            Err(calls) => CommandCall {
-                name: SEQUENCE.into(),
-                input: json!({ "calls": calls }),
-            },
         })
     }
 
@@ -428,6 +373,80 @@ impl Router<'_> {
     }
 }
 
+/// A script's `inverse` as the one call the run's undo is: each call
+/// names a registered command that writes, is one `parent` may
+/// compose and its input fits; the undo runs them later, as whoever
+/// undoes. One call stays as it is; several are a sequence, whose
+/// steps are `Tx` or `External` commands (a composite that leaves the
+/// transaction can't be a step of one).
+pub(super) fn route_inverse(
+    registry: &BTreeMap<String, Arc<Command>>,
+    active: Option<&crate::capabilities::Active>,
+    parent: &RunContext,
+    calls: Vec<CommandCall>,
+    name: &str,
+    at: &str,
+) -> Result<CommandCall, CommandError> {
+    let several = calls.len() > 1;
+    for (i, call) in calls.iter().enumerate() {
+        let place = format!("{at}/inverse/commands/{i}");
+        let invalid = |message: String| CommandError::Invalid {
+            field: Some(format!("{place}/name")),
+            message: format!("`{name}`'s inverse: {message}"),
+        };
+        let command = registry
+            .get(&call.name)
+            .ok_or_else(|| CommandError::Unknown {
+                name: call.name.clone(),
+            })?;
+        super::offered(active, &command.spec, &format!("{place}/name"))?;
+        if let oxplow_domain::grant::Decision::Denied(why) =
+            parent.decide(oxplow_domain::grant::Need::Command(call.name.clone()))
+        {
+            return Err(CommandError::Denied {
+                reason: format!("`{name}`'s inverse composing `{}`: {why}", call.name),
+            });
+        }
+        if command.spec.access.reads_only() {
+            return Err(invalid(format!(
+                "`{}` only reads; an inverse runs commands that write",
+                call.name
+            )));
+        }
+        if OWN_STORE_WRITES.contains(&call.name.as_str()) {
+            return Err(invalid(format!(
+                "`{}` can only be composed by the extension's own script, which an undo \
+                 is not; name the extension's own command that makes the write",
+                call.name
+            )));
+        }
+        if several && matches!(command.handler, Handler::Compose(_)) {
+            return Err(invalid(format!(
+                "`{}` composes other commands, and an inverse of several calls runs as a \
+                 sequence; name just that one call, or only commands that don't compose",
+                call.name
+            )));
+        }
+        command.validator.check(&call.input).map_err(|e| match e {
+            CommandError::Invalid { field, message } => CommandError::Invalid {
+                field: Some(format!("{place}/input{}", field.unwrap_or_default())),
+                message: format!(
+                    "`{name}`'s inverse: the input doesn't fit `{}`: {message}",
+                    call.name
+                ),
+            },
+            other => other,
+        })?;
+    }
+    Ok(match <[CommandCall; 1]>::try_from(calls) {
+        Ok([only]) => only,
+        Err(calls) => CommandCall {
+            name: SEQUENCE.into(),
+            input: json!({ "calls": calls }),
+        },
+    })
+}
+
 /// Every call of `calls`, and of the composites among them, as `actor`
 /// may run it (`may_write`: the write gate's answer): a job's tools and
 /// the agent policy — a composite never widens what its calls allow —
@@ -497,7 +516,7 @@ pub(super) fn run_composed(
             }),
         });
     }
-    run_tree(ctx, composed)
+    run_tree(ctx, &parent.id, composed)
 }
 
 /// `composed`'s calls, run on `ctx` one level deeper, checked already:
@@ -509,12 +528,17 @@ pub(super) fn run_composed(
 /// when one of those has none (it can't be undone in part); a child that
 /// changed nothing has nothing to undo. One whose every child changed
 /// nothing, with no events of its own, changed nothing.
-fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, CommandError> {
+fn run_tree(
+    ctx: &TxCtx<'_>,
+    name: &str,
+    composed: &Composed,
+) -> Result<HandlerOutput, CommandError> {
     ctx.trace.add(&composed.scopes);
     let mut children = Vec::with_capacity(composed.calls.len());
     let mut events = Vec::new();
     let mut afters: Vec<Box<dyn FnOnce() + Send + Sync>> = Vec::new();
     let mut inverses: Vec<Option<CommandCall>> = Vec::new();
+    let mut answers: Vec<StepAnswer> = Vec::new();
     for c in &composed.calls {
         c.run
             .check_authority()
@@ -529,7 +553,7 @@ fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, Comma
             trace: ctx.trace,
         };
         let out = match (&c.nested, &c.command.handler) {
-            (Some(nested), _) => run_tree(&inner, nested)?,
+            (Some(nested), _) => run_tree(&inner, &c.call.name, nested)?,
             (None, Handler::Tx(handler)) => handler(&inner, c.call.input.clone())?,
             (None, _) => {
                 return Err(CommandError::Failed {
@@ -542,6 +566,13 @@ fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, Comma
             afters.push(after);
         }
         events.extend(out.events);
+        if composed.finish.is_some() {
+            answers.push(StepAnswer {
+                name: c.call.name.clone(),
+                input: c.call.input.clone(),
+                result: out.result.clone(),
+            });
+        }
         children.push(json!({ "name": c.call.name, "result": out.result }));
         if !out.unchanged {
             inverses.push(out.inverse.filter(|_| c.command.spec.undoable));
@@ -556,8 +587,31 @@ fn run_tree(ctx: &TxCtx<'_>, composed: &Composed) -> Result<HandlerOutput, Comma
             input: json!({ "calls": calls }),
         });
     events.extend(composed.events.iter().cloned());
+    // Its `finish` runs here, still in the transaction, so a refusal rolls
+    // every child back: nothing is left landed.
+    let mut result = composed.result.clone();
+    if let Some(finish) = &composed.finish {
+        let reading = ctx.run.child(None, oxplow_domain::run::Mode::Pure);
+        // The transaction holds the database: a read through the gateway
+        // would wait on it, so `finish` has no reads here.
+        let done = finish(None, &reading, &composed.input, &answers)?;
+        ctx.trace.add(&reading.trace().summary());
+        if done.inverse.is_some() {
+            return Err(CommandError::Invalid {
+                field: Some("/inverse".into()),
+                message: format!(
+                    "`{name}`'s finish returned an `inverse`, but its calls stay in oxplow's \
+                     records, which undo themselves; drop `inverse` from finish (it can set \
+                     `result`). Nothing ran"
+                ),
+            });
+        }
+        if done.result.is_some() {
+            result = done.result;
+        }
+    }
     Ok(HandlerOutput {
-        result: json!({ "result": composed.result, "children": children }),
+        result: json!({ "result": result, "children": children }),
         inverse,
         events,
         after_commit: (!afters.is_empty()).then(|| {
@@ -616,7 +670,83 @@ fn stopped(failed: &str, landed: &[NestedChild], err: &CommandError) -> CommandE
     }
 }
 
+/// A `finish` that failed after every step landed, as the run reports
+/// it: the steps stand.
+fn finish_stopped(name: &str, landed: &[NestedChild], err: &CommandError) -> CommandError {
+    let landed: Vec<String> = landed.iter().map(|c| format!("`{}`", c.name)).collect();
+    let message = format!(
+        "`{name}`'s finish failed after {} ran — they stand, and the run can't be undone: {err}",
+        landed.join(", ")
+    );
+    match err {
+        CommandError::Unavailable { retry_after_ms, .. } => CommandError::Unavailable {
+            message,
+            retry_after_ms: *retry_after_ms,
+        },
+        _ => CommandError::Failed { message },
+    }
+}
+
 impl CommandBus {
+    /// Call a steps run's `finish` over the answers of the steps that
+    /// landed, off the async runtime (it reads through the SQL gateway as
+    /// the composer did), and check its `inverse` as routing checks a
+    /// script's (a known writing command, permitted, needs met, an input
+    /// that fits). The scopes it read are added to the run's.
+    async fn finish_steps(
+        &self,
+        run: &RunContext,
+        spec: &CommandSpec,
+        plan: &Arc<Composed>,
+        finish: &Arc<super::compose::Finisher>,
+        landed: &[NestedChild],
+        scopes: &mut BTreeMap<String, u32>,
+    ) -> Result<(Option<Value>, Option<CommandCall>), CommandError> {
+        let answers: Vec<StepAnswer> = landed
+            .iter()
+            .zip(&plan.calls)
+            .map(|(child, step)| StepAnswer {
+                name: child.name.clone(),
+                input: step.call.input.clone(),
+                result: child.result.clone(),
+            })
+            .collect();
+        let (finish, plan_c) = (finish.clone(), plan.clone());
+        let reading = run.child(None, oxplow_domain::run::Mode::Pure);
+        let reading_c = reading.clone();
+        let done = crate::extension::extension_activation::ExtensionActivation::spawn_blocking(
+            move || {
+                finish(
+                    Some(&plan_c.reads.composing()),
+                    &reading_c,
+                    &plan_c.input,
+                    &answers,
+                )
+            },
+        )
+        .await
+        .map_err(|e| CommandError::Failed {
+            message: format!("finish failed: {e}"),
+        })??;
+        oxplow_domain::scope::add_counts(scopes, reading.trace().summary());
+        let inverse = match done.inverse {
+            None => None,
+            Some(calls) => {
+                let registry = self.commands.read().commands.clone();
+                let active = self.active();
+                Some(route_inverse(
+                    &registry,
+                    active.as_ref(),
+                    run,
+                    calls,
+                    &spec.id,
+                    "",
+                )?)
+            }
+        };
+        Ok((done.result, inverse))
+    }
+
     /// Route composite `spec` (`compose`) for `input`: composed once, on a
     /// blocking thread reading through the SQL gateway, each call checked
     /// and routed. Every call inside the
@@ -638,14 +768,12 @@ impl CommandBus {
         let runtime = tokio::runtime::Handle::current();
         let routed = crate::extension::extension_activation::ExtensionActivation::spawn_blocking(
             move || {
-                let composing = super::compose::Composing {
-                    sql: &sql,
-                    db: &db,
-                    runtime: &runtime,
-                };
+                let reads = super::compose::Reads { sql, db, runtime };
+                let composing = reads.composing();
                 let mut router = Router {
                     registry: &registry,
                     composing: &composing,
+                    reads: &reads,
                     active: active.as_ref(),
                     prechecks: Vec::new(),
                     run: &run,
@@ -803,12 +931,37 @@ impl CommandBus {
             }
         }
 
-        // 3. Recorded once, with what landed (and what failed); the
-        // composite's own events only when every step landed.
+        // 3. Its `finish`, when every step landed: the run's result and
+        // undo from what the steps answered. A finish that fails (or whose
+        // inverse is refused) leaves the steps landed and fails the run.
+        let mut plan_result = plan.result.clone();
+        let mut plan_inverse = plan.inverse.clone();
+        let mut finish_failure: Option<CommandError> = None;
         if failure.is_none() {
+            if let Some(finish) = &plan.finish {
+                match self
+                    .finish_steps(run, spec, &plan, finish, &landed, &mut scopes)
+                    .await
+                {
+                    Ok((result, inverse)) => {
+                        if result.is_some() {
+                            plan_result = result;
+                        }
+                        if inverse.is_some() {
+                            plan_inverse = inverse;
+                        }
+                    }
+                    Err(err) => finish_failure = Some(err),
+                }
+            }
+        }
+
+        // 4. Recorded once, with what landed (and what failed); the
+        // composite's own events only when every step landed.
+        if failure.is_none() && finish_failure.is_none() {
             events.extend(plan.events.iter().cloned());
         }
-        let mut result = json!({ "result": plan.result, "children": &landed });
+        let mut result = json!({ "result": plan_result, "children": &landed });
         let stop = failure.as_ref().map(|(step, err)| {
             result["failed"] = json!({
                 "name": step.call.name,
@@ -821,9 +974,18 @@ impl CommandBus {
             });
             stopped(&step.call.name, &landed, err)
         });
+        let stop = stop.or_else(|| {
+            finish_failure.as_ref().map(|err| {
+                result["failed"] = json!({
+                    "name": format!("{}.finish", spec.id),
+                    "error": err.to_string(),
+                });
+                finish_stopped(&spec.id, &landed, err)
+            })
+        });
         let failed = stop.as_ref().map(ToString::to_string);
         // The script's inverse is the undo of a run that all landed.
-        let inverse = plan.inverse.clone().filter(|_| failure.is_none());
+        let inverse = plan_inverse.filter(|_| stop.is_none());
         let out = HandlerOutput {
             result: result.clone(),
             inverse: inverse.clone(),

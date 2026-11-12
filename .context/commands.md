@@ -775,6 +775,17 @@ so a script that returns both is refused at routing, naming the command —
 silently preferring one would hide the other. A run that stops partway
 keeps no inverse.
 
+**`finish`** (`Compose.finish`, a `Finisher`): a composer may also have a
+function that runs after every call landed, with each call's answer
+(`StepAnswer { name, input, result }`) — an extension script's `finish`
+(extensions-commands.md). In the transaction it runs in `steps::run_tree`
+after the children, still inside it (`TxCtx.run`'s pure child; no reads: the
+transaction holds the database), so its refusal rolls the run back; as steps it
+runs in `CommandBus::finish_steps` (`spawn_blocking`, reading through the
+`Reads` the routed `Composed` keeps), and its `inverse` goes through
+`route_inverse` — the same check as routing's — before the run is recorded; a
+failure there is recorded as an error with the steps that landed (they stand).
+
 ## Proposals: a run that needs a person who isn't there (P6b.A3)
 
 Two runs are kept for a person instead of being refused
