@@ -178,9 +178,11 @@ models:
   (it can scope by stream, drop archived items, index ids and comments).
   `search: { title, body }` on a model only generates a default
   searchable dataset `v_<ns>_search_<model>` when the resource names
-  none. Shipped extensions (foundation, bundled, oxtask, oxwiki) are
-  indexed unbounded, as foundation is today; others keep the row and
-  body bounds.
+  none. Built: shipped extensions (`bundled_extensions::BUNDLED`:
+  foundation, bundled, oxtask, oxwiki) are indexed unbounded, and their
+  `seq` is trusted for incremental reads; others keep the row and body
+  bounds. Any searchable view with a `stream_id` column scopes its hits
+  to that stream, whoever's it is (`kind_search`).
 - **The change event** is declared by the owner (`event_types:`):
   `{ uri, store, id, op: upserted | removed | renamed, changed: [column…],
   before: {col: value}, after: {col: value}, cause: trigger | reconcile

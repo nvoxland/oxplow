@@ -20,8 +20,10 @@
 //! is (re)registered, and one that is gone — its extension removed, its
 //! `searchable:` dropped — leaves the index with its entries.
 //!
-//! Another extension's resource is bounded: at most [`MAX_ROWS`] rows, each
-//! body cut at [`MAX_BODY`] bytes; oxplow-foundation's aren't. A row whose
+//! A resource of an extension that doesn't ship with oxplow is bounded: at
+//! most [`MAX_ROWS`] rows, each body cut at [`MAX_BODY`] bytes; a shipped
+//! one's (`bundled_extensions::BUNDLED`) aren't. A view with a `stream_id`
+//! column scopes each hit to its stream. A row whose
 //! `ref` isn't a URI of the resource is skipped. A
 //! recompute writes only the entries that changed, were added or went: a
 //! feed with a `version` column is planned from its versions alone and
@@ -63,8 +65,11 @@ pub(crate) struct SearchableKind {
     sql: String,
     /// The tables behind the view.
     tables: Vec<String>,
-    /// oxplow-foundation's: its rows aren't bounded.
-    core: bool,
+    /// Its extension ships with oxplow: its rows aren't bounded, and its
+    /// `seq` is trusted for incremental reads.
+    shipped: bool,
+    /// Its view has a `stream_id` column: each hit is that stream's.
+    streamed: bool,
     /// The resource as declared: a row's `ref` is one of its URIs.
     decl: oxplow_domain::uri::resources::ResourceDecl,
     /// Its view has a `version` column: a recompute is planned from it.
@@ -285,10 +290,10 @@ impl<'a> Feed<'a> {
 }
 
 impl Feed<'_> {
-    /// A row's stream: core's carry one; an extension's rows are
-    /// project-global.
+    /// A row's stream: its view's `stream_id`, when it has one; else the
+    /// rows are project-global.
     fn stream(&self) -> &'static str {
-        if self.spec.core {
+        if self.spec.streamed {
             "CAST(stream_id AS TEXT)"
         } else {
             "NULL"
@@ -299,9 +304,9 @@ impl Feed<'_> {
         format!("\"{}\"", self.spec.view.replace('"', "\"\""))
     }
 
-    /// The bound on its rows: none for core's.
+    /// The bound on its rows: none for a shipped extension's.
     fn limit(&self) -> String {
-        if self.spec.core {
+        if self.spec.shipped {
             String::new()
         } else {
             format!(" LIMIT {}", MAX_ROWS + 1)
@@ -319,7 +324,7 @@ impl Feed<'_> {
 
     fn body(&self, body: Option<String>) -> String {
         let mut body = body.unwrap_or_default();
-        if !self.spec.core && body.len() > MAX_BODY {
+        if !self.spec.shipped && body.len() > MAX_BODY {
             let mut end = MAX_BODY;
             while !body.is_char_boundary(end) {
                 end -= 1;
@@ -330,7 +335,7 @@ impl Feed<'_> {
     }
 
     fn warn_bounds(&self, rows: usize, skipped: usize) {
-        if !self.spec.core && rows > MAX_ROWS {
+        if !self.spec.shipped && rows > MAX_ROWS {
             tracing::warn!(kind = %self.kind, view = %self.spec.view, "more than {MAX_ROWS} rows; the rest aren't searchable");
         }
         if skipped > 0 {
@@ -469,7 +474,7 @@ impl Feed<'_> {
     }
 
     fn bound(&self) -> usize {
-        if self.spec.core {
+        if self.spec.shipped {
             usize::MAX
         } else {
             MAX_ROWS
@@ -499,21 +504,32 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         String,
         bool,
         bool,
+        bool,
     );
+    // The extensions that ship with oxplow, as a JSON list for the query.
+    let shipped = serde_json::to_string(
+        &crate::bundled_extensions::BUNDLED
+            .iter()
+            .map(|b| b.name)
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".into());
     let kinds: Vec<Declared> = db
-        .read(|tx| {
+        .read(move |tx| {
             let mut st = tx
                 .prepare(
-                    "SELECT k.resource, k.searchable, k.extension = 'oxplow-foundation', \
+                    "SELECT k.resource, k.searchable, \
+                            k.extension IN (SELECT value FROM json_each(?1)), \
                             (SELECT sql FROM sqlite_master WHERE type = 'view' AND name = k.searchable), \
                             EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'version'), \
                             k.params, k.additional, \
-                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'seq') \
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'seq'), \
+                            EXISTS (SELECT 1 FROM pragma_table_info(k.searchable) WHERE name = 'stream_id') \
                      FROM resource k WHERE k.searchable IS NOT NULL ORDER BY k.resource",
                 )
                 .map_err(oxplow_db::map_sql_err)?;
             let rows = st
-                .query_map([], |r| {
+                .query_map([&shipped], |r| {
                     Ok((
                         r.get(0)?,
                         r.get(1)?,
@@ -523,6 +539,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                         r.get(5)?,
                         r.get(6)?,
                         r.get(7)?,
+                        r.get(8)?,
                     ))
                 })
                 .map_err(oxplow_db::map_sql_err)?
@@ -539,7 +556,7 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
         // A view the compiler hasn't published (yet, or any more) has
         // nothing to index; it registers once the registry lists it.
         .filter_map(
-            |(kind, view, core, sql, versioned, params, additional, seq)| {
+            |(kind, view, shipped, sql, versioned, params, additional, seq, streamed)| {
                 let tables = tables.get(&view)?.clone();
                 let decl = oxplow_domain::uri::resources::ResourceDecl {
                     params: serde_json::from_str(&params).ok()?,
@@ -552,9 +569,10 @@ async fn searchable_kinds(db: &Database) -> Result<Searchable, DomainError> {
                         view,
                         sql: sql?,
                         tables,
-                        core,
+                        shipped,
+                        streamed,
                         versioned,
-                        incremental: seq && core,
+                        incremental: seq && shipped,
                         decl,
                     },
                 ))
@@ -763,6 +781,50 @@ resources:
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         hits
+    }
+
+    /// A searchable view with a `stream_id` column scopes each hit to that
+    /// stream, whoever's extension it is.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_searchable_views_stream_id_scopes_its_hits() {
+        let f = crate::test_fixtures::services_with_thread().await;
+        let svc = &f.svc;
+        let root = svc.layout.project_dir.clone();
+        acme(&root, "    searchable: found\n");
+        let manifest = root.join(".oxplow/extensions/acme/extension.yaml");
+        let text = std::fs::read_to_string(&manifest).unwrap().replace(
+            "      - { name: body, type: TEXT, doc: Its description. }\n",
+            "      - { name: body, type: TEXT, doc: Its description. }\n      - { name: stream_id, type: INT, doc: Its stream. }\n",
+        );
+        std::fs::write(&manifest, text).unwrap();
+        write(
+            &root,
+            ".oxplow/extensions/acme/datasets/found.sql",
+            "SELECT CAST(uri('acme/pr', 'id', n) AS TEXT) AS uri, title, body, CAST(1 AS INT) AS stream_id FROM ref('pr')",
+        );
+        rows(
+            &root,
+            r#"[{"n": "12", "title": "Widget frobnicator", "body": "Adds the frobnication of widgets."}]"#,
+        );
+        declare_entities(svc).await;
+        collect(svc).await;
+        crate::test_fixtures::activate_with_problems(svc).await;
+        let assets = Assets::new(svc.db.clone(), Duration::from_millis(50));
+        crate::datasets_changed::spawn(
+            svc.db.clone(),
+            Arc::new(crate::datasets_changed::DatasetWatermarks::default()),
+            svc.events.clone(),
+            assets.clone(),
+            svc.event_pump.clone(),
+            crate::pages::open_runs::PageRuns::default(),
+        );
+        assert_eq!(found(svc, "widget", &["12"]).await.len(), 1);
+        let hit = svc
+            .search_store
+            .search("frobnication", None, &[], 10)
+            .await
+            .unwrap();
+        assert_eq!(hit[0].stream_id.as_deref(), Some("1"), "{hit:?}");
     }
 
     /// P9.D3: a searchable kind's dataset rows are in the site-wide index
