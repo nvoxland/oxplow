@@ -3131,7 +3131,8 @@ pub(crate) mod tests {
             .db
             .read(|tx| {
                 tx.query_row(
-                    "SELECT namespace || ':' || name || ':' || kind FROM v_model_field_decl",
+                    "SELECT namespace || ':' || name || ':' || kind FROM v_model_field_decl \
+                     WHERE model = 'shelf/book'",
                     [],
                     |r| r.get(0),
                 )

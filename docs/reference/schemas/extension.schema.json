@@ -2497,6 +2497,13 @@
               "type": "null"
             }
           ]
+        },
+        "children": {
+          "description": "Rows that belong to one row of the model, by name.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ChildFile"
+          }
         }
       },
       "additionalProperties": false,
@@ -2521,6 +2528,69 @@
       "required": [
         "title",
         "body"
+      ]
+    },
+    "ChildFile": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "edge": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ChildEdgeFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "columns"
+      ]
+    },
+    "ChildEdgeFile": {
+      "type": "object",
+      "properties": {
+        "to": {
+          "type": "string"
+        },
+        "type_from": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "ref_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "prefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "to"
       ]
     },
     "FillFile": {
