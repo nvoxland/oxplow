@@ -4,7 +4,7 @@ namespace: oxplow
 description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
 # Its task tracker's skill is written to the agent's runtime (`/oxplow:next-task`).
-permissions: [files.read, agent.write, 'commands:oxplow.model.set_fields']
+permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields']
 # Its Work board is a custom component in TypeScript (src/board/), built
 # into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
 build: { run: "bun run build", output: dist, exclude: [node_modules] }
@@ -280,6 +280,37 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
+  # TEMPORARY (the switch renames them `oxplow.task.assign` / `.reorder`):
+  # who works on a task and its place in their queue, over the shared task
+  # model's two oxplow fields. Core's verbs of those names still serve the
+  # stores until then.
+  - name: tasks.assign
+    summary: "Assign a task to a thread, the person, or nobody, at the end of that queue. Undoable."
+    input_schema:
+      type: object
+      required: [uri]
+      properties:
+        uri: { type: string, description: "The task's URI." }
+        to: { type: [string, "null"], description: "A thread's URI (oxplow:oxplow/thread?id=thr1), oxplow:oxplow/person, or null for nobody." }
+      additionalProperties: false
+    example: {"uri": "oxplow:oxplow/task?id=tsk1", "to": "oxplow:oxplow/person"}
+    entry: handlers/assign.star
+    needs: [sql.read]
+    access: write
+  - name: tasks.reorder
+    summary: "Move a task within its assignee's queue (or among the unassigned): before or after another task there. Undoable."
+    input_schema:
+      type: object
+      required: [uri]
+      properties:
+        uri: { type: string, description: "The task's URI." }
+        before: { type: string, description: "Put it before this task (same queue)." }
+        after: { type: string, description: "Put it after this task (same queue)." }
+      additionalProperties: false
+    example: {"uri": "oxplow:oxplow/task?id=tsk1", "before": "oxplow:oxplow/task?id=tsk2"}
+    entry: handlers/reorder.star
+    needs: [sql.read]
+    access: write
   # The person's menu entry for foundation's `task.create`: an agent
   # runs foundation's; this adds the label, shortcut and form a person uses.
   - name: task.new

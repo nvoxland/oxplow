@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use oxplow_domain::CommandError;
+use rusqlite::OptionalExtension;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -15,7 +16,7 @@ use crate::models::{Cause, FieldsOutput, Models, Writer};
 
 use super::ops::Op;
 use super::util::schema;
-use super::{Handler, HandlerOutput};
+use super::{CommandCall, Handler, HandlerOutput};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -27,6 +28,11 @@ struct SetFields {
     /// Field → value, as declared in the composing extension's `fields:`;
     /// a null removes the field.
     values: serde_json::Map<String, Value>,
+    /// Whose fields these are, written only by an undo's replay of the
+    /// inverse this command recorded (its run has no composer then); a
+    /// script's own run names no one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extension: Option<String>,
 }
 
 const SET_FIELDS: &str = "oxplow.model.set_fields";
@@ -74,19 +80,43 @@ pub fn ops(services: Arc<ExtensionServices>, models: Models) -> Vec<Op> {
             "model.write",
             "set_fields",
             schema::<SetFields>(),
-            false,
+            true,
             Handler::Tx(Arc::new(move |ctx, input| {
                 let input: SetFields =
                     serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                         field: None,
                         message: e.to_string(),
                     })?;
-                let extension = services
-                    .composer_name(ctx.run, SET_FIELDS)
-                    .map_err(|reason| CommandError::Denied { reason })?;
+                let extension = match services.composer_name(ctx.run, SET_FIELDS) {
+                    Ok(name) => name,
+                    Err(_) if ctx.run.is_replaying_inverse() && input.extension.is_some() => {
+                        input.extension.clone().unwrap_or_default()
+                    }
+                    Err(reason) => return Err(CommandError::Denied { reason }),
+                };
+                let registry = models.current();
+                // The undo: the fields it names, as they stood (null where
+                // there was none), written back by the same command.
+                let inverse = previous_values(
+                    ctx.conn,
+                    &registry,
+                    &extension,
+                    &input.model,
+                    &input.uri,
+                    input.values.keys(),
+                )?
+                .map(|values| CommandCall {
+                    name: SET_FIELDS.into(),
+                    input: json!({
+                        "model": input.model,
+                        "uri": input.uri,
+                        "values": values,
+                        "extension": extension,
+                    }),
+                });
                 let applied = crate::models::apply_tx(
                     ctx.conn,
-                    &models.current(),
+                    &registry,
                     ctx.events.vocabulary,
                     &Writer {
                         extension: &extension,
@@ -130,9 +160,51 @@ pub fn ops(services: Arc<ExtensionServices>, models: Models) -> Vec<Op> {
                     > 0;
                 Ok(HandlerOutput {
                     result: json!({ "changed": changed }),
+                    inverse: if changed { inverse } else { None },
                     ..HandlerOutput::default()
                 })
             })),
         ),
     ]
+}
+
+/// The values `names` hold now in the composing extension's namespace of
+/// `model`'s fields on `uri` (JSON; null for a field with none). `None`
+/// when the extension declares no fields there: the write is refused later,
+/// with its message.
+fn previous_values<'a>(
+    conn: &rusqlite::Connection,
+    registry: &crate::models::ModelRegistry,
+    extension: &str,
+    model: &str,
+    uri: &str,
+    names: impl Iterator<Item = &'a String>,
+) -> Result<Option<serde_json::Map<String, Value>>, CommandError> {
+    let Some(decls) = registry
+        .fields
+        .iter()
+        .find(|d| d.extension == extension && d.model == model)
+    else {
+        return Ok(None);
+    };
+    let failed = |e: rusqlite::Error| CommandError::Failed {
+        message: e.to_string(),
+    };
+    let mut values = serde_json::Map::new();
+    for name in names {
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT value FROM model_field_value \
+                 WHERE model = ?1 AND uri = ?2 AND namespace = ?3 AND name = ?4",
+                rusqlite::params![model, uri, decls.namespace, name],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(failed)?;
+        let value = stored
+            .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+            .unwrap_or(Value::Null);
+        values.insert(name.clone(), value);
+    }
+    Ok(Some(values))
 }

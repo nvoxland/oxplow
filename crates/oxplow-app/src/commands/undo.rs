@@ -24,7 +24,7 @@ impl CommandBus {
             })?;
         let inverse = undoable(&row)?;
         self.run_inner(
-            &RunContext::core(actor.clone(), Mode::External),
+            &RunContext::core(actor.clone(), Mode::External).replaying_inverse(),
             &inverse.name,
             inverse.input.clone(),
             confirmed,

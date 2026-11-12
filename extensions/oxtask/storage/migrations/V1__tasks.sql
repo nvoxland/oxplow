@@ -48,6 +48,9 @@ CREATE TABLE task_comment (
   seq     INTEGER NOT NULL DEFAULT 0,
   deleted INTEGER NOT NULL DEFAULT 0
 );
+-- A task's comments are read by its id. (task_link's key already leads with
+-- task_id.)
+CREATE INDEX task_comment_task ON task_comment (task_id);
 
 -- A task row: insert, update and (soft) delete all take the next number.
 -- The guard `NEW.seq IS OLD.seq` keeps the trigger's own update (which
