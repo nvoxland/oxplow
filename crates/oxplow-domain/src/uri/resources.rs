@@ -233,9 +233,10 @@ struct Entry {
 pub struct ResourceRegistry {
     resources: BTreeMap<ResourceName, Entry>,
     wikilinks: BTreeMap<String, ResourceName>,
-    /// The active task tracker's own ids, when it declares them: what makes a
-    /// loose `tsk42` (or `ENG-12`) in text one of its items.
-    task_ids: Option<TaskIds>,
+    /// The task stores' own ids, as each declares them: what makes a loose
+    /// `tsk42` (or `ENG-12`) in text one of a store's items. The first told
+    /// of wins an id two would match.
+    task_ids: Vec<TaskIds>,
     /// The enabled knowledge stores' ids: what makes `[[<store>:<id>]]`
     /// one of their pages.
     knowledge_stores: BTreeSet<String>,
@@ -250,8 +251,8 @@ struct TaskIds {
 }
 
 impl ResourceRegistry {
-    /// This registry recognizing `provider`'s ids (`pattern`, a regex
-    /// matched whole): the active task tracker's, set by the app.
+    /// This registry also recognizing `provider`'s ids (`pattern`, a regex
+    /// matched whole), after those it already does: set by the app.
     pub fn with_task_ids(mut self, provider: &str, pattern: &str) -> Result<Self, ResourceError> {
         let whole =
             Regex::new(&format!("^(?:{pattern})$")).map_err(|e| ResourceError::BadPattern {
@@ -259,17 +260,16 @@ impl ResourceRegistry {
                 param: "id".into(),
                 error: e.to_string(),
             })?;
-        self.task_ids = Some(TaskIds {
+        self.task_ids.push(TaskIds {
             provider: provider.into(),
             whole,
         });
         Ok(self)
     }
 
-    /// This registry recognizing no task tracker's ids (none is active, or the
-    /// active one declares none).
+    /// This registry recognizing no task store's ids.
     pub fn without_task_ids(mut self) -> Self {
-        self.task_ids = None;
+        self.task_ids.clear();
         self
     }
 
@@ -289,19 +289,19 @@ impl ResourceRegistry {
         self.knowledge_stores.contains(id)
     }
 
-    /// `text`, whole, as one of the active task tracker's ids: that item's URI.
+    /// `text`, whole, as one of a task store's ids: that item's URI.
     pub fn task_uri_of(&self, text: &str) -> Option<String> {
-        let ids = self.task_ids.as_ref()?;
-        ids.whole
-            .is_match(text)
-            .then(|| super::build::task_uri(&ids.provider, text))
+        self.task_ids
+            .iter()
+            .find(|ids| ids.whole.is_match(text))
+            .map(|ids| super::build::task_uri(&ids.provider, text))
     }
 
     /// Every token of `text` that is one of the active task tracker's ids — a
     /// token being a run of letters, digits, `_` and `-` — as its item's
     /// URI, in order, each once.
     pub fn find_task_uris(&self, text: &str) -> Vec<String> {
-        if self.task_ids.is_none() {
+        if self.task_ids.is_empty() {
             return Vec::new();
         }
         let mut out: Vec<String> = Vec::new();

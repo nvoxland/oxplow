@@ -1041,14 +1041,14 @@ impl CapabilityRegistry {
             .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
 
-    fn task_ids_from(all: &[Implementation], config: &OxplowConfig) -> Option<(String, String)> {
+    fn task_ids_from(all: &[Implementation], config: &OxplowConfig) -> Vec<(String, String)> {
         let id = Self::resolve_from(all, config, "task_tracker").id;
-        let pattern = all
-            .iter()
-            .find(|i| i.capability == "task_tracker" && i.id == id)?
-            .id_pattern
-            .clone()?;
-        Some((id, pattern))
+        all.iter()
+            .find(|i| i.capability == "task_tracker" && i.id == id)
+            .and_then(|i| i.id_pattern.clone())
+            .map(|pattern| (id, pattern))
+            .into_iter()
+            .collect()
     }
 
     /// `capability`'s active implementation id under `config`.

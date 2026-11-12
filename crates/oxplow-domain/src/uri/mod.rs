@@ -821,6 +821,32 @@ mod tests {
         assert!(none.tasks.is_empty(), "{none:?}");
     }
 
+    /// Several stores' ids are recognized at once, each as its own store's
+    /// item; the first told of wins an id both would match.
+    #[test]
+    fn several_stores_ids_are_recognized_at_once() {
+        let both = resources::foundation()
+            .clone()
+            .with_task_ids("oxtask", r"tsk\d+")
+            .unwrap()
+            .with_task_ids("issues", r"[A-Z]+-\d+")
+            .unwrap()
+            .with_task_ids("shadow", r"tsk\d+")
+            .unwrap();
+        assert_eq!(
+            extract(&both, "tsk4 and ENG-2").tasks,
+            vec![
+                "oxplow:oxplow/task?id=ENG-2&provider=issues".to_string(),
+                "oxplow:oxplow/task?id=tsk4&provider=oxtask".to_string()
+            ]
+        );
+        assert!(both
+            .clone()
+            .without_task_ids()
+            .task_uri_of("tsk4")
+            .is_none());
+    }
+
     #[test]
     fn empty_body() {
         assert_eq!(extract(&tasks_kinds(), ""), ExtractedRefs::default());

@@ -2624,7 +2624,7 @@
           "default": null
         },
         "id_pattern": {
-          "description": "How its ids look in text (bare links; not used yet).",
+          "description": "How its ids look in text, a regex matched whole: a loose id that\nmatches is its store's item (a task model's stores).",
           "type": [
             "string",
             "null"

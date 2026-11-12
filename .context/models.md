@@ -160,9 +160,15 @@ models:
     columns, keyed on the vocabulary too (edges depend on which ids
     resolve).
 - **Bare links.** A loose id in text (`tsk12`, `[[slug]]`) resolves by
-  the stores' declared patterns: each `fills:` entry may declare
-  `id_pattern:` (a regex); two enabled stores whose patterns overlap is a
-  load error naming both. `[[slug]]` resolves to the store the model's
+  the stores' declared patterns: each `fills:` entry of a task model (one
+  whose resource is `oxplow/task`) may declare `id_pattern:` (a regex,
+  matched whole, checked at load). Built: the vocabulary recognizes the
+  active task tracker's pattern first (until the flip removes core's
+  tracker), then each live fill's (`ModelRegistry::task_ids`, added in
+  `PreparedVocabulary::prepare`), in load order; the first match wins an
+  id two would match (whether two regexes overlap can't be checked in
+  general, so the order is the rule). A provider fill carries its
+  instance's `id_pattern`. `[[slug]]` resolves to the store the model's
   owner names as `default_store` (bundled: `oxwiki`), else is left as
   text.
 - **Search.** The resource's `searchable: <dataset>` stays the mechanism
