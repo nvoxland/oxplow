@@ -1619,6 +1619,11 @@ impl Services {
             layer: sql.clone(),
         });
         let models = models::Models::default();
+        event_pump.register_async(providers::model_records::consumer(
+            models.clone(),
+            db.clone(),
+            event_log_store.vocabulary().clone(),
+        ));
         let collector_runner = collector_runner::CollectorRunner {
             models: models.clone(),
             project_dir: layout.project_dir.clone(),

@@ -6971,3 +6971,5 @@ async fn a_filesystem_provider_cannot_take_the_oxplow_namespace() {
         ["oxplow:extensions", "oxplow:local", "oxplow:temp"]
     );
 }
+
+mod model_records_tests;

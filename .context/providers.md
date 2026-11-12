@@ -1513,3 +1513,13 @@ Runtime catalog reads use the committed snapshot plus immediate explicit-disable
 and missing-folder revocation, without loading changed declarations. Some
 native/background and synchronous metadata entrypoints still need reader-pin
 review, and metric catalog reseeding remains separate.
+
+## The read adapter into the record models
+
+A provider instance's `task.recorded` and `knowledge.page.recorded`
+records are also written into bundled's `oxplow/task_record` and
+`oxplow/knowledge_record` models under the instance's id
+(`providers/model_records.rs`, consumer `records.models`), beside the
+`tasks.project` and `knowledge.records` projections, which go in a later
+phase. See `.context/models.md` "Providers". A provider program changes
+nothing.

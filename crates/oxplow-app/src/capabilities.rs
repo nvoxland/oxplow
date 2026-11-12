@@ -584,6 +584,11 @@ impl PreparedCapabilities {
         &self.active
     }
 
+    /// The `v_capability_provider` rows this candidate will hold.
+    pub fn rows(&self) -> &[CapabilityProvider] {
+        &self.rows
+    }
+
     pub fn recognizers(&self) -> crate::vocabulary_reactor::Recognizers {
         self.recognizers.clone()
     }
