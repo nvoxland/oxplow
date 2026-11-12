@@ -788,8 +788,7 @@ mod tests {
 
     /// A `{ files: ".oxplow/oxwiki/*.md" }` trigger is heard on a real
     /// workspace watch although `.oxplow/` ignores itself (`.oxplow/.gitignore`
-    /// is `*`): both a page in a folder that was there when the watch began
-    /// and one in a folder made afterwards.
+    /// is `*`: a page in a folder that was there when the watch began.
     #[tokio::test]
     async fn a_trigger_on_oxwiki_pages_is_heard_though_oxplow_is_ignored() {
         let dir = tempfile::tempdir().unwrap();
