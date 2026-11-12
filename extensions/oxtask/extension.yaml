@@ -41,7 +41,7 @@ fills:
     stages:
       - { id: backlog, title: Backlog, state: backlog }
       - { id: ready, title: Ready, state: todo }
-      - { id: in_progress, title: In progress, state: in_progress }
+      - { id: in_progress, title: In Progress, state: in_progress }
       - { id: blocked, title: Blocked, state: blocked }
       - { id: done, title: Done, state: done }
       - { id: canceled, title: Canceled, state: canceled }

@@ -8,14 +8,14 @@ given:
 when:
   command: oxplow.tasks.assign
   input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/person" }
-expect: { ok: true, result: { assignee: "oxplow:oxplow/person", rank: 2 } }
+expect: { ok: true, result: { assignee: "oxplow:oxplow/person", rank: 1 } }
 steps:
   - when: { sql: "SELECT title, rank FROM v_oxplow_task_next WHERE assignee = 'oxplow:oxplow/person' ORDER BY rank" }
-    expect: { rows: [{ title: A, rank: 1 }, { title: B, rank: 2 }] }
+    expect: { rows: [{ title: A, rank: 0 }, { title: B, rank: 1 }] }
   - when: { undo: oxplow.tasks.assign }
     expect: { ok: true }
   - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next ORDER BY title" }
-    expect: { rows: [{ title: A, assignee: "oxplow:oxplow/person", rank: 1 }, { title: B, assignee: null, rank: null }] }
+    expect: { rows: [{ title: A, assignee: "oxplow:oxplow/person", rank: 0 }, { title: B, assignee: null, rank: null }] }
   - when: { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: null } }
     expect: { ok: true, result: { assignee: null } }
   - when: { sql: "SELECT title, assignee FROM v_oxplow_task_next WHERE assignee IS NOT NULL" }
@@ -23,7 +23,7 @@ steps:
   - when: { undo: oxplow.tasks.assign }
     expect: { ok: true }
   - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next WHERE assignee IS NOT NULL" }
-    expect: { rows: [{ title: A, assignee: "oxplow:oxplow/person", rank: 1 }] }
+    expect: { rows: [{ title: A, assignee: "oxplow:oxplow/person", rank: 0 }] }
   - when: { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk9&provider=oxtask", to: null } }
     expect: { ok: false, refused: "no task" }
   - when: { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "thr1" } }

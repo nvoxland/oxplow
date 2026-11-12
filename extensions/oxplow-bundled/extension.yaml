@@ -107,13 +107,30 @@ datasets:
       - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
   - name: task_link_next
     version: 1
-    description: "TEMPORARY (the switch renames it `task_link`): the links of every store's tasks, in `v_task_link`'s shape (`created_at` is not kept by the model)."
+    description: "TEMPORARY (the switch renames it `task_link`): the links of every store's tasks, in `v_task_link`'s shape."
     fields:
       - { name: from_uri, type: TEXT, doc: "The task the link is from." }
       - { name: to_uri, type: TEXT, doc: "What it points at." }
       - { name: to_kind, type: TEXT, doc: "The target's resource kind." }
       - { name: link_type, type: TEXT, doc: "The link type." }
-      - { name: created_at, type: TEXT, doc: "Always NULL for now." }
+      - { name: created_at, type: TEXT, doc: "When the link was made (RFC 3339)." }
+  - name: task_comment_next
+    version: 1
+    description: "TEMPORARY (the switch renames it `task_comment`): the comments of every store's tasks, in `v_task_comment`'s shape, over the shared model's comments child. `id` is the store's own comment id (oxtask: `cmt3`; core's was `oxtask_note:3`)."
+    fields:
+      - { name: id, type: TEXT, doc: "The store's own id for the comment." }
+      - { name: uri, type: TEXT, doc: "The task it's on." }
+      - { name: body, type: TEXT, doc: "Markdown body." }
+      - { name: author, type: TEXT, doc: "Who wrote it, as the store records it (oxtask: a thread's or the person's URI)." }
+      - { name: created_at, type: TEXT, doc: "RFC 3339 timestamp." }
+  - name: search_task_next
+    version: 1
+    description: "TEMPORARY (the switch renames it `search_task`): what site search indexes for each task, in `v_search_task`'s shape, over `task_next`: its own id, its body, then its comments; tasks assigned to an archived thread or stream are left out."
+    fields:
+      - { name: uri, type: TEXT, doc: "The task's canonical ref: what a hit opens." }
+      - { name: title, type: TEXT, doc: "The task's title." }
+      - { name: body, type: TEXT, doc: "Its own id (so typing `tsk42` finds it), then its body, then its comments." }
+      - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
   - name: thread_tasks
     version: 9
     description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children); Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared. It reads no request, so it changes only when tasks, their requests' links or the thread's knowledge touches do; what a thread's request is doing now is v_request's (the Work panel reads it for its own thread)."
@@ -188,6 +205,7 @@ models:
         columns:
           to: uri
           type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+          at: time
         edge: { to: to, type_from: type, prefix: "task_record_link:" }
       comments:
         key: [id]
@@ -475,6 +493,33 @@ collectors:
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
         LEFT JOIN v_thread th ON th.id = t.thread_id
+       WHERE t.id = :turn_id
+    sync: upsert
+  - id: oxplow.request_task_prompt
+    doc: "TEMPORARY (the flip's `oxplow.request_task` family): links the request of a person's prompt to the tasks the prompt names (basis `prompt`), from the edges the prompt logging records."
+    runtime: starlark
+    entry: collectors/request/prompt_links.star
+    on: [agent.prompt.submitted]
+    input: |
+      SELECT r.uri AS request, th.uri AS thread_uri, p.target_uri AS task
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+        JOIN v_thread th ON th.id = t.thread_id
+        JOIN v_page_ref p ON p.source_uri = t.uri AND p.ref_type = 'prompt_mention'
+                         AND p.target_resource = 'oxplow/task'
+       WHERE t.id = :turn_id AND t.source = 'person'
+    sync: upsert
+  - id: oxplow.request_task_assigned
+    doc: "TEMPORARY (the flip's `oxplow.request_task` family): links the request of a turn that ended to the tasks in progress and assigned to its thread (basis `assigned`)."
+    runtime: starlark
+    entry: collectors/request/assigned_links.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request, th.uri AS thread_uri, w.uri AS task
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+        JOIN v_thread th ON th.id = t.thread_id
+        JOIN v_oxplow_task_next w ON w.assignee = th.uri AND w.state = 'in_progress'
        WHERE t.id = :turn_id
     sync: upsert
   # What the project knows: the pages it keeps, restated whenever a page is

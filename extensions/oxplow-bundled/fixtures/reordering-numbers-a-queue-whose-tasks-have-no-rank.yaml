@@ -16,10 +16,10 @@ given:
 when:
   command: oxplow.tasks.reorder
   input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
-expect: { ok: true, result: { rank: 1 } }
+expect: { ok: true, result: { rank: 0 } }
 steps:
   - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY rank" }
-    expect: { rows: [{ title: C, rank: 1 }, { title: A, rank: 2 }, { title: B, rank: 3 }] }
+    expect: { rows: [{ title: C, rank: 0 }, { title: A, rank: 1 }, { title: B, rank: 2 }] }
   - when: { undo: oxplow.tasks.reorder }
     expect: { ok: true }
   - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY title" }

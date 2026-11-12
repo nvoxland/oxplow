@@ -8,7 +8,7 @@
 STAGES = {
     "backlog": ["Backlog", "backlog"],
     "ready": ["Ready", "todo"],
-    "in_progress": ["In progress", "in_progress"],
+    "in_progress": ["In Progress", "in_progress"],
     "blocked": ["Blocked", "blocked"],
     "done": ["Done", "done"],
     "canceled": ["Canceled", "canceled"],
@@ -20,10 +20,10 @@ def task_uri(id):
 def sets(where, params):
     links = {}
     for r in scope("store.sql", {
-        "sql": "SELECT task_id, to_uri, type FROM task_link WHERE deleted = 0 AND task_id IN (SELECT id FROM task WHERE " + where + ") ORDER BY seq",
+        "sql": "SELECT task_id, to_uri, type, created_at FROM task_link WHERE deleted = 0 AND task_id IN (SELECT id FROM task WHERE " + where + ") ORDER BY seq",
         "params": params,
     })["rows"]:
-        links.setdefault(r["task_id"], []).append({"to": r["to_uri"], "type": r["type"]})
+        links.setdefault(r["task_id"], []).append({"to": r["to_uri"], "type": r["type"], "at": r["created_at"]})
     comments = {}
     for r in scope("store.sql", {
         "sql": "SELECT id, task_id, author, author_kind, at, body FROM task_comment WHERE deleted = 0 AND task_id IN (SELECT id FROM task WHERE " + where + ") ORDER BY n",

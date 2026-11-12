@@ -74,6 +74,7 @@ struct Link {
     task_id: String,
     to_uri: String,
     link_type: String,
+    created_at: String,
 }
 
 struct Note {
@@ -428,7 +429,9 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
     let mut links = Vec::new();
     {
         let mut st = tx
-            .prepare("SELECT from_item_id, to_uri, link_type FROM oxtask_link ORDER BY id")
+            .prepare(
+                "SELECT from_item_id, to_uri, link_type, created_at FROM oxtask_link ORDER BY id",
+            )
             .map_err(sql)?;
         let rows = st
             .query_map([], |r| {
@@ -436,6 +439,7 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
                     task_id: format!("tsk{}", r.get::<_, i64>(0)?),
                     to_uri: r.get(1)?,
                     link_type: r.get(2)?,
+                    created_at: r.get(3)?,
                 })
             })
             .map_err(sql)?;
@@ -622,8 +626,8 @@ fn write_store(tx: &Transaction<'_>, moved: &Moved) -> rusqlite::Result<()> {
     }
     for l in &moved.links {
         tx.execute(
-            "INSERT INTO task_link (task_id, to_uri, type) VALUES (?1, ?2, ?3)",
-            params![l.task_id, l.to_uri, l.link_type],
+            "INSERT INTO task_link (task_id, to_uri, type, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![l.task_id, l.to_uri, l.link_type, l.created_at],
         )?;
     }
     for n in &moved.notes {
@@ -858,12 +862,18 @@ mod tests {
             (c3.as_str(), u3.as_str(), pr.as_str()),
             ("c3", "u3", "medium")
         );
-        let link: (String, String, String) = s
-            .query_row("SELECT task_id, to_uri, type FROM task_link", [], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-            })
+        let link: (String, String, String, String) = s
+            .query_row(
+                "SELECT task_id, to_uri, type, created_at FROM task_link",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
             .unwrap();
-        assert_eq!(link, ("tsk3".into(), task_uri(2), "blocks".into()));
+        // The link keeps the time core made it.
+        assert_eq!(
+            link,
+            ("tsk3".into(), task_uri(2), "blocks".into(), "l".into())
+        );
         let notes: Vec<NoteRow> = s
             .prepare(
                 "SELECT n, task_id, author, at, body, author_kind FROM task_comment ORDER BY n",

@@ -2,7 +2,7 @@
 # assignee's queue (or among the unassigned): before or after another task
 # of that queue. Its rank goes between the neighbours'; when a neighbour
 # has no rank yet (the queue came from starts, not from this command) the
-# whole queue is numbered 1, 2, … in its shown order, the task in its new
+# whole queue is numbered 0, 1, … in its shown order, the task in its new
 # place. The undo writes every rank it changed back.
 # (The switch from the core verb renames it `oxplow.task.reorder`.)
 
@@ -45,7 +45,7 @@ def transform(x):
     ranked = (slot == 0 or low != None) and (slot == len(others) or high != None)
     if ranked:
         if low == None and high == None:
-            rank = 1.0
+            rank = 0.0
         elif low == None:
             rank = high - 1.0
         elif high == None:
@@ -57,8 +57,8 @@ def transform(x):
         order = others[:slot] + [{"uri": i["uri"], "rank": old}] + others[slot:]
         new = []
         for n in range(len(order)):
-            if order[n]["rank"] != n + 1.0:
-                new.append((order[n]["uri"], order[n]["rank"], n + 1.0))
+            if order[n]["rank"] != float(n):
+                new.append((order[n]["uri"], order[n]["rank"], float(n)))
     if not new or (len(new) == 1 and new[0][1] == new[0][2]):
         return {"commands": [], "result": {"uri": i["uri"], "rank": old}}
     return {

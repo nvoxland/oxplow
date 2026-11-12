@@ -3,7 +3,7 @@
 -- store's own fields; assignee and rank are oxplow's. Fields are read by
 -- joining the field table (its key and value index), never through the
 -- model's per-row `fields` JSON, which this query leaves unread.
-SELECT r.uri, r.store AS provider, r.id AS native_id, r.title, r.body, r.state,
+SELECT r.uri, r.store AS provider, r.id AS native_id, r.title, CAST(coalesce(r.body, '') AS TEXT) AS body, r.state,
        r.stage, r.stage_title,
        (SELECT CAST(json_group_object(n.name, json(n.value)) AS TEXT)
           FROM ref('task_record_field') n
