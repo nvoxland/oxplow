@@ -1,7 +1,7 @@
-//! Commands on shared models (`.context/models.md`) that an extension's
-//! script composes: `oxplow.model.set_fields`, its own fields on another
-//! extension's items. They run as the composing extension and refuse any
-//! other caller, in the command's transaction.
+//! Commands on shared models (`.context/models.md`):
+//! `oxplow.model.set_fields`, an extension's own fields on another's items
+//! (composed by its script, run as it, refused to any other caller), and
+//! `oxplow.refs.verify`, re-pinning a row's pinned refs to now (anyone may).
 
 use std::sync::Arc;
 
@@ -31,54 +31,93 @@ struct SetFields {
 
 const SET_FIELDS: &str = "oxplow.model.set_fields";
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct VerifyRefs {
+    /// What pins them: a shared model row's URI.
+    uri: String,
+    /// The files to re-pin; every file it pins when left out.
+    #[serde(default)]
+    files: Option<Vec<String>>,
+}
+
 pub fn ops(services: Arc<ExtensionServices>, models: Models) -> Vec<Op> {
-    vec![Op::new(
+    let verify = Op::new(
         "model.write",
-        "set_fields",
-        schema::<SetFields>(),
+        "verify_refs",
+        schema::<VerifyRefs>(),
         false,
-        Handler::Tx(Arc::new(move |ctx, input| {
-            let input: SetFields =
+        Handler::Tx(Arc::new(|ctx, input| {
+            let input: VerifyRefs =
                 serde_json::from_value(input).map_err(|e| CommandError::Invalid {
                     field: None,
                     message: e.to_string(),
                 })?;
-            let extension = services
-                .composer_name(ctx.run, SET_FIELDS)
-                .map_err(|reason| CommandError::Denied { reason })?;
-            let applied = crate::models::apply_tx(
+            let verified = oxplow_db::model_store::verify_pins_tx(
                 ctx.conn,
-                &models.current(),
-                ctx.events.vocabulary,
-                &Writer {
-                    extension: &extension,
-                    source: &ctx.events.source,
-                    cause: ctx.events.cause.clone(),
-                    anchors: Default::default(),
-                    why: Cause::Trigger,
-                },
-                &[],
-                &[FieldsOutput {
-                    model: input.model.clone(),
-                    uri: input.uri,
-                    values: input.values,
-                }],
+                &input.uri,
+                input.files.as_deref(),
             )
-            .map_err(|message| CommandError::Invalid {
-                field: None,
-                message,
+            .map_err(|e| CommandError::Invalid {
+                field: Some("/files".into()),
+                message: e.to_string(),
             })?;
-            let changed = applied
-                .counts
-                .get(&input.model)
-                .and_then(|c| c.get("fields"))
-                .copied()
-                .unwrap_or(0)
-                > 0;
             Ok(HandlerOutput {
-                result: json!({ "changed": changed }),
+                result: json!({ "verified": verified }),
                 ..HandlerOutput::default()
             })
         })),
-    )]
+    );
+    vec![
+        verify,
+        Op::new(
+            "model.write",
+            "set_fields",
+            schema::<SetFields>(),
+            false,
+            Handler::Tx(Arc::new(move |ctx, input| {
+                let input: SetFields =
+                    serde_json::from_value(input).map_err(|e| CommandError::Invalid {
+                        field: None,
+                        message: e.to_string(),
+                    })?;
+                let extension = services
+                    .composer_name(ctx.run, SET_FIELDS)
+                    .map_err(|reason| CommandError::Denied { reason })?;
+                let applied = crate::models::apply_tx(
+                    ctx.conn,
+                    &models.current(),
+                    ctx.events.vocabulary,
+                    &Writer {
+                        extension: &extension,
+                        source: &ctx.events.source,
+                        cause: ctx.events.cause.clone(),
+                        anchors: Default::default(),
+                        why: Cause::Trigger,
+                    },
+                    &[],
+                    &[FieldsOutput {
+                        model: input.model.clone(),
+                        uri: input.uri,
+                        values: input.values,
+                    }],
+                )
+                .map_err(|message| CommandError::Invalid {
+                    field: None,
+                    message,
+                })?;
+                let changed = applied
+                    .counts
+                    .get(&input.model)
+                    .and_then(|c| c.get("fields"))
+                    .copied()
+                    .unwrap_or(0)
+                    > 0;
+                Ok(HandlerOutput {
+                    result: json!({ "changed": changed }),
+                    ..HandlerOutput::default()
+                })
+            })),
+        ),
+    ]
 }

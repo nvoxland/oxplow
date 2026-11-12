@@ -1244,6 +1244,11 @@ commands:
     scope: model.write
     op: set_fields
     example: {"model": "shelf/book", "uri": "oxplow:shelf/book?id=dune&store=shelf-folder", "values": {"score": 9}}
+  - name: refs.verify
+    summary: "Re-pin a shared model item's pinned refs (`markdown: { pins: true }`) to the latest snapshot, saying what it says of them still holds: the named files (each cited, or under a cited directory), or every pinned file. The item's store isn't written. Returns `{ verified }`."
+    scope: model.write
+    op: verify_refs
+    example: {"uri": "oxplow:shelf/book?id=dune&store=shelf-folder", "files": ["src/a.rs"]}
   # extensions.check
   - name: extension.draft_status
     summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."

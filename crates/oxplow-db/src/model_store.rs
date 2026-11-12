@@ -347,6 +347,80 @@ pub fn replace_field_decls_tx(
     Ok(())
 }
 
+/// Re-pin `source`'s pinned refs to now (`oxplow.refs.verify`): `files`,
+/// or every file it pins when `None`. Each must be a file it pins or be
+/// under a directory it pins (one under a directory becomes a pin of its
+/// own). Nothing reaches the store. The paths re-pinned; refused for a
+/// source with no pinned refs (its body isn't projected yet).
+pub fn verify_pins_tx(
+    conn: &rusqlite::Connection,
+    source: &str,
+    files: Option<&[String]>,
+) -> Result<Vec<String>, DomainError> {
+    use crate::page_ref_projections::{RT_DIR_PIN, RT_FILE_PIN};
+    use crate::page_ref_store::{upsert_edge_tx, PageRefEdge};
+    let pinned: Vec<(String, String)> = conn
+        .prepare(
+            "SELECT target_uri, ref_type FROM page_ref
+             WHERE source_uri = ?1 AND ref_type IN (?2, ?3)",
+        )
+        .and_then(|mut st| {
+            st.query_map(params![source, RT_FILE_PIN, RT_DIR_PIN], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(map_sql_err)?;
+    if pinned.is_empty() {
+        return Err(invalid(format!(
+            "`{source}` pins no files yet (has its body been read?)"
+        )));
+    }
+    let path_of = |uri: &str| {
+        oxplow_domain::uri::build::file_of_uri(uri)
+            .ok()
+            .map(|f| f.path)
+    };
+    let pinned_files: Vec<String> = pinned
+        .iter()
+        .filter(|(_, t)| t == RT_FILE_PIN)
+        .filter_map(|(u, _)| path_of(u))
+        .collect();
+    let dirs: Vec<String> = pinned
+        .iter()
+        .filter(|(_, t)| t == RT_DIR_PIN)
+        .filter_map(|(u, _)| dir_path(u))
+        .collect();
+    let wanted: Vec<String> = files.map_or_else(|| pinned_files.clone(), <[String]>::to_vec);
+    let outside: Vec<&str> = wanted
+        .iter()
+        .filter(|p| {
+            !pinned_files.contains(p) && !crate::knowledge_record::path_under_any_dir(p, &dirs)
+        })
+        .map(String::as_str)
+        .collect();
+    if !outside.is_empty() {
+        return Err(invalid(format!(
+            "`{source}` neither cites nor is under a cited directory of: {}",
+            outside.join(", ")
+        )));
+    }
+    let pin = crate::knowledge_record::pin_tx(conn)?;
+    let Some(snapshot) = pin.snapshot_id else {
+        return Err(invalid("there is no snapshot to pin to yet".into()));
+    };
+    for path in &wanted {
+        let edge = PageRefEdge::new(
+            source,
+            oxplow_domain::uri::build::file_uri(path),
+            RT_FILE_PIN,
+        )
+        .with_version(snapshot, pin.revision.clone(), pin.revision.is_some());
+        upsert_edge_tx(conn, &edge)?;
+    }
+    Ok(wanted)
+}
+
 /// Whether `decl` is a model the store can keep: its names, key and
 /// columns (what a manifest's `models:` is checked against).
 pub fn check_decl(decl: &ModelDecl) -> Result<(), DomainError> {
@@ -1008,6 +1082,11 @@ fn id_text(v: rusqlite::types::Value) -> String {
     }
 }
 
+/// A directory URI's path.
+fn dir_path(uri: &str) -> Option<String> {
+    oxplow_domain::uri::build::param_of(uri, oxplow_domain::uri::resources::DIR, "path").ok()
+}
+
 /// Whether `decl` pins its markdown refs.
 fn pins(decl: &ModelDecl) -> bool {
     decl.columns
@@ -1118,11 +1197,7 @@ fn restate_edges_tx(
         let dirs: Vec<String> = edges
             .iter()
             .filter(|e| e.ref_type == RT_DIR_PIN)
-            .filter_map(|e| {
-                oxplow_domain::uri::build::file_of_uri(&e.target)
-                    .ok()
-                    .map(|f| f.path)
-            })
+            .filter_map(|e| dir_path(&e.target))
             .collect();
         for kept in existing {
             let cited = edges
@@ -2227,5 +2302,56 @@ mod tests {
             .await
             .unwrap();
         assert_eq!((title.as_str(), body.as_str()), ("Dune", "A desert."));
+    }
+
+    /// Verify re-pins a source's pinned files to the latest snapshot, and a
+    /// file under a pinned directory becomes a pin of its own; a file it
+    /// doesn't cite is refused, naming it.
+    #[tokio::test]
+    async fn verify_re_pins_what_a_source_cites() {
+        let db = Database::in_memory();
+        let first = snapshot(&db).await;
+        write_decl(
+            &db,
+            pinned_book(),
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[file:src/a.rs]] and [[dir:docs]]"}),
+            )],
+        )
+        .await;
+        let later = snapshot(&db).await;
+        let verified = db
+            .transaction(|tx| verify_pins_tx(tx, B1, None))
+            .await
+            .unwrap();
+        assert_eq!(verified, vec!["src/a.rs".to_string()]);
+        let under = db
+            .transaction(|tx| verify_pins_tx(tx, B1, Some(&["docs/x.md".to_string()])))
+            .await
+            .unwrap();
+        assert_eq!(under, vec!["docs/x.md".to_string()]);
+        let pins: Vec<(String, String, Option<i64>)> = edges(&db, B1)
+            .await
+            .into_iter()
+            .filter(|e| e.1 == "file_pin")
+            .collect();
+        assert_eq!(
+            pins,
+            vec![
+                (
+                    "oxplow:oxplow/file?path=docs/x.md".to_string(),
+                    "file_pin".to_string(),
+                    Some(later)
+                ),
+                (A_RS.to_string(), "file_pin".to_string(), Some(later)),
+            ]
+        );
+        assert_ne!(first, later);
+        let err = db
+            .transaction(|tx| verify_pins_tx(tx, B1, Some(&["src/zzz.rs".to_string()])))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("src/zzz.rs"), "{err}");
     }
 }

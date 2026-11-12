@@ -374,7 +374,7 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Write the composing extension's own fields on a shared model's items (`fields:`).",
+        summary: "Write on a shared model's items: the composing extension's own fields (`fields:`), and re-pin an item's pinned refs.",
     },
     Scope {
         id: "pages.author",
