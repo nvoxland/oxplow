@@ -5,7 +5,7 @@ steps:
   - when: { collector: shelf_db/books, trigger: sqlite }
     expect: { ok: true, result: { "shelf/book.upserted": 1 } }
   - when: { sql: "SELECT cursor_json FROM v_collector_run WHERE owner = 'shelf_db' AND id = 'books'" }
-    expect: { rows: [{ cursor_json: '{"rowid":1}' }] }
+    expect: { rows: [{ cursor_json: '{"seq":1}' }] }
   - when:
       sql: |
         SELECT id, title, author, store,

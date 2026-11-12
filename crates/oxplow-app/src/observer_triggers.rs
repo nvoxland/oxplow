@@ -786,6 +786,51 @@ mod tests {
         poll.abort();
     }
 
+    /// A `{ files: ".oxplow/oxwiki/*.md" }` trigger is heard on a real
+    /// workspace watch although `.oxplow/` ignores itself (`.oxplow/.gitignore`
+    /// is `*`): both a page in a folder that was there when the watch began
+    /// and one in a folder made afterwards.
+    #[tokio::test]
+    async fn a_trigger_on_oxwiki_pages_is_heard_though_oxplow_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".oxplow/oxwiki")).unwrap();
+        std::fs::write(root.join(".oxplow/.gitignore"), "*\n").unwrap();
+        let watch = oxplow_fs_watch::FsWatcher::watch_workspace(
+            &root,
+            oxplow_fs_watch::WorkspaceFilter::for_project(
+                &root,
+                Vec::<String>::new(),
+                Vec::<String>::new(),
+            ),
+        )
+        .unwrap();
+        let globs = vec![".oxplow/oxwiki/*.md".to_string()];
+        let (send, mut receive) = mpsc::unbounded_channel();
+        let follow = tokio::spawn(follow_files(
+            watch.subscribe_to(scope_of(&globs)),
+            root.clone(),
+            matcher(&globs).unwrap(),
+            send,
+        ));
+        // Let the watch settle before the first write.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        std::fs::write(root.join(".oxplow/oxwiki/home.md"), "# Home").unwrap();
+        let heard = tokio::time::timeout(Duration::from_secs(15), receive.recv())
+            .await
+            .expect("a page in the existing folder is heard");
+        match heard {
+            Some(RunTrigger::Files(changes)) => {
+                assert_eq!(
+                    changes.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+                    [".oxplow/oxwiki/home.md"]
+                );
+            }
+            other => panic!("expected a files trigger, got {other:?}"),
+        }
+        follow.abort();
+    }
+
     const HEAD: &str =
         "manifest: 2\nname: shelf\nintent: { purpose: t, origin: null, examples: [] }\n";
 
