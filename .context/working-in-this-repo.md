@@ -130,10 +130,10 @@ cargo run -q -p oxplow-dev -- --help
 extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
 fields (`.context/models.md` "The switch"). Run it with oxplow quit, after
 the new binary booted once on the project (so bundled's `task_record` model
-table and `request_task_next` entity table exist). Each task keeps its
+and `request_task` model tables exist). Each task keeps its
 number (so `tsk<N>` and its URI), links and notes go to the store, an
 assignment becomes the `oxplow` fields `assignee` and `rank`, and request
-links go to the entity (basis `command` becomes `edited`). It reads core's
+links go to the `oxplow/request_task` model's table (basis `command` becomes `edited`; core's `at` and `turn_id` are kept). It reads core's
 tables and deletes nothing there; it refuses when the store already has
 tasks; `--dry-run` does it all and keeps nothing.
 
@@ -142,8 +142,8 @@ The move runs as part of the flip (quit oxplow, build the flip, move
 instance lock as `extension deploy` does and refuses while oxplow runs.
 The main database commits first (every write in it is idempotent), then
 the store file; `--replace` deletes the store file, the `oxplow`-namespace
-fields of the `oxplow/task_record` model and every row of the request-link
-entity first, in the same transactions, so a move made earlier can be
+fields of the `oxplow/task_record` model and every row of the
+`oxplow/request_task` model (store `oxplow`) first, in the same transactions, so a move made earlier can be
 redone (with `--dry-run` it works on a scratch file and keeps nothing).
 Its rules:
 
@@ -159,8 +159,8 @@ Its rules:
 - **`closed_at`** is core's `task` row's `closed_at` for a done or canceled
   task (the old `completed_at` was set for done only), else the task's
   `updated_at`; an open task has none.
-- **Dropped for now:** the request links' `at` and `turn_id` (the entity
-  keeps request, task, basis and thread).
+- **Request links** keep core's `at` and `turn_id`; the thread becomes a
+  thread URI. They are rows of a model, so a later shape change keeps them.
 
 `extension status` and `extension deploy` change what oxplow runs from
 outside it. Boot deploys nothing, so they are how a checkout gets its

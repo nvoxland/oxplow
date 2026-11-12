@@ -2,8 +2,8 @@
 //! the oxtask extension's own file and bundled's fields.
 //!
 //! Run with oxplow quit, after the new binary has booted once (so the
-//! migrations ran and bundled's `task_record` model and `request_task_next`
-//! entity tables exist). Core's rows (`oxtask`, `oxtask_link`,
+//! migrations ran and bundled's `task_record` and `request_task` model
+//! tables exist). Core's rows (`oxtask`, `oxtask_link`,
 //! `oxtask_note`, `task_assignment`, `request_task`) are only read; nothing
 //! of core's is deleted.
 //!
@@ -14,7 +14,8 @@
 //!   number).
 //! - Assignments are `oxplow` fields of the task (`assignee`, `rank`),
 //!   stored as `oxplow.model.set_fields` stores them.
-//! - Request links are rows of bundled's `request_task_next` entity (an old
+//! - Request links are rows of bundled's `request_task` model, store
+//!   `oxplow`, with core's `at` and `turn_id` (an old
 //!   basis `command` is `edited` there).
 //!
 //! Who wrote what comes from the event log, as the people-facing screens
@@ -28,8 +29,8 @@
 //! The move takes the instance lock (it refuses while oxplow runs). The
 //! main database commits first (every write in it is idempotent), then the
 //! store; a second run is refused once the store has tasks, unless
-//! `--replace`: that deletes the store file and the fields and entity rows
-//! an earlier run wrote, then moves again.
+//! `--replace`: that deletes the store file and the fields and request-link
+//! rows an earlier run wrote, then moves again.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -50,7 +51,8 @@ const STORE: &str = "oxtask";
 const TASK_RESOURCE: &str = "oxplow/task";
 const MODEL: &str = "oxplow/task_record";
 const MODEL_TABLE: &str = "model__oxplow__task_record";
-const ENTITY_TABLE: &str = "ext__oxplow__request_task_next";
+const LINK_MODEL_TABLE: &str = "model__oxplow__request_task";
+const LINK_RESOURCE: &str = "oxplow/request_task";
 const PERSON: &str = "oxplow:oxplow/person";
 
 struct Task {
@@ -245,9 +247,9 @@ fn sql(e: rusqlite::Error) -> DomainError {
 
 /// Read core's tables and write the fields and the entity rows.
 fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> {
-    if !table_exists(tx, MODEL_TABLE)? || !table_exists(tx, ENTITY_TABLE)? {
+    if !table_exists(tx, MODEL_TABLE)? || !table_exists(tx, LINK_MODEL_TABLE)? {
         return Err(DomainError::Invalid(
-            "bundled's task model or its request_task_next entity is missing: \
+            "bundled's task or request_task model is missing: \
              boot the new oxplow once first, with oxplow-bundled enabled"
                 .into(),
         ));
@@ -260,8 +262,11 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
             [MODEL],
         )
         .map_err(sql)?;
-        tx.execute(&format!("DELETE FROM {ENTITY_TABLE}"), [])
-            .map_err(sql)?;
+        tx.execute(
+            &format!("DELETE FROM {LINK_MODEL_TABLE} WHERE store = 'oxplow'"),
+            [],
+        )
+        .map_err(sql)?;
     }
     // Who made what, from the event log (`event_log_type_seq`): the thread of
     // a task's `task.created` event, and of each `task.commented` event by the
@@ -518,12 +523,12 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
         }
     }
 
-    // Request links: `command` is `edited` in bundled's entity.
+    // Request links: `command` is `edited` in bundled's model.
     let mut requests: BTreeMap<String, usize> = BTreeMap::new();
     {
         let mut st = tx
             .prepare(
-                "SELECT rt.request_id, rt.task_uri, rt.basis, r.thread_id
+                "SELECT rt.request_id, rt.task_uri, rt.basis, r.thread_id, rt.turn_id, rt.at
                    FROM request_task rt JOIN request r ON r.id = rt.request_id
                   ORDER BY rt.request_id, rt.task_uri, rt.basis",
             )
@@ -535,11 +540,13 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, i64>(3)?,
+                    r.get::<_, Option<i64>>(4)?,
+                    r.get::<_, String>(5)?,
                 ))
             })
             .map_err(sql)?;
         let rows: Vec<_> = rows.collect::<Result<_, _>>().map_err(sql)?;
-        for (request, task, basis, thread) in rows {
+        for (request, task, basis, thread, turn, at) in rows {
             let request = oxplow_domain::uri::build::of(
                 "oxplow/request",
                 &[("id", &format!("req{request}"))],
@@ -549,17 +556,27 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
             } else {
                 basis
             };
+            // A row as a collector's upsert writes it (no change events): the
+            // model's table, store `oxplow`, named by its key.
+            let key = format!("{request}|{task}|{basis}");
             tx.execute(
                 &format!(
-                    "INSERT OR REPLACE INTO {ENTITY_TABLE} (key, request, task, basis, thread_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5)"
+                    "INSERT OR REPLACE INTO {LINK_MODEL_TABLE}
+                       (uri, store, key, request, task, basis, thread, turn_id, at, written_at)
+                     VALUES (?1, 'oxplow', ?2, ?3, ?4, ?5, ?6, ?7, ?8, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
                 ),
                 params![
-                    format!("{request}|{task}|{basis}"),
+                    oxplow_domain::uri::build::of(
+                        LINK_RESOURCE,
+                        &[("store", "oxplow"), ("id", &key)]
+                    ),
+                    key,
                     request,
                     task,
                     basis,
-                    thread
+                    format!("oxplow:oxplow/thread?id=thr{thread}"),
+                    turn,
+                    at
                 ],
             )
             .map_err(sql)?;
@@ -664,7 +681,7 @@ mod tests {
         let c = main_db(dir.path());
         c.execute_batch(&format!(
             "CREATE TABLE {MODEL_TABLE} (uri TEXT PRIMARY KEY);
-             CREATE TABLE {ENTITY_TABLE} (key TEXT PRIMARY KEY, request TEXT, task TEXT, basis TEXT, thread_id INTEGER);"
+             CREATE TABLE {LINK_MODEL_TABLE} (uri TEXT PRIMARY KEY, store TEXT NOT NULL, key TEXT, request TEXT, task TEXT, basis TEXT, thread TEXT, turn_id INTEGER, at TEXT, written_at TEXT NOT NULL, removed_at TEXT, refs TEXT);"
         ))
         .unwrap();
         dir
@@ -757,7 +774,7 @@ mod tests {
                ('{u2}', 'oxplow:oxplow/thread?id=thr7', 2.0, 'a'),
                ('{u3}', NULL, 1.5, 'a');
              INSERT INTO request_task (request_id, task_uri, basis, turn_id, at) VALUES
-               (11, '{u3}', 'command', NULL, 'r1'),
+               (11, '{u3}', 'command', 5, 'r1'),
                (12, '{u3}', 'assigned', NULL, 'r2'),
                (12, '{u2}', 'transition', NULL, 'r3'),
                (13, '{u6}', 'command', NULL, 'c6'),
@@ -924,13 +941,23 @@ mod tests {
                 (task_uri(3), "rank".into(), "1.5".into()),
             ]
         );
-        let entity: Vec<(String, String, String, String, i64)> = m
+        type Link = (String, String, String, String, String, Option<i64>, String);
+        let entity: Vec<Link> = m
             .prepare(&format!(
-                "SELECT key, request, task, basis, thread_id FROM {ENTITY_TABLE} ORDER BY key"
+                "SELECT key, request, task, basis, thread, turn_id, at FROM {LINK_MODEL_TABLE}
+                  WHERE store = 'oxplow' ORDER BY key"
             ))
             .unwrap()
             .query_map([], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
             })
             .unwrap()
             .collect::<Result<_, _>>()
@@ -938,17 +965,30 @@ mod tests {
         let req =
             |n: i64| oxplow_domain::uri::build::of("oxplow/request", &[("id", &format!("req{n}"))]);
         assert_eq!(entity.len(), 5);
+        // `command` is `edited`; the thread is a URI; core's turn and time
+        // are kept.
         assert!(entity.contains(&(
             format!("{}|{}|edited", req(11), task_uri(3)),
             req(11),
             task_uri(3),
             "edited".into(),
-            7
+            "oxplow:oxplow/thread?id=thr7".into(),
+            Some(5),
+            "r1".into()
         )));
         assert!(entity.iter().any(|e| e.3 == "assigned" && e.1 == req(12)));
         assert!(entity
             .iter()
-            .any(|e| e.3 == "transition" && e.2 == task_uri(2)));
+            .any(|e| e.3 == "transition" && e.2 == task_uri(2) && e.5.is_none()));
+        // A row's URI names the model's resource and its key.
+        let uri: String = m
+            .query_row(
+                &format!("SELECT uri FROM {LINK_MODEL_TABLE} WHERE basis = 'transition'"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(uri.starts_with("oxplow:oxplow/request_task?"), "{uri}");
 
         // A second run is refused (the store has the three and the new one).
         let e = move_to_oxtask(dir.path(), false, false).await.unwrap_err();
@@ -975,9 +1015,11 @@ mod tests {
             .unwrap();
         assert_eq!(n, 0);
         let n: i64 = m
-            .query_row(&format!("SELECT count(*) FROM {ENTITY_TABLE}"), [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                &format!("SELECT count(*) FROM {LINK_MODEL_TABLE}"),
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 0);
         // The real run still works after it.
@@ -988,7 +1030,7 @@ mod tests {
     async fn a_project_that_never_booted_the_new_oxplow_is_refused() {
         let dir = project().await;
         main_db(dir.path())
-            .execute_batch(&format!("DROP TABLE {ENTITY_TABLE}"))
+            .execute_batch(&format!("DROP TABLE {LINK_MODEL_TABLE}"))
             .unwrap();
         let e = move_to_oxtask(dir.path(), false, false).await.unwrap_err();
         assert!(e.contains("boot the new oxplow once first"), "{e}");
@@ -1022,7 +1064,7 @@ mod tests {
             "INSERT INTO model_field_value (model, uri, namespace, name, value) VALUES
                ('oxplow/task_record', '{stale}', 'oxplow', 'assignee', '\"x\"'),
                ('oxplow/task_record', '{kept}', 'oxtask', 'priority', '\"high\"');
-             INSERT INTO {ENTITY_TABLE} (key, request, task, basis, thread_id) VALUES ('stale|k', 'r', 't', 'edited', 1);",
+             INSERT INTO {LINK_MODEL_TABLE} (uri, store, key, request, task, basis, thread, written_at) VALUES ('u|stale', 'oxplow', 'stale|k', 'r', 't', 'edited', 'x', 'w'), ('u|other', 'elsewhere', 'other|k', 'r', 't', 'edited', 'x', 'w');",
             stale = task_uri(99),
             kept = task_uri(2),
         ))
@@ -1056,6 +1098,18 @@ mod tests {
             count("SELECT count(*) FROM model_field_value WHERE namespace = 'oxtask'"),
             1
         );
-        assert_eq!(count(&format!("SELECT count(*) FROM {ENTITY_TABLE}")), 5);
+        assert_eq!(
+            count(&format!(
+                "SELECT count(*) FROM {LINK_MODEL_TABLE} WHERE store = 'oxplow'"
+            )),
+            5
+        );
+        // Another store's rows are not the move's to clear.
+        assert_eq!(
+            count(&format!(
+                "SELECT count(*) FROM {LINK_MODEL_TABLE} WHERE store = 'elsewhere'"
+            )),
+            1
+        );
     }
 }
