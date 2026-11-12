@@ -1,15 +1,11 @@
-# The collector follows a change sequence: a run after the cursor states
-# only the rows written since, not the whole table.
+# The collector follows a change sequence: a book added after the cursor is
+# observed at once, and the cursor moves to its sequence.
 requires: [shelf, shelf-db]
 given:
   - { command: shelf_db.book.add, input: { title: Dune, rating: 4 } }
-when: { collector: shelf_db/books, trigger: start }
-expect: { ok: true, result: { "shelf/book.upserted": 1 } }
+when: { command: shelf_db.book.add, input: { title: Emma, rating: 3 } }
+expect: { ok: true }
 steps:
-  - when: { command: shelf_db.book.add, input: { title: Emma, rating: 3 } }
-    expect: { ok: true }
-  - when: { collector: shelf_db/books, trigger: sqlite }
-    expect: { ok: true, result: { "shelf/book.upserted": 1, "shelf/book.unchanged": 0 } }
   - when: { sql: "SELECT cursor_json FROM v_collector_run WHERE owner = 'shelf_db' AND id = 'books'" }
     expect: { rows: [{ cursor_json: '{"seq":2}' }] }
   - when: { sql: "SELECT count(*) AS n FROM v_shelf_book" }

@@ -504,6 +504,28 @@ fn validate_child(
                     decl.name
                 )));
             }
+            // Each edge type's slice is restated on its own: two owners of
+            // one type would delete each other's edges.
+            if let Some(c) = decl
+                .columns
+                .iter()
+                .find(|c| c.edge.as_deref() == Some(fixed.as_str()))
+            {
+                return Err(bad(format!(
+                    "edge `ref_type: {fixed}` is also the edge of column `{}`",
+                    c.name
+                )));
+            }
+            if let Some(o) = before.iter().find(|b| {
+                b.edge
+                    .as_ref()
+                    .is_some_and(|e| e.ref_type.as_deref() == Some(fixed.as_str()))
+            }) {
+                return Err(bad(format!(
+                    "edge `ref_type: {fixed}` is also the edge of child `{}`",
+                    o.name
+                )));
+            }
         }
         _ => {
             return Err(bad(
@@ -854,9 +876,9 @@ fn child_shape(child: &ChildDecl) -> Vec<(String, &'static str)> {
 }
 
 /// Create the child's table and view, and record the view as its owner's
-/// dataset. A child table is a cache of its store, like the parent's, but
-/// its rows have no URI to keep annotations by: a changed shape drops and
-/// recreates it, and the next write or `start` of the store refills it.
+/// dataset. A changed shape keeps the rows: a new column is added in
+/// place, a removed or retyped one is rebuilt with the common columns copied
+/// (an incremental store never refills a child table).
 fn ensure_child_tx(
     conn: &rusqlite::Connection,
     decl: &ModelDecl,
@@ -894,23 +916,69 @@ fn ensure_child_tx(
                 .any(|(h, ht, pk)| h == n && ht.eq_ignore_ascii_case(t) && *pk == pk_of(n))
         });
     if !same {
-        let mut cols: Vec<String> = want
-            .iter()
-            .map(|(n, t)| match n.as_str() {
-                "parent" | "store" | "written_at" => format!("{n} {t} NOT NULL"),
-                _ => format!("{} {t}", quote(n)),
-            })
-            .collect();
-        let mut pk = vec!["parent".to_string()];
-        pk.extend(child.key.iter().map(|k| quote(k)));
-        cols.push(format!("PRIMARY KEY ({})", pk.join(", ")));
-        conn.execute_batch(&format!(
-            "DROP VIEW IF EXISTS {v}; DROP TABLE IF EXISTS {t}; CREATE TABLE {t} ({c});",
-            v = quote(&view),
-            t = quote(&table),
-            c = cols.join(", ")
-        ))
-        .map_err(map_sql_err)?;
+        let rebuilt_needed = have.is_empty()
+            || have.iter().any(|(n, t, pk)| {
+                want.iter()
+                    .find(|(w, _)| w == n)
+                    .is_none_or(|(_, wt)| !wt.eq_ignore_ascii_case(t) || *pk != pk_of(n))
+            });
+        // The view reads the table: dropped before either change, made
+        // again below.
+        conn.execute_batch(&format!("DROP VIEW IF EXISTS {};", quote(&view)))
+            .map_err(map_sql_err)?;
+        if rebuilt_needed {
+            // Rows have no URI to keep annotations by, but an incremental
+            // store never refills them: rebuilt in place, the columns both
+            // shapes have copied.
+            let mut cols: Vec<String> = want
+                .iter()
+                .map(|(n, t)| match n.as_str() {
+                    "parent" | "store" | "written_at" => format!("{n} {t} NOT NULL"),
+                    _ => format!("{} {t}", quote(n)),
+                })
+                .collect();
+            let mut pk = vec!["parent".to_string()];
+            pk.extend(child.key.iter().map(|k| quote(k)));
+            cols.push(format!("PRIMARY KEY ({})", pk.join(", ")));
+            let rebuilt = format!("{table}__rebuilt");
+            let common: Vec<String> = want
+                .iter()
+                .filter(|(n, _)| have.iter().any(|(h, _, _)| h == n))
+                .map(|(n, _)| quote(n))
+                .collect();
+            let copy = if have.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "INSERT OR IGNORE INTO {r} ({common}) SELECT {common} FROM {t};",
+                    r = quote(&rebuilt),
+                    common = common.join(", "),
+                    t = quote(&table),
+                )
+            };
+            conn.execute_batch(&format!(
+                "DROP TABLE IF EXISTS {r};
+                 CREATE TABLE {r} ({c});
+                 {copy}
+                 DROP TABLE IF EXISTS {t};
+                 ALTER TABLE {r} RENAME TO {t};",
+                r = quote(&rebuilt),
+                c = cols.join(", "),
+                t = quote(&table),
+            ))
+            .map_err(map_sql_err)?;
+        } else {
+            for (n, t) in &want {
+                if !have.iter().any(|(h, _, _)| h == n) {
+                    conn.execute_batch(&format!(
+                        "ALTER TABLE {} ADD COLUMN {} {t};",
+                        quote(&table),
+                        quote(n)
+                    ))
+                    .map_err(map_sql_err)?;
+                }
+            }
+        }
     }
     let mut filters = vec!["t.removed_at IS NULL".to_string()];
     filters.extend(store_filter(live));
@@ -3674,10 +3742,55 @@ mod tests {
         assert!(check_decl(&linked_book()).is_ok());
     }
 
-    /// A changed child shape rebuilds its table (a cache the next write
-    /// refills); a same shape keeps its rows.
+    /// A field is found by its value through an index.
     #[tokio::test]
-    async fn a_changed_child_shape_rebuilds_its_table() {
+    async fn field_values_are_indexed_by_value() {
+        let db = Database::in_memory();
+        let n: i64 = db
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'model_field_value_value'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    /// A child's fixed `ref_type` may not be a parent column's `edge` or
+    /// another child's: their slices would delete each other's edges.
+    #[test]
+    fn a_child_ref_type_may_not_repeat_another_edge() {
+        let mut d = linked_book();
+        d.columns.push(ModelColumn::new("cites", ModelType::Uris));
+        d.columns.last_mut().unwrap().edge = Some("book.cites".into());
+        let child = |name: &str| ChildDecl {
+            name: name.into(),
+            key: vec!["to".into()],
+            columns: vec![ModelColumn::new("to", ModelType::Uri)],
+            edge: Some(ChildEdge {
+                to: "to".into(),
+                type_from: None,
+                ref_type: Some("book.cites".into()),
+                prefix: None,
+            }),
+        };
+        d.children.push(child("quotes"));
+        let e = check_decl(&d).unwrap_err().to_string();
+        assert!(e.contains("column `cites`"), "{e}");
+        d.columns.pop();
+        d.children.push(child("quotes2"));
+        let e = check_decl(&d).unwrap_err().to_string();
+        assert!(e.contains("child `quotes`"), "{e}");
+    }
+
+    /// A changed child shape (a new column, a retyped one) keeps its rows,
+    /// as the parent does: an incremental store never refills them.
+    #[tokio::test]
+    async fn a_changed_child_shape_keeps_its_rows() {
         let db = Database::in_memory();
         put(
             &db,
@@ -3696,7 +3809,24 @@ mod tests {
         db.transaction(move |tx| ensure_model_tx(tx, &wider))
             .await
             .unwrap();
-        assert!(kids(&db, NOTES).await.is_empty(), "rebuilt empty");
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"], "added column keeps");
+        let mut retyped = linked_book();
+        retyped.children[1].columns[1].ty = ModelType::Int;
+        retyped.children[1].columns[1].markdown = None;
+        db.transaction(move |tx| ensure_model_tx(tx, &retyped))
+            .await
+            .unwrap();
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|one"], "retype keeps");
+        let mut dropped = linked_book();
+        dropped.children[1].columns.remove(1);
+        db.transaction(move |tx| ensure_model_tx(tx, &dropped))
+            .await
+            .unwrap();
+        assert_eq!(
+            kids(&db, "SELECT id FROM v_shelf_book_notes").await,
+            vec!["n1"],
+            "removed column keeps"
+        );
         let published: i64 = db
             .read(|tx| {
                 tx.query_row(

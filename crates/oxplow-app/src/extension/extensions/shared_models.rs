@@ -219,6 +219,37 @@ fn fields_of(list: Vec<FieldFile>) -> Result<Vec<FieldDecl>, String> {
     Ok(out)
 }
 
+/// Every table and view name a model (and its children) generates.
+fn generated_names(d: &oxplow_db::model_store::ModelDecl) -> Vec<(String, String)> {
+    let mut out = vec![
+        (d.table(), format!("model `{}`", d.name)),
+        (d.view(), format!("model `{}`", d.name)),
+        (d.view_all(), format!("model `{}`", d.name)),
+        (format!("{}_field", d.view()), format!("model `{}`", d.name)),
+        (d.search_view(), format!("model `{}`", d.name)),
+    ];
+    for c in &d.children {
+        let what = format!("child `{}` of model `{}`", c.name, d.name);
+        out.push((d.child_table(c), what.clone()));
+        out.push((d.child_view(c), what));
+    }
+    out
+}
+
+/// The first generated name two models share, said naming both.
+fn name_clash(
+    a: &oxplow_db::model_store::ModelDecl,
+    b: &oxplow_db::model_store::ModelDecl,
+) -> Option<String> {
+    let theirs = generated_names(a);
+    generated_names(b).into_iter().find_map(|(name, what)| {
+        theirs
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, other)| format!("{what} and {other} both generate `{name}`"))
+    })
+}
+
 fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpec, String> {
     if !word(&raw.name) {
         return Err(format!("`{}` isn't a model name (snake_case)", raw.name));
@@ -404,7 +435,13 @@ pub fn parse(
                     line,
                     format!("model `{}` is declared twice", m.decl.name),
                 )),
-                Ok(m) => out.models.push(m),
+                Ok(m) => match out.models.iter().find_map(|o| name_clash(&o.decl, &m.decl)) {
+                    Some(clash) => errors.push(
+                        at("model.collision", file, line, format!("model: {clash}"))
+                            .fix("rename one of the models or children"),
+                    ),
+                    None => out.models.push(m),
+                },
                 Err(e) => errors.push(
                     at("model.invalid", file, line, format!("model: {e}"))
                         .fix("`{ name, resource, key, columns: { <name>: <type> | { type, doc?, values?, markdown?, edge? } }, open?, change_event?, store_param? }`"),
@@ -520,6 +557,32 @@ mod tests {
         let events = change_events(&d, "extension.yaml");
         assert_eq!(events[0].event_type, "shelf.book.changed");
         assert_eq!(events[0].schema, crate::models::change_event_schema());
+    }
+
+    /// Names two models generate in common are refused at load, naming both.
+    #[test]
+    fn colliding_generated_names_are_refused() {
+        let child =
+            "    children:\n      notes:\n        key: [id]\n        columns: { id: text }\n";
+        let model = |name: &str, kids: bool| {
+            format!(
+                "  - name: {name}\n    resource: {name}\n    key: id\n    columns:\n      id: text\n{}",
+                if kids { child } else { "" }
+            )
+        };
+        for other in ["book_notes", "book__notes"] {
+            let text = format!("models:\n{}{}", model("book", true), model(other, false));
+            let (d, errors) = parse_text(&text);
+            assert_eq!(d.models.len(), 1, "{other}");
+            let said = errors[0].message.clone();
+            assert!(said.contains("notes") && said.contains(other), "{said}");
+        }
+        let ok = format!(
+            "models:\n{}{}",
+            model("book", true),
+            model("shelf_item", false)
+        );
+        assert!(parse_text(&ok).1.is_empty());
     }
 
     const TASK: &str = "models:\n  - name: task\n    resource: task\n    open: true\n    key: id\n    columns:\n      id: text\n    children:\n      links:\n        key: [to, type]\n        columns:\n          to: uri\n          type: { type: text, values: [blocks, relates_to] }\n        edge: { to: to, type_from: type, prefix: \"task_link:\" }\n      comments:\n        key: [id]\n        columns: { id: text, body: { type: text, markdown: {} } }\n";

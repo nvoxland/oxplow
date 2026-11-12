@@ -310,7 +310,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `on:` lists, and a changed path must match its glob. `collector:
      <namespace>/<id>` runs a collector of a required extension (a store
      the fixture's extension owns the model for). Live triggers are
-     off in a fixture: the collector runs only when a step says so. Make the
+     off in a fixture, but a store command's own write is observed when the
+     command runs; any other run needs a step. Make the
      project files it follows in `given:` first — `- { files: { "<path>":
      "<body>" } }` writes them, `- { remove_files: ["<path>"] }` removes
      them, `- { rename_files: [{ from, to }] }` moves them (paths from the

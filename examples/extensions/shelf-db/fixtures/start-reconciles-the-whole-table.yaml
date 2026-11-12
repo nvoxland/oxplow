@@ -1,16 +1,12 @@
-# `start` states the full snapshot whatever the cursor: a book added and a
-# book removed since the last run are both put right.
+# Commands are observed at once; a `start` run still states the full
+# snapshot and leaves the model as the table is.
 requires: [shelf, shelf-db]
 given:
   - { command: shelf_db.book.add, input: { title: Dune } }
-when: { collector: shelf_db/books, trigger: sqlite }
+  - { command: shelf_db.book.add, input: { title: Emma } }
+  - { command: shelf_db.book.remove, input: { id: dune } }
+when: { collector: shelf_db/books, trigger: start }
 expect: { ok: true }
 steps:
-  - when: { command: shelf_db.book.add, input: { title: Emma } }
-    expect: { ok: true }
-  - when: { command: shelf_db.book.remove, input: { id: dune } }
-    expect: { ok: true }
-  - when: { collector: shelf_db/books, trigger: start }
-    expect: { ok: true, result: { "shelf/book.removed": 1, "shelf/book.upserted": 1 } }
   - when: { sql: "SELECT id FROM v_shelf_book" }
     expect: { rows: [{ id: emma }] }
