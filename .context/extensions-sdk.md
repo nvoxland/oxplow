@@ -664,8 +664,10 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
   compared on the keys named; `problems` are texts the failure message
   holds (with `ok: false`). The trigger must be one the collector's `on:`
   lists and a files change must match its glob, else a finding at the
-  fixture (`fixture.trigger`). Live triggers are off in a fixture: a
-  collector runs only when a step says so. Listed in the skill's table
+  fixture (`fixture.trigger`). Live triggers are off in a fixture, but a
+  store command's own write is observed when the command runs (its
+  observer collectors run before it returns); any other collector runs
+  only when a step says so. Listed in the skill's table
   (`testing.md`, made from `KINDS`).
 - `when: { action_point: <id>, context: {...} }` → `expect: { draws:
   none | button | menu, commands: [ids] }`.

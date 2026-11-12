@@ -386,9 +386,13 @@ fields:                        # oxplow's own annotations on every store's tasks
 - A changed set is the parent's change (`changed: [<child>]`); its edges
   (the child `edge`, its markdown's `comment_*` mentions) are restated from
   the parent's URI, by diff.
-- A child table is a cache of its store like the parent's: a changed shape
-  rebuilds it (dropped and recreated, empty), and the next write or `start`
-  refills it.
+- A changed child shape keeps the rows, as the parent's does: a new column
+  is added in place, a removed or retyped one is rebuilt with the common
+  columns copied (an incremental store never refills a child table).
+- Names are refused at load when they collide: a model's and a child's
+  generated table or view names (`book` + child `notes` vs a model
+  `book_notes` or `book__notes`), and a child's fixed `ref_type` that is a
+  parent column's `edge` or another child's.
 
 Built (`model_store.rs` `ChildDecl` / `ChildEdge`, `ModelDecl.children`;
 manifest parsing in `shared_models.rs`):

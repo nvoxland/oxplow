@@ -132,8 +132,8 @@ fn listens_to(
 /// against `expect: { ok?, result?, problems? }`: `ok` (default true) that it
 /// ran well, `result` the counts it stored (an entity's rows, `<model>.<op>`
 /// for shared models) on the keys named, `problems` text its failure
-/// holds. Live triggers are off in a fixture, so it runs only when a
-/// step says so.
+/// holds. Live triggers are off in a fixture, but a store command's own
+/// write is observed when the command runs; any other run needs a step.
 pub(super) async fn observer_example(
     host: &Host,
     ext: &Extension,
