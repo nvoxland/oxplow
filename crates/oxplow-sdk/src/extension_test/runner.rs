@@ -26,7 +26,7 @@ pub(super) async fn run_example(
                 report.finish_case(format!("example {}", ex.name), mark);
                 return;
             }
-            if let Err(e) = start_observers(host).await {
+            if let Err(e) = Box::pin(start_observers(host)).await {
                 report.errors.push(error(
                     shown,
                     None,
