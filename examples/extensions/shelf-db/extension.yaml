@@ -8,7 +8,7 @@ intent:
   purpose: >-
     Show a store over its own SQLite file. The extension owns the file and
     its migrations. A collector follows the file with a sqlite trigger and
-    returns a snapshot of the model. Commands write the file by composing
+    states a snapshot on start, then the rows changed since its cursor (a change sequence kept by the write commands, with tombstones for removals). Commands write the file by composing
     oxplow.extension_store.write. A rating field rides on each row. Commands add and
     remove books.
   origin: null
