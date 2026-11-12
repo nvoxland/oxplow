@@ -168,7 +168,7 @@ models:
 - **Search.** The resource's `searchable: <dataset>` stays the mechanism
   (it can scope by stream, drop archived items, index ids and comments).
   `search: { title, body }` on a model only generates a default
-  searchable dataset `v_search_<ns>_<model>` when the resource names
+  searchable dataset `v_<ns>_search_<model>` when the resource names
   none. Shipped extensions (foundation, bundled, oxtask, oxwiki) are
   indexed unbounded, as foundation is today; others keep the row and
   body bounds.
@@ -332,6 +332,20 @@ whatever ran it), else `trigger`. There is no "first run" rule: the app runs
 a store's `start` when it activates it (and the fixture harness does the
 same before each fixture), so the store's later incremental runs are
 `trigger`, and filing an item in a turn is that turn's change.
+
+- **The store author's rule:** a store that wants reactions (request
+  links, assign on start) answers a non-start trigger with `upsert` /
+  `delete`; one that always answers with a `snapshot` is always
+  `reconcile`, so nothing reacts to it, even to its own command's write.
+  A run folded to `start` (a files rescan, the run after a failed one) is a
+  reconcile too.
+- **An outside write is nobody's:** before a store command's write, under
+  the same run locks, each `sqlite` observer runs once with no anchors, so
+  a write to the file from outside (a person's sqlite3, `oxplow-dev`) that
+  no trigger has observed yet doesn't take the command's turn. (A `files`
+  trigger names only the command's own paths, so it needs no such run.)
+  The cost is one more collector run per store command; an incremental
+  collector with nothing new writes nothing.
 
 ## Bundled's models (the target of the vertical slice)
 
