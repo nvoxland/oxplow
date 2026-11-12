@@ -99,6 +99,57 @@ datasets:
       - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, a knowledge page's)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
       - { name: active, type: INT, doc: "1 for a task in progress on this thread." }
+# The shared task and knowledge models every store fills, and oxplow's
+# own fields on a task (who it is assigned to, its place in their queue).
+# Stores write them through their collectors; nothing here writes a row.
+models:
+  - name: task_record
+    resource: task
+    open: true
+    key: id
+    store_param: provider
+    change_event: oxplow.task_record.changed
+    search: { title: title, body: body }
+    columns:
+      id: text
+      title: text
+      body: { type: text, markdown: {} }
+      state: { type: text, values: [backlog, todo, in_progress, blocked, done, canceled] }
+      stage: text
+      stage_title: text
+      parent: { type: uri, edge: task_record.parent }
+      closed_at: time
+      created_at: time
+      updated_at: time
+    children:
+      links:
+        key: [to, type]
+        columns:
+          to: uri
+          type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+        edge: { to: to, type_from: type, prefix: "task_record_link:" }
+      comments:
+        key: [id]
+        columns: { id: text, author: text, at: time, body: { type: text, markdown: {} } }
+  - name: knowledge_record
+    resource: knowledge
+    open: true
+    key: id
+    change_event: oxplow.knowledge_record.changed
+    search: { title: title, body: body }
+    columns:
+      id: text
+      title: text
+      body: { type: text, markdown: { pins: true } }
+      kind: text
+      url: text
+      author: text
+      updated_at: time
+fields:
+  - model: oxplow/task_record
+    fields:
+      - { name: assignee, title: Assignee, kind: text }
+      - { name: rank, title: Rank, kind: number }
 event_types:
   types:
     - type: oxplow.tasks.finished_cleared

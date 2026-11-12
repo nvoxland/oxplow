@@ -318,6 +318,15 @@ fields:                        # oxplow's own annotations on every store's tasks
       - { name: rank, title: Rank, kind: number }         # sparse: an assign writes one value
 ```
 
+- **Declared now** (2026-11-12) as `task_record` and `knowledge_record`
+  (`v_oxplow_task_record`, `v_oxplow_knowledge_record`): in the `oxplow`
+  namespace a model named `task` would be `ref('task')` and shadow core's
+  `v_task` for bundled's own datasets. Two Phase 3 decisions follow: a
+  bundled dataset is `v_oxplow_<name>`, so `v_task` as the read contract
+  needs core to point the name at bundled's dataset (or its readers move);
+  and a child edge's prefix must start with its model's name, so task
+  links become `task_record_link:<type>` edges (today `task_link:`), and
+  `v_task_link` moves with them.
 - **Assignment and rank are bundled's fields** (namespace `oxplow`), written
   by its commands (`oxplow.task.assign` / `reorder` become bundled's, over
   `oxplow.model.set_fields`): a store's reconcile never touches them, a
