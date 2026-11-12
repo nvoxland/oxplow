@@ -1,0 +1,12 @@
+manifest: 2
+name: oxwiki
+namespace: oxwiki
+description: oxplow's own knowledge store, as an extension. Plumbing only for now; the pages store and its commands arrive later. Off by default.
+engine: ">=0.7"
+requires: [oxplow-bundled]
+intent:
+  purpose: >-
+    Hold oxplow's own knowledge store (oxwiki) as an ordinary extension with
+    its own store, so knowledge stops being special to core. It holds
+    nothing yet.
+  origin: null

@@ -34,6 +34,20 @@ The `oxplow-foundation` and `oxplow-bundled` extensions, the review packet, and 
       `oxplow.extension.write_page`) refuses to write into a bundled
       extension.
 
+- **The four shipped extensions.** Two more ship beside the two above, as
+  plumbing only, so later work has a place to land. They are in `BUNDLED`
+  and `build.rs`'s list like the others, are not in `DEFAULT_EXTENSIONS`
+  (off by default; turn one on in `extensions:`), and each is a minimal
+  manifest (`manifest: 2`, name, namespace, `intent`, README) with
+  `requires: [oxplow-bundled]`. `requires:` is by extension name, so it
+  crosses namespaces (`oxtask` and `oxwiki` are not in `oxplow`'s). With
+  `oxplow-bundled` off they are held (listed with why), never a boot
+  failure. Their sources are in this repo's `extensionSources`.
+  - `oxplow-foundation` (`oxplow`, required): oxplow's own commands, providers and harnesses.
+  - `oxplow-bundled` (`oxplow`): the review packet, analytics pages and advisories.
+  - `oxtask` (`oxtask`): will hold the tasks store and its commands. Empty now.
+  - `oxwiki` (`oxwiki`): will hold the knowledge store and its commands. Empty now.
+
 - **The knowledge metrics** (in `oxplow-bundled`). The `oxplow.knowledge_pages` collector restates the page counts (`knowledge.pages`, `knowledge.stale_pages`, sliced by `oxplow.knowledge_store` and `oxplow.knowledge_bucket`) when a page is written, recorded or deleted and when a snapshot changes a file a page cites (`knowledge.page.drifted`); the `oxplow.request_read_knowledge` collector records, per stopped request that changed files, whether an agent read a page (`knowledge.read_requests`). Metrics: `knowledge.pages`, `knowledge.stale_pct`, `knowledge.read_requests_pct`. See `metrics.md` (knowledge pages, request read knowledge).
 - **The tracking metric** (in `oxplow-bundled`). The `oxplow.request_tracked` collector records, per stopped request that changed files, whether it has a task linked; the `tasks.tracked_requests_pct` metric is the share. See `metrics.md` (request tracked).
 - **The review packet**. Its pages, mounted in

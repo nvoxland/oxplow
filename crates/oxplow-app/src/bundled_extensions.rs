@@ -71,6 +71,16 @@ mod generated {
         FILES.get_or_init(|| read("oxplow-bundled"))
     }
 
+    pub fn oxtask() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxtask"))
+    }
+
+    pub fn oxwiki() -> Files {
+        static FILES: OnceLock<Files> = OnceLock::new();
+        FILES.get_or_init(|| read("oxwiki"))
+    }
+
     /// `extensions/<name>/`'s files, kept for the life of the process.
     fn read(name: &str) -> Files {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -100,6 +110,16 @@ pub const BUNDLED: &[BundledExtension] = &[
     BundledExtension {
         name: "oxplow-bundled",
         files: generated::oxplow_bundled,
+        required: false,
+    },
+    BundledExtension {
+        name: "oxtask",
+        files: generated::oxtask,
+        required: false,
+    },
+    BundledExtension {
+        name: "oxwiki",
+        files: generated::oxwiki,
         required: false,
     },
 ];
@@ -158,6 +178,72 @@ mod tests {
             }
         }
         assert!(hits.is_empty(), "{}", hits.join("\n"));
+    }
+
+    /// `oxtask` and `oxwiki` ship (plumbing only, off by default): they are
+    /// found, load clean, are not in the default list, and turned on with
+    /// bundled on they activate clean; with bundled off they are held
+    /// (listed with why), not a boot failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oxtask_and_oxwiki_ship_off_by_default_and_need_bundled() {
+        for name in ["oxtask", "oxwiki"] {
+            assert!(find(name).is_some(), "{name} ships");
+            assert!(!is_required(name), "{name} is optional");
+            assert!(
+                !oxplow_config::DEFAULT_EXTENSIONS.contains(&name),
+                "{name} is off by default"
+            );
+        }
+        let project = |yaml: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            crate::test_fixtures::init_git_repo(dir.path());
+            std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
+            std::fs::write(dir.path().join(".oxplow/project.yaml"), yaml).unwrap();
+            dir
+        };
+
+        // Off by default: loaded clean, not enabled, not running.
+        let dir = project("");
+        let loaded = crate::extension::extensions::load_extensions(dir.path());
+        for (name, namespace) in [("oxtask", "oxtask"), ("oxwiki", "oxwiki")] {
+            let ext = loaded.iter().find(|e| e.name == name).expect(name);
+            assert!(ext.errors.is_empty(), "{name}: {:?}", ext.errors);
+            assert_eq!(ext.namespace, namespace);
+            assert_eq!(ext.requires, ["oxplow-bundled"]);
+            assert!(!ext.enabled, "{name} is off by default");
+        }
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        let runs = |svc: &crate::Services, name: &str| {
+            svc.extension_catalog
+                .active()
+                .is_some_and(|s| s.extensions().iter().any(|e| e.name == name && e.enabled))
+        };
+        assert!(!runs(&svc, "oxtask") && !runs(&svc, "oxwiki"));
+
+        // On, with bundled on: both activate with nothing held.
+        let dir = project("extensions: [oxplow-bundled, oxtask, oxwiki]\n");
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        crate::test_fixtures::activate(&svc).await;
+        assert!(runs(&svc, "oxtask") && runs(&svc, "oxwiki"));
+
+        // On, with bundled off: held, and oxplow still boots.
+        let dir = project("extensions: [oxtask, oxwiki]\ndisableExtensions: [oxplow-bundled]\n");
+        let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+        svc.streams.ensure_primary().await.unwrap();
+        let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+        assert!(!runs(&svc, "oxtask") && !runs(&svc, "oxwiki"));
+        for name in ["oxtask", "oxwiki"] {
+            assert!(
+                problems
+                    .get(name)
+                    .is_some_and(|p| p.iter().any(|d| d.render("").contains("oxplow-bundled"))),
+                "{name} is held for bundled: {problems:?}"
+            );
+        }
+        assert!(runs(&svc, "oxplow-foundation"));
     }
 
     /// oxtask is oxplow-bundled's, oxwiki is foundation's: with

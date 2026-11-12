@@ -1,0 +1,11 @@
+manifest: 2
+name: oxtask
+namespace: oxtask
+description: oxplow's own task tracker, as an extension. Plumbing only for now; the tasks store and its commands arrive later. Off by default.
+engine: ">=0.7"
+requires: [oxplow-bundled]
+intent:
+  purpose: >-
+    Hold oxplow's own task tracker as an ordinary extension with its own
+    store, so tasks stop being special to core. It holds nothing yet.
+  origin: null
