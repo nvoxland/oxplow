@@ -50,6 +50,9 @@ impl ExtensionStore {
         drop(setup);
         let manager = SqliteConnectionManager::file(path).with_init(|c| {
             c.pragma_update(None, "foreign_keys", "ON")?;
+            // Nothing may attach another file to this connection, whatever
+            // the statement check misses: the file is the boundary.
+            c.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)?;
             c.busy_timeout(std::time::Duration::from_secs(5))
         });
         let pool = Pool::builder().max_size(2).build(manager).map_err(fail)?;
@@ -83,7 +86,7 @@ impl ExtensionStore {
                 continue;
             }
             let tx = conn.transaction().map_err(fail)?;
-            tx.execute_batch(sql)
+            guarded(&tx, |c| c.execute_batch(sql))?
                 .map_err(|e| StoreError(format!("migration {file}: {e}")))?;
             tx.execute(
                 "INSERT INTO _oxplow_migration (version, name) VALUES (?1, ?2)",
@@ -99,7 +102,7 @@ impl ExtensionStore {
     pub fn write(&self, batch: &[Statement]) -> Result<Answer, StoreError> {
         let mut conn = self.pool.get().map_err(fail)?;
         let tx = conn.transaction().map_err(fail)?;
-        let answer = execute(&tx, batch)?;
+        let answer = guarded(&tx, |c| execute(c, batch))??;
         tx.commit().map_err(fail)?;
         Ok(answer)
     }
@@ -126,6 +129,25 @@ impl ExtensionStore {
         let _ = conn.authorizer(None::<fn(rusqlite::hooks::AuthContext<'_>) -> Authorization>);
         answer
     }
+}
+
+/// Run `f` on the extension's own SQL under an authorizer that refuses
+/// `ATTACH`, `DETACH` and transaction control (`BEGIN`, `COMMIT`, `ROLLBACK`,
+/// `SAVEPOINT`, `RELEASE`): the host owns the transaction and the file is
+/// the boundary. The authorizer is removed again before the host's own SQL.
+fn guarded<T>(conn: &Connection, f: impl FnOnce(&Connection) -> T) -> Result<T, StoreError> {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    conn.authorizer(Some(|ctx: AuthContext<'_>| match ctx.action {
+        AuthAction::Attach { .. }
+        | AuthAction::Detach { .. }
+        | AuthAction::Transaction { .. }
+        | AuthAction::Savepoint { .. } => Authorization::Deny,
+        _ => Authorization::Allow,
+    }))
+    .map_err(fail)?;
+    let out = f(conn);
+    let _ = conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+    Ok(out)
 }
 
 fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
@@ -386,5 +408,93 @@ mod tests {
         assert!(a
             .write(&[stmt("ATTACH DATABASE ?1 AS other", vec![json!("x.sqlite")])])
             .is_err());
+    }
+
+    fn main_db(dir: &Path) -> std::path::PathBuf {
+        let path = dir.join("main.sqlite");
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("CREATE TABLE x (v TEXT); INSERT INTO x VALUES ('main');")
+            .unwrap();
+        path
+    }
+
+    fn main_value(path: &Path) -> String {
+        Connection::open(path)
+            .unwrap()
+            .query_row("SELECT v FROM x", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_migration_cannot_attach_another_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = main_db(dir.path());
+        let store = ExtensionStore::open(&dir.path().join("a.sqlite")).unwrap();
+        let sql = format!(
+            "COMMIT; ATTACH '{}' AS m; UPDATE m.x SET v = 'pwned'; BEGIN;",
+            main.display()
+        );
+        assert!(store.migrate(&[("V1__evil.sql".into(), sql)]).is_err());
+        assert_eq!(main_value(&main), "main");
+        // Nothing stays attached on the pooled connections.
+        for _ in 0..2 {
+            assert!(store.read(&stmt("SELECT v FROM m.x", vec![])).is_err());
+            assert!(store
+                .write(&[stmt("UPDATE m.x SET v = 'pwned'", vec![])])
+                .is_err());
+        }
+        assert_eq!(main_value(&main), "main");
+    }
+
+    #[test]
+    fn nothing_can_attach_even_without_a_statement_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = main_db(dir.path());
+        let store = ExtensionStore::open(&dir.path().join("a.sqlite")).unwrap();
+        let conn = store.pool.get().unwrap();
+        let sql = format!("ATTACH '{}' AS m", main.display());
+        assert!(conn.execute_batch(&sql).is_err());
+    }
+
+    #[test]
+    fn a_write_cannot_end_or_start_a_transaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::open(&dir.path().join("a.sqlite")).unwrap();
+        store.migrate(&migrations()).unwrap();
+        for sql in [
+            "COMMIT",
+            "ROLLBACK",
+            "BEGIN",
+            "SAVEPOINT s",
+            "RELEASE s",
+            "END",
+        ] {
+            let result = store.write(&[
+                stmt("INSERT INTO book VALUES ('w', 'W')", vec![]),
+                stmt(sql, vec![]),
+            ]);
+            assert!(result.is_err(), "{sql}");
+            let n = store
+                .read(&stmt("SELECT count(*) AS n FROM book", vec![]))
+                .unwrap();
+            assert_eq!(n.rows, vec![json!({ "n": 1 })], "{sql}");
+        }
+        // A plain write still works afterwards.
+        store
+            .write(&[stmt("INSERT INTO book VALUES ('w', 'W')", vec![])])
+            .unwrap();
+    }
+
+    #[test]
+    fn a_migration_cannot_control_transactions() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::open(&dir.path().join("a.sqlite")).unwrap();
+        let bad = vec![(
+            "V1__t.sql".to_string(),
+            "CREATE TABLE t (x); COMMIT; BEGIN;".to_string(),
+        )];
+        assert!(store.migrate(&bad).is_err());
+        let good = vec![("V1__t.sql".to_string(), "CREATE TABLE t (x);".to_string())];
+        store.migrate(&good).unwrap();
     }
 }
