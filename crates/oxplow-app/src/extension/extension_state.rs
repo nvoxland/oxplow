@@ -190,18 +190,51 @@ impl StateHost {
         service: &str,
         read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
     ) -> Result<T, StateHostError> {
-        let owner = run
-            .contribution_ref()
-            .filter(|owner| owner.id.problem().is_none())
-            .ok_or(StateHostError::Denied(
-                "a valid contribution owner is required",
-            ))?;
         if !run.declares_scope(service) {
             return Err(StateHostError::Denied("the service was not declared"));
         }
         if !matches!(run.decide(Need::Scope(service.into())), Decision::Allowed) {
             return Err(StateHostError::Denied("live run authority refused access"));
         }
+        self.with_contribution_owner(run, read)
+    }
+
+    /// The extension a run's contribution belongs to, when it is live and
+    /// enabled; no service need be declared. A core command a script composes
+    /// runs as that contribution, so this names the composing extension.
+    pub(crate) fn with_contribution_owner<T>(
+        &self,
+        run: &RunContext,
+        read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
+    ) -> Result<T, StateHostError> {
+        let owner = run
+            .contribution_ref()
+            .filter(|owner| owner.id.problem().is_none())
+            .ok_or(StateHostError::Denied(
+                "a valid contribution owner is required",
+            ))?;
+        self.with_owner_ref(owner, read)
+    }
+
+    /// [`Self::with_contribution_owner`] for the contribution whose script
+    /// composed `run`'s command; none when the command was run directly.
+    pub(crate) fn with_composer<T>(
+        &self,
+        run: &RunContext,
+        read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
+    ) -> Result<T, StateHostError> {
+        let owner = run
+            .composed_by()
+            .filter(|owner| owner.id.problem().is_none())
+            .ok_or(StateHostError::Denied("no extension composed this"))?;
+        self.with_owner_ref(owner, read)
+    }
+
+    fn with_owner_ref<T>(
+        &self,
+        owner: &oxplow_domain::run::ContributionRef,
+        read: impl FnOnce(&crate::extension::extensions::Extension) -> T,
+    ) -> Result<T, StateHostError> {
         let snapshot = self.catalog.live_snapshot(&self.project);
         // A run that holds no generation (a collector's, an effect's, a
         // job's) is decided by the checks below: its extension's version,

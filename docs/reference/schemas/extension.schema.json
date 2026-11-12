@@ -129,6 +129,24 @@
         }
       ]
     },
+    "storage": {
+      "description": "Its own SQLite file, reached with the `store.sql` service.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StorageFile"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "files": {
+      "description": "Project folders it may read or write, reached with the `files.*`\nservices.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/FolderFile"
+      }
+    },
     "datasets": {
       "description": "Datasets: each with its SQL in `datasets/<name>.sql`, published as\n`v_<namespace>_<name>`, named by `namespace:`.",
       "type": [
@@ -499,6 +517,49 @@
           }
         ]
       }
+    },
+    "StorageFile": {
+      "description": "`storage:` as written.",
+      "type": "object",
+      "properties": {
+        "sqlite": {
+          "description": "Give the extension an SQLite file of its own,\n`.oxplow/extensions-data/<name>.sqlite`, migrated by\n`storage/migrations/V<n>__<name>.sql` and reached with the\n`store.sql` service (`needs: [store.sql]`).",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "FolderFile": {
+      "description": "A `files:` entry as written.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "A folder relative to the project root, without `..`.",
+          "type": "string"
+        },
+        "access": {
+          "description": "`read` for `files.read`; `write` also allows `files.write`.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FolderAccess"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "access"
+      ]
+    },
+    "FolderAccess": {
+      "description": "What a folder of `files:` allows.",
+      "type": "string",
+      "enum": [
+        "read",
+        "write"
+      ]
     },
     "DatasetDecl": {
       "description": "One dataset as its owner declares it (an entry of `datasets.yaml`, or\nof an extension's `datasets:`).",

@@ -278,11 +278,19 @@ pub const SCOPES: &[Scope] = &[
         summary: "Turn a disabled extension contribution back on.",
     },
     Scope {
+        id: "files.read",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read and list the files in the folders an extension's `files:` declares.",
+    },
+    Scope {
         id: "files.write",
         access: Access::Write,
         host: Host::Daemon,
         spends: false,
-        summary: "Write files in a worktree (restore one from a snapshot).",
+        summary: "Write files in a worktree (restore one from a snapshot), or in the folders an \
+                  extension's `files:` declares with write access.",
     },
     Scope {
         id: "handoffs.write",
@@ -452,6 +460,20 @@ pub const SCOPES: &[Scope] = &[
         host: Host::Daemon,
         spends: false,
         summary: "Atomically replace the calling extension's own private state or cache with a version/revision check.",
+    },
+    Scope {
+        id: "store.sql",
+        access: Access::Read,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Read the calling extension's own SQLite file (`storage: { sqlite: true }`) with SQL that changes nothing.",
+    },
+    Scope {
+        id: "store.write",
+        access: Access::Write,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Write to the calling extension's own SQLite file (`storage: { sqlite: true }`), as the extension itself.",
     },
     Scope {
         id: "streams.write",

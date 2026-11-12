@@ -187,6 +187,14 @@ pub struct ManifestV2 {
     )]
     pub permissions: oxplow_domain::permissions::Permissions,
 
+    /// Its own SQLite file, reached with the `store.sql` service.
+    #[serde(default)]
+    pub storage: Option<super::storage::StorageFile>,
+    /// Project folders it may read or write, reached with the `files.*`
+    /// services.
+    #[serde(default)]
+    pub files: Vec<super::storage::FolderFile>,
+
     // ---- kinds ----
     /// Datasets: each with its SQL in `datasets/<name>.sql`, published as
     /// `v_<namespace>_<name>`, named by `namespace:`.

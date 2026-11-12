@@ -36,6 +36,7 @@ pub mod extension_deployment_store;
 pub mod extension_job_store;
 pub mod extension_run_store;
 pub mod extension_state_store;
+pub mod extension_store;
 mod fact_chain;
 pub mod fact_store;
 pub mod git_store;

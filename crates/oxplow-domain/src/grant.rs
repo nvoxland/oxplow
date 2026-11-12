@@ -76,7 +76,8 @@ impl Grant {
         let ok = match need {
             Need::Scope(s) => match crate::service::need_scope(s) {
                 "sql.read" => p.sql.is_some(),
-                "tree.read" => p.files.is_some(),
+                "tree.read" | "files.read" => p.files.is_some(),
+                "files.write" => p.files == Some(crate::permissions::FilesAccess::Write),
                 "ai.compute" | "ai.discover" => p.ai,
                 _ => true,
             },
@@ -96,7 +97,8 @@ impl Grant {
         Err(match need {
             Need::Scope(s) => match crate::service::need_scope(s) {
                 "sql.read" => "sql.read".to_string(),
-                "tree.read" => "files.read".to_string(),
+                "tree.read" | "files.read" => "files.read".to_string(),
+                "files.write" => "files.write".to_string(),
                 _ => "ai.compute".to_string(),
             },
             Need::Dataset(_) => "sql.read".to_string(),

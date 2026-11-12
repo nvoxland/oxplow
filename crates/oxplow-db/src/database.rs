@@ -2105,8 +2105,9 @@ mod tests {
 
     /// tsk978: `Database::transaction` is the one write path — it begins
     /// IMMEDIATE and retries Busy. No store opens a transaction of its own
-    /// on a raw connection; the open-time dataset compile (`datasets.rs`, run
-    /// before the pool serves anyone) and this file's own are the two.
+    /// on a raw connection; an extension's own file (`extension_store.rs`, never the
+    /// main database), the open-time dataset compile (`datasets.rs`, run
+    /// before the pool serves anyone) and this file's own are the exceptions.
     #[test]
     fn every_store_write_runs_in_the_retried_transaction() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -2130,7 +2131,10 @@ mod tests {
                     .to_string_lossy()
                     .to_string();
                 if production.contains(".transaction()")
-                    && !matches!(rel.as_str(), "database.rs" | "datasets.rs")
+                    && !matches!(
+                        rel.as_str(),
+                        "database.rs" | "datasets.rs" | "extension_store.rs"
+                    )
                 {
                     own.push(rel);
                 }

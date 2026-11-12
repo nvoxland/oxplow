@@ -33,7 +33,24 @@ pub const CALLABLE: &[&str] = &[
     "extension_config.read",
     "jobs.read",
     "ai.discover",
+    "store.sql",
+    "files.read",
 ];
+
+/// The service a `scope()` call of `call` needs declared: `files.list`
+/// is `files.read`'s; any other call is its own.
+pub fn need_of_call(call: &str) -> &str {
+    match call {
+        "files.list" => "files.read",
+        other => other,
+    }
+}
+
+/// Whether `call` is a `scope()` call a script may make (`CALLABLE`, and
+/// `files.list`).
+pub fn is_callable(call: &str) -> bool {
+    CALLABLE.contains(&need_scope(need_of_call(call)))
+}
 
 /// Every service, by scope.
 pub const SERVICES: &[ServiceSpec] = &[
@@ -57,6 +74,26 @@ pub const SERVICES: &[ServiceSpec] = &[
         title: "Read private extension state",
         summary: "Read this extension's workflow state or cache: \
                   `scope(\"state.read\", {scope, area})` returns a snapshot or null.",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "store.sql",
+        title: "Use the extension's own SQLite file",
+        summary: "Read SQL on this extension's own file (`storage: { sqlite: true }`): \
+                  `scope(\"store.sql\", {sql, params?})` runs one statement that changes \
+                  nothing and returns `{rows}`. Writes are the command \
+                  `oxplow.extension_store.write`.",
+        builtins: &[],
+        modes: ALL,
+    },
+    ServiceSpec {
+        scope: "files.read",
+        title: "Read the extension's declared folders",
+        summary: "Read files in the folders `files:` declares: \
+                  `scope(\"files.read\", {path})` returns `{body}`, \
+                  `scope(\"files.list\", {path, glob?})` returns `{files: [{path, size, modified_at}]}`. \
+                  Writes are the commands `oxplow.extension_files.write` and `.delete`.",
         builtins: &[],
         modes: ALL,
     },
