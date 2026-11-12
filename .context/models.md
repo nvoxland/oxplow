@@ -270,6 +270,68 @@ composing extension's observers directly with the command's anchors and
 cause, so the change event is the command's. `oxplow.model.set_fields`
 should carry the command's anchors too (it carries none today).
 
+## Bundled's models (the target of the vertical slice)
+
+Draft, to build next (bundled owns them; namespace `oxplow`):
+
+```yaml
+models:
+  - name: task
+    resource: task             # oxplow/task, as today
+    open: true
+    key: id
+    store_param: provider      # today's URIs: oxplow:oxplow/task?id=<id>&provider=<store>
+    change_event: oxplow.task.changed
+    search: { title: title, body: body }
+    columns:
+      id: text
+      title: text
+      body: { type: text, markdown: {} }
+      state: { type: text, values: [backlog, todo, in_progress, blocked, done, canceled] }
+      stage: text              # the store's own stage
+      stage_title: text
+      parent: { type: uri, edge: task.parent }
+      closed_at: time
+      created_at: time
+      updated_at: time
+    children:
+      links: { key: [to, type], columns: { to: uri, type: { type: text, values: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] } }, edge: { to: to, type_from: type, prefix: "task_link:" } }
+      comments: { key: [id], columns: { id: text, author: text, at: time, body: { type: text, markdown: {} } } }
+  - name: knowledge_page
+    resource: knowledge        # oxplow/knowledge?id=<id>&store=<store>
+    open: true
+    key: id
+    change_event: oxplow.knowledge_page.changed
+    search: { title: title, body: body }
+    columns:
+      id: text
+      title: text
+      body: { type: text, markdown: { pins: true } }
+      kind: text               # its store's kind (note, memory, instruction)
+      url: text
+      author: text
+      updated_at: time
+fields:                        # oxplow's own annotations on every store's tasks
+  - model: oxplow/task
+    fields:
+      - { name: assignee, title: Assignee, kind: text }   # a thread's or the person's URI
+      - { name: rank, title: Rank, kind: number }         # sparse: an assign writes one value
+```
+
+- **Assignment and rank are bundled's fields** (namespace `oxplow`), written
+  by its commands (`oxplow.task.assign` / `reorder` become bundled's, over
+  `oxplow.model.set_fields`): a store's reconcile never touches them, a
+  rename and a tombstone keep them.
+- **`v_task` stays, as bundled's dataset** joining `v_oxplow_task` with its
+  fields and the store's stages, with today's columns (`provider` = store,
+  `native_id` = id, `native` = the store's own fields, `assignee`, `rank`,
+  `stage_title`…), so its readers move with no change. Core's `v_task`
+  goes in the same publication (two can't both exist).
+- **Request links** (`v_request_task`) are bundled's reaction to
+  `oxplow.task.changed` events with `cause: trigger`, using the event's
+  anchors (now the command's turn: a store's write is observed as its
+  command).
+
 ## Children
 
 - **Declared in the parent** (`children: { <name>: { key, columns, edge? } }`),
