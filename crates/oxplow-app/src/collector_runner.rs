@@ -3017,7 +3017,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "shelves",
-            "manifest: 2\nname: shelves\nintent:\n  purpose: test\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\n    fields: [{ name: rating, title: Rating, kind: number }]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n",
+            "manifest: 2\nname: shelves\nintent:\n  purpose: test\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\n    fields: [{ name: rating, title: Rating, kind: number }]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n",
             &[(
                 "books.star",
                 "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}], \"cursor\": {\"n\": 1}}\n",

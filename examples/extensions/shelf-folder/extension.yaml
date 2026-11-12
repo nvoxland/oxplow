@@ -12,7 +12,7 @@ intent:
     writes a new file by composing oxplow.extension_files.write.
   origin: null
   examples:
-    - name: start-reconciles-the-folder-into-books
+    - name: start-reconciles-two-files-into-two-books
       input: { collector: shelf_folder/books, trigger: start }
       expect: one row per file
 permissions: [files.read, files.write, 'commands:oxplow.extension_files.write']
@@ -25,8 +25,6 @@ collectors:
   - id: books
     doc: Reads shelf/*.md and states the books of this store.
     runtime: starlark
-    entities:
-      - { name: seen, key: id, columns: { id: text } }
     entry: collectors/books.star
     needs: [files.read]
     on: [start, { files: "shelf/*.md" }]

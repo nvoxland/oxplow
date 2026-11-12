@@ -2165,6 +2165,38 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             });
             ext.errors.extend(problems);
         }
+        // A collector with no entities and no facts must have somewhere to
+        // write: a shared model its extension fills, or fields it declares.
+        {
+            let observes =
+                !ext.shared_models.fills.is_empty() || !ext.shared_models.fields.is_empty();
+            let collectors_line = key_line(&manifest, "collectors");
+            let mut problems = Vec::new();
+            ext.collectors.retain(|c| {
+                if !c.entities.is_empty() || !c.facts.is_empty() || observes {
+                    return true;
+                }
+                let c_line = entry_line(&manifest, "collectors", "id", &c.id).or(collectors_line);
+                problems.push(
+                    at(
+                        "collector.no_output",
+                        man,
+                        c_line,
+                        format!(
+                            "collector `{}` declares no `entities` and no `facts`, and its \
+                             extension fills no shared model",
+                            c.id
+                        ),
+                    )
+                    .fix(
+                        "declare its `entities:` or `facts:`, or the model it fills under `fills:`",
+                    )
+                    .contribution(format!("{}/{}", ext.namespace, c.id)),
+                );
+                false
+            });
+            ext.errors.extend(problems);
+        }
         if let Some(v) = &m.action_points {
             let (points, errors) =
                 action_points::parse_action_points(v, man, &manifest, &ext.namespace);

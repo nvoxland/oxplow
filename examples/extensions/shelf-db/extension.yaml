@@ -27,8 +27,6 @@ collectors:
   - id: books
     doc: Reads the book table and states the books of this store.
     runtime: starlark
-    entities:
-      - { name: seen, key: id, columns: { id: text } }
     entry: collectors/books.star
     needs: [store.sql]
     on: [start, { sqlite: own }]

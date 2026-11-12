@@ -1350,9 +1350,8 @@ fn validate(
                 }
                 None => return Err(ctx("needs an `entry` (its program or script)".into())),
             }
-            if raw.entities.is_empty() && raw.facts.is_empty() {
-                return Err(ctx("declares no `entities` and no `facts`".into()));
-            }
+            // One with neither must fill a shared model; its extension's
+            // `fills:` / `fields:` say so (checked where they are known).
         }
     }
     if runtime == CollectorRuntime::Exec {
@@ -2219,10 +2218,6 @@ mod tests {
         assert_eq!(out[0].facts, vec!["repo.rust_clone"]);
         assert_eq!(out[1].report.as_ref().unwrap().format, "json");
         for (yaml, needle) in [
-            (
-                "- { id: a.b, runtime: starlark, entry: x.star }",
-                "no `entities` and no `facts`",
-            ),
             (
                 "- { id: a.b, runtime: starlark, entry: x.star, facts: [nodot] }",
                 "isn't a measure key",

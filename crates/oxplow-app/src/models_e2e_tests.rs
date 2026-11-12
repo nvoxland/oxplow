@@ -10,7 +10,7 @@ use crate::test_fixtures::services_with_thread;
 
 const OWNER: &str = "manifest: 2\nname: shelf\nintent:\n  purpose: p\nresources:\n  - name: book\n    description: A book.\n    label: Book\n    params: { store: { required: true }, id: { required: true } }\nmodels:\n  - name: book\n    resource: book\n    open: true\n    key: id\n    change_event: shelf.book.changed\n    search: { title: title, body: title }\n    columns: { id: text, title: text }\n";
 
-const STORE: &str = "manifest: 2\nname: shelves\nintent:\n  purpose: p\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n";
+const STORE: &str = "manifest: 2\nname: shelves\nintent:\n  purpose: p\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n";
 
 const SCORER: &str = "manifest: 2\nname: scorer\nintent:\n  purpose: p\nrequires: [shelf]\npermissions: ['commands:oxplow.model.set_fields']\nfields:\n  - model: shelf/book\n    fields: [{ name: score, title: Score, kind: number }]\ncommands:\n  - name: book.score\n    summary: Score a book.\n    input_schema: { type: object }\n    entry: handlers/score.star\n";
 
@@ -102,5 +102,31 @@ async fn a_script_sets_its_own_field_on_a_stores_item() {
     assert!(
         matches!(&direct, CommandError::Denied { reason } if reason.contains("composed")),
         "{direct:?}"
+    );
+}
+
+/// A collector that only fills a shared model needs no entities; one with
+/// nowhere to write (no entities, no facts, no fill) is refused at its line.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_collector_with_nowhere_to_write_is_refused() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(
+        root,
+        ".oxplow/extensions/idle/extension.yaml",
+        "manifest: 2\nname: idle\nintent:\n  purpose: p\ncollectors:\n  - id: nothing\n    runtime: starlark\n    entry: nothing.star\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/idle/nothing.star",
+        "def transform(x):\n    return {}\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    let listed = fx.svc.listed_extensions(root).await;
+    let idle = listed.iter().find(|e| e.name == "idle").unwrap();
+    let text = format!("{:?} {problems:?}", idle.errors);
+    assert!(
+        text.contains("collector.no_output") && text.contains("fills no shared model"),
+        "{text}"
     );
 }
