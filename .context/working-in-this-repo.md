@@ -137,6 +137,31 @@ links go to the entity (basis `command` becomes `edited`). It reads core's
 tables and deletes nothing there; it refuses when the store already has
 tasks; `--dry-run` does it all and keeps nothing.
 
+The move runs as part of the flip (quit oxplow, build the flip, move
+`--replace` under the instance lock, start), never earlier. It takes the
+instance lock as `extension deploy` does and refuses while oxplow runs.
+The main database commits first (every write in it is idempotent), then
+the store file; `--replace` deletes the store file, the `oxplow`-namespace
+fields of the `oxplow/task_record` model and every row of the request-link
+entity first, in the same transactions, so a move made earlier can be
+redone (with `--dry-run` it works on a scratch file and keeps nothing).
+Its rules:
+
+- **Authors come from the event log.** A task's author is the `thread_id`
+  of the `task.created` event whose subject is the task's URI; failing that
+  the thread of the request link its creation made (basis `command`, at the
+  task's creation time, to the second); otherwise none. It is never the
+  earliest link of any basis. A note's author is the thread of the
+  `task.commented` event whose payload `comment` is `not<N>`; it never
+  inherits the task's author. A person's rows are `oxplow:oxplow/person`.
+  `author_kind` is always core's old author column (`user` is `person`,
+  `agent`, `system`).
+- **`closed_at`** is core's `task` row's `closed_at` for a done or canceled
+  task (the old `completed_at` was set for done only), else the task's
+  `updated_at`; an open task has none.
+- **Dropped for now:** the request links' `at` and `turn_id` (the entity
+  keeps request, task, basis and thread).
+
 `extension status` and `extension deploy` change what oxplow runs from
 outside it. Boot deploys nothing, so they are how a checkout gets its
 first deployments and how oxplow comes back when it can't fix itself:
