@@ -246,7 +246,11 @@ So a store's own command (oxwiki's tool, from any stream) always writes the
 primary's folder: no refusal for an agent in a worktree stream, and nothing
 written into a worktree's copy. An agent editing a worktree's copy with its
 own file tools isn't refused either; it just isn't seen, and the store's
-skill says to use its tool.
+skill says to use its tool. oxwiki stays on markdown files (decided
+2026-11-12: agents and people read, grep and edit them with their own
+tools). To build: a one-time hint when an agent in a non-primary
+worktree writes under a store's declared folder ("this isn't seen; use the
+store's tool"), not a refusal.
 
 ## Attribution (to settle in Phase 3)
 
