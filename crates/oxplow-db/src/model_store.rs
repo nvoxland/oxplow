@@ -567,6 +567,26 @@ pub fn replace_field_decls_tx(
     Ok(())
 }
 
+/// Restate every live store of every model (`model_store_decl`):
+/// `(model, store, extension, provider, id_pattern)`.
+pub fn replace_store_decls_tx(
+    conn: &rusqlite::Connection,
+    decls: &[(String, String, String, bool, Option<String>)],
+) -> Result<(), DomainError> {
+    conn.execute("DELETE FROM model_store_decl", [])
+        .map_err(map_sql_err)?;
+    for (model, store, extension, provider, id_pattern) in decls {
+        conn.execute(
+            "INSERT OR IGNORE INTO model_store_decl
+               (model, store, extension, provider, id_pattern)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![model, store, extension, provider, id_pattern],
+        )
+        .map_err(map_sql_err)?;
+    }
+    Ok(())
+}
+
 /// Restate every store's declared stages (`model_stage_decl`):
 /// `(model, store, extension, stages)`, each list in its workflow order.
 pub fn replace_stage_decls_tx(

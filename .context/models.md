@@ -219,6 +219,12 @@ fills:
   `v_model_stage` (model, store, position, id, title, bucket, extension):
   what shared screens draw a store's columns from, without the
   capability rows.
+- **Stores** (built): each live store of a model (an enabled extension's
+  fill, or a running provider instance's) is restated each publication
+  into `model_store_decl` (V33), read as `v_model_store` (model, store,
+  extension, provider, id_pattern): who fills it and how its ids look in
+  text, what the desktop links loose ids by once the capability rows
+  no longer say.
 
 - A store id is owned by one extension. Two extensions naming the same
   store id is a load error. A provider instance's store id is its

@@ -287,6 +287,7 @@ impl PreparedExtensionDatabase {
             }
             oxplow_db::model_store::replace_field_decls_tx(tx, &self.models.field_decls())?;
             oxplow_db::model_store::replace_stage_decls_tx(tx, &self.models.stage_decls())?;
+            oxplow_db::model_store::replace_store_decls_tx(tx, &self.models.store_decls())?;
             let mut candidate = self.datasets.clone();
             for (extension, namespace, declaration) in &self.configurations {
                 let values = crate::extension::extension_configuration::effective_values(

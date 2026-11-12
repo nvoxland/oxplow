@@ -264,6 +264,11 @@ pub struct CommandUi {
     /// unset); without one the input is the whole context.
     #[serde(default)]
     pub at: Option<String>,
+    /// With `at`, at a point that names its item (`item:`): the stores
+    /// whose items it acts on (`{ store: <id> | [ids] }`, as `about`'s
+    /// `accepts`); the point offers it only for an item of one of them.
+    #[serde(default)]
+    pub accepts: Option<ItemAccepts>,
     /// The input it runs with. A string that is exactly `{{stream}}`,
     /// `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
     /// a binding there's nothing for makes it unavailable there.
@@ -487,6 +492,22 @@ impl CommandUi {
                     "at",
                     "a command joins an action point (`at`) or is about an item (`about`), not both: drop `about`"
                         .into(),
+                );
+            }
+        }
+        if let Some(accepts) = &self.accepts {
+            if self.at.is_none() {
+                return bad(
+                    "accepts",
+                    "`accepts` filters a point command by its item's store: give it an `at` \
+                     (an item command's goes in `about: { resource, accepts }`)"
+                        .into(),
+                );
+            }
+            if accepts.store.as_ref().is_some_and(|s| s.rules().is_empty()) {
+                return bad(
+                    "accepts/store",
+                    "`store` names at least one store id".into(),
                 );
             }
         }

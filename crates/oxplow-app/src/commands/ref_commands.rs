@@ -52,12 +52,22 @@ pub fn store_accepted(
     params: &BTreeMap<String, String>,
     store_param: &str,
 ) -> bool {
-    let Some(filter) = ui
-        .about
-        .as_ref()
-        .and_then(|a| a.accepts())
-        .and_then(|a| a.store.as_ref())
-    else {
+    accepts_store(
+        ui.about.as_ref().and_then(|a| a.accepts()),
+        params,
+        store_param,
+    )
+}
+
+/// Whether an item with `params` passes `accepts`' store filter (none: it
+/// does): an item command's (`about.accepts`) or a point command's
+/// (`accepts`).
+pub fn accepts_store(
+    accepts: Option<&oxplow_domain::commands::ItemAccepts>,
+    params: &BTreeMap<String, String>,
+    store_param: &str,
+) -> bool {
+    let Some(filter) = accepts.and_then(|a| a.store.as_ref()) else {
         return true;
     };
     let store = params.get(store_param);

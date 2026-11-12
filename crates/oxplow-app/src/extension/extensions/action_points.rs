@@ -65,6 +65,9 @@ pub struct ActionPointDecl {
     pub label: String,
     pub doc: Option<String>,
     pub context: Vec<ContextKey>,
+    /// The context key (a `uri`) naming the item it acts on: a joined
+    /// command's `ui.accepts` is checked against that item's store.
+    pub item: Option<String>,
 }
 
 /// The on-disk shape.
@@ -78,6 +81,9 @@ pub struct ActionPointFile {
     /// `{ <key>: <type> }`; a key written `name?` is optional.
     #[serde(default)]
     context: BTreeMap<String, ContextType>,
+    /// The context key naming the item it acts on (a required `uri`).
+    #[serde(default)]
+    item: Option<String>,
 }
 
 /// `action_points:` of the extension in `namespace`: the valid points and
@@ -195,11 +201,31 @@ pub fn parse_action_points(
             );
             continue;
         }
+        if let Some(item) = &raw.item {
+            let names_a_uri = context
+                .iter()
+                .any(|k| &k.name == item && !k.optional && matches!(k.ty, ContextType::Uri));
+            if !names_a_uri {
+                errors.push(
+                    at(
+                        "action_point.invalid_item",
+                        file,
+                        line,
+                        format!(
+                            "action point `{id}`: `item: {item}` must name a required `uri` context key"
+                        ),
+                    )
+                    .fix("`item: uri` with `context: { uri: uri, … }`"),
+                );
+                continue;
+            }
+        }
         points.push(ActionPointDecl {
             id,
             label: raw.label,
             doc: raw.doc,
             context,
+            item: raw.item,
         });
     }
     (points, errors)
@@ -212,6 +238,24 @@ mod tests {
     fn parse(yaml: &str) -> (Vec<ActionPointDecl>, Vec<Diagnostic>) {
         let value: Value = serde_yaml::from_str(yaml).unwrap();
         parse_action_points(&value, "extension.yaml", "", "acme")
+    }
+
+    /// A point's `item` names a required `uri` context key; anything else
+    /// is refused.
+    #[test]
+    fn a_points_item_is_a_required_uri_key() {
+        let (ok, errors) =
+            parse("- { name: task.move, label: Move, item: uri, context: { uri: uri } }");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(ok[0].item.as_deref(), Some("uri"));
+        for bad in [
+            "- { name: task.move, label: Move, item: uri, context: { uri?: uri } }",
+            "- { name: task.move, label: Move, item: n, context: { n: int } }",
+            "- { name: task.move, label: Move, item: gone, context: { uri: uri } }",
+        ] {
+            let (_, errors) = parse(bad);
+            assert_eq!(errors[0].code, "action_point.invalid_item", "{bad}");
+        }
     }
 
     #[test]

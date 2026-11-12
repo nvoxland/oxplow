@@ -109,6 +109,7 @@ pub fn point_offer(
     decl: &ActionPointDecl,
     specs: &[CommandSpec],
     context: &Value,
+    models: &crate::models::ModelRegistry,
 ) -> Result<PointOffer, String> {
     let nothing = || PointOffer {
         point: decl.id.clone(),
@@ -120,8 +121,30 @@ pub fn point_offer(
         return Ok(nothing());
     };
     let key = OfferKey::Point(decl.id.clone());
+    // The item it acts on, when it names one: a command's `accepts` is
+    // checked against that item's store.
+    let item = decl
+        .item
+        .as_ref()
+        .and_then(|k| context.get(k))
+        .and_then(Value::as_str)
+        .and_then(|u| oxplow_domain::uri::OxplowUri::parse(u).ok());
+    let store_param = item
+        .as_ref()
+        .map(|u| super::ref_commands::store_param_of(models, &u.resource().to_string()))
+        .unwrap_or_else(|| "store".into());
     let mut commands: Vec<PointCommand> = offered(specs, &key, &Default::default(), "store")
         .into_iter()
+        .filter(|s| {
+            let accepts = s.ui.as_ref().and_then(|ui| ui.accepts.as_ref());
+            match (accepts, &item) {
+                (None, _) => true,
+                (Some(_), None) => false,
+                (Some(a), Some(item)) => {
+                    super::ref_commands::accepts_store(Some(a), item.params(), &store_param)
+                }
+            }
+        })
         .map(|s| PointCommand {
             id: s.id.clone(),
             label: s
@@ -166,7 +189,12 @@ pub async fn action_point_offer(
         .find(|p| p.id == point)
         .cloned()
         .ok_or_else(|| format!("`{point}` is no action point an enabled extension declares"))?;
-    point_offer(&decl, &svc.commands.list(&Actor::Human), context)
+    point_offer(
+        &decl,
+        &svc.commands.list(&Actor::Human),
+        context,
+        &svc.models.current(),
+    )
 }
 
 #[cfg(test)]
@@ -211,7 +239,9 @@ mod tests {
     fn a_point_draws_by_its_contributors() {
         let ctx = json!({ "thread_id": 3 });
         let mut specs = vec![at("x.other", "Other", "oxplow/other")];
-        let offer = |specs: &[CommandSpec]| point_offer(&point(), specs, &ctx).unwrap();
+        let offer = |specs: &[CommandSpec]| {
+            point_offer(&point(), specs, &ctx, &Default::default()).unwrap()
+        };
         assert_eq!(offer(&specs).draws, Draws::None);
         specs.push(at("a.new", "Zed", "oxplow/task.new"));
         let one = offer(&specs);
@@ -229,10 +259,10 @@ mod tests {
     fn the_context_is_the_commands_input() {
         let specs = vec![at("a.new", "New", "oxplow/task.new")];
         let full = json!({ "parent": "oxplow:oxplow/task?id=1", "thread_id": 3 });
-        let offer = point_offer(&point(), &specs, &full).unwrap();
+        let offer = point_offer(&point(), &specs, &full, &Default::default()).unwrap();
         assert_eq!(offer.commands[0].input, full);
         let part = json!({ "parent": null, "thread_id": 3 });
-        let offer = point_offer(&point(), &specs, &part).unwrap();
+        let offer = point_offer(&point(), &specs, &part, &Default::default()).unwrap();
         assert_eq!(offer.commands[0].input, json!({ "thread_id": 3 }));
     }
 
@@ -246,7 +276,13 @@ mod tests {
                 "input": { "under": "{{context.parent}}", "thread": "{{context.thread_id}}" } }))
             .unwrap(),
         );
-        let offer = point_offer(&point(), &[spec], &json!({ "thread_id": 3 })).unwrap();
+        let offer = point_offer(
+            &point(),
+            &[spec],
+            &json!({ "thread_id": 3 }),
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(offer.commands[0].input, json!({ "thread": 3 }));
     }
 
@@ -255,11 +291,60 @@ mod tests {
     #[test]
     fn a_context_is_checked_against_the_declaration() {
         let specs = vec![at("a.new", "New", "oxplow/task.new")];
-        let none = point_offer(&point(), &specs, &json!({})).unwrap();
+        let none = point_offer(&point(), &specs, &json!({}), &Default::default()).unwrap();
         assert_eq!(none.draws, Draws::None);
-        let err = point_offer(&point(), &specs, &json!({ "thread_id": 1, "x": 1 })).unwrap_err();
+        let err = point_offer(
+            &point(),
+            &specs,
+            &json!({ "thread_id": 1, "x": 1 }),
+            &Default::default(),
+        )
+        .unwrap_err();
         assert!(err.contains("no context key `x`"), "{err}");
-        let err = point_offer(&point(), &specs, &json!({ "thread_id": "one" })).unwrap_err();
+        let err = point_offer(
+            &point(),
+            &specs,
+            &json!({ "thread_id": "one" }),
+            &Default::default(),
+        )
+        .unwrap_err();
         assert!(err.contains("thread_id"), "{err}");
+    }
+
+    /// A point that names its item (`item: uri`) offers a joined command
+    /// with `ui.accepts.store` only when the item's store passes it; one
+    /// without `accepts` always.
+    #[test]
+    fn an_item_points_commands_are_its_items_stores() {
+        let yaml =
+            "- { name: task.move, label: Move, item: uri, context: { uri: uri, stage: string } }";
+        let value = serde_yaml::from_str(yaml).unwrap();
+        let point = parse_action_points(&value, "extension.yaml", "", "oxplow")
+            .0
+            .remove(0);
+        let mut ours = at("oxtask.task.move", "Move", "oxplow/task.move");
+        ours.ui = Some(
+            serde_json::from_value(json!({ "label": "Move", "at": "oxplow/task.move",
+                "accepts": { "store": "oxtask" } }))
+            .unwrap(),
+        );
+        let mut theirs = ours.clone();
+        theirs.id = "jira.issue.move".into();
+        theirs.ui = Some(
+            serde_json::from_value(json!({ "label": "Move", "at": "oxplow/task.move",
+                "accepts": { "store": "jira" } }))
+            .unwrap(),
+        );
+        let any = at("audit.move", "Move", "oxplow/task.move");
+        let ctx = json!({ "uri": "oxplow:oxplow/task?id=tsk1&store=oxtask", "stage": "done" });
+        let offer = point_offer(
+            &point,
+            &[ours, theirs, any],
+            &ctx,
+            &crate::models::ModelRegistry::default(),
+        )
+        .unwrap();
+        let ids: Vec<_> = offer.commands.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, ["audit.move", "oxtask.task.move"]);
     }
 }
