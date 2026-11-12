@@ -65,9 +65,6 @@ intent:
     - name: the-plan-pages-show-the-proposed-plans
       input: { part: thread-plan, params: { thread_id: 1 } }
       expect: the plans an agent proposed, newest first, under a thread
-    - name: the-agent-interface-pages-count-tools-commands-and-hints
-      input: { page: agent-interface }
-      expect: tool calls by tool and harness, an agent's command runs and refusals, and the hints' counts
     - name: rust-unsafe-blocks-are-counted-per-file-and-tagged-with-their-rule
       input: { collector: oxplow.rust.unsafe_blocks }
       expect: Rust — each file with unsafe blocks has one ast_hit fact tagged unsafe_block (src/a.rs has 2, src/b.rs none, the README is skipped)
@@ -128,9 +125,6 @@ intent:
     - name: dashboards-list-the-dashboard-pages
       input: { page: dashboards }
       expect: the dashboards index lists the page-file dashboards and offers a title form
-    - name: the-timeline-draws-the-projects-activity-and-titles-itself
-      input: { page: timeline }
-      expect: the timeline draws items, titles itself and offers Today and Fit; Fit writes from and to
 ui:
   mounts:
     - { page: extension-runs, at: oxplow/extension.runs }

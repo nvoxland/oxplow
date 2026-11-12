@@ -12,7 +12,7 @@ loaders:
       FROM v_handoff h
       JOIN v_thread ft ON ft.id = h.from_thread_id
       LEFT JOIN v_agent_session s ON s.id = h.from_session_id
-      LEFT JOIN v_task w ON w.uri = h.task
+      LEFT JOIN v_oxplow_task w ON w.uri = h.task
       WHERE h.to_thread_id = :thread_id
         AND (h.state = 'open' OR julianday(h.settled_at) >= julianday('now') - 7)
       ORDER BY h.state <> 'open', h.sent_at DESC

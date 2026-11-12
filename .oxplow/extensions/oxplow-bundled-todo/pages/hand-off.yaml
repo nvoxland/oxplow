@@ -15,7 +15,7 @@ loaders:
   handoff_items:
     sql: |
       SELECT w.uri AS value, w.title AS label
-      FROM v_task w
+      FROM v_oxplow_task w
       WHERE w.assignee = :uri AND w.state NOT IN ('done', 'canceled')
       ORDER BY w.rank, w.uri
 view:

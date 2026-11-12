@@ -15,15 +15,15 @@ async function writes(daemon: Parameters<typeof ipc>[0]): Promise<number> {
 // the result oxplow draws under it from the inline page the component
 // hands it, with Save as Page beside it.
 test("explore a dataset, run SQL, and save it as a page", async ({ page, daemon }) => {
-  await run(daemon, "oxplow.task.create", { title: "Echidna task", thread: daemon.thread });
+  await run(daemon, "oxtask.task.create", { title: "Echidna task" });
   await page.goto("/");
   await openFromLauncher(page, "Explore Data");
   await expect(page.locator('[data-testid="page-host"]:visible [data-testid="custom-component"]')).toBeVisible();
-  await page.locator('[data-node="explore-catalog"]:visible').getByText("v_task", { exact: true }).click();
+  await page.locator('[data-node="explore-catalog"]:visible').getByText("v_oxplow_task", { exact: true }).click();
   const frame = page.frameLocator('[data-testid="custom-component-frame"]');
   // Picking a dataset writes its query; replace it once it's there.
-  await expect(frame.getByTestId("explore-sql")).toHaveValue(/v_task/);
-  await frame.getByTestId("explore-sql").fill("SELECT title FROM v_task WHERE title LIKE 'Echidna%'");
+  await expect(frame.getByTestId("explore-sql")).toHaveValue(/v_oxplow_task/);
+  await frame.getByTestId("explore-sql").fill("SELECT title FROM v_oxplow_task WHERE title LIKE 'Echidna%'");
   await frame.getByTestId("explore-run").click();
   await expect(page.getByTestId("custom-page-spec").getByTestId("viz-row-0")).toContainText("Echidna task");
   const before = await writes(daemon);

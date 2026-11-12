@@ -97,7 +97,7 @@ void oxplow.connect().then((c) => {
   const sql = el("textarea", {
     className: "ox-textarea",
     rows: 5,
-    placeholder: "SELECT … FROM v_task …  or  SELECT bucket, MEASURE('…') FROM metric_grid('day')   (Cmd/Ctrl+Enter runs)",
+    placeholder: "SELECT … FROM v_oxplow_task …  or  SELECT bucket, MEASURE('…') FROM metric_grid('day')   (Cmd/Ctrl+Enter runs)",
     testId: "explore-sql",
   });
   const run = el("button", { type: "button", className: "ox-button ox-primary", testId: "explore-run" }, "Run");
