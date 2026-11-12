@@ -1909,17 +1909,19 @@ fn restate_children_tx(
             Some(old) if &old == cells => {}
             Some(_) => {
                 moved = true;
-                let sets: Vec<String> = (0..cols.len())
-                    .filter(|i| !keys.contains(i))
-                    .map(|i| format!("{} = ?{}", cols[i], keys.len() + 3 + i))
-                    .collect();
-                if sets.is_empty() {
+                let rest: Vec<usize> = (0..cols.len()).filter(|i| !keys.contains(i)).collect();
+                if rest.is_empty() {
                     continue;
                 }
+                let sets: Vec<String> = rest
+                    .iter()
+                    .enumerate()
+                    .map(|(n, i)| format!("{} = ?{}", cols[*i], keys.len() + 3 + n))
+                    .collect();
                 let mut values: Vec<rusqlite::types::Value> = vec![parent.to_string().into()];
                 values.extend(keys.iter().map(|k| cells[*k].clone()));
                 values.push(now.to_string().into());
-                values.extend(cells.iter().cloned());
+                values.extend(rest.iter().map(|i| cells[*i].clone()));
                 conn.execute(
                     &format!(
                         "UPDATE {table} SET written_at = ?{}, {} WHERE parent = ?1 AND {}",
@@ -3568,6 +3570,22 @@ mod tests {
         assert_eq!(emptied.changes[0].changed, vec!["links".to_string()]);
         assert!(kids(&db, LINKS).await.is_empty());
         assert_eq!(kids(&db, NOTES).await.len(), 2, "notes were not restated");
+    }
+
+    /// A changed child row is updated whichever columns its key is: here
+    /// the key is the last column, after the text.
+    #[tokio::test]
+    async fn a_child_keyed_by_its_last_column_is_updated() {
+        let db = Database::in_memory();
+        let mut decl = linked_book();
+        decl.children[1].columns.reverse();
+        let note = |text: &str| {
+            row(json!({"id": "b1", "title": "t", "notes": [{"id": "n1", "text": text}]}))
+        };
+        write_decl(&db, decl.clone(), vec![note("one")]).await;
+        let moved = write_decl(&db, decl, vec![note("uno")]).await;
+        assert_eq!(moved.changes[0].changed, vec!["notes".to_string()]);
+        assert_eq!(kids(&db, NOTES).await, vec!["n1|uno"]);
     }
 
     /// A row without the key keeps its children, in an upsert and in a
