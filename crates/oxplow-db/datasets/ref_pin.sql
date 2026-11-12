@@ -25,7 +25,8 @@ LEFT JOIN (SELECT p2.source_uri, p2.ref_type, p2.path, MAX(fs.snapshot_id) AS sn
              FROM pins p2
              JOIN source('file_snapshot') fs
                ON (p2.ref_type = 'file_pin' AND fs.path = p2.path)
-               OR (p2.ref_type = 'dir_pin' AND fs.path LIKE p2.path || '/%')
+               OR (p2.ref_type = 'dir_pin'
+                   AND substr(fs.path, 1, length(p2.path) + 1) = p2.path || '/')
              JOIN source('streams') st ON st.id = fs.stream_id AND st.kind = 'primary'
             GROUP BY p2.source_uri, p2.ref_type, p2.path) l
   ON l.source_uri = p.source_uri AND l.ref_type = p.ref_type AND l.path = p.path

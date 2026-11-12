@@ -418,6 +418,18 @@ pub fn verify_pins_tx(
         .with_version(snapshot, pin.revision.clone(), pin.revision.is_some());
         upsert_edge_tx(conn, &edge)?;
     }
+    // Verifying all of it re-pins its directories too: what it says of
+    // them holds as of now.
+    if files.is_none() {
+        for (uri, _) in pinned.iter().filter(|(_, t)| t == RT_DIR_PIN) {
+            let edge = PageRefEdge::new(source, uri, RT_DIR_PIN).with_version(
+                snapshot,
+                pin.revision.clone(),
+                pin.revision.is_some(),
+            );
+            upsert_edge_tx(conn, &edge)?;
+        }
+    }
     Ok(wanted)
 }
 
@@ -1372,25 +1384,57 @@ pub fn write_tx(
             .collect(),
     };
 
-    for (from, to) in rename {
+    for (at, (from, to)) in rename.iter().enumerate() {
         let (old, new) = (decl.uri(store, from), decl.uri(store, to));
-        let moved = conn
-            .execute(
-                &format!(
-                    "UPDATE {table} SET uri = ?2, {} = ?3, written_at = ?4
-                     WHERE uri = ?1 AND NOT EXISTS (SELECT 1 FROM {table} WHERE uri = ?2)",
-                    quote(&decl.key)
-                ),
-                params![old, new, to, now],
+        let state = |uri: &str| -> Result<Option<bool>, DomainError> {
+            conn.query_row(
+                &format!("SELECT removed_at IS NOT NULL FROM {table} WHERE uri = ?1"),
+                [uri],
+                |r| r.get::<_, bool>(0),
             )
-            .map_err(map_sql_err)?;
-        if moved == 0 {
+            .optional()
+            .map_err(map_sql_err)
+        };
+        // Only a live item moves; onto a live one it can't.
+        if state(&old)? != Some(false) {
             continue;
         }
+        match state(&new)? {
+            Some(false) => {
+                out.quarantined.push(Quarantined {
+                    at,
+                    id: Some(from.clone()),
+                    message: format!(
+                        "model `{model}`: rename `{from}` → `{to}`: `{to}` is already an item"
+                    ),
+                });
+                continue;
+            }
+            // A tombstone at the new id gives way.
+            Some(true) => {
+                conn.execute(&format!("DELETE FROM {table} WHERE uri = ?1"), [&new])
+                    .map_err(map_sql_err)?;
+                conn.execute(
+                    "DELETE FROM model_field_value WHERE model = ?1 AND uri = ?2",
+                    params![model, new],
+                )
+                .map_err(map_sql_err)?;
+            }
+            None => {}
+        }
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET uri = ?2, {} = ?3, written_at = ?4 WHERE uri = ?1",
+                quote(&decl.key)
+            ),
+            params![old, new, to, now],
+        )
+        .map_err(map_sql_err)?;
+        // A source that cites both the old and the new URI keeps one edge.
         for sql in [
             "UPDATE model_field_value SET uri = ?2 WHERE model = ?3 AND uri = ?1",
-            "UPDATE page_ref SET source_uri = ?2 WHERE source_uri = ?1 AND ?3 = ?3",
-            "UPDATE page_ref SET target_uri = ?2 WHERE target_uri = ?1 AND ?3 = ?3",
+            "UPDATE OR REPLACE page_ref SET source_uri = ?2 WHERE source_uri = ?1 AND ?3 = ?3",
+            "UPDATE OR REPLACE page_ref SET target_uri = ?2 WHERE target_uri = ?1 AND ?3 = ?3",
         ] {
             conn.execute(sql, params![old, new, model])
                 .map_err(map_sql_err)?;
@@ -2396,6 +2440,16 @@ mod tests {
             ]
         );
         assert_ne!(first, later);
+        let dir: Vec<(String, String, Option<i64>)> = edges(&db, B1)
+            .await
+            .into_iter()
+            .filter(|e| e.1 == "dir_pin")
+            .collect();
+        assert_eq!(
+            dir[0].2,
+            Some(later),
+            "verifying all re-pins its directories"
+        );
         let err = db
             .transaction(|tx| verify_pins_tx(tx, B1, Some(&["src/zzz.rs".to_string()])))
             .await
@@ -2459,5 +2513,139 @@ mod tests {
             .unwrap();
         let titles: Vec<String> = rows(&db).await.into_iter().map(|r| r.2).collect();
         assert_eq!(titles, vec!["a"]);
+    }
+
+    /// A rename replaces a tombstone at its new id, keeps one edge when a
+    /// source cites both URIs, and is reported (not done) onto a live item.
+    #[tokio::test]
+    async fn a_rename_handles_tombstones_shared_edges_and_live_targets() {
+        let db = Database::in_memory();
+        let upsert = |rows: Vec<ModelRow>, delete: Vec<String>, rename: Vec<(String, String)>| {
+            ModelWrite::Upsert {
+                rows,
+                delete,
+                rename,
+            }
+        };
+        write(
+            &db,
+            "s",
+            vec![],
+            upsert(
+                vec![
+                    row(json!({"id": "a", "title": "A"})),
+                    row(json!({"id": "b", "title": "B"})),
+                ],
+                vec![],
+                vec![],
+            ),
+        )
+        .await
+        .unwrap();
+        write(&db, "s", vec![], upsert(vec![], vec!["b".into()], vec![]))
+            .await
+            .unwrap();
+        let (a, b) = (
+            "oxplow:shelf/book?id=a&store=s",
+            "oxplow:shelf/book?id=b&store=s",
+        );
+        db.transaction(move |tx| {
+            for target in [a, b] {
+                crate::page_ref_store::upsert_edge_tx(
+                    tx,
+                    &crate::page_ref_store::PageRefEdge::new(
+                        "oxplow:oxplow/file?path=x.md",
+                        target,
+                        "file_mention",
+                    ),
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let w = write(
+            &db,
+            "s",
+            vec![],
+            upsert(vec![], vec![], vec![("a".into(), "b".into())]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(w.changes.len(), 1, "{w:?}");
+        assert_eq!(
+            rows(&db)
+                .await
+                .iter()
+                .map(|r| r.2.clone())
+                .collect::<Vec<_>>(),
+            vec!["A"]
+        );
+        assert_eq!(edges(&db, "oxplow:oxplow/file?path=x.md").await.len(), 1);
+
+        write(
+            &db,
+            "s",
+            vec![],
+            upsert(vec![row(json!({"id": "c", "title": "C"}))], vec![], vec![]),
+        )
+        .await
+        .unwrap();
+        let onto_live = write(
+            &db,
+            "s",
+            vec![],
+            upsert(vec![], vec![], vec![("b".into(), "c".into())]),
+        )
+        .await
+        .unwrap();
+        assert!(onto_live.changes.is_empty());
+        assert!(onto_live.quarantined[0].message.contains("already an item"));
+    }
+
+    /// A directory pin matches the files under it by their exact prefix:
+    /// `my_dir` isn't stale for a change to `myXdir/a.md` (`_` is no
+    /// wildcard), only for one under `my_dir/`.
+    #[tokio::test]
+    async fn a_directory_pin_matches_only_files_under_it() {
+        let db = Database::in_memory();
+        snapshot(&db).await;
+        write_decl(
+            &db,
+            pinned_book(),
+            vec![row(
+                json!({"id": "b1", "title": "t", "body": "see [[dir:my_dir]]"}),
+            )],
+        )
+        .await;
+        let stale = |db: Database| async move {
+            db.read(|tx| {
+                tx.query_row(
+                    "SELECT stale FROM v_ref_pin WHERE source = ?1 AND kind = 'dir'",
+                    [B1],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap()
+        };
+        let file_at = |db: Database, path: &'static str| async move {
+            let id = snapshot(&db).await;
+            db.transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
+                     VALUES (1, ?1, 'h', 1, '2026-01-02T00:00:00Z', 'oxplow', ?2)",
+                    params![path, id],
+                )
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        };
+        file_at(db.clone(), "myXdir/a.md").await;
+        assert_eq!(stale(db.clone()).await, 0);
+        file_at(db.clone(), "my_dir/a.md").await;
+        assert_eq!(stale(db.clone()).await, 1);
     }
 }
