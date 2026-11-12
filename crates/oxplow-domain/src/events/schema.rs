@@ -35,6 +35,7 @@ pub const CORE_NAMESPACES: &[&str] = &[
     "agent",
     "capability",
     "thread",
+    "stream",
     "snapshot",
     "vcs",
     "task",
@@ -205,6 +206,8 @@ impl EventSchemaRegistry {
         r.register::<RefDrifted>().expect("core type registers");
         r.register::<HandoffSent>().expect("core type registers");
         r.register::<HandoffSettled>().expect("core type registers");
+        r.register::<ThreadClosed>().expect("core type registers");
+        r.register::<StreamArchived>().expect("core type registers");
         r.register::<KnowledgeCommentWritten>()
             .expect("core type registers");
         r.register::<KnowledgeCommentDeleted>()
@@ -2164,6 +2167,42 @@ impl EventType for HandoffSettled {
     type Payload = HandoffSettledV2;
 }
 
+/// `thread.closed@1`: a thread was closed (`oxplow.thread.close`): its
+/// sessions ended with it, and what it was working on goes back to nobody
+/// (bundled releases its tasks).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ThreadClosedV1 {
+    /// The thread (`thr3`).
+    pub thread: String,
+}
+
+pub struct ThreadClosed;
+impl EventType for ThreadClosed {
+    const TYPE: &'static str = "thread.closed";
+    const V: u32 = 1;
+    type Payload = ThreadClosedV1;
+}
+
+/// `stream.archived@1`: a stream was archived (`oxplow.stream.archive`):
+/// its threads' sessions ended and its working copy may be gone; what its
+/// threads were working on goes back to nobody.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StreamArchivedV1 {
+    /// The stream (`str2`).
+    pub stream: String,
+    /// Its threads (`thr3`), each.
+    pub threads: Vec<String>,
+}
+
+pub struct StreamArchived;
+impl EventType for StreamArchived {
+    const TYPE: &'static str = "stream.archived";
+    const V: u32 = 1;
+    type Payload = StreamArchivedV1;
+}
+
 /// `knowledge.comment.written@3`: a comment (a threaded annotation on a
 /// page) was created or changed — a reply, its intent, status or anchor.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2280,6 +2319,7 @@ mod tests {
                 ("knowledge.page.written", 3),
                 ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),
+                ("stream.archived", 1),
                 ("task.assigned", 1),
                 ("task.commented", 2),
                 ("task.created", 2),
@@ -2295,6 +2335,7 @@ mod tests {
                 ("test.coverage.recorded", 1),
                 ("test.run.recorded", 3),
                 ("thread.checkpoint", 2),
+                ("thread.closed", 1),
                 ("ui.op_error.dismissed", 1),
                 ("ui.op_error.seen", 1),
                 ("ui.op_failed", 2),

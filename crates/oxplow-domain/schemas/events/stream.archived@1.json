@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`stream.archived@1`: a stream was archived (`oxplow.stream.archive`):\nits threads' sessions ended and its working copy may be gone; what its\nthreads were working on goes back to nobody.",
+  "properties": {
+    "stream": {
+      "description": "The stream (`str2`).",
+      "type": "string"
+    },
+    "threads": {
+      "description": "Its threads (`thr3`), each.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "stream",
+    "threads"
+  ],
+  "title": "StreamArchivedV1",
+  "type": "object"
+}

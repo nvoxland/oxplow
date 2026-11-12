@@ -321,6 +321,20 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                     .iter()
                     .map(|t| oxplow_domain::uri::build::thread_uri(t.id))
                     .collect();
+                let archived = oxplow_domain::events::Envelope::typed::<
+                    oxplow_domain::events::schema::StreamArchived,
+                >(
+                    source.clone(),
+                    &oxplow_domain::events::schema::StreamArchivedV1 {
+                        stream: id.to_string(),
+                        threads: threads.iter().map(|t| t.id.to_string()).collect(),
+                    },
+                )
+                .with_subject(
+                    std::iter::once(oxplow_domain::uri::build::stream_uri(id))
+                        .chain(thread_uris.iter().cloned())
+                        .collect::<Vec<String>>(),
+                );
                 let released = deps
                     .db
                     .read(move |tx| {
@@ -346,9 +360,11 @@ pub fn archive_op(deps: StreamDeps) -> Op {
                 }
                 deps.worktrees.forget(&id).await;
                 deps.snapshot_captures.unregister(&id);
+                let mut events = released;
+                events.push(archived);
                 Ok(HandlerOutput {
                     result: json!({ "stream": input.stream, "archived": true }),
-                    events: released,
+                    events,
                     ..HandlerOutput::default()
                 })
             })
@@ -819,5 +835,53 @@ mod tests {
             .await
             .is_none());
         assert!(fx.svc.terminal_store.get(id).await.unwrap().is_none());
+    }
+
+    /// Archiving a stream logs `stream.archived`, naming it and its threads,
+    /// for whatever reacts to their work ending (bundled releases tasks).
+    #[tokio::test]
+    async fn archiving_logs_stream_archived_with_its_threads() {
+        let fx = services_with_thread().await;
+        let root = fx.svc.layout.project_dir.clone();
+        std::fs::write(root.join("base.txt"), "b\n").unwrap();
+        crate::test_fixtures::commit_all(&root, "base");
+        let main = fx.svc.vcs.head(&root).await.unwrap().branch.unwrap();
+        let out = fx
+            .svc
+            .commands
+            .run(
+                &Actor::Human,
+                CREATE,
+                json!({ "title": "Side", "source": "new", "new_branch": "side", "start_point": main }),
+                false,
+            )
+            .await
+            .unwrap();
+        let side = serde_json::from_value::<oxplow_domain::Stream>(out.result)
+            .unwrap()
+            .id;
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                ARCHIVE,
+                json!({ "stream": side.to_string(), "delete_worktree": true }),
+                true,
+            )
+            .await
+            .unwrap();
+        let logged: Vec<serde_json::Value> = fx
+            .svc
+            .event_log_store
+            .read_after(0, 10_000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "stream.archived")
+            .map(|e| e.envelope.payload)
+            .collect();
+        assert_eq!(logged.len(), 1, "{logged:?}");
+        assert_eq!(logged[0]["stream"], side.to_string());
+        assert!(logged[0]["threads"].is_array(), "{logged:?}");
     }
 }

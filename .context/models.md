@@ -482,6 +482,13 @@ fields:                        # oxplow's own annotations on every store's tasks
 
 ## The switch, as decided after the 2026-11-12 review
 
+- **Thread and stream ends are events** (built): closing a thread logs
+  `thread.closed@1 { thread }`, archiving a stream logs `stream.archived@1
+  { stream, threads }` (core namespace `stream`, kept without expiry), so
+  bundled releases what they were working on by reacting to them, and
+  core's commands stop naming tasks at the flip. A taken handoff's task is
+  read from `v_handoff` by the `handoff.settled` event's `handoff`.
+
 - **The read contract is bundled's dataset `task` (`v_oxplow_task`)**, over
   `task_record` joined with oxplow's fields and the store's stages, with
   today's `v_task` columns. No core alias for `v_task`: an alias would be a

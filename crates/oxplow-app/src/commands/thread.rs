@@ -419,15 +419,26 @@ pub fn close_op(processes: crate::agent_sessions::SessionProcesses) -> Op {
                 }
             }));
             // Its work goes back to nobody: another thread may take it.
-            let released = super::task::release_all_tx(
+            let mut events = super::task::release_all_tx(
                 ctx.conn,
                 &ctx.actor().source(),
                 &oxplow_domain::uri::build::thread_uri(id),
             )?;
+            events.push(
+                oxplow_domain::events::Envelope::typed::<
+                    oxplow_domain::events::schema::ThreadClosed,
+                >(
+                    ctx.actor().source(),
+                    &oxplow_domain::events::schema::ThreadClosedV1 {
+                        thread: id.to_string(),
+                    },
+                )
+                .with_subject(vec![thread_uri(id)]),
+            );
             Ok(HandlerOutput {
                 inverse: call(REOPEN, json!({ "thread": input.thread })),
                 after_commit,
-                events: released,
+                events,
                 ..result(&thread)
             })
         })),
@@ -666,6 +677,33 @@ mod tests {
             matches!(&err, CommandError::Denied { reason } if reason.contains("is closed")),
             "{err:?}"
         );
+    }
+
+    /// Closing a thread logs `thread.closed`, naming it, for whatever reacts
+    /// to its work ending (bundled releases its tasks).
+    #[tokio::test]
+    async fn closing_a_thread_logs_thread_closed() {
+        let fx = services_with_thread().await;
+        let second = create(&fx, "second").await;
+        run(
+            &fx,
+            &Actor::Human,
+            CLOSE,
+            json!({ "thread": second.to_string() }),
+        )
+        .await
+        .unwrap();
+        let logged: Vec<serde_json::Value> = fx
+            .svc
+            .event_log_store
+            .read_after(0, 1000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "thread.closed")
+            .map(|e| e.envelope.payload)
+            .collect();
+        assert_eq!(logged, vec![json!({ "thread": second.to_string() })]);
     }
 
     /// Moving a thread to the state it's in changes nothing, so it leaves
