@@ -1,0 +1,13 @@
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: A } }
+when: { command: oxtask.task.comment, input: { id: tsk1, body: First note, author: nate } }
+expect: { ok: true }
+steps:
+  - when: { command: oxtask.task.comment, input: { id: tsk1, body: Second note } }
+    expect: { ok: true }
+  - when: { sql: "SELECT id, author, body, at IS NOT NULL AS timed FROM v_oxplow_task_record_comments ORDER BY id" }
+    expect:
+      rows:
+        - { id: cmt1, author: nate, body: First note, timed: 1 }
+        - { id: cmt2, author: null, body: Second note, timed: 1 }
