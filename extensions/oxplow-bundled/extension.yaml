@@ -150,6 +150,16 @@ effects:
     on: [oxplow.task_record.changed]
     where: { cause: trigger }
     entry: effects/assign_on_start.star
+# Places where several task stores offer one action: a task page draws "New
+# Task" once, whichever stores are on (a button with one, a menu with
+# several). A store's command joins with `ui: { at: oxplow/task.new }`.
+action_points:
+  - name: task.new
+    label: New Task
+    doc: File a task. Each task store offers its own way.
+    context:
+      parent?: uri
+      thread_id?: int
 # What a request's work touched: one row per request, task and basis.
 # TEMPORARY (the flip renames the model, its resource and its view
 # `request_task`): until then core's `request_task` dataset is still what
@@ -239,6 +249,8 @@ ui:
   # A task's page shows the agent's tokens on it and what another
   # thread shares with it.
   mounts:
+    # The request summary's tasks (foundation's page reads no task).
+    - { page: request-tasks, at: oxplow/request-summary.sections, position: { after: request }, title: Tasks }
     - { page: task-tokens, at: oxplow/task-detail.sections }
     - { page: item-shared-work, at: oxplow/task-detail.sections }
     # A request's Changes page shows where it left its task's area and
@@ -563,6 +575,7 @@ collectors:
                       WHERE pt.request_id = t.request_id)
     facts: [knowledge.read_requests]
 dimensions:
+  - {"key": "work.priority", "label": "Priority", "entity": "v_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
   - {"key": "oxplow.knowledge_store", "label": "Knowledge store", "valueType": "categorical", "description": "The store that keeps a knowledge page, such as oxwiki."}
   - {"key": "oxplow.knowledge_bucket", "label": "Knowledge bucket", "valueType": "categorical", "description": "What a knowledge page is for: note, memory or instruction."}
 measures:
@@ -576,6 +589,8 @@ measures:
   # recorded again: 1 when tracked, 0 when not.
   - {"key": "oxplow.request_tracked", "title": "Request tracked", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when a request that changed files has a task linked, else 0, as of its latest turn."}
 metrics:
+  - {"key":"task.completed","title":"Tasks completed","entity":"v_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
+  - {"key":"task.open","title":"Open tasks","entity":"v_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
   - {"key":"tasks.tracked_requests_pct","title":"Tracked requests","measure": "oxplow.request_tracked", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files which have a task link.","sliceableDims":["oxplow.branch"]}
   - {"key":"knowledge.pages","title":"Knowledge pages","measure": "knowledge.pages", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"How many knowledge pages the enabled stores keep.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}
   - {"key":"knowledge.stale_pct","title":"Stale knowledge","measure": "knowledge.stale_pages", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"The share of knowledge pages that cite a file which changed since the page was pinned.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}

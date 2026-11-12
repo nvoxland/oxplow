@@ -489,6 +489,33 @@ pages:
 **Done when** core boots and is usable with `oxplow-bundled` disabled,
 and enabling it restores the review and analysis pages.
 
+## Task readers moved out of foundation (flip-order step 6, in part)
+
+Foundation must load and work with bundled off, and after the flip only
+bundled reads tasks. Both extensions have the namespace `oxplow`, so a
+moved page, metric or dimension keeps its id.
+
+- **Moved to bundled:** the metrics `task.open` and `task.completed` and the
+  dimension `work.priority` (all read `v_task`). A metric's key and its
+  facts' measure keys carry no extension (`metric_spec.key` is unique and
+  `extension` only records the owner), so history keeps its keys. The
+  metric page's "See also" now links them to `oxplow-bundled`; the fixture
+  moved with them.
+- **Stays in foundation:** the `tasks` skill (it documents the
+  `oxplow.task.*` commands, which stay in foundation until the flip, and is
+  gated on `task_tracker`; it moves with them), the `task` resource and the
+  `oxplow.task.*` descriptors.
+- **Pages:** none of `closed-threads`, `diff-view`, `local-history`,
+  `request-summary` and `thread-sessions` is a task page; each shows tasks
+  in part. `request-summary` is split: its Tasks section is bundled's part
+  `request-tasks`, mounted at `oxplow/request-summary.sections` after the
+  About section (same look, same position), and foundation's page reads no
+  task. The other four weave tasks into columns or SQL expressions
+  (closed-threads' and thread-sessions' Tasks column, the Changes page's
+  task column and item/body sections, local-history's take subjects built
+  from task titles), which a section cannot replace without changing the
+  page; they still read `v_task` / `v_request_task`.
+
 ## Added for extraction
 
 Features added to core because the extraction needed them,

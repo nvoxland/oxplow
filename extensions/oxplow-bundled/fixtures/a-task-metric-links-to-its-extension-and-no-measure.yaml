@@ -1,0 +1,8 @@
+# "See also": a metric built on no measure (the task counts read `v_task`
+# directly) links to the extension it comes from, bundled, and to no measure.
+when:
+  page: oxplow/metric
+  params: { metric: task.completed }
+expect:
+  see_also:
+    - { title: oxplow-bundled, uri: "oxplow:oxplow/extension?name=oxplow-bundled" }

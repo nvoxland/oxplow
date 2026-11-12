@@ -547,8 +547,6 @@ metrics:
   - {"key":"oxplow.coverage.untested_files","title":"Untested files","measure": "oxplow.coverage", "expression": "COUNT(*) FILTER (WHERE value <= 0)", "unit":"count","direction":"lower-better","displayKind":"findings","category":"coverage","description":"Instrumented files with 0% line coverage.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.analysis.errors","title":"Analysis errors","measure": "oxplow.lint_hit", "expression": "COUNT(*) FILTER (WHERE severity = 'error')", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis errors in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
   - {"key":"oxplow.analysis.warnings","title":"Analysis warnings","measure": "oxplow.lint_hit", "expression": "COUNT(*) FILTER (WHERE severity = 'warning')", "unit":"count","direction":"lower-better","displayKind":"gauge","category":"static-quality","description":"Static-analysis warnings in the latest run.","sliceableDims":["oxplow.branch","oxplow.vcs_rev"]}
-  - {"key":"task.completed","title":"Tasks completed","entity":"v_task","where":"state = 'done'","time":"closed_at","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks done, by the day they were closed."}
-  - {"key":"task.open","title":"Open tasks","entity":"v_task","where":"state IN ('todo', 'in_progress', 'blocked')","aggregation":"count","unit":"tasks","category":"operational","description":"Tasks ready, in progress or blocked, captured over time."}
 # What oxplow's URIs name (`oxplow:oxplow/<resource>?<params>`): declared
 # here like any extension's resources, so none is special
 # (the resource URI grammar). A param's `pattern` matches its decoded value.
@@ -2023,4 +2021,3 @@ dimensions:
   - {"key": "oxplow.rule", "label": "Rule", "valueType": "categorical", "promote": true, "description": "The rule that raised a finding."}
   - {"key": "oxplow.token_kind", "label": "Token kind", "valueType": "categorical", "promote": true, "description": "The kind of token in source code, such as an identifier or a keyword."}
   - {"key": "oxplow.tests_stat", "label": "Test outcome stat", "valueType": "categorical", "subjectKind": "request", "promote": true, "description": "Which test figure of a request a fact holds, such as passed or failed."}
-  - {"key": "work.priority", "label": "Priority", "entity": "v_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
