@@ -11,8 +11,9 @@ files AS (
 ),
 area AS (
   SELECT q.request_id, group_concat(w.title || ' ' || coalesce(w.body, ''), ' ') AS text
-  FROM (SELECT DISTINCT request_id, task FROM ref('request_task')) q
-  JOIN ref('task') w ON w.uri = q.task
+  FROM (SELECT DISTINCT r.id AS request_id, q.task
+        FROM ref('request_task') q JOIN ref('request') r ON r.uri = q.request) q
+  JOIN ref('task_next') w ON w.uri = q.task
   GROUP BY q.request_id
 ),
 -- Every directory prefix of every file (`a/`, `a/b/`, …).

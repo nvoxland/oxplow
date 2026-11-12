@@ -7,7 +7,7 @@
 -- order. It reads no request: what a thread's request is doing now changes
 -- on every tool call, and a reader that shows it (the Work panel's `now`)
 -- reads that for its own thread, so this list re-runs only when tasks do.
--- Finished is the done tasks the thread was working (v_request_task, basis
+-- Finished is the done tasks the thread was working (the request_task model, basis
 -- assigned or transition: it held the task or moved it; filing, commenting
 -- or being prompted with its id is not working it) since the person last
 -- cleared the list, and the knowledge pages it touched. An epic is a task with
@@ -15,13 +15,13 @@
 -- The tasks that have children, found once: an EXISTS per task searched
 -- every task for each.
 WITH parent AS (
-  SELECT DISTINCT parent_uri AS uri FROM ref('task') WHERE parent_uri IS NOT NULL
+  SELECT DISTINCT parent_uri AS uri FROM ref('task_next') WHERE parent_uri IS NOT NULL
 ),
 item AS (
   SELECT w.*, p.uri IS NOT NULL AS is_epic, t.id AS thread_id,
          row_number() OVER (PARTITION BY w.assignee
                             ORDER BY w.rank IS NULL, w.rank, w.created_at, w.uri) AS pos
-  FROM ref('task') w
+  FROM ref('task_next') w
   LEFT JOIN parent p ON p.uri = w.uri
   LEFT JOIN ref('thread') t ON t.uri = w.assignee
 ),
@@ -36,11 +36,12 @@ epic AS (
 ),
 finished AS (
   SELECT thread_id, title, icon, uri, at FROM (
-    SELECT rt.thread_id, i.title, 'done' AS icon, i.uri, i.closed_at AS at,
-           row_number() OVER (PARTITION BY rt.thread_id, i.uri ORDER BY i.closed_at DESC) AS n
+    SELECT th.id AS thread_id, i.title, 'done' AS icon, i.uri, i.closed_at AS at,
+           row_number() OVER (PARTITION BY th.id, i.uri ORDER BY i.closed_at DESC) AS n
     FROM item i
     JOIN ref('request_task') rt ON rt.task = i.uri
-    WHERE i.state = 'done' AND rt.thread_id IS NOT NULL AND rt.basis IN ('assigned', 'transition')
+    JOIN ref('thread') th ON th.uri = rt.thread
+    WHERE i.state = 'done' AND rt.basis IN ('assigned', 'transition')
   ) WHERE n = 1
   UNION ALL
   SELECT k.thread_id, p.title, 'knowledge', p.uri, k.last_seen_at

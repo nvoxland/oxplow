@@ -415,10 +415,23 @@ fields:                        # oxplow's own annotations on every store's tasks
   `native_id` = id, `native` = the store's own fields, `assignee`, `rank`,
   `stage_title`…), so its readers move with no change. Core's `v_task`
   goes in the same publication (two can't both exist).
-- **Request links** (`v_request_task`) are bundled's reaction to
-  `oxplow.task.changed` events with `cause: trigger`, using the event's
-  anchors (now the command's turn: a store's write is observed as its
-  command).
+- **Request links** are bundled's own model, `oxplow/request_task`
+  (`v_oxplow_request_task`; table `model__oxplow__request_task`), written
+  by its collector `oxplow.request_task` as a reaction to
+  `oxplow.task_record.changed` events with `cause: trigger` or `fields`.
+  It is owner-only (not `open`), with one store, `oxplow`, named in
+  bundled's own `fills:`. A row is named by its `key`
+  (`<request uri>|<task uri>|<basis>`) and has `request` (uri), `task`
+  (uri), `basis` (`filed`, `transition`, `assigned`, `edited`, and
+  `prompt` for a link moved from core), `thread` (uri), `turn_id` (int,
+  from the event's anchors) and `at` (the event's time). It is a model,
+  not an entity, because a model's table keeps its rows across a shape
+  change, where an entity table is dropped and rebuilt empty, and links
+  moved from core can't be rebuilt from anything. No edge is stated: a
+  column's edge projects from the row's own URI, not from the request to
+  the task, so none fits. Until the flip it shadows core's `request_task`
+  dataset inside bundled, so bundled's `thread_tasks` and `deviation`
+  read it, with `task_next` for the tasks.
 
 ## The switch, as decided after the 2026-11-12 review
 

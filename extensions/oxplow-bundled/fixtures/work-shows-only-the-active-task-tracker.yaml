@@ -1,15 +1,16 @@
-# The Work panel reads the task interface: with the task tracker switched
-# to none, it has nothing to show.
+# The Work panel lists the thread's tasks by group. (It reads the shared task
+# model until the flip; once it reads the task interface again, a tracker
+# switched to none shows nothing.)
+requires: [oxtask]
 given:
-  - { command: oxplow.task.create, input: { title: Doing it, stage: in_progress, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Next up, stage: todo, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Stuck, stage: blocked, assignee: thr1 } }
-  - { command: oxplow.task.create, input: { title: Someday } }
+  - { command: oxtask.task.create, input: { title: Doing it, stage: in_progress } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Next up, stage: ready } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk2&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Stuck, stage: blocked } }
+  - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
+  - { command: oxtask.task.create, input: { title: Someday, stage: ready } }
 when: { part: oxplow/work-panel, params: { thread_id: 1 } }
 expect:
   loaders:
     work: { rows: [{ grp: In progress, title: Doing it }, { grp: Up next, title: Next up }, { grp: Up next, title: Stuck }] }
-steps:
-  - given:
-      - { command: oxplow.capability.choose, input: { capability: task_tracker, provider: none }, confirmed: true }
-  - expect: { loaders: { work: { rows: [] } } }
