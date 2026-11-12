@@ -341,6 +341,35 @@ fields:                        # oxplow's own annotations on every store's tasks
   anchors (now the command's turn: a store's write is observed as its
   command).
 
+## The switch, as decided after the 2026-11-12 review
+
+- **The read contract is bundled's dataset `task` (`v_oxplow_task`)**, over
+  `task_record` joined with oxplow's fields and the store's stages, with
+  today's `v_task` columns. No core alias for `v_task`: an alias would be a
+  core special case. Its readers (pages, datasets, core Rust readers) move
+  to the new name. The same holds for `v_task_link` (its edges become
+  `task_record_link:<type>`) and the knowledge read contract.
+- **Reactions:**
+  - request links: a bundled collector `on: [oxplow.task_record.changed]`
+    (with the cause filter below) that writes them, declarative and
+    replayable, from the event's anchors (a command-started run carries the
+    command's turn);
+  - assign on start, close the assignment on done: a bundled effect that
+    composes `oxplow.model.set_fields`.
+- **A cause filter on `on:`** (`where: { cause: [trigger, fields] }`), so a
+  thousand-row reconcile doesn't start a thousand script runs that only
+  skip. To build before the reactions.
+- **Order:** the vertical slice runs only on a throwaway oxplow (fixtures,
+  an e2e) — a new store `oxtask` on a database whose core tasks share its
+  ids would give two items one URI. The switch moves the data first
+  (core's rows into `oxtask.sqlite`, rehearsed on a copy of the live home
+  with a before/after comparison), then flips the reads (bundled's `task`
+  dataset, the resources' `resolve` / `searchable`), and only then deletes
+  core's task verbs, tables and projection.
+- **Before the deletes:** the provider `read` adapter, and the boot repair
+  over models and their children (core's repair goes with the task
+  projection).
+
 ## Children
 
 - **Declared in the parent** (`children: { <name>: { key, columns, edge? } }`),
