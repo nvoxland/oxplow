@@ -247,6 +247,24 @@ fills:
   per provider operation, as today). `TasksProjection` and
   `KnowledgeRecords` go once the adapter stands in for them.
 
+## A script that composes a store's write (decided 2026-11-12)
+
+oxtask surfaced it: a script runs once, before its steps, so its `result`
+and `inverse` can't use what its steps answered — a minted task id, so
+an agent can't learn the id it filed, and `create` / `comment` can't be
+undone. To build:
+
+- **`finish(x)`**: a script command's script may also define `finish`.
+  After all its steps have landed, the bus calls it with `x["input"]`,
+  `x["actor"]` and `x["steps"]` (`[{ name, input, result }]`, each step's
+  answer: a store write's `rows` carry the minted id), and it returns `{
+  result?, inverse? }`, which become the run's result and its undo
+  (replacing what `transform` said). Pure, like `transform`: no writes, no
+  composed commands. A run that stops partway calls no `finish`.
+- **`x["actor"]`** for `transform` and `finish`: who runs it (`{ kind:
+  agent | person | system, thread?: <uri>, uri: <uri> }`), so a store
+  records its author reliably.
+
 ## A store's folder and worktree streams (decided 2026-11-12)
 
 `.oxplow/` is gitignored, so a store's folder (oxwiki's `.oxplow/oxwiki/`)
