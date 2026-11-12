@@ -171,7 +171,7 @@ async fn every_path_hands_over_the_same_envelope() {
         .unwrap();
     assert_eq!(
         seen(svc, "v_acme_seen_prog").await,
-        json!({ "event": expected })
+        json!({ "event": expected, "cursor": null })
     );
 
     // An effect's `x["event"]`.

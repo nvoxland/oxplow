@@ -645,16 +645,32 @@ pub async fn dry_run_collector(
         Ok(given) => given,
         Err(e) => return DryRun::Failed(e),
     };
-    match derive_collector(layer, script, spec, given, event, rows, &run).await {
+    let input = RunInput {
+        event,
+        rows,
+        observed: serde_json::Map::new(),
+    };
+    match derive_collector(layer, script, spec, given, input, &run).await {
         Ok(out) => DryRun::Output(out),
         Err(e) => DryRun::Failed(e),
     }
 }
 
+/// What a derived collector's run is handed besides its `input` query's rows.
+pub struct RunInput<'a> {
+    /// The event an `on:` collector reacts to.
+    pub event: Option<&'a EventView>,
+    /// Rows standing in for the `input` query (an example's fixture).
+    pub rows: Option<Vec<serde_json::Value>>,
+    /// What an observer's trigger adds (`trigger`, `changed`) and the last
+    /// good run's `cursor`.
+    pub observed: serde_json::Map<String, serde_json::Value>,
+}
+
 /// Run a derived (starlark / jaq) collector: read its `input` rows (the
 /// trigger event's anchors bound by name) — or take `rows`, standing in
 /// for them (an example's fixture) — then run its script over
-/// `{"rows": [...], "event"?: {...}}` in a script worker, as part of `run`
+/// `{"rows": [...], "event"?: {...}, "trigger"?, "changed"?, "cursor"}` in a script worker, as part of `run`
 /// (its budget, its cancel flag), with the services it was `given`
 /// ([`given`]).
 pub async fn derive_collector(
@@ -662,10 +678,14 @@ pub async fn derive_collector(
     script: String,
     spec: &CollectorSpec,
     given: crate::services::Given,
-    event: Option<&EventView>,
-    rows: Option<Vec<serde_json::Value>>,
+    input: RunInput<'_>,
     run: &RunContext,
 ) -> Result<ScriptOutput, String> {
+    let RunInput {
+        event,
+        rows,
+        observed,
+    } = input;
     run.check_authority()?;
     let run = run.clone();
     let read = match (rows, &spec.input) {
@@ -693,6 +713,10 @@ pub async fn derive_collector(
     if let Some(e) = event {
         input.insert("event".into(), e.to_json());
     }
+    // The trigger an observer ran for, and the last good run's cursor
+    // (`null` the first time).
+    input.extend(observed);
+    input.entry("cursor").or_insert(serde_json::Value::Null);
     let input = serde_json::Value::Object(input);
     let runtime = spec.runtime;
     let (budget, cancel, cost) = (run.budget(), run.cancel().clone(), run.clone());
@@ -830,21 +854,67 @@ impl From<RunCollectorError> for DomainError {
 }
 
 /// What ran a collector: `oxplow.collector.sync` by hand, its `every:` schedule,
-/// or an event its `on:` names.
+/// an event its `on:` names, or an observer's trigger (`start`, a file
+/// change, a SQLite file's write: `crate::observer_triggers`).
 #[derive(Debug, Clone)]
 pub enum RunTrigger {
     Manual,
     Every,
     On(Arc<StoredEvent>),
+    /// The extension started: the collector's full reconcile.
+    Start,
+    /// Files matching an `on: { files: <glob> }` changed.
+    Files(Vec<FileChange>),
+    /// A SQLite file named by `on: { sqlite: … }` was written.
+    Sqlite,
+}
+
+/// What happened to a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileOp {
+    Created,
+    Modified,
+    Removed,
+}
+
+/// One file an observer's `files` trigger heard of: its path from the
+/// project root, and what happened to it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileChange {
+    pub path: String,
+    pub op: FileOp,
 }
 
 impl RunTrigger {
-    fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             RunTrigger::Manual => "manual",
             RunTrigger::Every => "every",
             RunTrigger::On(_) => "on",
+            RunTrigger::Start => "start",
+            RunTrigger::Files(_) => "files",
+            RunTrigger::Sqlite => "sqlite",
         }
+    }
+
+    /// What an observer's trigger adds to the run's input: `trigger`, and
+    /// for a files trigger the `changed` list. Empty for the other triggers.
+    fn observed(&self) -> serde_json::Map<String, serde_json::Value> {
+        let mut out = serde_json::Map::new();
+        if matches!(
+            self,
+            RunTrigger::Start | RunTrigger::Files(_) | RunTrigger::Sqlite
+        ) {
+            out.insert("trigger".into(), self.name().into());
+        }
+        if let RunTrigger::Files(changed) = self {
+            out.insert(
+                "changed".into(),
+                serde_json::to_value(changed).unwrap_or_default(),
+            );
+        }
+        out
     }
 
     fn event(&self) -> Option<&StoredEvent> {
@@ -981,12 +1051,17 @@ impl InputRows {
 }
 
 /// An exec collector's stdin: `{ "event": … }` (the event envelope) when
-/// an event triggered it, `{}` otherwise.
-fn exec_input(event: Option<&EventView>) -> serde_json::Value {
-    match event {
-        Some(e) => serde_json::json!({ "event": e.to_json() }),
-        None => serde_json::json!({}),
+/// an event triggered it, plus what an observer's trigger adds (`trigger`,
+/// `changed`) and the last good run's `cursor`.
+fn exec_input(
+    event: Option<&EventView>,
+    observed: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    let mut input = observed;
+    if let Some(e) = event {
+        input.insert("event".into(), e.to_json());
     }
+    serde_json::Value::Object(input)
 }
 
 /// A collector's `contribution_health` key: its owner (the namespace it is
@@ -1101,7 +1176,7 @@ async fn run_collector_once(
         .map(|e| EventView::of(e, &ctx.vocabulary.current()))
         .transpose();
     let (spec, output) = match view {
-        Ok(view) => produce(ctx, run, owner, id, view.as_ref(), None).await?,
+        Ok(view) => produce(ctx, run, owner, id, view.as_ref(), None, trigger.observed()).await?,
         Err(e) => (
             find_collector(ctx, owner, id)?.1,
             Err(format!("collector `{id}`: its event: {e}")),
@@ -1670,7 +1745,16 @@ pub async fn preview_collector(
         .map_err(|e| RunCollectorError::Failed(format!("its event: {}", e.message())))?;
     let parent = RunContext::core(oxplow_domain::Actor::System, Mode::External);
     let run = collector_context(ctx, &parent, owner, id)?;
-    let (spec, output) = produce(ctx, &run, owner, id, view.as_ref(), rows).await?;
+    let (spec, output) = produce(
+        ctx,
+        &run,
+        owner,
+        id,
+        view.as_ref(),
+        rows,
+        serde_json::Map::new(),
+    )
+    .await?;
     let mut output = output.map_err(RunCollectorError::Failed)?;
     let declarer = run.extension().unwrap_or(owner);
     let events = plan_events(
@@ -1755,6 +1839,7 @@ async fn produce(
     id: &str,
     event: Option<&EventView>,
     rows: Option<Vec<serde_json::Value>>,
+    mut observed: serde_json::Map<String, serde_json::Value>,
 ) -> Result<(CollectorSpec, Result<ScriptOutput, String>), RunCollectorError> {
     let root = ctx.root;
     let (ext, spec) = find_collector(ctx, owner, id)?;
@@ -1764,6 +1849,15 @@ async fn produce(
             "collector `{owner}/{id}` reads a provider; run `oxplow.provider.sync` for it"
         )));
     }
+    // The last good run's cursor: a failed run keeps it, so the next trigger
+    // starts from the same place.
+    let cursor = ctx
+        .store
+        .run_of(owner, id)
+        .await
+        .map_err(RunCollectorError::Storage)?
+        .and_then(|run| run.cursor);
+    observed.insert("cursor".into(), cursor.unwrap_or(serde_json::Value::Null));
     if spec.runtime.is_derived() {
         let Some(script) =
             crate::extension::extensions::read_extension_file(root, &ext.path, entry_of(&spec))
@@ -1794,7 +1888,12 @@ async fn produce(
         }
         let output = match given(&spec, &run, &script, &sources).await {
             Ok(given) => {
-                derive_collector(&ctx.layer, script, &spec, given, event, rows, &run).await
+                let input = RunInput {
+                    event,
+                    rows,
+                    observed,
+                };
+                derive_collector(&ctx.layer, script, &spec, given, input, &run).await
             }
             Err(e) => Err(e),
         };
@@ -1834,7 +1933,16 @@ async fn produce(
     }
     let output = match missing {
         Some(e) => Err(e),
-        None => exec_from_deployment(&ext_dir, &spec, credentials, &exec_input(event), run).await,
+        None => {
+            exec_from_deployment(
+                &ext_dir,
+                &spec,
+                credentials,
+                &exec_input(event, observed),
+                run,
+            )
+            .await
+        }
     };
     Ok((spec, output))
 }

@@ -316,11 +316,11 @@ profile (`oxplow_sdk::profile_lines`: bound, or falling back), and
 `check` warns when the binding serving a profile forbids a feature it
 declares (`profile_warnings`, a person's `restrict:`).
 
-## Triggers for observers (contract, being built)
+## Triggers for observers
 
 Part of the shared-models work ([models.md](./models.md)). A store's
-collector must be able to follow its tool without an oxplow event. Three
-new `on:` kinds, mixed freely with event types in one list:
+collector follows its tool without an oxplow event. Three `on:` kinds sit
+beside event types in one list (`start` is a bare word):
 
 ```yaml
 collectors:
@@ -328,30 +328,67 @@ collectors:
     runtime: starlark
     entry: collectors/books.star
     needs: [model.write, files.read]
-    on: [start, { files: "shelf/*.md" }, shelf-folder.book.written]
+    on: [start, { files: "shelf/*.md" }, { sqlite: own }, shelf-folder.book.written]
 ```
 
-- **`start`**: once when the extension starts (boot, enable, a deploy).
-  It is the full reconcile: the script states a `snapshot`. Its input has
-  `x["trigger"] = "start"`.
-- **`{ files: <glob> }`**: files in the primary worktree matching the
-  glob (relative to the project root) were created, changed or removed,
-  from the stream watch (`stream_watch::subscribe_primary`). Coalesced
-  over the asset window. Input: `x["trigger"] = "files"`, `x["changed"]
-  = [{ path, op: created | modified | removed }]`.
+- **`start`**: runs once when the extension starts: boot, an enable, or a
+  deploy that changed the extension. It is the full reconcile (the script
+  states a `snapshot`); the run's trigger name is `start`, which the
+  runner treats as a reconcile for change events. Input: `x["trigger"] =
+  "start"`.
+- **`{ files: <glob> }`**: files of the primary worktree matching the glob
+  (relative to the project root; `*` stays in a folder, `**` crosses
+  them) were created, changed or removed. The watch is the primary
+  stream's (`stream_watch::subscribe_primary`), narrowed to the glob's
+  literal folder (`shelf/*.md` hears `shelf/`; a glob that starts with a
+  wildcard hears every kept path). Changes are coalesced: a burst is one
+  run, `crate::assets::COALESCE` after the last change, and at most
+  `MAX_WAIT_FACTOR` windows after the first (a write that never stops
+  still runs). A path keeps its last state (created then changed is
+  created; created then removed is dropped). A rescan (changes the watch
+  lost) lists the matching files on disk as `modified`. Input:
+  `x["trigger"] = "files"`, `x["changed"] = [{ path, op: created | modified
+  | removed }]`.
 - **`{ sqlite: own }`** or **`{ sqlite: <path> }`**: a SQLite file's
-  `PRAGMA data_version` moved, polled every 2 s while the extension is
-  on, on one dedicated read connection per file (`data_version` is only
-  comparable on the same connection). `own` is the extension's own file;
-  a `<path>` (a tool's database, `.beads/beads.db`) must be inside a
-  `files:` folder it may read, and is read with `files.sqlite`
-  ([extensions-permissions.md](./extensions-permissions.md) "Store
-  services"). Input: `x["trigger"] = "sqlite"`.
-- Every run may return `"cursor"`; the next run gets it as `x["cursor"]`
-  ([models.md](./models.md) "Cursor"), and `"models"` / `"fields"`, the
-  declarative writes of [models.md](./models.md) "The output". Both work
-  for `exec` collectors (printed on stdout) as for Starlark.
+  `PRAGMA data_version` moved. It is polled every 2 s (`observer_triggers::POLL`)
+  on one read-only connection kept for the file (`data_version` only
+  compares on one connection); the first read is the baseline, a file that
+  does not exist yet is opened when it appears. `own` is the extension's
+  own file (`.oxplow/extensions-data/<name>.sqlite`, needs `storage: {
+  sqlite: true }`); a `<path>` is relative to the project root and must be
+  inside a `files:` folder the extension declares. Input: `x["trigger"] =
+  "sqlite"`. Reading the tool's database inside the run is the `files.sqlite`
+  service's ([extensions-permissions.md](./extensions-permissions.md) "Store
+  services").
+- Every derived (Starlark, jaq) collector run, whatever its trigger, gets
+  `x["cursor"]`: the cursor the last successful run returned (`collector_run.cursor_json`),
+  `null` before one did. An exec collector's stdin has the same keys
+  (`trigger`, `changed`, `cursor`, `event`). A run may return `"cursor"` and
+  `"models"` / `"fields"` ([models.md](./models.md) "The output").
 - A collector only reads while it runs (`store.sql`, `files.read`,
   `files.list`, `files.sqlite`); the host applies its output after.
-- A trigger fires only while the extension is on. A run that fails keeps
-  the cursor and is retried on the next trigger.
+
+**Parsing** (`oxplow_config::collectors::parse_trigger`): the items become
+`Trigger::On { events, sources: Vec<ObserverSource>, .. }`; `where:` and the
+pacing keys go with event types only (an `on:` of `start` alone with
+`settle:` is an error); a bad glob, an absolute or `..` path is an error at
+the collector's line. The manifest loader then checks `sqlite: own` against
+`storage:` and `sqlite: <path>` against the `files:` folders
+(`collector.trigger_invalid`, at the collector's line); the collector is
+left out. An effect's `on:` takes event types only.
+
+**Running** (`observer_triggers.rs`): `supervise` (spawned at boot once the
+watches are up, `boot.rs`) keeps one task per observing collector of an
+enabled extension, in step with the catalog (`runtime_changes` and a 30 s
+look). A collector that is new, or whose declaration or deployment changed,
+starts over, which is what makes `start` run on boot, enable and deploy; one
+whose extension is off has no task and its triggers are dropped (`fire`
+checks again just before a run). Each task runs its collector through
+`run_collector` as the system, one run at a time; triggers that pile up behind
+a run fold into one (files merge). A run that fails is logged, keeps the
+cursor, and the next trigger runs it again (the failed `collector_run` row
+leaves `cursor_json` as it was).
+
+**Fixtures**: live triggers are off in a fixture; `when: { collector,
+trigger }` runs the collector for real ([extensions-sdk.md](./extensions-sdk.md)
+"Fixtures for observers").

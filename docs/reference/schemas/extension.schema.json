@@ -1566,6 +1566,16 @@
           "$ref": "#/definitions/EventTypeList"
         },
         {
+          "description": "Event types mixed with `start`, `{ files: <glob> }` and\n`{ sqlite: own | <path> }`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/OnItem"
+          }
+        },
+        {
+          "$ref": "#/definitions/ObserverFile"
+        },
+        {
           "$ref": "#/definitions/EveryFile"
         },
         {
@@ -1592,6 +1602,55 @@
             "type": "string"
           }
         }
+      ]
+    },
+    "OnItem": {
+      "description": "An item of an `on:` list: an event type, or an observer's trigger.",
+      "anyOf": [
+        {
+          "description": "An event type, or `start`.",
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/ObserverFile"
+        }
+      ]
+    },
+    "ObserverFile": {
+      "description": "`{ files: <glob> }` or `{ sqlite: own | <path> }`.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FilesFile"
+        },
+        {
+          "$ref": "#/definitions/SqliteFile"
+        }
+      ]
+    },
+    "FilesFile": {
+      "description": "`{ files: shelf/*.md }`: files of the project matching the glob (from\nthe project root) were created, changed or removed.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "files"
+      ]
+    },
+    "SqliteFile": {
+      "description": "`{ sqlite: own }` or `{ sqlite: .beads/beads.db }`: a SQLite file\nchanged (the extension's own, or one in a `files:` folder it may read).",
+      "type": "object",
+      "properties": {
+        "sqlite": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sqlite"
       ]
     },
     "EveryFile": {

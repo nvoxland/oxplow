@@ -646,11 +646,21 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
   that run together (the existing key).
 - `given: - { files: { "<path>": "<body>" } }` writes project files;
   `given: - { remove_files: ["<path>"] }` removes them; `given: - {
-  rename_files: [{ from, to }] }` renames.
+  rename_files: [{ from, to }] }` renames (built, `extension_test/observers.rs`;
+  a path is relative to the throwaway's project root, no `..`, not
+  under `.git`; it is a `given` step, so it also runs inside a scenario's
+  `steps: - given: [..]`).
 - `when: { collector: <id>, trigger: start | sqlite | { files: [{ path,
-  op }] } }` runs a collector for real as that trigger fires, and applies
-  its output; `expect: { ok, result?, problems? }`. Live triggers are
-  off in a fixture: a collector runs only when a step says so.
+  op }] } }` (built) runs a collector for real, through `run_collector`, as
+  that trigger fires, and applies its output (rows, models, cursor, as a
+  live run does). `expect: { ok?, result?, problems? }`: `ok` defaults to
+  `true`; `result` is the run's counts (entity rows, `<model>.<op>`)
+  compared on the keys named; `problems` are texts the failure message
+  holds (with `ok: false`). The trigger must be one the collector's `on:`
+  lists and a files change must match its glob, else a finding at the
+  fixture (`fixture.trigger`). Live triggers are off in a fixture: a
+  collector runs only when a step says so. Listed in the skill's table
+  (`testing.md`, made from `KINDS`).
 - `when: { action_point: <id>, context: {...} }` → `expect: { draws:
   none | button | menu, commands: [ids] }`.
 - `when: { item_commands: "<item uri>" }` → `expect: { commands: [ids]

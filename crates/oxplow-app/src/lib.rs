@@ -107,6 +107,7 @@ pub mod metrics_service;
 pub(crate) mod models;
 pub mod net_sandbox;
 pub mod observe_conformance;
+pub(crate) mod observer_triggers;
 pub mod on_demand;
 pub mod otlp_ingest;
 pub mod otlp_tokens;
