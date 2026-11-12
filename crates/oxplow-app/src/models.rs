@@ -526,9 +526,10 @@ pub fn apply_tx(
         let written = write_tx(conn, &spec.decl, kinds, &m.store, &fill.fields, &write)
             .map_err(|e| e.to_string())?;
         let counts = out.counts.entry(m.model.clone()).or_default();
-        let cause = match writer.why {
-            Cause::Trigger => "trigger",
-            Cause::Reconcile => "reconcile",
+        // A snapshot states the whole store: catching up, whatever ran it.
+        let cause = match (writer.why, m.snapshot.is_some()) {
+            (Cause::Trigger, false) => "trigger",
+            _ => "reconcile",
         };
         for change in &written.changes {
             let key = match change.op {
@@ -765,6 +766,19 @@ mod tests {
             2,
             "an unchanged snapshot logs nothing"
         );
+    }
+
+    /// A snapshot is a reconcile whatever started the run: it states the
+    /// whole store, so its changes are catching up, not "this happened now".
+    #[tokio::test]
+    async fn a_snapshot_is_a_reconcile_whatever_started_the_run() {
+        let db = oxplow_db::Database::in_memory();
+        let snap = output(json!({"model": "shelf/book", "store": "shelf-folder",
+            "snapshot": [{"id": "dune", "title": "Dune"}]}));
+        apply(&db, "shelf-folder", Cause::Trigger, vec![snap], vec![])
+            .await
+            .unwrap();
+        assert_eq!(changes(&db).await[0]["cause"], "reconcile");
     }
 
     /// A change to a row's children is the row's change, naming the child.

@@ -664,7 +664,10 @@ New fixture forms for the shared-models work ([models.md](./models.md)):
   compared on the keys named; `problems` are texts the failure message
   holds (with `ok: false`). The trigger must be one the collector's `on:`
   lists and a files change must match its glob, else a finding at the
-  fixture (`fixture.trigger`). Live triggers are off in a fixture, but a
+  fixture (`fixture.trigger`). Before each fixture every enabled
+  extension's `on: start` collectors run once, as the app runs them at
+  activation (so a store's first observed change is incremental, not a
+  catch-up). Live triggers are off in a fixture, but a
   store command's own write is observed when the command runs (its
   observer collectors run before it returns); any other collector runs
   only when a step says so. Listed in the skill's table

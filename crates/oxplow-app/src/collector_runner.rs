@@ -1280,7 +1280,6 @@ async fn run_collector_once(
                     .map(|e| e.envelope.anchors.clone())
                     .unwrap_or_else(|| run.anchors().clone()),
             };
-            let (run_owner, run_id) = (owner.to_string(), id.to_string());
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
@@ -1313,16 +1312,6 @@ async fn run_collector_once(
                             )?
                             .turn_id;
                         }
-                        // A collector's first good run catches up: it is a
-                        // reconcile whatever started it.
-                        let first: bool = tx
-                            .query_row(
-                                "SELECT NOT EXISTS (SELECT 1 FROM collector_run
-                                  WHERE owner = ?1 AND id = ?2 AND status = 'ok')",
-                                rusqlite::params![run_owner, run_id],
-                                |r| r.get(0),
-                            )
-                            .map_err(oxplow_db::map_sql_err)?;
                         let applied = crate::models::apply_tx(
                             tx,
                             &registry,
@@ -1332,10 +1321,9 @@ async fn run_collector_once(
                                 source: &writer_source,
                                 cause: Some(synced_id.clone()),
                                 anchors: anchors.clone(),
-                                // A first run a command started (its own
-                                // write, observed) is that command's, not a
-                                // catch-up.
-                                why: if reconcile || (first && anchors.thread_id.is_none()) {
+                                // A `start` run catches up; a snapshot is
+                                // a reconcile in `apply_tx` whatever ran it.
+                                why: if reconcile {
                                     crate::models::Cause::Reconcile
                                 } else {
                                     crate::models::Cause::Trigger

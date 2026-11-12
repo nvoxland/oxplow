@@ -26,6 +26,16 @@ pub(super) async fn run_example(
                 report.finish_case(format!("example {}", ex.name), mark);
                 return;
             }
+            if let Err(e) = start_observers(host).await {
+                report.errors.push(error(
+                    shown,
+                    None,
+                    "collector.failed",
+                    format!("starting the observers as the app does: {e}"),
+                ));
+                report.finish_case(format!("example {}", ex.name), mark);
+                return;
+            }
             // A page file's example (a page, a part or a query) runs its own
             // scenario: the steps re-run it with params, press and submit.
             if ["page", "part", "query"]
@@ -516,4 +526,36 @@ pub(super) fn unsupported(ext: &Extension) -> Vec<String> {
     note(ext.ui.replacements.len(), "replacement(s)");
     note(ext.skills.len(), "skill(s)");
     out
+}
+
+/// Run every enabled extension's `on: start` collectors once, as the app
+/// does when it activates them, so a fixture's changes are observed as
+/// what happens after start (a store's first incremental run isn't a
+/// catch-up).
+pub(super) async fn start_observers(host: &Host) -> Result<(), String> {
+    use oxplow_config::collectors::ObserverSource;
+    let catalog = host.svc.extension_catalog.get(&host.root);
+    let ctx = oxplow_app::collector_runner::Collectors::of(&host.svc, &host.root);
+    let parent = oxplow_domain::run::RunContext::core(
+        oxplow_domain::Actor::System,
+        oxplow_domain::run::Mode::External,
+    );
+    for ext in catalog.iter().filter(|e| e.errors.is_empty()) {
+        for spec in &ext.collectors {
+            if !spec.trigger.sources().contains(&ObserverSource::Start) {
+                continue;
+            }
+            oxplow_app::collector_runner::run_collector(
+                &ctx,
+                &parent,
+                &ext.namespace,
+                &spec.id,
+                oxplow_app::collector_runner::RunTrigger::Start,
+            )
+            .await
+            .map_err(|e| format!("`{}/{}`: {e:?}", ext.namespace, spec.id))?;
+        }
+    }
+    host.settle().await;
+    Ok(())
 }

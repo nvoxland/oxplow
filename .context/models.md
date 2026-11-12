@@ -313,9 +313,12 @@ falling in a turn's window" needs better: the plan is that
 composing extension's observers directly with the command's anchors and
 cause, so the change event is the command's. Built: a store's write is
 observed as its command, and its change events (and `set_fields'`) carry the
-command's thread and open turn; a collector's first run is a reconcile only
-when no command started it, so filing an item in a turn is that turn's
-change.
+command's thread and open turn. The cause is `reconcile` for a `start`
+run and for any `snapshot` output (it states the whole store: catching up,
+whatever ran it), else `trigger`. There is no "first run" rule: the app runs
+a store's `start` when it activates it (and the fixture harness does the
+same before each fixture), so the store's later incremental runs are
+`trigger`, and filing an item in a turn is that turn's change.
 
 ## Bundled's models (the target of the vertical slice)
 

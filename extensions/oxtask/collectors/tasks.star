@@ -1,5 +1,5 @@
 # The tasks of this store are the rows of the task table in oxtask's file.
-# On start (and a first run, with no cursor) state a snapshot, the whole
+# On start (or with no cursor) state a snapshot, the whole
 # store. On every later change of the file: the tasks written since the
 # cursor as upserts (each with its whole sets of links and comments), and
 # the soft-deleted ones as deletes. The file's triggers give every write the
