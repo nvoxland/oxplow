@@ -589,7 +589,11 @@ mod tests {
                 ],
                 vec![text("oxplow/event"), text("v_event"), SqlCell::Null(())],
                 vec![text("oxplow/file"), SqlCell::Null(()), SqlCell::Null(())],
-                vec![text("oxplow/task"), text("v_task"), text("v_search_task")],
+                vec![
+                    text("oxplow/task"),
+                    text("v_oxplow_task"),
+                    text("v_oxplow_search_task")
+                ],
             ]
         );
     }

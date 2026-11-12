@@ -203,7 +203,7 @@ fn sql_tokens(sql: &str) -> Vec<SqlToken> {
 
 /// Whether `text` names `name` (a dataset or a command) as a whole word,
 /// in any case: `v_commit_file` doesn't name `v_commit`, and a sentence's
-/// full stop after `oxplow.task.link` doesn't hide it.
+/// full stop after `oxplow.thread.rename` doesn't hide it.
 pub fn names(text: &str, name: &str) -> bool {
     let (text, name) = (text.to_lowercase(), name.to_lowercase());
     let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
@@ -292,7 +292,9 @@ pub async fn check(file: &str, questions: &[Question], c: &Checker<'_>) -> Check
             if let Some(why) = oxplow_app::extension::extension_resources::resource_problem(about) {
                 out.errors.push(
                     at.error("answer.about_unknown", format!("`about: {about}`: {why}"))
-                        .fix("`oxplow/file`, `oxplow/commit`, `oxplow/request`, `oxplow/task`, …"),
+                        .fix(
+                            "`oxplow/file`, `oxplow/commit`, `oxplow/request`, `oxplow/thread`, …",
+                        ),
                 );
             }
         }
@@ -691,12 +693,12 @@ mod tests {
     fn datasets_are_the_tables_a_query_reads() {
         assert_eq!(
             datasets_in(
-                "WITH x AS (SELECT 1 FROM V_Task) \
+                "WITH x AS (SELECT 1 FROM V_Thread) \
                  SELECT a.n AS v_total, 'v_quoted' -- v_comment\n\
                  FROM v_commit a, v_branch b /* v_block */ \
                  JOIN (SELECT * FROM v_tag) t ON 1 LEFT JOIN json_each(a.parents) p"
             ),
-            vec!["v_task", "v_commit", "v_branch", "v_tag"]
+            vec!["v_thread", "v_commit", "v_branch", "v_tag"]
         );
     }
 
@@ -708,9 +710,12 @@ mod tests {
         assert!(names("Read V_COMMIT.", "v_commit"));
         assert!(!names("read v_commit_file", "v_commit"));
         assert!(!names("read xv_commit", "v_commit"));
-        assert!(names("run oxplow.task.link.", "oxplow.task.link"));
-        assert!(!names("run oxplow.task.link_all", "oxplow.task.link"));
-        assert!(!names("run oxplow.task.links", "oxplow.task.link"));
+        assert!(names("run oxplow.thread.rename.", "oxplow.thread.rename"));
+        assert!(!names(
+            "run oxplow.thread.rename_all",
+            "oxplow.thread.rename"
+        ));
+        assert!(!names("run oxplow.thread.renames", "oxplow.thread.rename"));
     }
 
     #[test]
@@ -766,7 +771,7 @@ mod tests {
             .flat_map(|e| e.page_files.iter().flat_map(|p| p.answers.iter()))
             .collect();
         assert!(answers.len() >= 40, "{}", answers.len());
-        for kind in ["oxplow/file", "oxplow/commit", "oxplow/task"] {
+        for kind in ["oxplow/file", "oxplow/commit", "oxplow/thread"] {
             assert!(
                 answers.iter().any(|a| a.about.as_deref() == Some(kind)),
                 "no answer about `{kind}`"
@@ -803,8 +808,8 @@ mod tests {
             oxplow_app::extension::extensions::load_extension_at(&dir, "acme")
         };
         let skill =
-            |name: &str| (name == "acme-skill").then(|| "Use v_task to list work.".to_string());
-        let list = "SELECT title FROM v_task WHERE state = :state";
+            |name: &str| (name == "acme-skill").then(|| "Use v_thread to list work.".to_string());
+        let list = "SELECT title FROM v_thread WHERE mark = :state";
 
         let ok = extension("params: { state: open }, skill: acme-skill", list);
         let checked = check_pages(&[ok], &skill, Some(&svc)).await;
@@ -826,7 +831,7 @@ mod tests {
 
         let broken = extension(
             "params: { state: open }",
-            "SELECT title FROM v_task WHERE nope = :state",
+            "SELECT title FROM v_thread WHERE nope = :state",
         );
         let checked = check_pages(&[broken], &skill, Some(&svc)).await;
         assert!(

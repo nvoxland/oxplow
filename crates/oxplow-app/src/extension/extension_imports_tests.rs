@@ -174,7 +174,7 @@ fn put_in(dir: &Path, e: &Ext) {
         }
     }
     let mut imports = String::new();
-    let mut sql = "SELECT uri FROM ref('task')";
+    let mut sql = "SELECT uri FROM ref('thread')";
     if let Some((target, version, optional)) = e.import {
         let version = version
             .map(|v| format!(", version: {v}"))
@@ -226,7 +226,7 @@ fn put_in(dir: &Path, e: &Ext) {
     write(dir, "extension.yaml", &manifest);
     write(dir, "handlers/get.star", HANDLER);
     write(dir, "datasets/items.sql", sql);
-    write(dir, "datasets/plain.sql", "SELECT uri FROM ref('task')");
+    write(dir, "datasets/plain.sql", "SELECT uri FROM ref('thread')");
 }
 
 const HANDLER: &str = "def transform(x):\n    return {\"commands\": [], \"result\": {}}\n";

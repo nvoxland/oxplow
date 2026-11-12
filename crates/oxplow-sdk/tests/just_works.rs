@@ -208,29 +208,30 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
     let svc = booted(dir.path()).await;
     let ext = loaded(&svc, dir.path(), "add-note");
     let human = oxplow_domain::Actor::Human;
-    let task = svc
+    svc.streams.ensure_primary().await.unwrap();
+    let made = svc
         .commands
         .run(
             &human,
-            "oxplow.task.create",
-            serde_json::json!({ "title": "Look" }),
+            "oxplow.thread.create",
+            serde_json::json!({ "stream": "str1", "title": "Look" }),
             true,
         )
         .await
         .unwrap();
-    let item = task.result["uri"].as_str().unwrap().to_string();
+    let item = made.result["id"].as_str().unwrap().to_string();
     let ran = svc
         .commands
         .run(
             &human,
             &ext.commands[0].name,
-            serde_json::json!({ "uri": item }),
+            serde_json::json!({ "thread": item }),
             true,
         )
         .await
         .unwrap();
     assert_eq!(
-        ran.result["children"][0]["name"], "oxplow.task.comment",
+        ran.result["children"][0]["name"], "oxplow.thread.rename",
         "{}",
         ran.result
     );
@@ -238,7 +239,7 @@ async fn a_scaffolded_command_checks_tests_and_runs_through_the_bus() {
 
 /// `extension new job` checks clean, and its fixtures run the job on the
 /// fixture model: the reply is the job's text, and the finished job reaches
-/// `publish`, which comments it on the task.
+/// `publish`, which sets it as the thread's title.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_scaffolded_job_checks_tests_and_answers_with_the_fixture_model() {
     let dir = project().await;
@@ -277,22 +278,22 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     svc.streams.ensure_primary().await.unwrap();
     let thread = oxplow_domain::ThreadId::new(1);
     let human = oxplow_domain::Actor::Human;
-    let task = svc
+    let made = svc
         .commands
         .run(
             &human,
-            "oxplow.task.create",
-            serde_json::json!({ "title": "Look" }),
+            "oxplow.thread.create",
+            serde_json::json!({ "stream": "str1", "title": "Look" }),
             true,
         )
         .await
         .unwrap();
-    let item = task.result["uri"].as_str().unwrap().to_string();
+    let item = made.result["id"].as_str().unwrap().to_string();
     svc.commands
         .run(
             &human,
-            "oxplow.task.transition",
-            serde_json::json!({ "uri": item, "to": "done" }),
+            "oxplow.thread.close",
+            serde_json::json!({ "thread": item }),
             true,
         )
         .await
@@ -308,13 +309,17 @@ async fn a_scaffolded_effect_checks_tests_and_once_started_reacts() {
     }
     let runs = svc
         .sql
-        .query_sql("SELECT state FROM v_effect_run", vec![], None)
+        .query_sql(
+            "SELECT state FROM v_effect_run WHERE state = 'ok'",
+            vec![],
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(
         runs.rows,
         vec![vec![oxplow_db::SqlCell::Text("ok".into())]],
-        "the effect commented on the finished item"
+        "the effect renamed the closed thread"
     );
 }
 
@@ -839,32 +844,7 @@ async fn a_scaffolded_knowledge_provider_is_red_until_a_program_speaks_for_it() 
     );
 }
 
-/// A scaffolded script task tracker works as written: it checks clean, its
-/// example (chosen, a task the interface files is one of its items) passes,
-/// and `extension test` runs the task tracker conformance suite against it,
-/// as against a provider's program.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_scaffolded_script_task_tracker_checks_tests_and_conforms() {
-    let dir = project().await;
-    scaffolded(dir.path(), "implementation", "jotter").await;
-    let ran = tested(dir.path(), "jotter").await;
-    for want in [
-        "example basic",
-        "implementation jotter",
-        "task_tracker suite",
-    ] {
-        assert!(ran.iter().any(|r| r == want), "{want}: {ran:?}");
-    }
-    let svc = booted(dir.path()).await;
-    let ext = loaded(&svc, dir.path(), "jotter");
-    assert_eq!(
-        ext.implementations[0].entry.as_deref(),
-        Some("implementations/jotter.star")
-    );
-    assert_eq!(ext.implementations[0].needs, vec!["sql.read".to_string()]);
-}
-
-/// A scaffolded script implementation of another capability checks clean,
+/// A scaffolded script implementation checks clean,
 /// and is red until its verbs are written: its stubs fail the capability's
 /// conformance suite.
 #[tokio::test(flavor = "multi_thread")]

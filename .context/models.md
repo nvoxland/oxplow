@@ -866,3 +866,20 @@ edit, verify, `pins: false`), stated refs, the uri edge, enum values,
 search through the index, the SQLite file, the file service, fields kept
 apart by namespace through a reconcile, an action point with zero, one
 and two contributors, and the store filter.
+
+## The flip, done in core (branch `flip-core`)
+
+Core's task verbs (`oxplow.task.*`), the tracker registry, the active
+choice for `task_tracker`, `Tasks`/`TasksProjection`, the task page_ref
+projection, `request_links` and its writers in `record.rs`/`hook_ingest`,
+the datasets `task`, `task_link`, `task_comment`, `request_task`,
+`search_task` and `commit_task`, the task conformance suite and the
+`oxplow-oxtask` crate are gone. What is left of the kind: the
+`task_tracker` capability as the contract an external provider declares
+(`many`, not choosable, no verbs, no dispatch; `providers/tasks.rs` only
+tracks running instances), the read adapter, and the recognizers from
+fills and running instances. `repair_item` (`contribution_repair`) and
+`commit_task` are bundled's datasets. Release of a closed thread's or
+archived stream's work and the move of a taken handoff's task are bundled's
+reactions to `thread.closed` / `stream.archived` / `handoff.settled`. See
+`.context/tasks.md`.

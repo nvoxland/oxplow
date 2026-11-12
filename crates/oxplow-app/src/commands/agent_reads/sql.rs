@@ -99,13 +99,13 @@ mod tests {
             .run(
                 &anonymous(),
                 SQL_QUERY,
-                json!({ "sql": "SELECT view FROM v_dataset WHERE view = ?1", "params": ["v_task"], "limit": 5 }),
+                json!({ "sql": "SELECT view FROM v_dataset WHERE view = ?1", "params": ["v_thread"], "limit": 5 }),
                 false,
             )
             .await
             .unwrap();
         assert_eq!(out.result["columns"], json!(["view"]));
-        assert_eq!(out.result["rows"], json!([["v_task"]]));
+        assert_eq!(out.result["rows"], json!([["v_thread"]]));
         assert!(out.audit_id.is_none(), "a read leaves no record");
 
         let err = svc

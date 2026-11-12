@@ -2957,10 +2957,10 @@ mod tests {
     #[test]
     fn a_distinct_event_metric_is_not_summed_across_buckets() {
         let entity = |aggregation: &str| oxplow_config::EntitySpec {
-            view: "v_task".into(),
+            view: "v_thread".into(),
             where_: None,
             time: Some("closed_at".into()),
-            value: Some("json_extract(e.native, '$.priority')".into()),
+            value: Some("e.mark".into()),
             aggregation: aggregation.into(),
         };
         let stored = |aggregation: &str| {
@@ -5284,98 +5284,18 @@ def transform(input):
         assert_eq!(spec.direction, "lower-better");
     }
 
+    /// A project entity metric with a typo'd column never reaches the
+    /// catalog. (Bundled's task metrics read the task model; their numbers
+    /// are tested by bundled's own fixtures.)
     #[tokio::test]
-    async fn entity_metrics_seed_read_live_and_capture_state() {
+    async fn an_entity_metric_with_a_typod_column_never_reaches_the_catalog() {
         let (svc, dir) = fixture().await;
-        svc.db
-            .transaction(|c| {
-                c.execute_batch(
-                    // The active list's items, as the interface holds them.
-                    "INSERT INTO task (uri, provider, title, state, stage, native, created_at, updated_at, closed_at) VALUES
-                       ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxtask', 'a', 'done', 'done', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', '2026-09-21T09:00:00Z'),
-                       ('oxplow:oxplow/task?id=tsk2&provider=oxtask', 'oxtask', 'b', 'done', 'done', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', '2026-09-23T09:00:00Z'),
-                       ('oxplow:oxplow/task?id=tsk3&provider=oxtask', 'oxtask', 'c', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/task?id=tsk4&provider=oxtask', 'oxtask', 'd', 'blocked', 'blocked', '{\"priority\":\"low\"}', '2026-09-01', '2026-09-01', NULL),
-                       ('oxplow:oxplow/task?id=tsk5&provider=oxtask', 'oxtask', 'e', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-09-01', '2026-09-01', NULL);",
-                )
-                .map_err(|e| oxplow_domain::DomainError::Invalid(e.to_string()))
-            })
-            .await
-            .unwrap();
-        // A project entity metric with a typo'd column never reaches the catalog.
         write_project_extension(
             dir.path(),
-            "metrics:\n  - key: repo.bad\n    entity: v_task\n    where: \"no_such_col = 1\"\n",
+            "metrics:\n  - key: repo.bad\n    entity: v_thread\n    where: \"no_such_col = 1\"\n",
         );
         crate::test_fixtures::activate_with_problems(&svc).await;
-        let f = &svc.fact_store;
-        assert!(f.get_spec("repo.bad").await.unwrap().is_none());
-
-        // An event metric: computed live, daily, sliceable by its entity dims.
-        let done = f.get_spec("task.completed").await.unwrap().unwrap();
-        assert_eq!(done.source_measure, None);
-        assert_eq!(done.display_kind, "event");
-        assert_eq!(
-            done.sliceable_dims_json.as_deref(),
-            Some(r#"["work.priority"]"#)
-        );
-        let e = &svc.metric_engine;
-        let series = e
-            .series_for_spec_in_stream(&done, None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(
-            series.iter().map(|p| p.value).collect::<Vec<_>>(),
-            vec![1.0, 0.0, 1.0]
-        );
-        assert_eq!(
-            e.headline_from_series(&done, &series).await.unwrap(),
-            Some(2.0)
-        );
-        let by_prio = e
-            .series_for_spec_in_stream(&done, Some("work.priority"), None, None)
-            .await
-            .unwrap();
-        assert_eq!(by_prio.len(), 2);
-        assert!(e
-            .series_for_spec_in_stream(&done, Some("oxplow.package"), None, None)
-            .await
-            .is_err());
-
-        // A state metric: captured as a fact, so its series is its history.
-        let open = f.get_spec("task.open").await.unwrap().unwrap();
-        assert_eq!(open.source_measure.as_deref(), Some("task.open"));
-        assert_eq!(svc.metrics.capture_entity_states(true).await, 1);
-        // Unchanged since the last capture: nothing new is written — not even
-        // by a fresh process, which reads the last stored value.
-        assert_eq!(svc.metrics.capture_entity_states(true).await, 0);
-        svc.metrics.entity_captures.lock().unwrap().clear();
-        assert_eq!(svc.metrics.capture_entity_states(true).await, 0);
-        let hist = e
-            .series_for_spec_in_stream(&open, None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(hist.iter().map(|p| p.value).collect::<Vec<_>>(), vec![3.0]);
-        assert_eq!(e.headline_for_spec(&open).await.unwrap(), Some(3.0));
-        // Grouped reads are live.
-        let mut rows: Vec<(Option<String>, f64)> = e
-            .series_for_spec_in_stream(&open, Some("work.priority"), None, None)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|p| (p.group, p.value))
-            .collect();
-        rows.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(
-            rows,
-            vec![
-                (Some("high".to_string()), 2.0),
-                (Some("low".to_string()), 1.0)
-            ]
-        );
-        // Entity metrics are in the catalog like any other.
-        let catalog = svc.metrics.catalog().await;
-        assert!(catalog.iter().any(|c| c.key == "task.open" && c.enabled));
+        assert!(svc.fact_store.get_spec("repo.bad").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -5969,8 +5889,8 @@ def transform(input):
         std::fs::write(
             ext.join("extension.yaml"),
             "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [files.read]\n\
-             dimensions:\n  - { key: acme.status, label: Status, entity: v_task, expr: e.state }\n\
-             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_task }\n",
+             dimensions:\n  - { key: acme.status, label: Status, entity: v_thread, expr: e.mark }\n\
+             metrics:\n  - { key: acme.tasks, title: Tasks, entity: v_thread }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&svc).await;

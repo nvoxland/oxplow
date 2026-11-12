@@ -6,7 +6,7 @@ use std::path::Path;
 
 use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 use oxplow_domain::contribution::{extension_namespace, ContributionKind};
-use oxplow_domain::uri::build::task_uri;
+use oxplow_domain::uri::build::thread_uri;
 
 use crate::{title_case, Kind, SdkError};
 
@@ -60,7 +60,7 @@ pub(crate) fn build(
     command: Option<(&str, &str)>,
 ) -> Result<Contribution, SdkError> {
     let ns = extension_namespace(namespace);
-    let task = task_uri("oxtask", "tsk1");
+    let thread = thread_uri(oxplow_domain::ThreadId::new(1));
     let mut files: Vec<(String, String)> = Vec::new();
     let mut write = |rel: &str, body: String| -> Result<(), SdkError> {
         files.push((rel.to_string(), body));
@@ -83,21 +83,21 @@ pub(crate) fn build(
                  loaders:\n\
                  \x20 items:\n\
                  \x20   sql: |\n\
-                 \x20     SELECT w.uri, w.title, w.state, w.updated_at\n\
-                 \x20     FROM v_task w JOIN v_thread t ON t.uri = w.assignee\n\
-                 \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                 \x20     ORDER BY w.updated_at DESC\n\
+                 \x20     SELECT t.uri, t.title, t.mark\n\
+                 \x20     FROM v_thread t\n\
+                 \x20     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL\n\
+                 \x20     ORDER BY t.sort_index\n\
                  view:\n\
                  \x20 viz: table\n\
                  \x20 from: items\n\
                  \x20 columns:\n\
                  \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                 \x20   - {{ key: state }}\n\
+                 \x20   - {{ key: mark }}\n\
                  \x20 actions:\n\
                  \x20   # In each row's right-click menu: a command run as the person, the\n\
                  \x20   # row's values bound in (`{{{{row.<column>}}}}`).\n\
-                 \x20   - {{ id: start, label: Start, command: oxplow.task.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
-                 \x20 empty: No open tasks in this stream.\n",
+                 \x20   - {{ id: mark, label: Mark, command: oxplow.thread.mark, input: {{ thread: \"{{{{row.uri}}}}\", mark: amber }}, row: true }}\n\
+                 \x20 empty: No open threads in this stream.\n",
                 title = title_case(id)
             ),
         )?;
@@ -120,7 +120,7 @@ pub(crate) fn build(
                  \x20   return {\"entities\": {\"@ENT@\": [\n\
                  \x20       {\"uri\": r[\"uri\"], \"title\": r[\"title\"]}\n\
                  \x20       for r in x[\"rows\"]\n\
-                 \x20       if r[\"state\"] != \"done\"\n\
+                 \x20       if r[\"closed_at\"] == None\n\
                  \x20   ]}}\n"
                     .replace("@ENT@", &entity),
             )?;
@@ -140,7 +140,7 @@ pub(crate) fn build(
              \x20   entry: collectors/{id}.star\n\
              \x20   # Services its script may use: {services}.\n\
              \x20   needs: []\n\
-             \x20   input: \"SELECT uri, title, state FROM v_task\"\n\
+             \x20   input: \"SELECT uri, title, closed_at FROM v_thread\"\n\
              \x20   entities:\n\
              \x20     - {{ name: {entity}, key: uri, columns: {{ uri: text, title: text }} }}\n"
                         ),
@@ -153,7 +153,7 @@ pub(crate) fn build(
              \x20   version: 1\n\
              \x20   description: \"TODO: what these rows are.\"\n\
              \x20   fields:\n\
-             \x20     - {{ name: uri, type: TEXT, doc: \"The task (oxplow:oxplow/task?id=<id>&provider=<provider>).\" }}\n\
+             \x20     - {{ name: uri, type: TEXT, doc: \"The thread (oxplow:oxplow/thread?id=<id>).\" }}\n\
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
                         ),
                     ),
@@ -179,7 +179,7 @@ pub(crate) fn build(
              # as the caller (in one transaction when every one can, else as steps) — or {\"refuse\": \"why\"}. No I/O.\n\
              def transform(x):\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.task.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": x[\"input\"][\"thread\"], \"title\": \"TODO: the new title\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?;
@@ -188,25 +188,25 @@ pub(crate) fn build(
                     "commands",
                     format!(
                         "\x20 # Registered as {ns}.{id} (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
-             \x20 # caller: in one transaction when every one can, else as steps (a task tracker's verbs run outside it).\n\
+             \x20 # caller: in one transaction when every one can, else as steps (an extension's own commands run outside it).\n\
              \x20 - name: {id}\n\
-             \x20   summary: \"TODO: what it does. Here: comment on a task.\"\n\
+             \x20   summary: \"TODO: what it does. Here: rename a thread.\"\n\
              \x20   input_schema:\n\
              \x20     type: object\n\
-             \x20     required: [uri]\n\
+             \x20     required: [thread]\n\
              \x20     properties:\n\
-             \x20       uri: {{ type: string, description: \"The task (oxplow:oxplow/task?id=<id>&provider=<provider>).\" }}\n\
+             \x20       thread: {{ type: string, description: \"The thread (oxplow:oxplow/thread?id=<id>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: {file}\n\
              \x20   # Who may run it: a person, an agent, a page (each child command checks its own too).\n\
              \x20   \
-             \x20   # On a task's page (Commands) and a row's right-click.\n\
-             \x20   ui: {{ label: {label}, about: oxplow/task, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
+             \x20   # On a thread's page (Commands) and a row's right-click.\n\
+             \x20   ui: {{ label: {label}, about: oxplow/thread, input: {{ thread: \"{{{{uri}}}}\" }} }}\n\
              \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ uri: \"{task}\" }}, expect_commands: [oxplow.task.comment] }}\n"
+             \x20     - {{ name: happy, input: {{ thread: \"{thread}\" }}, expect_commands: [oxplow.thread.rename] }}\n"
                     ),
                 )],
-                vec!["commands:oxplow.task.comment"],
+                vec!["commands:oxplow.thread.rename"],
             )
         }
         Kind::Effect => {
@@ -216,9 +216,9 @@ pub(crate) fn build(
              # (the event envelope, at its type's newest version) and returns the\n\
              # commands to run — or {\"skip\": \"why\"}. No I/O.\n\
              def transform(x):\n\
-             \x20   uri = x[\"event\"][\"payload\"][\"task\"]\n\
+             \x20   thread = x[\"event\"][\"payload\"][\"thread\"]\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.task.comment\", \"input\": {\"uri\": uri, \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.thread.rename\", \"input\": {\"thread\": thread, \"title\": \"TODO: the new title\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?;
@@ -229,13 +229,12 @@ pub(crate) fn build(
              \x20 # rights under this extension's permissions, and only on events logged\n\
              \x20 # after it started; a command that asks becomes a proposal.\n\
              \x20 - id: on-done\n\
-             \x20   summary: \"TODO: what it does. Here: comment on a task when it's done.\"\n\
-             \x20   on: [task.state_changed]\n\
-             \x20   where: { to: done }\n\
+             \x20   summary: \"TODO: what it does. Here: rename a thread when it's closed.\"\n\
+             \x20   on: [thread.closed]\n\
              \x20   entry: effects/on-done.star\n"
                         .replace("on-done", id),
                 )],
-                vec!["commands:oxplow.task.comment"],
+                vec!["commands:oxplow.thread.rename"],
             )
         }
         Kind::Component => {
@@ -249,16 +248,16 @@ pub(crate) fn build(
                      \x20 # Filled in with the viewer's stream unless a value is given.\n\
                      \x20 - {{ name: stream_id, label: Stream }}\n\
                      answers:\n\
-                     \x20 - {{ question: \"TODO: how many open tasks are there?\", params: {{ stream_id: 1 }} }}\n\
+                     \x20 - {{ question: \"TODO: how many open threads are there?\", params: {{ stream_id: 1 }} }}\n\
                      loaders:\n\
                      \x20 # The rows the component is fed (`component.data.items`), and what an\n\
                      \x20 # agent reads: agents always see the table, never the frame.\n\
                      \x20 items:\n\
                      \x20   sql: |\n\
-                     \x20     SELECT w.uri, w.title, w.state\n\
-                     \x20     FROM v_task w JOIN v_thread t ON t.uri = w.assignee\n\
-                     \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                     \x20     ORDER BY w.updated_at DESC\n\
+                     \x20     SELECT t.uri, t.title, t.mark\n\
+                     \x20     FROM v_thread t\n\
+                     \x20     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL\n\
+                     \x20     ORDER BY t.sort_index\n\
                      view:\n\
                      \x20 component: {{ id: {id} }}\n",
                     title = title_case(id)
@@ -290,7 +289,7 @@ pub(crate) fn build(
                  \x20 component.applyTheme();\n\
                  \x20 const out = document.getElementById(\"out\");\n\
                  \x20 const render = (data) => {\n\
-                 \x20   out.textContent = data.items.rows.length + \" open tasks\";\n\
+                 \x20   out.textContent = data.items.rows.length + \" open threads\";\n\
                  \x20 };\n\
                  \x20 render(component.data);\n\
                  \x20 component.onUpdate(({ data }) => render(data));\n\
@@ -371,7 +370,7 @@ pub(crate) fn build(
                     format!(
                         "\
              \x20 # A {skill} the coding agent loads when it's relevant; `kind: command`\n\
-             \x20 # makes it a slash command a person runs. `needs: [task_tracker]` offers it only\n\
+             \x20 # makes it a slash command a person runs. `needs: [knowledge]` offers it only\n\
              \x20 # while that capability is active.\n\
              \x20 - name: {id}\n\
              \x20   file: skills/{id}/SKILL.md\n",

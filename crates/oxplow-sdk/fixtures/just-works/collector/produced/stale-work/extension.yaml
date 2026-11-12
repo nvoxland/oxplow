@@ -16,6 +16,7 @@ intent:
     - name: empty-project
       input: { page: stale-tasks }
       expect: no rows before the collector has synced
+requires: [oxplow-bundled, oxtask]
 collectors:
   # Open tasks with the last moment anyone touched them: the task's own
   # update or the latest activity on a comment about it. The script keeps the
@@ -30,9 +31,9 @@ collectors:
                json_extract(w.native, '$.priority') AS priority,
                th.id AS thread_id, th.stream_id,
                max(w.updated_at,
-                   coalesce((SELECT max(c.created_at) FROM v_task_comment c
+                   coalesce((SELECT max(c.created_at) FROM v_oxplow_task_comment c
                              WHERE c.uri = w.uri), '')) AS last_touched_at
-        FROM v_task w
+        FROM v_oxplow_task w
         LEFT JOIN v_thread th ON th.uri = w.assignee
         WHERE w.state IN ('todo', 'in_progress', 'blocked')
       )

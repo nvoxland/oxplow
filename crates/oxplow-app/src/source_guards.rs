@@ -996,22 +996,14 @@ fn a_handoff_reaches_an_agent_only_at_its_prompt() {
     assert_eq!(offenders, Vec::<String>::new());
 }
 
-/// Where oxplow's own task list — one implementation of the task
-/// interface (`.context/tasks.md`) — may be named in production
-/// code: its crate (`crates/oxplow-oxtask`, all of it) and the files listed
-/// here. Everything else reads the interface (`v_task` and its views)
-/// and writes through the `task.*` commands,
-/// whichever list is active. Each file still here says why.
+/// Where core's old task tables may still be named in production code:
+/// the files listed here. Tasks are the task model's (`.context/tasks.md`);
+/// the one-off move out of the old tables is the only reader left, and says
+/// why.
 #[rustfmt::skip]
 const TASK_IMPLEMENTATION: &[(&str, &str)] = &[
-    ("crates/oxplow-app/src/tasks.rs", "the built-in factory: `oxplow:oxtask` is oxplow_oxtask's verbs"),
-    ("crates/oxplow-app/src/lib.rs", "wires the task stores into Services"),
-    ("crates/oxplow-dev/src/main.rs", "oxplow's own task CLI, over its tables"),
-    ("crates/oxplow-dev/src/move_tasks.rs", "the one-off move of core's tasks into the oxtask extension's file; goes with core's tables"),
+    ("crates/oxplow-dev/src/move_tasks.rs", "the one-off move of core's old task tables into the oxtask extension's file; goes with core's tables"),
 ];
-
-/// The implementation's own crate.
-const TASK_CRATE: &str = "crates/oxplow-oxtask/";
 
 /// Production files outside the task crate that name oxplow's task list
 /// (comments left out).
@@ -1031,9 +1023,6 @@ fn task_implementation_readers() -> BTreeSet<String> {
     ];
     let mut out = BTreeSet::new();
     for (path, text) in production_sources() {
-        if path.starts_with(TASK_CRATE) {
-            continue;
-        }
         let named = text
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))

@@ -250,7 +250,7 @@ mod tests {
     /// oxplow-bundled off there is no task tracker (`task.*` is a sink that
     /// tracks nothing) and oxwiki still runs.
     #[tokio::test(flavor = "multi_thread")]
-    async fn oxwiki_runs_and_tasks_are_a_sink_with_bundled_off() {
+    async fn oxwiki_runs_with_bundled_off() {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         std::fs::create_dir_all(dir.path().join(".oxplow")).unwrap();
@@ -266,17 +266,6 @@ mod tests {
         svc.streams.ensure_primary().await.unwrap();
         crate::test_fixtures::activate(&svc).await;
         let human = oxplow_domain::Actor::Human;
-        let item = svc
-            .commands
-            .run(
-                &human,
-                "oxplow.task.create",
-                serde_json::json!({ "title": "Still here" }),
-                true,
-            )
-            .await
-            .expect("filing is a sink with bundled off, not a refusal");
-        assert_eq!(item.result["tracked"], false, "{}", item.result);
         svc.commands
             .run(
                 &human,

@@ -1759,7 +1759,7 @@ mod tests {
             [("add", "page", false), ("add-row", "names", true)],
             "{def}"
         );
-        assert_eq!(actions[0]["command"], json!("oxplow.task.create"));
+        assert_eq!(actions[0]["command"], json!("oxplow.thread.create"));
         // A loader that reads another names it.
         let def = run(
             &svc,
@@ -1788,7 +1788,9 @@ mod tests {
         .await;
         let titles = svc
             .sql
-            .run(oxplow_db::SqlQuery::new("SELECT title FROM v_task"))
+            .run(oxplow_db::SqlQuery::new(
+                "SELECT title FROM v_thread WHERE title = 'alpha'",
+            ))
             .await
             .unwrap();
         assert_eq!(
@@ -2118,7 +2120,7 @@ mod describe_tests {
         assert_eq!(total["loader_kind"], json!("sql"), "{total}");
         assert_eq!(total["source"], json!("SELECT 7 AS n"), "{total}");
         // A view that acts is no view.
-        let acting = "title: Acting\nactions:\n  - { id: create, label: Create, command: oxplow.task.create, input: { title: Hidden } }\nview: { markdown: Preview }\n";
+        let acting = "title: Acting\nactions:\n  - { id: create, label: Create, command: oxplow.thread.create, input: { stream: str1, title: Hidden } }\nview: { markdown: Preview }\n";
         fx.svc.temp.put("v2.yaml", acting.as_bytes()).await.unwrap();
         assert_eq!(
             describe(&fx, json!({ "uri": uri(TEMP, "v2.yaml", None) })).await,

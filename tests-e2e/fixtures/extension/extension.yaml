@@ -44,6 +44,8 @@ effects:
 # A command that always refuses, a page that runs it and a component that
 # does: how a person's failed command shows.
 commands:
+  # The fake tracker's own create, so a spec can put an item in its system.
+  - { name: fake.create, summary: File an item in the fake tracker., provider: fake, op: create }
   - name: fail.now
     summary: Always refuses (the suite's failing command).
     input_schema: { type: object, properties: {}, additionalProperties: false }

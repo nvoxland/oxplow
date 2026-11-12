@@ -299,7 +299,6 @@ pub fn parse_resources(
     } else {
         Vec::new()
     };
-    let datasets = if core { &core_datasets[..] } else { datasets };
     let lines = item_lines(manifest, "resources");
     let mut out: Vec<ExtensionResource> = Vec::new();
     let mut errors = Vec::new();
@@ -329,7 +328,7 @@ pub fn parse_resources(
             None => file.to_string(),
         };
         let name = f.name.clone();
-        match decl_of(segment, namespace, core, datasets, f) {
+        match decl_of(segment, namespace, core, &core_datasets, datasets, f) {
             Ok(decl) => out.push(ExtensionResource { decl, declared_at }),
             Err(e) => errors.push(at("resource.invalid", rel, line, e).contribution(name)),
         }
@@ -341,6 +340,7 @@ fn decl_of(
     segment: &str,
     namespace: &str,
     core: bool,
+    core_datasets: &[oxplow_db::datasets::DatasetSource],
     datasets: &[oxplow_db::datasets::DatasetSource],
     f: ResourceFile,
 ) -> Result<ResourceDecl, String> {
@@ -371,21 +371,28 @@ fn decl_of(
             },
         );
     }
-    // A dataset with these columns: the extension's own, or core's.
+    // A dataset with these columns: the extension's own, else (for the
+    // shared `oxplow` namespace) core's.
     let view_with = |key: &str, dataset: &str, columns: &[&str], why: &str| {
-        let source = datasets
-            .iter()
-            .find(|m| m.decl.name == dataset)
-            .ok_or_else(|| {
-                named(format!(
-                    "`{key}: {dataset}` isn't one of {} datasets",
-                    if core {
-                        "core's"
-                    } else {
-                        "this extension's (`datasets:`)"
-                    }
-                ))
-            })?;
+        let own = datasets.iter().find(|m| m.decl.name == dataset);
+        let (source, view) = match own {
+            Some(source) => (
+                source,
+                oxplow_db::datasets::extension_view(namespace, dataset),
+            ),
+            None => {
+                let source = core_datasets
+                    .iter()
+                    .find(|m| m.decl.name == dataset)
+                    .ok_or_else(|| {
+                        named(format!(
+                            "`{key}: {dataset}` isn't one of this extension's datasets (`datasets:`){}",
+                            if core { " or core's" } else { "" }
+                        ))
+                    })?;
+                (source, oxplow_db::datasets::core_view(dataset))
+            }
+        };
         if let Some(col) = columns
             .iter()
             .find(|col| !source.decl.fields.iter().any(|c| c.name == **col))
@@ -394,11 +401,7 @@ fn decl_of(
                 "dataset `{dataset}` has no `{col}` column ({why})"
             )));
         }
-        Ok(if core {
-            oxplow_db::datasets::core_view(dataset)
-        } else {
-            oxplow_db::datasets::extension_view(namespace, dataset)
-        })
+        Ok(view)
     };
     let title = f.title.as_deref().unwrap_or("title");
     let resolve = f

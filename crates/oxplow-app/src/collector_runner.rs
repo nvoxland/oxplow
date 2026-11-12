@@ -3034,13 +3034,10 @@ pub(crate) mod tests {
             c.execute_batch(
                 "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/r', '2026-01-01', '2026-01-01');
-                 INSERT INTO threads (id, stream_id, title, created_at, updated_at)
-                   VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO capability_provider (capability, provider, active) VALUES ('task_tracker', 'oxtask', 1);
-                 INSERT INTO task (uri, provider, title, state, stage, native, created_at, updated_at) VALUES
-                   ('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'oxtask', 'Fix login', 'todo', 'ready', '{\"priority\":\"high\"}', '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/task?id=tsk2&provider=oxtask', 'oxtask', 'Tidy docs', 'todo', 'ready', '{\"priority\":\"low\"}', '2026-01-01', '2026-01-01'),
-                   ('oxplow:oxplow/task?id=tsk3&provider=oxtask', 'oxtask', 'Ship it', 'done', 'done', '{\"priority\":\"high\"}', '2026-01-01', '2026-01-01');",
+                 INSERT INTO threads (id, stream_id, title, created_at, updated_at, closed_at, mark) VALUES
+                   (1, 1, 'Fix login', '2026-01-01', '2026-01-01', NULL, 'red'),
+                   (2, 1, 'Tidy docs', '2026-01-01', '2026-01-01', NULL, 'green'),
+                   (3, 1, 'Ship it', '2026-01-01', '2026-01-01', '2026-02-01', 'red');",
             )
             .map_err(|e| DomainError::Invalid(e.to_string()))
         })
@@ -3335,7 +3332,7 @@ pub(crate) mod tests {
         extension(
             &root,
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_task\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    on: { every: 10m }\n    input: \"SELECT uri, title FROM v_thread\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n",
             &[(
                 "hot.star",
                 "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"]]}}\n",
@@ -3513,12 +3510,12 @@ pub(crate) mod tests {
             root.path(),
             "work",
             &format!(
-                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_task WHERE state = 'todo'\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_task\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
+                "manifest: 2\nname: work\nintent:\n  purpose: test\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, mark AS priority FROM v_thread WHERE closed_at IS NULL\"\n{entity}  - id: jq\n    runtime: jaq\n    entry: hot.jq\n    input: \"SELECT uri, title FROM v_thread\"\n    entities:\n      - {{ name: upper, key: uri, columns: {{ uri: text, title: text }} }}\n"
             ),
             &[
                 (
                     "hot.star",
-                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                    "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"red\"]}}\n",
                 ),
                 (
                     "hot.jq",
@@ -3588,7 +3585,7 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_task\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [ai.compute]\nai_profiles:\n  - { id: sort, description: Sorts., fallback: decide }\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: kind.star\n    input: \"SELECT uri, title FROM v_thread\"\n    entities:\n      - { name: kind, key: uri, columns: { uri: text, kind: text } }\n",
             &[(
                 "kind.star",
                 "def transform(input):\n    rows = []\n    for r in input[\"rows\"]:\n        a = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        b = ai_classify(\"is this a bug?\", [\"bug\", \"feature\"], role = \"sort\")\n        rows.append({\"uri\": r[\"uri\"], \"kind\": a[\"label\"] if a == b else \"differs\"})\n    return {\"entities\": {\"kind\": rows}}\n",
@@ -3690,10 +3687,10 @@ pub(crate) mod tests {
         extension(
             root.path(),
             "work",
-            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, json_extract(native, '$.priority') AS priority FROM v_task WHERE state = 'todo'\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
+            "manifest: 2\nname: work\nintent:\n  purpose: test\npermissions: [process.run]\ncollectors:\n  - id: star\n    runtime: starlark\n    entry: hot.star\n    input: \"SELECT uri, title, mark AS priority FROM v_thread WHERE closed_at IS NULL\"\n    entities:\n      - { name: hot, key: uri, columns: { uri: text, title: text } }\n  - id: sh\n    runtime: exec\n    entry: sync.sh\n    entities:\n      - { name: raw, key: id, columns: { id: int } }\n",
             &[(
                 "hot.star",
-                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"high\"]}}\n",
+                "def transform(input):\n    return {\"entities\": {\"hot\": [{\"uri\": r[\"uri\"], \"title\": r[\"title\"]} for r in input[\"rows\"] if r[\"priority\"] == \"red\"]}}\n",
             )],
         );
         script(
@@ -3729,7 +3726,7 @@ pub(crate) mod tests {
         assert_eq!(hot.columns, vec!["uri", "title"]);
         assert_eq!(
             serde_json::to_value(&hot.rows).unwrap(),
-            json!([["oxplow:oxplow/task?id=tsk1&provider=oxtask", "Fix login"]])
+            json!([["oxplow:oxplow/thread?id=thr1", "Fix login"]])
         );
         assert_eq!(hot.total, 1);
         assert!(

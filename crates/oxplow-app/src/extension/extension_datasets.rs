@@ -116,7 +116,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('thread') WHERE mark = 'red'",
         );
         write(
             &root,
@@ -132,7 +132,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/shaky/datasets/broken.sql",
-            "SELECT nope FROM ref('task')",
+            "SELECT nope FROM ref('thread')",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         svc.sql
@@ -183,7 +183,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/counted.sql",
-            "SELECT uri FROM ref('task')",
+            "SELECT uri FROM ref('thread')",
         );
         write(
             &root,
@@ -237,7 +237,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('thread') WHERE mark = 'red'",
         );
         crate::test_fixtures::activate_with_problems(svc).await;
         let validate = || async {
@@ -262,7 +262,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri, title FROM ref('task') WHERE state = 'blocked'",
+            "SELECT uri, title FROM ref('thread') WHERE mark = 'red'",
         );
         let errors = validate().await;
         assert!(
@@ -272,7 +272,7 @@ mod tests {
         write(
             &root,
             ".oxplow/extensions/late/datasets/blocked.sql",
-            "SELECT uri, title FROM source('task')",
+            "SELECT uri, title FROM source('thread')",
         );
         assert!(validate().await.contains("only its own namespace's tables"));
     }

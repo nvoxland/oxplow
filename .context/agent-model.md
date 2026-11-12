@@ -1895,11 +1895,10 @@ None is cross-thread, visible to the person, and acknowledged.
   it — logging `handoff.settled@2`, undone by the state it replaced.
   `oxplow.handoff.resolve { handoff, outcome: taken | declined, note? }`
   is how a recipient takes one: a native composite that checks the same
-  rule (`may_settle`) against the run's actor before it composes, so a
-  stranger's run assigns nothing, then composes `oxplow.task.assign`
-  to the recipient thread (when taking an item not assigned there yet;
-  core's, for every list) and the settle, in one transaction, undone as
-  one. A decline undoes.
+  rule (`may_settle`) against the run's actor before it composes, then
+  composes the settle. Moving a taken handoff's task onto the recipient
+  thread is bundled's (it reacts to `handoff.settled@2`). A decline
+  undoes.
 - **Thread notes stay as they are.** They were the candidate carrier and
   don't fit: a note belongs to its writer's thread, has no recipient,
   state or delivery stamp, and the Explore hand-back relies on that.

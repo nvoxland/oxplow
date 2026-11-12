@@ -259,7 +259,7 @@ mod tests {
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_task, where: \"state = 'todo'\", default: off }\n",
+            "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_thread, where: \"closed_at IS NULL\", default: off }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&f.svc).await;

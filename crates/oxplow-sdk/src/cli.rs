@@ -21,9 +21,9 @@ usage:
       provider of --capability (task_tracker, the default,
       agent_harness, snapshots, knowledge or filesystem)
       with its contract's declarations, a stub program and test config; a
-      script implementation of --capability (the same ones): its
-      `implementations:` entry and one Starlark function per verb (a task
-      tracker's a working one, another's stubs); a Starlark
+      script implementation of --capability (all but task_tracker): its
+      `implementations:` entry and one Starlark function per verb (stubs to
+      write); a Starlark
       collector with a dataset and a page over it; a code metric (--language,
       default rust, over --glob, default the language's files): a per-path
       measure, a collector counting each file's functions over a complexity

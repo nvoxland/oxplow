@@ -191,7 +191,7 @@ async fn a_page_whose_needs_are_unmet_says_so_and_runs_nothing() {
     };
     let r = run_with(Some(crate::capabilities::Active::default())).await;
     let inactive = r.inactive.expect("unmet");
-    assert_eq!(inactive.needs, ["task_tracker"]);
+    assert_eq!(inactive.needs, ["snapshots"]);
     assert!(!inactive.message.is_empty());
     assert!(r.loaders.is_empty());
     // Where nothing says what's active (a check), it runs.

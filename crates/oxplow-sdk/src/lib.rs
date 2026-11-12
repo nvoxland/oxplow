@@ -48,8 +48,8 @@ pub enum SdkError {
 /// program stands behind its stub.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// One starter page (open tasks in the viewer's stream) with a row
-    /// action that starts one, in the launcher.
+    /// One starter page (open threads in the viewer's stream) with a row
+    /// action that marks one, in the launcher.
     Page,
     /// A v2 manifest only.
     Extension,
@@ -59,9 +59,7 @@ pub enum Kind {
     Provider { capability: &'static str },
     /// A script implementation of `capability` (one whose interface is a
     /// set of verbs): an `implementations:` entry and its Starlark file,
-    /// one function per verb. A task tracker's is a working one (it keeps
-    /// its items in oxplow's own record) with a fixture that files one;
-    /// another capability's verbs are stubs to replace.
+    /// one function per verb. The verbs are stubs to replace.
     Implementation { capability: &'static str },
     /// A derived (Starlark) collector of an entity, a dataset over it and a
     /// page over the dataset.
@@ -70,7 +68,7 @@ pub enum Kind {
     /// snapshot's files, the dimension its facts carry, the headline metric
     /// and a page whose rows link to the file and line.
     Metric,
-    /// A command whose script composes core commands, on a task's
+    /// A command whose script composes core commands, on a thread's
     /// Commands menu.
     Command,
     /// An effect: a script reacting to a logged
@@ -108,7 +106,7 @@ impl Kind {
                 capability: "task_tracker",
             }),
             "implementation" => Some(Kind::Implementation {
-                capability: "task_tracker",
+                capability: "knowledge",
             }),
             "collector" => Some(Kind::Collector),
             "metric" => Some(Kind::Metric),
@@ -129,25 +127,33 @@ impl Kind {
     /// A provider of `capability`; refused unless a process may implement
     /// it (its spec carries a provider contract).
     pub fn provider(capability: &str) -> Result<Kind, SdkError> {
-        Self::with_verbs(capability, "a provider").map(|capability| Kind::Provider { capability })
+        Self::with_contract(capability, "a provider", |_| true)
+            .map(|capability| Kind::Provider { capability })
     }
 
     /// A script implementation of `capability`; refused unless its
     /// interface is a set of verbs (its spec carries a provider contract),
     /// the same capabilities a provider may implement.
     pub fn implementation(capability: &str) -> Result<Kind, SdkError> {
-        Self::with_verbs(capability, "a script")
+        // A capability with no verbs core calls (a task tracker only fills
+        // the task model) has nothing for a script to implement.
+        Self::with_contract(capability, "a script", |p| !p.verbs.is_empty())
             .map(|capability| Kind::Implementation { capability })
     }
 
-    /// The core id of `capability` when it has verbs to implement.
-    fn with_verbs(capability: &str, who: &str) -> Result<&'static str, SdkError> {
-        match oxplow_domain::capability::spec(capability).filter(|c| c.provider.is_some()) {
+    /// The core id of `capability` when its provider contract passes `ok`.
+    fn with_contract(
+        capability: &str,
+        who: &str,
+        ok: fn(&oxplow_domain::capability::ProviderContract) -> bool,
+    ) -> Result<&'static str, SdkError> {
+        let fits = |c: &oxplow_domain::capability::CapabilitySpec| c.provider.is_some_and(ok);
+        match oxplow_domain::capability::spec(capability).filter(|c| fits(c)) {
             Some(spec) => Ok(spec.id),
             None => {
                 let may: Vec<String> = oxplow_domain::capability::CAPABILITIES
                     .iter()
-                    .filter(|c| c.provider.is_some())
+                    .filter(|c| fits(c))
                     .map(|c| format!("`{}`", c.id))
                     .collect();
                 Err(SdkError::Invalid(format!(
@@ -310,22 +316,22 @@ pub fn scaffold_with(
     let provider_id = oxplow_domain::contribution::extension_namespace(name);
     // The intent example, and its fixture (what `extension test` runs).
     // The URIs the examples name, built like every other.
-    use oxplow_domain::uri::build::task_uri;
-    let task = task_uri("oxtask", "tsk1");
+    use oxplow_domain::uri::build::thread_uri;
+    let thread = thread_uri(oxplow_domain::ThreadId::new(1));
     let (example_input, example_expect, fixture_expect) = match kind {
         Kind::Component | Kind::Page => (
             format!("{{ page: {name}, params: {{ stream_id: 1 }} }}"),
-            "one row per open task in the stream, newest first",
+            "one row per open thread in the stream, in their order",
             Some("{ loaders: { items: { rows: $any } } }".to_string()),
         ),
         Kind::Query => (
             format!("{{ query: {name} }}"),
-            "one row per state a task can be in, as value and label",
-            Some("{ rows: { contains: [{ value: todo, label: To do }] } }".to_string()),
+            "one row per thread mark, as value and label",
+            Some("{ rows: { contains: [{ value: amber, label: Amber }] } }".to_string()),
         ),
         Kind::Panel => (
             format!("{{ panel: {name} }}"),
-            "one row per open task in the stream, newest first",
+            "one row per open thread in the stream, in their order",
             Some("{ body: { loaders: { items: { rows: $any } } } }".to_string()),
         ),
         Kind::Extension | Kind::Advisory | Kind::Context | Kind::Skill => {
@@ -335,16 +341,8 @@ pub fn scaffold_with(
             let starter = provider_starter(capability);
             (starter.input, starter.expect, Some(starter.fixture))
         }
-        // A task tracker's files a task through the interface once chosen;
-        // another capability's verbs are stubs, run by its conformance
+        // A capability's verbs are stubs, run by its conformance
         // suite, so its example has no fixture of its own yet.
-        Kind::Implementation {
-            capability: "task_tracker",
-        } => (
-            format!("{{ sql: \"SELECT title, stage FROM v_task WHERE provider = '{provider_id}'\" }}"),
-            "chosen as the task tracker, a task it files is one of its items, in its first stage",
-            Some("{ rows: [{ title: First, stage: todo }] }".to_string()),
-        ),
         Kind::Implementation { .. } => (
             "{}".to_string(),
             "TODO: what its verbs answer (`extension test` runs its capability's conformance suite)",
@@ -352,25 +350,25 @@ pub fn scaffold_with(
         ),
         Kind::Collector => (
             format!(
-                "{{ collector: items, rows: [{{ uri: \"{}\", title: First, state: todo }}, {{ uri: \"{}\", title: Second, state: done }}] }}",
-                task_uri("demo", "1"),
-                task_uri("demo", "2"),
+                "{{ collector: items, rows: [{{ uri: \"{}\", title: First, closed_at: null }}, {{ uri: \"{}\", title: Second, closed_at: \"2026-01-01T00:00:00.000000Z\" }}] }}",
+                thread_uri(oxplow_domain::ThreadId::new(1)),
+                thread_uri(oxplow_domain::ThreadId::new(2)),
             ),
-            "one item per task that isn't done",
+            "one item per thread that isn't closed",
             Some("{ entities: { item: 1 } }".to_string()),
         ),
         Kind::Metric => unreachable!("a metric is written from its template above"),
         Kind::Command => (
-            format!("{{ command: {ns}.notes.add, input: {{ uri: \"{task}\" }} }}"),
-            "a comment on the task",
-            Some("{ ok: true, commands: [oxplow.task.comment] }".to_string()),
+            format!("{{ command: {ns}.notes.add, input: {{ thread: \"{thread}\" }} }}"),
+            "the thread renamed",
+            Some("{ ok: true, commands: [oxplow.thread.rename] }".to_string()),
         ),
         Kind::Effect => (
             format!(
-                "{{ effect: on-done, event: {{ type: task.state_changed, payload: {{ task: \"{task}\", to: done }} }} }}"
+                "{{ effect: on-done, event: {{ type: thread.closed, payload: {{ thread: \"{thread}\" }} }} }}"
             ),
-            "a comment on the finished task",
-            Some("{ commands: [oxplow.task.comment] }".to_string()),
+            "the closed thread renamed",
+            Some("{ commands: [oxplow.thread.rename] }".to_string()),
         ),
         // Its fixtures carry a model, so they are written with the job below.
         Kind::Job => (
@@ -453,7 +451,7 @@ pub fn scaffold_with(
             // scripts or text need one; then the kind's own lists.
             manifest.push_str(match kind {
                 Kind::Command | Kind::Effect => {
-                    "# Its script runs core commands as the caller.\npermissions: [commands:oxplow.task.comment]\n"
+                    "# Its script runs core commands as the caller.\npermissions: [commands:oxplow.thread.rename]\n"
                 }
                 Kind::Advisory => {
                     "# What an advisory says reaches the agent.\npermissions: [agent.write]\n"
@@ -478,13 +476,13 @@ pub fn scaffold_with(
         )),
         Kind::Job => {
             manifest.push_str(
-                "    - name: published\n      input: { job: run }\n      expect: the finished job's reply is commented on the task\n",
+                "    - name: published\n      input: { job: run }\n      expect: the finished job's reply is the thread's new title\n",
             );
             manifest.push_str(&format!(
                 "# The model: a person binds `{ns}/{ns}` in Settings → AI; until then it\n\
                  # uses their Summarize model. The job's script runs core commands as\n\
                  # the caller. Deploying approves the permissions below.\n\
-                 permissions: [ai.compute, commands:oxplow.task.comment]\n\
+                 permissions: [ai.compute, commands:oxplow.thread.rename]\n\
                  ai_profiles:\n\
                  \x20 - id: {ns}\n\
                  \x20   description: \"TODO: what the model is asked to do.\"\n\
@@ -493,7 +491,7 @@ pub fn scaffold_with(
                  \x20 # One model conversation per intent key; `job.ask` starts it, `job.cancel`\n\
                  \x20 # stops it (what it had written is kept).\n\
                  \x20 - id: run\n\
-                 \x20   description: \"TODO: what the job does. Here: write a short note about a task.\"\n\
+                 \x20   description: \"TODO: what the job does. Here: write a short title for a thread.\"\n\
                  \x20   version: 1\n\
                  \x20   operation: ai.complete_typed\n\
                  \x20   needs: [ai.compute]\n\
@@ -515,18 +513,18 @@ pub fn scaffold_with(
                  \x20   op: cancel\n\
                  \x20 # Builds the job's request (the prompt lives here) and composes `job.ask`.\n\
                  \x20 - name: note.ask\n\
-                 \x20   summary: \"TODO: what asking does. Here: ask a model for a note on a task.\"\n\
+                 \x20   summary: \"TODO: what asking does. Here: ask a model for a title for a thread.\"\n\
                  \x20   entry: commands/ask.star\n\
                  \x20   access: record\n\
                  \x20   input_schema:\n\
                  \x20     type: object\n\
-                 \x20     required: [uri]\n\
+                 \x20     required: [thread]\n\
                  \x20     additionalProperties: false\n\
                  \x20     properties:\n\
-                 \x20       uri: {{ type: string, description: \"The task (oxplow:oxplow/task?id=<id>&provider=<provider>).\" }}\n\
+                 \x20       thread: {{ type: string, description: \"The thread (oxplow:oxplow/thread?id=<id>).\" }}\n\
                  effects:\n\
                  \x20 - id: publish\n\
-                 \x20   summary: When the job ends, comment its reply on the task.\n\
+                 \x20   summary: When the job ends, rename the thread to its reply.\n\
                  \x20   on: [contribution.job.completed]\n\
                  \x20   where: {{ job: \"{ns}/run\" }}\n\
                  \x20   entry: effects/publish.star\n\
@@ -535,29 +533,15 @@ pub fn scaffold_with(
         }
         Kind::Page | Kind::Query | Kind::Extension | Kind::Metric => {}
     }
-    if matches!(kind, Kind::Command | Kind::Job) {
-        // The fixture files a task first, and oxtask is oxplow-bundled's.
-        manifest.push_str("requires: [oxplow-bundled]\n");
-    }
     write(&format!("{rel_dir}/extension.yaml"), manifest)?;
     if let Some(expect) = fixture_expect {
-        // A command runs for real on the test's oxplow: the item it notes
-        // is made first.
+        // A command runs for real on the test's oxplow: the thread it
+        // renames is made first.
         let (given, when) = match kind {
             Kind::Command => (
-                "given: [{ command: oxplow.task.create, input: { title: First }, bind: item }]\n"
+                "given: [{ command: oxplow.thread.create, input: { stream: str1, title: First }, bind: item }]\n"
                     .to_string(),
-                format!("{{ command: {ns}.notes.add, input: {{ uri: $item.uri }} }}"),
-            ),
-            // Chosen as the task tracker, a task the interface files is
-            // one of its items, in its first stage.
-            Kind::Implementation { .. } => (
-                format!(
-                    "given:\n\
-                     \x20 - {{ command: oxplow.capability.choose, input: {{ capability: task_tracker, provider: {provider_id} }} }}\n\
-                     \x20 - {{ command: oxplow.task.create, input: {{ title: First }} }}\n"
-                ),
-                example_input.clone(),
+                format!("{{ command: {ns}.notes.add, input: {{ thread: $item.id }} }}"),
             ),
             _ => (String::new(), example_input.clone()),
         };
@@ -633,17 +617,17 @@ pub fn scaffold_with(
             )?;
         }
         Kind::Job => {
-            let instruction = "Write a one-line note about this task.";
+            let instruction = "Write a short title for this thread.";
             write(
                 &format!("{rel_dir}/commands/ask.star"),
                 format!(
                     "# Builds the job's request and composes the job's `ask`. The intent key\n\
-                     # names the task, so asking again for it returns the same job.\n\
+                     # names the thread, so asking again for it returns the same job.\n\
                      \n\
                      SYSTEM = \"{instruction} Answer in one sentence.\"\n\
                      \n\
                      def transform(x):\n\
-                     \x20   uri = x[\"input\"][\"uri\"]\n\
+                     \x20   uri = x[\"input\"][\"thread\"]\n\
                      \x20   return {{\"commands\": [{{\n\
                      \x20       \"name\": \"{ns}.job.ask\",\n\
                      \x20       \"input\": {{\n\
@@ -654,7 +638,7 @@ pub fn scaffold_with(
                      \x20               \"role\": \"{ns}\",\n\
                      \x20               \"messages\": [\n\
                      \x20                   {{\"role\": \"system\", \"parts\": [{{\"type\": \"text\", \"text\": SYSTEM}}]}},\n\
-                     \x20                   {{\"role\": \"user\", \"parts\": [{{\"type\": \"text\", \"text\": \"Task: \" + uri}}]}},\n\
+                     \x20                   {{\"role\": \"user\", \"parts\": [{{\"type\": \"text\", \"text\": \"Thread: \" + uri}}]}},\n\
                      \x20               ],\n\
                      \x20           }},\n\
                      \x20       }},\n\
@@ -663,7 +647,7 @@ pub fn scaffold_with(
             )?;
             write(
                 &format!("{rel_dir}/effects/publish.star"),
-                "# The finished job's reply, commented on the task its intent key names.\n\
+                "# The finished job's reply, set as the title of the thread its intent key names.\n\
                  # The event says only which run ended (`where:` keeps it to this job).\n\
                  \n\
                  PREFIX = \"note:\"\n\
@@ -681,8 +665,8 @@ pub fn scaffold_with(
                  \x20   if not text:\n\
                  \x20       return {\"skip\": \"the model wrote nothing\"}\n\
                  \x20   return {\"commands\": [{\n\
-                 \x20       \"name\": \"oxplow.task.comment\",\n\
-                 \x20       \"input\": {\"uri\": key[len(PREFIX):], \"body\": text},\n\
+                 \x20       \"name\": \"oxplow.thread.rename\",\n\
+                 \x20       \"input\": {\"thread\": key[len(PREFIX):], \"title\": text},\n\
                  \x20   }]}\n"
                     .to_string(),
             )?;
@@ -710,7 +694,7 @@ pub fn scaffold_with(
                      \x20   - {{ key: intent_key, label: About }}\n\
                      \x20   - {{ key: state }}\n\
                      \x20   - {{ key: output, label: Reply }}\n\
-                     \x20 empty: Nothing asked yet — run {ns}.note.ask on a task.\n",
+                     \x20 empty: Nothing asked yet — run {ns}.note.ask on a thread.\n",
                     title = title_case(name)
                 ),
             )?;
@@ -736,12 +720,12 @@ pub fn scaffold_with(
             write(
                 &format!("{rel_dir}/fixtures/published.yaml"),
                 format!(
-                    "# The finished job reaches `publish`, which comments the reply on the work\n\
-                     # item its intent key names.\n\
-                     given: [{{ command: oxplow.task.create, input: {{ title: First }} }}]\n\
+                    "# The finished job reaches `publish`, which sets the reply as the title of the\n\
+                     # thread its intent key names.\n\
+                     given: [{{ command: oxplow.thread.create, input: {{ stream: str1, title: First }} }}]\n\
                      when:\n\
                      \x20 job: run\n\
-                     \x20 intentKey: \"note:{task}\"\n\
+                     \x20 intentKey: \"note:{thread}\"\n\
                      \x20 request:\n\
                      \x20   schemaVersion: 1\n\
                      \x20   role: summarize\n\
@@ -751,7 +735,7 @@ pub fn scaffold_with(
                      \x20 state: succeeded\n\
                      \x20 effects:\n\
                      \x20   - {{ id: {ns}/publish, state: ok }}\n\
-                     \x20 commands: {{ contains: [oxplow.task.comment] }}\n\
+                     \x20 commands: {{ contains: [oxplow.thread.rename] }}\n\
                      model:\n\
                      \x20 replies: [\"A fine start.\"]\n"
                 ),
@@ -763,11 +747,11 @@ pub fn scaffold_with(
                 "title: {title}\n\
                  description: \"TODO: what these rows are for (a choice's options: value, label, optional group).\"\n\
                  loaders:\n\
-                 \x20 states:\n\
+                 \x20 marks:\n\
                  \x20   rows:\n\
-                 \x20     - {{ value: todo, label: To do }}\n\
-                 \x20     - {{ value: in_progress, label: In progress }}\n\
-                 \x20     - {{ value: done, label: Done }}\n",
+                 \x20     - {{ value: amber, label: Amber }}\n\
+                 \x20     - {{ value: red, label: Red }}\n\
+                 \x20     - {{ value: green, label: Green }}\n",
                 title = title_case(name)
             ),
         )?,
@@ -782,17 +766,17 @@ pub fn scaffold_with(
                  loaders:\n\
                  \x20 items:\n\
                  \x20   sql: |\n\
-                 \x20     SELECT w.uri, w.title, w.state\n\
-                 \x20     FROM v_task w JOIN v_thread t ON t.uri = w.assignee\n\
-                 \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
-                 \x20     ORDER BY w.updated_at DESC\n\
+                 \x20     SELECT t.uri, t.title, t.mark\n\
+                 \x20     FROM v_thread t\n\
+                 \x20     WHERE t.stream_id = :stream_id AND t.closed_at IS NULL\n\
+                 \x20     ORDER BY t.sort_index\n\
                  view:\n\
                  \x20 viz: table\n\
                  \x20 from: items\n\
                  \x20 columns:\n\
                  \x20   - {{ key: title, label: Item, link: {{ kind: page, from: uri }} }}\n\
-                 \x20   - {{ key: state }}\n\
-                 \x20 empty: No open tasks in this stream.\n",
+                 \x20   - {{ key: mark }}\n\
+                 \x20 empty: No open threads in this stream.\n",
                 title = title_case(name)
             ),
         )?,
@@ -814,16 +798,10 @@ pub fn scaffold_with(
 }
 
 /// The manifest lines of a scaffolded script implementation `id` of
-/// `capability`: its `implementations:` entry and what it declares — a task
-/// tracker its stages and the `sql.read` it reads its items back with, an
+/// `capability`: its `implementations:` entry and what it declares — an
 /// agent harness its `data`.
 fn implementation_manifest(capability: &str, id: &str, name: &str) -> String {
     let mut out = String::new();
-    if capability == "task_tracker" {
-        out.push_str(
-            "# Its script reads its own items back from v_task.\npermissions: [sql.read]\n",
-        );
-    }
     out.push_str(&format!(
         "implementations:\n\
          \x20 - capability: {capability}\n\
@@ -835,27 +813,14 @@ fn implementation_manifest(capability: &str, id: &str, name: &str) -> String {
         title = title_case(name)
     ));
     match capability {
-        "task_tracker" => out.push_str(
-            "    needs: [sql.read]\n\
-             \x20   # Its workflow: a stage in each of todo, in_progress and done is required.\n\
-             \x20   stages:\n\
-             \x20     - { id: backlog, title: Backlog, bucket: backlog }\n\
-             \x20     - { id: todo, title: To Do, bucket: todo }\n\
-             \x20     - { id: in_progress, title: In Progress, bucket: in_progress }\n\
-             \x20     - { id: blocked, title: Blocked, bucket: blocked }\n\
-             \x20     - { id: done, title: Done, bucket: done }\n\
-             \x20     - { id: canceled, title: Canceled, bucket: canceled }\n",
-        ),
         "agent_harness" => out.push_str("    data: { env_markers: [], settings: [] }\n"),
         _ => {}
     }
     out
 }
 
-/// A scaffolded script implementation of `capability`. A task tracker's
-/// works: it keeps its items in oxplow's own record, each verb answering
-/// the item's whole row and reading it back from `v_task`. Another
-/// capability's verbs are stubs that fail until written.
+/// A scaffolded script implementation of `capability`: its verbs are
+/// stubs that fail until written.
 fn implementation_script(capability: &str) -> String {
     const HEAD: &str = "# One function per verb. Each gets one dict, `x`:\n\
         #   x[\"input\"]   the verb's input, as the capability's contract gives it\n\
@@ -863,9 +828,6 @@ fn implementation_script(capability: &str) -> String {
         #   x[\"id\"]      the implementation's id\n\
         #   x[\"key\"]     the call's idempotency key\n\
         # and answers { result, events?, inverse? }, as a provider's verb does.\n";
-    if capability == "task_tracker" {
-        return format!("{HEAD}{TASK_TRACKER_SCRIPT}");
-    }
     let mut out = HEAD.to_string();
     for verb in oxplow_domain::capability::contract(capability)
         .map(|c| c.verbs)
@@ -880,56 +842,6 @@ fn implementation_script(capability: &str) -> String {
     }
     out
 }
-
-/// A scaffolded script task tracker's verbs.
-const TASK_TRACKER_SCRIPT: &str = r#"#
-# It keeps nothing of its own: each answer records the item's whole row as a
-# `task.recorded@3` event, and a later verb reads the row back from `v_task`.
-
-def _recorded(item):
-    return {"type": "task.recorded", "v": 3, "payload": {"item": item}, "subject": [item["uri"]]}
-
-def _item(uri_text):
-    rows = scope("sql.read", {
-        "sql": "SELECT uri, title, body, stage FROM v_task WHERE uri = :uri",
-        "params": {"uri": uri_text},
-    })
-    if not rows:
-        fail("no task %s" % uri_text)
-    row = rows[0]
-    return {"uri": row["uri"], "title": row["title"], "body": row["body"] or "", "stage": row["stage"], "native": {}}
-
-def create(x):
-    i = x["input"]
-    # The key is the call's: the same call, sent again, is the same task.
-    item = {
-        "uri": uri.build("oxplow/task", id = "t%d" % abs(hash(x["key"])), provider = x["id"]),
-        "title": i["title"],
-        "body": i.get("body", ""),
-        "stage": i["stage"],
-        "native": {},
-    }
-    return {"result": {"uri": item["uri"]}, "events": [_recorded(item)]}
-
-def update(x):
-    i = x["input"]
-    item = _item(i["uri"])
-    for key in ["title", "body", "stage"]:
-        if key in i:
-            item[key] = i[key]
-    return {"result": {"uri": item["uri"]}, "events": [_recorded(item)]}
-
-def transition(x):
-    i = x["input"]
-    item = _item(i["uri"])
-    was = item["stage"]
-    item["stage"] = i["to"]
-    return {
-        "result": {"uri": item["uri"]},
-        "events": [_recorded(item)],
-        "inverse": {"command": "transition", "input": {"uri": item["uri"], "to": was}},
-    }
-"#;
 
 /// What a scaffolded provider of `capability` starts with beyond its
 /// contract: the intent example's input, what it should show and the
@@ -948,14 +860,6 @@ struct ProviderStarter {
 
 fn provider_starter(capability: &str) -> ProviderStarter {
     match capability {
-        "task_tracker" => ProviderStarter {
-            input: "{ command: create, input: { title: First } }".to_string(),
-            expect: "the new item's URI",
-            fixture: "{ uri: $any }".to_string(),
-            needs: None,
-            data: serde_json::Value::Null,
-            on: &[],
-        },
         "agent_harness" => ProviderStarter {
             input: "{ command: render, input: { answer: { kind: ack } } }".to_string(),
             expect: "its hooks' acknowledgement",
@@ -1018,26 +922,7 @@ fn provider_starter(capability: &str) -> ProviderStarter {
 fn verb_input(capability: &str, verb: &str) -> (String, serde_json::Value) {
     use serde_json::json;
     let str_prop = json!({ "type": "string" });
-    // One of the list's stages (its manifest's `stages:`): core resolves a
-    // bucket to one before the list sees it.
-    let stage = json!({ "type": "string" });
     match (capability, verb) {
-        ("task_tracker", "create") => (
-            "Create a task.".into(),
-            json!({ "type": "object", "required": ["title"], "additionalProperties": false,
-                    "properties": { "title": str_prop, "body": str_prop, "stage": stage } }),
-        ),
-        ("task_tracker", "update") => (
-            "Change a task's title, body or stage.".into(),
-            json!({ "type": "object", "required": ["uri"], "additionalProperties": false,
-                    "properties": { "uri": str_prop, "title": str_prop, "body": str_prop,
-                                    "stage": stage } }),
-        ),
-        ("task_tracker", "transition") => (
-            "Move a task to one of its stages.".into(),
-            json!({ "type": "object", "required": ["uri", "to"], "additionalProperties": false,
-                    "properties": { "uri": str_prop, "to": stage } }),
-        ),
         ("agent_harness", "launch") => (
             "How a session of it starts: the launch's input in, { spec: { kind: pty, command, env } } out — \
              the session's bearer in `env`, never in `command`."
@@ -1694,12 +1579,10 @@ mod tests {
             jsonschema::validator_for(&schema::manifest_schema()).expect("compiles");
         for kind in [
             Kind::Extension,
-            Kind::provider("task_tracker").unwrap(),
             Kind::provider("agent_harness").unwrap(),
             Kind::provider("snapshots").unwrap(),
             Kind::provider("knowledge").unwrap(),
             Kind::provider("filesystem").unwrap(),
-            Kind::implementation("task_tracker").unwrap(),
             Kind::implementation("agent_harness").unwrap(),
             Kind::implementation("snapshots").unwrap(),
             Kind::implementation("knowledge").unwrap(),
@@ -1787,6 +1670,15 @@ mod tests {
                 "{err}"
             );
         }
+        // A task tracker only fills the task model: core calls no verb of
+        // it, so a script has nothing to implement.
+        let err = Kind::implementation("task_tracker")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("`task_tracker`") && err.contains("knowledge"),
+            "{err}"
+        );
 
         let dir = tempfile::tempdir().unwrap();
         scaffold(
@@ -1798,13 +1690,7 @@ mod tests {
         .unwrap();
         let d = declarations(dir.path(), "tracker");
         assert_eq!(d["capabilities"][0]["capability"], "task_tracker");
-        let verbs: Vec<&str> = d["commands"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| c["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(verbs, ["create", "update", "transition"]);
+        assert_eq!(d["commands"].as_array().map(Vec::len), Some(0));
         let vocabulary = oxplow_domain::vocabulary::Vocabulary::core();
         assert_eq!(d["event_types"][0]["type"], "task.recorded");
         assert_eq!(d["event_types"][0]["v"], 3);
@@ -1813,6 +1699,25 @@ mod tests {
             vocabulary.schema("task.recorded", 3)
         );
         assert_eq!(d["collectors"][0]["entity"], "task");
+
+        let dir = tempfile::tempdir().unwrap();
+        scaffold(
+            dir.path(),
+            Kind::provider("knowledge").unwrap(),
+            "shelf",
+            None,
+        )
+        .unwrap();
+        let d = declarations(dir.path(), "shelf");
+        let verbs: Vec<&str> = d["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        assert!(verbs.contains(&"write_page"), "{verbs:?}");
+        assert_eq!(d["event_types"][0]["type"], "knowledge.page.recorded");
+        assert_eq!(d["collectors"][0]["entity"], "knowledge_page");
     }
 
     /// The feature-gated harness verbs have real descriptions to declare
@@ -1938,7 +1843,7 @@ mod tests {
         assert!(text.contains("dry-run on an empty database"), "{text}");
         let page = dir.path().join(".oxplow/extensions/demo/pages/demo.yaml");
         let body = std::fs::read_to_string(&page).unwrap();
-        std::fs::write(&page, body.replace("FROM v_task", "FROM v_no_such_view")).unwrap();
+        std::fs::write(&page, body.replace("FROM v_thread", "FROM v_no_such_view")).unwrap();
         // `check` doesn't run a page's loaders; `extension test` opens the page
         // with each answer's params, so a loader that fails is a finding.
         let tested = crate::extension_test::test_extension(dir.path(), "demo", false)
@@ -2055,7 +1960,7 @@ mod tests {
         write(
             dir.path(),
             ".oxplow/extensions/ord/extension.yaml",
-            "manifest: 2\nname: ord\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [task.state_changed], entry: e.star }\n  - { id: second, summary: s, on: [task.state_changed], entry: e.star, after: [first, change.analyze] }\n",
+            "manifest: 2\nname: ord\nintent:\n  purpose: x\n  examples: [{ name: a }]\neffects:\n  - { id: first, summary: s, on: [thread.closed], entry: e.star }\n  - { id: second, summary: s, on: [thread.closed], entry: e.star, after: [first, change.analyze] }\n",
         );
         write(
             dir.path(),

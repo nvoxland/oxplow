@@ -441,8 +441,8 @@ and whether it keeps items.
 
 | | `task_tracker` | `agent_harness` | `snapshots` | `knowledge` | `filesystem` |
 |---|---|---|---|---|---|
-| verbs | `create`, `update`, `transition`; `link` ← links, `comment` ← comments, `delete` ← delete, `reorder` ← ordering, `move` ← lists | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page` | `stat`, `read`, `list`; `write` ← writable |
-| verbs run as | `oxplow.task.<verb>` | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
+| verbs | none | `launch`, `tool_use`, `render`; `turns` ← transcript, `token_readings` ← telemetry, `refresh_text` ← runtime_text, `prompt` and `subagent` ← subagents | `mark`, `changed`; `read_at` ← contents | `write_page`, `delete_page` | `stat`, `read`, `list`; `write` ← writable |
+| verbs run as | none (a task tracker provider only fills the task model) | core's call: a session's launch, the hook route, the OTLP route, a transcript read, a text refresh | core's call: every take core makes (a turn's end, a measured run, an archive) | `oxplow.knowledge.<verb>`, after core checks the page against its record | core's call: a reader's `stat`, `read` and `list` for a file URI naming the filesystem |
 | declares as `data` | nothing | `env_markers`, `settings` | nothing | `kinds` (`{ id, title, bucket }`; none means `note`); feature `edit` | nothing |
 | may emit | `task.recorded@3` | nothing | nothing | `knowledge.page.recorded@3` | nothing |
 | collectors stream | `task` rows, logged as `task.recorded@3` `{ item: row }` | nothing | nothing | `knowledge_page` rows, logged as `knowledge.page.recorded@3` `{ page: row }` | nothing |
@@ -1064,7 +1064,7 @@ ProviderRegistry::run_op`) to the instance its input names — an
 `Unavailable` when that one isn't running; its inverse names an
 operation, made a call of the command declared over it (with the
 instance), or `<family>.<verb>` for a capability verb (its contract's
-`dispatch`: `oxplow.task.<verb>`). A capability verb can't be
+`dispatch`, when it has one). A capability verb can't be
 declared this way: core calls it. An instance registers only its
 capability's implementation (no bus namespace). **A provider emits only
 its capability's event types** (its contract's `events`: `task_tracker` →

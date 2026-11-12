@@ -16,7 +16,7 @@ use oxplow_domain::DomainError;
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DataEntity {
-    /// The view to query (`v_task`, `v_my_gh_pr`).
+    /// The view to query (`v_thread`, `v_my_gh_pr`).
     pub name: String,
     /// `core`, or the extension that provides it.
     pub owner: String,
@@ -114,9 +114,9 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>()
         };
-        let task = get(&all, "v_task");
+        let thread = get(&all, "v_thread");
         assert_eq!(
-            (task[0].owner.as_str(), task[0].kind.as_str()),
+            (thread[0].owner.as_str(), thread[0].kind.as_str()),
             ("core", "sql")
         );
         let pr = get(&all, "v_my_gh_pr");

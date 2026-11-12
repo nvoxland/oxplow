@@ -997,10 +997,10 @@ mod tests {
         crate::test_fixtures::activate(svc).await;
     }
 
-    /// Starts every effect of `acme` at the log's head.
+    /// Starts every effect of every enabled extension (`acme`'s, and what
+    /// ships with oxplow) at the log's head.
     async fn start(svc: &Services) {
-        let ext = effects(svc).into_iter().next().unwrap().0;
-        for decl in &ext.effects {
+        for (_, decl) in effects(svc) {
             effects::start_at_head(&svc.db, &decl.name()).await.unwrap();
         }
     }
@@ -1074,7 +1074,11 @@ mod tests {
         let ev = log(svc, settled(&fx, "taken")).await;
         consumer.handle(&ev).await.unwrap();
         assert_eq!(
-            rows(svc, "SELECT effect FROM v_effect_run ORDER BY id").await,
+            rows(
+                svc,
+                "SELECT effect FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY id"
+            )
+            .await,
             json!([["acme/first"], ["acme/middle"], ["acme/last"]])
         );
         assert!(
@@ -1120,7 +1124,11 @@ mod tests {
         consumer.handle(&ev).await.unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
         assert_eq!(
-            rows(svc, "SELECT effect, state FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT effect, state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([["acme/mark-done", "ok"]])
         );
         let executed = rows(
@@ -1207,7 +1215,11 @@ mod tests {
         let blocked = log(svc, settled(&fx, "declined")).await;
         consumer.handle(&blocked).await.unwrap();
         assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT count(*) FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([[0]])
         );
     }
@@ -1229,13 +1241,21 @@ mod tests {
         let blocked = log(svc, settled(&fx, "declined")).await;
         consumer.handle(&blocked).await.unwrap();
         assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT count(*) FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([[0]])
         );
         let done = log(svc, settled(&fx, "taken")).await;
         consumer.handle(&done).await.unwrap();
         assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT count(*) FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([[1]])
         );
     }
@@ -1400,7 +1420,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            rows(svc, "SELECT state FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([["failed"]])
         );
         fail.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1557,7 +1581,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT attempt, origin, state, latest FROM v_effect_run ORDER BY attempt"
+                "SELECT attempt, origin, state, latest FROM v_effect_run WHERE effect LIKE 'acme/%' ORDER BY attempt"
             )
             .await,
             json!([[1, "live", "failed", 0], [2, "retry", "ok", 1]])
@@ -1789,7 +1813,11 @@ mod tests {
             .handle(&ev)
             .await
             .unwrap();
-        let run = rows(svc, "SELECT state, proposal_id FROM v_effect_run").await;
+        let run = rows(
+            svc,
+            "SELECT state, proposal_id FROM v_effect_run WHERE effect LIKE 'acme/%'",
+        )
+        .await;
         assert_eq!(run[0][0], json!("proposed"));
         assert!(run[0][1].is_number(), "{run}");
         assert_eq!(
@@ -1827,7 +1855,11 @@ mod tests {
         let fourth = log(svc, settled(&fx, "taken")).await;
         consumer.handle(&fourth).await.unwrap();
         assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT count(*) FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([[3]]),
             "disabled: it no longer reacts"
         );
@@ -1881,7 +1913,11 @@ mod tests {
             json!([["cancelled"]])
         );
         assert_eq!(
-            rows(svc, "SELECT state FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([["failed"]]),
             "the attempt records why it stopped"
         );
@@ -1961,7 +1997,7 @@ mod tests {
         assert_eq!(
             rows(
                 svc,
-                "SELECT state, count(*) FROM v_effect_run GROUP BY state ORDER BY state"
+                "SELECT state, count(*) FROM v_effect_run WHERE effect LIKE 'acme/%' GROUP BY state ORDER BY state"
             )
             .await,
             json!([["proposed", 3], ["skipped", 3]])
@@ -2202,7 +2238,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            rows(svc, "SELECT origin, state FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT origin, state FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([["backfill", "started"]])
         );
         assert_eq!(
@@ -2307,7 +2347,11 @@ mod tests {
         }
         assert_eq!(title(&fx).await, before, "the past isn't reacted to");
         assert_eq!(
-            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            rows(
+                svc,
+                "SELECT count(*) FROM v_effect_run WHERE effect LIKE 'acme/%'"
+            )
+            .await,
             json!([[0]])
         );
 

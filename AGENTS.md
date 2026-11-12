@@ -28,13 +28,14 @@ or exact mechanics.
 - **`.context/usability.md`** — UI rules (Enter submits, Escape cancels,
   drop-target highlighting, right-click for destructive actions, etc.).
   Read before adding *any* UI.
-- **Tasks while the task tracker is none.** oxtask, oxplow's own task
-  tracker, ships in `oxplow-bundled`: with only `oxplow-foundation` running
-  there is no task tracker. With no task tracker (bundled off, or none
-  chosen in Settings → Capabilities) or oxplow not running, file and update
+- **Tasks from the command line.** oxtask, oxplow's own task tracker,
+  ships in `oxplow-bundled` and is a store of the shared task model. With
+  oxtask enabled in the project, or oxplow not running, file and update
   tasks with `cargo run -q -p oxplow-dev -- task …`
-  (`.context/working-in-this-repo.md` "oxplow-dev"). How oxplow tracks work and how to ask the person a
-  question come from oxplow itself, in every session's prompt.
+  (`.context/working-in-this-repo.md` "oxplow-dev"); it works over oxtask's
+  own file and says so when oxtask is off. How oxplow tracks work and how
+  to ask the person a question come from oxplow itself, in every session's
+  prompt.
 - **Which tests and lint to run, and when, is your call** — run what
   the change warrants. Nothing requires a full run before a commit. The
   commands, all in the foreground (a backgrounded run's reports are

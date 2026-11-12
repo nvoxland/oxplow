@@ -28,8 +28,9 @@ system prompt, and only file tools plus `oxplow extension …` in Bash.
   title column's `link: { kind: task, from: id }` was removed to keep the
   recording checking clean. The run predates the task interface:
   it read `v_task`, which is gone, so the collector's `input` was
-  rewritten over `v_task` (same output columns; the id is the
-  number in an oxplow ref). Re-record it with the current skill.
+  rewritten over `v_oxplow_task` (same output columns; the id is the
+  number in an oxplow ref) and the extension requires `oxplow-bundled`
+  and `oxtask`. Re-record it with the current skill.
 - **Patched after recording (2026-10-26):** the old UI format became pages, so the
   recorded `lenses/stale-tasks.yaml` was rewritten by hand as
   `pages/stale-tasks.yaml` (its query a `stale_tasks` loader, the same

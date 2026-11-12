@@ -5842,7 +5842,7 @@ params:
 loaders:
   items:
     sql: |
-      SELECT uri, title FROM v_task WHERE state = :state ORDER BY title
+      SELECT uri, title FROM v_thread WHERE mark = :state ORDER BY title
 view:
   viz: table
   from: items
@@ -6515,7 +6515,7 @@ collectors:
   - id: things
     runtime: starlark
     entry: collectors/things.star
-    input: \"SELECT uri FROM v_task\"
+    input: \"SELECT uri FROM v_thread\"
     entities:
       - { name: thing, key: id, columns: { id: int, label: text } }
 datasets:
@@ -8792,7 +8792,7 @@ commands:
                 .iter()
                 .find(|m| m.contains(what) && m.contains("`task` is a physical table"));
             let found = found.unwrap_or_else(|| panic!("{what}: {:?}", e.errors));
-            assert!(found.contains("read v_task"), "{found:?}");
+            assert!(found.contains("read v_thread"), "{found:?}");
         }
     }
 
@@ -9063,7 +9063,7 @@ commands:
         write(
             dir.path(),
             ".oxplow/extensions/x/datasets/late.sql",
-            "SELECT uri FROM ref('task') WHERE state = 'blocked'",
+            "SELECT uri FROM ref('thread') WHERE mark = 'red'",
         );
         write(
             dir.path(),
@@ -9101,7 +9101,7 @@ commands:
             ext.datasets[0].file,
             ".oxplow/extensions/x/datasets/late.sql"
         );
-        assert!(ext.datasets[0].sql.contains("ref('task')"));
+        assert!(ext.datasets[0].sql.contains("ref('thread')"));
 
         write(
             dir.path(),
@@ -9130,7 +9130,7 @@ commands:
         let manifest = [
             "dimensions:",
             "  - { key: acme.team, label: Team }",
-            "  - { key: acme.prio, entity: v_task, expr: \"json_extract(e.native, '$.priority')\" }",
+            "  - { key: acme.prio, entity: v_thread, expr: \"e.mark\" }",
             "  - { key: acme.hot, promote: true }",
             "",
         ]

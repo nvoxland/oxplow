@@ -552,7 +552,9 @@ running an older DB get the columns/tables dropped on first launch with
 the new binary; existing rows are not migrated forward (no surface
 reads them).
 
-### `task` — `SqliteOxtaskStore` (`crates/oxplow-oxtask/src/store.rs`)
+### `task` — core's old task table (legacy)
+
+> **Legacy.** Core no longer reads or writes this table, the `oxtask_note` table or the `task_assignment` projection; nothing in core names them but `oxplow-dev task move-to-oxtask`, which moved their rows into oxtask's own file. Tasks are the shared task model's (`.context/tasks.md`). The tables go in a later migration.
 
 The actual TODO list. Singular table name, `id INTEGER PRIMARY KEY
 AUTOINCREMENT` — stored as a plain integer, surfaced as `tsk<int>` (see
@@ -685,7 +687,7 @@ concurrent duplicate keeps the first (`ON CONFLICT DO NOTHING`). The
 same migration adds `ai_call.input_hash`. Read as `v_ai_result`; see
 [ai-providers.md](./ai-providers.md) "Recorded computations".
 
-### `oxtask_note` (`oxplow-oxtask` `satellite.rs`)
+### `oxtask_note` (legacy, see `task` above)
 
 **`oxtask_note`** holds only the comments on oxtask
 (`oxplow.task.comment`; `task_id` NOT NULL), which reach

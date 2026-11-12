@@ -404,7 +404,7 @@ async fn questions_and_config_keys_are_datasets() {
 #[tokio::test]
 async fn a_turn_declares_how_it_points_at_its_request() {
     let fx = services_with_thread().await;
-    for (dataset, from) in [("agent_turn", "request"), ("request_task", "request")] {
+    for (dataset, from) in [("agent_turn", "request")] {
         let found = rows(
             &fx,
             &format!("SELECT relationships FROM v_dataset WHERE name = '{dataset}'"),

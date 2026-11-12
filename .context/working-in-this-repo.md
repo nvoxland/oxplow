@@ -93,18 +93,16 @@ was a read/append race: advancing to the latest Main message could skip a peer
 reply posted in between. If such a mailbox is reused, track and acknowledge
 peer message UUIDs individually. A file does not wake an idle session.
 
-### oxplow-dev: tasks and knowledge while the task tracker is none
+### oxplow-dev: tasks and knowledge from the command line
 
-Snapshots and oxwiki are `oxplow-foundation`'s defaults, but
-oxtask, oxplow's own task tracker, is `oxplow-bundled`'s: disabling it
-(`disableExtensions: [oxplow-bundled]` in `.oxplow/personal.yaml`, never
-committed) leaves no task tracker, as does a project that chose none
-(Settings → Capabilities). With no tracker `task.*` succeeds as a sink
-(`{ tracked: false }`: nothing is recorded) and the task tools
-(`oxplow_next_task`, `oxplow_thread_tasks`) and the `tasks` skill are not
-offered. The
+Snapshots and oxwiki are `oxplow-foundation`'s defaults; tasks are a shared
+model (`.context/tasks.md`) that oxtask, `oxplow-bundled`'s own store,
+fills. Core has no task verbs: `task.*` as commands is oxtask's
+(`oxtask.task.*`), and the task tools (`oxplow_next_task`,
+`oxplow_thread_tasks`) and the `tasks` skill are offered only while the
+task model has a live store. The
 development helper `oxplow-dev` (`crates/oxplow-dev`, never shipped or
-bundled) keeps oxtask usable meanwhile:
+bundled) keeps oxtask usable from outside the app:
 
 ```
 cargo run -q -p oxplow-dev -- task list [--all]
@@ -126,20 +124,19 @@ cargo run -q -p oxplow-dev -- extension deploy oxplow-foundation   # one extensi
 cargo run -q -p oxplow-dev -- --help
 ```
 
-**Which backend `task` uses.** By the project's config: when the oxtask
-extension is enabled (`extensions:` / `enableExtensions` in
-`.oxplow/project.yaml` and `.oxplow/personal.yaml`, less `disableExtensions`;
-`oxplow_config::extension_settings(..).is_enabled("oxtask")`), the same
-subcommands read and write oxtask's own file
+**What `task` works on.** Only oxtask's own file
 (`.oxplow/extensions-data/oxtask.sqlite`, created and migrated with oxtask's
-migrations as the move tool does) and print the same shapes (`tsk12`,
-`state:`, the pretty JSON with `id` and `uri`); `--state todo` is oxtask's
-`ready`, and a run is `person`, or with `--thread` that thread's `agent`
-(the author columns). Each write is one statement through the file's own
-triggers (a change number, the delete guard), so the app's collector sees
-it on its next `sqlite` trigger. The SQL is the one in
-`extensions/oxtask/handlers/*.star`. Otherwise (oxtask off) the commands run
-over core's tables as described below, and oxtask's file is not made.
+migrations as the move tool does), and only when the oxtask extension is
+enabled (`extensions:` / `enableExtensions` in `.oxplow/project.yaml` and
+`.oxplow/personal.yaml`, less `disableExtensions`;
+`oxplow_config::extension_settings(..).is_enabled("oxtask")`); with it off
+the command says there is no task tracker to reach. It prints the shapes
+the pages use (`tsk12`, `state:`, the pretty JSON with `id` and `uri`);
+`--state todo` is oxtask's `ready`, and a run is `person`, or with
+`--thread` that thread's `agent` (the author columns). Each write is one
+statement through the file's own triggers (a change number, the delete
+guard), so the app's collector sees it on its next `sqlite` trigger. The SQL
+is the one in `extensions/oxtask/handlers/*.star`.
 
 `task move-to-oxtask` is the one-off move of core's tasks into the oxtask
 extension's own file (`.oxplow/extensions-data/oxtask.sqlite`) and bundled's
