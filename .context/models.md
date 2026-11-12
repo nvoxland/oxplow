@@ -206,10 +206,19 @@ fills:
     stores: [oxtask]            # store ids this extension writes; default [<namespace>]
     id_pattern: "tsk[0-9]+"     # how its ids look in text (optional)
     stages:                     # a task store's own stages (bundled's task model asks for them)
-      - { id: backlog, title: Backlog, state: backlog }
+      - { id: backlog, title: Backlog, bucket: backlog }
     fields:
       - { name: priority, title: Priority, kind: enum, values: [urgent, high, medium, low] }
 ```
+
+- **Stages** (built): a fill's `stages:` are its store's workflow in order,
+  `[{ id, title, bucket }]` (the domain's `StageDecl`), checked as a task
+  tracker's are (`stages_problem`: snake_case ids, a stage in each
+  required bucket). A provider fill carries its instance's stages. Each
+  publication restates them into `model_stage_decl` (V32), read as
+  `v_model_stage` (model, store, position, id, title, bucket, extension):
+  what shared screens draw a store's columns from, without the
+  capability rows.
 
 - A store id is owned by one extension. Two extensions naming the same
   store id is a load error. A provider instance's store id is its

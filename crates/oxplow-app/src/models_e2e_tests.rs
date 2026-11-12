@@ -452,3 +452,37 @@ async fn a_scripts_inverse_cant_write_fields_as_another_extension() {
     assert!(err.contains("oxplow.model.set_fields"), "{err}");
     assert!(err.contains("records its own undo"), "{err}");
 }
+
+/// A store's declared stages are read as `v_model_stage`, in order, with
+/// their buckets: what shared screens draw a store's workflow from.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stores_stages_are_read_as_model_stage() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(
+        root,
+        ".oxplow/extensions/zz/extension.yaml",
+        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n    stages:\n      - { id: todo, title: To do, bucket: todo }\n      - { id: doing, title: Doing, bucket: in_progress }\n      - { id: done, title: Done, bucket: done }\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    let out = fx
+        .svc
+        .sql
+        .query_sql(
+            "SELECT id || ':' || bucket FROM v_model_stage WHERE model = 'oxplow/task_record' AND store = 'zz' ORDER BY position",
+            vec![],
+            None,
+        )
+        .await
+        .unwrap();
+    let got: Vec<String> = out
+        .rows
+        .iter()
+        .map(|r| match &r[0] {
+            oxplow_db::SqlCell::Text(t) => t.clone(),
+            other => format!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(got, vec!["todo:todo", "doing:in_progress", "done:done"]);
+}

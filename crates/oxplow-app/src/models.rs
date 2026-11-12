@@ -49,6 +49,10 @@ pub struct FillSpec {
     /// provider instance's declared `id_pattern`).
     #[serde(default)]
     pub id_pattern: Option<String>,
+    /// Its store's workflow, in order (`fills.stages`, or a provider
+    /// instance's declared stages): each stage's id, title and bucket.
+    #[serde(default)]
+    pub stages: Vec<oxplow_domain::tasks::StageDecl>,
 }
 
 /// Fields an extension declares on a model it doesn't fill.
@@ -191,6 +195,7 @@ impl ModelRegistry {
                 fields,
                 provider: true,
                 id_pattern: row.id_pattern.clone(),
+                stages: serde_json::from_value(row.stages.clone()).unwrap_or_default(),
             });
         }
         self
@@ -280,6 +285,26 @@ impl ModelRegistry {
     /// Every declared field as `(model, namespace, extension, field)`: a
     /// store's under each of its store ids, another extension's under its
     /// namespace (`v_model_field_decl`).
+    /// Each filled store's stages: `(model, store, extension, stages)`.
+    pub fn stage_decls(
+        &self,
+    ) -> Vec<(String, String, String, Vec<oxplow_domain::tasks::StageDecl>)> {
+        self.fills
+            .iter()
+            .filter(|f| !f.stages.is_empty())
+            .flat_map(|f| {
+                f.stores.iter().map(move |store| {
+                    (
+                        f.model.clone(),
+                        store.clone(),
+                        f.extension.clone(),
+                        f.stages.clone(),
+                    )
+                })
+            })
+            .collect()
+    }
+
     pub fn field_decls(&self) -> Vec<(String, String, String, FieldDecl)> {
         let mut out = Vec::new();
         for fill in &self.fills {
@@ -673,6 +698,7 @@ mod tests {
             fields: vec![],
             provider: false,
             id_pattern: None,
+            stages: vec![],
         });
         r.fields.push(FieldsSpec {
             extension: "shelf-score".into(),
@@ -741,6 +767,7 @@ mod tests {
             fields: vec![],
             provider: false,
             id_pattern: Some("tsk[0-9]+".into()),
+            stages: vec![],
         });
         r.fills.push(FillSpec {
             extension: "quiet".into(),
@@ -749,6 +776,7 @@ mod tests {
             fields: vec![],
             provider: false,
             id_pattern: None,
+            stages: vec![],
         });
         assert_eq!(
             r.task_ids(),

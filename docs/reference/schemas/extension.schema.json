@@ -2632,8 +2632,12 @@
           "default": null
         },
         "stages": {
-          "description": "A task store's stages (bundled's task model; not used yet).",
-          "default": null
+          "description": "Its store's workflow, in order: `[{ id, title, bucket }]`, checked\nas a task tracker's stages are.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StageDecl"
+          },
+          "default": []
         },
         "fields": {
           "type": "array",
@@ -2645,6 +2649,41 @@
       "additionalProperties": false,
       "required": [
         "model"
+      ]
+    },
+    "StageDecl": {
+      "description": "One of a task tracker's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "snake_case, unique in the list (`in_review`).",
+          "type": "string"
+        },
+        "title": {
+          "description": "How a person names it (`In Review`).",
+          "type": "string"
+        },
+        "bucket": {
+          "$ref": "#/definitions/Bucket"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "bucket"
+      ]
+    },
+    "Bucket": {
+      "description": "What a task tracker's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
+      "type": "string",
+      "enum": [
+        "backlog",
+        "todo",
+        "in_progress",
+        "blocked",
+        "done",
+        "canceled"
       ]
     },
     "FieldFile": {
@@ -3384,41 +3423,6 @@
       "required": [
         "capability",
         "id"
-      ]
-    },
-    "StageDecl": {
-      "description": "One of a task tracker's stages, as it declares them in order: its id (what\na record and an input name), how a person names it, and its bucket. The\nfirst stage of a bucket is that bucket's default — where an input\nnaming the bucket (`to: done`) lands.",
-      "type": "object",
-      "properties": {
-        "id": {
-          "description": "snake_case, unique in the list (`in_review`).",
-          "type": "string"
-        },
-        "title": {
-          "description": "How a person names it (`In Review`).",
-          "type": "string"
-        },
-        "bucket": {
-          "$ref": "#/definitions/Bucket"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "title",
-        "bucket"
-      ]
-    },
-    "Bucket": {
-      "description": "What a task tracker's stage means to core: the bucket each of its declared\nstages ([`StageDecl`]) is in. Core acts on buckets only — `backlog` is\nfiled but not ready, `todo` is ready (what an idle thread may pull),\n`in_progress` is started, `blocked` waits on an answer, `done` and\n`canceled` are closed — and the screens draw the list's own stages.",
-      "type": "string",
-      "enum": [
-        "backlog",
-        "todo",
-        "in_progress",
-        "blocked",
-        "done",
-        "canceled"
       ]
     },
     "FieldDecl": {

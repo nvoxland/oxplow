@@ -567,6 +567,36 @@ pub fn replace_field_decls_tx(
     Ok(())
 }
 
+/// Restate every store's declared stages (`model_stage_decl`):
+/// `(model, store, extension, stages)`, each list in its workflow order.
+pub fn replace_stage_decls_tx(
+    conn: &rusqlite::Connection,
+    decls: &[(String, String, String, Vec<oxplow_domain::tasks::StageDecl>)],
+) -> Result<(), DomainError> {
+    conn.execute("DELETE FROM model_stage_decl", [])
+        .map_err(map_sql_err)?;
+    for (model, store, extension, stages) in decls {
+        for (position, stage) in stages.iter().enumerate() {
+            conn.execute(
+                "INSERT OR IGNORE INTO model_stage_decl
+                   (model, store, position, id, title, bucket, extension)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    model,
+                    store,
+                    position as i64,
+                    stage.id,
+                    stage.title,
+                    stage.bucket.as_str(),
+                    extension,
+                ],
+            )
+            .map_err(map_sql_err)?;
+        }
+    }
+    Ok(())
+}
+
 /// Re-pin `source`'s pinned refs to now (`oxplow.refs.verify`): `files`,
 /// or every file it pins when `None`. Each must be a file it pins or be
 /// under a directory it pins (one under a directory becomes a pin of its

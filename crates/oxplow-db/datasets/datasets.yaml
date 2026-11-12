@@ -2112,6 +2112,17 @@
     - { name: "kind", type: "TEXT", doc: "`enum`, `text` or `number`." }
     - { name: "values", type: "TEXT", doc: "An enum's values, as a JSON list; NULL otherwise." }
     - { name: "read_only", type: "INT", doc: "1 when screens show it but don't edit it." }
+- name: model_stage
+  version: 1
+  description: "Each store's workflow on a shared model, in order, as the enabled extensions declare it (`fills.stages`) and the running provider instances state it: what a shared screen draws a store's columns from without knowing the store."
+  fields:
+    - { name: "model", type: "TEXT", doc: "The model (`<owner namespace>/<model>`)." }
+    - { name: "store", type: "TEXT", doc: "The store whose workflow it is." }
+    - { name: "position", type: "INT", doc: "Its place in the workflow, from 0." }
+    - { name: "id", type: "TEXT", doc: "The stage's id (`in_progress`)." }
+    - { name: "title", type: "TEXT", doc: "What a screen calls it (`In Progress`)." }
+    - { name: "bucket", type: "TEXT", doc: "The bucket it is in: `backlog`, `todo`, `in_progress`, `blocked`, `done` or `canceled`." }
+    - { name: "extension", type: "TEXT", doc: "The extension that declares it (a provider instance's extension for its stages)." }
 - name: model_quarantine
   version: 1
   description: "The shared-model rows a write skipped because they failed their checks and have not been restated since: an open problem until the key is written good, deleted, renamed away, or left out of a snapshot of its store. A collector run reports the same rows once; this keeps them."

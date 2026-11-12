@@ -39,12 +39,12 @@ fills:
     stores: [oxtask]
     id_pattern: "tsk[0-9]+"
     stages:
-      - { id: backlog, title: Backlog, state: backlog }
-      - { id: ready, title: Ready, state: todo }
-      - { id: in_progress, title: In Progress, state: in_progress }
-      - { id: blocked, title: Blocked, state: blocked }
-      - { id: done, title: Done, state: done }
-      - { id: canceled, title: Canceled, state: canceled }
+      - { id: backlog, title: Backlog, bucket: backlog }
+      - { id: ready, title: Ready, bucket: todo }
+      - { id: in_progress, title: In Progress, bucket: in_progress }
+      - { id: blocked, title: Blocked, bucket: blocked }
+      - { id: done, title: Done, bucket: done }
+      - { id: canceled, title: Canceled, bucket: canceled }
     fields:
       - { name: priority, title: Priority, kind: enum, values: [urgent, high, medium, low] }
       - { name: author, title: Author, kind: text, read_only: true }

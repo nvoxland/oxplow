@@ -144,10 +144,10 @@ pub struct FillFile {
     /// matches is its store's item (a task model's stores).
     #[serde(default)]
     id_pattern: Option<String>,
-    /// A task store's stages (bundled's task model; not used yet).
+    /// Its store's workflow, in order: `[{ id, title, bucket }]`, checked
+    /// as a task tracker's stages are.
     #[serde(default)]
-    #[schemars(with = "Option<serde_json::Value>")]
-    stages: Option<Value>,
+    stages: Vec<oxplow_domain::tasks::StageDecl>,
     #[serde(default)]
     fields: Vec<FieldFile>,
 }
@@ -461,7 +461,11 @@ pub fn parse(
                     if let Some(bad) = stores.iter().find(|s| !store_id(s)) {
                         return Err(format!("`{bad}` isn't a store id"));
                     }
-                    let _ = raw.stages;
+                    if !raw.stages.is_empty() {
+                        if let Some(problem) = oxplow_domain::tasks::stages_problem(&raw.stages) {
+                            return Err(format!("`stages`: {problem}"));
+                        }
+                    }
                     if let Some(pattern) = &raw.id_pattern {
                         regex::Regex::new(&format!("^(?:{pattern})$"))
                             .map_err(|e| format!("`id_pattern` `{pattern}` isn't a regex: {e}"))?;
@@ -473,6 +477,7 @@ pub fn parse(
                         fields: fields_of(raw.fields)?,
                         provider: false,
                         id_pattern: raw.id_pattern,
+                        stages: raw.stages,
                     })
                 });
             match parsed {
@@ -567,6 +572,26 @@ mod tests {
     }
 
     /// Names two models generate in common are refused at load, naming both.
+    /// A fill's `stages` are its store's workflow, checked as a task
+    /// tracker's are; bad stages name the problem and leave the fill out.
+    #[test]
+    fn a_fills_stages_are_its_stores_workflow() {
+        let fill = |stages: &str| {
+            format!(
+                "fills:\n  - model: oxplow/task_record\n    stores: [t]\n    stages: {stages}\n"
+            )
+        };
+        let (d, errors) = parse_text(&fill(
+            "[{ id: todo, title: To do, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: done, title: Done, bucket: done }]",
+        ));
+        assert!(errors.is_empty(), "{errors:?}");
+        let ids: Vec<&str> = d.fills[0].stages.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec!["todo", "doing", "done"]);
+        let (d, errors) = parse_text(&fill("[{ id: todo, title: To do, bucket: todo }]"));
+        assert!(d.fills.is_empty());
+        assert!(errors[0].message.contains("stages"), "{errors:?}");
+    }
+
     #[test]
     fn colliding_generated_names_are_refused() {
         let child =
