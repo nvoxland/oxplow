@@ -10,7 +10,7 @@ given:
   - { command: oxtask.task.create, input: { title: By person, stage: ready } }
   - { command: oxtask.task.move, input: { id: tsk3, stage: in_progress } }
   - observe: { turn: { prompt: Start it, during: [{ command: oxtask.task.move, input: { id: tsk2, stage: in_progress }, as: agent }] } }
-when: { sql: "SELECT title, assignee = 'oxplow:oxplow/thread?id=thr1' AS on_thread, rank FROM v_oxplow_task_next ORDER BY title" }
+when: { sql: "SELECT title, assignee = 'oxplow:oxplow/thread?id=thr1' AS on_thread, rank FROM v_oxplow_task ORDER BY title" }
 expect:
   rows:
     - { title: By person, on_thread: null, rank: null }
@@ -18,5 +18,5 @@ expect:
     - { title: Started, on_thread: 1, rank: 1 }
 steps:
   - given: [{ command: oxtask.task.move, input: { id: tsk2, stage: done } }]
-  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next WHERE title = 'Started'" }
+  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task WHERE title = 'Started'" }
     expect: { rows: [{ title: Started, assignee: null, rank: null }] }

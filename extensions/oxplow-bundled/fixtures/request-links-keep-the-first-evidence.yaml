@@ -20,7 +20,7 @@ steps:
   - when:
       sql: |
         SELECT basis, turn_id, at <= (SELECT started_at FROM v_agent_turn WHERE id = 2) AS first_time
-          FROM v_oxplow_request_task_next WHERE basis IN ('assigned', 'prompt') ORDER BY basis
+          FROM v_oxplow_request_task WHERE basis IN ('assigned', 'prompt') ORDER BY basis
     expect:
       rows:
         - { basis: assigned, turn_id: 1, first_time: 1 }

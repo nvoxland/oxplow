@@ -5,8 +5,7 @@
 # Gets {"rows": [...], "event": {...}}: one row {request, thread_uri, task}
 # for each such task; none when the turn has no request or the thread holds
 # nothing in progress. Returns the (request, task, `assigned`) rows, stamped
-# with the event's time and turn (TEMPORARY: the model is
-# `request_task_next` until the flip).
+# with the event's time and turn.
 
 def transform(x):
     e = x["event"]
@@ -23,4 +22,4 @@ def transform(x):
         })
     if not rows:
         return {}
-    return {"models": [{"model": "oxplow/request_task_next", "store": "oxplow", "upsert": rows}]}
+    return {"models": [{"model": "oxplow/request_task", "store": "oxplow", "upsert": rows}]}

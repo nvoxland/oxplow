@@ -39,7 +39,7 @@ finished AS (
     SELECT rt.thread_id, i.title, 'done' AS icon, i.uri, i.closed_at AS at,
            row_number() OVER (PARTITION BY rt.thread_id, i.uri ORDER BY i.closed_at DESC) AS n
     FROM item i
-    JOIN ref('request_task') rt ON rt.task = i.uri
+    JOIN ref('request_link') rt ON rt.task = i.uri
     WHERE i.state = 'done' AND rt.thread_id IS NOT NULL AND rt.basis IN ('assigned', 'transition')
   ) WHERE n = 1
   UNION ALL

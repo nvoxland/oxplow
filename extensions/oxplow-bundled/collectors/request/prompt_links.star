@@ -7,8 +7,7 @@
 # Gets {"rows": [...], "event": {...}}: one row {request, thread_uri, task}
 # for each task the turn's prompts named; the event's `source` must be
 # `person` (a report's or a peer's text links none). Returns the (request, task, `prompt`) rows,
-# stamped with the event's time and turn (TEMPORARY: the model is
-# `request_task_next` until the flip).
+# stamped with the event's time and turn.
 
 def transform(x):
     e = x["event"]
@@ -29,4 +28,4 @@ def transform(x):
         })
     if not rows:
         return {}
-    return {"models": [{"model": "oxplow/request_task_next", "store": "oxplow", "upsert": rows}]}
+    return {"models": [{"model": "oxplow/request_task", "store": "oxplow", "upsert": rows}]}

@@ -1,6 +1,5 @@
 -- The tasks each request worked on, in today's `v_request_task` shape, over
--- the `request_task_next` model (TEMPORARY name: the switch renames it
--- `request_task`, and the model `request_task`). One row per (request,
+-- the `request_task` model. One row per (request,
 -- task, basis), with the request's totals so far. `basis` is the model's:
 -- `filed` and `edited` are core's `command`.
 SELECT CAST(m.request AS TEXT) AS request,
@@ -14,5 +13,5 @@ SELECT CAST(m.request AS TEXT) AS request,
        CAST((SELECT MIN(t.started_at) FROM ref('agent_turn') t WHERE t.request_id = r.id) AS TEXT) AS started_at,
        CAST((SELECT MAX(t.ended_at) FROM ref('agent_turn') t WHERE t.request_id = r.id) AS TEXT) AS last_ended_at,
        CAST(r.id AS INT) AS request_id
-  FROM ref('request_task_next') m
+  FROM ref('request_task') m
   JOIN ref('request') r ON r.uri = m.request

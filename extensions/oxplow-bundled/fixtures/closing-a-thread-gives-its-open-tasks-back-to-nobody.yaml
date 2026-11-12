@@ -2,7 +2,7 @@
 # of nobody's queue, in the order the thread held them, each with its assignee
 # cleared and a place; a done task (which has no assignee) is left, and so is
 # another thread's. The same setup through core's tracker gives the same
-# assignee and rank in `v_task` as in `task_next`.
+# assignee and rank in `v_task` as in `task`.
 requires: [oxtask]
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Old } }
@@ -24,7 +24,7 @@ given:
 when:
   sql: |
     SELECT n.title, n.assignee IS c.assignee AS assignee, n.rank IS c.rank AS rank
-      FROM v_oxplow_task_next n JOIN v_task c ON c.title = n.title ORDER BY n.title
+      FROM v_oxplow_task n JOIN v_task c ON c.title = n.title ORDER BY n.title
 expect:
   rows:
     - { title: Finished, assignee: 1, rank: 1 }
@@ -32,7 +32,7 @@ expect:
     - { title: Mine, assignee: 1, rank: 1 }
     - { title: Second, assignee: 1, rank: 1 }
 steps:
-  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next ORDER BY title" }
+  - when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
     expect:
       rows:
         - { title: Finished, assignee: null, rank: null }

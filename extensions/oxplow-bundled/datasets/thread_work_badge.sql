@@ -10,7 +10,7 @@ FROM (
   SELECT rt.thread_id,
          count(DISTINCT CASE WHEN w.state = 'done' THEN w.uri END) AS done,
          count(DISTINCT CASE WHEN w.state IN ('backlog', 'todo', 'in_progress', 'blocked') THEN w.uri END) AS open
-  FROM ref('request_task') rt
+  FROM ref('request_link') rt
   JOIN ref('task') w ON w.uri = rt.task
   GROUP BY rt.thread_id
 ) n

@@ -12,12 +12,12 @@
 def transform(x):
     p = x["event"]["payload"]
     threads = p["threads"] if "threads" in p else [p["thread"]]
-    last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task_next WHERE assignee IS NULL"})
+    last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task WHERE assignee IS NULL"})
     rank = 0.0 if last[0]["last"] == None else last[0]["last"] + 1.0
     commands = []
     for t in threads:
         held = scope("sql.read", {
-            "sql": "SELECT uri FROM v_oxplow_task_next WHERE assignee = :t AND state NOT IN ('done', 'canceled') ORDER BY rank IS NULL, rank, created_at, uri",
+            "sql": "SELECT uri FROM v_oxplow_task WHERE assignee = :t AND state NOT IN ('done', 'canceled') ORDER BY rank IS NULL, rank, created_at, uri",
             "params": {"t": "oxplow:oxplow/thread?id=" + t},
         })
         for r in held:

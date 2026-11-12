@@ -13,7 +13,7 @@ when:
   sql: |
     SELECT t.title, t.state, t.provider, t.native_id,
            t.assignee = (SELECT uri FROM v_thread LIMIT 1) AS on_thread
-      FROM v_oxplow_task_next t
+      FROM v_oxplow_task t
 expect:
   rows: [{ title: The fix, state: in_progress, provider: oxtask, native_id: tsk1, on_thread: 1 }]
 steps:
@@ -23,14 +23,14 @@ steps:
                r.thread = (SELECT uri FROM v_thread LIMIT 1) AS this_thread,
                r.turn_id = (SELECT id FROM v_agent_turn LIMIT 1) AS this_turn,
                r.at IS NOT NULL AS timed
-          FROM v_oxplow_request_task_next r JOIN v_oxplow_task_next t ON t.uri = r.task
+          FROM v_oxplow_request_task r JOIN v_oxplow_task t ON t.uri = r.task
          WHERE r.basis = 'transition'
     expect: { rows: [{ same_task: 1, this_request: 1, this_thread: 1, this_turn: 1, timed: 1 }] }
   - when: { command: oxtask.task.move, input: { id: tsk1, stage: done } }
     expect: { ok: true }
-  - when: { sql: "SELECT state, assignee FROM v_oxplow_task_next" }
+  - when: { sql: "SELECT state, assignee FROM v_oxplow_task" }
     expect: { rows: [{ state: done, assignee: null }] }
-  - when: { sql: "SELECT basis, thread = (SELECT uri FROM v_thread LIMIT 1) AS this_thread FROM v_oxplow_request_task_next ORDER BY basis" }
+  - when: { sql: "SELECT basis, thread = (SELECT uri FROM v_thread LIMIT 1) AS this_thread FROM v_oxplow_request_task ORDER BY basis" }
     expect: { rows: [{ basis: assigned, this_thread: 1 }, { basis: filed, this_thread: 1 }, { basis: transition, this_thread: 1 }] }
   # Filing it in a turn is that turn's change (`trigger`), as moving it is;
   # the effect's assignments are `fields`.

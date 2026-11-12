@@ -1,4 +1,4 @@
-# `request_task_view_next` gives `v_request_task`'s rows and columns for the
+# `request_link` gives `v_request_task`'s rows and columns for the
 # same requests made once through core's tracker and once through oxtask (they
 # share the task URIs): the request, task, turn, thread, totals and request
 # id are equal; core's `command` is the model's `filed` or `edited`.
@@ -20,7 +20,7 @@ when:
            c.request_id = n.request_id AS request_id, c.request = n.request AS request,
            n.at IS NOT NULL AS timed
       FROM v_request_task c
-      JOIN v_oxplow_request_task_view_next n ON n.request = c.request AND n.task = c.task AND n.basis = c.basis
+      JOIN v_oxplow_request_link n ON n.request = c.request AND n.task = c.task AND n.basis = c.basis
      WHERE c.basis IN ('prompt', 'assigned') ORDER BY c.request, c.basis
 expect:
   rows:

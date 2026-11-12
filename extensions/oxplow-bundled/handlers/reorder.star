@@ -18,7 +18,7 @@ def transform(x):
         return {"refuse": "give `before` or `after`, not both and not neither"}
     anchor = before if before != None else after
     found = scope("sql.read", {
-        "sql": "SELECT state, assignee FROM v_oxplow_task_next WHERE uri = :u",
+        "sql": "SELECT state, assignee FROM v_oxplow_task WHERE uri = :u",
         "params": {"u": i["uri"]},
     })
     if not found:
@@ -27,7 +27,7 @@ def transform(x):
     if me["state"] in ["done", "canceled"]:
         return {"refuse": "`%s` is %s: a closed item has no place in a queue" % (i["uri"], me["state"])}
     queue = scope("sql.read", {
-        "sql": "SELECT uri, rank FROM v_oxplow_task_next WHERE assignee IS :a AND state NOT IN ('done', 'canceled') ORDER BY rank IS NULL, rank, created_at, uri",
+        "sql": "SELECT uri, rank FROM v_oxplow_task WHERE assignee IS :a AND state NOT IN ('done', 'canceled') ORDER BY rank IS NULL, rank, created_at, uri",
         "params": {"a": me["assignee"]},
     })
     others = [q for q in queue if q["uri"] != i["uri"]]

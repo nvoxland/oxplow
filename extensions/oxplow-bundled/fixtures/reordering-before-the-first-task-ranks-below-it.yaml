@@ -18,9 +18,9 @@ when:
   input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", before: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
 expect: { ok: true, result: { rank: -1 } }
 steps:
-  - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY rank" }
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task ORDER BY rank" }
     expect: { rows: [{ title: C, rank: -1 }, { title: A, rank: 0 }, { title: B, rank: 1 }] }
   - when: { undo: oxplow.tasks.reorder }
     expect: { ok: true }
-  - when: { sql: "SELECT title, rank FROM v_oxplow_task_next ORDER BY title" }
+  - when: { sql: "SELECT title, rank FROM v_oxplow_task ORDER BY title" }
     expect: { rows: [{ title: A, rank: 0 }, { title: B, rank: 1 }, { title: C, rank: 2 }] }

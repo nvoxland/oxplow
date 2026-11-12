@@ -11,7 +11,7 @@ files AS (
 ),
 area AS (
   SELECT q.request_id, group_concat(w.title || ' ' || coalesce(w.body, ''), ' ') AS text
-  FROM (SELECT DISTINCT request_id, task FROM ref('request_task')) q
+  FROM (SELECT DISTINCT request_id, task FROM ref('request_link')) q
   JOIN ref('task') w ON w.uri = q.task
   GROUP BY q.request_id
 ),

@@ -3,7 +3,7 @@
 # recipient's, changes nothing. The handoffs are sent while core's tracker is
 # the active one, which checks the task: the same four tasks are made through
 # core's commands too (their URIs are oxtask's), so the same setup through
-# core gives the same assignee and rank in `v_task` as in `task_next`.
+# core gives the same assignee and rank in `v_task` as in `task`.
 requires: [oxtask]
 given:
   - { command: oxplow.thread.create, input: { stream: str1, title: Docs } }
@@ -25,7 +25,7 @@ given:
   - { command: oxplow.handoff.resolve, input: { handoff: hnd1, outcome: taken }, as: agent }
   - { command: oxplow.handoff.resolve, input: { handoff: hnd2, outcome: declined }, as: agent }
   - { command: oxplow.handoff.resolve, input: { handoff: hnd3, outcome: taken }, as: agent }
-when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next ORDER BY title" }
+when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
 expect:
   rows:
     - { title: Already the recipients, assignee: "oxplow:oxplow/thread?id=thr1", rank: 1 }
@@ -36,7 +36,7 @@ steps:
   - when:
       sql: |
         SELECT n.title, n.assignee IS c.assignee AS assignee, n.rank IS c.rank AS rank
-          FROM v_oxplow_task_next n JOIN v_task c ON c.title = n.title ORDER BY n.title
+          FROM v_oxplow_task n JOIN v_task c ON c.title = n.title ORDER BY n.title
     expect:
       rows:
         - { title: Already the recipients, assignee: 1, rank: 1 }

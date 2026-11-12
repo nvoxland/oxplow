@@ -1,5 +1,5 @@
 -- The links of every store's tasks, in today's `v_task_link` shape, over the
--- shared model's links (TEMPORARY name: the switch renames it `task_link`).
+-- shared model's links.
 -- `to_kind` is the target's resource kind.
 SELECT l.parent AS from_uri, l."to" AS to_uri,
        CAST(CASE WHEN l."to" LIKE 'oxplow:%'

@@ -16,7 +16,7 @@ given:
   - { command: oxtask.task.create, input: { title: On the main thread, stage: ready } }
   - { command: oxplow.tasks.assign, input: { uri: "oxplow:oxplow/task?id=tsk3&provider=oxtask", to: "oxplow:oxplow/thread?id=thr1" } }
   - { command: oxplow.stream.archive, input: { stream: str2 }, confirmed: true }
-when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task_next ORDER BY title" }
+when: { sql: "SELECT title, assignee, rank FROM v_oxplow_task ORDER BY title" }
 expect:
   rows:
     - { title: On one, assignee: null, rank: 0 }

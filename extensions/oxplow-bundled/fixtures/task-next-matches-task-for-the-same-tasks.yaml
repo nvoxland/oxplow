@@ -1,8 +1,8 @@
-# The model-based `task_next` gives the rows `v_task` gives, for the same
+# The model-based `task` gives the rows `v_task` gives, for the same
 # tasks made once through core's tracker and once through oxtask: every
 # column both have, the same value. (Ids and times differ by write; the
 # comparison is on titles.) What the two list differently is stated here:
-# `v_task` lists the active tracker's items only, `task_next` every store's.
+# `v_task` lists the active tracker's items only, `task` every store's.
 requires: [oxtask]
 given:
   - { command: oxplow.task.create, input: { title: Epic, body: "About it.", stage: todo, assignee: thr1 }, bind: cepic }
@@ -23,7 +23,7 @@ when:
            (c.parent_uri IS NULL) = (n.parent_uri IS NULL) AS parent,
            (c.closed_at IS NULL) = (n.closed_at IS NULL) AS closed,
            c.uri = n.uri AS uri
-      FROM v_task c JOIN v_oxplow_task_next n ON n.title = c.title
+      FROM v_task c JOIN v_oxplow_task n ON n.title = c.title
      ORDER BY c.title
 expect:
   rows:

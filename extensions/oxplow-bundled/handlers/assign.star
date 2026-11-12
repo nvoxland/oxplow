@@ -10,7 +10,7 @@ PERSON = "oxplow:oxplow/person"
 def transform(x):
     i = x["input"]
     found = scope("sql.read", {
-        "sql": "SELECT state, assignee, rank FROM v_oxplow_task_next WHERE uri = :u",
+        "sql": "SELECT state, assignee, rank FROM v_oxplow_task WHERE uri = :u",
         "params": {"u": i["uri"]},
     })
     if not found:
@@ -28,9 +28,9 @@ def transform(x):
     if to == task["assignee"]:
         return {"commands": [], "result": {"uri": i["uri"], "assignee": to, "rank": task["rank"]}}
     if to == None:
-        last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task_next WHERE assignee IS NULL AND uri != :u", "params": {"u": i["uri"]}})
+        last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task WHERE assignee IS NULL AND uri != :u", "params": {"u": i["uri"]}})
     else:
-        last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task_next WHERE assignee = :t", "params": {"t": to}})
+        last = scope("sql.read", {"sql": "SELECT MAX(rank) AS last FROM v_oxplow_task WHERE assignee = :t", "params": {"t": to}})
     top = last[0]["last"]
     rank = 0.0 if top == None else top + 1.0
     return {

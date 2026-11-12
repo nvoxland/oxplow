@@ -8,7 +8,7 @@ FROM (
          coalesce(w.title, uri_param(rt.task, 'id'), 'Unlinked work') AS label
   FROM ref('snapshot_op') o
   JOIN ref('agent_turn') t ON t.id = o.turn_id
-  LEFT JOIN ref('request_task') rt ON rt.request_id = t.request_id
+  LEFT JOIN ref('request_link') rt ON rt.request_id = t.request_id
   LEFT JOIN ref('task') w ON w.uri = rt.task
 ) x
 JOIN ref('snapshot') s ON s.id = x.snapshot_id

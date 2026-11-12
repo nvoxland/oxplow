@@ -17,7 +17,7 @@ when:
     SELECT c.basis, c.request = n.request AS request, c.task = n.task AS task,
            n.thread = (SELECT uri FROM v_thread LIMIT 1) AS thread, c.turn = 'oxplow:oxplow/turn?id=trn' || n.turn_id AS turn, n.at IS NOT NULL AS timed
       FROM v_request_task c
-      JOIN v_oxplow_request_task_next n ON n.task = c.task AND n.basis = c.basis AND n.request = c.request
+      JOIN v_oxplow_request_task n ON n.task = c.task AND n.basis = c.basis AND n.request = c.request
      WHERE c.basis IN ('prompt', 'assigned') ORDER BY c.basis
 expect:
   rows:
@@ -25,5 +25,5 @@ expect:
     - { basis: prompt, request: 1, task: 1, thread: 1, turn: 1, timed: 1 }
 steps:
   # Only a person's prompt, and only a task in progress on the thread.
-  - when: { sql: "SELECT basis, task FROM v_oxplow_request_task_next WHERE basis IN ('prompt', 'assigned') ORDER BY basis" }
+  - when: { sql: "SELECT basis, task FROM v_oxplow_request_task WHERE basis IN ('prompt', 'assigned') ORDER BY basis" }
     expect: { rows: [{ basis: assigned, task: "oxplow:oxplow/task?id=tsk2&provider=oxtask" }, { basis: prompt, task: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }] }

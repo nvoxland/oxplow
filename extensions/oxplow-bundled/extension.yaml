@@ -86,9 +86,9 @@ datasets:
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
-  - name: task_next
+  - name: task
     version: 1
-    description: "TEMPORARY (the switch renames it `task`): the tasks of every store in `v_task`'s shape, over the shared task model. `native` is the store's own fields, `assignee` and `rank` oxplow's."
+    description: "the tasks of every store in `v_task`'s shape, over the shared task model. `native` is the store's own fields, `assignee` and `rank` oxplow's."
     fields:
       - { name: uri, type: TEXT, doc: "The task's URI." }
       - { name: provider, type: TEXT, doc: "Its store." }
@@ -105,35 +105,35 @@ datasets:
       - { name: closed_at, type: TEXT, doc: "When it was closed; NULL while open." }
       - { name: created_at, type: TEXT, doc: "Created (RFC 3339)." }
       - { name: updated_at, type: TEXT, doc: "Updated (RFC 3339)." }
-  - name: task_link_next
+  - name: task_link
     version: 1
-    description: "TEMPORARY (the switch renames it `task_link`): the links of every store's tasks, in `v_task_link`'s shape."
+    description: "the links of every store's tasks, in `v_task_link`'s shape."
     fields:
       - { name: from_uri, type: TEXT, doc: "The task the link is from." }
       - { name: to_uri, type: TEXT, doc: "What it points at." }
       - { name: to_kind, type: TEXT, doc: "The target's resource kind." }
       - { name: link_type, type: TEXT, doc: "The link type." }
       - { name: created_at, type: TEXT, doc: "When the link was made (RFC 3339)." }
-  - name: task_comment_next
+  - name: task_comment
     version: 1
-    description: "TEMPORARY (the switch renames it `task_comment`): the comments of every store's tasks, in `v_task_comment`'s shape, over the shared model's comments child. `id` is the store's own comment id (oxtask: `cmt3`; core's was `oxtask_note:3`)."
+    description: "the comments of every store's tasks, in `v_task_comment`'s shape, over the shared model's comments child. `id` is the store's own comment id (oxtask: `cmt3`; core's was `oxtask_note:3`)."
     fields:
       - { name: id, type: TEXT, doc: "The store's own id for the comment." }
       - { name: uri, type: TEXT, doc: "The task it's on." }
       - { name: body, type: TEXT, doc: "Markdown body." }
       - { name: author, type: TEXT, doc: "Who wrote it, as the store records it (oxtask: a thread's or the person's URI)." }
       - { name: created_at, type: TEXT, doc: "RFC 3339 timestamp." }
-  - name: search_task_next
+  - name: search_task
     version: 1
-    description: "TEMPORARY (the switch renames it `search_task`): what site search indexes for each task, in `v_search_task`'s shape, over `task_next`: its own id, its body, then its comments; tasks assigned to an archived thread or stream are left out."
+    description: "what site search indexes for each task, in `v_search_task`'s shape, over `task`: its own id, its body, then its comments; tasks assigned to an archived thread or stream are left out."
     fields:
       - { name: uri, type: TEXT, doc: "The task's canonical ref: what a hit opens." }
       - { name: title, type: TEXT, doc: "The task's title." }
       - { name: body, type: TEXT, doc: "Its own id (so typing `tsk42` finds it), then its body, then its comments." }
       - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
-  - name: request_task_view_next
+  - name: request_link
     version: 1
-    description: "TEMPORARY (the switch renames it `request_task`): the tasks each request worked on, in `v_request_task`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task_next` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
+    description: "the tasks each request worked on, in `v_request_task`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
     fields:
       - { name: request, type: TEXT, doc: "The request (`v_request.uri`)." }
       - { name: task, type: TEXT, doc: "The task's URI; it may dangle." }
@@ -213,11 +213,8 @@ action_points:
       parent?: uri
       thread_id?: int
 # What a request's work touched: one row per request, task and basis.
-# TEMPORARY (the flip renames the model, its resource and its view
-# `request_task`): until then core's `request_task` dataset is still what
-# `ref('request_task')` reads.
 resources:
-  - name: request_task_next
+  - name: request_task
     label: Request link
     description: "A link from a request to a task its turns changed, and how (filed, transition, assigned, edited; prompt for a link moved from core, where a person's prompt named the task)."
     params:
@@ -226,13 +223,13 @@ resources:
 # The shared task and knowledge models every store fills, and oxplow's
 # own fields on a task (who it is assigned to, its place in their queue).
 # Stores write them through their collectors; this extension's own model
-# (`request_task_next`) is written by its own collector.
+# (`request_task`) is written by its own collector.
 fills:
-  - model: oxplow/request_task_next
+  - model: oxplow/request_task
     stores: [oxplow]
 models:
-  - name: request_task_next
-    resource: request_task_next
+  - name: request_task
+    resource: request_task
     key: key
     columns:
       # request|task|basis: the row's name.
@@ -397,10 +394,8 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
-  # TEMPORARY (the switch renames them `oxplow.task.assign` / `.reorder`):
-  # who works on a task and its place in their queue, over the shared task
-  # model's two oxplow fields. Core's verbs of those names still serve the
-  # stores until then.
+  # Who works on a task and its place in their queue, over the shared task
+  # model's two oxplow fields.
   - name: tasks.assign
     summary: "Assign a task to a thread, the person, or nobody, at the end of that queue. Undoable."
     input_schema:
@@ -555,14 +550,14 @@ collectors:
                       WHERE pt.request_id = t.request_id)
     facts: [oxplow.request_tracked]
   - id: oxplow.request_task
-    doc: "TEMPORARY (the flip renames its model `request_task`): links the request of the turn a task changed in to the task (the `oxplow/request_task_next` model), when the change's cause is a command or a field write (a reconcile links nothing)."
+    doc: "Links the request of the turn a task changed in to the task (the `oxplow/request_task` model), when the change's cause is a command or a field write (a reconcile links nothing)."
     runtime: starlark
     entry: collectors/request/task_links.star
     on: [oxplow.task_record.changed]
     where: { cause: [trigger, fields] }
     input: |
       SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri,
-             (SELECT group_concat(x.key, char(10)) FROM v_oxplow_request_task_next x
+             (SELECT group_concat(x.key, char(10)) FROM v_oxplow_request_task x
                WHERE x.request = r.uri) AS known
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
@@ -570,7 +565,7 @@ collectors:
        WHERE t.id = :turn_id
     sync: upsert
   - id: oxplow.request_task_prompt
-    doc: "TEMPORARY (the flip's `oxplow.request_task` family): links the request of a person's prompt to the tasks the prompt names (basis `prompt`), from the edges the prompt logging records."
+    doc: "Links the request of a person's prompt to the tasks the prompt names (basis `prompt`), from the edges the prompt logging records."
     runtime: starlark
     entry: collectors/request/prompt_links.star
     on: [agent.prompt.submitted]
@@ -583,11 +578,11 @@ collectors:
                          AND p.target_resource = 'oxplow/task'
        -- A link keeps the first evidence (core's insert or ignore).
        WHERE t.id = :turn_id
-         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task_next x
+         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task x
                           WHERE x.key = r.uri || '|' || p.target_uri || '|prompt')
     sync: upsert
   - id: oxplow.request_task_assigned
-    doc: "TEMPORARY (the flip's `oxplow.request_task` family): links the request of a turn that ended to the tasks in progress and assigned to its thread (basis `assigned`)."
+    doc: "Links the request of a turn that ended to the tasks in progress and assigned to its thread (basis `assigned`)."
     runtime: starlark
     entry: collectors/request/assigned_links.star
     on: [agent.turn.ended]
@@ -596,10 +591,10 @@ collectors:
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
         JOIN v_thread th ON th.id = t.thread_id
-        JOIN v_oxplow_task_next w ON w.assignee = th.uri AND w.state = 'in_progress'
+        JOIN v_oxplow_task w ON w.assignee = th.uri AND w.state = 'in_progress'
        -- A link keeps the first evidence (core's insert or ignore).
        WHERE t.id = :turn_id
-         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task_next x
+         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task x
                           WHERE x.key = r.uri || '|' || w.uri || '|assigned')
     sync: upsert
   # What the project knows: the pages it keeps, restated whenever a page is

@@ -11,7 +11,7 @@ def transform(x):
     if p["state"] != "taken":
         return {"skip": "not taken"}
     found = scope("sql.read", {
-        "sql": "SELECT h.task, w.assignee, w.state FROM v_handoff h JOIN v_oxplow_task_next w ON w.uri = h.task WHERE h.id = CAST(substr(:h, 4) AS INTEGER)",
+        "sql": "SELECT h.task, w.assignee, w.state FROM v_handoff h JOIN v_oxplow_task w ON w.uri = h.task WHERE h.id = CAST(substr(:h, 4) AS INTEGER)",
         "params": {"h": p["handoff"]},
     })
     if not found:

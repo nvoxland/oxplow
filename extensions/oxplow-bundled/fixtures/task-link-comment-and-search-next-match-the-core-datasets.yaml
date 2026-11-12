@@ -1,4 +1,4 @@
-# `task_link_next`, `task_comment_next` and `search_task_next` give the rows
+# `task_link`, `task_comment` and `search_task` give the rows
 # `v_task_link`, `v_task_comment` and `v_search_task` give, for the same
 # tasks made once through core's tracker and once through oxtask. A link's
 # and a comment's time is set on both; a comment's id and author are the
@@ -22,7 +22,7 @@ when:
   sql: |
     SELECT c.to_uri = n.to_uri AS to_uri, c.to_kind = n.to_kind AS to_kind, c.link_type = n.link_type AS link_type,
            c.created_at IS NOT NULL AND n.created_at IS NOT NULL AS timed, n.link_type AS type
-      FROM v_task_link c JOIN v_oxplow_task_link_next n ON n.from_uri = c.from_uri AND n.link_type = c.link_type
+      FROM v_task_link c JOIN v_oxplow_task_link n ON n.from_uri = c.from_uri AND n.link_type = c.link_type
      ORDER BY n.link_type
 expect:
   rows:
@@ -32,17 +32,17 @@ steps:
   - when:
       sql: |
         SELECT c.body, c.uri = n.uri AS uri, c.created_at IS NOT NULL AND n.created_at IS NOT NULL AS timed
-          FROM v_task_comment c JOIN v_oxplow_task_comment_next n ON n.uri = c.uri AND n.body = c.body
+          FROM v_task_comment c JOIN v_oxplow_task_comment n ON n.uri = c.uri AND n.body = c.body
          ORDER BY c.body
     expect: { rows: [{ body: First note., uri: 1, timed: 1 }, { body: Second note., uri: 1, timed: 1 }] }
   - when:
       sql: |
         SELECT c.title, c.body = n.body AS body, c.stream_id IS n.stream_id AS stream_id, c.uri = n.uri AS uri
-          FROM v_search_task c JOIN v_oxplow_search_task_next n ON n.title = c.title ORDER BY c.title
+          FROM v_search_task c JOIN v_oxplow_search_task n ON n.title = c.title ORDER BY c.title
     expect:
       rows:
         - { title: Blocked, body: 1, stream_id: 1, uri: 1 }
         - { title: Blocker, body: 1, stream_id: 1, uri: 1 }
   # The search body is its id, its body, then its comments.
-  - when: { sql: "SELECT body FROM v_oxplow_search_task_next WHERE title = 'Blocked'" }
+  - when: { sql: "SELECT body FROM v_oxplow_search_task WHERE title = 'Blocked'" }
     expect: { rows: [{ body: "tsk1\n\nFirst note.\nSecond note." }] }
