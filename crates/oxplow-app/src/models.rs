@@ -38,6 +38,12 @@ pub struct FillSpec {
     pub stores: Vec<String>,
     /// The store's own fields.
     pub fields: Vec<FieldDecl>,
+    /// Added by `with_provider_fills` for a running provider instance, never
+    /// declared by an extension. Only such a fill is the provider read
+    /// adapter's to write through (`providers::model_records`): a store an
+    /// extension fills has its own writer.
+    #[serde(default)]
+    pub provider: bool,
 }
 
 /// Fields an extension declares on a model it doesn't fill.
@@ -178,6 +184,7 @@ impl ModelRegistry {
                 model: model.into(),
                 stores: vec![row.provider.clone()],
                 fields,
+                provider: true,
             });
         }
         self
@@ -640,6 +647,7 @@ mod tests {
             model: "shelf/book".into(),
             stores: vec!["shelf-folder".into()],
             fields: vec![],
+            provider: false,
         });
         r.fields.push(FieldsSpec {
             extension: "shelf-score".into(),

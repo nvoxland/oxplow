@@ -264,3 +264,110 @@ async fn a_recorded_page_lands_in_the_knowledge_record_model_with_its_refs_as_ed
         "{edges:?}"
     );
 }
+
+/// A store an extension fills has its own writer: the adapter writes only
+/// through the fills it added for provider instances.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_record_for_a_store_an_extension_fills_writes_nothing() {
+    let fx = running_tracker().await;
+    let mut registry = fx.svc.models.current().as_ref().clone();
+    for fill in registry.fills.iter_mut().filter(|f| f.provider) {
+        fill.provider = false;
+    }
+    fx.svc.models.swap(registry);
+    fx.svc
+        .tasks_client()
+        .create(
+            &Actor::Human,
+            crate::tasks::NewItem {
+                title: "theirs".into(),
+                stage: Some("doing".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    settled(&fx).await;
+    let held = rows(&fx, "SELECT id FROM v_oxplow_task_record").await;
+    assert!(held.is_empty(), "{held:?}");
+}
+
+/// A record that came while no fill stood (bundled off) is stated when the
+/// fill is back: the publication states the store once.
+#[cfg(unix)]
+#[tokio::test]
+async fn records_made_while_there_was_no_fill_appear_when_the_fill_returns() {
+    let fx = running_tracker().await;
+    let items = fx.svc.tasks_client();
+    let full = fx.svc.models.current().as_ref().clone();
+    // A publication with bundled off: no fill, so its markers go.
+    reconcile(&fx, &crate::models::ModelRegistry::default()).await;
+    fx.svc.models.swap(crate::models::ModelRegistry::default());
+    let kept = items
+        .create(
+            &Actor::Human,
+            crate::tasks::NewItem {
+                title: "kept".into(),
+                stage: Some("doing".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the list keeps it");
+    let gone = items
+        .create(
+            &Actor::Human,
+            crate::tasks::NewItem {
+                title: "gone".into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the list keeps it");
+    items.delete(&Actor::Human, &gone, true).await.unwrap();
+    settled(&fx).await;
+    // Bundled back on: the next publication states what the log holds.
+    fx.svc.models.swap(full.clone());
+    assert!(rows(&fx, "SELECT id FROM v_oxplow_task_record")
+        .await
+        .is_empty());
+    reconcile(&fx, &full).await;
+    let tasks = rows(
+        &fx,
+        &format!("SELECT title FROM v_oxplow_task_record WHERE store = '{TASK_STORE}'"),
+    )
+    .await;
+    assert_eq!(tasks, vec![vec![json!("kept")]], "{kept:?}");
+    let changes = logged(&fx, "oxplow.task_record.changed").await;
+    let first = changes.len();
+    assert!(
+        changes.iter().any(|c| c["cause"] == json!("reconcile")),
+        "{changes:?}"
+    );
+    // A second publication states nothing more.
+    reconcile(&fx, &full).await;
+    assert_eq!(logged(&fx, "oxplow.task_record.changed").await.len(), first);
+    let marker = rows(
+        &fx,
+        "SELECT asset FROM asset_state WHERE asset LIKE 'model_reconcile:%'",
+    )
+    .await;
+    assert_eq!(marker.len(), 1, "{marker:?}");
+}
+
+/// What a publication runs after its capability rows stand.
+#[cfg(unix)]
+async fn reconcile(fx: &ThreadFixture, registry: &crate::models::ModelRegistry) {
+    let registry = registry.clone();
+    let vocabulary = fx.svc.vocabulary.current();
+    fx.svc
+        .db
+        .transaction(move |tx| {
+            crate::providers::model_records::reconcile_if_needed_tx(tx, &registry, &vocabulary)
+        })
+        .await
+        .unwrap();
+}

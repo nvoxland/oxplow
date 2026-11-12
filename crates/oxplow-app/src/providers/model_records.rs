@@ -52,89 +52,104 @@ impl crate::event_pump::AsyncEventConsumer for ModelRecords {
     }
 
     async fn handle(&self, event: &StoredEvent) -> Result<(), DomainError> {
-        let env = &event.envelope;
-        let is_task = env.event_type == TaskRecorded::TYPE;
-        let (model, instance, id) = if is_task {
-            let TaskRecordedV3 { item } = serde_json::from_value(env.payload.clone())
-                .map_err(|e| invalid(format!("task.recorded payload: {e}")))?;
-            let Some((instance, id)) = oxplow_domain::uri::build::task_of_uri(&item.uri) else {
-                return Ok(());
-            };
-            (TASK_RECORD, instance, id)
-        } else {
-            let KnowledgePageRecordedV3 { page } = serde_json::from_value(env.payload.clone())
-                .map_err(|e| invalid(format!("knowledge.page.recorded payload: {e}")))?;
-            let Some((instance, id)) = oxplow_domain::uri::build::knowledge_of_uri(&page.uri)
-            else {
-                return Ok(());
-            };
-            (KNOWLEDGE_RECORD, instance, id)
-        };
-        // Its own records, while its instance runs and bundled declares
-        // the model.
         let registry = self.models.current();
-        let Some(fill) = registry
-            .fills
-            .iter()
-            .find(|f| f.model == model && f.stores.contains(&instance))
-        else {
-            return Ok(());
-        };
-        let extension = fill.extension.clone();
-        let payload = env.payload.clone();
-        let (at, cause, anchors, source) = (
-            event.envelope.at.to_string(),
-            env.id.clone(),
-            env.anchors.clone(),
-            oxplow_domain::uri::build::provider_source(&instance),
-        );
         let vocabulary = self.vocabulary.clone();
+        let event = event.clone();
         self.db
             .transaction(move |tx| {
-                let vocabulary = vocabulary.current();
-                let (upsert, delete) = if is_task {
-                    let TaskRecordedV3 { item } = serde_json::from_value(payload.clone())
-                        .map_err(|e| invalid(format!("task.recorded payload: {e}")))?;
-                    if item.deleted {
-                        (Vec::new(), vec![id.clone()])
-                    } else {
-                        let row = task_row(tx, &registry, &instance, &id, &item, &at)?;
-                        (vec![row], Vec::new())
-                    }
-                } else {
-                    let KnowledgePageRecordedV3 { page } = serde_json::from_value(payload.clone())
-                        .map_err(|e| invalid(format!("knowledge.page.recorded payload: {e}")))?;
-                    if page.deleted {
-                        (Vec::new(), vec![id.clone()])
-                    } else {
-                        (vec![page_row(&id, &page)], Vec::new())
-                    }
-                };
-                let output = ModelOutput {
-                    model: model.to_string(),
-                    store: instance.clone(),
-                    upsert,
-                    delete,
-                    rename: Vec::new(),
-                    snapshot: None,
-                    confirm_removals: false,
-                };
-                let writer = Writer {
-                    extension: &extension,
-                    source: &source,
-                    cause: Some(cause.clone()),
-                    anchors: anchors.clone(),
-                    why: Cause::Trigger,
-                };
-                let applied = apply_tx(tx, &registry, &vocabulary, &writer, &[output], &[])
-                    .map_err(invalid)?;
-                for problem in applied.problems {
-                    tracing::warn!(%instance, %problem, "a provider record wasn't written");
-                }
-                Ok(())
+                write_record_tx(tx, &registry, &vocabulary.current(), &event, Cause::Trigger)
+                    .map(|_| ())
             })
             .await
     }
+}
+
+/// The provider fill of `store` in `model`: the one `with_provider_fills`
+/// added for the running instance. A store an extension fills is not here —
+/// that extension writes it, and the adapter writing it too would give it a
+/// second writer.
+fn provider_fill<'a>(
+    registry: &'a crate::models::ModelRegistry,
+    model: &str,
+    store: &str,
+) -> Option<&'a crate::models::FillSpec> {
+    registry
+        .fills
+        .iter()
+        .find(|f| f.provider && f.model == model && f.stores.iter().any(|s| s == store))
+}
+
+/// Write the record `event` states into its model, as its instance's
+/// provider fill; `Ok(false)` when it is not this adapter's (no provider
+/// fill: the instance isn't running, or bundled's model isn't declared).
+fn write_record_tx(
+    tx: &rusqlite::Connection,
+    registry: &crate::models::ModelRegistry,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+    event: &StoredEvent,
+    why: Cause,
+) -> Result<bool, DomainError> {
+    let env = &event.envelope;
+    let is_task = env.event_type == TaskRecorded::TYPE;
+    let (model, instance, id) = if is_task {
+        let TaskRecordedV3 { item } = serde_json::from_value(env.payload.clone())
+            .map_err(|e| invalid(format!("task.recorded payload: {e}")))?;
+        let Some((instance, id)) = oxplow_domain::uri::build::task_of_uri(&item.uri) else {
+            return Ok(false);
+        };
+        (TASK_RECORD, instance, id)
+    } else {
+        let KnowledgePageRecordedV3 { page } = serde_json::from_value(env.payload.clone())
+            .map_err(|e| invalid(format!("knowledge.page.recorded payload: {e}")))?;
+        let Some((instance, id)) = oxplow_domain::uri::build::knowledge_of_uri(&page.uri) else {
+            return Ok(false);
+        };
+        (KNOWLEDGE_RECORD, instance, id)
+    };
+    let Some(fill) = provider_fill(registry, model, &instance) else {
+        return Ok(false);
+    };
+    let at = env.at.to_string();
+    let (upsert, delete) = if is_task {
+        let TaskRecordedV3 { item } = serde_json::from_value(env.payload.clone())
+            .map_err(|e| invalid(format!("task.recorded payload: {e}")))?;
+        if item.deleted {
+            (Vec::new(), vec![id.clone()])
+        } else {
+            let row = task_row(tx, registry, &instance, &id, &item, &at)?;
+            (vec![row], Vec::new())
+        }
+    } else {
+        let KnowledgePageRecordedV3 { page } = serde_json::from_value(env.payload.clone())
+            .map_err(|e| invalid(format!("knowledge.page.recorded payload: {e}")))?;
+        if page.deleted {
+            (Vec::new(), vec![id.clone()])
+        } else {
+            (vec![page_row(&id, &page)], Vec::new())
+        }
+    };
+    let output = ModelOutput {
+        model: model.to_string(),
+        store: instance.clone(),
+        upsert,
+        delete,
+        rename: Vec::new(),
+        snapshot: None,
+        confirm_removals: false,
+    };
+    let source = oxplow_domain::uri::build::provider_source(&instance);
+    let writer = Writer {
+        extension: &fill.extension,
+        source: &source,
+        cause: Some(env.id.clone()),
+        anchors: env.anchors.clone(),
+        why,
+    };
+    let applied = apply_tx(tx, registry, vocabulary, &writer, &[output], &[]).map_err(invalid)?;
+    for problem in applied.problems {
+        tracing::warn!(%instance, %problem, "a provider record wasn't written");
+    }
+    Ok(true)
 }
 
 /// The stage's title and bucket, as the instance declares its stages.
@@ -308,6 +323,132 @@ fn page_row(id: &str, page: &KnowledgePageRecord) -> ModelRow {
     row.insert("updated_at".into(), json!(page.updated_at));
     row.insert("refs".into(), json!(page.uris));
     row
+}
+
+/// State each provider fill's store once, when the fill appears.
+///
+/// The consumer drops a record that arrives with no provider fill (bundled
+/// off, the model undeclared, the instance not yet in the registry), and
+/// the provider sync never sends that record again (it equals the item's
+/// last `task.recorded`). So a publication that carries a provider fill
+/// not stated before writes, from the event log, the latest record of
+/// each item of that store, with cause `reconcile`; a deleted item stays
+/// out. `asset_state` keeps a `model_reconcile:<model>:<store>` marker for
+/// each fill stated; the marker of a fill the publication no longer has is
+/// dropped, so a fill that goes away and comes back is stated again. The
+/// publication runs it after the capability rows are restated (a task's
+/// stage is read from them).
+pub fn reconcile_if_needed_tx(
+    conn: &rusqlite::Connection,
+    registry: &crate::models::ModelRegistry,
+    vocabulary: &oxplow_domain::vocabulary::Vocabulary,
+) -> Result<(), DomainError> {
+    let storage = oxplow_db::map_sql_err;
+    let wanted: Vec<(String, String, String)> = registry
+        .fills
+        .iter()
+        .filter(|f| f.provider)
+        .flat_map(|f| {
+            f.stores
+                .iter()
+                .map(|s| (f.model.clone(), s.clone(), f.extension.clone()))
+        })
+        .collect();
+    let assets: Vec<String> = wanted
+        .iter()
+        .map(|(m, s, _)| format!("model_reconcile:{m}:{s}"))
+        .collect();
+    let held: Vec<String> = conn
+        .prepare("SELECT asset FROM asset_state WHERE asset LIKE 'model_reconcile:%'")
+        .and_then(|mut st| st.query_map([], |r| r.get(0))?.collect())
+        .map_err(storage)?;
+    for gone in held.iter().filter(|a| !assets.contains(a)) {
+        conn.execute("DELETE FROM asset_state WHERE asset = ?1", [gone])
+            .map_err(storage)?;
+    }
+    let fresh: Vec<&(String, String, String)> = wanted
+        .iter()
+        .zip(&assets)
+        .filter(|(_, asset)| !held.contains(asset))
+        .map(|(w, _)| w)
+        .collect();
+    if fresh.is_empty() {
+        return Ok(());
+    }
+    let started = std::time::Instant::now();
+    for (event_type, key) in [
+        (TaskRecorded::TYPE, "item"),
+        (KnowledgePageRecorded::TYPE, "page"),
+    ] {
+        let ids: Vec<String> = conn
+            .prepare(&format!(
+                "SELECT id FROM event_log WHERE type = ?1 AND seq IN (
+                   SELECT max(seq) FROM event_log WHERE type = ?1
+                    GROUP BY json_extract(payload, '$.{key}.uri'))
+                 ORDER BY seq"
+            ))
+            .and_then(|mut st| st.query_map([event_type], |r| r.get(0))?.collect())
+            .map_err(storage)?;
+        for id in ids {
+            let Some(event) =
+                oxplow_db::event_log_store::get_tx(conn, &oxplow_domain::EventId(id))?
+            else {
+                continue;
+            };
+            if event.payload_expired_at.is_some() {
+                continue;
+            }
+            // Only a store stated now; one stated before follows its events.
+            let store = match event_type {
+                TaskRecorded::TYPE => {
+                    serde_json::from_value::<TaskRecordedV3>(event.envelope.payload.clone())
+                        .ok()
+                        .and_then(|p| oxplow_domain::uri::build::task_of_uri(&p.item.uri))
+                }
+                _ => serde_json::from_value::<KnowledgePageRecordedV3>(
+                    event.envelope.payload.clone(),
+                )
+                .ok()
+                .and_then(|p| oxplow_domain::uri::build::knowledge_of_uri(&p.page.uri)),
+            };
+            let model = if event_type == TaskRecorded::TYPE {
+                TASK_RECORD
+            } else {
+                KNOWLEDGE_RECORD
+            };
+            let Some((instance, _)) = store else { continue };
+            if !fresh.iter().any(|(m, s, _)| m == model && *s == instance) {
+                continue;
+            }
+            // One record that won't write (a stage the instance no longer
+            // declares) must not stop a publication.
+            if let Err(error) =
+                write_record_tx(conn, registry, vocabulary, &event, Cause::Reconcile)
+            {
+                tracing::warn!(%instance, %error, "a provider record wasn't reconciled");
+            }
+        }
+    }
+    for ((model, store, extension), asset) in wanted.iter().zip(&assets) {
+        if !fresh.iter().any(|(m, s, _)| m == model && s == store) {
+            continue;
+        }
+        conn.execute(
+            "INSERT INTO asset_state (asset, computed_at, events_to, elapsed_ms, built_from)
+             VALUES (?1, ?2, (SELECT coalesce(max(seq), 0) FROM event_log), ?3, ?4)
+             ON CONFLICT (asset) DO UPDATE SET
+                computed_at = excluded.computed_at, events_to = excluded.events_to,
+                elapsed_ms = excluded.elapsed_ms, built_from = excluded.built_from",
+            rusqlite::params![
+                asset,
+                oxplow_domain::Timestamp::now().to_string(),
+                started.elapsed().as_millis() as i64,
+                extension
+            ],
+        )
+        .map_err(storage)?;
+    }
+    Ok(())
 }
 
 /// Registered with the event pump beside the projections.

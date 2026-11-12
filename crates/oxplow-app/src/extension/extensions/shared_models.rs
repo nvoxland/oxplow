@@ -466,6 +466,7 @@ pub fn parse(
                         model: raw.model,
                         stores,
                         fields: fields_of(raw.fields)?,
+                        provider: false,
                     })
                 });
             match parsed {
