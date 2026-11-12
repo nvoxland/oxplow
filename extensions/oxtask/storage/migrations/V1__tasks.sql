@@ -8,7 +8,8 @@ CREATE TABLE change_seq (
 INSERT INTO change_seq (id, v) VALUES (1, 0);
 
 CREATE TABLE task (
-  n          INTEGER PRIMARY KEY,
+  -- AUTOINCREMENT: a number that was used never comes back.
+  n          INTEGER PRIMARY KEY AUTOINCREMENT,
   -- Minted in the insert from the row number, so two writers can't collide
   -- and `INSERT … RETURNING id` names it.
   id         TEXT GENERATED ALWAYS AS ('tsk' || n) STORED UNIQUE,
@@ -16,7 +17,7 @@ CREATE TABLE task (
   body       TEXT,
   stage      TEXT NOT NULL DEFAULT 'backlog'
              CHECK (stage IN ('backlog', 'ready', 'in_progress', 'blocked', 'done', 'canceled')),
-  parent     TEXT,
+  parent     TEXT REFERENCES task (id),
   priority   TEXT CHECK (priority IS NULL OR priority IN ('urgent', 'high', 'medium', 'low')),
   author     TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -28,7 +29,7 @@ CREATE TABLE task (
 CREATE INDEX task_seq ON task (seq);
 
 CREATE TABLE task_link (
-  task_id TEXT NOT NULL,
+  task_id TEXT NOT NULL REFERENCES task (id),
   to_uri  TEXT NOT NULL,
   type    TEXT NOT NULL
           CHECK (type IN ('blocks', 'discovered_from', 'relates_to', 'duplicates', 'supersedes', 'replies_to', 'about')),
@@ -38,9 +39,9 @@ CREATE TABLE task_link (
 );
 
 CREATE TABLE task_comment (
-  n       INTEGER PRIMARY KEY,
+  n       INTEGER PRIMARY KEY AUTOINCREMENT,
   id      TEXT GENERATED ALWAYS AS ('cmt' || n) STORED UNIQUE,
-  task_id TEXT NOT NULL,
+  task_id TEXT NOT NULL REFERENCES task (id),
   author  TEXT,
   at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   body    TEXT NOT NULL,
@@ -89,4 +90,19 @@ BEGIN
   UPDATE change_seq SET v = v + 1;
   UPDATE task_comment SET seq = (SELECT v FROM change_seq) WHERE n = NEW.n;
   UPDATE task SET seq = (SELECT v FROM change_seq) WHERE id = NEW.task_id;
+END;
+
+-- A hard DELETE takes no change number, so the collector would never see
+-- it. Rows are only ever soft deleted (the delete and unlink commands).
+CREATE TRIGGER task_no_delete BEFORE DELETE ON task
+BEGIN
+  SELECT RAISE(ABORT, 'oxtask rows are never deleted: use the oxtask.task.delete command');
+END;
+CREATE TRIGGER task_link_no_delete BEFORE DELETE ON task_link
+BEGIN
+  SELECT RAISE(ABORT, 'oxtask rows are never deleted: use the oxtask.task.unlink command');
+END;
+CREATE TRIGGER task_comment_no_delete BEFORE DELETE ON task_comment
+BEGIN
+  SELECT RAISE(ABORT, 'oxtask rows are never deleted: comments are kept');
 END;

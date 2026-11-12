@@ -6,6 +6,7 @@ def transform(x):
     write = {
         "sql": "UPDATE task SET deleted = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1 AND deleted = 1",
         "params": [id],
+        "expect_changes": 1,
     }
     out = {
         "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": [write]}}],
@@ -13,6 +14,8 @@ def transform(x):
         "result": {"id": id},
     }
     found = scope("store.sql", {"sql": "SELECT 1 AS there FROM task WHERE id = ?1 AND deleted = 1", "params": [id]})["rows"]
+    if len(found) == 0:
+        return {"refuse": "no deleted task " + id}
     if len(found) == 1:
         out["inverse"] = {"commands": [{"name": "oxtask.task.delete", "input": {"id": id}}]}
     return out

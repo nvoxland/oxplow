@@ -210,6 +210,7 @@ impl ExtensionServices {
             .read(&Statement {
                 sql: args.sql,
                 params: args.params,
+                expect_changes: None,
             })
             .map_err(|e| e.to_string())?;
         // One statement: its rows.

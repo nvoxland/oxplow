@@ -18,6 +18,9 @@ pub struct StoreError(pub String);
 pub struct Statement {
     pub sql: String,
     pub params: Vec<Value>,
+    /// When set, the statement must change exactly this many rows (its own,
+    /// not a trigger's), or the whole batch fails and rolls back.
+    pub expect_changes: Option<usize>,
 }
 
 /// What a call answers: for each statement, in order, the rows it returns
@@ -163,9 +166,11 @@ fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
             let mut prepared = tx.prepare(&statement.sql).map_err(fail)?;
             let params: Vec<rusqlite::types::Value> = statement.params.iter().map(cell).collect();
             if prepared.column_count() == 0 {
-                answer.changes += prepared
+                let changed = prepared
                     .execute(rusqlite::params_from_iter(params))
                     .map_err(fail)?;
+                expected(statement, changed)?;
+                answer.changes += changed;
                 answer.rows.push(Vec::new());
                 continue;
             }
@@ -191,11 +196,24 @@ fn execute(tx: &Connection, batch: &[Statement]) -> Result<Answer, StoreError> {
             let wrote = !prepared.readonly();
             drop(prepared);
             if wrote {
-                answer.changes += tx.changes() as usize;
+                let changed = tx.changes() as usize;
+                expected(statement, changed)?;
+                answer.changes += changed;
             }
             answer.rows.push(rows);
         }
         Ok(answer)
+    }
+}
+
+/// Check a statement's `expect_changes` against the rows it changed.
+fn expected(statement: &Statement, changed: usize) -> Result<(), StoreError> {
+    match statement.expect_changes {
+        Some(want) if want != changed => Err(StoreError(format!(
+            "expected `{}` to change {want} row(s), it changed {changed}; nothing was written",
+            statement.sql
+        ))),
+        _ => Ok(()),
     }
 }
 
@@ -279,7 +297,72 @@ mod tests {
         Statement {
             sql: sql.into(),
             params,
+            expect_changes: None,
         }
+    }
+
+    #[test]
+    fn a_statement_that_changes_fewer_rows_than_expected_rolls_the_batch_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::open(&dir.path().join("s.sqlite")).unwrap();
+        store.migrate(&migrations()).unwrap();
+        let mut miss = stmt("UPDATE book SET title = 'x' WHERE id = 'nope'", vec![]);
+        miss.expect_changes = Some(1);
+        let err = store
+            .write(&[
+                stmt("INSERT INTO book (id, title) VALUES ('b9', 'T')", vec![]),
+                miss,
+            ])
+            .unwrap_err();
+        assert!(err.0.contains("UPDATE book"), "names the statement: {err}");
+        let rows = store
+            .read(&stmt("SELECT id FROM book WHERE id = 'b9'", vec![]))
+            .unwrap();
+        assert!(rows.rows[0].is_empty(), "rolled back: {rows:?}");
+        let mut hit = stmt("UPDATE book SET title = 'x' WHERE id = 'b0'", vec![]);
+        hit.expect_changes = Some(1);
+        store.write(&[hit]).unwrap();
+    }
+
+    /// oxtask's schema: a command can't make a raw `DELETE` (only an
+    /// extension's own script may compose the write), so the trigger is
+    /// checked here on the shipped migration.
+    #[test]
+    fn oxtask_refuses_a_hard_delete_and_never_reuses_an_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ExtensionStore::open(&dir.path().join("t.sqlite")).unwrap();
+        let sql = include_str!("../../../extensions/oxtask/storage/migrations/V1__tasks.sql");
+        store
+            .migrate(&[("V1__tasks.sql".into(), sql.into())])
+            .unwrap();
+        let ids =
+            |q: &str| -> Vec<Value> { store.write(&[stmt(q, vec![])]).unwrap().rows.remove(0) };
+        assert_eq!(
+            ids("INSERT INTO task (title) VALUES ('a') RETURNING id")[0]["id"],
+            "tsk1"
+        );
+        let err = store
+            .write(&[stmt("DELETE FROM task WHERE id = 'tsk1'", vec![])])
+            .unwrap_err();
+        assert!(err.0.contains("oxtask.task.delete"), "{err}");
+        let err = store
+            .write(&[stmt(
+                "INSERT INTO task_comment (task_id, body) VALUES ('tsk99', 'x')",
+                vec![],
+            )])
+            .unwrap_err();
+        assert!(err.0.contains("FOREIGN KEY"), "{err}");
+        // Even with the guard off, the number is not handed out again.
+        store
+            .write(&[stmt("DROP TRIGGER task_no_delete", vec![])])
+            .unwrap();
+        store
+            .write(&[stmt("DELETE FROM task WHERE id = 'tsk1'", vec![])])
+            .unwrap();
+        assert_eq!(
+            ids("INSERT INTO task (title) VALUES ('b') RETURNING id")[0]["id"],
+            "tsk2"
+        );
     }
 
     fn migrations() -> Vec<(String, String)> {
