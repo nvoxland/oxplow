@@ -599,6 +599,14 @@ fields:                        # oxplow's own annotations on every store's tasks
   tasks. Create, move, link and comment open small forms (oxtask's pages
   `new-task`, `move-task`, `link-task`, `comment-on-task`); delete runs from
   the task's id.
+- **Request links in core's read shape (step 5).** Bundled's
+  `request_task_view_next` is `v_request_task`'s columns (`request`, `task`,
+  `basis`, `turn`, `thread_id`, `at`, `turns`, `started_at`, `last_ended_at`,
+  `request_id`) over the `request_task_next` model, joined to `request` and
+  `agent_turn`; `basis` keeps the model's names (`filed` and `edited` are
+  core's `command`). Core's fact store reads a fact's task through
+  `v_request_task`, ranking `command`, `edited` and `filed` alike (a test pins
+  it), so the flip changes the view and not the reader.
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).

@@ -131,6 +131,20 @@ datasets:
       - { name: title, type: TEXT, doc: "The task's title." }
       - { name: body, type: TEXT, doc: "Its own id (so typing `tsk42` finds it), then its body, then its comments." }
       - { name: stream_id, type: TEXT, doc: "Its thread's stream (`str1`); NULL for an unassigned task." }
+  - name: request_task_view_next
+    version: 1
+    description: "TEMPORARY (the switch renames it `request_task`): the tasks each request worked on, in `v_request_task`'s shape (request, task, basis, turn, thread_id, at, turns, started_at, last_ended_at, request_id), over the `request_task_next` model. `basis` keeps the model's names: `filed` and `edited` are core's `command`."
+    fields:
+      - { name: request, type: TEXT, doc: "The request (`v_request.uri`)." }
+      - { name: task, type: TEXT, doc: "The task's URI; it may dangle." }
+      - { name: basis, type: TEXT, doc: "`prompt`, `filed`, `edited`, `transition` or `assigned`." }
+      - { name: turn, type: TEXT, doc: "The turn the evidence was recorded in (`v_agent_turn.uri`)." }
+      - { name: thread_id, type: INT, doc: "That turn's thread (`v_thread.id`); NULL when no turn was named." }
+      - { name: at, type: TEXT, doc: "When the link was recorded (RFC 3339)." }
+      - { name: turns, type: INT, doc: "How many turns the request has so far." }
+      - { name: started_at, type: TEXT, doc: "When the request's first turn started." }
+      - { name: last_ended_at, type: TEXT, doc: "When its latest turn ended; NULL while one runs." }
+      - { name: request_id, type: INT, doc: "The request's id (`v_request.id`)." }
   - name: thread_work_badge
     version: 1
     description: "A label for each thread that worked on tasks: how many are done and how many still open (\"3 done · 1 open\"), over the tasks its requests worked on. Decorates thread rows (Closed Threads)."
