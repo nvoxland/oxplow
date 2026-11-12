@@ -1297,6 +1297,18 @@
           ],
           "default": null
         },
+        "from": {
+          "description": "A fact dimension an extension's dataset answers: the fact's `by` key\n(`request_id`, `thread_id`, `turn_id` or `stream_id`) is looked up in\nthe dataset's column of the same name, and the dimension's value is the\ndataset's `value` column of the first row in `order`. Core names no\ndataset: with the extension off the dimension is absent and the fact\nhas no value on it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DimensionFrom"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "ai_context": {
           "description": "Guidance for an agent reading the dimension.",
           "anyOf": [
@@ -1319,6 +1331,38 @@
         }
       },
       "additionalProperties": false
+    },
+    "DimensionFrom": {
+      "description": "Where a `from:` dimension reads its value (see [`DimensionEntry::from`]).",
+      "type": "object",
+      "properties": {
+        "dataset": {
+          "description": "The `v_*` view of the dataset that answers.",
+          "type": "string"
+        },
+        "by": {
+          "description": "The fact key the dataset is looked up by, and its column of the same\nname: `request_id`, `thread_id`, `turn_id` or `stream_id`.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The dataset column that holds the dimension's value.",
+          "type": "string"
+        },
+        "order": {
+          "description": "A SQL ordering over the dataset's columns; the first row wins. Without\nit, the dataset's own order.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "dataset",
+        "by",
+        "value"
+      ]
     },
     "RawCollector": {
       "description": "A `collectors:` entry as written (an extension's manifest, or\n`.oxplow/project.yaml`); `validate` makes it a `CollectorSpec`.",

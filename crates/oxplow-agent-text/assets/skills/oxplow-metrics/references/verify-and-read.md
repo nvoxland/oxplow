@@ -33,9 +33,11 @@ is a grid of time buckets (`day`, `week`, `month`, or `capture` for one row
 per recording, with a `capture_id` that joins `v_capture`); each
 `MEASURE('<key>')` is a metric's series on it, computed with the metric's
 own aggregation and time semantics. The optional `dim` slices it: any
-dimension the facts carry, or `oxplow.stream` / `oxplow.thread` /
-`oxplow.task` /
-`oxplow.vcs_rev`. "Tokens per task per week" is:
+dimension the facts carry, `oxplow.stream` / `oxplow.thread` /
+`oxplow.request` / `oxplow.vcs_rev`, or a dimension an extension's dataset
+answers (`from:` in its `dimensions:`; `oxplow.task`, from oxplow-bundled, is
+one: the task a fact's request worked on, absent with bundled off).
+"Tokens per task per week" is:
 
 ```sql
 SELECT bucket, "oxplow.task", MEASURE('oxplow.tokens.total')

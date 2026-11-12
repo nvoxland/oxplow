@@ -508,6 +508,14 @@ pub struct DimensionEntry {
     /// `LEFT JOIN v_thread t ON t.id = e.thread_id`.
     #[serde(default)]
     pub join: Option<String>,
+    /// A fact dimension an extension's dataset answers: the fact's `by` key
+    /// (`request_id`, `thread_id`, `turn_id` or `stream_id`) is looked up in
+    /// the dataset's column of the same name, and the dimension's value is the
+    /// dataset's `value` column of the first row in `order`. Core names no
+    /// dataset: with the extension off the dimension is absent and the fact
+    /// has no value on it.
+    #[serde(default)]
+    pub from: Option<DimensionFrom>,
     /// Guidance for an agent reading the dimension.
     #[serde(default)]
     pub ai_context: Option<AiContext>,
@@ -515,6 +523,26 @@ pub struct DimensionEntry {
     #[serde(default)]
     pub description: Option<String>,
 }
+
+/// Where a `from:` dimension reads its value (see [`DimensionEntry::from`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DimensionFrom {
+    /// The `v_*` view of the dataset that answers.
+    pub dataset: String,
+    /// The fact key the dataset is looked up by, and its column of the same
+    /// name: `request_id`, `thread_id`, `turn_id` or `stream_id`.
+    pub by: String,
+    /// The dataset column that holds the dimension's value.
+    pub value: String,
+    /// A SQL ordering over the dataset's columns; the first row wins. Without
+    /// it, the dataset's own order.
+    #[serde(default)]
+    pub order: Option<String>,
+}
+
+/// The fact keys a `from:` dimension may be looked up by.
+pub const DIMENSION_FROM_KEYS: &[&str] = &["request_id", "thread_id", "turn_id", "stream_id"];
 
 /// A fully-resolved dimension — the flat form the boot seeder upserts into the
 /// `dimension` catalog. Produced by [`resolve_dimensions`] (project > global).
@@ -530,6 +558,7 @@ pub struct ResolvedDimension {
     pub scope: String,
     pub promote: bool,
     pub entity: Option<EntityDimensionSpec>,
+    pub from: Option<DimensionFrom>,
     pub ai_context: Option<AiContext>,
     pub description: Option<String>,
 }
@@ -3517,6 +3546,44 @@ pub fn validate_dimensions(
             }
             None => {}
         }
+        let from = match e.from {
+            None => None,
+            Some(f) => {
+                if entity.is_some() || e.promote {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] sets `from` as well as `entity` or `promote`: a `from` \
+                         dimension is resolved from a dataset at read time"
+                    )));
+                }
+                if !is_entity_name(&f.dataset) {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] from.dataset must name a `v_*` view (got \"{}\")",
+                        f.dataset
+                    )));
+                }
+                if !DIMENSION_FROM_KEYS.contains(&f.by.as_str()) {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] from.by must be one of {DIMENSION_FROM_KEYS:?} (got \"{}\")",
+                        f.by
+                    )));
+                }
+                let column = f.value.trim();
+                if column.is_empty()
+                    || !column
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                {
+                    return Err(ConfigError::Invalid(format!(
+                        "dimensions[{i}] from.value must name a column of the dataset (got \"{}\")",
+                        f.value
+                    )));
+                }
+                Some(DimensionFrom {
+                    order: f.order.map(|o| o.trim().to_string()).filter(|o| !o.is_empty()),
+                    ..f
+                })
+            }
+        };
         out.push(DimensionEntry {
             key: Some(key),
             label: opt(e.label),
@@ -3527,6 +3594,7 @@ pub fn validate_dimensions(
             entity,
             expr,
             join,
+            from,
             ai_context: e.ai_context,
             description: opt(e.description),
         });
@@ -3603,6 +3671,7 @@ pub fn resolve_dimensions(
                     expr: e.expr.clone().unwrap_or_default(),
                     join: e.join.clone(),
                 }),
+                from: e.from.clone(),
                 ai_context: e.ai_context.clone(),
                 description: e.description.clone(),
             };
@@ -6078,6 +6147,48 @@ metrics:
         // Defaults applied.
         assert_eq!(churn.title, "acme.churn");
         assert_eq!(churn.temporal_semantics, "semi-additive");
+    }
+
+    fn from_dimension(by: &str, dataset: &str) -> DimensionEntry {
+        DimensionEntry {
+            key: Some("acme.task".into()),
+            from: Some(DimensionFrom {
+                dataset: dataset.into(),
+                by: by.into(),
+                value: "task".into(),
+                order: Some(" at ".into()),
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_from_dimension_is_resolved_from_a_dataset() {
+        let out = validate_dimensions(
+            Some(vec![from_dimension("request_id", "v_acme_links")]),
+            CatalogLayer::Extension("acme"),
+        )
+        .expect("valid");
+        let resolved = resolve_dimensions(&[], &[("acme".to_string(), out)]);
+        let from = resolved[0].from.as_ref().expect("kept");
+        assert_eq!(from.dataset, "v_acme_links");
+        assert_eq!(from.order.as_deref(), Some("at"));
+    }
+
+    #[test]
+    fn a_from_dimension_with_a_bad_key_or_dataset_is_refused() {
+        for (by, dataset) in [("path", "v_acme_links"), ("request_id", "acme_links")] {
+            let e = validate_dimensions(
+                Some(vec![from_dimension(by, dataset)]),
+                CatalogLayer::Extension("acme"),
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(e.contains("from."), "{e}");
+        }
+        let mut both = from_dimension("request_id", "v_acme_links");
+        both.promote = true;
+        assert!(validate_dimensions(Some(vec![both]), CatalogLayer::Extension("acme")).is_err());
     }
 
     #[test]

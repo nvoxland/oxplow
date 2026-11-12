@@ -695,6 +695,7 @@ collectors:
     facts: [knowledge.read_requests]
 dimensions:
   - {"key": "work.priority", "label": "Priority", "entity": "v_oxplow_task", "expr": "json_extract(e.native, '$.priority')", "description": "The priority of a task."}
+  - {"key": "oxplow.task", "label": "Task", "valueType": "entity-ref", "subjectKind": "task", "from": {"dataset": "v_oxplow_request_link", "by": "request_id", "value": "task", "order": "CASE basis WHEN 'prompt' THEN 0 WHEN 'edited' THEN 1 WHEN 'filed' THEN 1 WHEN 'transition' THEN 2 ELSE 3 END, at"}, "description": "The task a fact's request worked on: the one the prompt named, else the one it filed or edited, else the one it moved."}
   - {"key": "oxplow.knowledge_store", "label": "Knowledge store", "valueType": "categorical", "description": "The store that keeps a knowledge page, such as oxwiki."}
   - {"key": "oxplow.knowledge_bucket", "label": "Knowledge bucket", "valueType": "categorical", "description": "What a knowledge page is for: note, memory or instruction."}
 measures:

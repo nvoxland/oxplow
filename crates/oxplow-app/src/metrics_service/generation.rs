@@ -13,6 +13,8 @@ pub(crate) struct PreparedMetricCatalog {
     specs: BTreeMap<String, Option<NewMetricSpec>>,
     extension_specs: BTreeSet<String>,
     extension_dimensions: BTreeSet<String>,
+    /// The dimensions an extension's dataset answers, published with the rest.
+    derived: Vec<crate::metric_engine::DerivedDimension>,
 }
 
 impl MetricsService {
@@ -49,7 +51,21 @@ impl MetricsService {
                 description: measure.description,
             })
             .collect();
-        let dimensions: Vec<_> = resolve_dimensions(&global_dims, &ext.dimensions)
+        let resolved_dimensions = resolve_dimensions(&global_dims, &ext.dimensions);
+        let derived: Vec<crate::metric_engine::DerivedDimension> = resolved_dimensions
+            .iter()
+            .filter_map(|dim| {
+                let from = dim.from.as_ref()?;
+                Some(crate::metric_engine::DerivedDimension {
+                    key: dim.key.clone(),
+                    dataset: from.dataset.clone(),
+                    by: from.by.clone(),
+                    value: from.value.clone(),
+                    order: from.order.clone(),
+                })
+            })
+            .collect();
+        let dimensions: Vec<_> = resolved_dimensions
             .into_iter()
             .map(|dim| NewDimension {
                 key: dim.key,
@@ -110,6 +126,7 @@ impl MetricsService {
             specs,
             extension_specs,
             extension_dimensions,
+            derived,
         })
     }
 }
@@ -299,6 +316,7 @@ impl PreparedMetricCatalog {
         let config = crate::config_service::read_config(&self.frozen.config);
         let global = self.frozen.with_global_catalog(Clone::clone);
         *metrics.published_inputs.lock() = Some(Arc::new(PublishedMetricInputs { config, global }));
+        crate::metric_engine::set_derived_dimensions(self.derived.clone());
     }
 }
 

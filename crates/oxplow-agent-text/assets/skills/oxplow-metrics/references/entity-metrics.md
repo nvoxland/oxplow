@@ -10,14 +10,14 @@ directly (the views and their columns are in `v_dataset` / `v_field`):
 metrics:
   - key: repo.items_done
     title: Tasks completed
-    entity: v_task
+    entity: v_oxplow_task
     where: "state = 'done'"
     time: closed_at           # optional: an event metric, bucketed by this time
     aggregation: count        # count | count_distinct | sum | avg | min | max | median | p90
     # value: "e.rank"         # the expression aggregated (not needed for count)
 dimensions:
   - key: repo.priority
-    entity: v_task
+    entity: v_oxplow_task
     expr: "json_extract(e.native, '$.priority')"   # a field the list declares
     # join: "LEFT JOIN v_thread t ON t.id = e.thread_id"
 ```

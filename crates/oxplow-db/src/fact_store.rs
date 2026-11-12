@@ -1356,9 +1356,10 @@ pub struct FactRow {
     pub turn_id: Option<i64>,
     /// The request of that turn (`agent_turn.request_id`), resolved per read.
     pub request_id: Option<i64>,
-    /// That request's task, as a ref: its strongest `request_task` link
-    /// (resolved per read).
-    pub task: Option<String>,
+    /// The values of the `from:` dimensions an extension declared (key →
+    /// value), stamped by the metric engine at read time. Empty when the
+    /// fact is read below the engine.
+    pub derived: std::collections::BTreeMap<String, String>,
     pub provenance: String,
     pub source: String,
     /// The capture's producer (gauge key / ingest kind) — identifies which scan
@@ -1428,8 +1429,7 @@ pub(crate) fn fact_row_mapper<'c>(
 ) -> rusqlite::Result<impl FnMut(&rusqlite::Row<'_>) -> rusqlite::Result<FactRow> + 'c> {
     // Turn → request, resolved once per turn a read meets: a per-row join
     // would cost a lookup on every fact, and a read's facts come from a few
-    // turns. (The task a request worked on is not core's to say: the
-    // `oxplow.task` dimension is undecided after the flip.)
+    // turns.
     let mut turns: std::collections::HashMap<i64, Option<i64>> = std::collections::HashMap::new();
     let mut request_of =
         conn.prepare_cached("SELECT t.request_id FROM agent_turn t WHERE t.id = ?1")?;
@@ -1507,7 +1507,7 @@ fn row_to_fact_row_with(
         thread_id: row.get(20)?,
         turn_id: row.get(21)?,
         request_id: None,
-        task: None,
+        derived: std::collections::BTreeMap::new(),
         provenance: row.get(22)?,
         source: row.get(23)?,
         producer: row.get(24)?,

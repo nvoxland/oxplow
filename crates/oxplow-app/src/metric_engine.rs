@@ -443,7 +443,7 @@ fn apply_window(points: Vec<SeriesPoint>, window: Option<TimeWindow>) -> Vec<Ser
 #[derive(Debug, Clone, Default)]
 pub struct SeriesRead {
     /// Slice by a dimension (conformed, `dims_json`, or a spine dim such as
-    /// `oxplow.task`).
+    /// a derived dimension).
     pub group_by: Option<String>,
     /// Scope to one stream; `None` reads all.
     pub stream: Option<i64>,
@@ -541,13 +541,57 @@ pub(crate) fn dim_value_cached(
         "oxplow.stream" => Some(f.stream_id.to_string()),
         "oxplow.thread" => f.thread_id.map(|v| v.to_string()),
         "oxplow.request" => f.request_id.map(|v| v.to_string()),
-        "oxplow.task" => f.task.clone(),
         "oxplow.vcs_rev" => f.closest_vcs_rev.clone(),
-        key => dims.get(f).and_then(|d| dim_from_map(d, key)),
+        key => dims
+            .get(f)
+            .and_then(|d| dim_from_map(d, key))
+            .or_else(|| f.derived.get(key).cloned()),
     }
 }
 
-/// Dimensions read off the capture spine (stream, thread, request, task, git
+/// A fact dimension an extension's dataset answers (`from:` in its
+/// `dimensions:`): the fact's `by` key is looked up in the dataset's column of
+/// the same name, and the value is the dataset's `value` column of the first
+/// row in `order`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedDimension {
+    pub key: String,
+    pub dataset: String,
+    pub by: String,
+    pub value: String,
+    pub order: Option<String>,
+}
+
+/// The derived dimensions in force. Process-wide, like the dimension
+/// catalog it comes from: the metrics service replaces it on every reseed (an
+/// extension turned off takes its dimensions with it), and the engine, the
+/// cube and the filter classification read it.
+static DERIVED_DIMENSIONS: std::sync::RwLock<Vec<DerivedDimension>> =
+    std::sync::RwLock::new(Vec::new());
+
+/// Replace the derived dimensions in force.
+pub fn set_derived_dimensions(dims: Vec<DerivedDimension>) {
+    *DERIVED_DIMENSIONS
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = dims;
+}
+
+fn derived_dimensions() -> Vec<DerivedDimension> {
+    DERIVED_DIMENSIONS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+fn is_derived_dim(dimension: &str) -> bool {
+    DERIVED_DIMENSIONS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|d| d.key == dimension)
+}
+
+/// Dimensions read off the capture spine (stream, thread, request, git
 /// version). Sliceable on the fact path only: the cube never buckets by them,
 /// because a capture's turn is linked to its request (and the request to its
 /// tasks) after the cube may already have folded it.
@@ -555,12 +599,13 @@ pub(crate) const SPINE_DIMS: &[&str] = &[
     "oxplow.stream",
     "oxplow.thread",
     "oxplow.request",
-    "oxplow.task",
     "oxplow.vcs_rev",
 ];
 
+/// A dimension that reads outside a fact's own slice: the capture spine, and
+/// the ones an extension's dataset answers.
 pub(crate) fn is_spine_dim(dimension: &str) -> bool {
-    SPINE_DIMS.contains(&dimension)
+    SPINE_DIMS.contains(&dimension) || is_derived_dim(dimension)
 }
 
 /// Whether a dimension resolves entirely from a [`FactSliceKey`] — i.e. from
@@ -1361,7 +1406,8 @@ pub struct MetricEngine {
     /// (tsk102). `None` (tests, callers without a repo) ⇒ [`Visibility::blind`]
     /// — pre-tsk102 behavior, never an error.
     visibility: Option<std::sync::Arc<crate::metric_visibility::VisibilityResolver>>,
-    /// Entity metrics read through the semantic layer (tsk322).
+    /// Entity metrics and derived dimensions read through the semantic layer
+    /// (tsk322).
     layer: crate::sql_gateway::SqlGateway,
 }
 
@@ -1373,6 +1419,14 @@ impl MetricEngine {
             fold_memo: Arc::new(Mutex::new(FoldMemo::default())),
             visibility: None,
         }
+    }
+
+    /// Read entity metrics and derived dimensions through `layer`: the app's
+    /// gateway, which speaks the extensions' datasets (the default one speaks
+    /// core's only).
+    pub fn with_layer(mut self, layer: crate::sql_gateway::SqlGateway) -> Self {
+        self.layer = layer;
+        self
     }
 
     /// Attach the ancestry resolver. **The cube's builder must get the same
@@ -1511,7 +1565,7 @@ impl MetricEngine {
         // A trend legitimately reads the measure's history (one point per
         // capture) — but stream-bounded SQL-side (tsk75), never loaded whole
         // then filtered in Rust.
-        let facts: Vec<FactRow> = match stream {
+        let mut facts: Vec<FactRow> = match stream {
             Some(s) => {
                 self.facts
                     .facts_for_measure_in_stream(measure.id, s)
@@ -1519,6 +1573,7 @@ impl MetricEngine {
             }
             None => self.facts.facts_for_measure(measure.id).await?,
         };
+        self.stamp_derived(&mut facts).await;
 
         // The producers whose scans emit this metric's slice — derived from the
         // facts that (ever) matched the filter, so an unrelated producer's
@@ -1662,17 +1717,81 @@ impl MetricEngine {
         // bug class, and every scope picks a DIFFERENT fold — a wildcard arm
         // would let a future fourth scope compile clean and silently read as
         // whichever default it fell into.
-        match parse_capture_scope(&measure.key, &measure.capture_scope)? {
+        let mut facts = match parse_capture_scope(&measure.key, &measure.capture_scope)? {
             scope @ (CaptureScope::PerSubject | CaptureScope::PerPath) => {
-                self.partial_state_facts(measure, scope, stream).await
+                self.partial_state_facts(measure, scope, stream).await?
             }
-            CaptureScope::Complete => Ok(self
+            CaptureScope::Complete => self
                 .facts
                 .facts_for_measure(measure.id)
                 .await?
                 .into_iter()
                 .filter(|f| stream.is_none_or(|s| f.stream_id == s))
-                .collect()),
+                .collect(),
+        };
+        self.stamp_derived(&mut facts).await;
+        Ok(facts)
+    }
+
+    /// Give each fact its value on every derived dimension (an extension's
+    /// `from:` dimension), asking each dimension's dataset once for the keys
+    /// the facts carry. A dataset that can't be read (its extension is off)
+    /// leaves its dimension absent: the facts have no value on it, and
+    /// nothing fails.
+    pub(crate) async fn stamp_derived(&self, facts: &mut [FactRow]) {
+        for dim in derived_dimensions() {
+            let key_of = |f: &FactRow| -> Option<i64> {
+                match dim.by.as_str() {
+                    "request_id" => f.request_id,
+                    "thread_id" => f.thread_id,
+                    "turn_id" => f.turn_id,
+                    "stream_id" => Some(f.stream_id),
+                    _ => None,
+                }
+            };
+            let keys: std::collections::BTreeSet<i64> = facts.iter().filter_map(key_of).collect();
+            if keys.is_empty() {
+                continue;
+            }
+            let list = keys
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let order = dim
+                .order
+                .as_deref()
+                .map(|o| format!(", {o}"))
+                .unwrap_or_default();
+            let sql = format!(
+                "SELECT {by}, {value} FROM {dataset} WHERE {by} IN ({list}) ORDER BY {by}{order}",
+                by = dim.by,
+                value = dim.value,
+                dataset = dim.dataset,
+            );
+            let Ok(rows) = self.layer.query_sql(&sql, Vec::new(), None).await else {
+                continue;
+            };
+            // The first row of each key, in the dimension's order.
+            let mut values: HashMap<i64, String> = HashMap::new();
+            for row in rows.rows {
+                let [oxplow_db::SqlCell::Int(k), v] = &row[..] else {
+                    continue;
+                };
+                let v = match v {
+                    oxplow_db::SqlCell::Text(t) => t.clone(),
+                    oxplow_db::SqlCell::Int(i) => i.to_string(),
+                    oxplow_db::SqlCell::Real(r) => r.to_string(),
+                    oxplow_db::SqlCell::Bool(b) => b.to_string(),
+                    oxplow_db::SqlCell::Null(()) => continue,
+                };
+                values.entry(*k).or_insert(v);
+            }
+            for f in facts.iter_mut() {
+                if let Some(v) = key_of(f).and_then(|k| values.get(&k)) {
+                    f.derived.insert(dim.key.clone(), v.clone());
+                }
+            }
         }
     }
 
@@ -2119,12 +2238,13 @@ impl MetricEngine {
             return Ok(Vec::new());
         };
         let filter = spec_filter(spec)?;
-        let facts = match capture_id {
+        let mut facts = match capture_id {
             // Pinned drill-in: exactly that capture's facts — never the whole
             // measure history filtered in Rust (tsk75).
             Some(c) => self.facts.facts_for_captures(measure.id, vec![c]).await?,
             None => self.current_facts(&measure).await?,
         };
+        self.stamp_derived(&mut facts).await;
         let facts: Vec<FactRow> = facts
             .into_iter()
             .filter(|f| filter.matches(f))
@@ -2276,7 +2396,7 @@ mod tests {
             thread_id: None,
             turn_id: None,
             request_id: None,
-            task: None,
+            derived: Default::default(),
             provenance: "observed".into(),
             source: "test".into(),
             producer: "test.gauge".into(),
@@ -2614,7 +2734,6 @@ mod tests {
             branch: Some("feature/x".into()),
             thread_id: Some(4),
             request_id: Some(9),
-            task: Some("oxplow:oxplow/task?id=ENG-12&provider=issues".into()),
             closest_vcs_rev: Some("abc123".into()),
             severity: Some("error".into()),
             rule: Some("E1".into()),
@@ -2656,7 +2775,6 @@ mod tests {
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.request",
-            "oxplow.task",
             "oxplow.vcs_rev",
         ] {
             assert!(!dim_is_slice_key(key), "{key} reads outside the slice key");
@@ -2668,12 +2786,66 @@ mod tests {
         }
     }
 
+    /// A dimension an extension's dataset answers: each fact gets the first
+    /// row (in the declared order) of the dataset under its key; with the
+    /// dataset unreadable the dimension is absent and nothing fails.
+    #[tokio::test]
+    async fn a_derived_dimension_is_read_through_its_dataset() {
+        let (engine, facts, _) = engine_fixture().await;
+        facts
+            .database()
+            .transaction(|tx| {
+                tx.execute_batch(
+                    "INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+                     VALUES (10, 1, 'first', 'x', 'x'), (11, 1, 'second', 'x', 'x');",
+                )
+                .map_err(oxplow_db::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let derived = |dataset: &str| DerivedDimension {
+            key: "acme.title".into(),
+            dataset: dataset.into(),
+            by: "stream_id".into(),
+            value: "title".into(),
+            order: Some("id DESC".into()),
+        };
+        let mut rows = vec![
+            FactRow {
+                stream_id: 1,
+                ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+            },
+            FactRow {
+                stream_id: 2,
+                ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+            },
+        ];
+        set_derived_dimensions(vec![derived("v_thread")]);
+        engine.stamp_derived(&mut rows).await;
+        assert_eq!(dim_value(&rows[0], "acme.title").as_deref(), Some("second"));
+        assert_eq!(dim_value(&rows[1], "acme.title"), None, "no thread there");
+        // Read outside a fact's own slice, never bucketed by the cube.
+        assert!(is_spine_dim("acme.title"));
+        assert!(!dim_is_slice_key("acme.title"));
+
+        // The dataset isn't there (its extension is off): the dimension is
+        // absent and the read goes on.
+        set_derived_dimensions(vec![derived("v_not_there")]);
+        let mut rows = vec![FactRow {
+            stream_id: 1,
+            ..fact(1, "2026-06-30T00:00:00Z", 1.0)
+        }];
+        engine.stamp_derived(&mut rows).await;
+        assert_eq!(dim_value(&rows[0], "acme.title"), None);
+        set_derived_dimensions(Vec::new());
+        assert!(!is_spine_dim("acme.title"));
+    }
+
     #[test]
     fn spine_dimensions_read_the_capture_it_came_from() {
         let f = FactRow {
             thread_id: Some(4),
             request_id: Some(9),
-            task: Some("oxplow:oxplow/task?id=tsk12&provider=oxtask".into()),
             closest_vcs_rev: Some("abc123".into()),
             ..fact(1, "2026-06-30T00:00:00Z", 1.0)
         };
@@ -2681,7 +2853,6 @@ mod tests {
             "oxplow.stream",
             "oxplow.thread",
             "oxplow.request",
-            "oxplow.task",
             "oxplow.vcs_rev",
         ]
         .iter()
@@ -2693,13 +2864,12 @@ mod tests {
                 Some(f.stream_id.to_string()),
                 Some("4".into()),
                 Some("9".into()),
-                Some("oxplow:oxplow/task?id=tsk12&provider=oxtask".into()),
                 Some("abc123".into())
             ]
         );
-        // Unattributed facts have no request/task group rather than a blank one.
+        // Unattributed facts have no request group rather than a blank one.
         let bare = fact(1, "2026-06-30T00:00:00Z", 1.0);
-        assert_eq!(dim_value(&bare, "oxplow.task"), None);
+        assert_eq!(dim_value(&bare, "oxplow.request"), None);
         // The cube never buckets by these: a turn is linked to its request
         // after the cube may have folded its captures.
         assert!(SPINE_DIMS.iter().all(|d| is_spine_dim(d)));

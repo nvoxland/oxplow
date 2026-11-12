@@ -1018,6 +1018,7 @@ impl Services {
             vcs.revision_graph(&layout.project_dir),
         ));
         let metric_engine = metric_engine::MetricEngine::new(SqliteFactStore::new(db.clone()))
+            .with_layer(sql.clone())
             .with_visibility(metric_visibility.clone());
         let dataset_watermarks = Arc::new(datasets_changed::DatasetWatermarks::default());
         let assets = assets::Assets::new(db.clone(), assets::COALESCE);
