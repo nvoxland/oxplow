@@ -92,7 +92,22 @@ pub fn ops(services: Arc<ExtensionServices>, models: Models) -> Vec<Op> {
                         extension: &extension,
                         source: &ctx.events.source,
                         cause: ctx.events.cause.clone(),
-                        anchors: Default::default(),
+                        anchors: {
+                            // The command's, with its agent's open turn.
+                            let mut anchors = ctx.run.anchors().clone();
+                            if let (Some(thread), None) = (anchors.thread_id, anchors.turn_id) {
+                                anchors.turn_id = oxplow_db::agent_stores::activity_anchors_tx(
+                                    ctx.conn,
+                                    thread,
+                                    anchors.agent_session_id,
+                                )
+                                .map_err(|e| CommandError::Failed {
+                                    message: e.to_string(),
+                                })?
+                                .turn_id;
+                            }
+                            anchors
+                        },
                         why: Cause::Trigger,
                     },
                     &[],

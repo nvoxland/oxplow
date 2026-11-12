@@ -1088,6 +1088,9 @@ fn run_lock(root: &Path, owner: &str, id: &str) -> Arc<tokio::sync::Mutex<()>> {
     static LOCKS: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     > = std::sync::OnceLock::new();
+    // The same project however its root was spelled (a resolved worktree
+    // path, the layout's).
+    let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let key = format!("{}\u{0}{owner}\u{0}{id}", root.display());
     LOCKS
         .get_or_init(Default::default)
@@ -1099,6 +1102,24 @@ fn run_lock(root: &Path, owner: &str, id: &str) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 pub async fn run_collector(
+    ctx: &Collectors<'_>,
+    parent: &RunContext,
+    owner: &str,
+    id: &str,
+    trigger: RunTrigger,
+) -> Result<CollectorRunReport, RunCollectorError> {
+    // One run of a collector at a time, whichever path starts it (its
+    // trigger, an event, a sync, a store command's write): a snapshot read
+    // before a newer run's write must not land after it.
+    let lock = run_lock(ctx.root, owner, id);
+    let _held = lock.lock().await;
+    run_collector_held(ctx, parent, owner, id, trigger).await
+}
+
+/// [`run_collector`] for a caller that already holds the collector's run
+/// lock ([`CollectorRunner::observe_write`], which holds it across the
+/// write it observes).
+async fn run_collector_held(
     ctx: &Collectors<'_>,
     parent: &RunContext,
     owner: &str,
@@ -1119,11 +1140,6 @@ pub async fn run_collector(
         )));
     }
     let run = collector_context(ctx, parent, owner, id)?;
-    // One run of a collector at a time, whichever path starts it (its
-    // trigger, an event, a sync, a store command's write): a snapshot read
-    // before a newer run's write must not land after it.
-    let lock = run_lock(ctx.root, owner, id);
-    let _held = lock.lock().await;
     let started = std::time::Instant::now();
     let result = run_collector_once(ctx, &run, owner, id, trigger).await;
     let recorded = match &result {
@@ -1255,10 +1271,16 @@ async fn run_collector_once(
             // An event's run carries its event's anchors; one a command
             // started (a store's write observed at once) carries the
             // command's, so its change events are the command's turn's.
-            let anchors = trigger
-                .event()
-                .map(|e| e.envelope.anchors.clone())
-                .unwrap_or_else(|| run.anchors().clone());
+            // A manual or scheduled sync observes what anyone changed: it is
+            // nobody's turn's.
+            let anchors = match &trigger {
+                RunTrigger::Manual | RunTrigger::Every => oxplow_domain::Anchors::default(),
+                _ => trigger
+                    .event()
+                    .map(|e| e.envelope.anchors.clone())
+                    .unwrap_or_else(|| run.anchors().clone()),
+            };
+            let (run_owner, run_id) = (owner.to_string(), id.to_string());
             let vocabulary = ctx.vocabulary.clone();
             let event = event.clone();
             let elapsed = elapsed_ms(started);
@@ -1281,6 +1303,26 @@ async fn run_collector_once(
                     // `collector.synced`, logged below.
                     let synced_id = oxplow_domain::events::EventId::generate();
                     if !models.is_empty() || !fields.is_empty() {
+                        // An agent's run is its open turn's.
+                        let mut anchors = anchors.clone();
+                        if let (Some(thread), None) = (anchors.thread_id, anchors.turn_id) {
+                            anchors.turn_id = oxplow_db::agent_stores::activity_anchors_tx(
+                                tx,
+                                thread,
+                                anchors.agent_session_id,
+                            )?
+                            .turn_id;
+                        }
+                        // A collector's first good run catches up: it is a
+                        // reconcile whatever started it.
+                        let first: bool = tx
+                            .query_row(
+                                "SELECT NOT EXISTS (SELECT 1 FROM collector_run
+                                  WHERE owner = ?1 AND id = ?2 AND status = 'ok')",
+                                rusqlite::params![run_owner, run_id],
+                                |r| r.get(0),
+                            )
+                            .map_err(oxplow_db::map_sql_err)?;
                         let applied = crate::models::apply_tx(
                             tx,
                             &registry,
@@ -1290,7 +1332,7 @@ async fn run_collector_once(
                                 source: &writer_source,
                                 cause: Some(synced_id.clone()),
                                 anchors: anchors.clone(),
-                                why: if reconcile {
+                                why: if reconcile || first {
                                     crate::models::Cause::Reconcile
                                 } else {
                                     crate::models::Cause::Trigger
@@ -2010,62 +2052,78 @@ pub enum Wrote {
 }
 
 impl CollectorRunner {
-    /// Run `extension`'s collectors that observe what its command just
-    /// wrote, at once and as that command (`run`), so the model it fills
-    /// shows the write when the command returns and its change events carry
-    /// the command's anchors (`.context/models.md` "Attribution"). What
-    /// fails is returned, not raised: the write already happened, and the
-    /// next trigger repairs the model.
-    pub async fn observe_written(
+    /// Make a store's command's write and observe it at once, as that
+    /// command (`run`): the extension's collectors that observe what it
+    /// writes are locked before the write and run after it under the same
+    /// locks, so no other run (a poll, another write's) can observe this
+    /// write first and without the command's anchors; the model shows the
+    /// write when the command returns, and its change events are the
+    /// command's turn's (`.context/models.md` "Attribution"). What the
+    /// observers fail at is logged, not raised: the write already happened,
+    /// and the next trigger repairs the model.
+    pub async fn observe_write<T, E>(
         &self,
         run: &RunContext,
-        extension: &str,
+        extension: Option<&str>,
         wrote: Wrote,
-    ) -> Vec<String> {
+        write: impl std::future::Future<Output = Result<T, E>>,
+    ) -> Result<T, E> {
         use oxplow_config::collectors::ObserverSource;
         let root = self.worktrees.resolve(None).await.into_local_path();
         let ctx = self.collectors(&root);
-        let Some(ext) = ctx
-            .catalog
-            .unpinned(
-                &root,
-                "a store's write is observed by its declared collectors",
-            )
-            .iter()
-            .find(|e| e.name == extension && e.enabled)
-            .cloned()
-        else {
-            return Vec::new();
-        };
-        let mut problems = Vec::new();
-        for c in &ext.collectors {
-            let trigger = c
-                .trigger
-                .sources()
+        let ext = extension.and_then(|name| {
+            ctx.catalog
+                .unpinned(
+                    &root,
+                    "a store's write is observed by its declared collectors",
+                )
                 .iter()
-                .find_map(|source| match (source, &wrote) {
-                    (ObserverSource::Sqlite { path: None }, Wrote::OwnStore) => {
-                        Some(RunTrigger::Sqlite)
-                    }
-                    (ObserverSource::Files { glob }, Wrote::File { path, op }) => {
-                        oxplow_config::collectors::files_matcher(std::slice::from_ref(glob))
-                            .ok()
-                            .filter(|m| m.is_match(path))
-                            .map(|_| {
-                                RunTrigger::Files(vec![FileChange {
-                                    path: path.clone(),
-                                    op: *op,
-                                }])
-                            })
-                    }
-                    _ => None,
-                });
-            let Some(trigger) = trigger else { continue };
-            if let Err(e) = run_collector(&ctx, run, &ext.namespace, &c.id, trigger).await {
-                problems.push(format!("collector `{}/{}`: {e:?}", ext.namespace, c.id));
+                .find(|e| e.name == name && e.enabled)
+                .cloned()
+        });
+        let mut observers: Vec<(String, String, RunTrigger)> =
+            ext.iter()
+                .flat_map(|ext| {
+                    ext.collectors.iter().filter_map(|c| {
+                        let trigger = c.trigger.sources().iter().find_map(|source| {
+                            match (source, &wrote) {
+                                (ObserverSource::Sqlite { path: None }, Wrote::OwnStore) => {
+                                    Some(RunTrigger::Sqlite)
+                                }
+                                (ObserverSource::Files { glob }, Wrote::File { path, op }) => {
+                                    oxplow_config::collectors::files_matcher(std::slice::from_ref(
+                                        glob,
+                                    ))
+                                    .ok()
+                                    .filter(|m| m.is_match(path))
+                                    .map(|_| {
+                                        RunTrigger::Files(vec![FileChange {
+                                            path: path.clone(),
+                                            op: *op,
+                                        }])
+                                    })
+                                }
+                                _ => None,
+                            }
+                        })?;
+                        Some((ext.namespace.clone(), c.id.clone(), trigger))
+                    })
+                })
+                .collect();
+        // Locks in one order, so two writes never wait on each other.
+        observers.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+        let mut held = Vec::new();
+        for (owner, id, _) in &observers {
+            held.push(run_lock(&root, owner, id).lock_owned().await);
+        }
+        let written = write.await?;
+        for (owner, id, trigger) in observers {
+            if let Err(e) = run_collector_held(&ctx, run, &owner, &id, trigger).await {
+                tracing::warn!(collector = %format!("{owner}/{id}"), error = ?e, "a store's write wasn't observed at once; its next trigger will");
             }
         }
-        problems
+        drop(held);
+        Ok(written)
     }
 
     fn collectors<'a>(&'a self, root: &'a Path) -> Collectors<'a> {
