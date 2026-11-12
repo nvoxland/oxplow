@@ -735,3 +735,14 @@ name that isn't one is an unknown slot, an action that isn't `{ id,
 label, command, input?, row? }` a field error.
 `Extension.manifest_version` is the
 version the file declares.
+
+## `models:`, `fills:`, `storage:`, `files:`, `action_points:` (contract, being built)
+
+New manifest keys of the shared-models work. Their contracts:
+[models.md](./models.md) (`models:`, `fills:`, fields),
+[extensions-permissions.md](./extensions-permissions.md) "Store services"
+(`storage:`, `files:`), [extensions-slots.md](./extensions-slots.md)
+"Action points" (`action_points:`, `ui.at`, `ui.about.accepts`),
+[extensions-jobs.md](./extensions-jobs.md) "Triggers for observers" (the
+new `on:` kinds). `requires:` may name an extension in another namespace
+(a store requires its model's owner).

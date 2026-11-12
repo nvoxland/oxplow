@@ -325,3 +325,28 @@ color is used only when it is a plain one (`#rgb…` or a CSS color name,
 shows nothing.
 
 A decorator shows; it never acts.
+
+## Action points and the store filter (contract, being built)
+
+Part of the shared-models work ([models.md](./models.md)).
+
+**A named action point** is a place where several extensions offer the
+same kind of action ("New Task") and none of them owns the page.
+
+- **Declared by its owner:** `action_points: [{ name: task.new, label: New
+  Task, doc, context: { parent?: uri, thread_id?: int } }]`. Its id is
+  `<namespace>/<name>` (`oxplow/task.new`).
+- **Placed by a page:** a view node `{ action_point: oxplow/task.new,
+  context: { parent: "{{row.uri}}" } }`.
+- **Joined by a command:** `ui: { at: oxplow/task.new }`. The command gets
+  the point's context as input.
+- **Drawn by the shell:** nothing with no contributor, a button with one,
+  a menu with several. The person may set a default per point
+  (Settings), and then it is a split button.
+- Item commands (`ui.about`) and point commands are one list in the
+  command registry, with two kinds of key.
+
+**The store filter.** `ui.about` takes `accepts: { store: <id> | [ids] }`,
+the same match a renderer's `accepts: { provider }` uses: the command
+shows only on items of those stores. A store's item commands default to
+its own stores (from its `fills:`).

@@ -132,6 +132,7 @@ or exact mechanics.
 | Knowledge — the knowledge capability (several stores at once; oxwiki is oxplow's own), `knowledge.write_page` and its sibling commands, pins, hand-edit convergence, the oxwiki write guard | `.context/knowledge.md` |
 | External providers — the JSON-RPC/NDJSON protocol crate and meta-model, the fake provider, the host (consent, spawn, handshake, `ExternalTaskTracker`), instances and health, Settings → Integrations, the conformance kit and `oxplow extension test` | `.context/providers.md` |
 | Tasks — `v_task`, the `TaskTracker` capability and registry, oxtask, the conformance suite | `.context/tasks.md` |
+| Shared models (contract, being built) — `models:` / `fills:`, `model.write`, fields, markdown bodies, how tasks and knowledge become observed systems | `.context/models.md` |
 | The semantic layer — sources (entities + facts), dimensions, metrics, the `v_*` read contract, `query_sql`, user/extension sources (target design, epic tsk275) | `.context/semantic-layer.md` |
 | Extensions — the terms (extension, contribution, capability, provider, scope, access, effect) and the index of the extensions docs | `.context/extensions.md` |
 | Extensions — `extension.yaml` (manifest v2), contribution descriptors, `configuration:`, private state, the design rules | `.context/extensions-manifest.md` |

@@ -1545,3 +1545,15 @@ registered entity schema differs from the signature captured with the active
 generation (view, version, SQL, columns and key). Ordinary data changes keep the
 published runtime and provider processes. Until a generation is activated,
 dataset consumers compile against the current fingerprint.
+
+## Shared models (contract, being built)
+
+A **shared model** is an entity table one extension declares (`models:`)
+and other extensions fill through the `model.write` service, never SQL.
+Its view `v_<ns>_<model>` holds every store's rows with implicit `store`,
+`uri`, `fields` and `written_at` columns; `v_<ns>_<model>_field` is its
+fields in long form; `v_model_field_decl` lists the declared fields.
+Dimensions and metrics over it work as over any entity. A `markdown:`
+column's refs, and `uri` / `uris` columns, become `page_ref` edges; pins
+make `v_ref_pin` staleness generic. The whole contract:
+[models.md](./models.md).

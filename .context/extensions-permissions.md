@@ -508,3 +508,43 @@ is detached from the settings RPC's lifetime, then requests coordinated
 reconciliation. Keychain mutation failure also invalidates old consumers; it
 does not claim deletion succeeded. Runtime isolation/revocation checks remain
 pending.
+
+## Store services (contract, being built)
+
+Part of the shared-models work ([models.md](./models.md)).
+
+**An extension's own SQLite file.** `storage: { sqlite: true }` in the
+manifest makes the host open `.oxplow/extensions-data/<name>.sqlite`
+(created when missing; its own pool, like `Database::attach`; never
+attached to the main connection) and run the extension's migration files
+(`storage/migrations/V<n>__<name>.sql`, in order, recorded in the file).
+The service `store.sql` (`needs: [store.sql]`) runs SQL on that file
+only:
+
+```python
+scope("store.sql", {"sql": "INSERT INTO book (id, title) VALUES (?1, ?2)", "params": ["b1", "Dune"]})
+scope("store.sql", {"batch": [{"sql": "...", "params": [...]}, ...]})   # one transaction
+# -> {"rows": [...], "changes": n}
+```
+
+It is usable from commands, effects and collectors. A command's call
+commits with the command's own write (the store file first, then the
+main database; a failure in the second leaves the store written, and the
+next reconcile repairs the model). The file is removed with the
+extension's data (uninstall), never on disable.
+
+**The scoped file service.** `files:` in the manifest names folders the
+extension may use, relative to the project root, each with `access: read
+| write`:
+
+```yaml
+files:
+  - { path: shelf, access: write }
+```
+
+`files.read { path }` → `{ body }`, `files.list { path, glob? }` →
+`{ files: [{ path, size, modified_at }] }`, `files.write { path, body }`,
+`files.delete { path }` (`needs: [files.read]` / `[files.write]`, the
+usual grant). A path outside a declared folder, or with `..`, is refused.
+oxplow's write guard does not apply to these writes (it goes with the
+oxwiki carve-out).

@@ -315,3 +315,35 @@ profiles". `extension check` and `extension test` print a line per
 profile (`oxplow_sdk::profile_lines`: bound, or falling back), and
 `check` warns when the binding serving a profile forbids a feature it
 declares (`profile_warnings`, a person's `restrict:`).
+
+## Triggers for observers (contract, being built)
+
+Part of the shared-models work ([models.md](./models.md)). A store's
+collector must be able to follow its tool without an oxplow event. Three
+new `on:` kinds, mixed freely with event types in one list:
+
+```yaml
+collectors:
+  - id: shelf-folder.books
+    runtime: starlark
+    entry: collectors/books.star
+    needs: [model.write, files.read]
+    on: [start, { files: "shelf/*.md" }, shelf-folder.book.written]
+```
+
+- **`start`**: once when the extension starts (boot, enable, a deploy).
+  It is the full reconcile: the script states a `snapshot`. Its input has
+  `x["trigger"] = "start"`.
+- **`{ files: <glob> }`**: files in the primary worktree matching the
+  glob (relative to the project root) were created, changed or removed,
+  from the stream watch (`stream_watch::subscribe_primary`). Coalesced
+  over the asset window. Input: `x["trigger"] = "files"`, `x["changed"]
+  = [{ path, op: created | modified | removed }]`.
+- **`{ sqlite: own }`** or **`{ sqlite: <path> }`**: a SQLite file's
+  `PRAGMA data_version` moved (polled, every 2 s while the extension is
+  on; `own` is the extension's own file, [extensions-permissions.md](./extensions-permissions.md)
+  "Store services"). Input: `x["trigger"] = "sqlite"`.
+- Every run may return `"cursor"`; the next run gets it as `x["cursor"]`
+  ([models.md](./models.md) "Cursor").
+- A trigger fires only while the extension is on. A run that fails keeps
+  the cursor and is retried on the next trigger.
