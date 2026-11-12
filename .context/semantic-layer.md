@@ -402,8 +402,15 @@ materialized input's own table) — re-run when the registry (`dataset`,
 changed is re-registered, so its first recompute fills it: a contract
 can change under an unchanged SELECT (an input's column changed type),
 and the compiler then recreates the table empty (tsk727). A recompute refills the table, whole, in one
-transaction (`DELETE`, then `INSERT … SELECT`), after its inputs have
-been quiet for the coalesce window, and is recorded in `asset_state`.
+transaction, after its inputs have been quiet for the coalesce window
+(or three windows after the first change when they never go quiet), and
+is recorded in `asset_state`. It writes only when the answer differs
+from what the table holds (computed into a temp table with the table's
+columns and compared as a multiset; then `DELETE`, `INSERT … SELECT`):
+an answer that didn't move touches nothing, so its readers hear nothing.
+That is what lets a small dataset over a busy input be stored instead of
+live: bundled's `finished_cleared` reads the event log, which every agent
+event writes, and as a live view it re-ran the Work panel on each one.
 **Lineage for subscriptions** routes through the table: a materialized
 dataset changes when `m_<view>` is refilled, not when its inputs move, so
 `DatasetsChanged` names it and its readers once per recompute. Its
@@ -744,7 +751,8 @@ input tables and recomputes it; `Services.assets` (an `Assets` runner) is
 told by the change loop which tables each commit touched, marks the
 materializers reading them dirty, and recomputes each once its inputs have
 been quiet for `COALESCE` (1 s) — a sweep's burst of writes is one
-recompute. Each recompute is recorded in `asset_state` (V130) and read as
+recompute — or `MAX_WAIT_FACTOR` (3) windows after the first change, so
+an input written all the time can't starve it. Each recompute is recorded in `asset_state` (V130) and read as
 **`v_asset`** (`asset`, `computed_at`, `events_to` — the log's highest
 seq as it began — `snapshot_id`, `elapsed_ms`): an asset's freshness and
 provenance. A registered asset builds once at registration (its

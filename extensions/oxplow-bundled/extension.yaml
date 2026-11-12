@@ -77,6 +77,11 @@ datasets:
   - name: finished_cleared
     version: 2
     key: [thread_id]
+    # Stored: it reads the event log, which every agent event writes, and a
+    # live view of it would make the Work panel re-run on each one. A
+    # recompute that finds the same rows writes nothing, so its readers
+    # hear only a clear.
+    materialize: on_change
     description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.tasks.clear_finished`), read from the events' envelopes."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
