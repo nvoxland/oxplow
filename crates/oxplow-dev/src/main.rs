@@ -4,18 +4,13 @@
 //! pages, through the `knowledge.*` commands, with oxwiki as the store
 //! (`--store oxwiki`, the one it runs), whatever the project has enabled.
 //!
-//! `oxplow-dev task …` over oxtask's own file when the project has the oxtask
-//! extension enabled (`oxtask_file.rs`); else, as below, over core's tables.
-//! It reads and changes oxtask while the project
-//! has no task tracker active (none chosen in Settings → Capabilities). It runs oxplow's own `task.*` commands on a command
-//! bus over the project's database, as the app would — validation, audit,
-//! events and all — on a bus that doesn't check what's active. So the rows
-//! and the log are the task system's own, and turning the extension back
-//! on shows all of it. The database is opened as it is
-//! (`Database::open_existing`): nothing migrated or recompiled under the
-//! running app. Its reads are oxplow's own task table, not the task
-//! interface (which shows only the active list's items): the one place
-//! outside oxplow's implementation that reads it, on purpose. See
+//! `oxplow-dev task …` works over oxtask's own file (`oxtask_file.rs`)
+//! when the project has the oxtask extension enabled; without it there is
+//! no task tracker for it to reach. Knowledge goes through the
+//! `knowledge.*` commands on a command bus over the project's database, as
+//! the app would — validation, audit, events and all. The database is
+//! opened as it is (`Database::open_existing`): nothing migrated or
+//! recompiled under the running app. See
 //! `.context/working-in-this-repo.md` "oxplow-dev".
 
 use std::path::{Path, PathBuf};
@@ -26,7 +21,6 @@ mod oxtask_file;
 
 use oxplow_app::commands::CommandBus;
 use oxplow_db::{Database, SqliteEventLogStore};
-use oxplow_domain::tasks::TaskTrackers;
 use oxplow_domain::{Actor, ThreadId};
 use serde_json::{json, Map, Value};
 
@@ -120,17 +114,20 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
     }
     match args.first().map(String::as_str) {
         Some("task") => {
-            // With oxtask on, the tasks are its file's; else core's tables.
-            if oxplow_config::extension_settings(&project).is_enabled("oxtask") {
-                let file = oxtask_file::OxtaskFile::open(&project, thread.as_deref())?;
-                return file.run(&args[1..], USAGE);
+            // The tasks are oxtask's file's.
+            if !oxplow_config::extension_settings(&project).is_enabled("oxtask") {
+                return Err(
+                    "there is no task tracker to reach: the oxtask extension is off in this \
+                     project (turn it on in Settings → Extensions)"
+                        .to_string(),
+                );
             }
-            let tasks = Tasks::open(&project, thread.as_deref())?;
-            tasks.run(args.split_off(1)).await
+            let file = oxtask_file::OxtaskFile::open(&project, thread.as_deref())?;
+            file.run(&args[1..], USAGE)
         }
         Some("knowledge") => {
-            let tasks = Tasks::open(&project, thread.as_deref())?;
-            tasks.knowledge(args.split_off(1)).await
+            let dev = Dev::open(&project, thread.as_deref())?;
+            dev.knowledge(args.split_off(1)).await
         }
         Some("extension") => extension(&project, &args[1..]).await,
         _ => Err(format!("usage:\n{USAGE}")),
@@ -375,30 +372,21 @@ fn take_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     Some(value)
 }
 
-/// oxtask over the project's database.
-struct Tasks {
+/// The knowledge commands over the project's database.
+struct Dev {
     db: Database,
     bus: Arc<CommandBus>,
     actor: Actor,
 }
 
-impl Tasks {
+impl Dev {
     fn open(project: &Path, thread: Option<&str>) -> Result<Self, String> {
         let layout = oxplow_app::AppLayout::for_project(project);
         let db = Database::open_existing(&layout.state_db_path)
             .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
         let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
         let log = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
-        // The task interface's projections, so a write here reads
-        // back at once (the app's pump delivers the rest).
-        let pump = Arc::new(oxplow_app::event_pump::EventPump::new(
-            db.clone(),
-            log.clone(),
-            vec![
-                Arc::new(oxplow_app::tasks::TasksProjection),
-                Arc::new(oxplow_app::page_ref_consumers::PageRefTaskConsumer { vocabulary }),
-            ],
-        ));
+        let pump = Arc::new(oxplow_app::event_pump::EventPump::new(db.clone(), log.clone(), vec![]));
         // No `with_capabilities`: every registered command is offered,
         // whatever the project has active.
         let bus = Arc::new(CommandBus::new(
@@ -407,28 +395,6 @@ impl Tasks {
             Arc::new(oxplow_app::agent_policy::AgentPolicy),
             pump,
         ));
-        let tasks = TaskTrackers::new(Arc::new(|| oxplow_app::tasks::PROVIDER.to_string()));
-        tasks.register(
-            oxplow_app::tasks::built_in_provider(oxplow_app::tasks::BUILT_IN, &db)
-                .ok_or("oxtask aren't a built-in task tracker")?,
-        );
-        let links = oxplow_app::link_check::LinkDeps {
-            project_dir: layout.project_dir.clone(),
-            vcs: Arc::new(oxplow_app::vcs::GitProvider),
-            db: db.clone(),
-            vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
-        };
-        use oxplow_app::commands::task as w;
-        for op in [
-            w::transition_op(tasks.clone(), db.clone()),
-            w::create_op(tasks.clone(), links.clone()),
-            w::update_op(tasks.clone(), links.clone()),
-            w::link_op(tasks.clone(), links.clone()),
-            w::unlink_op(tasks.clone(), links),
-            w::comment_op(tasks.clone()),
-        ] {
-            bus.add_op(op).map_err(|e| e.to_string())?;
-        }
         // oxwiki as the knowledge store, whatever the project has enabled:
         // pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app does.
         let stores = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
@@ -463,65 +429,6 @@ impl Tasks {
             None => Actor::Human,
         };
         Ok(Self { db, bus, actor })
-    }
-
-    async fn run(&self, mut args: Vec<String>) -> Result<String, String> {
-        let body = take_flag(&mut args, "--body");
-        let parent = take_flag(&mut args, "--parent");
-        let state = take_flag(&mut args, "--state");
-        let title = take_flag(&mut args, "--title");
-        let all = args.iter().any(|a| a == "--all");
-        args.retain(|a| a != "--all");
-        // What's left is positional: an option it doesn't take would
-        // otherwise become a title or an id.
-        if let Some(unknown) = args.iter().find(|a| a.starts_with("--")) {
-            return Err(format!("unknown option `{unknown}`\nusage:\n{USAGE}"));
-        }
-        let arg = |i: usize, what: &str| {
-            args.get(i)
-                .cloned()
-                .ok_or_else(|| format!("missing {what}\nusage:\n{USAGE}"))
-        };
-        match args.first().map(String::as_str) {
-            Some("list") => self.list(all).await,
-            Some("show") => self.show(&arg(1, "<id>")?).await,
-            Some("create") => {
-                let mut input = Map::new();
-                input.insert("title".into(), json!(arg(1, "<title>")?));
-                put(&mut input, "body", body);
-                put(&mut input, "parent_uri", parent);
-                put(&mut input, "state", state);
-                self.command("oxplow.task.create", input).await
-            }
-            Some("transition") => {
-                let mut input = Map::new();
-                input.insert("uri".into(), json!(arg(1, "<id>")?));
-                input.insert("to".into(), json!(arg(2, "<state>")?));
-                self.command("oxplow.task.transition", input).await
-            }
-            Some("update") => {
-                let mut input = Map::new();
-                input.insert("uri".into(), json!(arg(1, "<id>")?));
-                put(&mut input, "title", title);
-                put(&mut input, "body", body);
-                put(&mut input, "parent_uri", parent);
-                self.command("oxplow.task.update", input).await
-            }
-            Some("comment") => {
-                let mut input = Map::new();
-                input.insert("uri".into(), json!(arg(1, "<id>")?));
-                input.insert("body".into(), json!(arg(2, "<body>")?));
-                self.command("oxplow.task.comment", input).await
-            }
-            Some(verb @ ("link" | "unlink")) => {
-                let mut input = Map::new();
-                input.insert("uri".into(), json!(arg(1, "<id>")?));
-                input.insert("target".into(), json!(arg(2, "<target>")?));
-                input.insert("link_type".into(), json!(arg(3, "<link type>")?));
-                self.command(&format!("oxplow.task.{verb}"), input).await
-            }
-            _ => Err(format!("usage:\n{USAGE}")),
-        }
     }
 
     /// `oxplow-dev knowledge …`: the pages through the knowledge commands.
@@ -638,60 +545,8 @@ impl Tasks {
             .run(&self.actor, name, Value::Object(input), confirmed)
             .await
             .map_err(|e| e.to_string())?;
-        // The interface answers `{ ref, state? }`; this is oxplow's task
-        // tool, so it names the task's id too.
-        let mut result = out.result;
-        let task = result["uri"]
-            .as_str()
-            .and_then(oxplow_oxtask::oxtask_of_task_ref);
-        if let (Some(task), Value::Object(fields)) = (task, &mut result) {
-            fields.insert("id".into(), json!(task.to_string()));
-        }
+        let result = out.result;
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
-    }
-
-    /// Oxplow's tasks, from its own table: whatever task tracker is active
-    /// (the interface shows only the active one's), this is oxplow's.
-    async fn list(&self, all: bool) -> Result<String, String> {
-        let rows = self
-            .rows(
-                &format!(
-                    "SELECT 'tsk' || id, status, title FROM oxtask WHERE deleted_at IS NULL {}
-                     ORDER BY id",
-                    if all {
-                        ""
-                    } else {
-                        "AND status NOT IN ('done', 'canceled', 'archived')"
-                    }
-                ),
-                vec![],
-            )
-            .await?;
-        Ok(rows
-            .iter()
-            .map(|r| format!("{}\t{}\t{}", r[0], r[1], r[2]))
-            .collect::<Vec<_>>()
-            .join("\n"))
-    }
-
-    async fn show(&self, id: &str) -> Result<String, String> {
-        let id = oxplow_domain::uri::build::task_of_uri(id)
-            .map_or(id.to_string(), |(_, item)| item)
-            .trim_start_matches("tsk")
-            .to_string();
-        let rows = self
-            .rows(
-                "SELECT 'tsk' || id, status, title,
-                        coalesce('tsk' || parent_id, ''), coalesce(description, '')
-                   FROM oxtask WHERE id = ?1 AND deleted_at IS NULL",
-                vec![id.clone()],
-            )
-            .await?;
-        let r = rows.first().ok_or_else(|| format!("no task `tsk{id}`"))?;
-        Ok(format!(
-            "{}\nstate: {}\ntitle: {}\nparent: {}\n\n{}",
-            r[0], r[1], r[2], r[3], r[4]
-        ))
     }
 
     /// `sql`'s rows as text.

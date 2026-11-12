@@ -1,9 +1,8 @@
 use super::*;
 
 /// Load component `id` as its frame would, then ask what the fixture asks
-/// (`when: { component, items?: [title], invokes?: [{ command, input? } | { point, context?, command? }]
-/// }`): `items` are tasks filed first
-/// (`oxplow:oxplow/task?id=tsk1&provider=oxtask`, …); each invoke's
+/// (`when: { component, invokes?: [{ command, input? } | { point, context?, command? }]
+/// }`): each invoke's
 /// outcome — what the command answers when the component calls it —
 /// against `expect: { invokes?: [{ ok?, refused? }] }`. The data a
 /// component draws is its page's loaders: a page example tests those. The
@@ -31,34 +30,6 @@ pub(super) async fn component_example(
             return;
         }
     };
-    for title in ex
-        .when
-        .get("items")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-    {
-        let made = host
-            .svc
-            .tasks_client()
-            .create(
-                &Actor::Human,
-                oxplow_app::tasks::NewItem {
-                    title: title.as_str().unwrap_or_default().into(),
-                    ..Default::default()
-                },
-            )
-            .await;
-        if let Err(e) = made {
-            report.errors.push(error(
-                shown,
-                None,
-                "example.component_failed",
-                format!("filing its item `{title}`: {e}"),
-            ));
-            return;
-        }
-    }
     let mut invokes = Vec::new();
     for i in ex
         .when

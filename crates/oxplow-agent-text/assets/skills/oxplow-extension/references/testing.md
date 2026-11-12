@@ -95,7 +95,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | panel | `{ panel: <id \| ext/id>, thread?, stream?, choices? } (the panel run whole, as the rail shows it)` | `{ body?, collapsed?, count_page?, badge? (each a part's run, as a page's expect), count?, alert?, choices?, text? }` |
 | form | `{ form: <page \| part>, node?, params? }` | `{ values?, fixed?, fields? }` |
 | job | `{ job: <id>, intentKey, request, cancel?, setup?, rows? }` | `{ state, result?, text?, toolCalls?, output?, effects?, commands?, pages? }` |
-| component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
+| component | `{ component: <id>, invokes?: [{ command, input? } \| { point, context?, command? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
 | event | `{ event: { type, v?, payload, subject?, anchors? } }` | `{ effects?: [{ id, state }], commands?: [names] }` |
 | effect | `{ effect: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip } \| { reacts: false }` |
 | event_type | `{ event_type, v?, payload }` | `{ valid, upcast? }` |
@@ -276,10 +276,10 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      the tool's result); `cancel: true` cancels it through
      your `jobs.write/cancel` command once it has written. `expect: {
      state, result?, text?, toolCalls?, output?: [{ kind }] }`;
-   - a component: `when: { component: <id>, items?: [title], invokes?: [{
-     command, input? }] }` — what its frame would ask; `expect: { invokes: [{
+   - a component: `when: { component: <id>, invokes?: [{
+     command, input? } | { point, context?, command? }] }` — what its frame would ask; `expect: { invokes: [{
      ok, result? } | { ok: false, refused }] }` (an invoke is `refused` when the
-     command refuses or fails; `items` are tasks filed first, `oxplow:oxplow/task?id=<id>&provider=oxtask`, …);
+     command refuses or fails);
    - a page's form (a `viz: form` node): `when: { form: <page>, node?,
      params? }` — opens it as a person would (`node` names the form node,
      else the page's first); `expect: { values?, fixed?, fields? }` (the

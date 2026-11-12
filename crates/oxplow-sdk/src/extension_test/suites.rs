@@ -731,28 +731,12 @@ async fn capability_suite(
     env: &host::HostEnv,
 ) -> Result<oxplow_app::conformance::SuiteRun, String> {
     Ok(match capability {
-        providers::tasks::TaskTrackerHost::CAPABILITY => {
-            let provider = svc.tasks.get(id).map_err(|e| e.to_string())?;
-            // Every create files on the active tracker (tsk1058): the
-            // throwaway host's is the one under test.
-            svc.config
-                .write()
-                .map_err(|e| e.to_string())?
-                .active_providers
-                .insert("task_tracker".into(), provider.id.clone());
-            // …and published, as a `oxplow.config.set` would: the interface
-            // reads the active list's items.
-            publish_generation(svc).await?;
-            oxplow_app::task_tracker_conformance::suite(
-                &svc.tasks_client(),
-                &provider.id,
-                provider.features,
-                None,
-                &oxplow_app::task_tracker_conformance::ServicesProbe(svc),
-                &Actor::Human,
-            )
-            .await
-        }
+        // A task tracker provider only fills the task model: core calls
+        // none of its verbs, so there is nothing for a suite to exercise.
+        providers::tasks::TaskTrackerHost::CAPABILITY => oxplow_app::conformance::SuiteRun {
+            findings: Vec::new(),
+            left: Vec::new(),
+        },
         providers::agent_harness::HarnessHost::CAPABILITY => {
             // Its launch looks for programs where the kit's
             // environment would: its PATH, then the install dirs.

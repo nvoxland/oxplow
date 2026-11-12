@@ -180,10 +180,9 @@ pub async fn record_repair(db: &oxplow_db::Database, elapsed_ms: i64) {
     }
 }
 
-/// What the backfill projects: the task interface (in `db`) and the
-/// stores of the other kinds.
+/// What the backfill projects: the stores of the kinds whose data lives
+/// entirely in SQLite.
 pub struct Sources {
-    pub db: oxplow_db::Database,
     pub findings: Arc<SqliteCodeQualityStore>,
     pub handoffs: Arc<SqliteHandoffStore>,
 }
@@ -195,7 +194,6 @@ pub async fn run(
     sources: Sources,
 ) -> BackfillCounts {
     let Sources {
-        db,
         findings: findings_store,
         handoffs,
     } = sources;

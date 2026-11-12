@@ -69,16 +69,6 @@ pub enum ReadError {
 /// query's `?1` the URI (its view left out).
 const RELATED: &[(&str, &str, &str)] = &[
     (
-        r::TASK,
-        "links",
-        "SELECT * FROM v_task_link WHERE from_uri = ?1 ORDER BY created_at",
-    ),
-    (
-        r::TASK,
-        "comments",
-        "SELECT * FROM v_task_comment WHERE uri = ?1 ORDER BY created_at",
-    ),
-    (
         r::COMMIT,
         "files",
         "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE uri = ?1) ORDER BY path",

@@ -317,7 +317,7 @@ pub(super) const KINDS: &[Kind] = &[
     },
     Kind {
         key: "component",
-        when: "{ component: <id>, items?, invokes?: [{ command, input? } | { point, context?, command? }] }",
+        when: "{ component: <id>, invokes?: [{ command, input? } | { point, context?, command? }] }",
         expect: "{ invokes: [{ ok, result? } | { ok: false, refused }] }",
     },
     Kind {
@@ -409,8 +409,7 @@ pub(super) fn kinds_table() -> String {
 }
 
 /// Whether example `ex` changes its oxplow's data (and what reacts to
-/// that): it has steps or rows, or runs a job, logs an event or files a
-/// component's items. A dry run (a command's, an effect's) or a
+/// that): it has steps or rows, or runs a job or logs an event. A dry run (a command's, an effect's) or a
 /// collector run that stores nothing doesn't.
 pub(super) fn makes_data(ex: &Example<'_>) -> bool {
     let input = &ex.when;

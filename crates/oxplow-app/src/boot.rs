@@ -487,7 +487,6 @@ pub async fn run_boot_orchestration(
         let vocabulary = state.vocabulary.clone();
         let page_refs = state.page_ref_store.clone();
         let sources = crate::page_ref_backfill::Sources {
-            db: state.db.clone(),
             findings: state.code_quality_store.clone(),
             handoffs: state.handoff_store.clone(),
         };
