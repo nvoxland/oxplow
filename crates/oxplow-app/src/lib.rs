@@ -2337,7 +2337,19 @@ mod tests {
                 "oxplow.tasks.assign",
                 "oxplow.tasks.clear_finished",
                 "oxplow.tasks.reorder",
-                "oxplow.tasks.set_workflow",
+                // oxtask's commands compose a write of its own store; its
+                // workflow setting a write of its own settings.
+                "oxtask.task.comment",
+                "oxtask.task.create",
+                "oxtask.task.delete",
+                "oxtask.task.link",
+                "oxtask.task.move",
+                "oxtask.task.restore",
+                "oxtask.task.uncomment",
+                "oxtask.task.unlink",
+                "oxtask.task.unparent",
+                "oxtask.task.update",
+                "oxtask.tasks.set_workflow",
             ]
         );
     }

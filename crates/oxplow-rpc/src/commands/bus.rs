@@ -405,28 +405,14 @@ mod tests {
                 .await
             }
         };
-        // A command that asks asks the person over IPC: a comment's delete.
-        let made = crate::dispatch(
-            "run_command",
-            json!({
-                "id": "oxplow.knowledge.add_comment",
-                "input": {
-                    "stream": "str1",
-                    "target": "oxplow:oxplow/knowledge?id=a-page&store=oxwiki",
-                    "body": "T",
-                },
-                "confirmed": false,
-            }),
-            &svc,
-        )
-        .await
-        .unwrap();
+        // A command that asks asks the person over IPC: a file's delete.
+        std::fs::write(dir.path().join("old.txt"), "old").unwrap();
         let delete = |confirmed: bool| {
-            let (svc, comment) = (svc.clone(), made["result"]["comment"]["id"].clone());
+            let svc = svc.clone();
             async move {
                 crate::dispatch(
                     "run_command",
-                    json!({ "id": "oxplow.knowledge.delete_comment", "input": { "comment": comment }, "confirmed": confirmed }),
+                    json!({ "id": "oxplow.file.delete", "input": { "stream": "str1", "path": "old.txt" }, "confirmed": confirmed }),
                     &svc,
                 )
                 .await
@@ -434,7 +420,9 @@ mod tests {
         };
         let err = delete(false).await.unwrap_err();
         assert_eq!(err.code, "NEEDS_CONFIRMATION", "{}", err.message);
+        assert!(dir.path().join("old.txt").exists(), "asked, so not deleted");
         delete(true).await.unwrap();
+        assert!(!dir.path().join("old.txt").exists());
         // One that doesn't ask runs at once.
         let out = set(false).await.unwrap();
         assert!(out["audit_id"].is_number(), "{out}");
@@ -468,7 +456,8 @@ mod tests {
     #[tokio::test]
     async fn a_person_decides_an_effects_proposal() {
         use oxplow_domain::stores::{StreamStore as _, ThreadStore as _};
-        let (svc, _dir) = services().await;
+        let (svc, dir) = services().await;
+        std::fs::write(dir.path().join("proposed.txt"), "x").unwrap();
         let stream = svc.stream_store.list().await.unwrap().pop().unwrap();
         let thread = svc
             .thread_store
@@ -483,30 +472,15 @@ mod tests {
             thread_id: Some(thread.id),
             stream_id: Some(stream.id),
         };
-        let made = svc
-            .commands
-            .run(
-                &oxplow_domain::Actor::Human,
-                "oxplow.knowledge.add_comment",
-                json!({
-                    "stream": "str1",
-                    "target": "oxplow:oxplow/knowledge?id=a-page&store=oxwiki",
-                    "body": "Proposed away",
-                }),
-                false,
-            )
-            .await
-            .unwrap();
         let propose = || {
             let (svc, effect) = (svc.clone(), effect.clone());
-            let comment = made.result["comment"]["id"].clone();
             async move {
                 let err = svc
                     .commands
                     .run(
                         &effect,
-                        "oxplow.knowledge.delete_comment",
-                        json!({ "comment": comment }),
+                        "oxplow.file.delete",
+                        json!({ "stream": "str1", "path": "proposed.txt" }),
                         false,
                     )
                     .await
@@ -528,31 +502,16 @@ mod tests {
                 .await
             }
         };
-        let exists = || {
-            let svc = svc.clone();
-            async move {
-                svc.commands
-                    .run(
-                        &oxplow_domain::Actor::Human,
-                        "oxplow.sql.query",
-                        json!({ "sql": "SELECT count(*) FROM v_comment WHERE body = 'Proposed away'" }),
-                        false,
-                    )
-                    .await
-                    .unwrap()
-                    .result["rows"][0][0]
-                    .clone()
-            }
-        };
+        let exists = || dir.path().join("proposed.txt").exists();
 
         let declined = propose().await;
         assert_eq!(decide(declined, false).await.unwrap(), json!(null));
-        assert_eq!(exists().await, json!(1), "declined: still there");
+        assert!(exists(), "declined: still there");
 
         let approved = propose().await;
         let out = decide(approved, true).await.unwrap();
         assert!(out["audit_id"].is_number(), "{out}");
-        assert_eq!(exists().await, json!(0), "approved: deleted as the person");
+        assert!(!exists(), "approved: deleted as the person");
         // Decided once.
         let err = decide(approved, false).await.unwrap_err();
         assert_eq!(err.code, "INVALID", "{}", err.message);

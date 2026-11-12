@@ -120,6 +120,10 @@ mod tests {
     /// names: a link to a collector nothing installed defines comes back
     /// unresolved with no label, never an error.
     #[tokio::test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test seeds an edge no command writes"
+    )]
     async fn an_outbound_edge_says_whether_its_target_resolves() {
         let (svc, _dir) = crate::test_support::services().await;
         let item = "oxplow:oxplow/knowledge?id=fix-it&store=oxwiki".to_string();

@@ -55,8 +55,8 @@ fn wikilink_sugar_translates_to_uris() {
         ),
         // A URI itself, of a declared resource.
         (
-            "oxplow:oxplow/task?id=ENG-12&provider=issues",
-            "oxplow:oxplow/task?id=ENG-12&provider=issues",
+            "oxplow:oxplow/thread?id=thr3",
+            "oxplow:oxplow/thread?id=thr3",
         ),
         (
             "oxplow:oxplow/file?path=src/a@b.rs&rev=git:HEAD#lines=1",

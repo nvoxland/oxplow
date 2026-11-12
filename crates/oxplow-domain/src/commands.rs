@@ -400,7 +400,8 @@ pub const MENU_BARS: &[&str] = &["file", "edit"];
 impl CommandUi {
     /// The input a command at an action point runs with, from the point's
     /// `context`: its `input` with each whole `{{context.<key>}}` string
-    /// replaced by that key's value (an object entry whose key the context
+    /// replaced by that key's value (`{{context.<key>.<param>}}`: a param of the
+    /// URI that value is) (an object entry whose key the context
     /// lacks is left out), else the whole context. At a point with an
     /// `item`, `{{uri}}` is the item's URI and `{{uri.<param>}}` one of its
     /// params (`{{uri.id}}`), as an item command's are.
@@ -416,7 +417,14 @@ impl CommandUi {
         ) -> Option<Value> {
             match v {
                 Value::String(s) => match crate::template::whole_placeholder(s) {
-                    Some(p) if p.scope == "context" => ctx.get(&p.name).cloned(),
+                    Some(p) if p.scope == "context" => match p.name.split_once('.') {
+                        // `context.<key>.<param>`: a param of the URI at `key`.
+                        Some((key, param)) => {
+                            let uri = crate::uri::OxplowUri::parse(ctx.get(key)?.as_str()?).ok()?;
+                            uri.params().get(param).map(|v| Value::String(v.clone()))
+                        }
+                        None => ctx.get(&p.name).cloned(),
+                    },
                     Some(p) if p.scope == "uri" => {
                         let item = item?;
                         if p.name.is_empty() {
@@ -1558,6 +1566,26 @@ mod tests {
         assert_eq!(
             u.point_input(ctx.as_object().unwrap(), None),
             json!({ "stage": "done" })
+        );
+    }
+
+    /// A context value that is a URI binds one of its params as
+    /// `{{context.<key>.<param>}}` (a parent task's URI, its store's id); a
+    /// value that isn't a URI, or lacks the param, leaves the key out.
+    #[test]
+    fn a_context_uri_binds_one_of_its_params() {
+        let u = ui(
+            json!({ "label": "E", "at": "oxplow/task.edit", "input": { "parent": "{{context.parent.id}}", "whole": "{{context.parent}}" } }),
+        );
+        let ctx = json!({ "parent": "oxplow:oxplow/task?id=tsk3&provider=oxtask" });
+        assert_eq!(
+            u.point_input(ctx.as_object().unwrap(), None),
+            json!({ "parent": "tsk3", "whole": "oxplow:oxplow/task?id=tsk3&provider=oxtask" })
+        );
+        let bad = json!({ "parent": "tsk3" });
+        assert_eq!(
+            u.point_input(bad.as_object().unwrap(), None),
+            json!({ "whole": "tsk3" })
         );
     }
 

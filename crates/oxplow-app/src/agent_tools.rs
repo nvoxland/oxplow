@@ -209,7 +209,7 @@ mod tests {
     }
 
     /// oxplow's own tools are foundation's declarations (and, as the test
-    /// services ship it, oxplow-bundled's `next_task` and `thread_tasks`),
+    /// services ship it, oxtask's `next_task` and bundled's `thread_tasks`),
     /// each named under `oxplow_`, its hint its command's access.
     #[tokio::test]
     async fn oxplows_tools_are_foundations_declarations() {
@@ -237,7 +237,6 @@ mod tests {
                 "oxplow_list_comments",
                 "oxplow_list_tabs",
                 "oxplow_navigate",
-                "oxplow_next_task",
                 "oxplow_preview_collector",
                 "oxplow_query_sql",
                 "oxplow_read",
@@ -252,6 +251,7 @@ mod tests {
                 "oxplow_vcs_branches",
                 "oxplow_vcs_log",
                 "oxplow_vcs_status",
+                "oxtask_next_task",
             ]
         );
         let query = tools.iter().find(|t| t.name == "oxplow_query_sql").unwrap();
@@ -273,8 +273,8 @@ mod tests {
     }
 
     /// With only oxplow-foundation's declarations there is no task tracker
-    /// (oxtask is oxplow-bundled's), so the agent is offered neither
-    /// `oxplow_next_task` nor `oxplow_thread_tasks`; its other tools stay.
+    /// (oxtask requires oxplow-bundled), so the agent is offered neither
+    /// `oxtask_next_task` nor `oxplow_thread_tasks`; its other tools stay.
     #[tokio::test]
     async fn without_bundled_the_agent_has_no_task_tools() {
         let fx = services_with_thread().await;
@@ -296,7 +296,7 @@ mod tests {
             .collect();
         assert!(names.contains(&"oxplow_query_sql".to_string()), "{names:?}");
         assert!(
-            !names.contains(&"oxplow_next_task".to_string()),
+            !names.contains(&"oxtask_next_task".to_string()),
             "{names:?}"
         );
         assert!(

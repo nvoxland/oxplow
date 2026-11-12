@@ -42,7 +42,6 @@ use async_trait::async_trait;
 use oxplow_domain::diagnostic::Diagnostic;
 use oxplow_domain::events::Envelope;
 use oxplow_domain::run::{ContributionRef, Mode, RunContext};
-use oxplow_domain::tasks::StageDecl;
 use oxplow_domain::{Actor, CommandError};
 use oxplow_provider_protocol::model::{EventDraft, InitializeResult, InvokeResult};
 use serde_json::{json, Value};
@@ -62,8 +61,6 @@ pub struct ScriptEndpoint {
     extension: String,
     capability: String,
     declared: InitializeResult,
-    stages: Vec<StageDecl>,
-    id_pattern: Option<String>,
     text: Arc<str>,
     needs: Vec<String>,
     config: Value,
@@ -96,8 +93,6 @@ impl ScriptEndpoint {
             extension: ext.name.clone(),
             capability: decl.capability.clone(),
             declared: script.declared.clone(),
-            stages: script.spec.stages.clone(),
-            id_pattern: script.spec.id_pattern.clone(),
             text: script.text.as_str().into(),
             needs: decl.needs.clone(),
             config: decl.config.clone(),
@@ -151,14 +146,6 @@ impl Endpoint for ScriptEndpoint {
 
     fn declared(&self) -> &InitializeResult {
         &self.declared
-    }
-
-    fn stages(&self) -> &[StageDecl] {
-        &self.stages
-    }
-
-    fn id_pattern(&self) -> Option<&str> {
-        self.id_pattern.as_deref()
     }
 
     async fn invoke(

@@ -58,7 +58,7 @@ const MODEL_TABLE: &str = "model__oxplow__task_record";
 const LINK_MODEL_TABLE: &str = "model__oxplow__request_task";
 /// The table an earlier build of bundled made for this model while the flip
 /// was in progress; the move drops it.
-const LEGACY_LINK_MODEL_TABLE: &str = "model__oxplow__request_task_next";
+const RENAMED_LINK_MODEL_TABLE: &str = "model__oxplow__request_task_next";
 const LINK_RESOURCE: &str = "oxplow/request_task";
 /// The ref type prefix of a task's link edges.
 const LINK_EDGE_PREFIX: &str = "task_link:";
@@ -425,7 +425,7 @@ fn main_half(tx: &Transaction<'_>, replace: bool) -> Result<Moved, DomainError> 
     // A build of bundled from before the model was renamed left its table
     // behind; links written there would never be read.
     tx.execute(
-        &format!("DROP TABLE IF EXISTS {LEGACY_LINK_MODEL_TABLE}"),
+        &format!("DROP TABLE IF EXISTS {RENAMED_LINK_MODEL_TABLE}"),
         [],
     )
     .map_err(sql)?;
@@ -917,7 +917,7 @@ mod tests {
         let c = main_db(dir.path());
         c.execute_batch(&format!(
             "CREATE TABLE {MODEL_TABLE} (uri TEXT PRIMARY KEY);
-             CREATE TABLE {LEGACY_LINK_MODEL_TABLE} (uri TEXT PRIMARY KEY);
+             CREATE TABLE {RENAMED_LINK_MODEL_TABLE} (uri TEXT PRIMARY KEY);
              CREATE TABLE {LINK_MODEL_TABLE} (uri TEXT PRIMARY KEY, store TEXT NOT NULL, key TEXT, request TEXT, task TEXT, basis TEXT, thread TEXT, turn_id INTEGER, at TEXT, written_at TEXT NOT NULL, removed_at TEXT, refs TEXT);"
         ))
         .unwrap();
@@ -1048,7 +1048,7 @@ mod tests {
         let legacy: bool = main_db(dir.path())
             .query_row(
                 "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = ?1)",
-                [LEGACY_LINK_MODEL_TABLE],
+                [RENAMED_LINK_MODEL_TABLE],
                 |r| r.get(0),
             )
             .unwrap();
@@ -1361,7 +1361,11 @@ mod tests {
     async fn the_move_refuses_while_oxtask_is_off() {
         let dir = project().await;
         seed(dir.path());
-        std::fs::write(dir.path().join(".oxplow/personal.yaml"), "").unwrap();
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxtask]\n",
+        )
+        .unwrap();
         let e = move_to_oxtask(dir.path(), false, false, false)
             .await
             .unwrap_err();

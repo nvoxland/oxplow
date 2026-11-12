@@ -2,11 +2,11 @@
 
 ## Find the data
 
-- `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_task`,
+- `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_oxplow_task`,
   `v_request`, `v_comment`, `v_knowledge_page`, `v_snapshot`, `v_measure`,
   `v_capture`, `v_fact`, …) with its doc, and `v_field` documents
   every field (column): `SELECT view, name, sql_type, doc FROM v_field WHERE
-  view = 'v_task'`. **Read them first**; don't guess column names.
+  view = 'v_oxplow_task'`. **Read them first**; don't guess column names.
 - Comment threads on pages are `v_comment`, and each one's messages
   `v_comment_message` (`WHERE comment = <the thread's uri> ORDER BY
   position`).
@@ -15,9 +15,9 @@
   query — with `read_event_content(event_id, output)` for what they
   printed) and `v_agent_nudge` (hints oxplow raised for an agent or a
   person, shown until dismissed).
-- Tasks are `v_task` (with `v_task_link` and
-  `v_task_comment`): the active task tracker's, whichever it is — never
-  a particular list's own tables.
+- Tasks are `v_oxplow_task` (with `v_oxplow_task_link` and
+  `v_oxplow_task_comment`): every store's, whichever holds them — never
+  a particular store's own tables.
 - `oxplow_query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
 - The project's architectural zones are `v_zone` (each rule of the `zones:` table
@@ -55,7 +55,7 @@ Everything in oxplow has one identity, its URI (`oxplow:oxplow/request?id=req12`
 Carry URIs; never assemble or dissect them:
 
 - **In SQL**, select the dataset's `uri` column (`v_request.uri`,
-  `v_thread.uri`, `v_task.uri`, …) — each an
+  `v_thread.uri`, `v_oxplow_task.uri`, …) — each an
   oxplow URI (`oxplow:oxplow/request?id=req12`) — and compare URIs to URIs:
   `WHERE uri = :uri`. To build one, `uri(resource, key1, value1, …)`:
   `uri('oxplow/thread', 'id', json_extract(e.payload, '$.thread'))` (an event
@@ -129,7 +129,7 @@ SELECT uri, title FROM ref('task') WHERE state = 'blocked'
 - It publishes as `v_<namespace>_<name>` (dashes as underscores), named by
   the manifest's `namespace:` (default: the extension's name):
   `v_late_work_blocked` for extension `late-work`.
-- Read through `ref()` only: `ref('task')` is a core dataset (`v_task`),
+- Read through `ref()` only: `ref('stream')` is a core dataset (`v_stream`),
   `ref('blocked')` your own dataset or synced entity. Another extension's
   dataset is read through an import ("Importing another extension's dataset" below). `source('<table>')` is only
   for your own source tables (`ext__<namespace>__<entity>`).

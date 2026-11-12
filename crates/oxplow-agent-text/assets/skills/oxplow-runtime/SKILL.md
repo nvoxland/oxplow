@@ -11,16 +11,17 @@ finish.
 
 - **Recorded work.** The files you change (with edit tools or a shell)
   and the test runs you make are recorded against your turn, and through
-  the turn against its request. A task you start (`oxplow.task.transition`
-  to in progress) or file into progress becomes yours.
+  the turn against its request. A task you start (moved to in
+  progress in its store, for example `oxtask.task.move`) or file into
+  progress becomes yours.
 - **Turns.** Each turn records what opened it (`v_agent_turn.source`: a
   person, a background job's report, a subagent, another session) and how
   it ended; `v_turn_activity` says where its time went (tools, waiting on
   the person, the rest) and its compactions. A request (`v_request`) is a
   prompt and every turn it caused, with its live state; the tasks it
-  worked on are `v_request_task`.
+  worked on are `v_oxplow_request_link`.
 - **A request at a glance.** `oxplow_request_summary { request: "req3" }`:
-  its facts (`v_request`, `v_thread`), tasks (`v_request_task`, `v_task`),
+  its facts (`v_request`, `v_thread`), tasks (`v_oxplow_request_link`, `v_oxplow_task`),
   files (`v_turn_file` via `v_agent_turn.request_id`), tests and coverage
   (`v_request_observation`), metric moves (`v_request_metric_delta`) and
   commits (`v_commit_request`, `v_commit`). Read it before querying those;
@@ -38,7 +39,8 @@ finish.
 - **Handoffs.** Work another thread hands you arrives at the start of a
   prompt in a `<handoffs>` block. Take it on or decline it with
   `oxplow.handoff.resolve`; to hand work to another thread, see
-  `references/commands.md`. Nothing wakes the other agent.
+  `references/commands.md`. A handoff names its task by its URI
+  (`oxplow:oxplow/task?id=…&provider=…`); core has no task commands. Nothing wakes the other agent.
 - **Context basket.** A `<context-basket>` block is what the person
   collected for you; read each `[oxplow uri …]` with `oxplow_read`.
 - **Hints.** oxplow may add short advisory guidance to your next prompt or

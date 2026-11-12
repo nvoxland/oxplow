@@ -1222,8 +1222,8 @@ fn script_implementation(
         extension: Some(e.name.clone()),
         source: Source::Script,
         features,
-        fields: serde_json::to_value(&script.spec.fields).unwrap_or_default(),
-        stages: serde_json::to_value(&script.spec.stages).unwrap_or_default(),
+        fields: serde_json::Value::Array(Vec::new()),
+        stages: serde_json::Value::Array(Vec::new()),
         kinds: script
             .declared
             .capabilities
@@ -1232,7 +1232,7 @@ fn script_implementation(
             .and_then(|c| c.data.get("kinds").cloned())
             .unwrap_or_default(),
         offered: true,
-        id_pattern: script.spec.id_pattern.clone(),
+        id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
         description: d.description.clone(),
@@ -2193,15 +2193,17 @@ commands:
         assert!(!skills.join("on-a").exists(), "on-a is no longer offered");
     }
 
-    /// Bundled's task skills (`next-task`, `track-work`, `work-tasks`) are
-    /// offered only while the task model has a live store; with none (no
-    /// oxtask running) the project's workflow setting offers none of them.
+    /// oxtask's task skills (`next-task`, `track-work`, `work-tasks`) are
+    /// offered while the task model has a live store, as oxtask's workflow
+    /// setting says; with the workflow off none of them is.
     #[tokio::test(flavor = "multi_thread")]
-    async fn the_task_skills_wait_for_a_live_task_store() {
+    async fn the_task_skills_follow_the_task_workflow() {
         let fx = crate::test_fixtures::services_developing_oxplow().await;
-        crate::extension::extension_deploy::deploy(&fx.svc, "oxplow-bundled", true)
-            .await
-            .expect("bundled deploys from its source");
+        for name in ["oxplow-bundled", "oxtask"] {
+            crate::extension::extension_deploy::deploy(&fx.svc, name, true)
+                .await
+                .expect("deploys from its source");
+        }
         crate::test_fixtures::activate_with_problems(&fx.svc).await;
         let offered = || async {
             let text = fx
@@ -2220,24 +2222,28 @@ commands:
             names.sort();
             names
         };
-        assert!(offered().await.is_empty(), "the default");
+        assert_eq!(offered().await, ["next-task", "track-work"], "the default");
         let store = SqliteExtensionConfigStore::new(fx.svc.db.clone());
         let mut expected = None;
-        for workflow in ["person_files", "custom", "off"] {
+        for (workflow, skills) in [
+            ("person_files", vec!["next-task", "work-tasks"]),
+            ("custom", vec!["next-task"]),
+            ("off", vec![]),
+        ] {
             let values = json!({ "tasks": { "workflow": workflow } });
             expected = Some(
                 store
                     .compare_exchange(
-                        ConfigNamespace::new("oxplow".into(), Scope::Project).unwrap(),
+                        ConfigNamespace::new("oxtask".into(), Scope::Project).unwrap(),
                         expected,
-                        2,
+                        1,
                         values,
                     )
                     .await
                     .unwrap()
                     .stamp(),
             );
-            assert!(offered().await.is_empty(), "{workflow}");
+            assert_eq!(offered().await, skills, "{workflow}");
         }
     }
 }

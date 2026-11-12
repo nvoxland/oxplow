@@ -341,7 +341,7 @@ pub const MANIFEST: &[Capability] = &[
     agent("oxplow_code_call_hierarchy"),
     agent("oxplow_navigate"),
     agent("oxplow_thread_tasks"),
-    agent("oxplow_next_task"),
+    agent("oxtask_next_task"),
     agent("oxplow_catalog"),
     agent("oxplow_request_summary"),
     // ---- git ----

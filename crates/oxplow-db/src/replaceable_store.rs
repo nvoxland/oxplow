@@ -21,7 +21,7 @@ pub fn restate_tx(conn: &Connection) -> Result<(), DomainError> {
     for r in replaceable_all() {
         st.execute(params![
             r.target,
-            r.capability,
+            r.subject(),
             r.bound_to_provider as i64,
             i64::from(r.version),
             serde_json::to_string(r.props).expect("prop names serialize"),

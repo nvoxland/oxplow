@@ -1026,13 +1026,10 @@ fn a_manifest_names_a_capability_a_process_may_implement() {
         "snapshots",
         "    fields: [{ name: points, title: Points, kind: number }]\n",
     ));
-    assert!(
-        errors[0].contains("fields are an item-keeping capability's"),
-        "{errors:?}"
-    );
+    assert!(errors[0].contains("unknown field `fields`"), "{errors:?}");
     let (_, errors) = parse(manifest("snapshots", "    idPattern: \"P-\\\\d+\"\n"));
     assert!(
-        errors[0].contains("id_pattern is an item-keeping capability's"),
+        errors[0].contains("unknown field `idPattern`") || errors[0].contains("unknown field"),
         "{errors:?}"
     );
 }

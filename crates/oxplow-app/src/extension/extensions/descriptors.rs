@@ -875,6 +875,7 @@ mod tests {
                 extension: "tracker".into(),
                 target: "task.board".into(),
                 capability: "vcs".into(),
+                model: None,
                 bound_to_provider: false,
                 page: "tracker/board".into(),
                 version: 1,

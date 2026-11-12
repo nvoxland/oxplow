@@ -532,6 +532,48 @@ async fn a_replaceable_node_runs_the_replacement_that_stands_in_for_it() {
     assert!(own.tree.embed.is_none(), "{:?}", own.tree);
 }
 
+/// A replaceable target of a shared model's items, bound to the item's store
+/// (`task.detail.state`): the extension that fills the model as the store the
+/// item's `provider` names replaces it, and no other store's item takes it.
+#[tokio::test]
+async fn a_model_bound_target_is_replaced_by_the_items_own_store() {
+    let dir = tempfile::tempdir().unwrap();
+    crate::test_fixtures::init_git_repo(dir.path());
+    let write = |rel: &str, body: &str| {
+        let p = dir.path().join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, body).unwrap();
+    };
+    write(
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2\nname: acme\nintent:\n  purpose: test\n",
+    );
+    write(
+        ".oxplow/extensions/acme/pages/host.yaml",
+        "title: Host\nparams: [{ name: uri }]\nloaders:\n  own: { sql: \"SELECT 1 AS n\" }\nview: { id: state, viz: table, from: own, replaceable: task.detail.state }\n",
+    );
+    // A second store of the task model, replacing the state control.
+    write(
+        ".oxplow/extensions/beta/extension.yaml",
+        "manifest: 2\nname: beta\nrequires: [oxplow-bundled]\nintent:\n  purpose: test\nfills:\n  - model: oxplow/task_record\n    stores: [beta]\n    stages:\n      - { id: open, title: Open, bucket: todo }\n      - { id: doing, title: Doing, bucket: in_progress }\n      - { id: shut, title: Shut, bucket: done }\nui:\n  mounts:\n    - { page: state, at: task.detail.state }\n",
+    );
+    write(
+        ".oxplow/extensions/beta/pages/state.yaml",
+        "title: State\nparams: [{ name: uri }]\nloaders:\n  echo: { sql: \"SELECT :uri AS uri\" }\nview: { viz: table, from: echo }\n",
+    );
+    let svc = crate::Services::in_memory(dir.path()).await.unwrap();
+    let problems = crate::test_fixtures::activate_with_problems(&svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+
+    let beta = "oxplow:oxplow/task?id=b1&provider=beta";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(beta.into()))]).await;
+    assert_eq!(r.tree.replaced_by.as_deref(), Some("beta"));
+
+    let oxtask = "oxplow:oxplow/task?id=tsk1&provider=oxtask";
+    let r = run(&svc, "acme/host", &[("uri", SqlCell::Text(oxtask.into()))]).await;
+    assert_eq!(r.tree.replaced_by, None, "oxtask's items keep oxplow's own");
+}
+
 /// A loader with no columns (nothing came back, or it failed) is not a
 /// table SQLite can hold: what reads it yields no rows, or says what it
 /// read failed, never a syntax error.

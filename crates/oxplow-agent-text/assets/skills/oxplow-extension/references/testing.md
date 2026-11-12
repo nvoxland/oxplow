@@ -81,7 +81,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model, and `requires: [<extension>…]` for more extensions that fixture
-   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker and knowledge; a fixture that needs what `oxplow-bundled`
+   needs on (what only yours declares is on otherwise, plus oxplow's own knowledge; a fixture that needs what `oxplow-bundled`
    adds, such as its review pages, says `requires: [oxplow-bundled]`; a name
    that isn't an extension here is an error). Any other key is an error:
    The kinds of fixture (generated from the runner's own list):
@@ -161,8 +161,9 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `$name.uri` (any `.key` / `[n]` path) in a later input, `params` or
      `expect` is that value. `confirmed: true` runs a command that asks a
      person first. Example:
-     `given: [{ command: oxplow.task.create, input: { title: T }, bind: t }]`,
-     `when: { page: items, params: { uri: $t.uri } }`, `expect: { loaders:
+     `given: [{ command: oxtask.task.create, input: { title: T }, bind: t }]`
+     (the fixture's extension has `requires: [oxtask]`),
+     `when: { page: items, params: { id: $t.id } }`, `expect: { loaders:
      { items: { rows: [{ title: T }] } } }`.
      **Scenarios:** `steps: [ { given: [..] } | { expect, params?, bind? } ]`
      after it — each `expect` runs the page again (`params` over the

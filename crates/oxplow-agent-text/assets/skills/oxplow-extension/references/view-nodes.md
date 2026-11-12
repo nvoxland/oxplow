@@ -220,7 +220,7 @@ exists for actions and links).
   a `uri`). Build it in SQL (`json_object('kind', 'agent', 'label',
   th.title, 'uri', uri('oxplow/page', 'page', 'thread-tasks', 'thread', 'thr'
   || th.id))`). An agent reads `agent in <label>`, `extension <label>`.
-- `link: { kind, from? }` makes cells clickable: `page` (any URI: a task's `v_task.uri`, `oxplow:oxplow/commit?sha=…`), `file` (a path;
+- `link: { kind, from? }` makes cells clickable: `page` (any URI: a task's `v_oxplow_task.uri`, `oxplow:oxplow/commit?sha=…`), `file` (a path;
   `line: <column>`), `knowledge` (a page's URI), `commit`, `metric`, `request` (a
   request's id, `v_request.id`: opens its Changes page).
   `from` names the column holding the id (default: the column itself).
@@ -259,8 +259,8 @@ row action) or the page (`page-format.md`).
 - `input` is the command's input; `"{{param.x}}"` binds a page param and,
   with `row: true` (a row's right-click action), `"{{row.col}}"` binds that
   row's column, which the loader must return even when `columns:` doesn't
-  show it. e.g. `{ id: finish, label: Finish, command:
-  oxplow.task.transition, row: true, input: { uri: "{{row.uri}}", to:
+  show it. e.g. `{ id: finish, label: Finish, point:
+  oxplow/task.move, row: true, context: { uri: "{{row.uri}}", stage:
   done } }`.
 - A viz node's action without `row` is a button under its rows. `all:
   true` says it acts on every row shown (a Clear, a Retry all): the

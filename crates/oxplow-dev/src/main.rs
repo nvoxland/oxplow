@@ -1128,6 +1128,11 @@ mod tests {
     #[tokio::test]
     async fn with_oxtask_off_there_is_no_tracker_and_its_file_is_not_made() {
         let dir = project().await;
+        std::fs::write(
+            dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxtask]\n",
+        )
+        .unwrap();
         let err = dev(dir.path(), &["task", "create", "Nowhere"])
             .await
             .unwrap_err();

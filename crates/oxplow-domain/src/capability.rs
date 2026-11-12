@@ -88,8 +88,6 @@ pub struct ProviderContract {
     /// The resource whose URIs an instance owns (`oxplow/task`, its
     /// `provider` param the instance); `None` when it owns none.
     pub resource: Option<&'static str>,
-    /// Whether it keeps items: a manifest's `fields` and `id_pattern` apply.
-    pub items: bool,
     /// The JSON Schema of what it declares of itself beyond its features
     /// (its capability declaration's `data`); `None` when it declares
     /// nothing more.
@@ -164,7 +162,6 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
     events: &[],
     records: None,
     resource: None,
-    items: false,
     data: None,
 };
 
@@ -192,7 +189,6 @@ pub const KNOWLEDGE: ProviderContract = ProviderContract {
         key: "page",
     }),
     resource: Some("oxplow/knowledge"),
-    items: false,
     data: Some(KNOWLEDGE_DATA),
 };
 
@@ -264,7 +260,6 @@ pub const AGENT_HARNESS: ProviderContract = ProviderContract {
     events: &[],
     records: None,
     resource: None,
-    items: false,
     data: Some(HARNESS_DATA),
 };
 
@@ -296,7 +291,6 @@ pub const FILESYSTEM: ProviderContract = ProviderContract {
     events: &[],
     records: None,
     resource: None,
-    items: false,
     data: None,
 };
 
@@ -429,8 +423,7 @@ pub fn instance_id_problem(id: &str) -> Option<String> {
         Some(format!(
             "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
         ))
-    } else if id == "oxplow" || crate::events::schema::CORE_NAMESPACES.contains(&id)
-    {
+    } else if id == "oxplow" || crate::events::schema::CORE_NAMESPACES.contains(&id) {
         Some(format!("`{id}` is reserved for oxplow"))
     } else {
         None

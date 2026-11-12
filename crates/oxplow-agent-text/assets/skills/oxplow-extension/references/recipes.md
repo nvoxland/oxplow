@@ -13,7 +13,7 @@ Each recipe: write the file, check it, deploy, test.
    answers:
      - { question: "What work is open?", params: { state: todo } }
    loaders:
-     items: { sql: "SELECT title, state FROM v_task WHERE state = :state" }
+     items: { sql: "SELECT title, state FROM v_oxplow_task WHERE state = :state" }
    view: { viz: table, from: items }
    ```
 
@@ -36,13 +36,13 @@ Each recipe: write the file, check it, deploy, test.
 title: New item
 params: [{ name: t, default: "" }]
 loaders:
-  states: { rows: [{ value: todo, label: To do }, { value: done, label: Done }] }
+  states: { rows: [{ value: ready, label: Ready }, { value: done, label: Done }] }
 view:
   viz: form
   form:
-    command: oxplow.task.create
+    command: oxtask.task.create
     defaults: { title: "{{param.t}}" }
-    choices: { state: acme/new-item#states }
+    choices: { stage: acme/new-item#states }
 ```
 
 A `form` viz has no `from`. `command` is the (write) command the form

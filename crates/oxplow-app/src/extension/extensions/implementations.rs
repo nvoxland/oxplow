@@ -139,17 +139,6 @@ pub(crate) struct ImplementationFile {
     #[serde(default)]
     #[schemars(with = "Option<serde_json::Value>")]
     data: Option<Value>,
-    /// A script item-keeping capability's stages, in order, each in one of core's
-    /// buckets (one in each of todo, in_progress and done).
-    #[serde(default)]
-    stages: Vec<oxplow_domain::tasks::StageDecl>,
-    /// A script item-keeping capability's own fields (kept in an item's `native`).
-    #[serde(default)]
-    fields: Vec<oxplow_domain::tasks::FieldDecl>,
-    /// What a script item-keeping capability's own ids look like (a regex matched
-    /// whole).
-    #[serde(default)]
-    id_pattern: Option<String>,
     /// Offered only while a setting of the extension's own configuration
     /// is one of `in` (`{ config: /oxwiki, in: [true] }`); otherwise it is
     /// declared but off.
@@ -165,9 +154,6 @@ impl ImplementationFile {
             ("needs", !self.needs.is_empty()),
             ("features", self.features.is_some()),
             ("data", self.data.is_some()),
-            ("stages", !self.stages.is_empty()),
-            ("fields", !self.fields.is_empty()),
-            ("id_pattern", self.id_pattern.is_some()),
         ]
         .into_iter()
         .find_map(|(key, set)| set.then_some(key))
@@ -561,17 +547,8 @@ fn script_decl(
         credentials: Vec::new(),
         network: Vec::new(),
         declarations: entry.to_string(),
-        id_pattern: f.id_pattern.clone(),
-        fields: f.fields.clone(),
-        stages: f.stages.clone(),
         needs: f.needs.clone(),
     };
-    if let Some(p) = crate::providers::spec::items_problem(&provider_spec) {
-        return Err(problem(
-            "implementation.script_items",
-            format!("{what}: {p}"),
-        ));
-    }
     for verb in contract.required(&features) {
         if !defined.iter().any(|d| d == verb) {
             let when = match contract.verb(verb).map(|v| v.needs) {
@@ -869,7 +846,6 @@ mod tests {
     const SNAP: &str = "def mark(x):\n    return {}\n\
         def changed(x):\n    return {\"result\": scope(\"sql.read\", {\"sql\": \"SELECT 1\"})}\n\
         def _helper(x):\n    return x\n";
-    const STAGES: &str = "stages: [{ id: open, title: Open, bucket: todo }, { id: doing, title: Doing, bucket: in_progress }, { id: closed, title: Closed, bucket: done }]";
 
     fn scripts(rel: &str) -> Option<String> {
         match rel {
@@ -983,27 +959,12 @@ mod tests {
                 "without".into(),
             ),
             (
-                format!("  - {{ capability: snapshots, id: marks, entry: snaps/s.star, needs: [sql.read], {STAGES} }}\n"),
-                "implementation.script_items",
-                "stages are an item-keeping capability's".into(),
-            ),
-            (
-                "  - { capability: knowledge, id: notes, entry: snaps/s.star, needs: [sql.read], stages: [{ id: open, title: Open, bucket: todo }] }\n".into(),
-                "implementation.script_items",
-                "stages are an item-keeping capability's".into(),
-            ),
-            (
-                snap(", id_pattern: \"n\\\\d+\""),
-                "implementation.script_items",
-                "id_pattern is an item-keeping capability's".into(),
-            ),
-            (
                 snap(", config: [a]"),
                 "implementation.script_config",
                 "must be a map".into(),
             ),
             (
-                snap("").replace("id: marks", "id: oxtask"),
+                snap("").replace("id: marks", "id: agent"),
                 "implementation.script_id",
                 "reserved".into(),
             ),
@@ -1016,11 +977,6 @@ mod tests {
                 "  - { capability: snapshots, id: keep, entry: \"oxplow:snapshots\", needs: [sql.read] }\n".into(),
                 "implementation.built_in_needs",
                 "takes no `needs`".into(),
-            ),
-            (
-                format!("  - {{ capability: snapshots, id: keep, entry: \"oxplow:snapshots\", {STAGES} }}\n"),
-                "implementation.built_in_declares",
-                "takes no `stages`".into(),
             ),
             (
                 "  - { capability: ai_provider, id: acme, provider: anthropic, needs: [sql.read] }\n".into(),

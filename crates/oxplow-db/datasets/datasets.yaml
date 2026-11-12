@@ -1214,13 +1214,13 @@
   tests:
     - { not_null: event_type }
 - name: replaceable
-  version: 3
+  version: 4
   key: [target]
   description: "The core sub-components an extension may replace with a page (`ui.replacements`), each with its versioned props contract: what the replacement is given, and must declare, instead of any host state. Which extension replaces one is the person's choice (`replacements:` in the project config) or, for a bound target, its provider's."
   fields:
     - { name: "target", type: "TEXT", doc: "The sub-component: `task.board`, `task.list`, `task.detail`, `task.detail.state`, `vcs.history.graph`." }
-    - { name: "capability", type: "TEXT", doc: "The capability it belongs to (`task_tracker`, `vcs`)." }
-    - { name: "bound", type: "INTEGER", doc: "1 when only the extension of the capability's deciding provider may replace it (the item's own provider's states); 0 when any extension may, and the person chooses." }
+    - { name: "capability", type: "TEXT", doc: "What it belongs to: a capability (`vcs`), or `model:<owner>/<model>` for a shared model's items (`model:oxplow/task_record`)." }
+    - { name: "bound", type: "INTEGER", doc: "1 when only the extension that holds the item may replace it: its own provider's, or the one that fills the model as the item's store (a task's states); 0 when any extension may, and the person chooses." }
     - { name: "version", type: "INTEGER", doc: "The contract's version; a declaration may pin it (`version:`)." }
     - { name: "props", type: "TEXT", doc: "JSON array of the prop names the replacement page is given and must declare as `params`." }
     - { name: "view", type: "TEXT", doc: "JSON array of the host page's view params the replacement shares: it reads and writes them as the core component does (`q`, `author`, `branch` for `vcs.history.graph`). (v2)" }
@@ -2425,15 +2425,15 @@
     - { name: "commands", type: "TEXT", doc: "The commands it may invoke, as a JSON array." }
     - { name: "sql", type: "TEXT", doc: "`read` when it runs its own read-only SQL over the datasets; NULL otherwise." }
 - name: replacement
-  version: 2
+  version: 3
   key: [target, extension]
-  description: "The core sub-components extensions replace (`task.board`, `task.list`), one row per candidate extension, read live from the enabled extensions and the config. `chosen` is the extension the person picked for the target (`oxplow` for oxplow's own), NULL for the default: the only extension replacing it, or oxplow's own where several do, or the item's provider's extension for a `bound_to_provider` target."
+  description: "The core sub-components extensions replace (`task.board`, `task.list`), one row per candidate extension, read live from the enabled extensions and the config. `chosen` is the extension the person picked for the target (`oxplow` for oxplow's own), NULL for the default: the only extension replacing it, or oxplow's own where several do, or the item's provider's (or store's) extension for a `bound_to_provider` target."
   fields:
     - { name: "target", type: "TEXT", doc: "The core sub-component, `<area>.<name>`." }
     - { name: "label", type: "TEXT", doc: "What a person calls it (`board`)." }
     - { name: "extension", type: "TEXT", doc: "The extension that replaces it." }
     - { name: "bound_to_provider", type: "INT", doc: "1 when it renders only while that extension's provider decides, so the person chooses only between the default and oxplow's own." }
-    - { name: "capability", type: "TEXT", doc: "The capability the target belongs to." }
+    - { name: "capability", type: "TEXT", doc: "What the target belongs to: a capability, or `model:<owner>/<model>`." }
     - { name: "chosen", type: "TEXT", doc: "The person's choice for the target: an extension, or `oxplow`; NULL for the default." }
 - name: provider_instance
   version: 1

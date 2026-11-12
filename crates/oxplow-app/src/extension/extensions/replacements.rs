@@ -10,8 +10,9 @@
 //!
 //! Checked here: the target exists, the page is the extension's and
 //! declares every prop of the target's contract, a pinned `version:` is
-//! the contract's, and — for a target bound to its capability's provider
-//! — the extension brings a provider of it.
+//! the contract's, and — for a target bound to the provider or store that
+//! holds the thing it shows — the extension brings a provider of the
+//! capability, or fills the model as a store.
 //! *Which* replacement renders is decided when the component renders (the
 //! active provider changes without a reload; the person's choice for an
 //! unbound target is config), so that rule is the renderer's.
@@ -31,8 +32,11 @@ pub struct UiReplacement {
     pub extension: String,
     /// The core sub-component it replaces (`task.board`).
     pub target: String,
-    /// The capability the target belongs to.
+    /// The capability the target belongs to; empty for a model's target.
     pub capability: String,
+    /// The shared model the target shows items of (`oxplow/task_record`),
+    /// for a target of a model rather than a capability.
+    pub model: Option<String>,
     /// Only while this extension's provider is the deciding one does it
     /// render; otherwise the person's choice among candidates decides.
     pub bound_to_provider: bool,
@@ -104,12 +108,13 @@ impl ReplacementFile {
 }
 
 /// Check the `ui.mounts` entries at core components against the
-/// extension's pages and the capabilities its providers bring: the valid
-/// ones, and an error (`file:line: …`) for each broken one.
+/// extension's pages and what it holds (`held`: the capabilities its
+/// providers bring, and `model:<id>` for each model it fills as a store):
+/// the valid ones, and an error (`file:line: …`) for each broken one.
 pub fn parse_replacements(
     extension: &str,
     namespace: &str,
-    capabilities: &[String],
+    held: &[String],
     pages: &[crate::pages::schema::Page],
     items: Vec<(Option<usize>, ReplacementFile)>,
     file: &str,
@@ -172,14 +177,21 @@ pub fn parse_replacements(
                             r.version.unwrap_or_default()
                         ),
                     ))
-                } else if t.bound_to_provider && !capabilities.iter().any(|c| c == t.capability) {
+                } else if t.bound_to_provider && !held.iter().any(|c| *c == t.subject()) {
                     Some((
                         "replacement.provider_required",
-                        format!(
-                            "only an extension that brings a `{}` provider may replace `{}` \
-                             (`providers:`); it shows while that provider is the active one",
-                            t.capability, t.target
-                        ),
+                        match t.model {
+                            Some(model) => format!(
+                                "only an extension that fills `{model}` as a store (`fills:`) \
+                                 may replace `{}`; it shows for the items of that store",
+                                t.target
+                            ),
+                            None => format!(
+                                "only an extension that brings a `{}` provider may replace `{}` \
+                                 (`providers:`); it shows while that provider is the active one",
+                                t.capability, t.target
+                            ),
+                        },
                     ))
                 } else if out.iter().any(|o| o.target == t.target) {
                     Some((
@@ -203,6 +215,7 @@ pub fn parse_replacements(
             extension: extension.to_string(),
             target: t.target.to_string(),
             capability: t.capability.to_string(),
+            model: t.model.map(str::to_string),
             bound_to_provider: t.bound_to_provider,
             page: format!("{namespace}/{}", r.page),
             version: t.version,
@@ -231,6 +244,7 @@ mod tests {
             extension: extension.into(),
             target: target.into(),
             capability: "vcs".into(),
+            model: None,
             bound_to_provider: bound,
             page: format!("{extension}/page"),
             version: 1,

@@ -732,7 +732,7 @@ pub fn source_declaring_page(project: &Path, checkout: &Path, id: &str) -> Optio
 /// Settings are the namespace's: the extensions sharing one that declare
 /// `configuration:` each get the one declaration of them all
 /// (`config_schema::merge`). A disabled one's keys are in it too: the
-/// stored settings outlive its being off (bundled's task workflow with
+/// stored settings outlive its being off (bundled's review policy with
 /// bundled off), and a layer holding them must still read, or every setting
 /// of the namespace would fail closed. One at another version, or declaring
 /// a key an earlier one does, is a load error and has none.
@@ -2628,12 +2628,21 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
         ext.errors.extend(errors);
     }
     if !replacement_files.is_empty() {
-        let capabilities: Vec<String> =
-            ext.providers.iter().map(|p| p.capability.clone()).collect();
+        let held: Vec<String> = ext
+            .providers
+            .iter()
+            .map(|p| p.capability.clone())
+            .chain(
+                ext.shared_models
+                    .fills
+                    .iter()
+                    .map(|f| format!("model:{}", f.model)),
+            )
+            .collect();
         let (replaced, errors) = replacements::parse_replacements(
             name,
             &ext.namespace,
-            &capabilities,
+            &held,
             &ext.page_files,
             replacement_files,
             man,
@@ -6774,7 +6783,6 @@ commands:
         assert_eq!(
             commands,
             [
-                "oxplow.tasks.set_workflow",
                 "oxplow.tasks.clear_finished",
                 "oxplow.tasks.assign",
                 "oxplow.tasks.reorder",
@@ -6793,7 +6801,6 @@ commands:
                 "contribution_repair",
                 "deviation",
                 "finished_cleared",
-                "ready_queue",
                 "request_link",
                 "search_task",
                 "session_task_badge",
@@ -6802,7 +6809,6 @@ commands:
                 "task",
                 "task_comment",
                 "task_link",
-                "task_workflow",
                 "thread_tasks",
                 "thread_work_badge"
             ]

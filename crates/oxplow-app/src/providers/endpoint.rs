@@ -9,7 +9,6 @@
 use async_trait::async_trait;
 use oxplow_domain::events::Envelope;
 use oxplow_domain::run::RunContext;
-use oxplow_domain::tasks::StageDecl;
 use oxplow_domain::{Actor, CommandError};
 use oxplow_provider_protocol::model::{EventDraft, InitializeResult, InvokeResult};
 use serde_json::Value;
@@ -26,10 +25,6 @@ pub trait Endpoint: Send + Sync {
     /// What it declares of itself: the capability with its features and
     /// `data`, the verbs it answers and their input schemas.
     fn declared(&self) -> &InitializeResult;
-    /// An item-keeping store's stages, in order; empty for anything else.
-    fn stages(&self) -> &[StageDecl];
-    /// What an item-keeping store's own ids look like (a regex matched whole).
-    fn id_pattern(&self) -> Option<&str>;
     /// Call `verb` with `input` for `run`, under `idempotency_key` (the
     /// write's, when the caller has one).
     async fn invoke(

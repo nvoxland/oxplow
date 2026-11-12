@@ -46,7 +46,7 @@
 ## Replacing a core view
 
 When a person wants their own Board, Tasks list or task editor, an
-extension replaces that core view with a page (or a component) — no task tracker needed. The views and their props are `v_replaceable`; the
+extension replaces that core view with a page (or a component) — no task store needed. The views and their props are `v_replaceable`; the
 page declares each prop as a param:
 
 ```yaml
@@ -56,10 +56,11 @@ ui:
     - { page: edit-item, at: task.detail, version: 1 }  # props: uri
 ```
 
-- Read items from `v_task`; change them only through the interface
-  commands (`oxplow.task.update`, `transition`, `assign` — who works
-  on it — and `reorder` — its place in that assignee's queue; both core's,
-  for every list), so the view works with whichever list is active. A component
+- Read items from `v_oxplow_task`; change them only through the task
+  action points (`oxplow/task.move`, `task.edit`, … — the item's store
+  answers) and `oxplow.tasks.assign` (who works on it) and `reorder` (its
+  place in that assignee's queue; both bundled's, for every store), so the
+  view works with whichever store holds the task. A component
   declares the commands it runs (`commands:`); one outside the extension's
   namespace also needs `commands:<pattern>`, approved at deploy.
 - The person picks whose view shows: Settings → Integrations, or

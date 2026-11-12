@@ -29,10 +29,10 @@ earlier loader's **first row**) or a literal.
 
 ```yaml
 loaders:
-  base:  { sql: "SELECT id, state FROM v_task" }
+  base:  { sql: "SELECT id, state FROM v_oxplow_task" }
   open:  { sql: "SELECT * FROM base WHERE state = :state" }   # base is a table
   child:
-    sql: "SELECT title FROM v_task WHERE parent_uri = :p"
+    sql: "SELECT title FROM v_oxplow_task WHERE parent_uri = :p"
     params: { p: { from: open.id } }
 ```
 

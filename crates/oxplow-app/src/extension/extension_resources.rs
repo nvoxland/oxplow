@@ -114,8 +114,44 @@ pub fn resource_problem(name: &str) -> Option<String> {
     (parsed.namespace() == CORE_NAMESPACE
         && oxplow_domain::uri::resources::foundation()
             .get(&parsed)
-            .is_none())
+            .is_none()
+        && !shipped_resources().contains(name))
     .then(|| "oxplow declares no such resource".to_string())
+}
+
+/// The `oxplow/<name>` resources the extensions oxplow ships declare
+/// (`resources:` in their manifests): `oxplow/task` is oxplow-bundled's.
+fn shipped_resources() -> &'static std::collections::BTreeSet<String> {
+    static NAMES: std::sync::OnceLock<std::collections::BTreeSet<String>> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut out = std::collections::BTreeSet::new();
+        for shipped in crate::bundled_extensions::BUNDLED {
+            let Some((_, bytes)) = (shipped.files)()
+                .iter()
+                .find(|(rel, _)| *rel == "extension.yaml")
+            else {
+                continue;
+            };
+            let Ok(doc) = serde_yaml::from_slice::<serde_yaml::Value>(bytes) else {
+                continue;
+            };
+            if doc.get("namespace").and_then(|n| n.as_str()) != Some(CORE_NAMESPACE) {
+                continue;
+            }
+            for resource in doc
+                .get("resources")
+                .and_then(|r| r.as_sequence())
+                .into_iter()
+                .flatten()
+            {
+                if let Some(name) = resource.get("name").and_then(|n| n.as_str()) {
+                    out.insert(format!("{CORE_NAMESPACE}/{name}"));
+                }
+            }
+        }
+        out
+    })
 }
 
 /// Why `svg` can't be drawn as an icon: not an svg, too big, or not inert

@@ -81,15 +81,15 @@ impl PreparedProviderGeneration {
                     .as_ref()
                     .map(|capability| capability.features().clone())
                     .unwrap_or_default(),
-                fields: serde_json::to_value(&staged.instance.spec.fields).unwrap_or_default(),
-                stages: serde_json::to_value(&staged.instance.spec.stages).unwrap_or_default(),
+                fields: serde_json::Value::Array(Vec::new()),
+                stages: serde_json::Value::Array(Vec::new()),
                 kinds: staged
                     .capability
                     .as_ref()
                     .map(|capability| capability.kinds().clone())
                     .unwrap_or_default(),
                 offered: true,
-                id_pattern: staged.instance.spec.id_pattern.clone(),
+                id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
                 description: None,

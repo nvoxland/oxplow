@@ -15,7 +15,7 @@ bundled's `v_oxplow_contribution_repair` has the open `repair_item`). Each colle
   whole repair brief: what the extension is for, the declaration, the
   last errors, the failing fixture and the `check` report. A repeat
   failure comments on the open item. The item is linked `about` the
-  contribution's ref (`v_task_link`), which is how the open one is
+  contribution's ref (`v_oxplow_task_link`), which is how the open one is
   found; its title is only for people. When the user asks you to repair an
   extension, read that item first.
 - **Fix it, then prove it.** Change the script or declaration, run

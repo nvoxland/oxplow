@@ -798,9 +798,8 @@ fn implementation_manifest(capability: &str, id: &str, name: &str) -> String {
          \x20   entry: implementations/{id}.star\n",
         title = title_case(name)
     ));
-    match capability {
-        "agent_harness" => out.push_str("    data: { env_markers: [], settings: [] }\n"),
-        _ => {}
+    if capability == "agent_harness" {
+        out.push_str("    data: { env_markers: [], settings: [] }\n");
     }
     out
 }

@@ -1064,10 +1064,24 @@ impl PageRunner<'_> {
                     .ok()?
                     .param("provider")?
                     .to_string();
-                self.capabilities
-                    .as_ref()?
-                    .get(&first.capability, &provider)?
-                    .extension
+                match &first.model {
+                    // A model's item: the extension that fills the model as
+                    // the item's own store.
+                    Some(model) => self
+                        .svc
+                        .models
+                        .current()
+                        .fills
+                        .iter()
+                        .find(|f| &f.model == model && f.stores.contains(&provider))
+                        .map(|f| f.extension.clone()),
+                    None => {
+                        self.capabilities
+                            .as_ref()?
+                            .get(&first.capability, &provider)?
+                            .extension
+                    }
+                }
             }
             _ => None,
         };

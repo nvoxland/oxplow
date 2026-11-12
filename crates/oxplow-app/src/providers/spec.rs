@@ -67,45 +67,11 @@ pub struct ProviderSpec {
     pub network: Vec<String>,
     /// The checked-in `InitializeResult` (JSON), relative to the folder.
     pub declarations: String,
-    /// What an item-keeping capability's own ids look like (a regex matched whole:
-    /// `[A-Z]+-\d+`), so a loose id resolves to its item while it's the
-    /// active one.
-    #[serde(default)]
-    pub id_pattern: Option<String>,
-    /// An item-keeping capability's own fields (kept in an item's `native`), so screens
-    /// render and edit them: `[{ name, title, kind: enum|text|number,
-    /// values? }]`.
-    #[serde(default)]
-    pub fields: Vec<oxplow_domain::tasks::FieldDecl>,
-    /// An item-keeping capability's stages, in order, each in one of core's buckets:
-    /// `[{ id, title, bucket }]` — required for an item-keeping capability, which needs
-    /// one in each of todo, in_progress and done. The first of a bucket is
-    /// where naming the bucket lands.
-    #[serde(default)]
-    pub stages: Vec<oxplow_domain::tasks::StageDecl>,
     /// The scopes it calls over the protocol (`host/call`,
     /// `sql.read` or `state.read`): part of what its approval covers, and the only ones it
     /// may call.
     #[serde(default)]
     pub needs: Vec<String>,
-}
-
-/// What's wrong with `spec`'s stages: an item-keeping capability declares them (core's
-/// buckets need its stages to mean anything), and nothing else does.
-fn stages_problem(spec: &ProviderSpec) -> Option<String> {
-    match (contract_of(spec).items, spec.stages.is_empty()) {
-        (true, true) => Some(
-            "an item-keeping capability declares its `stages:` (`[{ id, title, bucket }]`, one in each of \
-             todo, in_progress and done)"
-                .into(),
-        ),
-        (true, false) => oxplow_domain::tasks::stages_problem(&spec.stages),
-        (false, false) => Some(format!(
-            "stages are an item-keeping capability's; `{}` has none",
-            spec.capability
-        )),
-        (false, true) => None,
-    }
 }
 
 /// How a credential is obtained by signing in: OAuth 2.1's
@@ -593,37 +559,6 @@ pub fn check_declarations(spec: &ProviderSpec, declared: &InitializeResult) -> R
     Ok(())
 }
 
-/// What's wrong with what `spec` says of the items it keeps — its
-/// `fields`, `stages` and `id_pattern`, an item-keeping capability's and nothing
-/// else's — or `None`. One rule for a provider and a script implementation
-/// (`implementations:`).
-pub(crate) fn items_problem(spec: &ProviderSpec) -> Option<String> {
-    let items = contract_of(spec).items;
-    if !spec.fields.is_empty() && !items {
-        return Some(format!(
-            "fields are an item-keeping capability's; `{}` has none",
-            spec.capability
-        ));
-    }
-    if let Some(p) = oxplow_domain::tasks::fields_problem(&spec.fields) {
-        return Some(p);
-    }
-    if let Some(p) = stages_problem(spec) {
-        return Some(p);
-    }
-    match &spec.id_pattern {
-        Some(pattern) => match regex::Regex::new(pattern) {
-            Err(e) => Some(format!("id_pattern `{pattern}` isn't a regex: {e}")),
-            Ok(_) if !items => Some(format!(
-                "id_pattern is an item-keeping capability's; `{}` has no ids",
-                spec.capability
-            )),
-            Ok(_) => None,
-        },
-        None => None,
-    }
-}
-
 /// Parse an extension's `providers:` block. Valid specs, and a message
 /// for each invalid one. `read` reads a file inside the extension folder.
 pub fn parse_providers(
@@ -671,8 +606,6 @@ pub fn parse_providers(
             .find(|h| !crate::net_sandbox::valid_host_pattern(h))
         {
             Some(format!("provider `{id}`: `{bad}` isn't a host pattern"))
-        } else if let Some(problem) = items_problem(&spec) {
-            Some(format!("provider `{id}`: {problem}"))
         } else {
             read_declarations(&spec, read).err()
         };

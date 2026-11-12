@@ -2,7 +2,7 @@
   "$defs": {
     "CapabilityDecl": {
       "additionalProperties": false,
-      "description": "A capability the provider implements (`task_tracker`), with the\ncapability's own feature flags and, for a capability whose contract\nasks for more (an agent harness's instruction files, environment\nmarkers and settings), what it declares of itself as `data`.",
+      "description": "A capability the provider implements (`snapshots`), with the\ncapability's own feature flags and, for a capability whose contract\nasks for more (an agent harness's instruction files, environment\nmarkers and settings), what it declares of itself as `data`.",
       "properties": {
         "capability": {
           "type": "string"

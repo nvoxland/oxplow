@@ -7958,7 +7958,7 @@ mod tests {
             .unwrap();
         let rows = store.facts_for_measure(m).await.unwrap();
         assert_eq!((rows[0].turn_id, rows[0].request_id), (Some(1), Some(1)));
-        assert_eq!(rows[0].task, None, "core links no task to a request");
+        assert!(rows[0].derived.is_empty(), "the store derives nothing");
 
         store
             .db
@@ -7970,7 +7970,7 @@ mod tests {
         let rows = store.facts_for_measure(m).await.unwrap();
         assert_eq!(rows.len(), 1, "the fact survives its turn");
         assert_eq!(rows[0].value, 7.0);
-        assert_eq!((rows[0].turn_id, rows[0].task.as_deref()), (None, None));
+        assert_eq!((rows[0].turn_id, rows[0].request_id), (None, None));
     }
 
     #[tokio::test]

@@ -991,6 +991,12 @@ mod tests {
     #[tokio::test]
     async fn start_runs_on_boot_and_on_enable_and_never_while_off() {
         let fx = crate::test_fixtures::services_with_thread().await;
+        // Only this test's collector: oxtask's is off.
+        std::fs::write(
+            fx._dir.path().join(".oxplow/personal.yaml"),
+            "disableExtensions: [oxtask]\n",
+        )
+        .unwrap();
         declare(&fx.svc).await;
         let mut running = BTreeMap::new();
         reconcile(&fx.svc, &mut running, observers(&fx.svc));

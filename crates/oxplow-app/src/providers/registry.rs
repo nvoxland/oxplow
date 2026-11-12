@@ -1312,14 +1312,6 @@ impl super::endpoint::Endpoint for Instance {
         &self.declared
     }
 
-    fn stages(&self) -> &[oxplow_domain::tasks::StageDecl] {
-        &self.spec.stages
-    }
-
-    fn id_pattern(&self) -> Option<&str> {
-        self.spec.id_pattern.as_deref()
-    }
-
     async fn invoke(
         &self,
         run: &RunContext,

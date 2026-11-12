@@ -17,8 +17,7 @@
   name: item.estimate, summary, provider: <your provider id>, op:
   estimate, ui? }]` — the operation's input (plus an optional
   `instance`) and access come from its declarations; it runs on the
-  instance its `uri` (or `instance`) names. Its capability verbs aren't
-  declared: they run as `oxplow.task.<verb>`.
+  instance its `uri` (or `instance`) names.
 
 - **`commands:`** register commands of your own, as
   `<namespace>.<area>.<verb>`: `{ name: area.verb, summary, input_schema,
@@ -110,8 +109,8 @@
   is its subtitle (a page action's form is about the page, its title).
   `input` values that aren't `fixed` are where the fields start (bind the
   text a person sees, e.g. a `display_name` column, not an empty one).
-  `{ id: edit, label: Edit…, command: oxplow.task.update, row: true,
-  form: true, about: title, fixed: [uri], input: { uri: "{{row.uri}}", title: "{{row.title}}" } }`.
+  `{ id: edit, label: Edit…, command: oxtask.task.update, row: true,
+  form: true, about: title, fixed: [id], input: { id: "{{row.native_id}}", title: "{{row.title}}" } }`.
 - **How a form's fields read** (an action's `fields`, or a form node's):
   `fields: [{ name: title, label: Name, help: What the tab shows. }, native]`
   lists the only fields shown, in order (the rest keep `input`'s value),
@@ -145,8 +144,8 @@
   `{{option.value}}` / `{{option.label}}`; `current: <column>` is the
   row's column holding the option it is in now, shown checked and not
   offered. A Mark ▸ of a list's stages:
-  `{ id: mark, label: Mark, command: oxplow.task.transition, row: true,
-  options_from: stages, current: stage, input: { uri: "{{row.uri}}", to: "{{option.value}}" } }`.
+  `{ id: mark, label: Mark, point: oxplow/task.move, row: true,
+  options_from: stages, current: stage, context: { uri: "{{row.uri}}", stage: "{{option.value}}" } }`.
   With `bulk: true` the marked rows get a select. No `form`, `drag`,
   `edit`, `group` or `key` with it.
 - **In a component**, a `<form>` is fine: handle `submit` in your script

@@ -1506,7 +1506,10 @@ impl LiveSources {
                     text(r.label.clone()),
                     text(r.extension.clone()),
                     flag(r.bound_to_provider),
-                    text(r.capability.clone()),
+                    text(match &r.model {
+                        Some(model) => format!("model:{model}"),
+                        None => r.capability.clone(),
+                    }),
                     opt(chosen.get(&r.target).cloned()),
                 ]);
             }
