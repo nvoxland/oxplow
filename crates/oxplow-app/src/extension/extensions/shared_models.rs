@@ -196,6 +196,32 @@ fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpe
     if !word(&raw.name) {
         return Err(format!("`{}` isn't a model name (snake_case)", raw.name));
     }
+    // Its generated views are `v_<ns>_<name>`, `…_all`, `…_field` and
+    // `v_<ns>_search_<name>`: a model may not take one another's would.
+    if raw.name.ends_with("_all") || raw.name.ends_with("_field") || raw.name.starts_with("search_")
+    {
+        return Err(format!(
+            "`{}`: a model name may not end in `_all` or `_field` or start with `search_` \
+             (its generated views use them)",
+            raw.name
+        ));
+    }
+    if format!("{namespace}/{}", raw.resource)
+        .parse::<oxplow_domain::uri::ResourceName>()
+        .is_err()
+    {
+        return Err(format!(
+            "`resource: {}` isn't a resource name",
+            raw.resource
+        ));
+    }
+    if let Some(param) = &raw.store_param {
+        if !word(param) || param == "id" {
+            return Err(format!(
+                "`store_param: {param}` must be a snake_case word other than `id`"
+            ));
+        }
+    }
     let mut columns = Vec::new();
     for (name, v) in raw.columns {
         let col = match &v {
@@ -229,6 +255,17 @@ fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpe
             return Err(format!(
                 "column `{name}`: only a uri or uris column can be an edge"
             ));
+        }
+        if let Some(edge) = &col.edge {
+            let own = edge
+                .strip_prefix(&format!("{}.", raw.name))
+                .is_some_and(word);
+            if !own {
+                return Err(format!(
+                    "column `{name}`: edge `{edge}` must be `{}.<word>` (its model's own ref type)",
+                    raw.name
+                ));
+            }
         }
         columns.push(ModelColumn {
             name,
@@ -443,5 +480,15 @@ mod tests {
         assert!(text.contains("wide"), "{text}");
         assert!(text.contains("namespace"), "{text}");
         assert!(text.contains("Bad Store"), "{text}");
+        for (manifest, says) in [
+            ("models:\n  - name: book\n    resource: Book\n    key: id\n    columns: { id: text }\n", "resource name"),
+            ("models:\n  - name: book\n    resource: book\n    store_param: id\n    key: id\n    columns: { id: text }\n", "other than `id`"),
+            ("models:\n  - name: book_all\n    resource: b\n    key: id\n    columns: { id: text }\n", "generated views"),
+            ("models:\n  - name: b\n    resource: b\n    key: id\n    columns: { id: text, to: { type: uri, edge: file_pin } }\n", "own ref type"),
+        ] {
+            let (d, errors) = parse_text(manifest);
+            assert!(d.models.is_empty(), "{manifest}");
+            assert!(format!("{errors:?}").contains(says), "{manifest}: {errors:?}");
+        }
     }
 }
