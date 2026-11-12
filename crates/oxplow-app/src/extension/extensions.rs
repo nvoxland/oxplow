@@ -6744,6 +6744,7 @@ commands:
                 "deviation",
                 "finished_cleared",
                 "ready_queue",
+                "request_task_view_next",
                 "search_task_next",
                 "session_task_badge",
                 "snapshot_work_badge",
