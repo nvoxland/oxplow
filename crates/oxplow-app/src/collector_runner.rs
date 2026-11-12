@@ -903,20 +903,21 @@ impl RunTrigger {
     }
 
     /// What an observer's trigger adds to the run's input: `trigger`, and
-    /// for a files trigger the `changed` list. Empty for the other triggers.
+    /// `changed` (the files trigger's list; empty for the others, so a
+    /// script treats a manual run like `start`). Empty for the event and
+    /// schedule triggers.
     fn observed(&self) -> serde_json::Map<String, serde_json::Value> {
         let mut out = serde_json::Map::new();
         if matches!(
             self,
-            RunTrigger::Start | RunTrigger::Files(_) | RunTrigger::Sqlite
+            RunTrigger::Manual | RunTrigger::Start | RunTrigger::Files(_) | RunTrigger::Sqlite
         ) {
             out.insert("trigger".into(), self.name().into());
-        }
-        if let RunTrigger::Files(changed) = self {
-            out.insert(
-                "changed".into(),
-                serde_json::to_value(changed).unwrap_or_default(),
-            );
+            let changed = match self {
+                RunTrigger::Files(changed) => serde_json::to_value(changed).unwrap_or_default(),
+                _ => serde_json::Value::Array(Vec::new()),
+            };
+            out.insert("changed".into(), changed);
         }
         out
     }

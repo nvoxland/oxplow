@@ -130,8 +130,12 @@ pub fn changes_in(root: &Path, glob: &globset::GlobSet, batch: &Batch) -> Vec<Fi
 }
 
 /// Fold `later` changes into `earlier` ones: a path keeps one entry, the
-/// last thing that happened to it (a file created and then changed is still
-/// created; created and then removed never was).
+/// last thing that happened to it. An entry still `Created` is a path that
+/// did not exist before the burst (its first op was `created`), so created
+/// and then removed never was and leaves no entry. A path that existed
+/// before (first op `modified` or `removed`) and is removed keeps a
+/// `removed`: removed then created is `modified` (it exists, and changed),
+/// so a later removal is not lost.
 pub fn merge(earlier: &mut Vec<FileChange>, later: Vec<FileChange>) {
     for change in later {
         match earlier.iter().position(|c| c.path == change.path) {
@@ -143,6 +147,10 @@ pub fn merge(earlier: &mut Vec<FileChange>, later: Vec<FileChange>) {
                         earlier.remove(at);
                     }
                     (FileOp::Created, FileOp::Modified) => {}
+                    (FileOp::Removed, FileOp::Created) => earlier[at].op = FileOp::Modified,
+                    // It existed before the burst: a `created` over it is a
+                    // rewrite, and a removal after still has to be heard.
+                    (FileOp::Modified, FileOp::Created) => {}
                     (_, op) => earlier[at].op = op,
                 }
             }
@@ -161,6 +169,9 @@ pub async fn follow_files(
 ) {
     while let Some(first) = changes.next_batch().await {
         let mut found = changes_in(&root, &glob, &first);
+        // A rescan can't see a removal: the burst can't be trusted to name
+        // everything, so it asks for the full reconcile.
+        let mut rescanned = !first.rescans.is_empty();
         let deadline = tokio::time::Instant::now() + COALESCE * MAX_WAIT_FACTOR;
         loop {
             let window =
@@ -169,12 +180,22 @@ pub async fn follow_files(
                 break;
             }
             match tokio::time::timeout(window, changes.next_batch()).await {
-                Ok(Some(more)) => merge(&mut found, changes_in(&root, &glob, &more)),
+                Ok(Some(more)) => {
+                    rescanned |= !more.rescans.is_empty();
+                    merge(&mut found, changes_in(&root, &glob, &more));
+                }
                 // Quiet for the window (or the watch ended): the burst is over.
                 Ok(None) | Err(_) => break,
             }
         }
-        if !found.is_empty() && send.send(RunTrigger::Files(found)).is_err() {
+        let trigger = if rescanned {
+            Some(RunTrigger::Start)
+        } else if found.is_empty() {
+            None
+        } else {
+            Some(RunTrigger::Files(found))
+        };
+        if trigger.is_some_and(|t| send.send(t).is_err()) {
             return;
         }
     }
@@ -185,12 +206,39 @@ fn data_version(conn: &rusqlite::Connection) -> rusqlite::Result<i64> {
     conn.query_row("PRAGMA data_version", [], |r| r.get(0))
 }
 
+/// A read connection to a SQLite file and its `data_version` when opened.
+pub type Baseline = (rusqlite::Connection, i64);
+
+/// Open `path` read-only and read its `data_version`: the baseline writes
+/// are compared with. None when the file isn't there or can't be read.
+pub fn open_baseline(path: &Path) -> Option<Baseline> {
+    if !path.is_file() {
+        return None;
+    }
+    rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()
+    .and_then(|c| data_version(&c).ok().map(|v| (c, v)))
+}
+
 /// Poll the SQLite file at `path` every `every` and send when another
 /// connection wrote to it. The connection is opened once the file exists and
 /// kept: `data_version` is only comparable on one connection. The first read
 /// is the baseline, not a change.
-pub async fn poll_sqlite(path: PathBuf, every: Duration, send: mpsc::UnboundedSender<RunTrigger>) {
-    let mut conn: Option<(rusqlite::Connection, i64)> = None;
+///
+/// `baseline` is the connection and `data_version` read before the `start`
+/// run (see [`open_baseline`]), so a write made after that read, while the
+/// run goes on, is heard. None: the first read the poll makes is the
+/// baseline.
+pub async fn poll_sqlite(
+    path: PathBuf,
+    every: Duration,
+    send: mpsc::UnboundedSender<RunTrigger>,
+    baseline: Option<Baseline>,
+) {
+    let mut conn: Option<Baseline> = baseline;
     loop {
         tokio::time::sleep(every).await;
         if send.is_closed() {
@@ -198,13 +246,7 @@ pub async fn poll_sqlite(path: PathBuf, every: Duration, send: mpsc::UnboundedSe
         }
         let Some((open, last)) = conn.as_mut() else {
             if path.is_file() {
-                conn = rusqlite::Connection::open_with_flags(
-                    &path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                        | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                )
-                .ok()
-                .and_then(|c| data_version(&c).ok().map(|v| (c, v)));
+                conn = open_baseline(&path);
             }
             continue;
         };
@@ -282,35 +324,44 @@ async fn run_triggers(
     observer: Observer,
     mut triggers: mpsc::UnboundedReceiver<RunTrigger>,
 ) {
+    // Set when a run failed: what it was told of is not known to be stored
+    // (its `changed` list is gone), so the next run reconciles in full.
+    let mut needs_reconcile = false;
     while let Some(mut trigger) = triggers.recv().await {
         while let Ok(more) = triggers.try_recv() {
             trigger = fold(trigger, more);
         }
+        if needs_reconcile {
+            trigger = RunTrigger::Start;
+        }
         let Some(svc) = svc.upgrade() else { return };
-        fire(&svc, &observer, trigger).await;
+        needs_reconcile = !fire(&svc, &observer, trigger).await;
     }
 }
 
-/// Two triggers that wait for the same run: the files add up.
+/// Two triggers that wait for the same run: the files add up, two of a
+/// kind stay that kind, and two different kinds become `start`, the full
+/// reconcile, so neither's changes are lost.
 fn fold(first: RunTrigger, second: RunTrigger) -> RunTrigger {
     match (first, second) {
         (RunTrigger::Files(mut a), RunTrigger::Files(b)) => {
             merge(&mut a, b);
             RunTrigger::Files(a)
         }
+        (RunTrigger::Sqlite, RunTrigger::Sqlite) => RunTrigger::Sqlite,
         // `start` is the full reconcile: nothing after it adds to it.
-        (RunTrigger::Start, _) | (_, RunTrigger::Start) => RunTrigger::Start,
-        (_, second) => second,
+        _ => RunTrigger::Start,
     }
 }
 
-/// Run `observer`'s collector for `trigger`, if it is still on.
-pub async fn fire(svc: &Arc<Services>, observer: &Observer, trigger: RunTrigger) {
+/// Run `observer`'s collector for `trigger`, if it is still on. False when
+/// the run failed or couldn't run: the caller reconciles in full next.
+pub async fn fire(svc: &Arc<Services>, observer: &Observer, trigger: RunTrigger) -> bool {
     if !observers(svc)
         .iter()
         .any(|o| o.owner == observer.owner && o.id == observer.id)
     {
-        return;
+        return true;
     }
     let root = svc.layout.project_dir.clone();
     let ctx = crate::collector_runner::Collectors::of(svc, &root);
@@ -330,14 +381,20 @@ pub async fn fire(svc: &Arc<Services>, observer: &Observer, trigger: RunTrigger)
         ))
         .await;
     match ran {
-        Ok(Ok(_)) => {}
-        Ok(Err(error)) => tracing::warn!(
-            collector = %format!("{}/{}", observer.owner, observer.id),
-            trigger = name,
-            error = ?error,
-            "an observing collector failed; its cursor is kept for the next trigger"
-        ),
-        Err(error) => tracing::warn!(?error, "an observing collector couldn't run"),
+        Ok(Ok(_)) => true,
+        Ok(Err(error)) => {
+            tracing::warn!(
+                collector = %format!("{}/{}", observer.owner, observer.id),
+                trigger = name,
+                error = ?error,
+                "an observing collector failed; its cursor is kept and the next run reconciles in full"
+            );
+            false
+        }
+        Err(error) => {
+            tracing::warn!(?error, "an observing collector couldn't run");
+            false
+        }
     }
 }
 
@@ -369,22 +426,31 @@ fn start(svc: &Arc<Services>, observer: &Observer) -> Running {
             Err(e) => tracing::warn!(error = %e, "a files trigger isn't a glob"),
         }
     }
+    // The SQLite baselines are read before the `start` run is sent, so a
+    // write while that run goes on is a change the poll hears.
     for source in &observer.sources {
-        match source {
-            ObserverSource::Start => {
-                let _ = send.send(RunTrigger::Start);
-            }
-            ObserverSource::Sqlite { path } => {
-                let file = match path {
-                    None => {
-                        crate::extension::extension_services::store_path(&root, &observer.extension)
-                    }
-                    Some(path) => root.join(path),
-                };
-                tasks.push(tokio::spawn(poll_sqlite(file, POLL, send.clone())));
-            }
-            ObserverSource::Files { .. } => {}
+        if let ObserverSource::Sqlite { path } = source {
+            let file = match path {
+                None => {
+                    crate::extension::extension_services::store_path(&root, &observer.extension)
+                }
+                Some(path) => root.join(path),
+            };
+            let baseline = open_baseline(&file);
+            tasks.push(tokio::spawn(poll_sqlite(
+                file,
+                POLL,
+                send.clone(),
+                baseline,
+            )));
         }
+    }
+    if observer
+        .sources
+        .iter()
+        .any(|s| matches!(s, ObserverSource::Start))
+    {
+        let _ = send.send(RunTrigger::Start);
     }
     Running {
         stamp: observer.stamp.clone(),
@@ -491,6 +557,102 @@ mod tests {
             ],
         );
         assert_eq!(found, vec![created("a.md"), created("c.md")]);
+    }
+
+    fn change(path: &str, op: FileOp) -> FileChange {
+        FileChange {
+            path: path.into(),
+            op,
+        }
+    }
+
+    /// A removal is never lost: created then removed is nothing only when
+    /// the path did not exist before the burst. A path that did (its first op
+    /// was a removal or a change, or an atomic write showed as `created`
+    /// over it) still ends as removed.
+    #[test]
+    fn a_removal_of_a_path_that_existed_is_kept() {
+        let run = |ops: &[FileOp]| {
+            let mut found = Vec::new();
+            for op in ops {
+                merge(&mut found, vec![change("a.md", *op)]);
+            }
+            found
+        };
+        use FileOp::{Created, Modified, Removed};
+        assert_eq!(run(&[Removed, Created, Removed]), [change("a.md", Removed)]);
+        assert_eq!(
+            run(&[Modified, Created, Removed]),
+            [change("a.md", Removed)]
+        );
+        assert_eq!(run(&[Removed, Created]), [change("a.md", Modified)]);
+        assert_eq!(run(&[Created, Removed]), Vec::<FileChange>::new());
+        assert_eq!(run(&[Created, Removed, Created]), [change("a.md", Created)]);
+    }
+
+    /// Triggers that wait for one run: files add up; two kinds are the full
+    /// reconcile, so the files' changes are not replaced by a SQLite one.
+    #[test]
+    fn folding_different_kinds_is_a_start() {
+        let a = RunTrigger::Files(vec![created("a.md")]);
+        assert!(matches!(
+            fold(a.clone(), RunTrigger::Sqlite),
+            RunTrigger::Start
+        ));
+        assert!(matches!(
+            fold(RunTrigger::Sqlite, a.clone()),
+            RunTrigger::Start
+        ));
+        assert!(matches!(
+            fold(RunTrigger::Sqlite, RunTrigger::Sqlite),
+            RunTrigger::Sqlite
+        ));
+        assert!(matches!(
+            fold(RunTrigger::Start, a.clone()),
+            RunTrigger::Start
+        ));
+        match fold(a, RunTrigger::Files(vec![created("b.md")])) {
+            RunTrigger::Files(found) => assert_eq!(found.len(), 2),
+            other => panic!("files, got {other:?}"),
+        }
+    }
+
+    /// A rescan can't see a removal: the burst asks for a `start` run.
+    #[tokio::test(start_paused = true)]
+    async fn a_rescan_is_a_start_run() {
+        let feed = Feed::default();
+        let (send, mut receive) = mpsc::unbounded_channel();
+        let root = PathBuf::from("/p");
+        tokio::spawn(follow_files(
+            feed.subscribe(),
+            root.clone(),
+            files(&["shelf/*.md"]),
+            send,
+        ));
+        feed.rescan(&root.join("shelf"));
+        assert!(matches!(receive.recv().await, Some(RunTrigger::Start)));
+    }
+
+    /// A write made after the baseline was read, before the poll's first
+    /// look, is heard (the baseline is read before the `start` run).
+    #[tokio::test]
+    async fn a_write_after_the_baseline_but_before_the_first_poll_is_heard() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tool.sqlite");
+        let writer = rusqlite::Connection::open(&file).unwrap();
+        writer
+            .execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);")
+            .unwrap();
+        let baseline = open_baseline(&file);
+        assert!(baseline.is_some());
+        writer.execute_batch("INSERT INTO t VALUES (2);").unwrap();
+        let (send, mut receive) = mpsc::unbounded_channel();
+        let poll = tokio::spawn(poll_sqlite(file, Duration::from_millis(20), send, baseline));
+        let heard = tokio::time::timeout(Duration::from_secs(5), receive.recv())
+            .await
+            .expect("heard in time");
+        assert!(matches!(heard, Some(RunTrigger::Sqlite)));
+        poll.abort();
     }
 
     async fn heard(receive: &mut mpsc::UnboundedReceiver<RunTrigger>) -> Vec<FileChange> {
@@ -602,7 +764,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("tool.sqlite");
         let (send, mut receive) = mpsc::unbounded_channel();
-        let poll = tokio::spawn(poll_sqlite(file.clone(), Duration::from_millis(20), send));
+        let poll = tokio::spawn(poll_sqlite(
+            file.clone(),
+            Duration::from_millis(20),
+            send,
+            None,
+        ));
         // Not there yet: nothing, and no failure.
         tokio::time::sleep(Duration::from_millis(60)).await;
         let writer = rusqlite::Connection::open(&file).unwrap();
@@ -701,6 +868,52 @@ mod tests {
                 [3, "sqlite", "", "{\"n\": 2}"],
             ])
         );
+    }
+
+    /// A manual run gets the same keys: `trigger: "manual"` and an empty
+    /// `changed`, so a script can treat it like `start`.
+    #[tokio::test]
+    async fn a_manual_run_is_told_its_trigger_and_no_changes() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        declare(&fx.svc).await;
+        let o = observer(&fx.svc);
+        assert!(fire(&fx.svc, &o, RunTrigger::Manual).await);
+        assert_eq!(seen(&fx.svc).await, json!([[1, "manual", "", "None"]]));
+    }
+
+    /// After a failed run (its `changed` list is gone) the next run of the
+    /// collector is a `start`, whatever trigger came.
+    #[tokio::test]
+    async fn the_run_after_a_failed_one_is_a_start() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        declare(&fx.svc).await;
+        let (send, receive) = mpsc::unbounded_channel();
+        let task = tokio::spawn(run_triggers(
+            Arc::downgrade(&fx.svc),
+            observer(&fx.svc),
+            receive,
+        ));
+        send.send(RunTrigger::Start).unwrap();
+        wait_for_runs(&fx.svc, 1).await;
+        send.send(RunTrigger::Files(vec![created("shelf/boom.md")]))
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        send.send(RunTrigger::Files(vec![created("shelf/a.md")]))
+            .unwrap();
+        wait_for_runs(&fx.svc, 2).await;
+        assert_eq!(
+            seen(&fx.svc).await.as_array().unwrap()[1],
+            json!([2, "start", "", "{\"n\": 1}"])
+        );
+        // A good run clears it: files are files again.
+        send.send(RunTrigger::Files(vec![created("shelf/b.md")]))
+            .unwrap();
+        wait_for_runs(&fx.svc, 3).await;
+        assert_eq!(
+            seen(&fx.svc).await.as_array().unwrap()[2],
+            json!([3, "files", "shelf/b.md:created", "{\"n\": 2}"])
+        );
+        task.abort();
     }
 
     async fn run_command(svc: &Arc<Services>, command: &str) {

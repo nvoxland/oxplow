@@ -120,7 +120,7 @@ pub fn point_offer(
         return Ok(nothing());
     };
     let key = OfferKey::Point(decl.id.clone());
-    let mut commands: Vec<PointCommand> = offered(specs, &key, &Default::default())
+    let mut commands: Vec<PointCommand> = offered(specs, &key, &Default::default(), "store")
         .into_iter()
         .map(|s| PointCommand {
             id: s.id.clone(),

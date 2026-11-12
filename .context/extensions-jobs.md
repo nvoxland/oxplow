@@ -345,8 +345,8 @@ collectors:
   run, `crate::assets::COALESCE` after the last change, and at most
   `MAX_WAIT_FACTOR` windows after the first (a write that never stops
   still runs). A path keeps its last state (created then changed is
-  created; created then removed is dropped). A rescan (changes the watch
-  lost) lists the matching files on disk as `modified`. Input:
+  created; a new path created then removed is dropped). A rescan (changes
+  the watch lost) runs `start` (see "No change is lost"). Input:
   `x["trigger"] = "files"`, `x["changed"] = [{ path, op: created | modified
   | removed }]`.
 - **`{ sqlite: own }`** or **`{ sqlite: <path> }`**: a SQLite file's
@@ -386,8 +386,25 @@ whose extension is off has no task and its triggers are dropped (`fire`
 checks again just before a run). Each task runs its collector through
 `run_collector` as the system, one run at a time; triggers that pile up behind
 a run fold into one (files merge). A run that fails is logged, keeps the
-cursor, and the next trigger runs it again (the failed `collector_run` row
-leaves `cursor_json` as it was).
+cursor (the failed `collector_run` row leaves `cursor_json` as it was).
+
+**No change is lost.** The rule: when in doubt, run `start`, the full
+reconcile.
+
+- A path keeps its last state, but created-then-removed is dropped only
+  when the burst's first op on it was `created` (it did not exist before).
+  Removed-then-created is `modified`; modified-then-created stays
+  `modified`; so a later removal stays `removed`.
+- Folding two triggers of the same kind keeps the kind (files merge). Two
+  different kinds (files and SQLite) fold into `start`.
+- A failed run loses its `changed` list, so the next run of that collector
+  is a `start`, whatever trigger came, until one succeeds.
+- A rescan cannot see a removal, so a burst with a rescan is a `start`.
+- The SQLite `data_version` baseline is read before the `start` run, so a
+  write during that run is heard.
+- Every `trigger` that gives a script `x["trigger"]` also gives
+  `x["changed"]`: `start`, `sqlite` and `manual` runs get `trigger` and an
+  empty `changed`, so a script can treat a manual sync like `start`.
 
 **Fixtures**: live triggers are off in a fixture; `when: { collector,
 trigger }` runs the collector for real ([extensions-sdk.md](./extensions-sdk.md)
