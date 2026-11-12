@@ -386,10 +386,10 @@ mod tests {
     /// field the payload lacks never matches.
     #[test]
     fn a_where_filter_compares_by_value_and_a_missing_field_never_matches() {
-        let filter = |pairs: &[(&str, &str)]| -> std::collections::BTreeMap<String, String> {
+        let filter = |pairs: &[(&str, &str)]| -> oxplow_config::collectors::WhereFilter {
             pairs
                 .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .map(|(k, v)| (k.to_string(), vec![v.to_string()]))
                 .collect()
         };
         let payload = json!({ "file_count": 1.0, "unchanged": false, "trigger": "git_refs" });
@@ -570,6 +570,34 @@ mod tests {
             &fx.svc,
             &on_task_done(
                 "\n    where: { task: \"oxplow:oxplow/task?id=reviewer&provider=issues\" }",
+            ),
+            &[("seen.star", SEEN)],
+        )
+        .await;
+        let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
+        let other = log(&fx.svc, fx.thread, "other").await;
+        consumer.handle(&other).await.unwrap();
+        assert_eq!(
+            rows(&fx.svc, "SELECT count(*) FROM v_collector_run").await,
+            json!([[0]])
+        );
+        let mine = log(&fx.svc, fx.thread, "reviewer").await;
+        consumer.handle(&mine).await.unwrap();
+        assert_eq!(
+            rows(&fx.svc, "SELECT ev FROM v_work_seen").await,
+            json!([[mine.seq]])
+        );
+    }
+
+    /// A `where` list matches any of its values; an event it excludes
+    /// starts no run (no run row) — the filter runs before anything is queued.
+    #[tokio::test]
+    async fn a_where_list_runs_for_any_value_and_a_filtered_event_costs_no_run() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        extension(
+            &fx.svc,
+            &on_task_done(
+                "\n    where: { task: [\"oxplow:oxplow/task?id=a&provider=issues\", \"oxplow:oxplow/task?id=reviewer&provider=issues\"] }",
             ),
             &[("seen.star", SEEN)],
         )

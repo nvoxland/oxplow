@@ -1205,6 +1205,34 @@ mod tests {
         );
     }
 
+    /// An effect's `where` list matches any of its values; an event it
+    /// excludes starts no run (no run row).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_effect_where_list_matches_any_value_and_excludes_the_rest() {
+        let fx = crate::test_fixtures::services_with_task().await;
+        let svc = &fx.svc;
+        extension(
+            svc,
+            &MARK_DONE.replace("{ to: done }", "{ to: [done, canceled] }"),
+            &[("mark.star", MARK)],
+        )
+        .await;
+        start(svc).await;
+        let consumer = EffectTriggers::new(Arc::downgrade(svc));
+        let blocked = log(svc, state_changed(&fx, Bucket::Blocked)).await;
+        consumer.handle(&blocked).await.unwrap();
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            json!([[0]])
+        );
+        let done = log(svc, state_changed(&fx, Bucket::Done)).await;
+        consumer.handle(&done).await.unwrap();
+        assert_eq!(
+            rows(svc, "SELECT count(*) FROM v_effect_run").await,
+            json!([[1]])
+        );
+    }
+
     /// A reaction claimed `started` (a step outside oxplow may have run)
     /// and then interrupted is recorded failed and never sent again.
     #[tokio::test(flavor = "multi_thread")]

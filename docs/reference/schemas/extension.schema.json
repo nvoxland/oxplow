@@ -1383,7 +1383,7 @@
             "null"
           ],
           "additionalProperties": {
-            "$ref": "#/definitions/PayloadScalar"
+            "$ref": "#/definitions/PayloadValue"
           },
           "default": null
         },
@@ -1686,6 +1686,20 @@
       "enum": [
         "test",
         "analysis"
+      ]
+    },
+    "PayloadValue": {
+      "description": "One scalar, or a non-empty list of them (the payload value equals any).",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PayloadScalar"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PayloadScalar"
+          }
+        }
       ]
     },
     "PayloadScalar": {
@@ -3914,7 +3928,7 @@
             "null"
           ],
           "additionalProperties": {
-            "$ref": "#/definitions/PayloadScalar"
+            "$ref": "#/definitions/PayloadValue"
           },
           "default": null
         },

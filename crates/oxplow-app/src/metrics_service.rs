@@ -230,7 +230,13 @@ fn trigger_label(trigger: &Trigger) -> String {
         Trigger::Every { minutes } => format!("every {minutes}m"),
         Trigger::OnRun { run } => format!("on {run:?} run").to_lowercase(),
         Trigger::On { events, filter, .. } => {
-            let filter: Vec<String> = filter.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+            let filter: Vec<String> = filter
+                .iter()
+                .map(|(k, v)| match v.as_slice() {
+                    [one] => format!("{k}: {one}"),
+                    many => format!("{k}: [{}]", many.join(", ")),
+                })
+                .collect();
             match filter.is_empty() {
                 true => format!("on {}", events.join(", ")),
                 false => format!("on {} where {}", events.join(", "), filter.join(", ")),

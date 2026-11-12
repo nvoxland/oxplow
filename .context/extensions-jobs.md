@@ -368,6 +368,14 @@ collectors:
 - A collector only reads while it runs (`store.sql`, `files.read`,
   `files.list`, `files.sqlite`); the host applies its output after.
 
+**`where:`** beside event types takes payload fields, each one scalar
+(equals) or a non-empty list of scalars (equals any of them), e.g.
+`where: { cause: [trigger, fields] }`; fields are ANDed. The filter runs
+before anything is queued: an excluded event marks nothing `pending`,
+writes no run row and spawns no script (entity collectors test
+`triggered_by`, fact collectors `where_fits`, both before the pacing
+deferral and `runnable`).
+
 **Parsing** (`oxplow_config::collectors::parse_trigger`): the items become
 `Trigger::On { events, sources: Vec<ObserverSource>, .. }`; `where:` and the
 pacing keys go with event types only (an `on:` of `start` alone with

@@ -98,11 +98,11 @@ pub enum Trigger {
     /// Every `minutes` minutes (an exec collector once approved).
     Every { minutes: u32 },
     /// When an event of one of these types is logged and its payload has
-    /// each `filter` field equal to its value — after the consumers in
+    /// each `filter` field equal to one of its values — after the consumers in
     /// the collector's `after` have handled the event.
     On {
         events: Vec<String>,
-        filter: BTreeMap<String, String>,
+        filter: WhereFilter,
         /// When the run happens after a triggering event: at
         /// once by default.
         #[serde(default)]
@@ -182,25 +182,31 @@ impl Trigger {
 /// collector's (`Trigger::On`) and an effect's alike.
 pub fn fires(
     events: &[String],
-    filter: &BTreeMap<String, String>,
+    filter: &WhereFilter,
     event_type: &str,
     payload: &serde_json::Value,
 ) -> bool {
     events.iter().any(|t| t == event_type) && payload_matches(filter, payload)
 }
 
-/// Whether `payload` has each `filter` field equal to its value. The value
-/// is the YAML text: a string matches exactly, a boolean by `true`/`false`, a
-/// number by value (`1` matches `1.0`). A field the payload lacks, or holds
-/// as an object, list or null, never matches.
-pub fn payload_matches(filter: &BTreeMap<String, String>, payload: &serde_json::Value) -> bool {
-    filter.iter().all(|(field, want)| match payload.get(field) {
-        Some(serde_json::Value::String(s)) => s == want,
-        Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
-        Some(serde_json::Value::Number(n)) => {
-            matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
-        }
-        _ => false,
+/// A parsed `where:`: each payload field and the values it may equal (a
+/// scalar written alone is a list of one).
+pub type WhereFilter = BTreeMap<String, Vec<String>>;
+
+/// Whether `payload` has each `filter` field equal to one of its values
+/// (fields are ANDed). A value is the YAML text: a string matches exactly, a
+/// boolean by `true`/`false`, a number by value (`1` matches `1.0`). A field
+/// the payload lacks, or holds as an object, list or null, never matches.
+pub fn payload_matches(filter: &WhereFilter, payload: &serde_json::Value) -> bool {
+    filter.iter().all(|(field, wants)| {
+        wants.iter().any(|want| match payload.get(field) {
+            Some(serde_json::Value::String(s)) => s == want,
+            Some(serde_json::Value::Bool(b)) => want.parse::<bool>().ok() == Some(*b),
+            Some(serde_json::Value::Number(n)) => {
+                matches!((n.as_f64(), want.parse::<f64>()), (Some(a), Ok(b)) if a == b)
+            }
+            _ => false,
+        })
     })
 }
 
@@ -852,8 +858,17 @@ pub enum EventTypeList {
     Many(Vec<String>),
 }
 
-/// `where:` — payload fields and the scalar each must equal.
-pub type PayloadFilter = BTreeMap<String, PayloadScalar>;
+/// `where:` — payload fields and the scalar (or any of a list of scalars)
+/// each must equal.
+pub type PayloadFilter = BTreeMap<String, PayloadValue>;
+
+/// One scalar, or a non-empty list of them (the payload value equals any).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum PayloadValue {
+    One(PayloadScalar),
+    Any(Vec<PayloadScalar>),
+}
 
 /// A `where:` value.
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -1030,16 +1045,26 @@ pub fn parse_trigger(
                     "`{unknown}` isn't a registered event type (see `v_event_type`)"
                 ));
             }
-            let mut filter = BTreeMap::new();
+            let mut filter = WhereFilter::new();
             if let Some(w) = &t.filter {
                 let w = w
                     .as_mapping()
                     .ok_or_else(|| "`where` maps payload fields to values".to_string())?;
                 for (k, v) in w {
-                    let (Some(k), Some(v)) = (k.as_str(), yaml_scalar(v)) else {
-                        return Err("`where` maps payload fields to values".into());
+                    let values = match (k.as_str(), v) {
+                        (Some(_), serde_yaml::Value::Sequence(items)) => {
+                            items.iter().map(yaml_scalar).collect::<Option<Vec<_>>>()
+                        }
+                        (Some(_), v) => yaml_scalar(v).map(|s| vec![s]),
+                        _ => None,
+                    }
+                    .filter(|v| !v.is_empty());
+                    let (Some(k), Some(values)) = (k.as_str(), values) else {
+                        return Err("`where` maps each payload field to a scalar or a \
+                             non-empty list of scalars"
+                            .into());
                     };
-                    filter.insert(k.to_string(), v);
+                    filter.insert(k.to_string(), values);
                 }
             }
             let secs = |key: &str, value: &Option<Value>| -> Result<Option<u32>, String> {
@@ -1811,7 +1836,7 @@ mod tests {
             with("on: [snapshot.taken]\n  where: { trigger: git_refs }").0[0].trigger,
             Trigger::On {
                 events: vec!["snapshot.taken".into()],
-                filter: [("trigger".to_string(), "git_refs".to_string())].into(),
+                filter: [("trigger".to_string(), vec!["git_refs".to_string()])].into(),
                 pacing: Pacing::default(),
                 sources: Vec::new(),
             }
@@ -1921,6 +1946,52 @@ mod tests {
             assert!(
                 e.iter().any(|m| m.contains("go with event types")),
                 "{t}: {e:?}"
+            );
+        }
+    }
+
+    /// A `where` value is one scalar (equals) or a non-empty list of scalars
+    /// (equals any of them); fields are ANDed.
+    #[test]
+    fn a_where_value_may_be_a_list_of_scalars() {
+        let with = |w: &str| {
+            parse(&GOOD.replace(
+                "on: { every: 10m }",
+                &format!("on: [snapshot.taken]\n  where: {w}"),
+            ))
+        };
+        let (s, e) = with("{ cause: [trigger, fields], n: 2 }");
+        assert!(e.is_empty(), "{e:?}");
+        let t = &s[0].trigger;
+        assert!(t.where_fits(&serde_json::json!({ "cause": "trigger", "n": 2 })));
+        assert!(t.where_fits(&serde_json::json!({ "cause": "fields", "n": 2.0 })));
+        assert!(!t.where_fits(&serde_json::json!({ "cause": "reconcile", "n": 2 })));
+        assert!(!t.where_fits(&serde_json::json!({ "cause": "fields", "n": 3 })));
+        assert!(!t.where_fits(&serde_json::json!({ "n": 2 })));
+        // A scalar still works.
+        let (s, e) = with("{ cause: trigger }");
+        assert!(e.is_empty(), "{e:?}");
+        assert!(s[0]
+            .trigger
+            .where_fits(&serde_json::json!({ "cause": "trigger" })));
+        assert!(!s[0]
+            .trigger
+            .where_fits(&serde_json::json!({ "cause": "fields" })));
+        // Refused shapes.
+        for w in [
+            "{ cause: [] }",
+            "{ cause: [[a]] }",
+            "{ cause: [{ a: b }] }",
+            "{ cause: [null] }",
+            "{ cause: { a: b } }",
+            "{ cause: null }",
+        ] {
+            let (s, e) = with(w);
+            assert!(s.is_empty(), "{w}");
+            assert!(
+                e.iter()
+                    .any(|m| m.contains("a scalar or a non-empty list of scalars")),
+                "{w}: {e:?}"
             );
         }
     }

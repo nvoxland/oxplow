@@ -358,7 +358,8 @@ fields:                        # oxplow's own annotations on every store's tasks
     composes `oxplow.model.set_fields`.
 - **A cause filter on `on:`** (`where: { cause: [trigger, fields] }`), so a
   thousand-row reconcile doesn't start a thousand script runs that only
-  skip. To build before the reactions.
+  skip. Built: a `where:` value is one scalar or a non-empty list (equals
+  any of them), applied before a run is queued or spawned.
 - **Order:** the vertical slice runs only on a throwaway oxplow (fixtures,
   an e2e) — a new store `oxtask` on a database whose core tasks share its
   ids would give two items one URI. The switch moves the data first
