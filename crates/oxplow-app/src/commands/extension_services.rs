@@ -59,24 +59,6 @@ fn refused(message: String) -> CommandError {
     CommandError::Denied { reason: message }
 }
 
-/// Run the composer's observers of what it just wrote, as its command, so
-/// the model it fills shows the write when the command returns. A failure
-/// is logged, not raised: the write already happened.
-async fn observe(
-    runner: &crate::collector_runner::CollectorRunner,
-    services: &ExtensionServices,
-    run: &oxplow_domain::run::RunContext,
-    command: &str,
-    wrote: crate::collector_runner::Wrote,
-) {
-    let Ok(extension) = services.composer_name(run, command) else {
-        return;
-    };
-    for problem in runner.observe_written(run, &extension, wrote).await {
-        tracing::warn!(%extension, %problem, "a store's write wasn't observed at once; its next trigger will");
-    }
-}
-
 pub fn ops(
     services: Arc<ExtensionServices>,
     runner: crate::collector_runner::CollectorRunner,
@@ -102,24 +84,24 @@ pub fn ops(
                             params: s.params,
                         })
                         .collect();
-                    let changes =
-                        services
-                            .write_store(&invocation.run, &batch)
-                            .map_err(|message| {
-                                if message.contains("can only be composed") {
-                                    refused(message)
-                                } else {
-                                    CommandError::Failed { message }
-                                }
-                            })?;
-                    observe(
-                        &runner,
-                        &services,
-                        &invocation.run,
-                        "oxplow.extension_store.write",
-                        crate::collector_runner::Wrote::OwnStore,
-                    )
-                    .await;
+                    let composer = services
+                        .composer_name(&invocation.run, "oxplow.extension_store.write")
+                        .ok();
+                    let changes = runner
+                        .observe_write(
+                            &invocation.run,
+                            composer.as_deref(),
+                            crate::collector_runner::Wrote::OwnStore,
+                            async { services.write_store(&invocation.run, &batch) },
+                        )
+                        .await
+                        .map_err(|message| {
+                            if message.contains("can only be composed") {
+                                refused(message)
+                            } else {
+                                CommandError::Failed { message }
+                            }
+                        })?;
                     Ok(HandlerOutput {
                         result: json!({ "changes": changes }),
                         ..HandlerOutput::default()
@@ -142,20 +124,23 @@ pub fn ops(
                 let runner = runner.clone();
                 Box::pin(async move {
                     let input: FileWrite = parse(input)?;
-                    let result = services
-                        .write_file(&invocation.run, &input.path, &input.body)
+                    let composer = services
+                        .composer_name(&invocation.run, "oxplow.extension_files.write")
+                        .ok();
+                    let result = runner
+                        .observe_write(
+                            &invocation.run,
+                            composer.as_deref(),
+                            crate::collector_runner::Wrote::File {
+                                path: input.path.clone(),
+                                op: crate::collector_runner::FileOp::Modified,
+                            },
+                            async {
+                                services.write_file(&invocation.run, &input.path, &input.body)
+                            },
+                        )
+                        .await
                         .map_err(refused)?;
-                    observe(
-                        &runner,
-                        &services,
-                        &invocation.run,
-                        "oxplow.extension_files.write",
-                        crate::collector_runner::Wrote::File {
-                            path: input.path.clone(),
-                            op: crate::collector_runner::FileOp::Modified,
-                        },
-                    )
-                    .await;
                     Ok(HandlerOutput {
                         result,
                         ..HandlerOutput::default()
@@ -175,20 +160,21 @@ pub fn ops(
             let runner = runner.clone();
             Box::pin(async move {
                 let input: FileDelete = parse(input)?;
-                let result = services
-                    .delete_file(&invocation.run, &input.path)
+                let composer = services
+                    .composer_name(&invocation.run, "oxplow.extension_files.delete")
+                    .ok();
+                let result = runner
+                    .observe_write(
+                        &invocation.run,
+                        composer.as_deref(),
+                        crate::collector_runner::Wrote::File {
+                            path: input.path.clone(),
+                            op: crate::collector_runner::FileOp::Removed,
+                        },
+                        async { services.delete_file(&invocation.run, &input.path) },
+                    )
+                    .await
                     .map_err(refused)?;
-                observe(
-                    &runner,
-                    &services,
-                    &invocation.run,
-                    "oxplow.extension_files.delete",
-                    crate::collector_runner::Wrote::File {
-                        path: input.path.clone(),
-                        op: crate::collector_runner::FileOp::Removed,
-                    },
-                )
-                .await;
                 Ok(HandlerOutput {
                     result,
                     ..HandlerOutput::default()

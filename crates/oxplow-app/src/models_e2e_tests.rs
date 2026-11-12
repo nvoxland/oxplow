@@ -191,8 +191,32 @@ async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
     );
     let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
     assert!(problems.is_empty(), "{problems:?}");
+    // An agent mid-turn.
+    fx.svc
+        .hook_ingest
+        .ingest(crate::HookEnvelope {
+            session_title: None,
+            turn_run: None,
+            reading: Default::default(),
+            kind: oxplow_domain::HookKind::UserPromptSubmit,
+            thread_id: Some(fx.thread),
+            stream_id: None,
+            agent_session_id: Some(fx.session),
+            session_id: Some("native".into()),
+            payload_json: "{}".into(),
+            prompt: None,
+            decision: None::<crate::ToolDecision>,
+            tool: crate::test_fixtures::claude_tool(
+                oxplow_domain::HookKind::UserPromptSubmit,
+                &json!({}),
+            ),
+            subagent: None,
+            harness_turn: None,
+        })
+        .await
+        .unwrap();
     let agent = Actor::Agent {
-        session_id: None,
+        session_id: Some(fx.session),
         thread_id: Some(fx.thread),
         stream_id: None,
     };
@@ -234,5 +258,10 @@ async fn a_stores_write_shows_in_the_model_when_its_command_returns() {
         changed[0].envelope.anchors.thread_id,
         Some(fx.thread),
         "the change is the command's thread's"
+    );
+    assert!(
+        changed[0].envelope.anchors.turn_id.is_some(),
+        "and its open turn's: {:?}",
+        changed[0].envelope.anchors
     );
 }
