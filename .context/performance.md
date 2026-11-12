@@ -1077,7 +1077,10 @@ run once per projection-code hash and schema version — it used to be
 once per build, ~59 s of a thread at every restart after a dev rebuild)
 restates every task, note and finding slice: it writes them in
 batches of 1000 through `SqlitePageRefStore::replace_sources`, one
-transaction each. Written one commit per row, it once sent ~250k change
+transaction each, and writes only a source whose stored edges differ (a
+run after a comment edit to a projection file once rewrote all 222,884
+findings' edges: 42 s with the database's writes held in ~400 ms
+chunks). Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events
 socket lagged, the UI re-read for a minute and terminal input timed out.
 

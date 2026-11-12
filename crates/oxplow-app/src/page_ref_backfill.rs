@@ -22,7 +22,11 @@
 //!
 //! It writes in batches ([`BATCH`] sources per transaction): every commit
 //! is a change event the UI hears, and a commit per row — a quarter of a
-//! million findings once — flooded it for a minute at boot.
+//! million findings once — flooded it for a minute at boot. And it writes
+//! only what drifted: a source whose stored edges equal its projection is
+//! left alone (`replace_sources`), so a run that finds the graph current
+//! (the projection key hashes source text, so a comment edit runs it) is
+//! reads, not a rewrite of every finding's edge.
 //!
 //! Ordering doesn't matter — projections are per-source and each
 //! writer owns its own slice. The backfill is idempotent: running
@@ -379,6 +383,79 @@ mod tests {
             published <= 10,
             "{published} change messages for one repair"
         );
+    }
+
+    /// A repair over a graph that is already its sources' writes no edge:
+    /// every source whose stored edges equal its projection is left alone,
+    /// so a repair that finds no drift (the usual case: a projection file's
+    /// comment changed) is reads, not a quarter of a million rewrites the
+    /// UI hears.
+    #[tokio::test]
+    async fn a_repair_over_a_current_graph_writes_no_edge() {
+        let db = Database::in_memory();
+        let findings_store = Arc::new(SqliteCodeQualityStore::new(db.clone()));
+        let scan = findings_store
+            .create_scan("duplication", "change 1", "working", "x")
+            .await
+            .unwrap();
+        let rows = (0..1500)
+            .map(|i| oxplow_db::CodeQualityFinding {
+                id: 0,
+                scan_id: scan,
+                path: format!("src/f{i}.rs"),
+                start_line: 1,
+                end_line: 9,
+                kind: "duplicate-block".into(),
+                metric_value: 9.0,
+                extra_json: None,
+            })
+            .collect();
+        findings_store
+            .finish_scan_with_findings(scan, rows)
+            .await
+            .unwrap();
+        let page_refs = Arc::new(SqlitePageRefStore::new(db.clone()));
+        let sources = || Sources {
+            db: db.clone(),
+            findings: findings_store.clone(),
+            handoffs: Arc::new(SqliteHandoffStore::new(db.clone())),
+        };
+        // One finding lost its edge: the repair restores it, and only it.
+        db.transaction(|tx| {
+            tx.execute(
+                "DELETE FROM page_ref WHERE target_uri = ?1",
+                [oxplow_domain::uri::build::file_uri("src/f7.rs")],
+            )
+            .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+        run(VocabularyHandle::core(), page_refs.clone(), sources()).await;
+        assert_eq!(
+            page_refs
+                .list_backlinks(&oxplow_domain::uri::build::file_uri("src/f7.rs"), None)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "the drifted edge is restored"
+        );
+
+        let mut changes = db.subscribe_changes();
+        let counts = run(VocabularyHandle::core(), page_refs.clone(), sources()).await;
+        assert_eq!(counts.findings, 1500, "every finding is still checked");
+        loop {
+            match changes.try_recv() {
+                Ok(changed) => assert!(
+                    !changed.contains("page_ref"),
+                    "a current graph was rewritten: {changed:?}"
+                ),
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                    panic!("{n} change messages lagged for a repair that changed nothing")
+                }
+                Err(_) => break,
+            }
+        }
     }
 
     /// Every task is restated from the interface, whichever list

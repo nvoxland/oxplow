@@ -129,7 +129,9 @@ impl SqlitePageRefStore {
     /// [`replace_source`] / [`replace_source_for_ref_types`] for many
     /// sources in one transaction — one commit, one change event, where a
     /// call per source is a commit (and an event the UI hears) each. For
-    /// restating many rows at once (the boot repair).
+    /// restating many rows at once (the boot repair). A source whose stored
+    /// edges already equal its slice is left alone, so restating a current
+    /// graph writes nothing (a repair that finds no drift is reads only).
     pub async fn replace_sources(&self, slices: Vec<SourceSlice>) -> Result<(), DomainError> {
         if slices.is_empty() {
             return Ok(());
@@ -137,6 +139,9 @@ impl SqlitePageRefStore {
         self.db
             .transaction(move |tx| {
                 for s in &slices {
+                    if slice_is_stored_tx(tx, s)? {
+                        continue;
+                    }
                     match &s.ref_types {
                         None => replace_source_tx(tx, &s.source, s.edges.clone())?,
                         Some(types) if types.is_empty() => {}
@@ -447,6 +452,82 @@ pub fn replace_source_tx(
         .into_iter()
         .collect();
     replace_source_for_ref_types_tx(conn, source, &ref_types, edges)
+}
+
+/// One stored row of a source, every column [`replace_source_tx`] writes.
+type StoredEdge = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<i64>,
+    Option<String>,
+    bool,
+    String,
+);
+
+/// Whether `slice`'s source already holds exactly the rows restating it
+/// would write: the same edges, extras and version pins (what
+/// [`replace_source_tx`] / [`replace_source_for_ref_types_tx`] would leave).
+fn slice_is_stored_tx(
+    conn: &rusqlite::Connection,
+    slice: &SourceSlice,
+) -> Result<bool, DomainError> {
+    use std::collections::BTreeSet;
+    let in_slice = |ref_type: &str| match &slice.ref_types {
+        None => true,
+        Some(types) => types.iter().any(|t| t == ref_type),
+    };
+    let wanted: Vec<StoredEdge> = slice
+        .edges
+        .iter()
+        .filter(|e| e.source == slice.source && in_slice(&e.ref_type))
+        .map(|e| {
+            (
+                e.target.clone(),
+                e.ref_type.clone(),
+                resource(&e.target),
+                e.source_extra.clone(),
+                e.local_snapshot_id,
+                e.closest_vcs_rev.clone(),
+                e.vcs_rev_exact,
+                resource(&e.source),
+            )
+        })
+        .collect();
+    let wanted_set: BTreeSet<StoredEdge> = wanted.iter().cloned().collect();
+    // Two edges with one key: the insert keeps the first, so compare by
+    // writing instead.
+    let keys: BTreeSet<(&String, &String)> = wanted.iter().map(|e| (&e.0, &e.1)).collect();
+    if keys.len() != wanted.len() {
+        return Ok(false);
+    }
+    let mut stmt = conn
+        .prepare_cached(
+            "SELECT target_uri, ref_type, target_resource, source_extra, local_snapshot_id,
+                    closest_vcs_rev, vcs_rev_exact, source_resource
+             FROM page_ref WHERE source_uri = ?1",
+        )
+        .map_err(crate::database::map_sql_err)?;
+    let stored: BTreeSet<StoredEdge> = stmt
+        .query_map(params![slice.source], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get::<_, i64>(6)? != 0,
+                r.get(7)?,
+            ))
+        })
+        .and_then(|rows| rows.collect::<rusqlite::Result<BTreeSet<StoredEdge>>>())
+        .map_err(crate::database::map_sql_err)?
+        .into_iter()
+        .filter(|e| in_slice(&e.1))
+        .collect();
+    Ok(stored == wanted_set)
 }
 
 /// Insert the edges of sources that have none yet (a row just inserted, its

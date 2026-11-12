@@ -1411,7 +1411,11 @@ hash of the files that decide a source's edges (`PROJECTION_SOURCES`:
 the backfill, `page_ref_projections.rs`, `task_refs.rs`), not the build, which every dev rebuild changed
 (`needs_repair`; recorded as `asset_state` row `page_ref_repair`):
 between those the writers keep the graph current. A new projection file
-belongs in that list. Knowledge page bodies and recent commits are covered by their
+belongs in that list. The hash is of the text, comments included, so a
+comment edit runs it too; that is cheap, because a run writes only the
+sources whose stored edges differ from their projection
+(`replace_sources` compares first): a run over a current graph is reads,
+with no write and no change event. Knowledge page bodies and recent commits are covered by their
 own initial-scan paths and don't need separate backfill. Efforts were
 removed (2026-11-10), and their slice of the graph (touched files, summary
 refs, declared impacts) went with them.
