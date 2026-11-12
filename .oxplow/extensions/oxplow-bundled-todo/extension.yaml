@@ -32,21 +32,9 @@ intent:
     - name: extension runs over the last week
       input: { page: runs, params: {} }
       expect: each extension's runs, failures, denials, mean CPU and model calls, the ones needing attention first
-    - name: repair-files-an-item
-      input: { effect: repair-disabled, event: { type: contribution.disabled } }
-      expect: one repair item filed on the active task tracker for the disabled contribution
-    - name: repair-comments-on-the-open-item
-      input: { effect: repair-disabled, event: { type: contribution.disabled } }
-      expect: a comment on the contribution's open repair item, not a second item
-    - name: repair-skips-without-a-task-tracker
-      input: { effect: repair-disabled, event: { type: contribution.disabled } }
-      expect: nothing filed when no task tracker is running
     - name: comments-panel-counts-open-comments-by-who-acts
       input: { part: oxplow/comments-panel, params: { stream_id: 1 } }
       expect: open notes for the person and followups for the agent, a resolved one not counted, none for another stream
-    - name: a-disabled-contribution-files-a-repair-item-and-a-repeat-comments
-      input: { event: contribution.disabled }
-      expect: one repair item while open, a comment on a repeat, a new item once closed
     - name: the-interest-dataset-scores-a-change-like-the-old-formula
       input: { sql: v_oxplow_change_interest }
       expect: size, complexity spikes, parameter growth and long new functions multiply into a score and its reasons
@@ -318,15 +306,6 @@ configuration:
           windowMinutes: { type: integer, minimum: 1, description: How recent an edit is for two threads' work on the same file to count as overlapping. }
   defaults:
     sharedFiles: { windowMinutes: 60 }
-# Effects are programs: a person approves each before it reacts, bundled
-# or not. `repair-disabled` files nothing until it is approved (and stops
-# when the approval is taken back).
-effects:
-  - id: repair-disabled
-    summary: When an extension's contribution is disabled after repeated failures, file one repair item on the active task tracker (comment on it while it is open).
-    on: [contribution.disabled]
-    entry: effects/repair_disabled.star
-    needs: [sql.read]
 commands:
   - name: advisory_policy.read
     summary: The advisories' effective settings, where each came from, and the stamps a write needs.

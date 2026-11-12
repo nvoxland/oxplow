@@ -1,24 +1,21 @@
-# oxplow/repair-disabled: when an extension's contribution is
-# disabled after repeated failures, file one task asking for it to be
-# repaired — on the active task tracker, whichever provider that is — and
-# comment on that item when the contribution is disabled again while it is
-# still open. oxplow never sends the item to an agent; a person does.
+# oxtask/repair-disabled: when an extension's contribution is disabled
+# after repeated failures, file one task asking for it to be repaired, and
+# comment on that task when the contribution is disabled again while it is
+# still open. oxplow never sends the task to an agent; a person does.
 #
-# The item is the contribution's: it is `about` the contribution's ref,
-# which is what the open one is found by (and what
-# `v_contribution_health.repair_item` shows). Its title is for people.
+# The task is the contribution's: it is linked `about` the contribution's
+# ref, which is what the open one is found by (and what
+# `v_oxplow_contribution_repair` shows). Its title is for people.
 
 _REASON_MAX = 80
 _ERRORS_SHOWN = 5
 
-# The active task tracker's provider, when one is running (`none` files
-# nowhere), and the contribution's open repair item.
+# The contribution's open repair task: one of this store's, linked `about` it,
+# not done or canceled.
 _STATE = """
-SELECT (SELECT provider FROM v_capability_provider
-         WHERE capability = 'task_tracker' AND active = 1 AND available = 1
-           AND provider <> 'none') AS provider,
-       (SELECT w.uri FROM v_task_link l JOIN v_task w ON w.uri = l.from_uri
+SELECT (SELECT w.native_id FROM v_oxplow_task_link l JOIN v_oxplow_task w ON w.uri = l.from_uri
          WHERE l.to_uri = :contribution AND l.link_type = 'about'
+           AND w.provider = 'oxtask'
            AND w.state NOT IN ('done', 'canceled')
          ORDER BY w.uri DESC LIMIT 1) AS open_item
 """
@@ -57,6 +54,12 @@ def _title(prefix, reason):
 def _quote(reason):
     return "\n".join(["> " + md_text(line) for line in reason.split("\n")])
 
+# An effect's commands run in one transaction, and a store's own commands
+# write outside it, so the effect writes oxtask's file the way those
+# commands do: through the extension store's write.
+def _write(batch):
+    return {"name": "oxplow.extension_store.write", "input": {"batch": batch}}
+
 def transform(x):
     event = x["event"]
     p = event["payload"]
@@ -68,9 +71,6 @@ def transform(x):
     prefix = "Repair %s %s:" % (namespace, contribution)
 
     state = scope("sql.read", {"sql": _STATE, "params": {"contribution": p["contribution"]}})[0]
-    if not state["provider"]:
-        return {"skip": "no task tracker is running to file a repair item on"}
-
     found = scope("sql.read", {
         "sql": _FAILURES,
         "params": {"uri": p["contribution"], "namespace": namespace, "contribution": contribution, "kind": kind},
@@ -85,10 +85,11 @@ def transform(x):
         if len(errors) > 1:
             lines.extend(["", "Recent failures (newest first):", ""])
             lines.extend(["- " + md_text(e) for e in errors[:_ERRORS_SHOWN]])
-        return {"commands": [{
-            "name": "oxplow.task.comment",
-            "input": {"uri": state["open_item"], "body": "\n".join(lines)},
-        }]}
+        return {"commands": [_write([{
+            "sql": "INSERT INTO task_comment (task_id, author_kind, body) VALUES (?1, 'system', ?2)",
+            "params": [state["open_item"], "\n".join(lines)],
+            "expect_changes": 1,
+        }])]}
 
     body = [
         "The %s `%s` of the extension `%s` was disabled on this machine after it kept failing:" % (kind, contribution, extension),
@@ -107,13 +108,19 @@ def transform(x):
         "1. Find why it fails: read the failures and its source (its intent is in the manifest), and reproduce one (`oxplow extension test %s`)." % extension,
         "2. Fix it, keeping its purpose and examples.",
         "3. Check it: `oxplow extension check %s` and `oxplow extension test %s` must be clean." % (extension, extension),
-        "4. Say what you changed on this item. A person enables it again (`oxplow.contribution.enable`, Settings → Extensions); you can't.",
+        "4. Say what you changed on this task. A person enables it again (`oxplow.contribution.enable`, Settings → Extensions); you can't.",
     ])
-    return {"commands": [{
-        "name": "oxplow.task.create",
-        "input": {
-            "title": _title(prefix, reason),
-            "body": "\n".join(body),
-            "links": [{"target": p["contribution"], "link_type": "about"}],
+    return {"commands": [_write([
+        {
+            "sql": "INSERT INTO task (title, body, stage, author_kind) VALUES (?1, ?2, 'ready', 'system')",
+            "params": [_title(prefix, reason), "\n".join(body)],
+            "expect_changes": 1,
         },
-    }]}
+        # The link goes to the task just inserted (the highest number: the
+        # write is one transaction, and numbers only grow).
+        {
+            "sql": "INSERT INTO task_link (task_id, to_uri, type) SELECT id, ?1, 'about' FROM task ORDER BY n DESC LIMIT 1",
+            "params": [p["contribution"]],
+            "expect_changes": 1,
+        },
+    ])]}

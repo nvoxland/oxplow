@@ -32,7 +32,7 @@ intent:
     - name: deleting-a-task-removes-its-row-and-undo-brings-it-back
       input: { command: oxtask.task.delete }
       expect: the row goes, and undo returns it with its children
-permissions: ['commands:oxplow.extension_store.write']
+permissions: ['commands:oxplow.extension_store.write', sql.read]
 storage: { sqlite: true }
 fills:
   - model: oxplow/task_record
@@ -49,6 +49,12 @@ fills:
       - { name: priority, title: Priority, kind: enum, values: [urgent, high, medium, low] }
       - { name: author, title: Author, kind: text, read_only: true }
       - { name: author_kind, title: Author kind, kind: enum, values: [person, agent, system], read_only: true }
+effects:
+  - id: repair-disabled
+    summary: When an extension's contribution is disabled after repeated failures, file one repair task for it (comment on it while it is open). A person or an agent they ask repairs it; oxplow never sends it.
+    on: [contribution.disabled]
+    entry: effects/repair_disabled.star
+    needs: [sql.read]
 collectors:
   - id: tasks
     doc: Reads the task tables of this extension's file and states the tasks of the oxtask store, each with its links and comments.
@@ -68,6 +74,15 @@ commands:
         stage: { type: string, enum: [backlog, ready, in_progress, blocked, done, canceled] }
         parent: { type: string, pattern: "^tsk[0-9]+$" }
         priority: { type: string, enum: [urgent, high, medium, low] }
+        links:
+          type: array
+          items:
+            type: object
+            required: [to, type]
+            properties:
+              to: { type: string }
+              type: { type: string, enum: [blocks, discovered_from, relates_to, duplicates, supersedes, replies_to, about] }
+            additionalProperties: false
       additionalProperties: false
     entry: handlers/create.star
     needs: [store.sql]

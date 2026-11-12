@@ -1,4 +1,4 @@
-# oxtask.task.create { title, body?, stage?, parent?, priority? }: insert a
+# oxtask.task.create { title, body?, stage?, parent?, priority?, links? }: insert a
 # row. The insert mints the id (`tsk` + the row number) and returns it, so the
 # result and the inverse come from `finish`, which sees the write's `rows`
 # once it landed. The author is who ran the command (`x["actor"]["uri"]`), with its kind
@@ -19,8 +19,18 @@ def transform(x):
                "RETURNING id",
         "params": [i["title"], i.get("body"), stage, i.get("parent"), i.get("priority"), x["actor"]["uri"], x["actor"]["kind"]],
     }
+    batch = [write]
+    # Each link goes to the task just inserted (the highest number: the
+    # write is one transaction, and numbers only grow).
+    for link in i.get("links", []):
+        batch.append({
+            "sql": "INSERT INTO task_link (task_id, to_uri, type) " +
+                   "SELECT id, ?1, ?2 FROM task ORDER BY n DESC LIMIT 1",
+            "params": [link["to"], link["type"]],
+            "expect_changes": 1,
+        })
     return {
-        "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": [write]}}],
+        "commands": [{"name": "oxplow.extension_store.write", "input": {"batch": batch}}],
         "events": [],
         "result": {"stage": stage},
     }

@@ -1,0 +1,15 @@
+# Disabled again while its repair task is open: a comment on it, not a
+# second task.
+requires: [oxplow-bundled, oxtask]
+given:
+  - command: oxtask.task.create
+    input:
+      title: "Repair work hot: boom"
+      links: [{ to: "oxplow:oxplow/collector?collector=work/hot", type: about }]
+when:
+  event:
+    type: contribution.disabled
+    payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom again" }
+expect:
+  effects: [{ id: oxtask/repair-disabled, state: ok }]
+  commands: [oxplow.extension_store.write]

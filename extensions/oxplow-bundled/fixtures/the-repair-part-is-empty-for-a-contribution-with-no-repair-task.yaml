@@ -1,0 +1,8 @@
+# The part on the contribution-health page says there is no repair task when
+# the contribution has none (its health row and its repair row are both
+# needed for an action to be offered).
+requires: [oxtask]
+when: { part: oxplow/contribution-repair, params: { namespace: work, contribution: hot } }
+expect:
+  loaders:
+    repair: { rows: 0 }

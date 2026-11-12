@@ -1,9 +1,0 @@
-# A disabled collector with no open repair item: one item is filed, on
-# whichever task tracker is active.
-when:
-  event:
-    type: contribution.disabled
-    payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom" }
-expect:
-  effects: [{ id: oxplow/repair-disabled, state: ok }]
-  commands: [oxplow.task.create]

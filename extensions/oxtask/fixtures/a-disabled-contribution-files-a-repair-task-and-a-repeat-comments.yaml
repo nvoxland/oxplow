@@ -1,6 +1,7 @@
-# A disabled contribution files one repair item whose title says what
-# failed; a repeat disable comments on the open item; once it is closed the
-# next disable files a new item.
+# A disabled contribution files one repair task whose title says what
+# failed; a repeat disable comments on the open task; once it is closed the
+# next disable files a new task.
+requires: [oxplow-bundled, oxtask]
 given:
   - observe:
       event:
@@ -10,16 +11,16 @@ given:
       event:
         type: contribution.disabled
         payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom again" }
-  - { command: oxplow.task.transition, input: { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask", to: done } }
+  - { command: oxtask.task.move, input: { id: tsk1, stage: done } }
   - observe:
       event:
         type: contribution.disabled
         payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom thrice" }
 when:
   sql: |
-    SELECT w.title, w.state, (SELECT count(*) FROM v_task_comment c WHERE c.uri = w.uri) AS comments,
-           (SELECT group_concat(link_type) FROM v_task_link l WHERE l.from_uri = w.uri AND l.to_uri = 'oxplow:oxplow/collector?collector=work/hot') AS about
-    FROM v_task w ORDER BY w.uri
+    SELECT w.title, w.state, (SELECT count(*) FROM v_oxplow_task_comment c WHERE c.uri = w.uri) AS comments,
+           (SELECT group_concat(link_type) FROM v_oxplow_task_link l WHERE l.from_uri = w.uri AND l.to_uri = 'oxplow:oxplow/collector?collector=work/hot') AS about
+    FROM v_oxplow_task w ORDER BY w.uri
 expect:
   rows:
     - { title: "Repair work hot: 3 failures in a row; the last: boom", state: done, comments: 1, about: about }

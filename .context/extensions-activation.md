@@ -23,29 +23,31 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   included, a lost race to another delivery not; `skipped` and `proposed`
   never do, and a reaction whose commands ran starts the count over. Nothing cascades: a page over its view still runs.
 - **Repairing.** Core detects and reports (the health row,
-  `contribution.disabled@1`, the Extensions page) with or without a task tracker. Filing the repair item is the bundled effect
-  `oxplow/repair-disabled` (`effects/repair_disabled.star`, on
-  `contribution.disabled`, `needs: [sql.read]`): it composes
-  `oxplow.task.create` on the active task tracker — whichever provider
-  that is, never a task table — titled `Repair <namespace> <contribution>:
-  <reason>`. Its body is what failed (the reason), where it is declared
-  (`v_contribution` file:line), its recent failures (a collector's failed
-  syncs, an effect's failed reactions, else the last error) and what to do.
-  It no longer carries the declaration YAML, `intent.purpose`, the
-  `extension check` output or the `engine:` line — none is readable through
-  `sql.read`; the item says to run `oxplow extension check`/`test`. A later
-  disable while the item is open comments on it (`oxplow.task.comment`);
-  once it is done or canceled the next disable files a new one. **The
-  open item is found by its link**: it is created with `links: [{ target:
-  <contribution URI>, link_type: about }]`, and the open one is the not-done
-  `v_task` with a `v_task_link` `about` the contribution's URI.
-  The title is for people and never matched.
-  `v_contribution_health.repair_item` is that same open item (the table
-  keeps no `repair_item`). With no running task tracker
-  (`none`, or the chosen tracker down) the effect skips; it is a bundled
-  effect like `verify-unchecked`, so **repair items appear once its
-  extension is enabled**, and disabling the effect stops new ones. It runs as an anchorless effect (the event has no thread), so the
-  thread gate doesn't apply. oxplow never sends the item to an agent.
+  `contribution.disabled@1`, the Extensions page), with or without a task
+  store. Filing the repair task is **oxtask's** effect `oxtask/repair-disabled`
+  (`extensions/oxtask/effects/repair_disabled.star`, on `contribution.disabled`,
+  `needs: [sql.read]`): it composes `oxtask.task.create`, titled `Repair
+  <namespace> <contribution>: <reason>`. It is a store's effect because
+  bundled names no store's command and an effect can't run an action point.
+  Its body is what failed (the reason), where it is declared (`v_contribution`
+  file:line), its recent failures (a collector's failed syncs, an effect's
+  failed reactions, else the last error) and what to do. It carries no
+  declaration YAML, `intent.purpose`, `extension check` output or `engine:`
+  line — none is readable through `sql.read`; the task says to run `oxplow
+  extension check`/`test`. A later disable while the task is open comments on
+  it (`oxtask.task.comment`); once it is done or canceled the next disable
+  files a new one. **The open task is found by its link**: it is created with
+  `links: [{ to: <contribution URI>, type: about }]`, and the open one is the
+  not-done oxtask task in `v_oxplow_task` with a `v_oxplow_task_link`
+  `about` the contribution's URI. The title is for people and never matched.
+  Bundled's dataset `v_oxplow_contribution_repair` is that same open task (the
+  contribution-health table keeps no `repair_item`), and bundled's part
+  `oxplow/contribution-repair`, mounted in the health page's `repair` slot,
+  shows it with **Repair with the Agent**. With oxtask off nothing files and
+  the part is empty. It is an effect like `verify-unchecked`, so **repair tasks
+  appear once oxtask is enabled** and its effect approved; disabling the effect
+  stops new ones. It runs as an anchorless effect (the event has no thread),
+  so the thread gate doesn't apply. oxplow never sends the task to an agent.
 - **The events** are `contribution.disabled@1 { contribution, reason }` and
   `contribution.enabled@1 { contribution }`, `contribution` the URI
   (`collector:triage/todos`, `effect:…`, `provider:…`).
@@ -58,10 +60,10 @@ in (a row's extension is `v_contribution`'s for its `uri`; Enable takes
   `v_contribution_health`): `OK` with its average time, a missed schedule and
   undelivered events; `Failing (N in a row): <error>`; or `Disabled:
   <reason>` with **Enable Again** (`oxplow.contribution.enable` through
-  `personCommands`) and, while its repair item is open, **Repair with
-  the Agent** — one line in the agent's input, `Repair the extension
-  described in [oxplow uri <repair item>] — read it first.`, never sent
-  (the repair brief is the item's body; `no-agent-input-automation.test.ts`
+  `personCommands`) and, while its repair task is open, **Repair with
+  the Agent** (bundled's part) — one line in the agent's input, `Repair the
+  extension described in [oxplow uri <repair task>] — read it first.`, never
+  sent (the repair brief is the task's body; `no-agent-input-automation.test.ts`
   pins the button as its only caller). Settings → Data → **Undelivered events**
   (the `alerts-deliveries` page, mounted in `oxplow/settings-data.sections`) lists the pending dead letters with Retry and Discard; the
   rail's Alerts shows "N events couldn't be delivered" while any wait.

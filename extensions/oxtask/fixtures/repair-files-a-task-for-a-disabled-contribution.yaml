@@ -1,0 +1,10 @@
+# A disabled collector with no open repair task: one task is filed, linked
+# `about` the contribution, and the contribution's repair row names it.
+requires: [oxplow-bundled, oxtask]
+when:
+  event:
+    type: contribution.disabled
+    payload: { contribution: "oxplow:oxplow/collector?collector=work/hot", reason: "3 failures in a row; the last: boom" }
+expect:
+  effects: [{ id: oxtask/repair-disabled, state: ok }]
+  commands: [oxplow.extension_store.write]
