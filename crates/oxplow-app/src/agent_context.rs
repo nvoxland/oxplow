@@ -772,15 +772,21 @@ async fn handoffs(svc: &Services, thread: ThreadId) -> Option<(String, Vec<Hando
     };
     let ids: Vec<HandoffId> = taken.iter().map(|h| h.id).collect();
     // How the person sees each: its sender's thread and session, its item.
+    // Its task's title through the task resource's own dataset.
+    let (task_view, task_title) =
+        crate::ref_resolver::resolve_view(svc, oxplow_domain::uri::resources::TASK)
+            .unwrap_or_else(|| ("(SELECT NULL AS uri, NULL AS title)".into(), "title".into()));
     let labels: HashMap<String, (String, Option<String>, Option<String>)> = match svc
         .sql
         .query_sql(
-            "SELECT h.uri, t.title, s.display_name, w.title
-               FROM v_handoff h
-               JOIN v_thread t ON t.id = h.from_thread_id
-               LEFT JOIN v_agent_session s ON s.id = h.from_session_id
-               LEFT JOIN v_task w ON w.uri = h.task
-              WHERE h.to_thread_id = ?1",
+            &format!(
+                "SELECT h.uri, t.title, s.display_name, w.{task_title}
+                   FROM v_handoff h
+                   JOIN v_thread t ON t.id = h.from_thread_id
+                   LEFT JOIN v_agent_session s ON s.id = h.from_session_id
+                   LEFT JOIN {task_view} w ON w.uri = h.task
+                  WHERE h.to_thread_id = ?1"
+            ),
             vec![SqlCell::Int(thread.value())],
             None,
         )

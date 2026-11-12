@@ -271,9 +271,11 @@ fn unresolved_ref(
 /// `None` when it resolves.
 fn missing_reason(world: &LinkWorld<'_>, reference: &Reference) -> Option<String> {
     match reference {
-        // Through the interface: the active list's items.
-        Reference::Task(uri) => (!exists(world.conn, "SELECT 1 FROM v_task WHERE uri = ?1", uri))
-            .then(|| format!("task `{uri}` does not exist")),
+        // Through the task resource's `resolve:` dataset, whichever it is.
+        Reference::Task(uri) => match oxplow_domain::uri::OxplowUri::parse(uri) {
+            Ok(canonical) => unresolved_ref(world, &canonical),
+            Err(_) => Some(format!("task `{uri}` does not exist")),
+        },
         Reference::Knowledge { store, id } => {
             let uri = oxplow_domain::uri::build::knowledge_uri(store, id);
             (world.this_page != Some(uri.as_str())
