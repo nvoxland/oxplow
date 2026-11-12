@@ -69,6 +69,7 @@ pub const CORE_CONSUMERS: &[&str] = &[
     "knowledge.records",
     "metrics.entity_states",
     "page_ref.task",
+    "refs.drift",
     "search.index",
     "snapshots.switch",
     "symbols.collect",

@@ -124,6 +124,7 @@ mod reading_data_tests;
 #[cfg(test)]
 mod real_watch_tests;
 pub mod recovery;
+pub mod ref_drift;
 pub mod ref_moves;
 pub mod ref_read;
 pub mod ref_resolver;
@@ -985,6 +986,9 @@ impl Services {
                 }),
                 Arc::new(knowledge::KnowledgeReads),
                 Arc::new(knowledge::KnowledgeDrift {
+                    vocabulary: vocabulary.clone(),
+                }),
+                Arc::new(ref_drift::RefDrift {
                     vocabulary: vocabulary.clone(),
                 }),
                 // The log's facts the renderer hears (P7.B6).

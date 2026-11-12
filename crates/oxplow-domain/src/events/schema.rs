@@ -202,6 +202,7 @@ impl EventSchemaRegistry {
             .expect("core type registers");
         r.register::<KnowledgePageDrifted>()
             .expect("core type registers");
+        r.register::<RefDrifted>().expect("core type registers");
         r.register::<HandoffSent>().expect("core type registers");
         r.register::<HandoffSettled>().expect("core type registers");
         r.register::<KnowledgeCommentWritten>()
@@ -1996,6 +1997,30 @@ impl EventType for KnowledgePageDrifted {
     type Payload = KnowledgePageDriftedV1;
 }
 
+/// `snapshot.ref_drifted@1`: a snapshot of the primary stream changed files a
+/// source's pinned refs cite (`file_pin` / `dir_pin` edges, a shared
+/// model's pinned markdown column), so what it says of them may no longer
+/// hold (`v_ref_pin.stale`), whether or not it was stale already. Caused by
+/// the `snapshot.taken`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RefDriftedV1 {
+    /// The source that pins them (a model row's URI).
+    pub source: String,
+    /// The snapshot that changed them.
+    pub snapshot: i64,
+    /// The changed files it cites, or that are under a directory it cites
+    /// (repo-relative).
+    pub paths: Vec<String>,
+}
+
+pub struct RefDrifted;
+impl EventType for RefDrifted {
+    const TYPE: &'static str = "snapshot.ref_drifted";
+    const V: u32 = 1;
+    type Payload = RefDriftedV1;
+}
+
 /// `ui.op_failed@2`: an operation the person started in the app failed, as
 /// the app showed it (`oxplow.ui.report_error`). Its captured stderr and
 /// stdout are the `output` body. v2 adds the run's audit row and an
@@ -2253,6 +2278,7 @@ mod tests {
                 ("knowledge.page.read", 1),
                 ("knowledge.page.recorded", 3),
                 ("knowledge.page.written", 3),
+                ("snapshot.ref_drifted", 1),
                 ("snapshot.taken", 3),
                 ("task.assigned", 1),
                 ("task.commented", 2),

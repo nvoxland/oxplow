@@ -104,7 +104,7 @@ models:
     `pinned_snapshot_id`, `latest_snapshot_id`, `stale`): a file is stale
     when its primary snapshot is newer than its pin or it was never
     pinned; a dir is stale when any file under it is.
-  - A pinned source drifting is the generic event `ref.drifted@1 {
+  - A pinned source drifting is the generic event `snapshot.ref_drifted@1 {
     source, snapshot, paths }` (today's `knowledge.page.drifted`, for any
     pinned source), so counts follow drift and not every snapshot.
   - **Verify** is core's `oxplow.refs.verify { uri, files? }`: re-pin the
