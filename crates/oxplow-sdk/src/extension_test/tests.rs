@@ -4002,8 +4002,6 @@ fills:
   - model: oxplow/task_record
     stores: [qstore]
     id_pattern: \"q[0-9]+\"
-    stages:
-      - { id: backlog, title: Backlog, state: backlog }
 collectors:
   - id: good
     runtime: starlark
