@@ -72,6 +72,7 @@ commands:
     entry: handlers/create.star
     needs: [store.sql]
     access: write
+    ui: { label: New Task, group: Tasks, at: oxplow/task.new, form: "oxplow:oxplow/page?page=oxtask/new-task", open_after: "oxplow:oxplow/task?id={{result.id}}&provider=oxtask" }
     example: { title: Fix the greeting, stage: ready, priority: high }
   - name: task.update
     summary: Change a task's title, body, priority or parent (null clears the last three). Undo puts the old values back.
@@ -101,6 +102,7 @@ commands:
     entry: handlers/move.star
     needs: [store.sql]
     access: write
+    ui: { label: Move To…, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/move-task" }
     example: { id: tsk1, stage: in_progress }
   - name: task.link
     summary: Link a task to another task (its id) or any URI, with a type. Undo removes the link.
@@ -115,6 +117,7 @@ commands:
     entry: handlers/link.star
     needs: [store.sql]
     access: write
+    ui: { label: Link…, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/link-task" }
     example: { id: tsk1, to: tsk2, type: blocks }
   - name: task.unlink
     summary: Remove a link from a task. Undo links it again.
@@ -142,6 +145,7 @@ commands:
     entry: handlers/comment.star
     needs: [store.sql]
     access: write
+    ui: { label: Comment…, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, form: "oxplow:oxplow/page?page=oxtask/comment-on-task" }
     example: { id: tsk1, body: Reproduced on main. }
   - name: task.uncomment
     summary: Remove a comment from its task. It is the undo of task.comment.
@@ -165,6 +169,7 @@ commands:
     entry: handlers/delete.star
     needs: [store.sql]
     access: write
+    ui: { label: Delete Task, group: Tasks, about: { resource: oxplow/task, accepts: { store: oxtask } }, input: { id: "{{uri.id}}" } }
     example: { id: tsk1 }
   - name: task.restore
     summary: Bring a deleted task back. It is the undo of task.delete.

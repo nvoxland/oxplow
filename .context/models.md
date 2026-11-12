@@ -572,6 +572,17 @@ fields:                        # oxplow's own annotations on every store's tasks
     queue; a close clears the assignee and the rank.
   - The `task_record` model's `title` is markdown like `body`, so a title
     naming a file or a task keeps its edge (core parsed both).
+- **Done before the flip (steps 6 and 4 of the flip order, in part).** The
+  task metrics and the `work.priority` dimension are bundled's; the
+  request summary's Tasks section is a bundled part in a foundation slot
+  (`.context/extensions-bundled.md`). Bundled declares the action point
+  `oxplow/task.new` (context `parent?`, `thread_id?`); oxtask's `task.create`
+  joins it (a button with one store, a menu with several) and its `move`,
+  `link`, `comment` and `delete` are item commands (`ui.about: { resource:
+  oxplow/task, accepts: { store: oxtask } }`), so they show only on oxtask
+  tasks. Create, move, link and comment open small forms (oxtask's pages
+  `new-task`, `move-task`, `link-task`, `comment-on-task`); delete runs from
+  the task's id.
 - **Before the deletes:** the provider `read` adapter, and the boot repair
   over models and their children (core's repair goes with the task
   projection).
