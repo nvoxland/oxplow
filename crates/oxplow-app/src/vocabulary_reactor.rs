@@ -49,7 +49,9 @@ pub struct VocabularyService {
 /// `[[<store>:<id>]]` is read).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Recognizers {
-    pub task_ids: Option<(String, String)>,
+    /// `(store, pattern)` per task store whose ids text may name loosely,
+    /// the active tracker's first: the first match wins.
+    pub task_ids: Vec<(String, String)>,
     pub knowledge_stores: Vec<String>,
 }
 
@@ -102,6 +104,14 @@ impl PreparedVocabulary {
         if !errors.is_empty() {
             return Err(errors);
         }
+        // The live task stores' own id patterns (`fills.id_pattern`), after
+        // what the host recognizes.
+        let mut recognizers = recognizers;
+        for ids in crate::models::ModelRegistry::of(snapshot.extensions()).task_ids() {
+            if !recognizers.task_ids.contains(&ids) {
+                recognizers.task_ids.push(ids);
+            }
+        }
         Ok(Self {
             generation: snapshot.generation().to_string(),
             declared: declarations(snapshot.extensions()),
@@ -134,23 +144,24 @@ impl PreparedVocabulary {
                     .resources
                     .clone()
                     .with_knowledge_stores(self.recognizers.knowledge_stores.iter().cloned());
-                match self.recognizers.task_ids.as_ref() {
-                    Some((provider, pattern)) => {
-                        match vocabulary
-                            .resources
-                            .clone()
-                            .with_task_ids(provider, pattern)
-                        {
-                            Ok(resources) => vocabulary.resources = resources,
-                            Err(error) => errors.entry("<host>".to_string()).or_default().push(
-                                Diagnostic::error(
+                vocabulary.resources = vocabulary.resources.clone().without_task_ids();
+                for (provider, pattern) in &self.recognizers.task_ids {
+                    match vocabulary
+                        .resources
+                        .clone()
+                        .with_task_ids(provider, pattern)
+                    {
+                        Ok(resources) => vocabulary.resources = resources,
+                        Err(error) => {
+                            errors
+                                .entry("<host>".to_string())
+                                .or_default()
+                                .push(Diagnostic::error(
                                     "activation.task_id_recognizer",
                                     format!("task id recognizer: {error}"),
-                                ),
-                            ),
+                                ))
                         }
                     }
-                    None => vocabulary.resources = vocabulary.resources.without_task_ids(),
                 }
                 errors.retain(|_, messages| !messages.is_empty());
                 if errors.is_empty() {
@@ -210,17 +221,19 @@ impl VocabularyService {
 /// `resources` recognizing what `recognizers` say: the active task
 /// tracker's ids (or none) and the enabled knowledge stores.
 pub fn recognizing(resources: ResourceRegistry, recognizers: &Recognizers) -> ResourceRegistry {
-    let resources = resources.with_knowledge_stores(recognizers.knowledge_stores.iter().cloned());
-    match recognizers.task_ids.as_ref() {
-        Some((provider, pattern)) => resources
-            .clone()
-            .with_task_ids(provider, pattern)
-            .unwrap_or_else(|e| {
-                tracing::warn!(provider, error = %e, "the task tracker's id pattern doesn't compile");
-                resources.without_task_ids()
-            }),
-        None => resources.without_task_ids(),
+    let mut resources = resources
+        .with_knowledge_stores(recognizers.knowledge_stores.iter().cloned())
+        .without_task_ids();
+    for (provider, pattern) in &recognizers.task_ids {
+        resources = match resources.clone().with_task_ids(provider, pattern) {
+            Ok(with) => with,
+            Err(e) => {
+                tracing::warn!(provider, error = %e, "a task store's id pattern doesn't compile");
+                resources
+            }
+        };
     }
+    resources
 }
 
 /// The vocabulary `declared` makes, checked against and restated into

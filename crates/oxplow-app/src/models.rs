@@ -38,6 +38,17 @@ pub struct FillSpec {
     pub stores: Vec<String>,
     /// The store's own fields.
     pub fields: Vec<FieldDecl>,
+    /// Added by `with_provider_fills` for a running provider instance, never
+    /// declared by an extension. Only such a fill is the provider read
+    /// adapter's to write through (`providers::model_records`): a store an
+    /// extension fills has its own writer.
+    #[serde(default)]
+    pub provider: bool,
+    /// How its items' ids look in text (a regex matched whole, `tsk[0-9]+`):
+    /// a loose id that matches is its store's item (`fills.id_pattern`, or a
+    /// provider instance's declared `id_pattern`).
+    #[serde(default)]
+    pub id_pattern: Option<String>,
 }
 
 /// Fields an extension declares on a model it doesn't fill.
@@ -178,9 +189,29 @@ impl ModelRegistry {
                 model: model.into(),
                 stores: vec![row.provider.clone()],
                 fields,
+                provider: true,
+                id_pattern: row.id_pattern.clone(),
             });
         }
         self
+    }
+}
+
+impl ModelRegistry {
+    /// Each store of a task model (one whose resource is `oxplow/task`)
+    /// that declares how its ids look: `(store, pattern)`, in fill order.
+    /// What makes a loose `tsk42` in text that store's item.
+    pub fn task_ids(&self) -> Vec<(String, String)> {
+        self.fills
+            .iter()
+            .filter(|f| {
+                self.models
+                    .get(&f.model)
+                    .is_some_and(|m| m.decl.resource == oxplow_domain::uri::resources::TASK)
+            })
+            .filter_map(|f| f.id_pattern.as_ref().map(|p| (f, p)))
+            .flat_map(|(f, p)| f.stores.iter().map(move |s| (s.clone(), p.clone())))
+            .collect()
     }
 }
 
@@ -640,6 +671,8 @@ mod tests {
             model: "shelf/book".into(),
             stores: vec!["shelf-folder".into()],
             fields: vec![],
+            provider: false,
+            id_pattern: None,
         });
         r.fields.push(FieldsSpec {
             extension: "shelf-score".into(),
@@ -689,6 +722,38 @@ mod tests {
             anchors: Anchors::default(),
             why,
         }
+    }
+
+    /// A task model's stores that declare an id pattern recognize their
+    /// ids; another model's fills, and a fill with none, don't.
+    #[test]
+    fn a_task_models_stores_name_their_id_patterns() {
+        let mut r = registry();
+        r.fills[0].id_pattern = Some("bk[0-9]+".into());
+        assert!(r.task_ids().is_empty(), "shelf/book isn't a task model");
+        let mut task = r.models["shelf/book"].clone();
+        task.decl.resource = oxplow_domain::uri::resources::TASK.into();
+        r.models.insert("x/task".into(), task);
+        r.fills.push(FillSpec {
+            extension: "tracker".into(),
+            model: "x/task".into(),
+            stores: vec!["tracker".into()],
+            fields: vec![],
+            provider: false,
+            id_pattern: Some("tsk[0-9]+".into()),
+        });
+        r.fills.push(FillSpec {
+            extension: "quiet".into(),
+            model: "x/task".into(),
+            stores: vec!["quiet".into()],
+            fields: vec![],
+            provider: false,
+            id_pattern: None,
+        });
+        assert_eq!(
+            r.task_ids(),
+            vec![("tracker".to_string(), "tsk[0-9]+".to_string())]
+        );
     }
 
     fn output(v: Value) -> ModelOutput {

@@ -36,7 +36,7 @@ vocabulary changed: `models::repair_edges_if_needed_tx`, recorded as
 `model_repair:<model>`); a stated row keeps its refs (`refs` column) so
 the repair restates them as written.
 
-Not yet: the provider `read` adapter, the owner's
+Not yet: the owner's
 `oxplow.model.write`, bare-link patterns, the tombstone sweep's schedule, and the shipped-extension plumbing (F7).
 This doc is the contract for the rest. The other pieces
 have their contracts in their own docs:
@@ -160,9 +160,15 @@ models:
     columns, keyed on the vocabulary too (edges depend on which ids
     resolve).
 - **Bare links.** A loose id in text (`tsk12`, `[[slug]]`) resolves by
-  the stores' declared patterns: each `fills:` entry may declare
-  `id_pattern:` (a regex); two enabled stores whose patterns overlap is a
-  load error naming both. `[[slug]]` resolves to the store the model's
+  the stores' declared patterns: each `fills:` entry of a task model (one
+  whose resource is `oxplow/task`) may declare `id_pattern:` (a regex,
+  matched whole, checked at load). Built: the vocabulary recognizes the
+  active task tracker's pattern first (until the flip removes core's
+  tracker), then each live fill's (`ModelRegistry::task_ids`, added in
+  `PreparedVocabulary::prepare`), in load order; the first match wins an
+  id two would match (whether two regexes overlap can't be checked in
+  general, so the order is the rule). A provider fill carries its
+  instance's `id_pattern`. `[[slug]]` resolves to the store the model's
   owner names as `default_store` (bundled: `oxwiki`), else is left as
   text.
 - **Search.** The resource's `searchable: <dataset>` stays the mechanism
@@ -279,6 +285,27 @@ fills:
   knowledge_record), written as the provider's extension; the views list
   its store because the fill is in the swapped registry. Bundled off (the
   models undeclared) -> no fill, the consumer returns without error.
+  **One writer per store.** A provider fill carries `provider: true`
+  (set only by `with_provider_fills`, never by a manifest), and the
+  consumer writes only through such a fill. A store an extension fills has
+  its own writer: core's own tracker emits `task.recorded` with
+  `provider=oxtask` too, and the oxtask extension fills `oxplow/task_record`
+  with `stores: [oxtask]`, so without the flag the adapter would write a
+  second copy of those rows.
+  **Reconcile.** A record that arrives with no provider fill is dropped by
+  the consumer, and the provider sync never resends it (it equals the item's
+  last `task.recorded`). So a publication states a store when its provider
+  fill appears: `model_records::reconcile_if_needed_tx`, run in
+  `PreparedExtensionDatabase::with_vocabulary` after the capability rows are
+  restated (a task's stage is read from them). It writes the latest
+  `task.recorded` / `knowledge.page.recorded` of each item of the store
+  from the event log with cause `reconcile` (a deleted item stays out; a
+  record that won't write is warned about, not fatal). An `asset_state`
+  marker `model_reconcile:<model>:<store>` makes it run once per fill; a
+  publication without the fill drops the marker, so a fill that goes away
+  and comes back is stated again. An instance becoming available changes
+  the capability rows, which is a publication (the fill is built from those
+  rows), so no separate trigger is needed.
 
 ## A script that composes a store's write (decided 2026-11-12, built)
 

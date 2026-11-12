@@ -387,3 +387,24 @@ async fn an_outside_write_pending_when_a_command_writes_is_nobodys() {
         assert_eq!(*thread, want, "{uri}");
     }
 }
+
+/// A task store that declares how its ids look (`fills.id_pattern`) makes a
+/// loose id in text its item, beside the active tracker's.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_id_pattern_on_a_fill_recognizes_its_loose_task_ids() {
+    let fx = services_with_thread().await;
+    let root = fx._dir.path();
+    write(
+        root,
+        ".oxplow/extensions/zz/extension.yaml",
+        "manifest: 2\nname: zz\nintent:\n  purpose: p\nfills:\n  - model: oxplow/task_record\n    stores: [zz]\n    id_pattern: \"zz[0-9]+\"\n",
+    );
+    let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+    assert!(problems.is_empty(), "{problems:?}");
+    let resources = fx.svc.vocabulary.current().resources.clone();
+    assert_eq!(
+        resources.task_uri_of("zz4").as_deref(),
+        Some("oxplow:oxplow/task?id=zz4&provider=zz")
+    );
+    assert_eq!(resources.task_uri_of("zzz"), None);
+}

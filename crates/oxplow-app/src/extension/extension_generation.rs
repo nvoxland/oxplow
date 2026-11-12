@@ -334,6 +334,10 @@ impl PreparedExtensionDatabase {
             if let Some(capabilities) = &self.capabilities {
                 capabilities.restate_tx(tx, &vocabulary)?;
             }
+            // A provider fill that appears states what the log holds for its
+            // store (the capability rows stand now: a task's stage is read
+            // from them).
+            crate::providers::model_records::reconcile_if_needed_tx(tx, &self.models, &vocabulary)?;
             Ok(vocabulary)
         })();
         match result {

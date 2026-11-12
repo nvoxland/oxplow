@@ -140,7 +140,8 @@ pub struct FillFile {
     model: String,
     #[serde(default)]
     stores: Option<Vec<String>>,
-    /// How its ids look in text (bare links; not used yet).
+    /// How its ids look in text, a regex matched whole: a loose id that
+    /// matches is its store's item (a task model's stores).
     #[serde(default)]
     id_pattern: Option<String>,
     /// A task store's stages (bundled's task model; not used yet).
@@ -460,12 +461,18 @@ pub fn parse(
                     if let Some(bad) = stores.iter().find(|s| !store_id(s)) {
                         return Err(format!("`{bad}` isn't a store id"));
                     }
-                    let _ = (raw.id_pattern, raw.stages);
+                    let _ = raw.stages;
+                    if let Some(pattern) = &raw.id_pattern {
+                        regex::Regex::new(&format!("^(?:{pattern})$"))
+                            .map_err(|e| format!("`id_pattern` `{pattern}` isn't a regex: {e}"))?;
+                    }
                     Ok(FillSpec {
                         extension: extension.to_string(),
                         model: raw.model,
                         stores,
                         fields: fields_of(raw.fields)?,
+                        provider: false,
+                        id_pattern: raw.id_pattern,
                     })
                 });
             match parsed {
