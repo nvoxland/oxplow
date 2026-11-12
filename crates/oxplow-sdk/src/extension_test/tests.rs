@@ -2501,6 +2501,156 @@ expect: {{ text: {want} }}
     );
 }
 
+/// `when: { action_point }` asks what a named action point offers as the
+/// shell would draw it: nothing with no contributor, a button with one, a
+/// menu with several; the commands are listed by id.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_what_an_action_point_draws() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let command = |name: &str, at: &str| {
+        format!(
+            "  - name: {name}
+    summary: Make one.
+    input_schema: {{ type: object, properties: {{ thread_id: {{ type: integer }} }} }}
+    entry: handlers/make.star
+    examples:
+      - {{ name: happy, input: {{ thread_id: 1 }}, expect_commands: [] }}
+    ui: {{ label: {name}, at: {at}, input: {{ thread_id: \"{{{{context.thread_id}}}}\" }} }}
+"
+        )
+    };
+    let manifest = |commands: &str| {
+        format!(
+            "manifest: 2
+name: acme
+intent:
+  purpose: Makes things.
+  examples:
+    - {{ name: drawn, input: {{ action_point: thing.new }}, expect: what it draws }}
+action_points:
+  - {{ name: thing.new, label: New Thing, context: {{ \"thread_id?\": int }} }}
+commands:
+{commands}"
+        )
+    };
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/make.star",
+        "def transform(x):\n    return {\"commands\": []}\n",
+    );
+    let fixture = |draws: &str, commands: &str| {
+        format!(
+            "when: {{ action_point: thing.new, context: {{ thread_id: 3 }} }}\nexpect: {{ draws: {draws}, commands: {commands} }}\n"
+        )
+    };
+    // No contributor: a command at another point does not count.
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(&command("thing.other", "acme/other.point")),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("none", "[]"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    // One: a button.
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(&command("thing.make", "acme/thing.new")),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("button", "[acme.thing.make]"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    // Several: a menu.
+    let two = format!(
+        "{}{}",
+        command("thing.make", "acme/thing.new"),
+        command("thing.also", "acme/thing.new")
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        &manifest(&two),
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("menu", "[acme.thing.also, acme.thing.make]"),
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+    // A wrong expectation names the point.
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/drawn.yaml",
+        &fixture("button", "$any"),
+    );
+    let errors = test_extension(root, "acme", false)
+        .await
+        .unwrap()
+        .error_lines()
+        .join("\n");
+    assert!(
+        errors.contains("action point `acme/thing.new` offered"),
+        "{errors}"
+    );
+}
+
+/// `when: { item_commands }` lists the commands about an item: its store
+/// filter (`ui.about.accepts.store`) keeps a command off other stores' items.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fixture_asks_which_commands_an_item_is_offered() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".oxplow/extensions/acme/extension.yaml",
+        "manifest: 2
+name: acme
+intent:
+  purpose: Acts on work items.
+  examples:
+    - { name: offered, input: { item_commands: \"oxplow:oxplow/task?id=tsk1&store=oxtask\" }, expect: the store's commands }
+commands:
+  - name: item.fix
+    summary: Fix it.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/fix.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/task?id=tsk1\" }, expect_commands: [] }
+    ui: { label: Fix, about: { resource: oxplow/task, accepts: { store: oxtask } } }
+  - name: item.other
+    summary: Other.
+    input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
+    entry: handlers/fix.star
+    examples:
+      - { name: happy, input: { uri: \"oxplow:oxplow/task?id=tsk1\" }, expect_commands: [] }
+    ui: { label: Other, about: { resource: oxplow/task, accepts: { store: [gh, jira] } } }
+",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/handlers/fix.star",
+        "def transform(x):\n    return {\"commands\": []}\n",
+    );
+    write(
+        root,
+        ".oxplow/extensions/acme/fixtures/offered.yaml",
+        "when: { item_commands: \"oxplow:oxplow/task?id=tsk1&store=oxtask\" }\nexpect: { commands: [acme.item.fix] }\n",
+    );
+    let report = test_extension(root, "acme", false).await.unwrap();
+    assert_eq!(report.error_lines(), Vec::<String>::new());
+}
+
 /// A page's `ui:` step runs its custom component's own code in the
 /// app's webview against the test's oxplow: what it draws, what it asks
 /// the shell (a title, actions) and what it invokes, through clicks,

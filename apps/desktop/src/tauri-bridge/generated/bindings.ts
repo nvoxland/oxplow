@@ -581,6 +581,11 @@ export const commands = {
 	 *  Generated from the command table in `oxplow-rpc`; the
 	 *  implementation and its docs live on the core.
 	 */
+	actionPointCommands: (point: string, context: unknown) => typedError<PointOffer, IpcError_Serialize>(__TAURI_INVOKE("action_point_commands", { point, context })),
+	/**
+	 *  Generated from the command table in `oxplow-rpc`; the
+	 *  implementation and its docs live on the core.
+	 */
 	registerClientHost: (client: string, scopes: string[]) => typedError<null, IpcError_Serialize>(__TAURI_INVOKE("register_client_host", { client, scopes })),
 	/**
 	 *  Generated from the command table in `oxplow-rpc`; the
@@ -795,6 +800,17 @@ export const commands = {
 };
 
 /* Types */
+/**
+ *  `ui.about`: the resource kind (the short form, a string) or the object
+ *  form `{ resource, accepts? }` that also filters the items.
+ */
+export type About = string | AboutItem;
+
+export type AboutItem = {
+	resource: string,
+	accepts?: ItemAccepts | null,
+};
+
 export type AcceptedValues = {
 	column: string,
 	values: string[],
@@ -825,6 +841,24 @@ export type Access =
  *  bound to an open thread (the worktree it changes).
  */
 "write";
+
+/**  An action point an extension declares. */
+export type ActionPointDecl = {
+	/**  `<namespace>/<name>`. */
+	id: string,
+	label: string,
+	doc: string | null,
+	context: ContextKey[],
+};
+
+/**
+ *  An action point a run placed: the point and the context the page gave
+ *  it (`context:` bound from the page's params and loaders).
+ */
+export type ActionPointRun = {
+	point: string,
+	context: { [key in string]: unknown },
+};
 
 /**
  *  What becomes of the page a viz is on after one of its actions (or its
@@ -1658,7 +1692,7 @@ export type CommandUi = {
 	 *  The ref kind it acts on (`task`, `request`): offered on that
 	 *  ref's page and rows. `None`: it needs no ref, and search offers it.
 	 */
-	about?: string | null,
+	about?: About | null,
 	/**
 	 *  A column of `about`'s dataset row (the dataset its resource
 	 *  resolves through) that must be truthy — not null, 0, `""` or false —
@@ -1669,6 +1703,15 @@ export type CommandUi = {
 	 *  extensions load. Absent, every ref of the kind is offered it.
 	 */
 	about_when?: string | null,
+	/**
+	 *  The named action point it joins (`<namespace>/<name>`, declared
+	 *  by an extension's `action_points:`): the point's page places it,
+	 *  and it runs with the point's context as its input. Excludes
+	 *  `about` (an item command). Its `input` binds the context's keys
+	 *  (`{ parent: "{{context.parent}}" }`, a key the page left out stays
+	 *  unset); without one the input is the whole context.
+	 */
+	at?: string | null,
 	/**
 	 *  The input it runs with. A string that is exactly `{{stream}}`,
 	 *  `{{thread}}`, `{{uri}}` or `{{uri.id}}` is bound from where it runs;
@@ -1837,6 +1880,19 @@ export type ConfigurationFile = {
 export type Confirm = "never" | "always" |
 /**  Irreversible; presented as destructive and always confirmed. */
 "destructive";
+
+/**  One key of a point's context. */
+export type ContextKey = {
+	name: string,
+	ty: ContextType,
+	/**  Declared `name?`: a page may leave it out. */
+	optional: boolean,
+};
+
+/**  The type of one context key. */
+export type ContextType = "string" |
+/**  A ref (`oxplow:…`): a string. */
+"uri" | "int" | "bool";
 
 /**
  *  A contribution's identity within the catalog: who declared it, what
@@ -2183,6 +2239,15 @@ export type DimensionEntry = {
 	/**  One sentence saying what the dimension slices by (`v_dimension.description`). */
 	description?: string | null,
 };
+
+/**  How the shell draws a point. */
+export type Draws =
+/**  No contributor: nothing is drawn. */
+"none" |
+/**  One: a button that runs it. */
+"button" |
+/**  Several: a menu of them. */
+"menu";
 
 /**
  *  Where a dragged row landed: the rows on either side of the drop
@@ -2609,6 +2674,8 @@ export type Extension_Deserialize = {
 	jobs: JobDecl[],
 	/**  Named dataset needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
+	/**  Action points it declares (`action_points:`; valid ones). */
+	actionPoints: ActionPointDecl[],
 	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
 	/**
@@ -2775,6 +2842,8 @@ export type Extension_Serialize = {
 	jobs: JobDecl[],
 	/**  Named dataset needs this extension declares. */
 	aiProfiles: AiProfileDecl[],
+	/**  Action points it declares (`action_points:`; valid ones). */
+	actionPoints: ActionPointDecl[],
 	/**  Its `version:` (semver), when it declares one; required to share. */
 	version: string | null,
 	/**
@@ -3443,6 +3512,16 @@ export type IpcError_Serialize = {
 	auditId?: number | null,
 };
 
+/**  A `ui.about` command's filter on the item it is offered on. */
+export type ItemAccepts = {
+	/**
+	 *  The store ids of the item URI's `store` param it is offered on:
+	 *  one id or a list; each is an exact id, or a renderer's `accepts`
+	 *  rule (`present`, `absent`, an anchored id pattern).
+	 */
+	store?: StoreFilter | null,
+};
+
 export type ItemBody =
 /**
  *  What the human sent. `context` is the oxplow block attached to it,
@@ -3904,51 +3983,63 @@ export type NodeKind = NodeKind_Serialize | NodeKind_Deserialize;
 
 export type NodeKind_Deserialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "stack"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "grid"; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; params?: never; props?: never; text?: never } |
+({ kind: "switch"; param: string; children: Node_Deserialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; config: VizConfig_Deserialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "viz"; from: string | null; config: VizConfig_Deserialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; param?: never; props?: never; text?: never } |
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; from?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never } |
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never } |
 /**  One of the extension's custom components, given the page's data. */
-({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
+({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
+/**
+ *  A named action point (`action_point: <id>`, `context:`): the
+ *  commands that joined it, drawn by the shell as nothing, a button or
+ *  a menu. `context` is bound as an embed's params are.
+ */
+({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
 
 export type NodeKind_Serialize =
 /**  Its children one after another (sections). */
-({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "stack"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Its children as tiles, each at its `size`. */
-({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "grid"; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  The one child whose id is `param`'s value. */
-({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; config?: never; from?: never; name?: never; page?: never; params?: never; props?: never; text?: never } |
+({ kind: "switch"; param: string; children: Node_Serialize[] }) & { component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  A loader's rows through a viz. `from` is none only for a viz that
  *  reads no rows (a form, approvals).
  */
-({ kind: "viz"; from: string | null; config: VizConfig_Serialize }) & { children?: never; component?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "viz"; from: string | null; config: VizConfig_Serialize }) & { children?: never; component?: never; context?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**
  *  Another page, inline: its params by name from this page's params
  *  and its loaders' first rows, `params` naming any explicitly.
  */
-({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; param?: never; props?: never; text?: never } |
+({ kind: "embed"; page: string; params: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; param?: never; point?: never; props?: never; text?: never } |
 /**  Where other extensions' pages are mounted (`<page>.<name>`). */
-({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; from?: never; page?: never; param?: never; params?: never; props?: never; text?: never } |
+({ kind: "slot"; name: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; page?: never; param?: never; params?: never; point?: never; props?: never; text?: never } |
 /**  Static markdown. */
-({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never } |
+({ kind: "markdown"; text: string }) & { children?: never; component?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; props?: never } |
 /**  One of the extension's custom components, given the page's data. */
-({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; text?: never };
+({ kind: "component"; component: string; props: unknown | null }) & { children?: never; config?: never; context?: never; from?: never; name?: never; page?: never; param?: never; params?: never; point?: never; text?: never } |
+/**
+ *  A named action point (`action_point: <id>`, `context:`): the
+ *  commands that joined it, drawn by the shell as nothing, a button or
+ *  a menu. `context` is bound as an embed's params are.
+ */
+({ kind: "actionPoint"; point: string; context: { [key in string]: ArgSource } }) & { children?: never; component?: never; config?: never; from?: never; name?: never; page?: never; param?: never; params?: never; props?: never; text?: never };
 
 /**  A node of a page's view. */
 export type Node_Deserialize = {
@@ -5495,6 +5586,27 @@ export type PlanEntry = {
 
 export type PlanStatus = "pending" | "in_progress" | "completed";
 
+/**  One command at a point, and what it runs with. */
+export type PointCommand = {
+	id: string,
+	label: string,
+	/**  What it runs with: its `ui.input` bound from the point's context. */
+	input: unknown,
+};
+
+/**  What a point offers for a context. */
+export type PointOffer = {
+	point: string,
+	/**
+	 *  The point's label, which names its button or menu when a command's
+	 *  own label doesn't.
+	 */
+	label: string,
+	draws: Draws,
+	/**  By extension, then command id. */
+	commands: PointCommand[],
+};
+
 /**  A `command_proposal` row: an agent's run waiting on a person. */
 export type ProposalId = number;
 
@@ -5826,6 +5938,8 @@ export type RunNode_Deserialize = {
 	 *  extension, its run the `embed`.
 	 */
 	replacedBy: string | null,
+	/**  An action point node's point and its context, bound. */
+	actionPoint: ActionPointRun | null,
 };
 
 /**  A node of a run's tree: the page's node by id, and what it resolved to. */
@@ -5845,6 +5959,8 @@ export type RunNode_Serialize = {
 	 *  extension, its run the `embed`.
 	 */
 	replacedBy: string | null,
+	/**  An action point node's point and its context, bound. */
+	actionPoint: ActionPointRun | null,
 };
 
 /**  A run and the sequence of that exact snapshot, captured under one lock. */
@@ -6196,6 +6312,9 @@ export type StageDecl = {
 	title: string,
 	bucket: Bucket,
 };
+
+/**  One store id or a list of them. */
+export type StoreFilter = string | string[];
 
 export type Stream = {
 	id: StreamId,

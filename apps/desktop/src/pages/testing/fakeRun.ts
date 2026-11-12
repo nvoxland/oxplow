@@ -180,6 +180,7 @@ export function runTreeOf(n: Node, pick: Record<string, string> = {}, embeds: Re
     children: shown.map((c) => runTreeOf(c, pick, embeds)),
     embed: n.kind === "embed" ? (embeds[n.id] ?? null) : null,
     error: null,
+    actionPoint: null,
   } as RunNode;
 }
 

@@ -100,6 +100,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | effect | `{ effect: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip } \| { reacts: false }` |
 | event_type | `{ event_type, v?, payload }` | `{ valid, upcast? }` |
 | advisory | `{ advisory: <id>, thread? }` | `{ lines: [text] }` |
+| action_point | `{ action_point: <id \| name>, context? } (what a named action point offers)` | `{ draws: none \| button \| menu, commands?: [ids] }` |
+| item_commands | `{ item_commands: <uri> } (the commands about an item, its store filter applied)` | `{ commands: [ids] }` |
 | context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
 | wikilink | `{ wikilink }` | `{ uri }` |

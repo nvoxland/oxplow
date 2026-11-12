@@ -86,6 +86,19 @@ pub async fn ref_commands(svc: &Services, uri: String) -> Result<Vec<String>, Ip
         .map_err(IpcError::invalid)
 }
 
+/// What action point `point` offers for `context`: the commands that
+/// joined it, each with the context as its input, and how to draw them
+/// (`oxplow_app::commands::action_point_offers`).
+pub async fn action_point_commands(
+    svc: &Services,
+    point: String,
+    context: Json,
+) -> Result<oxplow_app::commands::action_point_offers::PointOffer, IpcError> {
+    oxplow_app::commands::action_point_offers::action_point_offer(svc, &point, &context.0)
+        .await
+        .map_err(IpcError::invalid)
+}
+
 /// Window `client` (an id it mints when it starts) is open and hosts
 /// `scopes` (`tabs.write`, …): a command the daemon runs over one
 /// of them comes to it as a `clientCall` event addressed to it

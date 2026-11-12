@@ -8,6 +8,7 @@
 /// Every node's root carries `data-node` with its id (an embed's nodes
 /// `<embed>/<id>`, as the server names them for actions) and registers in
 /// the `NodeRegistry`, so the host can land on `#node=<id>`.
+import { ActionPoint } from "../components/ActionPoint.js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Markdown } from "../components/Markdown/Markdown.js";
@@ -283,6 +284,10 @@ function NodeBody(props: NodeViewProps & { def: Node; id: string }) {
     case "component":
       // The page's extension's component, fed the page's loaders.
       return <ComponentNode run={props.run} def={def} streamId={props.streamId ?? null} />;
+    case "actionPoint":
+      // The commands that joined the point, as the shell draws them (none,
+      // a button, a menu); the run bound its context.
+      return at.actionPoint ? <ActionPoint point={at.actionPoint.point} context={at.actionPoint.context} /> : null;
     case "embed":
       return at.embed ? (
         <>

@@ -652,6 +652,7 @@ implementations: …  # capability implementations it declares (oxplow-foundatio
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see extensions-events.md "Effects")
+action_points: …       # named places where several extensions offer one kind of action; a command joins with `ui: { at: <ns>/<name> }` (see extensions-slots.md "Action points and the store filter")
 custom_components: …   # sandboxed components a page's `component` node or `custom` viz draws (see extensions-components.md "Custom components"); each has an optional one-sentence `description:`
 ```
 

@@ -330,10 +330,12 @@ pub fn check_about_when(extensions: &mut [Extension]) {
     for ext in extensions.iter_mut().filter(|e| e.enabled) {
         let mut problems = Vec::new();
         for c in &ext.commands {
-            let Some((about, column)) =
-                c.ui.as_ref()
-                    .and_then(|ui| ui.about.as_ref().zip(ui.about_when.as_ref()))
-            else {
+            let Some((about, column)) = c.ui.as_ref().and_then(|ui| {
+                ui.about
+                    .as_ref()
+                    .map(|a| a.resource().to_string())
+                    .zip(ui.about_when.as_ref())
+            }) else {
                 continue;
             };
             let at = |m: String| {
@@ -1930,7 +1932,7 @@ mod tests {
         let ui = c.ui.as_ref().unwrap();
         assert_eq!(ui.label, "Finish Review");
         assert_eq!(ui.group.as_deref(), Some("Review"));
-        assert_eq!(ui.about.as_deref(), Some("oxplow/task"));
+        assert_eq!(ui.about.as_ref().map(|a| a.resource()), Some("oxplow/task"));
         assert_eq!(ui.input, Some(serde_json::json!({ "uri": "{{uri}}" })));
         assert!(!c.stable, "a private extension's command is experimental");
     }

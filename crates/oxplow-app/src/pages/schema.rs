@@ -571,6 +571,13 @@ pub enum NodeKind {
         #[specta(type = Option<oxplow_domain::Json>)]
         props: Option<serde_json::Value>,
     },
+    /// A named action point (`action_point: <id>`, `context:`): the
+    /// commands that joined it, drawn by the shell as nothing, a button or
+    /// a menu. `context` is bound as an embed's params are.
+    ActionPoint {
+        point: String,
+        context: BTreeMap<String, ArgSource>,
+    },
 }
 
 /// A page file as written on disk.
@@ -1192,6 +1199,7 @@ fn inline_problem(page: &Page) -> Option<String> {
         let why = match &node.kind {
             NodeKind::Component { .. } => Some("a component"),
             NodeKind::Slot { .. } => Some("a slot"),
+            NodeKind::ActionPoint { .. } => Some("an action point"),
             NodeKind::Viz { config: cfg, .. } if !cfg.actions.is_empty() => Some("actions"),
             NodeKind::Viz { config: cfg, .. } => match cfg.viz {
                 Viz::Form => Some("a form"),
@@ -1585,7 +1593,7 @@ struct NodeCtx<'a> {
 }
 
 const NODE_KINDS: &str =
-    "`stack`, `grid`, `switch`, `viz`, `embed`, `slot`, `markdown` or `component`";
+    "`stack`, `grid`, `switch`, `viz`, `embed`, `slot`, `markdown`, `component` or `action_point`";
 
 fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, String> {
     let mut map = value
@@ -1721,6 +1729,23 @@ fn parse_node(value: &serde_yaml::Value, ctx: &mut NodeCtx<'_>) -> Result<Node, 
         only(&map, "markdown")?;
         let text = take_str(&mut map, "markdown")?.unwrap_or_default();
         (ctx.ids.layout("markdown"), NodeKind::Markdown { text })
+    } else if map.contains_key("action_point") {
+        let context = match map.remove("context") {
+            None => BTreeMap::new(),
+            Some(v) => serde_yaml::from_value::<BTreeMap<String, ArgSource>>(v)
+                .map_err(|e| format!("`context`: {e}"))?,
+        };
+        only(&map, "action_point")?;
+        let point = take_str(&mut map, "action_point")?.unwrap_or_default();
+        if !oxplow_domain::commands::is_action_point_id(&point) {
+            return Err(format!(
+                "`action_point: {point}` isn't an action point (`<extension>/<name>`, as `oxplow/task.new`)"
+            ));
+        }
+        (
+            ctx.ids.layout("action_point"),
+            NodeKind::ActionPoint { point, context },
+        )
     } else if map.contains_key("component") {
         only(&map, "component")?;
         let c: ComponentFile = serde_yaml::from_value(map.remove("component").unwrap_or_default())
@@ -1825,7 +1850,12 @@ fn leaf_viz(
 fn check_titles(node: &Node) -> Result<(), String> {
     for child in node.children() {
         let titled = child.title.as_deref().is_some_and(|t| !t.trim().is_empty());
-        if !titled && !matches!(child.kind, NodeKind::Slot { .. } | NodeKind::Embed { .. }) {
+        if !titled
+            && !matches!(
+                child.kind,
+                NodeKind::Slot { .. } | NodeKind::Embed { .. } | NodeKind::ActionPoint { .. }
+            )
+        {
             return Err(format!(
                 "node `{}` is a section and needs a `title`: give it one, and add \
                  `hide_title: true` if its heading shouldn't show (Contents and agents \

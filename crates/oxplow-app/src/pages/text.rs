@@ -189,6 +189,11 @@ fn write_tree<'r>(
                     "(custom component `{component}`: it shows the page's loaders)\n"
                 ));
             }
+            NodeKind::ActionPoint { point, .. } => {
+                out.push_str(&format!(
+                    "(action point `{point}`: the shell draws the commands that joined it)\n"
+                ));
+            }
             NodeKind::Slot { .. } => {
                 for child in &at.children {
                     write_tree(svc, root, run, child, prefix, level, out).await?;

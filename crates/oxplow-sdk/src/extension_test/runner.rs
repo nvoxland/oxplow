@@ -217,6 +217,10 @@ pub(super) async fn dispatch(
         event_type_example(ext, ex, t, report);
     } else if let Some(id) = ex.when.get("advisory").and_then(Value::as_str) {
         advisory_example(host, ext, ex, id, report).await;
+    } else if let Some(point) = ex.when.get("action_point").and_then(Value::as_str) {
+        action_point_example(host, ext, ex, point, report).await;
+    } else if let Some(uri) = ex.when.get("item_commands").and_then(Value::as_str) {
+        item_commands_example(host, ex, uri, report).await;
     } else if let Some(id) = ex.when.get("context").and_then(Value::as_str) {
         context_example(host, ext, ex, id, report).await;
     } else if let Some(sql) = ex.when.get("sql").and_then(Value::as_str) {
@@ -316,6 +320,16 @@ pub(super) const KINDS: &[Kind] = &[
         key: "advisory",
         when: "{ advisory: <id>, thread? }",
         expect: "{ lines: [text] }",
+    },
+    Kind {
+        key: "action_point",
+        when: "{ action_point: <id | name>, context? } (what a named action point offers)",
+        expect: "{ draws: none | button | menu, commands?: [ids] }",
+    },
+    Kind {
+        key: "item_commands",
+        when: "{ item_commands: <uri> } (the commands about an item, its store filter applied)",
+        expect: "{ commands: [ids] }",
     },
     Kind {
         key: "context",

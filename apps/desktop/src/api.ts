@@ -5,6 +5,7 @@ import type {
   TabReportAnswer,
   HookEnvelope,
   OpOutcome,
+  PointOffer,
   OxplowConfig,
   OxplowEvent,
   Reads,
@@ -657,6 +658,13 @@ export async function listPersonCommands(): Promise<CommandSpec[]> {
  *  (`ref_commands`). */
 export async function refCommands(uri: string): Promise<string[]> {
   return unwrap(await commands.refCommands(uri));
+}
+
+/** What action point `point` offers for `context`: the commands that
+ *  joined it (`ui.at`) with the input each runs with, and how to draw them
+ *  (`action_point_commands`). */
+export async function actionPointCommands(point: string, context: Record<string, unknown>): Promise<PointOffer> {
+  return unwrap(await commands.actionPointCommands(point, context as never));
 }
 
 /** Run command `id` as a background task (its `ui.background`: a slow
