@@ -43,6 +43,7 @@ pub mod git_store;
 pub mod handoff_store;
 pub mod knowledge_page_store;
 pub mod knowledge_record;
+pub mod model_store;
 pub mod op_error_store;
 pub mod page_ref_projections;
 pub mod page_ref_store;

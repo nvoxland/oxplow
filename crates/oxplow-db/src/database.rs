@@ -2687,6 +2687,8 @@ mod tests {
             "oxtask_link",
             "knowledge_page_touch",
             "knowledge_page_read",
+            "model_field_value",
+            "model_field_decl",
             "page_ref",
             "comment",
             "comment_message",
