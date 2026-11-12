@@ -11,8 +11,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use oxplow_db::model_store::{
-    ensure_model_tx, write_fields_tx, write_tx, ChangeOp, FieldDecl, ModelChange, ModelDecl,
-    ModelRow, ModelWrite,
+    write_fields_tx, write_tx, ChangeOp, FieldDecl, ModelChange, ModelDecl, ModelRow, ModelWrite,
 };
 use oxplow_db::EventCtx;
 use oxplow_domain::events::{Anchors, Envelope, EventId};
@@ -114,6 +113,67 @@ impl ModelRegistry {
 }
 
 impl ModelRegistry {
+    /// What the enabled extensions' declarations can't both have, as errors
+    /// on the later extension: a store id two extensions write into one
+    /// model, and a store id that is another extension's field namespace on
+    /// it (the store's restatement of its own fields would remove theirs).
+    pub fn conflicts(
+        extensions: &[crate::extension::extensions::Extension],
+    ) -> crate::vocabulary_reactor::VocabularyErrors {
+        use oxplow_domain::diagnostic::Diagnostic;
+        let mut errors = crate::vocabulary_reactor::VocabularyErrors::new();
+        let mut claimed: BTreeMap<(String, String), String> = BTreeMap::new();
+        let enabled: Vec<_> = extensions.iter().filter(|e| e.enabled).collect();
+        for e in &enabled {
+            for f in &e.shared_models.fills {
+                for store in &f.stores {
+                    match claimed.get(&(f.model.clone(), store.clone())) {
+                        Some(owner) if owner != &e.name => {
+                            errors.entry(e.name.clone()).or_default().push(
+                                Diagnostic::error(
+                                    "model.store_taken",
+                                    format!(
+                                        "`{}` fills `{}` as store `{store}`, which `{owner}` already writes",
+                                        e.name, f.model
+                                    ),
+                                )
+                                .fix("name a store id of its own under `fills:`"),
+                            );
+                        }
+                        _ => {
+                            claimed.insert((f.model.clone(), store.clone()), e.name.clone());
+                        }
+                    }
+                }
+            }
+        }
+        for e in &enabled {
+            for f in &e.shared_models.fields {
+                if let Some(owner) = claimed.get(&(f.model.clone(), f.namespace.clone())) {
+                    if owner != &e.name {
+                        errors.entry(e.name.clone()).or_default().push(Diagnostic::error(
+                            "model.namespace_taken",
+                            format!(
+                                "`{}`'s fields on `{}` would be kept as `{}`, the store id `{owner}` writes",
+                                e.name, f.model, f.namespace
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    /// The stores whose rows `model`'s views show: the enabled fillers'.
+    pub fn live_stores(&self, model: &str) -> Vec<String> {
+        self.fills
+            .iter()
+            .filter(|f| f.model == model)
+            .flat_map(|f| f.stores.iter().cloned())
+            .collect()
+    }
+
     /// Every declared field as `(model, namespace, extension, field)`: a
     /// store's under each of its store ids, another extension's under its
     /// namespace (`v_model_field_decl`).
@@ -329,7 +389,6 @@ pub fn apply_tx(
                     .collect(),
             },
         };
-        ensure_model_tx(conn, &spec.decl).map_err(|e| e.to_string())?;
         let written = write_tx(conn, &spec.decl, kinds, &m.store, &fill.fields, &write)
             .map_err(|e| e.to_string())?;
         let counts = out.counts.entry(m.model.clone()).or_default();
@@ -366,7 +425,6 @@ pub fn apply_tx(
                     writer.extension, f.model
                 )
             })?;
-        ensure_model_tx(conn, &spec.decl).map_err(|e| e.to_string())?;
         if let Some(change) = write_fields_tx(
             conn,
             &spec.decl,
@@ -395,7 +453,7 @@ mod e2e_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxplow_db::model_store::{Markdown, ModelColumn, ModelType};
+    use oxplow_db::model_store::{ensure_model_tx, Markdown, ModelColumn, ModelType};
 
     const EVENT: &str = "shelf.book.changed";
 
@@ -493,6 +551,9 @@ mod tests {
         fields: Vec<FieldsOutput>,
     ) -> Result<Applied, String> {
         db.transaction_or(move |tx| {
+            for spec in registry().models.values() {
+                ensure_model_tx(tx, &spec.decl).map_err(oxplow_db::TxError::Storage)?;
+            }
             apply_tx(
                 tx,
                 &registry(),
