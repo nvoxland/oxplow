@@ -85,6 +85,13 @@ export interface OxplowComponent {
    *  `DENIED` when a policy refuses it, or the bundle it was loaded at is
    *  no longer the deployed one). */
   invoke(command: string, input?: unknown): Promise<unknown>;
+  /** Run an action point this component declares in `action_points`, as
+   *  the person looking at it: the command that answers `point` for
+   *  `context` runs with the input the point binds (a store's own command
+   *  needs no entry in `commands`). `command` names which when several
+   *  answer; with none answering it rejects `INVALID` ("nothing answers").
+   *  Rejects as {@link invoke} does. */
+  invokePoint(point: string, context?: unknown, command?: string): Promise<unknown>;
   /** Open one of oxplow's pages, in a new tab with `{ newTab: true }`.
    *  Rejects with an {@link OxplowError}. */
   navigate(ref: string, options?: { newTab?: boolean }): Promise<null>;

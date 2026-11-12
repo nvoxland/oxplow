@@ -273,6 +273,10 @@ pub const MANIFEST: &[Capability] = &[
         "a custom component's bridged command, from its sandboxed frame through the host (P6b.D2)",
     ),
     ui(
+        "invoke_component_point",
+        "a custom component's bridged action point, from its sandboxed frame through the host; an agent runs the point's command itself",
+    ),
+    ui(
         "run_component_sql",
         "a custom component's own read-only SQL, from its sandboxed frame through the host; an agent runs oxplow_query_sql",
     ),

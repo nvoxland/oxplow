@@ -660,6 +660,137 @@ fn prepare_component_command(
     })
 }
 
+/// A custom component runs an action point (`invokePoint`): "do this to
+/// that", where the point's contributors say how.
+pub struct ComponentPointInvoke {
+    /// The component whose frame asked: `<extension>/<component id>`.
+    pub component: String,
+    /// The point, as the component's `action_points:` names it.
+    pub point: String,
+    /// The point's context, as a page would place it.
+    pub context: Value,
+    /// Which of the offered commands, when several are (`None`: the only
+    /// one).
+    pub command: Option<String>,
+    /// Who is looking at the frame.
+    pub on_behalf_of: Actor,
+    /// The person confirmed this call, in the host (never in the frame).
+    pub confirmed: bool,
+    /// The bundle version the frame was loaded at.
+    pub version: String,
+}
+
+/// Run the command that answers `call.point` for `call.context`, as the
+/// component acting for its viewer: the command the point offers them (so
+/// its `ui.accepts` and its policies apply as if they ran it), with the
+/// input the offer binds. The bundle must declare the point; the store's
+/// joining the point is its consent, so no `commands:` permission is
+/// needed.
+pub async fn invoke_component_point(
+    svc: &crate::Services,
+    project_root: &Path,
+    call: ComponentPointInvoke,
+) -> Result<CommandOutcome, CommandError> {
+    svc.sql
+        .read_generation(async { check_component_point(svc, project_root, &call) })
+        .await
+        .map_err(CommandError::from)??;
+    let offer =
+        crate::commands::action_point_offers::action_point_offer(svc, &call.point, &call.context)
+            .await
+            .map_err(|message| CommandError::Invalid {
+                field: Some("/point".into()),
+                message,
+            })?;
+    let chosen = match &call.command {
+        Some(name) => offer
+            .commands
+            .iter()
+            .find(|c| &c.id == name)
+            .ok_or_else(|| CommandError::Invalid {
+                field: Some("/command".into()),
+                message: format!(
+                    "`{name}` isn't offered at `{}` for this context ({})",
+                    call.point,
+                    offered_ids(&offer)
+                ),
+            })?,
+        None => match offer.commands.as_slice() {
+            [] => {
+                return Err(CommandError::Invalid {
+                    field: Some("/point".into()),
+                    message: format!("nothing answers `{}` for this context", call.point),
+                })
+            }
+            [only] => only,
+            _ => {
+                return Err(CommandError::Invalid {
+                    field: Some("/command".into()),
+                    message: format!(
+                        "several answer `{}` for this context; name one: {}",
+                        call.point,
+                        offered_ids(&offer)
+                    ),
+                })
+            }
+        },
+    };
+    Prepared::Command {
+        actor: Actor::Component {
+            component: call.component,
+            on_behalf_of: Box::new(call.on_behalf_of),
+        },
+        command: chosen.id.clone(),
+        input: chosen.input.clone(),
+        confirmed: call.confirmed,
+    }
+    .run(svc)
+    .await
+}
+
+fn offered_ids(offer: &crate::commands::action_point_offers::PointOffer) -> String {
+    offer
+        .commands
+        .iter()
+        .map(|c| c.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn check_component_point(
+    svc: &crate::Services,
+    project_root: &Path,
+    call: &ComponentPointInvoke,
+) -> Result<(), CommandError> {
+    let (ext, component) = component_of(svc, project_root, &call.component)?;
+    let loaded = svc
+        .component_bundles
+        .get(&call.version)
+        .filter(|bundle| {
+            bundle.extension == ext.name
+                && bundle.component == component.id
+                && svc.component_bundles.is_current(project_root, bundle)
+        })
+        .ok_or_else(|| CommandError::Denied {
+            reason: format!(
+                "component `{}/{}` isn't loaded at that version any more; reload its page",
+                ext.name, component.id
+            ),
+        })?;
+    if !loaded.points.contains(&call.point) {
+        return Err(CommandError::Invalid {
+            field: Some("/point".into()),
+            message: format!(
+                "`{}` isn't one of component `{}`'s action points ({})",
+                call.point,
+                component.id,
+                loaded.points.join(", ")
+            ),
+        });
+    }
+    Ok(())
+}
+
 /// Load the bundle of component `key` (`<extension>/<id>`) as it is now
 /// under `project_root`, for its frame: the version to serve it at and invoke
 /// with.
@@ -1760,6 +1891,161 @@ view:
             &fx.svc,
             &root,
             board_invoke(&fx, "oxplow.task.transition", &loaded),
+        )
+        .await
+        .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// An extension `acme` whose component `board` runs the point
+    /// `acme/item.finish` (and no command), with `joined` commands at it,
+    /// each composing a transition of the item to the context's stage.
+    async fn point_fixture(
+        joined: &[&str],
+        declares: &str,
+    ) -> (crate::test_fixtures::TaskFixture, std::path::PathBuf) {
+        let (fx, root) = fixture().await;
+        let ext = root.join(".oxplow/extensions/acme");
+        let commands: String = joined
+            .iter()
+            .map(|name| {
+                format!(
+                    "  - name: {name}\n    summary: Finish it.\n    input_schema: {{ type: object, \
+                     required: [uri, to], properties: {{ uri: {{ type: string }}, to: {{ type: string }} }} }}\n    \
+                     entry: handlers/finish.star\n    \
+                     examples:\n      - {{ name: happy, input: {{ uri: \"oxplow:oxplow/task?id=tsk1\", to: done }}, \
+                     expect_commands: [oxplow.task.transition] }}\n    \
+                     ui: {{ label: {name}, at: acme/item.finish, \
+                     input: {{ uri: \"{{{{context.uri}}}}\", to: \"{{{{context.stage}}}}\" }} }}\n"
+                )
+            })
+            .collect();
+        std::fs::write(
+            ext.join("extension.yaml"),
+            format!(
+                "manifest: 2\nname: acme\nintent:\n  purpose: test\npermissions: [commands:oxplow.task.transition]\n\
+                 action_points:\n  - {{ name: item.finish, label: Finish, context: {{ uri: uri, stage: string }} }}\n\
+                 commands:\n{commands}\
+                 custom_components:\n  - {{ id: board, {declares} }}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(ext.join("handlers")).unwrap();
+        std::fs::write(
+            ext.join("handlers/finish.star"),
+            "def transform(x):\n    i = x[\"input\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.transition\", \
+             \"input\": {\"uri\": i[\"uri\"], \"to\": i[\"to\"]}}]}\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(ext.join("components/board")).unwrap();
+        std::fs::write(ext.join("components/board/index.html"), "<!doctype html>").unwrap();
+        std::fs::write(ext.join("pages/view.yaml"), VIEW_PAGE).unwrap();
+        crate::test_fixtures::activate(&fx.svc).await;
+        (fx, root)
+    }
+
+    fn point_invoke(
+        fx: &crate::test_fixtures::TaskFixture,
+        command: Option<&str>,
+        version: &str,
+    ) -> ComponentPointInvoke {
+        ComponentPointInvoke {
+            component: "acme/board".into(),
+            point: "acme/item.finish".into(),
+            context: serde_json::json!({ "uri": oxplow_oxtask::task_ref(fx.task), "stage": "done" }),
+            command: command.map(String::from),
+            on_behalf_of: Actor::Human,
+            confirmed: false,
+            version: version.into(),
+        }
+    }
+
+    fn invalid(err: CommandError, field: &str, says: &str) {
+        assert!(
+            matches!(&err, CommandError::Invalid { field: Some(f), message }
+                if f == field && message.contains(says)),
+            "{err:?}"
+        );
+    }
+
+    /// A component runs only the points it declares: one it doesn't is
+    /// refused, and nothing ran.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_component_runs_only_the_points_it_declares() {
+        let (fx, root) = point_fixture(&["item.finish"], "action_points: [acme/item.other]").await;
+        let version = load_board(&fx, &root).await;
+        invalid(
+            invoke_component_point(&fx.svc, &root, point_invoke(&fx, None, &version))
+                .await
+                .unwrap_err(),
+            "/point",
+            "isn't one of component `board`'s action points",
+        );
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+    }
+
+    /// A point with one answer runs it with the offer's bound input, as the
+    /// component acting for the person (audited so), with no `commands:`
+    /// declared for it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_point_with_one_answer_runs_it_as_the_component() {
+        let (fx, root) = point_fixture(&["item.finish"], "action_points: [acme/item.finish]").await;
+        let version = load_board(&fx, &root).await;
+        invoke_component_point(&fx.svc, &root, point_invoke(&fx, None, &version))
+            .await
+            .unwrap();
+        assert_eq!(state(&fx.svc, fx.task).await, "done");
+        let (kind, id) = audit_actor(&fx.svc).await;
+        assert_eq!(
+            (kind.as_str(), id.as_deref()),
+            ("component", Some("acme/board"))
+        );
+    }
+
+    /// No command answers the context: `Invalid`, saying so.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_point_nothing_answers_is_invalid() {
+        let (fx, root) = point_fixture(&[], "action_points: [acme/item.finish]").await;
+        let version = load_board(&fx, &root).await;
+        invalid(
+            invoke_component_point(&fx.svc, &root, point_invoke(&fx, None, &version))
+                .await
+                .unwrap_err(),
+            "/point",
+            "nothing answers `acme/item.finish`",
+        );
+    }
+
+    /// Several answer: without `command` it is `Invalid` and lists them; a
+    /// named one runs; one that doesn't answer is `Invalid`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn several_answers_need_a_named_command() {
+        let (fx, root) = point_fixture(
+            &["item.finish", "item.also"],
+            "action_points: [acme/item.finish]",
+        )
+        .await;
+        let version = load_board(&fx, &root).await;
+        let err = invoke_component_point(&fx.svc, &root, point_invoke(&fx, None, &version))
+            .await
+            .unwrap_err();
+        invalid(err, "/command", "acme.item.also, acme.item.finish");
+        invalid(
+            invoke_component_point(
+                &fx.svc,
+                &root,
+                point_invoke(&fx, Some("acme.item.nope"), &version),
+            )
+            .await
+            .unwrap_err(),
+            "/command",
+            "isn't offered",
+        );
+        assert_ne!(state(&fx.svc, fx.task).await, "done");
+        invoke_component_point(
+            &fx.svc,
+            &root,
+            point_invoke(&fx, Some("acme.item.also"), &version),
         )
         .await
         .unwrap();

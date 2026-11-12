@@ -241,6 +241,7 @@ macro_rules! oxplow_command_table {
                 list_extensions => $crate::commands::extensions::list_extensions {} -> Vec<::oxplow_app::extension::extensions::Extension>,
                 load_component => $crate::commands::extensions::load_component { id: String } -> String,
                 invoke_component_command => $crate::commands::extensions::invoke_component_command { id: String, command: String, input: ::oxplow_domain::Json, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
+                invoke_component_point => $crate::commands::extensions::invoke_component_point { id: String, point: String, context: ::oxplow_domain::Json, command: Option<String>, confirmed: bool, version: String } -> ::oxplow_domain::CommandOutcome,
                 run_component_sql => $crate::commands::extensions::run_component_sql { id: String, sql: String, params: Option<Vec<::oxplow_db::SqlCell>>, stream_id: Option<String>, version: String } -> ::oxplow_db::SqlQueryResult,
                 component_form => $crate::commands::extensions::component_form { id: String, command: String, input: Option<::oxplow_domain::Json>, version: String } -> ::oxplow_app::viz_actions::FormStart,
                 list_services => $crate::commands::extensions::list_services {} -> Vec<$crate::commands::extensions::ServiceListing>,

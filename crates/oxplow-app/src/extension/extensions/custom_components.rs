@@ -40,6 +40,12 @@ pub struct CustomComponent {
     pub bundle: String,
     /// Commands the component may invoke.
     pub commands: Vec<String>,
+    /// Action points it may run (`invokePoint`): whatever command joined
+    /// the point for the context it gives. The store joining the point is
+    /// its consent, so no `commands:` permission is needed. Any extension's
+    /// point.
+    #[serde(default)]
+    pub action_points: Vec<String>,
     /// It runs its own read-only SQL over the datasets (`querySql`): needs
     /// `sql.read` permission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,6 +67,9 @@ pub(crate) struct ComponentFile {
     bundle: Option<String>,
     #[serde(default)]
     commands: Vec<String>,
+    /// Action points it may run (`invokePoint`), by id (`oxplow/task.move`).
+    #[serde(default)]
+    action_points: Vec<String>,
     /// `read`: it runs its own read-only SQL over the datasets
     /// (`querySql`); its extension needs `sql.read` in `permissions:`.
     #[serde(default)]
@@ -572,6 +581,18 @@ pub fn parse_custom_components(
                 "component.invalid_command_name",
                 format!("custom component `{}`: `{bad}` isn't a command name", c.id),
             ))
+        } else if let Some(bad) = c
+            .action_points
+            .iter()
+            .find(|n| !oxplow_domain::commands::is_action_point_id(n))
+        {
+            Some((
+                "component.invalid_action_point",
+                format!(
+                    "custom component `{}`: `{bad}` isn't an action point id (`<namespace>/<name>`)",
+                    c.id
+                ),
+            ))
         } else {
             match stat(&bundle) {
                 BundleLook::Unknown => None,
@@ -609,6 +630,7 @@ pub fn parse_custom_components(
                 title: c.title,
                 bundle,
                 commands: c.commands,
+                action_points: c.action_points,
                 sql: c.sql,
                 description: c
                     .description
@@ -1046,6 +1068,11 @@ mod tests {
                 "{ id: c, bundle: components/burndown, commands: [Nope] }",
                 "",
                 "isn't a command name",
+            ),
+            (
+                "{ id: c, bundle: components/burndown, action_points: [Nope] }",
+                "",
+                "isn't an action point id",
             ),
         ] {
             let d = tempfile::tempdir().unwrap();
