@@ -4168,6 +4168,24 @@ export type OAuthListener = {
 };
 
 /**
+ *  An observer's trigger in an `on:` list, beside event types
+ *  (`.context/extensions-jobs.md` "Triggers for observers").
+ */
+export type ObserverSource =
+/**  Once when the extension starts (boot, enable, a deploy that changes it). */
+{ kind: "start" } |
+/**
+ *  Files of the primary worktree matching `glob` (relative to the
+ *  project root) were created, changed or removed.
+ */
+{ kind: "files"; glob: string } |
+/**
+ *  A SQLite file's `PRAGMA data_version` moved: the extension's own file
+ *  (`path` absent) or a tool's database in a `files:` folder it may read.
+ */
+{ kind: "sqlite"; path: string | null };
+
+/**
  *  What a mutation did. `log` is the provider's own account (a CLI's
  *  output) for the person to read.
  */
@@ -6620,7 +6638,12 @@ export type Trigger =
  *  When the run happens after a triggering event: at
  *  once by default.
  */
-pacing?: Pacing } |
+pacing?: Pacing;
+/**
+ *  What else in the same `on:` list sets it off: `start`, a file
+ *  glob, a SQLite file (an observer's triggers).
+ */
+sources?: ObserverSource[] } |
 /**
  *  A report collector's: when the agent runs the project's tests or an
  *  analyzer (the `collection` reactor detects the run), if its report
