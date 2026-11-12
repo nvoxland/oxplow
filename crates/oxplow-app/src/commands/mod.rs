@@ -37,6 +37,7 @@ pub mod handoff;
 pub mod hint;
 pub mod lsp;
 pub mod metric;
+pub mod model_commands;
 pub mod op_error;
 pub mod ops;
 mod proposals;

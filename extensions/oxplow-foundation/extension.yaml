@@ -1237,6 +1237,13 @@ commands:
     scope: files.write
     op: extension_delete
     example: {"path": "shelf/dune.md"}
+  # model.write — a shared model's items (`.context/models.md`). A script composes it; it runs
+  # as that extension and refuses any other caller.
+  - name: model.set_fields
+    summary: "Set the composing extension's own fields on an item of a shared model, as its `fields:` declares them (a null removes one). Only an extension's own script can compose it. Logs the model's change event with cause `fields`; returns `{ changed }`."
+    scope: model.write
+    op: set_fields
+    example: {"model": "shelf/book", "uri": "oxplow:shelf/book?id=dune&store=shelf-folder", "values": {"score": 9}}
   # extensions.check
   - name: extension.draft_status
     summary: "How a stream's draft of an extension differs from what runs. Reads the extension's source in the stream's checkout (yours unless `stream_id` names another) and compares it with the running version: `differs`, the running `deployed_hash` (null when none runs) and the draft's `source_hash`, and for `pages` (page files, by id) and `commands` (by name) the `added`, `removed` and `changed` ones. `draft` is true when that checkout is not the main stream's: a draft deploys only once its change is on the main branch. A deploy that would remove a page or command warns about it."

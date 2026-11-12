@@ -389,6 +389,10 @@ pub fn apply_tx(
 }
 
 #[cfg(test)]
+#[path = "models_e2e_tests.rs"]
+mod e2e_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use oxplow_db::model_store::{Markdown, ModelColumn, ModelType};

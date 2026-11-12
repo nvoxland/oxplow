@@ -1694,6 +1694,10 @@ impl Services {
             .chain(commands::extension_services::ops(
                 extension_services.clone(),
             ))
+            .chain(commands::model_commands::ops(
+                extension_services.clone(),
+                models.clone(),
+            ))
             .chain(commands::extension_state::ops(
                 extension::extension_state::StateHost::new(
                     extension_catalog.clone(),
