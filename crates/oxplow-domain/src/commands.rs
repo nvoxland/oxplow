@@ -505,15 +505,16 @@ impl CommandUi {
                     ),
                 );
             }
-            if self.about.is_some() {
+        }
+        if let Some(accepts) = &self.accepts {
+            if self.about.as_ref().is_some_and(|a| a.accepts().is_some()) {
                 return bad(
-                    "at",
-                    "a command joins an action point (`at`) or is about an item (`about`), not both: drop `about`"
+                    "accepts",
+                    "one store filter: a command with an `about` and an `at` takes `about.accepts` \
+                     for both; drop `accepts`"
                         .into(),
                 );
             }
-        }
-        if let Some(accepts) = &self.accepts {
             if self.at.is_none() {
                 return bad(
                     "accepts",
@@ -1473,6 +1474,8 @@ mod tests {
             json!({ "label": "New Task", "at": "oxplow/task.new", "input": { "parent": "{{context.parent}}", "n": 1 } }),
             json!({ "label": "New Task", "at": "oxplow/task.new", "form": "oxplow:oxplow/page?page=new-task" }),
             json!({ "label": "Fix", "about": { "resource": "oxplow/task" } }),
+            json!({ "label": "Move", "at": "oxplow/task.move", "about": { "resource": "oxplow/task", "accepts": { "store": "oxtask" } } }),
+            json!({ "label": "Move", "at": "oxplow/task.move", "about": "oxplow/task", "accepts": { "store": "oxtask" } }),
             json!({ "label": "Fix", "about": { "resource": "oxplow/task", "accepts": { "store": "oxtask" } } }),
             json!({ "label": "Fix", "about": { "resource": "oxplow/task", "accepts": { "store": ["a", "b"] } } }),
         ] {
@@ -1490,9 +1493,9 @@ mod tests {
                 "action point",
             ),
             (
-                json!({ "label": "X", "at": "oxplow/task.new", "about": "oxplow/task" }),
-                "/ui/at",
-                "`about`",
+                json!({ "label": "X", "at": "oxplow/task.new", "about": { "resource": "oxplow/task", "accepts": { "store": "a" } }, "accepts": { "store": "a" } }),
+                "/ui/accepts",
+                "one store filter",
             ),
             (
                 json!({ "label": "X", "input": { "p": "{{context.parent}}" } }),
@@ -1500,7 +1503,7 @@ mod tests {
                 "`at`",
             ),
             (
-                json!({ "label": "X", "at": "oxplow/task.new", "input": { "p": "{{uri}}" } }),
+                json!({ "label": "X", "input": { "p": "{{uri}}" } }),
                 "/ui/input",
                 "`about`",
             ),

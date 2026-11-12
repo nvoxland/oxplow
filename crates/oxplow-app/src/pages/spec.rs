@@ -1276,9 +1276,15 @@ pub struct PageAction {
     pub id: String,
     pub label: String,
     /// The command it runs (`oxplow.task.transition`). None for an
-    /// `open` action, which runs none.
+    /// `open` action, which runs none. With a `point`, which of the
+    /// commands that answer the point to run (none: the only one).
     #[serde(default)]
     pub command: Option<String>,
+    /// Instead of a command: an action point (`oxplow/task.move`) whose
+    /// answering command runs, for the context `input` binds. The store
+    /// that joined the point answers, so the page names no store's command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point: Option<String>,
     /// An `open` action: the column of the row it is offered on that holds
     /// the URI it opens. It runs no command (no bus run, no audit): the
     /// app navigates, and an agent pressing it is told the URI.
@@ -1429,9 +1435,16 @@ pub(crate) struct ActionFile {
     /// or the row's own) that holds the URI to open. No command runs.
     #[serde(default)]
     open: Option<String>,
+    /// Instead of a command: an action point; the command that answers it
+    /// for the `context` runs. `command` then names which, when several do.
+    #[serde(default)]
+    point: Option<String>,
     /// The command's input; `{{param.<name>}}` / `{{row.<column>}}` bound.
     #[serde(default)]
     input: Option<serde_json::Value>,
+    /// With `point`: the point's context, bound as `input` is.
+    #[serde(default)]
+    context: Option<serde_json::Value>,
     /// Offered on each row (right-click), `{{row.*}}` bound to it.
     #[serde(default)]
     row: bool,
@@ -1563,7 +1576,41 @@ pub(crate) fn parse_actions(
         if out.iter().any(|a| a.id == f.id) {
             return Err(format!("actions: `{}` is declared twice", f.id));
         }
+        let mut f = f;
+        if let Some(point) = f.point.clone() {
+            if !oxplow_domain::commands::is_action_point_id(&point) {
+                return Err(format!(
+                    "actions: `{}`: `point: {point}` isn't an action point (`<extension>/<name>`, as `oxplow/task.move`)",
+                    f.id
+                ));
+            }
+            if f.open.is_some()
+                || f.form
+                || f.edit
+                || !f.fixed.is_empty()
+                || !f.fields.is_empty()
+                || !f.choices.is_empty()
+            {
+                return Err(format!(
+                    "actions: `{}`: a `point` action runs the command that answers the point: it takes no `open`, `form`, `edit`, `fixed`, `fields` or `choices`",
+                    f.id
+                ));
+            }
+            if f.input.is_some() {
+                return Err(format!(
+                    "actions: `{}`: a `point` action binds the point's `context`, not an `input`",
+                    f.id
+                ));
+            }
+            f.input = f.context.take();
+        } else if f.context.is_some() {
+            return Err(format!(
+                "actions: `{}`: `context` is for a `point` action",
+                f.id
+            ));
+        }
         match (&f.command, &f.open) {
+            (None, None) if f.point.is_some() => {}
             (None, None) => {
                 return Err(format!(
                     "actions: `{}` needs a `command` or an `open` (the column that holds the URI to open)",
@@ -1901,6 +1948,7 @@ pub(crate) fn parse_actions(
             id: f.id,
             label: f.label,
             command: f.command,
+            point: f.point,
             open: f.open,
             input,
             row,

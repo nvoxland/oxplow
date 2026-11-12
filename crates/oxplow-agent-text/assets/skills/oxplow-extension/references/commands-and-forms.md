@@ -132,6 +132,13 @@
   cards between columns; `bulk: true` runs once per marked row; `key: f`
   runs on the cursor row. You run the command yourself; these are the
   person's gestures.
+- **An action point instead of a command** (`point: oxplow/task.move,
+  context: { uri: "{{row.uri}}", stage: "{{option.value}}" }`): whichever
+  command a store joined to the point (and accepts that item) runs, so the
+  page names no store's command. `context:` binds like `input:`; `command:`
+  beside it picks one when several answer; `bulk`, `drag`, `row` and
+  `options_from` work as usual. A row nothing answers is skipped with a
+  reason, not failed. No `form` with it.
 - **One action, many choices** (a row action): `options_from: <loader>`
   offers each row of that loader of this page (`value`, `label`, an
   optional `group`) as an entry of a submenu, and binds the one picked as

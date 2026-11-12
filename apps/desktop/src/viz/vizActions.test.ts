@@ -252,3 +252,14 @@ test("a button with `enabled` is enabled only while that column of the one row i
   expect(actionEnabled(push, result(0))).toBe(false);
   expect(actionEnabled({ enabled: null } as Parameters<typeof actionEnabled>[0], result(0))).toBe(true);
 });
+
+test("a point action whose row nothing answers says it was skipped, and is not a failure", async () => {
+  const { d, log } = deps();
+  const skipping: VizActionDeps = {
+    ...d,
+    press: async () => ({ result: { skipped: "nothing answers `oxplow/task.move` for this item" }, audit_id: null, event_id: null, inverse: null }),
+  };
+  const point: PageAction = { id: "mark", label: "Mark", command: null, point: "oxplow/task.move", input: {}, row: true } as PageAction;
+  expect(await performVizAction(point, run, { id: 1 }, null, false, skipping)).toBe("done");
+  expect(log).toEqual(["toast Mark: skipped — nothing answers `oxplow/task.move` for this item"]);
+});
