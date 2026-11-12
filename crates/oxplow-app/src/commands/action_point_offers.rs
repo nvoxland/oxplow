@@ -136,7 +136,7 @@ pub fn point_offer(
     let mut commands: Vec<PointCommand> = offered(specs, &key, &Default::default(), "store")
         .into_iter()
         .filter(|s| {
-            let accepts = s.ui.as_ref().and_then(|ui| ui.accepts.as_ref());
+            let accepts = s.ui.as_ref().and_then(super::ref_commands::point_accepts);
             match (accepts, &item) {
                 (None, _) => true,
                 (Some(_), None) => false,
@@ -155,7 +155,7 @@ pub fn point_offer(
             input: s
                 .ui
                 .as_ref()
-                .map(|ui| ui.point_input(&context))
+                .map(|ui| ui.point_input(&context, item.as_ref()))
                 .unwrap_or_else(|| Value::Object(context.clone())),
         })
         .collect();
@@ -346,5 +346,50 @@ mod tests {
         .unwrap();
         let ids: Vec<_> = offer.commands.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(ids, ["audit.move", "oxtask.task.move"]);
+    }
+
+    /// A command with an `about` and an `at` is one action, offered on its
+    /// item and at the point; `about.accepts` is its one store filter.
+    #[test]
+    fn a_command_about_an_item_and_at_a_point_takes_the_abouts_filter() {
+        let yaml =
+            "- { name: task.move, label: Move, item: uri, context: { uri: uri, stage: string } }";
+        let value = serde_yaml::from_str(yaml).unwrap();
+        let point = parse_action_points(&value, "extension.yaml", "", "oxplow")
+            .0
+            .remove(0);
+        let mut both = at("oxtask.task.move", "Move", "oxplow/task.move");
+        both.ui = Some(
+            serde_json::from_value(json!({ "label": "Move", "at": "oxplow/task.move",
+                "about": { "resource": "oxplow/task", "accepts": { "store": "oxtask" } } }))
+            .unwrap(),
+        );
+        let offer = |uri: &str| {
+            point_offer(
+                &point,
+                std::slice::from_ref(&both),
+                &json!({ "uri": uri, "stage": "done" }),
+                &crate::models::ModelRegistry::default(),
+            )
+            .unwrap()
+            .commands
+            .len()
+        };
+        assert_eq!(offer("oxplow:oxplow/task?id=tsk1&store=oxtask"), 1);
+        assert_eq!(offer("oxplow:oxplow/task?id=n1&store=notes"), 0);
+        // And it is still the item's command.
+        let item = super::super::ref_commands::OfferKey::Item("oxplow/task".into());
+        let params =
+            std::collections::BTreeMap::from([("store".to_string(), "oxtask".to_string())]);
+        assert_eq!(
+            super::super::ref_commands::offered(
+                std::slice::from_ref(&both),
+                &item,
+                &params,
+                "store"
+            )
+            .len(),
+            1
+        );
     }
 }

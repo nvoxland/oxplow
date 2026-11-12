@@ -32,14 +32,23 @@ pub enum OfferKey {
     Point(String),
 }
 
-/// The key `ui` is offered under: its `about`, else its `at`; none for a
-/// command search lists on its own.
-pub fn key_of(ui: &CommandUi) -> Option<OfferKey> {
-    match (&ui.about, &ui.at) {
-        (Some(about), _) => Some(OfferKey::Item(about.resource().to_string())),
-        (None, Some(point)) => Some(OfferKey::Point(point.clone())),
-        (None, None) => None,
+/// Whether `ui` is offered under `key`: an item key by its `about`, a
+/// point key by its `at` — a command with both is offered under both, as
+/// one action.
+pub fn has_key(ui: &CommandUi, key: &OfferKey) -> bool {
+    match key {
+        OfferKey::Item(resource) => ui.about.as_ref().is_some_and(|a| a.resource() == resource),
+        OfferKey::Point(point) => ui.at.as_ref() == Some(point),
     }
+}
+
+/// The store filter of `ui` at a point: the `about`'s when it has one (the
+/// one filter a command with both serves), else its own `accepts`.
+pub fn point_accepts(ui: &CommandUi) -> Option<&oxplow_domain::commands::ItemAccepts> {
+    ui.about
+        .as_ref()
+        .and_then(|a| a.accepts())
+        .or(ui.accepts.as_ref())
 }
 
 /// Whether `ui`'s store filter lets an item with `params` through: some
@@ -105,7 +114,7 @@ pub fn offered<'a>(
         .iter()
         .filter(|s| {
             let Some(ui) = &s.ui else { return false };
-            key_of(ui).as_ref() == Some(key)
+            has_key(ui, key)
                 && match key {
                     OfferKey::Item(_) => store_accepted(ui, params, store_param),
                     OfferKey::Point(_) => true,
