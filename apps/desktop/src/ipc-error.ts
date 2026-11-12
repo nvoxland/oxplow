@@ -6,7 +6,7 @@
  * as a plain **string**. The old `unwrap` only read `.message`/`.code`, so a
  * string error collapsed to the opaque literal "ipc error" — swallowing the
  * real reason (e.g. "invalid type: integer, expected a string") and making
- * bugs like the effort-diff snapshot-id mismatch much harder to diagnose.
+ * bugs like a snapshot-id mismatch much harder to diagnose.
  *
  * Order: a string is the reason; otherwise `message`, then `code`, then a
  * JSON dump of the payload, and only then the generic literal.

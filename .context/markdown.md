@@ -12,20 +12,20 @@ react-markdown + remark-gfm). Given `onChange` or `onCommit` it is the
 editor (`RichTextField.tsx`, Tiptap). **Both modes have the one feature
 set**, and a surface never builds its own:
 
-- **Links** (`links.ts`): a wikilink or ref link (a wiki page, a file at
-  a revision, a directory, a commit, a work item, an extension's
+- **Links** (`links.ts`): a wikilink or ref link (a knowledge page, a file at
+  a revision, a directory, a commit, a task, an extension's
   resource) opens through the page's navigation (`openRef`);
   Cmd/Ctrl-click or middle-click opens it in a new tab; right-click
   offers Open, Open in new tab and a Copy of what it names (path, SHA,
   id, link). A web link opens in the app's web page when the allowlist
   takes it (`classifyExternalUrl`), else in the browser. An in-page
   anchor jumps. A broken `[[…]]` is inert and marked. A bare ref link
-  (a wiki page, a work item, an extension's ref, written without a
+  (a knowledge page, a task, an extension's ref, written without a
   `|label`) shows its title (`useRefLinkTitle`, one rule for both modes;
   in the editor the stored text stays the slug, below).
 - **`[[` completes** (the editor): typing `[[` lists what it could link
   to under the caret, filtered as the person types — the site search's
-  hits (wiki pages, work items, commits, extensions' resources; not file
+  hits (knowledge pages, tasks, commits, extensions' resources; not file
   content matches) and, on a page of a stream, its files by name
   (`refOptions.ts`; the owner's search is `useRefSearch` in
   `Markdown.tsx`). ↑/↓ move, Enter or Tab picks, Escape closes the list
@@ -74,8 +74,8 @@ set**, and a surface never builds its own:
   foundation's Markdown page passes `content.uri`): `parseMarkdownLink(href,
   base)` reads a relative href as a file in that file's folder
   (`relativeFilePath`: `./`, `../`, `/` from the root), on its filesystem
-  and revision — `docs/guide.md` is a file, not a wiki slug, which it
-  stays with no base, as the wiki's own pages mean it. A relative image is
+  and revision — `docs/guide.md` is a file, not an oxwiki slug, which it
+  stays with no base, as oxwiki's own pages mean it. A relative image is
   `FileImage`: `readBytesAt` on the viz's stream (`useVizStream`), drawn
   from a blob URL given back when it goes; a missing one keeps its alt.
   `followLink` and `linkMenu` take the same `base`. A link to a file of
@@ -100,8 +100,8 @@ never reset.
 
 - **`onCommit`**: the text 300 ms after typing stops, on blur and on
   unmount (an edit is never lost to a closed tab). For an owner that
-  saves as the person types: the task body (`TaskDetail`), the React
-  wiki page. A value from outside is skipped while the editor has focus
+  saves as the person types: a task's description, the React
+  knowledge page. A value from outside is skipped while the editor has focus
   (a late echo mustn't clobber typing).
 - **`onChange`**: every edit. For an owner that keeps a draft and saves
   on a button: a form's markdown field (`SchemaForm`, a schema property
@@ -117,6 +117,27 @@ never reset.
   popovers is open) reach the owner with the text as it is now. Enter
   adds a line.
 
+## One line
+
+`<Markdown value={text} inline />` draws one line of markdown in a `span`
+that flows in its text: only `INLINE_ELEMENTS` (`inlineMarkdown.ts`:
+emphasis, strikethrough, code, links, a line break) survive, every block
+unwrapping into the line (react-markdown's `allowedElements` +
+`unwrapDisallowed`), with the same link behavior and titles as the
+viewer. A page column's `format: markdown` draws its cell this way (a
+description's `first_sentence(body)`, which keeps its inline markdown and
+cuts outside code spans and links). A component's frame draws the same
+line through the kit (`renderMarkdown`: extensions-components.md
+"Markdown in a frame"), from the same parse and link rules.
+
+**Where the rules live.** `markdownLinks.ts` is a link's meaning with no
+React — wikilinks in and out (`preprocessWikilinks`,
+`postprocessWikilinks`, `refLinkOf`), `parseMarkdownLink`, `linkRef`,
+the title rule (`refLinkTitle`, which `useRefLinkTitle` runs over the
+title caches' hooks) and the URLs a link may hold (`urlTransform`).
+`MarkdownView.tsx` draws with them; `markdownTree.ts` builds a frame's
+tree with them.
+
 ## Where it is used
 
 The page `markdown` viz node is the owner a declared
@@ -129,10 +150,8 @@ headings.
 
 Every markdown surface: the `markdown` viz and markdown nodes of a
 page's view, and `oxplow-page` fenced blocks (an inline page, read-only,
-drawn live in the wiki body), foundation's `markdown` page (a `.md` file
-read as a document, View as → Markdown), effort summaries
-(`TaskDetail`, `DiffViewPage`), the wiki body (the wiki page's `markdown` viz), a work
-item's body (`TaskDetail`), comment messages (`CommentPopover`) and the
+drawn live in the knowledge page body), foundation's `markdown` page (a `.md` file
+read as a document, View as → Markdown), the knowledge page body (the knowledge page's `markdown` viz), a task's body (the task page's `markdown` viz), comment messages (`CommentPopover`) and the
 comment composer (`CommentComposer`), a form's markdown field
 (`SchemaForm`: stream and thread prompts, a handoff's body). A
 dashboard's `TextTile` is plain text by its own decision (its file says
@@ -157,7 +176,7 @@ why).
   block-only so they're off when `inlineOnly`). `tiptap-markdown` ships
   the GFM table serializer and markdown-it parses tables, so adding the
   standard table nodes is all the round-trip needs — without them the
-  always-on wiki editor flattened any `| … |` table into run-on text on
+  always-on knowledge page editor flattened any `| … |` table into run-on text on
   autosave. Editor-only table CSS (cell-selection overlay, column-resize
   handle, `table-layout: fixed`) lives in `index.html` next to the
   `.oxplow-md table` display styles (which the editor inherits via
@@ -211,7 +230,7 @@ why).
   of plain text; a link Tiptap hands over with a null href is passed to
   the default check, never `.trim()`med (tsk1007). **Never as Link's `protocols`**: Tiptap
   registers those with linkify (for autolinking, off here), and linkify
-  throws on a scheme it can't tokenize — `work_item`'s underscore broke
+  throws on a scheme it can't tokenize — `task`'s underscore broke
   every rich-text field (tsk974; `InternalLink.test.ts`). `openOnClick:
   false` — click handling is owned by the
   React layer: the `RichTextField` wrapper's `onClick` /
@@ -264,7 +283,7 @@ when that tab is hidden. A caller may supply explicit scope; outside a page
 body it falls back to the host stream and selected thread. Links use the
 containing page's navigation. A picked row
 updates the inline run and the host's view params; inline node IDs never
-register as the wiki page's own nodes.
+register as the knowledge page's own nodes.
 
 Rendering budgets: at most 64 KiB of UTF-8 source per block and four nested
 inline blocks (page markdown may itself contain page fences). A limit is
@@ -274,29 +293,29 @@ change the markdown saved on disk.
 
 ## Wikilink round-trip
 
-Wiki pages use `[[ ]]` syntax extensively (`[[path/to/file]]`,
+Knowledge pages use `[[ ]]` syntax extensively (`[[path/to/file]]`,
 `[[dir:src/components|the folder]]`, `[[git:<sha>]]`, `[[tsk<id>]]`, etc.).
 `MarkdownView`'s `preprocessWikilinks` converts these to standard
 markdown links (`[label](oxplow:oxplow/file?path=…)`) for read-rendering; the
 `postprocessWikilinks` helper is the inverse — it collapses standard
 markdown links to oxplow URIs back into `[[ ]]` form on save.
 
-**Work item wikilinks** — a full URI (`[[oxplow:oxplow/work_item?id=ENG-1&provider=issues]]`) or a
-bare id of the active list's (`[[tsk42]]` with oxplow's tasks), matched
+**Task wikilinks** — a full URI (`[[oxplow:oxplow/task?id=ENG-1&provider=issues]]`) or a
+bare id of the active list's (`[[tsk42]]` with oxtask), matched
 by the id pattern the list declares (`v_capability_provider.id_pattern`,
-`workItemRefOfMention`), as the backend ref extractor does — route to the
-item's `oxplow/work_item` URI link and **resolve to its title** at
-render time via `useWorkItemTitle` (`apps/desktop/src/workItemTitleCache.ts`,
-a lazy per-ref sibling of `wikiTitleCache`) — same display-swap rule wiki
-slugs use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
+`taskRefOfMention`), as the backend ref extractor does — route to the
+item's `oxplow/task` URI link and **resolve to its title** at
+render time via `useTaskTitle` (`apps/desktop/src/taskTitleCache.ts`,
+a lazy per-ref sibling of `knowledgeTitleCache`, keyed by a page's URI) — same display-swap rule knowledge
+page links use (bare `[[tsk42]]` shows the title; `[[tsk42|label]]` keeps the
 label). An item that isn't on the active list renders broken. Click
-routes through `workItemTabRef` via the page-nav chokepoint.
+routes through `taskTabRef` via the page-nav chokepoint.
 
 The `Markdown` component applies `preprocessWikilinks` to the value it
-is given and `postprocessWikilinks` to the text it hands back. A wiki
-page's `[[slug]]` goes in as its URI (`oxplow:oxplow/wiki?slug=…`), as
+is given and `postprocessWikilinks` to the text it hands back. A knowledge
+page's `[[slug]]` (an oxwiki page) goes in as its URI (`oxplow:oxplow/knowledge?id=…&store=oxwiki`), as
 every other ref does, so the editor keeps it as a link and it comes back
-as `[[slug]]` (a bare slug as the href was once kept as a relative link
+as `[[slug]]` (`[[<store>:<id>]]` for another enabled store's page) (a bare slug as the href was once kept as a relative link
 and saved as `[slug](slug)`). The on-disk shape is preserved across edits,
 including the bare vs. labeled forms (`[[path]]` vs.
 `[[path|label]]`). Plain http/https links and image links are left
@@ -335,9 +354,9 @@ In `apps/desktop/index.html`:
 
 The editor becomes comment-enabled when given a `comments`
 config (`{ streamId, threadId, target, author? }`, `target` a URI).
-The `wiki-page` page entry says `comments: true`, so the page's URI is the comment target (a wiki page isn't thread-bound) and the page wraps its body in the URI as a context node
+The `wiki-page` page entry says `comments: true`, so the page's URI is the comment target (a knowledge page isn't thread-bound) and the page wraps its body in the URI as a context node
 (`contextNodeProps`), so plain-DOM selections around the editor
-resolve to the page too; WorkItemPage passes
+resolve to the page too; TaskPage passes
 `{ target: <the item's URI>, threadId:
 item.threadId }`.
 
@@ -369,7 +388,7 @@ item.threadId }`.
   becomes a canonical `(kind,id)` ref so the agent sees what the
   highlighted prose links to. The backend additionally unions refs it can
   parse out of the quote *text* at create time, so plain mentions are
-  covered too. `context_chain` stays empty: a wiki/task editor is its own
+  covered too. `context_chain` stays empty: a knowledge page/task editor is its own
   root, with no typed ancestors above it. The in-content `{from,to,…}`
   anchor stays the surface coordinate fast-path (not migrated to the W3C
   selector array — the resolver tolerates both, and the legacy shape is
@@ -410,7 +429,7 @@ item.threadId }`.
   is `.oxplow-comment-highlight` (`--comment-highlight*` tokens).
 - **Cross-page reveal.** The field subscribes to `comment-reveal-bus.ts`.
   When the comment navigator (`CommentNavigator`) fires
-  `requestCommentReveal(id)` and navigation lands on this wiki page, the
+  `requestCommentReveal(id)` and navigation lands on this knowledge page, the
   field finds the decoration's rendered `[data-comment-id]` node,
   `scrollIntoView`s it, opens its `CommentPopover`, and clears the bus.
   The request stays pending until the node exists, so the async mount +

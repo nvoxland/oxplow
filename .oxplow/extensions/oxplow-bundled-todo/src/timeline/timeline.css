@@ -30,7 +30,7 @@ body { display: flex; flex-direction: column; }
 .vis-timeline .vis-item.vis-selected { border-color: var(--accent); background: var(--accent-soft-bg); }
 .vis-timeline .vis-item.kind-thread { background: var(--surface-card); border-color: var(--border-strong, var(--border-subtle)); }
 .vis-timeline .vis-item.kind-session { background: var(--accent-soft-bg); border-color: var(--accent); }
-.vis-timeline .vis-item.kind-effort { background: var(--surface-card); border-color: var(--accent); }
+.vis-timeline .vis-item.kind-request { background: var(--surface-card); border-color: var(--accent); }
 .vis-timeline .vis-item.kind-commit .vis-dot { border-color: var(--accent); }
 .vis-timeline .vis-item.kind-commit { background: transparent; border: none; color: var(--text-secondary); }
 /* A cluster: several items too close to tell apart at this zoom. */
@@ -38,6 +38,6 @@ body { display: flex; flex-direction: column; }
 .vis-timeline .vis-item.vis-cluster-line { border-color: var(--accent); }
 .vis-timeline .vis-current-time { background: var(--accent); }
 .vis-tooltip { background: var(--surface-overlay, var(--surface-card)) !important; color: var(--text-primary) !important; border: 1px solid var(--border-subtle) !important; font-family: var(--font-ui) !important; }
-/* A per-day or per-week count of efforts or commits, in a wide window. */
+/* A per-day or per-week count of requests or commits, in a wide window. */
 .vis-timeline .vis-item.count { background: var(--accent-soft-bg); border: 1px solid var(--accent); color: var(--text-primary); cursor: zoom-in; }
 .vis-timeline .vis-item.count .vis-item-content { width: 100%; text-align: center; padding: 1px 0; }

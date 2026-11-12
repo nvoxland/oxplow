@@ -402,7 +402,7 @@ impl StreamService {
     }
 
     /// Archive a stream and every thread under it. Soft-delete via
-    /// `archived_at` — the rows stay in the DB so closed efforts,
+    /// `archived_at` — the rows stay in the DB so turns,
     /// snapshots, and page_visit attribution don't dangle, but the
     /// rail and thread queries filter them out. If `delete_worktree`
     /// is true and the stream is a worktree (not primary), the

@@ -23,7 +23,7 @@ mock.module("../api.js", () => ({
   },
 }));
 const { ResourcePage } = await import("./ResourcePage.js");
-const { setResources } = await import("../resources.js");
+const { setResources } = await import("../resourceStore.js");
 
 afterEach(() => {
   cleanup();

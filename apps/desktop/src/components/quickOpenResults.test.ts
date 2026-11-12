@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { keyOf, keyedUri, wikiUri } from "../uri/uri.js";
+import { keyOf, keyedUri, knowledgeUri } from "../uri/uri.js";
 import type { SearchHit, WorkspaceIndexedFile } from "../api.js";
 import type { PageDirectoryEntry } from "./RailHud/sections.js";
 import type { PageCategory } from "./RailHud/sections.js";
@@ -20,7 +20,7 @@ import {
 function hit(kind: string, refId: string): SearchHit {
   return {
     resource: `oxplow/${kind}`,
-    uri: keyedUri(`oxplow/${kind}`, refId),
+    uri: kind === "knowledge" ? knowledgeUri("oxwiki", refId) : keyedUri(`oxplow/${kind}`, refId),
     stream_id: null,
     title: refId,
     snippet: "…",
@@ -43,7 +43,7 @@ function command(id: string, label: string, enabled = true): CommandEntry {
 describe("dedupeSiteHits", () => {
   test("keeps body hits for pages and non-matching files", () => {
     const out = dedupeSiteHits(
-      [hit("wiki", "architecture-overview"), hit("file", "src/other.rs"), hit("work_item", "12")],
+      [hit("knowledge", "architecture-overview"), hit("file", "src/other.rs"), hit("task", "12")],
       new Set(["src/main.rs"]),
     );
     expect(out.map((h) => keyOf(h.uri))).toEqual(["architecture-overview", "src/other.rs", "12"]);
@@ -51,14 +51,14 @@ describe("dedupeSiteHits", () => {
 
   test("drops file hits whose path already matched by filename", () => {
     const out = dedupeSiteHits(
-      [hit("file", "src/main.rs"), hit("wiki", "w")],
+      [hit("file", "src/main.rs"), hit("knowledge", "w")],
       new Set(["src/main.rs"]),
     );
     expect(out.map((h) => keyOf(h.uri))).toEqual(["w"]);
   });
 
   test("non-file kinds are never deduped against paths", () => {
-    const out = dedupeSiteHits([hit("wiki", "src/main.rs")], new Set(["src/main.rs"]));
+    const out = dedupeSiteHits([hit("knowledge", "src/main.rs")], new Set(["src/main.rs"]));
     expect(out).toHaveLength(1);
   });
 });
@@ -104,10 +104,10 @@ describe("buildQuickOpenResults", () => {
       pages,
       commands,
       files,
-      siteHits: [hit("wiki", "git-notes")],
+      siteHits: [hit("knowledge", "git-notes")],
     });
     // "git" matches the Git page (label/id), the Git ▸ Commit command,
-    // the src/git.rs file path, and the wiki body hit — in that order.
+    // the src/git.rs file path, and the knowledge body hit — in that order.
     // (The "Git" page label also equals the query, so the exact-match
     // hoist keeps it first — where it already was.)
     expect(out.results.map((r) => r.kind)).toEqual(["page", "command", "file", "hit", "ask"]);
@@ -124,22 +124,22 @@ describe("buildQuickOpenResults", () => {
       pages,
       commands,
       files,
-      siteHits: [hit("wiki", "w"), hit("work_item", "tsk30")],
+      siteHits: [hit("knowledge", "w"), hit("task", "tsk30")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/work_item", uri: keyedUri("oxplow/work_item", "tsk30") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { resource: "oxplow/task", uri: keyedUri("oxplow/task", "tsk30") } });
   });
 
   test("an exact content match floats above a fuzzy page/file match", () => {
     // "gt" fuzzy-matches the "Git" page and src/git.rs, but exactly
-    // matches the wiki hit titled "gt" — the exact hit wins.
+    // matches the knowledge hit titled "gt" — the exact hit wins.
     const out = buildQuickOpenResults({
       query: "gt",
       pages,
       commands,
       files,
-      siteHits: [hit("wiki", "gt")],
+      siteHits: [hit("knowledge", "gt")],
     });
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("gt") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: knowledgeUri("oxwiki", "gt") } });
     expect(out.results.some((r) => r.kind === "page")).toBe(true);
   });
 
@@ -159,7 +159,7 @@ describe("buildQuickOpenResults", () => {
 
   test("truncated reports matches dropped by the file/hit caps", () => {
     const manyFiles = Array.from({ length: 85 }, (_, i) => file(`src/f${i}.ts`));
-    const manyHits = Array.from({ length: 35 }, (_, i) => hit("wiki", `w${i}`));
+    const manyHits = Array.from({ length: 35 }, (_, i) => hit("knowledge", `w${i}`));
     const out = buildQuickOpenResults({
       query: "ts",
       pages,
@@ -173,13 +173,13 @@ describe("buildQuickOpenResults", () => {
 
   test("floats an exact match even when it ranks past the section cap", () => {
     // 35 hits; the one titled exactly "meeting" sits past the 30-hit cap.
-    const hits = Array.from({ length: 35 }, (_, i) => hit("wiki", i === 33 ? "meeting" : `w${i}`));
+    const hits = Array.from({ length: 35 }, (_, i) => hit("knowledge", i === 33 ? "meeting" : `w${i}`));
     const out = buildQuickOpenResults({ query: "meeting", pages, commands, files, siteHits: hits });
     // Pre-fix this exact hit was sliced away before the float ran.
-    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: wikiUri("meeting") } });
+    expect(out.results[0]).toMatchObject({ kind: "hit", hit: { uri: knowledgeUri("oxwiki", "meeting") } });
   });
 
-  // tsk1031: "todo" ranked Planning, Recent Decisions and Unbacked Claims
+  // tsk1031: "todo" ranked Planning and two other pages
   // first — t…o…d…o appears in order somewhere in their long descriptions.
   // A keyword matches at a word's start; a title match ranks first.
   test("a title match ranks first, and keywords match whole words", () => {
@@ -265,7 +265,7 @@ describe("nextSectionIndex", () => {
     page: (id: string): LauncherNavRow => ({ kind: "page", entry: page(id, id) }),
     command: (): LauncherNavRow => ({ kind: "command", entry: cmd }),
     file: (p: string): LauncherNavRow => ({ kind: "file", file: file(p) }),
-    hit: (id: string): LauncherNavRow => ({ kind: "hit", hit: hit("wiki", id) }),
+    hit: (id: string): LauncherNavRow => ({ kind: "hit", hit: hit("knowledge", id) }),
   };
 
   test("search mode: Tab jumps to the first row of the next kind-run", () => {
@@ -289,14 +289,14 @@ describe("buildRecentEntries", () => {
   test("prefixes ids to avoid directory collisions, falls back label→refId, rebuilds the ref", () => {
     const entries = buildRecentEntries([
       { refKind: "file", refId: "oxplow:oxplow/file?path=src/main.rs", label: "main.rs" },
-      { refKind: "wiki", refId: "oxplow:oxplow/wiki?slug=architecture", label: "" },
+      { refKind: "oxplow/knowledge", refId: "oxplow:oxplow/knowledge?id=architecture&store=oxwiki", label: "" },
     ]);
     expect(entries[0]!.id).toBe("recent:oxplow:oxplow/file?path=src/main.rs");
     expect(entries[0]!.label).toBe("main.rs");
     expect(entries[0]!.ref.id).toBe("oxplow:oxplow/file?path=src/main.rs");
     // Empty stored label falls back to the ref id.
-    expect(entries[1]!.label).toBe("oxplow:oxplow/wiki?slug=architecture");
-    expect(entries[1]!.ref.id).toBe("oxplow:oxplow/wiki?slug=architecture");
+    expect(entries[1]!.label).toBe("oxplow:oxplow/knowledge?id=architecture&store=oxwiki");
+    expect(entries[1]!.ref.id).toBe("oxplow:oxplow/knowledge?id=architecture&store=oxwiki");
   });
 });
 

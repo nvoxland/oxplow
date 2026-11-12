@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`task.commented@2`: a comment was added to an item.",
+  "properties": {
+    "comment": {
+      "description": "The list's own id for the comment, unique on the item, when its\nanswer named one (the `comment` verb's `result.comment`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "description": "`oxplow:oxplow/task?id=<id>&provider=<list>`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task"
+  ],
+  "title": "TaskCommentedV2",
+  "type": "object"
+}

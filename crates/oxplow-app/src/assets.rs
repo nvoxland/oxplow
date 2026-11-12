@@ -14,7 +14,8 @@
 //! one change loop in `datasets_changed.rs`), marks the materializers that
 //! read them dirty, and recomputes each once its inputs have been quiet
 //! for the coalesce window (a sweep's burst of writes is one recompute,
-//! not one per commit) — then records `asset_state { computed_at,
+//! not one per commit), or [`MAX_WAIT_FACTOR`] windows after the first
+//! change when they never go quiet — then records `asset_state { computed_at,
 //! events_to, snapshot_id, elapsed_ms }`. A recompute that fails is
 //! logged; the next change tries again.
 //!
@@ -35,6 +36,11 @@ use tokio::sync::Notify;
 
 /// How long an asset's inputs must be quiet before it recomputes.
 pub const COALESCE: Duration = Duration::from_secs(1);
+
+/// The most coalesce windows a dirty asset waits for its inputs to go quiet
+/// before it recomputes anyway: an input written all the time (the event
+/// log while agents work) would otherwise never let it run.
+pub const MAX_WAIT_FACTOR: u32 = 3;
 
 /// What a recompute covered, beyond when it ran.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -361,11 +367,19 @@ impl Assets {
             first_build(&db, &entries, &entry, &now).await;
             loop {
                 entry.dirty.notified().await;
-                // Wait until its inputs have been quiet for the window.
-                while tokio::time::timeout(coalesce, entry.dirty.notified())
-                    .await
-                    .is_ok()
-                {}
+                // Wait until its inputs have been quiet for the window, or
+                // at most MAX_WAIT_FACTOR windows from the first change.
+                let deadline = tokio::time::Instant::now() + coalesce * MAX_WAIT_FACTOR;
+                loop {
+                    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if left.is_zero()
+                        || tokio::time::timeout(coalesce.min(left), entry.dirty.notified())
+                            .await
+                            .is_err()
+                    {
+                        break;
+                    }
+                }
                 // A wake-up the last recompute already covered (it asked
                 // for this one before running) needs nothing.
                 if entry.pending() {
@@ -667,17 +681,67 @@ impl SqlDatasetMaterializer {
         }
     }
 
-    /// Refill the table whole; report what it now holds.
+    /// Refill the table whole; report what it now holds. The answer is
+    /// written only when it differs from the rows the table holds (as a
+    /// multiset: a repeated row counts), so a recompute that finds the same
+    /// answer touches nothing and its readers hear nothing: an `on_change`
+    /// dataset over a busy input (the event log) re-announces only when its
+    /// answer moved.
     async fn refill(&self) -> Result<Recomputed, DomainError> {
         let table = oxplow_db::datasets::materialized_table(&self.view);
         let sql = self.sql.clone();
         let watermark = self.incremental.clone();
         self.db
             .transaction(move |tx| {
+                let quoted = table.replace('"', "\"\"");
+                let scratch = format!("refill_{quoted}");
+                // The scratch table takes the table's own columns, so the
+                // answer is held with the values the table would store.
                 tx.execute_batch(&format!(
-                    "DELETE FROM \"{table}\"; INSERT INTO \"{table}\" SELECT * FROM ({sql});"
+                    "DROP TABLE IF EXISTS temp.\"{scratch}\";
+                     CREATE TEMP TABLE \"{scratch}\" AS SELECT * FROM main.\"{quoted}\" WHERE 0;
+                     INSERT INTO temp.\"{scratch}\" SELECT * FROM ({sql});"
                 ))
                 .map_err(oxplow_db::map_sql_err)?;
+                let columns = tx
+                    .prepare(&format!(
+                        "SELECT name FROM pragma_table_info('{}')",
+                        quoted.replace('\'', "''")
+                    ))
+                    .and_then(|mut st| {
+                        st.query_map([], |r| r.get::<_, String>(0))?
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                    })
+                    .map_err(oxplow_db::map_sql_err)?
+                    .iter()
+                    .map(|c| format!("\"{}\"", c.replace('"', "\"\"")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let counted =
+                    |t: &str| format!("SELECT {columns}, count(*) FROM {t} GROUP BY {columns}");
+                let (held_now, answer) = (
+                    counted(&format!("main.\"{quoted}\"")),
+                    counted(&format!("temp.\"{scratch}\"")),
+                );
+                let same: bool = tx
+                    .query_row(
+                        &format!(
+                            "SELECT NOT EXISTS ({answer} EXCEPT {held_now})
+                                AND NOT EXISTS ({held_now} EXCEPT {answer})"
+                        ),
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(oxplow_db::map_sql_err)?;
+                if !same {
+                    tx.execute_batch(&format!(
+                        "DELETE FROM main.\"{quoted}\";
+                         INSERT INTO main.\"{quoted}\" SELECT * FROM temp.\"{scratch}\";"
+                    ))
+                    .map_err(oxplow_db::map_sql_err)?;
+                }
+                tx.execute_batch(&format!("DROP TABLE temp.\"{scratch}\";"))
+                    .map_err(oxplow_db::map_sql_err)?;
                 held(tx, &table, watermark.as_deref(), "full")
             })
             .await
@@ -991,6 +1055,30 @@ mod tests {
         ]));
         settle().await;
         assert_eq!(runs.load(Ordering::SeqCst), 2, "not one of its inputs");
+    }
+
+    /// Inputs that never go quiet (the event log while agents work) don't
+    /// starve an asset: once dirty, it recomputes at the latest
+    /// [`MAX_WAIT_FACTOR`] coalesce windows later, quiet or not.
+    #[tokio::test]
+    async fn a_busy_input_does_not_starve_an_asset() {
+        let db = Database::in_memory();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let assets = Assets::new(db.clone(), Duration::from_millis(50));
+        assets.register(Arc::new(Counting { runs: runs.clone() }));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "the first build");
+
+        let task = oxplow_db::changes::Changed::inserted(["task".to_string()]);
+        // A change every 10 ms for 600 ms: never 50 ms quiet.
+        for _ in 0..60 {
+            assets.changed(&task);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            runs.load(Ordering::SeqCst) >= 2,
+            "no recompute while its input stayed busy"
+        );
     }
 
     /// Counts its runs over the `scratch` table, with a definition.
@@ -1423,6 +1511,59 @@ mod tests {
         .await
         .unwrap()
         .flatten()
+    }
+
+    /// A whole refill whose answer is the rows the table already holds
+    /// writes nothing, so its readers don't hear it: an `on_change` dataset
+    /// over a busy input (the event log) re-announces only when its answer
+    /// moved. A different answer — fewer rows, or a repeated row more — is
+    /// written.
+    #[tokio::test]
+    async fn a_refill_that_finds_the_same_rows_writes_nothing() {
+        let db = Database::in_memory();
+        write(
+            &db,
+            "CREATE TABLE src (id INTEGER PRIMARY KEY, v INTEGER NOT NULL);
+             CREATE TABLE m_v_same (v INTEGER);
+             INSERT INTO src (v) VALUES (1), (1), (2);"
+                .into(),
+        )
+        .await;
+        let m = SqlDatasetMaterializer::new(
+            db.clone(),
+            "v_same",
+            "SELECT v FROM src WHERE v < 10",
+            vec!["src".into()],
+            &oxplow_db::datasets::Materialize::Named(
+                oxplow_db::datasets::MaterializePolicy::OnChange,
+            ),
+        );
+        m.recompute(true).await.unwrap();
+        let touched =
+            |rx: &mut tokio::sync::broadcast::Receiver<oxplow_db::changes::TablesChanged>| {
+                let mut any = false;
+                while let Ok(changed) = rx.try_recv() {
+                    any |= changed.contains("m_v_same");
+                }
+                any
+            };
+
+        let mut rx = db.subscribe_changes();
+        write(&db, "INSERT INTO src (v) VALUES (50);".into()).await;
+        m.recompute(true).await.unwrap();
+        assert!(!touched(&mut rx), "the same answer was rewritten");
+
+        write(&db, "UPDATE src SET v = 2 WHERE id = 2;".into()).await;
+        m.recompute(true).await.unwrap();
+        assert!(touched(&mut rx), "a repeated row less is a change");
+        assert_eq!(
+            rows(
+                &db,
+                "SELECT v, count(*) FROM m_v_same GROUP BY v ORDER BY v"
+            )
+            .await,
+            vec![(1, 1), (2, 2)]
+        );
     }
 
     /// P8.B4: an incremental dataset's first build is whole, an insert

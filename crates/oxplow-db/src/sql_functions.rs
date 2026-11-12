@@ -7,6 +7,13 @@
 //!   key)` reads one param back, `uri_resource(uri)` its resource and
 //!   `uri_key(uri)` the param that names it (`thr3`; anything that isn't a
 //!   URI as it was). A NULL value leaves its param out.
+//! - `first_sentence(markdown)` is a description's opening for a card or a
+//!   list row to draw as markdown (a `markdown` column, the kit's
+//!   `renderMarkdown`): the first line that isn't a heading, the list and
+//!   quote marks that lead it dropped, up to the first `.`, `!` or `?` that
+//!   ends a sentence outside a code span, a link and a wikilink — its
+//!   inline markdown kept, so it still renders; NULL when there's no such
+//!   line.
 
 use rusqlite::functions::{Context, FunctionFlags};
 use rusqlite::types::ValueRef;
@@ -20,6 +27,9 @@ pub(crate) fn register(c: &Connection) -> rusqlite::Result<()> {
     c.create_scalar_function("uri_resource", 1, flags, uri_resource)?;
     c.create_scalar_function("uri_key", 1, flags, uri_key)?;
     c.create_scalar_function("uri_view", -1, flags, uri_view)?;
+    c.create_scalar_function("first_sentence", 1, flags, |ctx| {
+        Ok(text(ctx, 0)?.and_then(|t| first_sentence(&t)))
+    })?;
     c.create_scalar_function("read_measure", 1, flags, read_measure)
 }
 
@@ -169,7 +179,7 @@ fn uri_param(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
         .and_then(|u| u.param(&key).map(str::to_string)))
 }
 
-/// `uri_resource(uri)`: the resource a URI names (`oxplow/work_item`);
+/// `uri_resource(uri)`: the resource a URI names (`oxplow/task`);
 /// NULL when it isn't an oxplow URI.
 fn uri_resource(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
     Ok(text(ctx, 0)?.and_then(|t| oxplow_domain::uri::build::resource_of(&t)))
@@ -189,6 +199,100 @@ fn uri_key(ctx: &Context<'_>) -> rusqlite::Result<Option<String>> {
             u.param(&key).map(str::to_string)
         });
     Ok(Some(key.unwrap_or(t)))
+}
+
+/// The first sentence of a markdown description, its inline markdown
+/// kept (the module's doc).
+fn first_sentence(body: &str) -> Option<String> {
+    let line = body
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with('#'))?;
+    let mut rest = line;
+    // List, numbered-list and quote marks, however many lead the line.
+    loop {
+        let before = rest;
+        for mark in ["- ", "* ", "+ "] {
+            if let Some(r) = rest.strip_prefix(mark) {
+                rest = r.trim_start();
+            }
+        }
+        if let Some(r) = rest.strip_prefix('>') {
+            rest = r.trim_start();
+        }
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits > 0 {
+            let after = &rest[digits..];
+            if let Some(r) = after
+                .strip_prefix(". ")
+                .or_else(|| after.strip_prefix(") "))
+            {
+                rest = r.trim_start();
+            }
+        }
+        if rest == before {
+            break;
+        }
+    }
+    let chars: Vec<char> = rest.trim().chars().collect();
+    let end = sentence_end(&chars);
+    let sentence: String = match end {
+        Some(i) => chars[..=i].iter().collect(),
+        None => chars.iter().collect(),
+    };
+    (!sentence.is_empty()).then_some(sentence)
+}
+
+/// Where the first sentence of a line of inline markdown ends: the first
+/// `.`, `!` or `?` followed by whitespace or the end, outside a code span,
+/// a link's text or target and a wikilink, and not escaped — so the cut
+/// leaves markdown that still renders.
+fn sentence_end(chars: &[char]) -> Option<usize> {
+    let run = |at: usize| chars[at..].iter().take_while(|c| **c == '`').count();
+    let (mut i, mut brackets, mut parens) = (0, 0usize, 0usize);
+    while i < chars.len() {
+        match chars[i] {
+            '\\' => {
+                i += 2;
+                continue;
+            }
+            '`' => {
+                // A code span runs to the next run of as many backticks.
+                let open = run(i);
+                let mut j = i + open;
+                while j < chars.len() {
+                    let close = run(j);
+                    if close == open {
+                        break;
+                    }
+                    j += close.max(1);
+                }
+                i = j + open;
+                continue;
+            }
+            '[' => brackets += 1,
+            ']' => {
+                brackets = brackets.saturating_sub(1);
+                if brackets == 0 && chars.get(i + 1) == Some(&'(') {
+                    parens = 1;
+                    i += 2;
+                    continue;
+                }
+            }
+            '(' if parens > 0 => parens += 1,
+            ')' if parens > 0 => parens -= 1,
+            '.' | '!' | '?'
+                if brackets == 0
+                    && parens == 0
+                    && chars.get(i + 1).is_none_or(|n| n.is_whitespace()) =>
+            {
+                return Some(i);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn text(ctx: &Context<'_>, i: usize) -> rusqlite::Result<Option<String>> {
@@ -218,16 +322,16 @@ mod tests {
     #[test]
     fn uri_builds_a_canonical_uri() {
         assert_eq!(
-            run("SELECT uri('oxplow/effort', 'id', 'eff' || 12)")
+            run("SELECT uri('oxplow/request', 'id', 'req' || 12)")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow:oxplow/effort?id=eff12")
+            Some("oxplow:oxplow/request?id=req12")
         );
         assert_eq!(
-            run("SELECT uri('oxplow/work_item', 'provider', 'oxplow', 'id', 'tsk1', 'x', NULL)")
+            run("SELECT uri('oxplow/task', 'provider', 'oxtask', 'id', 'tsk1', 'x', NULL)")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow:oxplow/work_item?id=tsk1&provider=oxplow")
+            Some("oxplow:oxplow/task?id=tsk1&provider=oxtask")
         );
         assert_eq!(
             run("SELECT uri('oxplow/file', 'path', 'a b&c.rs')")
@@ -236,9 +340,9 @@ mod tests {
             Some("oxplow:oxplow/file?path=a%20b%26c.rs")
         );
         assert_eq!(run("SELECT uri(NULL, 'id', 'x')").unwrap(), None);
-        assert!(run("SELECT uri('oxplow/effort', 'id')").is_err());
-        assert!(run("SELECT uri('Effort', 'id', 'x')").is_err());
-        assert!(run("SELECT uri('oxplow/effort', 'bad key', 'x')").is_err());
+        assert!(run("SELECT uri('oxplow/request', 'id')").is_err());
+        assert!(run("SELECT uri('Request', 'id', 'x')").is_err());
+        assert!(run("SELECT uri('oxplow/request', 'bad key', 'x')").is_err());
     }
 
     #[test]
@@ -257,28 +361,28 @@ mod tests {
     #[test]
     fn uri_param_reads_one_param() {
         assert_eq!(
-            run("SELECT uri_param('oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 'id')")
+            run("SELECT uri_param('oxplow:oxplow/task?id=tsk1&provider=oxtask', 'id')")
                 .unwrap()
                 .as_deref(),
             Some("tsk1")
         );
         assert_eq!(
-            run("SELECT uri_param('oxplow:oxplow/effort?id=eff1', 'gone')").unwrap(),
+            run("SELECT uri_param('oxplow:oxplow/request?id=req1', 'gone')").unwrap(),
             None
         );
-        assert_eq!(run("SELECT uri_param('effort:eff1', 'id')").unwrap(), None);
+        assert_eq!(run("SELECT uri_param('request:req1', 'id')").unwrap(), None);
         assert_eq!(run("SELECT uri_param(NULL, 'id')").unwrap(), None);
     }
 
     #[test]
     fn uri_resource_reads_the_resource() {
         assert_eq!(
-            run("SELECT uri_resource('oxplow:oxplow/work_item?id=tsk1&provider=oxplow')")
+            run("SELECT uri_resource('oxplow:oxplow/task?id=tsk1&provider=oxtask')")
                 .unwrap()
                 .as_deref(),
-            Some("oxplow/work_item")
+            Some("oxplow/task")
         );
-        assert_eq!(run("SELECT uri_resource('effort:eff1')").unwrap(), None);
+        assert_eq!(run("SELECT uri_resource('request:req1')").unwrap(), None);
         assert_eq!(run("SELECT uri_resource(NULL)").unwrap(), None);
     }
 
@@ -308,5 +412,62 @@ mod tests {
             assert_eq!(run(sql).unwrap().as_deref(), want, "{sql}");
         }
         assert_eq!(run("SELECT uri_key(NULL)").unwrap(), None);
+    }
+
+    /// A description's first sentence, for a card or a list row to draw
+    /// as markdown: past headings and the list and quote marks that lead
+    /// its first line, to the first `.`, `!` or `?` that ends a sentence
+    /// outside a code span, a link or a wikilink, its inline markdown kept.
+    #[test]
+    fn first_sentence_reads_a_descriptions_opening() {
+        let first = |body: &str| {
+            let c = Connection::open_in_memory().unwrap();
+            register(&c).unwrap();
+            c.query_row("SELECT first_sentence(?1)", [body], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .unwrap()
+        };
+        for (body, says) in [
+            (
+                "Signing in from /settings bounces back. The `next` param is stale.",
+                Some("Signing in from /settings bounces back."),
+            ),
+            (
+                "## Context\n\n- **The panel** times out after 5s\nmore",
+                Some("**The panel** times out after 5s"),
+            ),
+            (
+                "> Quoted first: yes! Then more.",
+                Some("Quoted first: yes!"),
+            ),
+            (
+                "See `v_request.prompt`. Done.",
+                Some("See `v_request.prompt`."),
+            ),
+            ("Run `a. b` now. Then.", Some("Run `a. b` now.")),
+            (
+                "Read [the spec](https://x.y/a.b?c=d. e) first. Then.",
+                Some("Read [the spec](https://x.y/a.b?c=d. e) first."),
+            ),
+            (
+                "Follow-up from [[tsk242]]/[[notes. v2|the notes]]. More.",
+                Some("Follow-up from [[tsk242]]/[[notes. v2|the notes]]."),
+            ),
+            (
+                "Ends in a \\. Not here. Here.",
+                Some("Ends in a \\. Not here."),
+            ),
+            (
+                "Version 1.2 ships soon. Next.",
+                Some("Version 1.2 ships soon."),
+            ),
+            ("1. Number one. Two.", Some("Number one.")),
+            ("", None),
+            ("# Only a heading", None),
+        ] {
+            assert_eq!(first(body).as_deref(), says, "{body:?}");
+        }
+        assert_eq!(run("SELECT first_sentence(NULL)").unwrap(), None);
     }
 }

@@ -1,0 +1,12 @@
+# Each turn under the request it belongs to, titled by the request's first
+# prompt line.
+given:
+  - observe: { turn: { prompt: Build the parser } }
+  - observe: { turn: { prompt: What does the lexer do? } }
+when: { page: oxplow/thread-activity, params: { thread: thr1 } }
+expect:
+  loaders:
+    thread_activity:
+      rows:
+        - { section: What does the lexer do?, prompt: What does the lexer do? }
+        - { section: Build the parser, prompt: Build the parser }

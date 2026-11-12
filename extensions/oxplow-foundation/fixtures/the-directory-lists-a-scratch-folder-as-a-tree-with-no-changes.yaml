@@ -11,7 +11,7 @@ when:
   params: { stream_id: 1, path: "", filesystem: "oxplow:temp", scope: uncommitted, compare: main }
 expect:
   loaders:
-    row: { rows: [{ is_local: 0, change_kind: "" }] }
+    row: { rows: [{ is_local: 0, show: all }] }
     tree:
       rows:
         - { name: note.md, is_file: 1, can_write: 0, is_changed: 0, target: "oxplow:oxplow/file?filesystem=oxplow:temp&path=note.md" }

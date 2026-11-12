@@ -27,9 +27,12 @@ const ALL: &[Mode] = &[Mode::Pure, Mode::Transactional, Mode::External];
 
 /// Services multiplexed by the `scope` builtin. The SQL service owns the
 /// builtin's metadata; each call checks its actual declared service.
+/// `state.write` is no service (`SERVICES`): only a capability
+/// implementation's script may declare it (`scope_calls::check_implementation_need`).
 pub const CALLABLE: &[&str] = &[
     "sql.read",
     "state.read",
+    "state.write",
     "extension_config.read",
     "jobs.read",
     "ai.discover",

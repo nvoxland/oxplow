@@ -6,7 +6,7 @@
 //! same way; a call to one the command didn't declare is refused.
 //!
 //! Not to be confused with [`crate::capability`]: the swappable slots a
-//! project chooses an implementation of (`work_items`, `snapshots`). A
+//! project chooses an implementation of (`task_tracker`, `snapshots`). A
 //! command's `needs` may name both; each name is looked up in its own
 //! catalog.
 
@@ -236,13 +236,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Run an extension's effect again: retry a reaction, backfill past events.",
     },
     Scope {
-        id: "efforts.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Open, update, link and close efforts; record and review their claims and decisions.",
-    },
-    Scope {
         id: "extension_config.read",
         access: Access::Read,
         host: Host::Daemon,
@@ -324,14 +317,14 @@ pub const SCOPES: &[Scope] = &[
         access: Access::Read,
         host: Host::Daemon,
         spends: false,
-        summary: "Read the wiki's comments and the drift of its refs from the code they name.",
+        summary: "Read knowledge pages' comments and the drift of their refs from the code they name.",
     },
     Scope {
         id: "knowledge.write",
         access: Access::Record,
         host: Host::Daemon,
         spends: false,
-        summary: "Write the project's wiki: pages, notes, comments and links.",
+        summary: "Write the project's knowledge: pages, notes, comments and links.",
     },
     Scope {
         id: "lsp.control",
@@ -468,6 +461,13 @@ pub const SCOPES: &[Scope] = &[
         summary: "Open, close and focus tabs in a thread's set of tabs — an agent's only in its own thread's.",
     },
     Scope {
+        id: "task_tracker.write",
+        access: Access::Record,
+        host: Host::Daemon,
+        spends: false,
+        summary: "Create, update, move, link, comment on and delete tasks.",
+    },
+    Scope {
         id: "terminals.write",
         access: Access::Write,
         host: Host::Daemon,
@@ -525,13 +525,6 @@ pub const SCOPES: &[Scope] = &[
         summary: "Show the window's search box (Quick Open) or its find-in-file bar.",
     },
     Scope {
-        id: "work_items.write",
-        access: Access::Record,
-        host: Host::Daemon,
-        spends: false,
-        summary: "Create, update, move, link, comment on and delete work items.",
-    },
-    Scope {
         id: "worktrees.write",
         access: Access::Write,
         host: Host::Daemon,
@@ -582,6 +575,6 @@ mod tests {
             strongest_access(&needs(&["sql.read", "tabs.write"])),
             Some(Access::Read)
         );
-        assert_eq!(strongest_access(&needs(&["work_items"])), None);
+        assert_eq!(strongest_access(&needs(&["task_tracker"])), None);
     }
 }

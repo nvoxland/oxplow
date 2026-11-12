@@ -54,7 +54,7 @@ project rather than editing those generated files.
 
 Only the writer thread may change its stream's worktree. No session needs
 an in-progress task to make an edit, and work tracking never gates Stop.
-Efforts belong to the thread and can span sessions. See
+Requests belong to the thread and can span sessions. See
 [Agent control](agent-control.md) and [Local History](local-history.md).
 
 ## Ask the Assistant

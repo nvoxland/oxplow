@@ -86,7 +86,7 @@ fn uri_members(builder: &mut GlobalsBuilder) {
         })))
     }
 
-    /// The resource a URI names (`oxplow/effort`).
+    /// The resource a URI names (`oxplow/request`).
     fn resource(#[starlark(require = pos)] text: &str) -> anyhow::Result<String> {
         Ok(crate::uri::parse_uri(text)?.resource().to_string())
     }
@@ -108,7 +108,7 @@ fn uri_members(builder: &mut GlobalsBuilder) {
     }
 
     /// The key of a URI that names one thing by one param
-    /// (`oxplow:oxplow/effort?id=eff12` → `eff12`); with `resource`,
+    /// (`oxplow:oxplow/request?id=req12` → `req12`); with `resource`,
     /// fails unless it is of that resource.
     fn id(
         #[starlark(require = pos)] text: &str,
@@ -189,24 +189,25 @@ mod tests {
             })
         );
         assert_eq!(
-            run(r#"uri.resource("oxplow:oxplow/effort?id=eff12")"#).unwrap(),
-            json!("oxplow/effort")
+            run(r#"uri.resource("oxplow:oxplow/request?id=req12")"#).unwrap(),
+            json!("oxplow/request")
         );
         assert_eq!(
-            run(r#"uri.id("oxplow:oxplow/effort?id=eff12")"#).unwrap(),
-            json!("eff12")
+            run(r#"uri.id("oxplow:oxplow/request?id=req12")"#).unwrap(),
+            json!("req12")
         );
         assert_eq!(
-            run(r#"uri.id("oxplow:oxplow/effort?id=eff12", resource = "oxplow/effort")"#).unwrap(),
-            json!("eff12")
+            run(r#"uri.id("oxplow:oxplow/request?id=req12", resource = "oxplow/request")"#)
+                .unwrap(),
+            json!("req12")
         );
         let e =
             run(r#"uri.id("oxplow:oxplow/claim?id=3", resource = "oxplow/decision")"#).unwrap_err();
         assert!(e.contains("oxplow/decision"), "{e}");
         assert_eq!(
-            run(r#"[uri.param("oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "provider"), uri.param("oxplow:oxplow/file?path=a", "rev")]"#)
+            run(r#"[uri.param("oxplow:oxplow/task?id=tsk1&provider=oxtask", "provider"), uri.param("oxplow:oxplow/file?path=a", "rev")]"#)
                 .unwrap(),
-            json!(["oxplow", null])
+            json!(["oxtask", null])
         );
         let e = run(r#"uri.parse("nope")"#).unwrap_err();
         assert!(e.contains("isn't an oxplow URI"), "{e}");
@@ -215,15 +216,15 @@ mod tests {
             json!({ "kind": "collector", "namespace": "work", "id": "hot" })
         );
         assert_eq!(
-            run(r#"uri.contribution("oxplow:oxplow/command?command=oxplow.review.accept")"#)
+            run(r#"uri.contribution("oxplow:oxplow/command?command=oxplow.task.comment")"#)
                 .unwrap(),
-            json!({ "kind": "command", "namespace": null, "id": "oxplow.review.accept" })
+            json!({ "kind": "command", "namespace": null, "id": "oxplow.task.comment" })
         );
-        assert!(run(r#"uri.contribution("oxplow:oxplow/effort?id=eff1")"#).is_err());
+        assert!(run(r#"uri.contribution("oxplow:oxplow/request?id=req1")"#).is_err());
         // A guard for an optional value: `uri.is_uri` never fails.
         assert_eq!(
             run(
-                r#"[uri.is_uri("oxplow:oxplow/wiki?slug=x"), uri.is_uri("nope"), uri.is_uri(None)]"#
+                r#"[uri.is_uri("oxplow:oxplow/knowledge?id=x&store=oxwiki"), uri.is_uri("nope"), uri.is_uri(None)]"#
             )
             .unwrap(),
             json!([true, false, false])

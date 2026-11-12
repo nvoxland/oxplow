@@ -1,7 +1,7 @@
 //! The event envelope an extension sees (`.context/extensions-events.md` "The
 //! event envelope"): one projection of a logged event, the same whichever
 //! path hands it over — a collector's `input.event`, an effect's
-//! `x["event"]`, an effort policy's event, a provider's `react { event }`,
+//! `x["event"]`, a provider's `react { event }`,
 //! an `on:` exec collector's stdin — and built the same way from a test
 //! fixture. Every field is always present; what an event doesn't have is
 //! `null`, never made up. The payload is always at its type's newest
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{Anchors, StoredEvent};
-use crate::ids::{AgentSessionId, EffortId, StreamId, ThreadId};
+use crate::ids::{AgentSessionId, StreamId, ThreadId};
 use crate::time::Timestamp;
 use crate::vocabulary::Vocabulary;
 use crate::DomainError;
@@ -155,7 +155,6 @@ struct FixtureEvent {
 struct FixtureAnchors {
     stream_id: Option<StreamId>,
     thread_id: Option<ThreadId>,
-    effort_id: Option<EffortId>,
     turn_id: Option<i64>,
     agent_session_id: Option<AgentSessionId>,
     snapshot_id: Option<i64>,
@@ -166,7 +165,6 @@ impl From<FixtureAnchors> for Anchors {
         Anchors {
             stream_id: a.stream_id,
             thread_id: a.thread_id,
-            effort_id: a.effort_id,
             turn_id: a.turn_id,
             agent_session_id: a.agent_session_id,
             snapshot_id: a.snapshot_id,
@@ -235,7 +233,7 @@ mod tests {
             turn_id: Some(7),
             ..Default::default()
         })
-        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"])
+        .with_subject(["oxplow:oxplow/task?id=tsk4&provider=oxtask"])
         .with_cause(EventId("01990000-0000-7000-8000-000000000001".into()));
         env.at = Timestamp::parse("2026-10-09T12:00:00.000000Z").unwrap();
         StoredEvent {
@@ -260,9 +258,9 @@ mod tests {
                 "seq": 42,
                 "at": "2026-10-09T12:00:00.000000Z",
                 "source": "oxplow:oxplow/collector?collector=acme/c",
-                "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
+                "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
                 "anchors": {
-                    "stream_id": null, "thread_id": "thr3", "effort_id": null,
+                    "stream_id": null, "thread_id": "thr3",
                     "turn_id": 7, "agent_session_id": null, "snapshot_id": null
                 },
                 "payload": { "count": 5 },
@@ -281,7 +279,7 @@ mod tests {
         let given = json!({
             "id": event.envelope.id.0, "type": "acme.thing", "v": 1, "seq": 42,
             "at": "2026-10-09T12:00:00.000000Z", "source": "oxplow:oxplow/collector?collector=acme/c",
-            "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
+            "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
             "anchors": { "thread_id": "thr3", "turn_id": 7 },
             "payload": { "n": 5 },
             "cause": "01990000-0000-7000-8000-000000000001",
@@ -326,7 +324,7 @@ mod tests {
                 "turn_id",
             ),
             (
-                json!({ "type": "acme.thing", "payload": { "count": 1 }, "anchors": { "thread_id": "eff1" } }),
+                json!({ "type": "acme.thing", "payload": { "count": 1 }, "anchors": { "thread_id": "req1" } }),
                 "thread_id",
             ),
             (

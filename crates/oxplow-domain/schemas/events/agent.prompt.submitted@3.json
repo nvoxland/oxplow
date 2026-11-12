@@ -1,0 +1,119 @@
+{
+  "$defs": {
+    "ContentRef": {
+      "additionalProperties": false,
+      "description": "Where a large or sensitive body lives: `event_content.hash` (xxh3-128\nhex) and its length. Retention may delete the body; the ref stays.",
+      "properties": {
+        "hash": {
+          "type": "string"
+        },
+        "size": {
+          "description": "The whole body's length, stored or not.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated": {
+          "description": "Only the first part was stored (bodies are capped).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hash",
+        "size"
+      ],
+      "type": "object"
+    },
+    "TurnSource": {
+      "description": "What opened a turn (`agent_turn.source`), as its harness read the\nprompt hook. Only `person` is a person's words; the others are what the\nharness delivered to the agent on its own.",
+      "oneOf": [
+        {
+          "const": "person",
+          "description": "A person's prompt.",
+          "type": "string"
+        },
+        {
+          "const": "background_job",
+          "description": "A job the agent started in the background reported back (Claude\nCode's task notification: a background shell or subagent finished).",
+          "type": "string"
+        },
+        {
+          "const": "subagent",
+          "description": "A subagent handed its report back to its session.",
+          "type": "string"
+        },
+        {
+          "const": "peer",
+          "description": "Another agent session's message.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "The harness opened a turn and said nothing of why.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "`agent.prompt.submitted@3`: a prompt reached the agent — a person's,\na background job's report, a subagent's hand-back, another session's\nmessage (`source`). Every delivery logs one; one with no turn open also\nopens a turn (`reprompt` says it landed inside an open one).",
+  "properties": {
+    "job": {
+      "description": "On a background job's report or a subagent's hand-back: the\nharness's id for the job (the subagent's id).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "prompt": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The text the harness delivered, stored in `event_content`."
+    },
+    "reprompt": {
+      "type": "boolean"
+    },
+    "sender": {
+      "description": "On another session's message: the sender's own name for its\nsession (its socket when it has no name).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "session": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/TurnSource",
+      "description": "Who it came from. Rows logged before sources were read `unknown`."
+    },
+    "thread": {
+      "description": "The thread (`thr3`).",
+      "type": "string"
+    },
+    "turn": {
+      "description": "The turn it opened, or the one it was delivered into (`trn12`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "thread",
+    "reprompt",
+    "source"
+  ],
+  "title": "AgentPromptSubmittedV3",
+  "type": "object"
+}

@@ -283,7 +283,7 @@ const TAURI_ONLY: &[&str] = oxplow_tauri_ipc::SHELL_ONLY_COMMANDS;
 /// registry — unless it is on the explicit `TAURI_ONLY` allowlist. Without this
 /// guard a command can be wired as a `#[tauri::command]` (and get TS bindings)
 /// yet be forgotten in `rpc_dispatch!`, silently 404ing for remote users. (This
-/// is exactly how the metrics effort-band / findings / override / scaffold
+/// is exactly how the metrics band / findings / override / scaffold
 /// commands shipped broken before tsk236.)
 #[test]
 fn dispatch_registry_covers_ipc_surface() {

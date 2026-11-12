@@ -125,6 +125,7 @@ pub fn prompt(body: &serde_json::Value) -> Option<Prompt> {
                 id: id.to_string(),
                 kind: None,
             },
+            text: String::new(),
         });
     }
     body.get("prompt")

@@ -9,7 +9,7 @@ extra Tauri plugins, etc.).
 
 ## Why open external links in-app at all
 
-Wiki pages and tasks frequently reference public URLs (GitHub
+Knowledge pages and tasks frequently reference public URLs (GitHub
 issues, vendor docs, dashboards). Bouncing every click to the OS
 browser breaks flow. The trade-off is that any embedded surface is a
 new attack surface — a malicious page rendered inside the app could

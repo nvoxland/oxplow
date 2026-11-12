@@ -16,7 +16,8 @@ missing `intent`, a Starlark script that doesn't parse or define
 page that isn't there, a command that doesn't exist or an input that doesn't
 fit it, a loader reading one declared after it); the datasets compiled without
 publishing (SQL errors, a `ref()` that doesn't resolve, columns that differ
-from the declared contract); and a dry run of every advisory and every command
+from the declared contract); and a dry run of every advisory, every agent context (it must
+return a `text` column) and every command
 example. It **always** dry-runs, on this build's schema with no data —
 never the project's database: a collector's entities stand in empty. It
 does not run a page's loaders: `oxplow_run_page` and `extension test` (which
@@ -80,8 +81,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    run first), `when` (what it does — one key names the kind), `expect`
    (`$any` matches anything), and `model: { replies: [...] }` when it calls
    a model, and `requires: [<extension>…]` for more extensions that fixture
-   needs on (what only yours declares is on otherwise, plus oxplow's own work
-   list, effort policy and wiki; a fixture that needs what `oxplow-bundled`
+   needs on (what only yours declares is on otherwise, plus oxplow's own task tracker and knowledge; a fixture that needs what `oxplow-bundled`
    adds, such as its review pages, says `requires: [oxplow-bundled]`; a name
    that isn't an extension here is an error). Any other key is an error:
    The kinds of fixture (generated from the runner's own list):
@@ -98,11 +98,11 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
 | component | `{ component: <id>, items?, invokes?: [{ command, input? }] }` | `{ invokes: [{ ok, result? } \| { ok: false, refused }] }` |
 | event | `{ event: { type, v?, payload, subject?, anchors? } }` | `{ effects?: [{ id, state }], commands?: [names] }` |
 | effect | `{ effect: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip } \| { reacts: false }` |
-| implementation | `{ implementation: <id>, event, answers? } (a dry run)` | `{ commands } \| { skip }` |
 | event_type | `{ event_type, v?, payload }` | `{ valid, upcast? }` |
 | advisory | `{ advisory: <id>, thread? }` | `{ lines: [text] }` |
 | action_point | `{ action_point: <id \| name>, context? } (what a named action point offers)` | `{ draws: none \| button \| menu, commands?: [ids] }` |
 | item_commands | `{ item_commands: <uri> } (the commands about an item, its store filter applied)` | `{ commands: [ids] }` |
+| context | `{ context: <id>, thread? }` | `{ text: <string> \| null }` |
 | sql | `{ sql, params? }` | `{ rows, columns? }` |
 | wikilink | `{ wikilink }` | `{ uri }` |
 | collector | `{ collector: <id>, rows?, event? } \| { collector: <id>, files }` | `{ entities?, events? } \| { facts }` |
@@ -126,7 +126,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a part: `when: { part: <slug | ext/slug>, params? }`, the same
      `expect` as a page's; a query: `when: { query: <slug | ext/slug>[#loader],
      params? }`, `expect: { rows, columns? }` — the rows of its last loader
-     (or the named one), compared as a `sql` example's are. `<page>#<loader>`
+     (or the named one), compared as a `sql` example's are; its `steps` are
+     `{ given }` or `{ when, expect }`, as a page's. `<page>#<loader>`
      names a loader of any page file, run alone as the app runs it for a
      list (a page's own `options_from: '#x'` list does not run with the
      page, so this is how it is tested). `page:` on a
@@ -137,8 +138,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a panel: `when: { panel: <id | ext/id>, thread?, stream?, choices? }`
      runs the panel whole, as the rail shows it: its `body`, `collapsed`,
      `count` and `badge` parts, each from the view `thread` / `stream` name
-     (default: the project's first stream, its first thread), the body with
-     the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
+     (default: the project's first stream, its first thread), every part
+     that declares a toggle with the toggles `choices` picks (`{ mode: top }`; a pick the body doesn't
      offer falls back to its default). Never `params`: a part's scope id is
      the view's. `expect: { body?, collapsed?, count_page?, badge?, count?,
      alert?, choices?, text? }` — each part is checked as a page's `expect`
@@ -159,7 +160,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `$name.uri` (any `.key` / `[n]` path) in a later input, `params` or
      `expect` is that value. `confirmed: true` runs a command that asks a
      person first. Example:
-     `given: [{ command: oxplow.work_item.create, input: { title: T }, bind: t }]`,
+     `given: [{ command: oxplow.task.create, input: { title: T }, bind: t }]`,
      `when: { page: items, params: { uri: $t.uri } }`, `expect: { loaders:
      { items: { rows: [{ title: T }] } } }`.
      **Scenarios:** `steps: [ { given: [..] } | { expect, params?, bind? } ]`
@@ -185,8 +186,8 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `ui` steps, and the steps after them, didn't run. With `--require-ui` (CI's run) that is an
      error, not a warning, so a run that can't draw fails.
      Write the `ui` fixture first, then the component. A step can also act as a person would: `{ press: {
-     action, node?, row?: { uri: $t.uri }, input? } }` presses one of the
-     page's actions, `{ submit: { node, input } }` submits a form node —
+     action, node?, row?: { uri: $t.uri }, input?, option? } }` presses one of the
+     page's actions (`option`: the `value` picked, for one with `options_from`), `{ submit: { node, input } }` submits a form node —
      for real; its `expect` is `{ ok: true, result? }` or `{ ok: false,
      refused: <part of the reason> }` (none: a no fails the step), and the
      next `expect` step shows what it changed. What a step sets off (a reaction to its event, a
@@ -208,38 +209,38 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      write?: { path, body }, answer?, compactions?: n,
      context?: { tokens, window? } } } }` — one turn on the thread, as its
      harness's hooks report it: the prompt, the commands made `during` it
-     (an effort opened mid-turn), each tool call (a finished call; a shell
+     (a task started mid-turn), each tool call (a finished call; a shell
      test command also records a test run), the file the turn wrote (with a
      snapshot before and after, so the turn's checkpoint says `changed`) and
      the turn's end with the agent's last message. Read the result with
-     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_effort`, …).
+     `when: { sql }` (`v_tool_call`, `v_agent_turn`, `v_request`, …).
      Other kinds: `{ observe: { event: { type, payload, … } } }` (an event
      oxplow logs on its own, your effects reacting), `{ observe: { evidence:
-     { effort, observations: [{ kind, metric_value?, payload? }] } } }` (an
-     effort's `test-run` and `diff-coverage` evidence) and `{ observe: {
-     commit: { sha, at, subject, files?: [{ path, status?, additions?,
-     deletions? }] } } }` (a commit the git indexer read), `{ observe: {
+     { request, observations: [{ kind, metric_value?, payload? }] } } }` (a
+     request's `test-run` and `diff-coverage` evidence) and `{ observe: {
+     commit: { sha, at?, subject, files?: [{ path, status?, additions?,
+     deletions?, blob? }] } } }` (a commit the git indexer read, `at` now
+     when absent; a file's `blob` is the git blob id it holds, and links the
+     commit to the requests whose turns left the file so — a snapshot row
+     with that `blob` — as `v_commit_request` reads), `{ observe: {
      change: { kind?, target, files?: [{ path, status?, additions?,
-     deletions?, zone?, is_test? }], functions?: [{ path, symbol, status?,
+     deletions?, zone?, is_test?, staged?, untracked? }], functions?: [{ path, symbol, status?,
      body_changed?, length?, params_before?, params_after?, complexity?,
      complexity_delta?, … }] } } }` (what the change analysis stored for a
-     change: `kind` is `commit` by default, an effort's `target` is its id
-     like `eff1`; the datasets over a change read it, and the
+     change: `kind` is `commit` by default; the datasets over a change read it, and the
      materialized datasets that read the commit index need a step of their
-     own to fill), `{ observe: { test_run: { effort, at?, cases?: [{ name,
-     status }], asserted_failed? } } }` (a test run an effort recorded: a
+     own to fill), `{ observe: { test_run: { at?, cases?: [{ name,
+     status }], asserted_failed? } } }` (a test run: a
      capture with a fact per case) and `{ observe: { snapshot: { trigger?,
-     elapsed_ms?, budget_ms?, files?: [{ path, hash }] } } }` (one take in
+     elapsed_ms?, budget_ms?, files?: [{ path, hash, blob? }] } } }` (one take in
      the stream's snapshot log; its parent is the take before it,
      `{ observe: { diagnostics: { path, items: [{ severity, message, line?,
      col? }] } } }` (what a language server reported for a file),
      `{ observe: { symbols: { path, items: [{ name, kind, container?, line? }] } } }`
-     (the definitions the index read from it), `{ observe: { collect: {
-     effort, collectors?: [key] } } }` (the fact collectors an effort's end
-     runs), `{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
+     (the definitions the index read from it), ``{ observe: { run: { extension, contribution, kind?, outcome?, days_ago?, cpu_ms?, ai_calls? } } }`
      (a finished run of an extension's code), `{ observe: { health: { namespace, contribution,
      kind?, disable } } }` (a contribution disabled after failures), `{ observe: { token_usage: {
-     thread?, effort?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
+     thread?, session?, prompt?, input_tokens?, output_tokens?, … } } }`, `{ observe: {
      hint: { hint, evaluated? } } }` and `{ observe: { nudge: { kind, message, delivered? } } }`,
      a `{ project: { <project.yaml key>: … } }` given (keys of `.oxplow/project.yaml`, read again
      as core does), and a `turn` that also takes `thread`, `session`, `prompt: null` with
@@ -264,7 +265,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a job: `when: { job: <id>, intentKey, request, cancel?, setup?,
      rows? }` — `setup: [{ command, input?, as? }]` first runs oxplow's
      own commands (`as: agent` for the agent of `oxplow:oxplow/thread?id=thr1`) to make
-     what its tools read: a work item, an effort, a test run — run
+     what its tools read: a task, a request, a test run — run
      through your commands over `jobs.write/enqueue` and
      `jobs.read/snapshot` (declare both), its model rounds
      answered by `model.replies` (a string, or `{ text?, toolCalls?: [{
@@ -277,8 +278,7 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
    - a component: `when: { component: <id>, items?: [title], invokes?: [{
      command, input? }] }` — what its frame would ask; `expect: { invokes: [{
      ok, result? } | { ok: false, refused }] }` (an invoke is `refused` when the
-     command refuses or fails; `items` are work
-     items filed first, `oxplow:oxplow/work_item?id=<id>&provider=oxplow`, …);
+     command refuses or fails; `items` are tasks filed first, `oxplow:oxplow/task?id=<id>&provider=oxtask`, …);
    - a page's form (a `viz: form` node): `when: { form: <page>, node?,
      params? }` — opens it as a person would (`node` names the form node,
      else the page's first); `expect: { values?, fixed?, fields? }` (the
@@ -306,11 +306,6 @@ dataset the SQL reads and the command it runs. Prefer `answers:` on pages.
      `result` is compared on the keys you name, so a read command's
      example checks its answer) or `{ refused: <part of the reason> }` —
      a dry run; nothing changes;
-   - an effort policy script (`implementations:`): `input: {
-     implementation: <id>, event: { type, payload, anchors? }, answers?
-     }`, `expect: { commands: [names] }` or `{ skip: <part of the
-     reason> | $any }` — a dry run; the test also runs the effort-policy
-     conformance suite over the script;
    - a provider: `when: { command, input }` (`references/providers.md`).
 
    An `event:` in an example is `{ type, v?, payload, subject?, anchors?

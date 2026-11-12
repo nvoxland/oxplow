@@ -31,7 +31,7 @@ mod tests {
         let (svc, _dir) = crate::test_support::services().await;
         let out = crate::dispatch(
             "list_comments_for_target",
-            serde_json::json!({"target": oxplow_domain::uri::build::wiki_uri("some-slug")}),
+            serde_json::json!({"target": oxplow_domain::uri::build::knowledge_uri("oxwiki", "some-slug")}),
             &svc,
         )
         .await

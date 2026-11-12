@@ -2,7 +2,7 @@
 
 
 What this doc covers: the layered flow you follow whenever a feature
-needs persistence + IPC + UI, with `wiki_page` as a worked example.
+needs persistence + IPC + UI, with `knowledge_page` as a worked example.
 For the actual data shapes, see [data-model.md](./data-model.md).
 
 ## The 7-layer flow
@@ -272,9 +272,9 @@ agent's commands only. Two bodies for one read drift — the deleted
 `validate_extension` dry-ran a check's SQL on the project's database,
 which `oxplow_sdk::check` says a check never does.
 
-## Worked example: `wiki_page`
+## Worked example: `knowledge_page`
 
-Reads of a persisted feature are datasets now (P6): the `wiki_page`
+Reads of a persisted feature are datasets now (P6): the `knowledge_page`
 table is published as `v_knowledge_page` / `v_knowledge_body` /
 `v_knowledge_ref`, the desktop reads them with `querySql`
 (`knowledge.ts`), and writes are `knowledge.*` commands through the bus.
@@ -472,13 +472,12 @@ is one transaction (`record_take`: the snapshot row, its file rows, a
 is an ancestry chain (see data-model.md "Takes and the operation log").
 Rows returned by `listSnapshotsForStream` carry their creating op's
 `parent_snapshot_id` / `trigger` / `over_budget`, and exclude the
-first-ever baseline (nothing to diff against). Efforts anchor to
-snapshots through `effort.start_snapshot_id` / `end_snapshot_id` and
-agent turns through `agent_turn.start_snapshot_id` / `snapshot_id`.
+first-ever baseline (nothing to diff against). An agent
+turn's end take carries its `turn_id`.
 Unlike other stores it doesn't expose a `subscribe()`; the renderer
 hears a take that recorded something as `SnapshotTaken`, which the
 `ui.push` consumer derives from the logged `snapshot.taken@3` (and a
-re-stamp from `vcs.head.moved@2`).
+re-stamp from `vcs.head.moved@3`).
 
 IPC methods (all go through `ipc-contract.ts` → `main.ts` →
 `preload.ts` → `apps/desktop/src/api.ts`):
@@ -495,10 +494,6 @@ IPC methods (all go through `ipc-contract.ts` → `main.ts` →
   captured file row. The old `get_snapshot_summary` /
   `get_snapshot_pair_diff` RPCs had no caller and are gone; diffs go
   through the `diff` RPC (`Trees`, `.context/vcs.md`).
-- `readTaskEfforts(taskId)` (`workItems.ts`) — a task's efforts from
-  `v_effort` (`work_item = oxplow:oxplow/work_item?id=<id>&provider=oxplow`), newest first, each
-  with its changed files (`get_effort_files`). Used by the task page's
-  Activity timeline and the "Show in history" jump.
 
 UI subscribe helper: `subscribeSnapshotEvents(streamId, fn)` filters
 `file-snapshot.created` by stream and unpacks the payload.
@@ -574,7 +569,8 @@ or `fail` in the new spot; events publish automatically.
 ## Work panel in_progress bucket is task-only
 
 The Work panel's in_progress bucket is driven purely by `task`
-rows (`status = 'in_progress'` for the selected thread). There are no
+rows (`state = 'in_progress'`, assigned to the selected thread), each
+with its latest request's state as its activity. There are no
 synthesized turn rows, no live-prompt overlay, and no IPC for
 listing open turns — `listAgentTurns`, `listOpenTurns`,
 `listRecentInactiveTurns`, `archiveAgentTurn`, and
@@ -706,20 +702,20 @@ store, runtime, IPC, and UI are tool-agnostic.
 The collection subsystem (`.context/collection.md`) follows the same
 7-layer shape with a couple of slice patterns worth calling out:
 
-- **Stored once, read as a dataset.** The `effort_evidence` asset computes
-  each effort's observations and stores them (`v_effort_observation`); the
+- **Stored once, read as a dataset.** The `request_analysis` asset computes
+  each request's observations and stores them (`v_request_observation`); the
   panel and an agent's `oxplow_query_sql` read the dataset
-  (`SqliteEffortEvidenceStore::list_observations`). Mutations are the
+  (`SqliteRequestAnalysisStore`). Mutations are the
   `oxplow.test.record_run` command and `oxplow.collector.sync` on a report collector
   (agents run them; P8.A8, tsk863) since the UI never writes observations. A view of them re-runs on
-  `DatasetsChanged` (P8.A2: the bespoke `EffortObservationsChanged` had no
+  `DatasetsChanged` (P8.A2: the bespoke observations-changed event had no
   listener and is gone).
 - **The engine lives in `oxplow-app`, not a store.** `CollectionService`
   (`crates/oxplow-app/src/collection.rs`) owns the orchestration
-  (effort resolution, coverage parse via `oxplow-coverage`, changed-line
+  (request resolution, coverage parse via `oxplow-coverage`, changed-line
   diff, freshness pin) and is called from both the MCP tools and the
-  control-plane PostToolUse hook; the evidence store
-  (`SqliteEffortEvidenceStore`) stays a thin typed read/write surface.
+  control-plane PostToolUse hook; the analysis store
+  (`SqliteRequestAnalysisStore`) stays a thin typed read/write surface.
 
 ## Agent nudges
 
@@ -730,11 +726,9 @@ post-tool-use advisories). A standard 7-layer instance backed by
 schema in [data-model.md](./data-model.md), migration `V33`).
 
 - **IPC** (UI-only — the agent never reads nudges back):
-  `list_nudges_for_thread(threadId)`. Per-effort nudges are read through
-  `v_agent_nudge` (the oxplow-bundled `effort-nudges` page)
-  (`crates/oxplow-rpc/src/commands/effort.rs`, adapters in
-  `crates/oxplow-tauri-ipc/src/commands/effort.rs`, registered in the
-  `rpc_dispatch!` registry and the surface-parity manifest as `ui()`).
+  `list_nudges_for_thread(threadId)`. Per-request nudges are read through
+  `v_agent_nudge`. The IPC is registered in the
+  `rpc_dispatch!` registry and the surface-parity manifest as `ui()`.
   There are no write IPCs — nudges are written exclusively by the service
   inside `on_shell_run`, best-effort (a persistence error is logged,
   never fails the hook).
@@ -748,9 +742,9 @@ schema in [data-model.md](./data-model.md), migration `V33`).
 Most stores have a single writer per row. The unified
 cross-page-reference graph (`page_ref` table; see
 [data-model.md](./data-model.md)) is the exception: a single
-one `source_uri` like a work item's accumulates
+one `source_uri` like a task's accumulates
 rows from different owners (the item's body, link and comment slices,
-restated from the work-item interface, and the effort store's edges),
+restated from the task interface),
 each owning a slice keyed by `ref_type`.
 
 The pattern that lets writers co-own a source without trampling
@@ -759,8 +753,8 @@ each other:
 1. **Pure projections** (`crates/oxplow-db/src/page_ref_projections.rs`)
    turn each writer's domain rows into `Vec<PageRefEdge>`. Each
    helper also exposes a small list of the `ref_type`s it owns
-   (`work_item_body_ref_types()`, `work_item_comment_ref_types()`,
-   the `work_item_link:` prefix, `effort_ref_types()`).
+   (`task_body_ref_types()`, `task_comment_ref_types()`,
+   the `task_link:` prefix).
 2. **Slice-replace** at the store
    (`SqlitePageRefStore::replace_source_for_ref_types`) takes
    `(source, ref_types, edges)` and atomically
@@ -778,13 +772,13 @@ each other:
    SQLite-sourced slice, so a migration that resets `page_ref` (V92)
    or a writer's drift is undone at the next start after a migration or
    under a new build (it doesn't rerun when neither changed).
-4. **Event-driven projection** where the write logs an event. A task
-   work-item command logs core's `work_item.*` events in its
-   transaction (`.context/work-items.md`), and
-   `PageRefWorkItemConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
+4. **Event-driven projection** where the write logs an event. A
+   task command logs core's `task.*` events in its
+   transaction (`.context/tasks.md`), and
+   `PageRefTaskConsumer` (`oxplow-app/src/page_ref_consumers.rs`)
    restates the item's body, link and comment slices from the
-   work-item interface (`work_item_refs::restate_tx`) when the pump
-   delivers it, for every list — after `work_items.project` has put a
+   task interface (`task_refs::restate_tx`) when the pump
+   delivers it, for every list — after `tasks.project` has put a
    list's record there —
    checkpointed and dead-lettered, so a crash between commit and
    projection can't leave the graph stale. As writes gain events this
@@ -792,7 +786,7 @@ each other:
    "event_log" — its consumer table lists every reaction to the log
    (agent activity, collection, tokens and search run there since P3).
 
-When a single writer owns the WHOLE source (wiki sync, findings
+When a single writer owns the WHOLE source (oxwiki sync, findings
 write, commit indexer), use the simpler `replace_source` instead.
 
 To add a new source kind to the graph: add a projection helper, a
@@ -800,7 +794,7 @@ ref-type-list helper, construct the page-ref mirror inside the owning
 store's `new()`, and call the slice or full replace from its write
 methods.
 For body-text sources that should pick up the same wikilink rules
-the wiki + tasks use, route through
+knowledge pages and tasks use, route through
 `oxplow_domain::uri::extract` rather than re-implementing the
 parser.
 
@@ -855,7 +849,7 @@ pause.
 The `search` command/tool is a read over `SqliteSearchStore`
 (`crates/oxplow-db/src/search_store.rs`) — a unified FTS5/BM25 index, not a
 per-domain store. It is **fed**, not written by its callers. Tasks,
-comments, thread notes and wiki pages are searchable resources derived from a dataset
+comments, thread notes and knowledge pages are searchable resources derived from a dataset
 (`v_search_<kind>`): an asset per kind (`kind_search.rs`, tsk864)
 restates the kind whole when a table behind its dataset commits — a move, a
 soft delete, a thread delete included — writing nothing when the rows are

@@ -2,10 +2,10 @@
 # (notes) and for the agent (followups), each row opening the inbox; a
 # resolved comment no longer counts.
 given:
-  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b } }
-  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b } }
-  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: followup, body: b } }
-  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/wiki?slug=some-page", intent: note, body: b }, bind: last }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=some-page&store=oxwiki", intent: note, body: b } }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=some-page&store=oxwiki", intent: note, body: b } }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=some-page&store=oxwiki", intent: followup, body: b } }
+  - { command: oxplow.knowledge.add_comment, input: { stream: str1, target: "oxplow:oxplow/knowledge?id=some-page&store=oxwiki", intent: note, body: b }, bind: last }
   - { command: oxplow.knowledge.update_comment, input: { comment: $last.comment.id, status: resolved } }
 when: { part: oxplow/comments-panel, params: { stream_id: 1 } }
 expect:

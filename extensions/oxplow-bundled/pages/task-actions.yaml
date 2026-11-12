@@ -1,0 +1,46 @@
+title: Task actions
+description: "One task's moves, for an agent: Mark done, or Record a block on another item."
+needs:
+- task_tracker
+params:
+- name: uri
+  label: Task
+answers:
+- {"question":"Mark a task done.","about":"oxplow/task","params":{"uri":"oxplow:oxplow/task?id=tsk1&provider=oxtask"},"skill":"tasks"}
+- {"question":"Record that one task blocks another.","about":"oxplow/task","params":{"uri":"oxplow:oxplow/task?id=tsk1&provider=oxtask"},"skill":"tasks"}
+loaders:
+  item:
+    sql: |
+      SELECT w.uri, w.title, coalesce(w.stage_title, w.stage) AS stage_title, w.state AS icon
+      FROM v_task w WHERE w.uri = :uri
+actions:
+- id: done
+  label: Mark done
+  command: oxplow.task.transition
+  input:
+    uri: '{{param.uri}}'
+    to: done
+- id: blocks
+  label: Record a block…
+  command: oxplow.task.link
+  form: true
+  fixed:
+  - uri
+  - link_type
+  input:
+    uri: '{{param.uri}}'
+    link_type: blocks
+view:
+  id: item
+  from: item
+  viz: detail
+  columns:
+  - key: title
+    label: Task
+    link:
+      kind: page
+      from: uri
+  - key: stage_title
+    label: Stage
+    icon: icon
+  empty: This task isn't on the active task tracker.

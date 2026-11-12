@@ -1,30 +1,41 @@
-//! Knowledge — the wiki — as commands (P5.C3, `.context/knowledge.md`).
+//! Knowledge as commands (`.context/knowledge.md`): pages kept in one or
+//! more stores at once — oxwiki (`oxplow_oxwiki`), an extension's — and
+//! core's record of them, the same for every store.
 //!
-//! `oxplow.knowledge.write_page` is the one way a page is written: in the bus's
-//! transaction it validates the slug and every `[[link]]`, restates the
-//! `wiki_page` row and its `page_ref` edges (new file refs pinned to the
-//! primary stream's latest snapshot) and logs `knowledge.page.written`;
-//! once committed it writes `.oxplow/wiki/<slug>.md`. Beside it:
-//! `oxplow.knowledge.delete_page`, `oxplow.knowledge.link` (add a link to a page) and
-//! `oxplow.knowledge.resync` (restate a page from its file — the repair op).
-//! A hand edit of the file converges through the same core
-//! ([`crate::wiki_pages::sync_page`], logged as `system:wiki_watch`).
+//! `oxplow.knowledge.write_page` is the one way a page is written: it
+//! resolves the store (named, or the only one enabled), checks the write
+//! against core's record (its id, every link it adds, the files it verifies
+//! or removes), has the store keep it, and records what the store kept
+//! (`oxplow_db::knowledge_record`: the row, its `page_ref` edges with new
+//! file refs pinned, `knowledge.page.written`). Beside it:
+//! `oxplow.knowledge.delete_page`, `oxplow.knowledge.verify_files` (only the
+//! pins move: nothing reaches the store),
+//! `oxplow.knowledge.link` (core adds the link under the page's Related
+//! heading and writes the page through its store) and
+//! `oxplow.knowledge.resync` (restate an oxwiki page from its file — the
+//! repair op).
 
 use crate::commands::ops::Op;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use oxplow_db::page_ref_projections::{stamp_file_versions, wiki_edges, RT_WIKI_FILE};
-use oxplow_db::page_ref_store::{merge_source_tx, replace_source_tx, upsert_edge_tx};
-use oxplow_db::{EventCtx, FileRefVersion, PageRefEdge, WikiPage};
+use oxplow_db::knowledge_record::{
+    delete_page_tx, strip_body_version_literals, write_page_tx, CitedRefs, PageWrite,
+};
+use oxplow_db::EventCtx;
 use oxplow_domain::events::schema::{
-    KnowledgePageDeleted, KnowledgePageDeletedV2, KnowledgePageWritten, KnowledgePageWrittenV2,
+    AgentToolFinished, AgentToolFinishedV4, KnowledgePageDrifted, KnowledgePageDriftedV1,
+    KnowledgePageRead, KnowledgePageReadV1, KnowledgePageWritten, KnowledgePageWrittenV3, ReadVia,
+    SnapshotTaken, SnapshotTakenV3,
 };
 use oxplow_domain::events::Envelope;
-use oxplow_domain::knowledge::{Kept, KnowledgeProvider, PageCall, PageDraft, RefFreshness};
-use oxplow_domain::uri::build::{file_of_uri, file_uri, wiki_uri};
-use oxplow_domain::vcs::{Revision, Vcs};
-use oxplow_domain::{Anchors, CommandError, Confirm, DomainError, Timestamp};
+use oxplow_domain::knowledge::{
+    Kept, KnowledgeProvider, KnowledgeStores, PageCall, PageDraft, RefFreshness, OXWIKI,
+};
+use oxplow_domain::uri::build::knowledge_uri;
+use oxplow_domain::vcs::Vcs;
+use oxplow_domain::{CommandError, Confirm, DomainError, Timestamp};
+use oxplow_oxwiki::OxwikiPresence;
 use rusqlite::{params, OptionalExtension};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -33,15 +44,12 @@ use serde_json::json;
 use crate::commands::util::{invalid, parse, schema};
 use crate::commands::{Handler, HandlerOutput, Invocation, TxCtx};
 use crate::link_check::{check_links_in, LinkWorld};
-use crate::wiki_pages::{
-    extract_title, parse_refs, path_under_any_dir, strip_body_version_literals, wiki_pages_dir,
-};
 
 /// The capability.
 pub const CAPABILITY: &str = "knowledge";
-/// The wiki's built-in entry (`capabilities::BUILT_INS`), which
-/// `oxplow-bundled` declares.
-pub const BUILT_IN: &str = "oxplow:wiki";
+/// oxwiki's built-in entry (`capabilities::BUILT_INS`), which
+/// `oxplow-foundation` declares under the id `oxwiki`.
+pub const BUILT_IN: &str = "oxplow:oxwiki";
 
 pub const WRITE_PAGE: &str = "oxplow.knowledge.write_page";
 pub const DELETE_PAGE: &str = "oxplow.knowledge.delete_page";
@@ -49,296 +57,8 @@ pub const LINK: &str = "oxplow.knowledge.link";
 pub const RESYNC: &str = "oxplow.knowledge.resync";
 pub const VERIFY_FILES: &str = "oxplow.knowledge.verify_files";
 
-/// A page's ref: `oxplow:oxplow/wiki?slug=<slug>`.
-pub fn page_ref(slug: &str) -> String {
-    oxplow_domain::uri::build::wiki_uri(slug)
-}
-
-/// Where a page's body lives.
-pub fn page_path(project_dir: &Path, slug: &str) -> PathBuf {
-    wiki_pages_dir(project_dir).join(format!("{slug}.md"))
-}
-
-/// A slug is kebab-case: lowercase letters and digits in `-`-joined runs.
-pub fn valid_slug(slug: &str) -> bool {
-    !slug.is_empty()
-        && slug.split('-').all(|part| {
-            !part.is_empty()
-                && part
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
-        })
-}
-
-/// What new file refs are pinned to: the primary stream's latest snapshot,
-/// and the revision that snapshot is exactly, when it is one. Freshness
-/// compares the pinned snapshot to a file's latest (`oxplow_wiki_ref_drift`).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Pin {
-    pub snapshot_id: Option<i64>,
-    pub revision: Option<String>,
-}
-
-pub fn pin_tx(conn: &rusqlite::Connection) -> Result<Pin, DomainError> {
-    let row: Option<(i64, Option<String>)> = conn
-        .query_row(
-            "SELECT s.id, s.revision FROM snapshot s
-             JOIN streams st ON st.id = s.stream_id AND st.kind = 'primary'
-             ORDER BY s.id DESC LIMIT 1",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()
-        .map_err(sql)?;
-    Ok(match row {
-        None => Pin::default(),
-        Some((id, revision)) => Pin {
-            snapshot_id: Some(id),
-            revision: revision
-                .and_then(|r| r.parse::<Revision>().ok())
-                .and_then(|r| r.vcs_rev().map(str::to_string)),
-        },
-    })
-}
-
 fn sql(e: rusqlite::Error) -> DomainError {
     DomainError::Storage(e.to_string())
-}
-
-impl Pin {
-    fn stamp(&self, edge: PageRefEdge) -> PageRefEdge {
-        match self.snapshot_id {
-            Some(id) => edge.with_version(id, self.revision.clone(), self.revision.is_some()),
-            None => edge,
-        }
-    }
-}
-
-/// A page to restate from `body`, with the refs its author re-checked
-/// (`verified`: pinned to now) and dropped (`removed`: must be gone from
-/// the body).
-pub struct PageWrite<'a> {
-    pub slug: &'a str,
-    pub body: &'a str,
-    pub verified: &'a [String],
-    pub removed: &'a [String],
-    pub updated_at: Timestamp,
-    /// The refs its store states (a provider's record); `None`: parsed
-    /// from the body (the wiki's grammar).
-    pub stated: Option<&'a [String]>,
-    /// Who wrote it, on the event (a command's actor's thread and
-    /// stream; none for the watcher).
-    pub anchors: Anchors,
-}
-
-/// What a write left: the page's outbound refs and its pin.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Written {
-    /// The page's slug.
-    pub page: String,
-    pub outbound: Vec<String>,
-    /// The snapshot its new refs are pinned to.
-    pub snapshot: Option<i64>,
-}
-
-/// Refuse `verified` / `removed` refs the body doesn't bear out: a removed
-/// ref still cited, a verified one neither cited nor under a cited
-/// directory.
-pub fn refs_borne_out(
-    refs: &crate::wiki_pages::ParsedRefs,
-    verified: &[String],
-    removed: &[String],
-) -> Result<(), CommandError> {
-    let still_cited: Vec<&str> = removed
-        .iter()
-        .filter(|p| refs.file_refs.contains(p))
-        .map(String::as_str)
-        .collect();
-    if !still_cited.is_empty() {
-        return Err(invalid(
-            "/removed_files",
-            format!(
-                "removed_files still cited by the body: {}",
-                still_cited.join(", ")
-            ),
-        ));
-    }
-    let unreferenced: Vec<&str> = verified
-        .iter()
-        .filter(|p| !refs.file_refs.contains(p) && !path_under_any_dir(p, &refs.dir_refs))
-        .map(String::as_str)
-        .collect();
-    if !unreferenced.is_empty() {
-        return Err(invalid(
-            "/verified_files",
-            format!(
-                "verified_files neither cited by the body nor under a cited directory: {}",
-                unreferenced.join(", ")
-            ),
-        ));
-    }
-    Ok(())
-}
-
-/// Restate a page's row and edges from its body, answering what it left
-/// and its `knowledge.page.written` for the caller to log. Edges already stored keep their pins (so
-/// unrelated prose edits don't re-stamp them); new file refs and verified
-/// ones take the current [`Pin`]. A file verified under a directory the
-/// body cites (`[[dir:…]]`) becomes an edge of its own, kept while that
-/// directory stays cited.
-pub fn write_page_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    project_dir: &Path,
-    write: &PageWrite<'_>,
-) -> Result<(Written, Envelope), DomainError> {
-    let PageWrite {
-        slug,
-        body,
-        verified,
-        removed,
-        updated_at,
-        stated,
-        ref anchors,
-    } = *write;
-    let refs = match stated {
-        Some(stated) => crate::wiki_pages::stated_refs(stated),
-        None => parse_refs(body),
-    };
-    refs_borne_out(&refs, verified, removed).map_err(|e| DomainError::Invalid(e.to_string()))?;
-    let created_at = oxplow_db::wiki_page_store::get_tx(conn, slug)?
-        .map(|(page, _)| page.created_at)
-        .unwrap_or(updated_at);
-    let page = WikiPage {
-        slug: slug.to_string(),
-        title: extract_title(body, slug),
-        body_path: page_path(project_dir, slug).to_string_lossy().into_owned(),
-        body_excerpt: body.chars().take(280).collect(),
-        body_size_bytes: body.len() as i64,
-        file_refs: refs.file_refs.clone(),
-        dir_refs: refs.dir_refs.clone(),
-        related_notes: refs.related_notes,
-        created_at,
-        updated_at,
-    };
-    oxplow_db::wiki_page_store::upsert_tx(conn, &page, body, &body_hash(body))?;
-
-    let pin = pin_tx(conn)?;
-    let mut edges = match stated {
-        Some(stated) => oxplow_db::page_ref_projections::stated_edges(slug, stated),
-        None => wiki_edges(&ev.vocabulary.resources, slug, body),
-    };
-    if let Some(id) = pin.snapshot_id {
-        stamp_file_versions(
-            &mut edges,
-            FileRefVersion {
-                local_snapshot_id: id,
-                closest_vcs_rev: pin.revision.as_deref(),
-                vcs_rev_exact: pin.revision.is_some(),
-            },
-        );
-    }
-    // Verification edges under a still-cited directory stay (with their
-    // pins); merge_source prunes the rest.
-    let source = wiki_uri(slug);
-    for kept in file_edges_tx(conn, &source)? {
-        let cited = edges.iter().any(|e| e.target == kept.target);
-        let under = file_of_uri(&kept.target)
-            .is_ok_and(|file| path_under_any_dir(&file.path, &page.dir_refs));
-        if !cited && under {
-            edges.push(kept);
-        }
-    }
-    merge_source_tx(conn, &source, edges.clone())?;
-    for path in verified {
-        let target = file_uri(path);
-        let edge = edges
-            .iter()
-            .find(|e| e.target == target && e.ref_type == RT_WIKI_FILE)
-            .cloned()
-            .unwrap_or_else(|| PageRefEdge::new(&source, &target, RT_WIKI_FILE));
-        upsert_edge_tx(conn, &pin.stamp(edge))?;
-    }
-
-    let page_ref = page_ref(slug);
-    let written = Written {
-        page: slug.to_string(),
-        outbound: outbound_tx(conn, slug)?,
-        snapshot: pin.snapshot_id,
-    };
-    let env = ev
-        .typed::<KnowledgePageWritten>(&KnowledgePageWrittenV2 {
-            page: written.page.clone(),
-            outbound: written.outbound.clone(),
-            snapshot: written.snapshot,
-        })
-        .with_anchors(Anchors {
-            snapshot_id: pin.snapshot_id,
-            ..anchors.clone()
-        })
-        .with_subject([page_ref]);
-    Ok((written, env))
-}
-
-/// Delete a page's row and edges, answering its `knowledge.page.deleted`
-/// for the caller to log; `None` when there was no page.
-pub fn delete_page_tx(
-    conn: &rusqlite::Connection,
-    ev: &EventCtx<'_>,
-    anchors: Anchors,
-    slug: &str,
-) -> Result<Option<Envelope>, DomainError> {
-    let existed = oxplow_db::wiki_page_store::delete_tx(conn, slug)?;
-    replace_source_tx(conn, &wiki_uri(slug), Vec::new())?;
-    Ok(existed.then(|| {
-        ev.typed::<KnowledgePageDeleted>(&KnowledgePageDeletedV2 {
-            page: slug.to_string(),
-        })
-        .with_anchors(anchors)
-        .with_subject([page_ref(slug)])
-    }))
-}
-
-/// The hash a page row keeps of the body it was written from.
-pub fn body_hash(body: &str) -> String {
-    crate::blob_store::BlobStore::hash(body.as_bytes())
-}
-
-/// The file edges a page (`source`, its URI) holds.
-fn file_edges_tx(
-    conn: &rusqlite::Connection,
-    source: &str,
-) -> Result<Vec<PageRefEdge>, DomainError> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT target_uri, ref_type, source_extra, local_snapshot_id, closest_vcs_rev,
-                    vcs_rev_exact
-             FROM page_ref WHERE source_uri = ?1 AND target_resource = ?2",
-        )
-        .map_err(sql)?;
-    let rows = stmt
-        .query_map(params![source, oxplow_domain::uri::resources::FILE], |r| {
-            let mut edge = PageRefEdge::new(source, r.get::<_, String>(0)?, r.get::<_, String>(1)?);
-            edge.source_extra = r.get(2)?;
-            edge.local_snapshot_id = r.get(3)?;
-            edge.closest_vcs_rev = r.get(4)?;
-            edge.vcs_rev_exact = r.get::<_, i64>(5)? != 0;
-            Ok(edge)
-        })
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(sql)?;
-    Ok(rows)
-}
-
-fn outbound_tx(conn: &rusqlite::Connection, slug: &str) -> Result<Vec<String>, DomainError> {
-    let mut stmt = conn
-        .prepare("SELECT DISTINCT target_uri FROM page_ref WHERE source_uri = ?1 ORDER BY 1")
-        .map_err(sql)?;
-    let rows = stmt
-        .query_map(params![wiki_uri(slug)], |r| r.get::<_, String>(0))
-        .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-        .map_err(sql)?;
-    Ok(rows)
 }
 
 /// `body` with its first `# ` heading set to `title` (added when there
@@ -359,266 +79,65 @@ fn with_title(body: &str, title: &str) -> String {
     out
 }
 
-/// oxplow's wiki as a store: a page is `.oxplow/wiki/<slug>.md`. It keeps
-/// the file; the record is core's ([`write_page_tx`], run by the
-/// commands). A hand edit of the file converges through the watcher.
-pub struct WikiKnowledge {
-    /// The id its declaration gives (`oxplow`).
-    pub id: String,
-    pub project_dir: PathBuf,
+/// `body` with `line` added at the end of its `## Related` section (before
+/// whatever section follows), or a new `## Related` at the end.
+fn with_related(body: &str, line: &str) -> String {
+    let mut lines: Vec<&str> = body.lines().collect();
+    let Some(heading) = lines.iter().position(|l| l.trim_end() == "## Related") else {
+        return format!("{}\n\n## Related\n\n{line}\n", body.trim_end());
+    };
+    let end = lines[heading + 1..]
+        .iter()
+        .position(|l| l.starts_with("# ") || l.starts_with("## "))
+        .map_or(lines.len(), |i| heading + 1 + i);
+    match (heading + 1..end)
+        .rev()
+        .find(|&i| !lines[i].trim().is_empty())
+    {
+        Some(last) => lines.insert(last + 1, line),
+        None => lines
+            .splice(heading + 1..heading + 1, ["", line])
+            .for_each(drop),
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
 }
 
-#[async_trait::async_trait]
-impl KnowledgeProvider for WikiKnowledge {
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    async fn write_page(
-        &self,
-        _call: &PageCall<'_>,
-        draft: &PageDraft,
-    ) -> Result<Option<Kept>, CommandError> {
-        write_file(&page_path(&self.project_dir, &draft.slug), &draft.body)?;
-        Ok(Some(Kept {
-            body: draft.body.clone(),
-            refs: None,
-            events: Vec::new(),
-        }))
-    }
-
-    async fn delete_page(
-        &self,
-        _call: &PageCall<'_>,
-        slug: &str,
-    ) -> Result<Option<Vec<Envelope>>, CommandError> {
-        let path = page_path(&self.project_dir, slug);
-        match std::fs::remove_file(&path) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(CommandError::Failed {
-                message: format!("couldn't delete {}: {e}", path.display()),
-            }),
-            _ => Ok(Some(Vec::new())),
-        }
-    }
-
-    async fn link(
-        &self,
-        _call: &PageCall<'_>,
-        slug: &str,
-        target: &str,
-    ) -> Result<Option<Kept>, CommandError> {
-        let path = page_path(&self.project_dir, slug);
-        let current = std::fs::read_to_string(&path)
-            .map_err(|_| invalid("/page", format!("no page `{slug}`")))?;
-        let body = strip_body_version_literals(&with_related(&current, &format!("- [[{target}]]")));
-        write_file(&path, &body)?;
-        Ok(Some(Kept {
-            body,
-            refs: None,
-            events: Vec::new(),
-        }))
-    }
-}
-
-/// None as a knowledge store: a sink, as the work list's none is. A write
-/// lands nowhere and succeeds (`{ tracked: false }`), a delete and a link
-/// too, and nothing is recorded, so nothing that writes pages is refused
-/// while no store is active.
-pub struct NoneKnowledge;
-
-#[async_trait::async_trait]
-impl KnowledgeProvider for NoneKnowledge {
-    fn id(&self) -> &str {
-        oxplow_domain::capability::NONE
-    }
-
-    fn sink(&self) -> bool {
-        true
-    }
-
-    async fn write_page(
-        &self,
-        _call: &PageCall<'_>,
-        _draft: &PageDraft,
-    ) -> Result<Option<Kept>, CommandError> {
-        Ok(None)
-    }
-
-    async fn delete_page(
-        &self,
-        _call: &PageCall<'_>,
-        _slug: &str,
-    ) -> Result<Option<Vec<Envelope>>, CommandError> {
-        Ok(None)
-    }
-
-    async fn link(
-        &self,
-        _call: &PageCall<'_>,
-        _slug: &str,
-        _target: &str,
-    ) -> Result<Option<Kept>, CommandError> {
-        Ok(None)
-    }
-}
-
-/// Whether oxplow's wiki is the project's knowledge store now: its file
-/// watch and its repair (`oxplow.knowledge.resync`) run only then, since
-/// the record is the active store's pages. Decided by which ids the wiki
-/// was registered under, never by an id's name.
-#[derive(Debug, Default)]
-pub struct WikiFollow {
-    serves: std::sync::RwLock<std::collections::BTreeSet<String>>,
-    live: std::sync::atomic::AtomicBool,
-}
-
-impl WikiFollow {
-    fn set_serves(&self, ids: impl IntoIterator<Item = String>) {
-        *self.serves.write().unwrap_or_else(|e| e.into_inner()) = ids.into_iter().collect();
-    }
-
-    /// Follow the active store `id`; whether the wiki is it.
-    pub fn follow(&self, id: &str) -> bool {
-        let live = self
-            .serves
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(id);
-        self.live.store(live, std::sync::atomic::Ordering::SeqCst);
-        live
-    }
-
-    pub fn live(&self) -> bool {
-        self.live.load(std::sync::atomic::Ordering::SeqCst)
-    }
-}
-
-/// Empty the record — every page row, its edges and touches — when the
-/// store it held pages of is no longer the active one. Nothing in any
-/// store is touched.
-pub async fn clear_record(db: &oxplow_db::Database) -> Result<(), DomainError> {
-    db.transaction(|tx| {
-        tx.execute_batch(
-            "DELETE FROM page_ref WHERE source_resource = 'oxplow/wiki';
-             DELETE FROM wiki_page_thread_update;
-             DELETE FROM wiki_page;",
-        )
-        .map_err(sql)
-    })
-    .await
-}
-
-/// On `capability.switched` for knowledge: the record becomes the newly
-/// active store's pages — emptied, then, for the wiki, restated from its
-/// files.
-pub struct KnowledgeSwitch {
-    pub stores: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
-    pub wiki: Arc<WikiFollow>,
-    pub db: oxplow_db::Database,
-    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
-    pub project_dir: PathBuf,
-    pub pages: Arc<oxplow_db::SqliteWikiPageStore>,
-}
-
-impl KnowledgeSwitch {
-    pub const NAME: &'static str = "knowledge.switch";
-}
-
-#[async_trait::async_trait]
-impl crate::event_pump::AsyncEventConsumer for KnowledgeSwitch {
-    fn name(&self) -> &'static str {
-        Self::NAME
-    }
-
-    fn handles(&self, event_type: &str) -> bool {
-        event_type
-            == <oxplow_domain::events::schema::CapabilitySwitched as oxplow_domain::EventType>::TYPE
-    }
-
-    async fn handle(&self, event: &oxplow_domain::StoredEvent) -> Result<(), DomainError> {
-        if event.envelope.payload["capability"] != CAPABILITY {
-            return Ok(());
-        }
-        self.follow_active().await
-    }
-}
-
-impl KnowledgeSwitch {
-    /// Make the record the active store's pages: empty it, then, when the
-    /// wiki is the store, restate it from its files. A provider's pages
-    /// come in on its collector's sync.
-    pub async fn follow_active(&self) -> Result<(), DomainError> {
-        clear_record(&self.db).await?;
-        if self.wiki.follow(&self.stores.active_id()) {
-            crate::wiki_pages::scan_and_sync_all(
-                &self.db,
-                &self.vocabulary,
-                &self.project_dir,
-                &self.pages,
-            )
-            .await?;
-        }
-        Ok(())
-    }
-}
-
-/// Staged built-in providers. Preparing these values has no effect on a live
-/// registry or wiki watcher, so a generation can publish them with its other
+/// Staged built-in stores. Preparing these values has no effect on the live
+/// stores or oxwiki's watch, so a generation can publish them with its other
 /// prepared capability state.
 pub struct PreparedKnowledge {
     providers: Vec<Arc<dyn KnowledgeProvider>>,
 }
 
 impl PreparedKnowledge {
-    /// Publish provider maps without resolving the active capability. This
-    /// can run while the activation owner holds its publication reservation.
-    pub(crate) fn publish_maps(
-        self,
-        registry: &oxplow_domain::knowledge::KnowledgeRegistry,
-        wiki: &WikiFollow,
-    ) {
-        wiki.set_serves(
-            self.providers
-                .iter()
-                .filter(|provider| !provider.sink())
-                .map(|provider| provider.id().to_string()),
-        );
-        registry.set_declared(self.providers);
-    }
-
-    /// Publish the staged providers, then point wiki file watching at the
-    /// registry's selected store. Call only after capability reservations are
-    /// released, because resolving the active id reads the capability registry.
-    pub fn publish(
-        self,
-        registry: &oxplow_domain::knowledge::KnowledgeRegistry,
-        wiki: &WikiFollow,
-    ) {
-        self.publish_maps(registry, wiki);
-        wiki.follow(&registry.active_id());
+    /// Publish the declared stores; oxwiki is present when it is one of
+    /// them (its watch scans its files when it appears).
+    pub(crate) fn publish_maps(self, stores: &KnowledgeStores, oxwiki: &OxwikiPresence) {
+        oxwiki.set(self.providers.iter().any(|p| p.id() == OXWIKI));
+        stores.set_declared(self.providers);
     }
 }
 
-/// Prepare core's none sink and the wiki providers for each declared id.
-/// This does not mutate a registry or `WikiFollow`.
+/// Prepare oxwiki's store for its declaration — only under its own id,
+/// which its pages' URIs carry. This does not change the live stores.
 pub fn prepare_built_ins(
     declared: &[crate::capabilities::Implementation],
     project_dir: &Path,
 ) -> PreparedKnowledge {
-    let mut all: Vec<Arc<dyn KnowledgeProvider>> = vec![Arc::new(NoneKnowledge)];
-    all.extend(
-        declared
-            .iter()
-            .filter(|i| i.capability == CAPABILITY)
-            .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(BUILT_IN)))
-            .map(|i| -> Arc<dyn KnowledgeProvider> {
-                Arc::new(WikiKnowledge {
-                    id: i.id.clone(),
-                    project_dir: project_dir.to_path_buf(),
-                })
-            }),
-    );
-    PreparedKnowledge { providers: all }
+    let providers = declared
+        .iter()
+        .filter(|i| i.capability == CAPABILITY && i.id == OXWIKI)
+        .filter(|i| matches!(i.source, crate::capabilities::Source::BuiltIn(BUILT_IN)))
+        .take(1)
+        .map(|_| -> Arc<dyn KnowledgeProvider> {
+            Arc::new(oxplow_oxwiki::OxwikiStore {
+                project_dir: project_dir.to_path_buf(),
+            })
+        })
+        .collect();
+    PreparedKnowledge { providers }
 }
 
 /// How current each of `page`'s pinned file refs is (`v_knowledge_ref`:
@@ -655,16 +174,16 @@ pub async fn freshness(
     .await
 }
 
-/// Marks a page touched by the thread whose command wrote it (the rail's
-/// "Finished" list; `wiki_page_thread_update`), from
-/// `knowledge.page.written`. A hand edit (no thread) marks nothing.
-pub struct WikiAttribution;
+/// Marks a page touched by the thread whose command wrote it
+/// (`knowledge_page_touch`, `v_knowledge_touch`), from
+/// `knowledge.page.written`. A sync (no thread) marks nothing.
+pub struct KnowledgeAttribution;
 
-impl WikiAttribution {
-    pub const NAME: &'static str = "wiki.attribution";
+impl KnowledgeAttribution {
+    pub const NAME: &'static str = "knowledge.attribution";
 }
 
-impl crate::event_pump::EventConsumer for WikiAttribution {
+impl crate::event_pump::EventConsumer for KnowledgeAttribution {
     fn name(&self) -> &'static str {
         Self::NAME
     }
@@ -681,39 +200,291 @@ impl crate::event_pump::EventConsumer for WikiAttribution {
         let Some(thread) = event.envelope.anchors.thread_id else {
             return Ok(());
         };
-        let written: KnowledgePageWrittenV2 =
+        let written: KnowledgePageWrittenV3 =
             serde_json::from_value(event.envelope.payload.clone()).map_err(|e| {
                 DomainError::Invalid(format!("knowledge.page.written payload: {e}"))
             })?;
-        let slug = written.page.as_str();
         // A page deleted since is no longer there to mark.
-        if oxplow_db::wiki_page_store::get_tx(conn, slug)?.is_none() {
+        if oxplow_db::knowledge_page_store::get_tx(conn, &written.page)?.is_none() {
             return Ok(());
         }
-        oxplow_db::wiki_page_thread_updates::touch_tx(conn, thread, slug, event.envelope.at)
+        oxplow_db::knowledge_page_store::touch_tx(conn, thread, &written.page, event.envelope.at)
     }
 }
 
-/// What the commands run against: the active store, and core's record.
+/// Log an agent's read of the page `uri` through a tool (`oxplow_read`):
+/// `knowledge.page.read { via: tool }`, as the actor, anchored to its open
+/// turn (so a request that read a page is one). A read command runs
+/// unrecorded, so it appends this itself.
+pub async fn log_read(
+    svc: &crate::Services,
+    actor: &oxplow_domain::Actor,
+    uri: &str,
+) -> Result<(), DomainError> {
+    let Some((store, id)) = oxplow_domain::uri::build::knowledge_of_uri(uri) else {
+        return Ok(());
+    };
+    let page = knowledge_uri(&store, &id);
+    let (vocabulary, source, actor) = (svc.vocabulary.clone(), actor.source(), actor.clone());
+    svc.db
+        .transaction(move |tx| {
+            let anchors = match &actor {
+                oxplow_domain::Actor::Agent {
+                    thread_id: Some(thread),
+                    session_id,
+                    ..
+                } => oxplow_db::agent_stores::activity_anchors_tx(tx, *thread, *session_id)?,
+                other => other.anchors(),
+            };
+            let vocabulary = vocabulary.current();
+            let env = EventCtx {
+                vocabulary: &vocabulary,
+                source: source.clone(),
+                cause: None,
+            }
+            .typed::<KnowledgePageRead>(&KnowledgePageReadV1 {
+                page: page.clone(),
+                via: ReadVia::Tool,
+            })
+            .with_anchors(anchors)
+            .with_subject([page.clone()]);
+            oxplow_db::event_log_store::append_tx(tx, &vocabulary, &env).map(|_| ())
+        })
+        .await
+}
+
+/// An agent reading a page's file with its own tool reads the page: each
+/// `agent.tool.finished` of a file read whose path an enabled store says is
+/// a recorded page's file (`page_at`; oxwiki's `.oxplow/oxwiki/<slug>.md`)
+/// logs `knowledge.page.read { via: file }`, caused by the tool call, with
+/// its anchors. A path is the worktree's (relative) or absolute; one that is
+/// no page is nothing. Every read then reaches the record the same way
+/// ([`KnowledgeReads`]).
+pub struct KnowledgeFileReads {
+    pub stores: Arc<KnowledgeStores>,
+    pub project_dir: PathBuf,
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+}
+
+impl KnowledgeFileReads {
+    pub const NAME: &'static str = "knowledge.file_reads";
+}
+
+impl crate::event_pump::EventConsumer for KnowledgeFileReads {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == <AgentToolFinished as oxplow_domain::EventType>::TYPE
+    }
+
+    fn handle(
+        &self,
+        conn: &rusqlite::Connection,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        let Ok(tool) =
+            serde_json::from_value::<AgentToolFinishedV4>(event.envelope.payload.clone())
+        else {
+            return Ok(());
+        };
+        if tool.kind != oxplow_domain::agent::tool::ToolKind::Read || tool.paths.is_empty() {
+            return Ok(());
+        }
+        // A relative path is the worktree's the agent ran in.
+        let worktree: PathBuf = match event.envelope.anchors.stream_id {
+            Some(stream) => conn
+                .query_row(
+                    "SELECT worktree_path FROM streams WHERE id = ?1",
+                    [stream.value()],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sql)?
+                .map_or_else(|| self.project_dir.clone(), PathBuf::from),
+            None => self.project_dir.clone(),
+        };
+        let stores: Vec<Arc<dyn KnowledgeProvider>> = self
+            .stores
+            .enabled()
+            .iter()
+            .filter_map(|id| self.stores.get(id))
+            .collect();
+        let vocabulary = self.vocabulary.current();
+        let ev = EventCtx {
+            vocabulary: &vocabulary,
+            source: event.envelope.source.clone(),
+            cause: Some(event.envelope.id.clone()),
+        };
+        for path in &tool.paths {
+            let path = Path::new(path);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                worktree.join(path)
+            };
+            for store in &stores {
+                let Some(id) = store.page_at(&path) else {
+                    continue;
+                };
+                let page = knowledge_uri(store.id(), &id);
+                if oxplow_db::knowledge_page_store::get_tx(conn, &page)?.is_none() {
+                    continue;
+                }
+                let env = ev
+                    .typed::<KnowledgePageRead>(&KnowledgePageReadV1 {
+                        page: page.clone(),
+                        via: ReadVia::File,
+                    })
+                    .with_anchors(event.envelope.anchors.clone())
+                    .with_subject([page]);
+                ev.append(conn, &env)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Says which recorded pages a snapshot of the primary stream drifted: one
+/// `knowledge.page.drifted` per page citing a file the take changed (its
+/// `file_snapshot` rows), caused by the `snapshot.taken`. Staleness is the
+/// primary stream's (`v_knowledge_pin`), so another stream's take is
+/// nothing; so is a take that changed no cited file. What counts stale
+/// pages (bundled's `oxplow.knowledge_pages`) follows these instead of every
+/// snapshot.
+pub struct KnowledgeDrift {
+    pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
+}
+
+impl KnowledgeDrift {
+    pub const NAME: &'static str = "knowledge.drift";
+}
+
+impl crate::event_pump::EventConsumer for KnowledgeDrift {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == <SnapshotTaken as oxplow_domain::EventType>::TYPE
+    }
+
+    fn handle(
+        &self,
+        conn: &rusqlite::Connection,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        let Ok(taken) = serde_json::from_value::<SnapshotTakenV3>(event.envelope.payload.clone())
+        else {
+            return Ok(());
+        };
+        if taken.unchanged || taken.file_count == 0 {
+            return Ok(());
+        }
+        let mut stmt = conn
+            .prepare_cached(
+                "SELECT pr.source_uri, fs.path
+                   FROM snapshot s
+                   JOIN streams st ON st.id = s.stream_id AND st.kind = 'primary'
+                   JOIN file_snapshot fs ON fs.snapshot_id = s.id
+                   JOIN page_ref pr ON pr.source_resource = 'oxplow/knowledge'
+                                   AND pr.target_resource = 'oxplow/file'
+                                   AND uri_param(pr.target_uri, 'path') = fs.path
+                   JOIN knowledge_page kp ON kp.uri = pr.source_uri
+                  WHERE s.id = ?1
+                  ORDER BY pr.source_uri, fs.path",
+            )
+            .map_err(sql)?;
+        let mut drifted: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for row in stmt
+            .query_map([taken.snapshot], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(sql)?
+        {
+            let (page, path) = row.map_err(sql)?;
+            let paths = drifted.entry(page).or_default();
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        if drifted.is_empty() {
+            return Ok(());
+        }
+        let vocabulary = self.vocabulary.current();
+        let ev = EventCtx {
+            vocabulary: &vocabulary,
+            source: event.envelope.source.clone(),
+            cause: Some(event.envelope.id.clone()),
+        };
+        for (page, paths) in drifted {
+            let env = ev
+                .typed::<KnowledgePageDrifted>(&KnowledgePageDriftedV1 {
+                    page: page.clone(),
+                    snapshot: taken.snapshot,
+                    paths,
+                })
+                .with_anchors(event.envelope.anchors.clone())
+                .with_subject([page]);
+            ev.append(conn, &env)?;
+        }
+        Ok(())
+    }
+}
+
+/// Records every read of a knowledge page an agent made
+/// (`knowledge_page_read`, `v_knowledge_read`) from its
+/// `knowledge.page.read`, with its thread and turn, for recorded pages
+/// only.
+pub struct KnowledgeReads;
+
+impl KnowledgeReads {
+    pub const NAME: &'static str = "knowledge.reads";
+}
+
+impl crate::event_pump::EventConsumer for KnowledgeReads {
+    fn name(&self) -> &'static str {
+        Self::NAME
+    }
+
+    fn handles(&self, event_type: &str) -> bool {
+        event_type == <KnowledgePageRead as oxplow_domain::EventType>::TYPE
+    }
+
+    fn handle(
+        &self,
+        conn: &rusqlite::Connection,
+        event: &oxplow_domain::StoredEvent,
+    ) -> Result<(), DomainError> {
+        let read: KnowledgePageReadV1 = serde_json::from_value(event.envelope.payload.clone())
+            .map_err(|e| DomainError::Invalid(format!("knowledge.page.read payload: {e}")))?;
+        let anchors = &event.envelope.anchors;
+        conn.execute(
+            "INSERT INTO knowledge_page_read (uri, thread_id, turn_id, via, at)
+             SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM knowledge_page WHERE uri = ?1)",
+            params![
+                read.page,
+                anchors.thread_id.map(|t| t.value()),
+                anchors.turn_id,
+                read.via.as_str(),
+                oxplow_db::ts_to_string(event.envelope.at),
+            ],
+        )
+        .map_err(sql)?;
+        Ok(())
+    }
+}
+
+/// What the commands run against: the enabled stores, and core's record.
 #[derive(Clone)]
 pub struct KnowledgeTarget {
     pub project_dir: PathBuf,
     pub vcs: Arc<dyn Vcs>,
     pub db: oxplow_db::Database,
     pub vocabulary: oxplow_domain::vocabulary::VocabularyHandle,
-    pub stores: Arc<oxplow_domain::knowledge::KnowledgeRegistry>,
-    pub wiki: Arc<WikiFollow>,
-}
-
-fn slug_of(raw: &str) -> Result<&str, CommandError> {
-    if valid_slug(raw) {
-        Ok(raw)
-    } else {
-        Err(invalid(
-            "/slug",
-            format!("`{raw}` isn't a slug (kebab-case: `some-page`)"),
-        ))
-    }
+    pub stores: Arc<KnowledgeStores>,
+    pub oxwiki: Arc<OxwikiPresence>,
 }
 
 fn domain(e: DomainError) -> CommandError {
@@ -726,34 +497,54 @@ fn domain(e: DomainError) -> CommandError {
     }
 }
 
-/// Refuse a body whose links don't all resolve, naming each.
-/// Refuse the links `body` adds that don't resolve. A link the page
-/// already has (in its file now) isn't the writer's to fix: a cited file
-/// or task that has since gone, or a hand edit's bad link, mustn't block
-/// verifying, rewriting or linking the page.
+/// The store a write names, refused unless oxplow may write its pages.
+fn writable(
+    t: &KnowledgeTarget,
+    store: Option<&str>,
+) -> Result<Arc<dyn KnowledgeProvider>, CommandError> {
+    let provider = t.stores.resolve(store)?;
+    if !provider.features().edit {
+        return Err(invalid(
+            "/store",
+            format!(
+                "the knowledge store `{}` is read-only: oxplow doesn't write its pages",
+                provider.id()
+            ),
+        ));
+    }
+    Ok(provider)
+}
+
+/// Refuse the links `body` adds that don't resolve, naming each. A link the
+/// page already has (`page`'s recorded body) isn't the writer's to fix: a
+/// cited file or task that has since gone, or a hand edit's bad link,
+/// mustn't block verifying, rewriting or linking the page.
 fn links_resolve(
     target: &KnowledgeTarget,
     conn: &rusqlite::Connection,
     kinds: &oxplow_domain::uri::resources::ResourceRegistry,
-    slug: &str,
+    page: Option<&str>,
     body: &str,
 ) -> Result<(), CommandError> {
     let graph = target.vcs.revision_graph(&target.project_dir);
-    let existing: std::collections::HashSet<String> = recorded_body_tx(conn, slug)?
-        .map(|current| {
-            oxplow_domain::uri::classify_wikilinks(kinds, &current)
-                .into_iter()
-                .map(|l| l.raw)
-                .collect()
-        })
-        .unwrap_or_default();
+    let existing: std::collections::HashSet<String> = match page {
+        Some(page) => recorded_body_tx(conn, page)?
+            .map(|current| {
+                oxplow_domain::uri::classify_wikilinks(kinds, &current)
+                    .into_iter()
+                    .map(|l| l.raw)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        None => Default::default(),
+    };
     let mut warnings = check_links_in(
         &LinkWorld {
             conn,
             resources: kinds,
             project_dir: &target.project_dir,
             graph: &*graph,
-            this_page: Some(slug),
+            this_page: page,
         },
         body,
     );
@@ -774,84 +565,40 @@ fn links_resolve(
     ))
 }
 
-/// The body core recorded for `slug`, if it records the page.
+/// The body core recorded for the page `uri`, if it records the page.
 fn recorded_body_tx(
     conn: &rusqlite::Connection,
-    slug: &str,
+    uri: &str,
 ) -> Result<Option<String>, CommandError> {
-    conn.query_row("SELECT body FROM wiki_page WHERE slug = ?1", [slug], |r| {
-        r.get(0)
-    })
+    conn.query_row(
+        "SELECT body FROM knowledge_page WHERE uri = ?1",
+        [uri],
+        |r| r.get(0),
+    )
     .optional()
     .map_err(|e| CommandError::Failed {
         message: e.to_string(),
     })
 }
 
-/// `body` with `line` added at the end of its `## Related` section (before
-/// whatever section follows), or a new `## Related` at the end.
-fn with_related(body: &str, line: &str) -> String {
-    let mut lines: Vec<&str> = body.lines().collect();
-    let Some(heading) = lines.iter().position(|l| l.trim_end() == "## Related") else {
-        return format!("{}\n\n## Related\n\n{line}\n", body.trim_end());
-    };
-    let end = lines[heading + 1..]
-        .iter()
-        .position(|l| l.starts_with("# ") || l.starts_with("## "))
-        .map_or(lines.len(), |i| heading + 1 + i);
-    match (heading + 1..end)
-        .rev()
-        .find(|&i| !lines[i].trim().is_empty())
-    {
-        Some(last) => lines.insert(last + 1, line),
-        None => lines
-            .splice(heading + 1..heading + 1, ["", line])
-            .for_each(drop),
-    }
-    let mut out = lines.join("\n");
-    out.push('\n');
-    out
-}
-
-/// Write `body` to the page's file (unless it already holds it), inside
-/// the run: the file is the page, so a write that fails fails the run and
-/// the transaction records nothing. A temp file renamed into place means
-/// the file is never half-written; were the commit itself to fail after
-/// it, the file is ahead of the row and the watcher converges them.
-fn write_file(path: &Path, body: &str) -> Result<(), CommandError> {
-    if std::fs::read_to_string(path).ok().as_deref() == Some(body) {
-        return Ok(());
-    }
-    let failed = |e: std::io::Error| CommandError::Failed {
-        message: format!("couldn't write {}: {e}", path.display()),
-    };
-    let dir = path.parent().ok_or_else(|| CommandError::Failed {
-        message: format!("{} has no directory", path.display()),
-    })?;
-    std::fs::create_dir_all(dir).map_err(failed)?;
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy())
-        .unwrap_or_default();
-    let temp = dir.join(format!(".{name}.tmp"));
-    std::fs::write(&temp, body)
-        .and_then(|()| std::fs::rename(&temp, path))
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&temp);
-            failed(e)
-        })
-}
-
 /// Write a page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WritePageInput {
-    /// Kebab-case (`vcs-capability`); the page is `.oxplow/wiki/<slug>.md`.
-    pub slug: String,
+    /// The store that keeps it (`oxwiki`, an extension's): needed only when
+    /// several are enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// The store's page id (oxwiki: kebab-case, `vcs-capability`, the page
+    /// `.oxplow/oxwiki/<id>.md`). Omit it to have the store derive one from
+    /// the title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// Sets the body's `# ` heading (added when it has none).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// The whole page, markdown. Every `[[link]]` must resolve.
+    #[schemars(extend("contentMediaType" = "text/markdown"))]
     pub body: String,
     /// Files you re-read against this body: their pins move to now. A
     /// file under a `[[dir:…]]` the body cites counts.
@@ -866,40 +613,48 @@ pub struct WritePageInput {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VerifyFilesInput {
-    /// The page (its slug).
-    pub slug: String,
+    /// The page's store: needed only when several are enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// The store's page id.
+    pub id: String,
     /// The files you re-read against the page as it stands: their pins move
     /// to now. Omit for every file the page cites.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Vec<String>>,
 }
 
-/// Delete a page.
+/// A page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SlugInput {
-    pub slug: String,
+pub struct PageInput {
+    /// The page's store: needed only when several are enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// The store's page id.
+    pub id: String,
+}
+
+/// An oxwiki page.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResyncInput {
+    /// The page's slug (`.oxplow/oxwiki/<id>.md`).
+    pub id: String,
 }
 
 /// Add a link to a page.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LinkInput {
-    /// The page (its slug).
-    pub page: String,
-    /// What to link to, as a wikilink's inside: `other-page`,
-    /// `src/lib.rs`, `oxplow:oxplow/dir?path=src/vcs`, `tsk42`, `git:<sha>`.
+    /// The page's store: needed only when several are enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    /// The store's page id.
+    pub id: String,
+    /// What to link to, as a wikilink's inside: `other-page`, `vault:Notes/a.md`,
+    /// `src/lib.rs`, `dir:src/vcs`, `tsk42`, `git:<sha>`.
     pub target: String,
-}
-
-/// The active store; none is one too (the sink).
-fn store(target: &KnowledgeTarget) -> Result<Arc<dyn KnowledgeProvider>, CommandError> {
-    target.stores.active().ok_or_else(|| CommandError::Failed {
-        message: format!(
-            "the knowledge store `{}` isn't running",
-            target.stores.active_id()
-        ),
-    })
 }
 
 /// Run `check` against core's record, in a read.
@@ -920,24 +675,28 @@ where
         .map_err(CommandError::from)?
 }
 
-/// Record what a store kept of `slug`: its row, links, pins and
+/// Record what `store` kept of a write: its row, links, pins and
 /// `knowledge.page.written`, returned for the bus to log after the run.
 async fn record(
     target: &KnowledgeTarget,
     actor: &oxplow_domain::Actor,
-    slug: &str,
+    store: &str,
     kept: Kept,
     verified: Vec<String>,
     removed: Vec<String>,
 ) -> Result<HandlerOutput, CommandError> {
-    let (slug, project_dir, vocabulary) = (
-        slug.to_string(),
-        target.project_dir.clone(),
-        target.vocabulary.clone(),
-    );
+    let (store, vocabulary) = (store.to_string(), target.vocabulary.clone());
     let (source, anchors) = (actor.source(), actor.anchors());
-    let body = strip_body_version_literals(&kept.body);
-    let stated = kept.refs.clone();
+    let Kept {
+        id,
+        body,
+        title,
+        kind,
+        url,
+        author,
+        refs,
+        mut events,
+    } = kept;
     let (written, env) = target
         .db
         .transaction(move |tx| {
@@ -950,21 +709,21 @@ async fn record(
             write_page_tx(
                 tx,
                 &ev,
-                &project_dir,
                 &PageWrite {
-                    slug: &slug,
-                    body: &body,
+                    title: title.as_deref(),
+                    kind: kind.as_deref(),
+                    url: url.as_deref(),
+                    author: author.as_deref(),
                     verified: &verified,
                     removed: &removed,
-                    updated_at: Timestamp::now(),
-                    stated: stated.as_deref(),
+                    stated: refs.as_deref(),
                     anchors: anchors.clone(),
+                    ..PageWrite::new(&store, &id, &body)
                 },
             )
         })
         .await
         .map_err(domain)?;
-    let mut events = kept.events;
     events.push(env);
     Ok(output(
         serde_json::to_value(&written).expect("Written serializes"),
@@ -982,14 +741,6 @@ fn output(result: serde_json::Value, events: Vec<Envelope>) -> HandlerOutput {
     }
 }
 
-/// What a write to a store that keeps nothing answers.
-fn untracked(slug: &str) -> HandlerOutput {
-    output(
-        json!({ "page": page_ref(slug), "tracked": false }),
-        Vec::new(),
-    )
-}
-
 fn call(invocation: &Invocation) -> PageCall<'_> {
     PageCall {
         run: &invocation.run,
@@ -997,55 +748,66 @@ fn call(invocation: &Invocation) -> PageCall<'_> {
     }
 }
 
-/// Write a page through the active store, checked against core's record
-/// and recorded as the store kept it.
+/// Write a page through its store, checked against core's record and
+/// recorded as the store kept it.
 async fn write_page(
     t: &KnowledgeTarget,
     invocation: Invocation,
     input: WritePageInput,
 ) -> Result<HandlerOutput, CommandError> {
-    let slug = slug_of(&input.slug)?.to_string();
+    let store = writable(t, input.store.as_deref())?;
     let mut body = strip_body_version_literals(&input.body);
     if let Some(title) = &input.title {
         body = with_title(&body, title);
     }
     {
-        let (t2, slug, body) = (t.clone(), slug.clone(), body.clone());
+        let page = input.id.as_deref().map(|id| knowledge_uri(store.id(), id));
+        let (t2, body) = (t.clone(), body.clone());
         let (verified, removed) = (input.verified_files.clone(), input.removed_files.clone());
         check(t, move |conn, vocabulary| {
-            links_resolve(&t2, conn, &vocabulary.resources, &slug, &body)?;
-            refs_borne_out(&parse_refs(&body), &verified, &removed)
+            links_resolve(&t2, conn, &vocabulary.resources, page.as_deref(), &body)?;
+            CitedRefs::of_body(&vocabulary.resources, &body)
+                .bear_out(&verified, &removed)
+                .map_err(|(field, message)| invalid(field, message))
         })
         .await?;
     }
     let draft = PageDraft {
-        slug: slug.clone(),
+        id: input.id.clone(),
         title: input.title.clone(),
         body,
         verified_files: input.verified_files.clone(),
         removed_files: input.removed_files.clone(),
     };
-    match store(t)?.write_page(&call(&invocation), &draft).await? {
-        None => Ok(untracked(&slug)),
-        Some(kept) => {
-            record(
-                t,
-                invocation.actor(),
-                &slug,
-                kept,
-                input.verified_files,
-                input.removed_files,
-            )
-            .await
-        }
-    }
+    let kept = store.write_page(&call(&invocation), &draft).await?;
+    record(
+        t,
+        invocation.actor(),
+        store.id(),
+        kept,
+        input.verified_files,
+        input.removed_files,
+    )
+    .await
 }
 
-/// The page commands: each is checked against core's record (the slug,
-/// every link it adds, the refs it verifies or removes), then dispatched
-/// to the active store, and what the store kept is recorded the same way
-/// for every store. `oxplow.knowledge.resync` is the wiki's: it restates a
-/// page from its file.
+/// A recorded page's body, or refused naming it.
+async fn recorded_body(t: &KnowledgeTarget, page: &str) -> Result<String, CommandError> {
+    let uri = page.to_string();
+    t.db.read(move |conn| Ok(recorded_body_tx(conn, &uri)))
+        .await
+        .map_err(CommandError::from)??
+        .ok_or_else(|| {
+            let (store, id) = oxplow_domain::uri::build::knowledge_of_uri(page).unwrap_or_default();
+            invalid("/id", format!("no page `{id}` in `{store}`"))
+        })
+}
+
+/// The page commands: each is checked against core's record (the id, every
+/// link it adds, the files it verifies or removes), then dispatched to the
+/// page's store, and what the store kept is recorded the same way for every
+/// store. `oxplow.knowledge.resync` is oxwiki's: it restates a page from its
+/// file.
 pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
     let t = target.clone();
     let write = Handler::External(Arc::new(move |invocation: Invocation, input| {
@@ -1057,79 +819,48 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
     }));
 
     let t = target.clone();
-    let verify_files = Handler::External(Arc::new(move |invocation: Invocation, input| {
-        let t = t.clone();
-        Box::pin(async move {
-            let input: VerifyFilesInput = parse(input)?;
-            let slug = slug_of(&input.slug)?.to_string();
-            let page = page_ref(&slug);
-            let (body, pinned) = {
-                let slug = slug.clone();
-                t.db.read(move |conn| {
-                    Ok((|| {
-                        let Some(body) = recorded_body_tx(conn, &slug)? else {
-                            return Err(invalid("/slug", format!("no page `{slug}`")));
-                        };
-                        let mut stmt = conn
-                            .prepare(
-                                "SELECT path FROM v_knowledge_ref WHERE page = ?1 ORDER BY path",
-                            )
-                            .map_err(|e| CommandError::Failed {
-                                message: e.to_string(),
-                            })?;
-                        let paths = stmt
-                            .query_map([&page], |r| r.get::<_, String>(0))
-                            .and_then(|rows| rows.collect::<rusqlite::Result<Vec<_>>>())
-                            .map_err(|e| CommandError::Failed {
-                                message: e.to_string(),
-                            })?;
-                        Ok((body, paths))
-                    })())
-                })
-                .await
-                .map_err(CommandError::from)??
-            };
-            write_page(
-                &t,
-                invocation,
-                WritePageInput {
-                    slug,
-                    title: None,
-                    body,
-                    verified_files: input.files.unwrap_or(pinned),
-                    removed_files: Vec::new(),
-                },
-            )
-            .await
-        }) as crate::commands::ExternalFuture
+    let verify_files = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
+        let input: VerifyFilesInput = parse(input)?;
+        // Any enabled store's page: only its pins move, so a read-only
+        // store's pages are verified too.
+        let store = t.stores.resolve(input.store.as_deref())?;
+        let page = knowledge_uri(store.id(), &input.id);
+        let (written, env) = oxplow_db::knowledge_record::verify_tx(
+            ctx.conn,
+            &ctx.events,
+            &page,
+            input.files.as_deref(),
+            ctx.actor().anchors(),
+        )
+        .map_err(|e| match e {
+            DomainError::Invalid(message) if message.starts_with("no page") => {
+                invalid("/id", format!("no page `{}` in `{}`", input.id, store.id()))
+            }
+            DomainError::Invalid(message) => invalid("/files", message),
+            other => CommandError::from(other),
+        })?;
+        Ok(output(
+            serde_json::to_value(&written).expect("Written serializes"),
+            vec![env],
+        ))
     }));
 
     let t = target.clone();
     let delete = Handler::External(Arc::new(move |invocation: Invocation, input| {
         let t = t.clone();
         Box::pin(async move {
-            let input: SlugInput = parse(input)?;
-            let slug = slug_of(&input.slug)?.to_string();
-            let store = store(&t)?;
-            {
-                let slug = slug.clone();
-                let sink = store.sink();
-                check(&t, move |conn, _| match recorded_body_tx(conn, &slug)? {
-                    None if !sink => Err(invalid("/slug", format!("no page `{slug}`"))),
-                    _ => Ok(()),
-                })
-                .await?;
-            }
-            let Some(mut events) = store.delete_page(&call(&invocation), &slug).await? else {
-                return Ok(untracked(&slug));
-            };
+            let input: PageInput = parse(input)?;
+            let store = writable(&t, input.store.as_deref())?;
+            let page = knowledge_uri(store.id(), &input.id);
+            recorded_body(&t, &page).await?;
+            let mut events = store.delete_page(&call(&invocation), &input.id).await?;
             let (vocabulary, source, anchors) = (
                 t.vocabulary.clone(),
                 invocation.actor().source(),
                 invocation.actor().anchors(),
             );
             let deleted = {
-                let slug = slug.clone();
+                let page = page.clone();
                 t.db.transaction(move |tx| {
                     let vocabulary = vocabulary.current();
                     let ev = EventCtx {
@@ -1137,13 +868,13 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                         source: source.clone(),
                         cause: None,
                     };
-                    delete_page_tx(tx, &ev, anchors.clone(), &slug)
+                    delete_page_tx(tx, &ev, anchors.clone(), &page)
                 })
                 .await
                 .map_err(domain)?
             };
             events.extend(deleted);
-            Ok(output(json!({ "page": page_ref(&slug) }), events))
+            Ok(output(json!({ "page": page }), events))
         }) as crate::commands::ExternalFuture
     }));
 
@@ -1152,54 +883,62 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         let t = t.clone();
         Box::pin(async move {
             let input: LinkInput = parse(input)?;
-            let slug = valid_slug(&input.page)
-                .then_some(input.page.clone())
-                .ok_or_else(|| invalid("/page", format!("`{}` isn't a slug", input.page)))?;
-            let store = store(&t)?;
+            let store = writable(&t, input.store.as_deref())?;
+            let page = knowledge_uri(store.id(), &input.id);
+            let current = recorded_body(&t, &page).await?;
+            let line = format!("- [[{}]]", input.target);
+            if current.lines().any(|l| l.trim() == line) {
+                return Err(invalid(
+                    "/target",
+                    format!("`{}` already links to it", input.id),
+                ));
+            }
             {
-                let (t2, slug, target) = (t.clone(), slug.clone(), input.target.clone());
-                let sink = store.sink();
+                let (t2, page, line) = (t.clone(), page.clone(), line.clone());
                 check(&t, move |conn, vocabulary| {
-                    let Some(current) = recorded_body_tx(conn, &slug)? else {
-                        return if sink {
-                            Ok(())
-                        } else {
-                            Err(invalid("/page", format!("no page `{slug}`")))
-                        };
-                    };
-                    let line = format!("- [[{target}]]");
-                    if current.lines().any(|l| l.trim() == line) {
-                        return Err(invalid("/target", format!("`{slug}` already links to it")));
-                    }
-                    links_resolve(&t2, conn, &vocabulary.resources, &slug, &line)
+                    links_resolve(&t2, conn, &vocabulary.resources, Some(&page), &line)
                 })
                 .await?;
             }
-            match store.link(&call(&invocation), &slug, &input.target).await? {
-                None => Ok(untracked(&slug)),
-                Some(kept) => {
-                    record(&t, invocation.actor(), &slug, kept, Vec::new(), Vec::new()).await
-                }
-            }
+            write_page(
+                &t,
+                invocation,
+                WritePageInput {
+                    store: Some(store.id().to_string()),
+                    id: Some(input.id),
+                    title: None,
+                    body: with_related(&current, &line),
+                    verified_files: Vec::new(),
+                    removed_files: Vec::new(),
+                },
+            )
+            .await
         }) as crate::commands::ExternalFuture
     }));
 
     let t = target;
     let resync = Handler::Tx(Arc::new(move |ctx: &TxCtx<'_>, input| {
-        let input: SlugInput = parse(input)?;
-        let slug = slug_of(&input.slug)?;
-        if !t.wiki.live() {
+        let input: ResyncInput = parse(input)?;
+        if !oxplow_oxwiki::valid_slug(&input.id) {
             return Err(invalid(
-                "/slug",
-                "oxplow's wiki isn't the project's knowledge store: there is no file to restate from",
+                "/id",
+                format!("`{}` isn't an oxwiki page id (kebab-case)", input.id),
             ));
         }
-        let (result, events) = match std::fs::read_to_string(page_path(&t.project_dir, slug)) {
+        if !t.oxwiki.present() {
+            return Err(invalid(
+                "/id",
+                "oxwiki is turned off: there is no file to restate from",
+            ));
+        }
+        let page = knowledge_uri(OXWIKI, &input.id);
+        let path = oxplow_oxwiki::page_path(&t.project_dir, &input.id);
+        let (result, events) = match std::fs::read_to_string(path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let env = delete_page_tx(ctx.conn, &ctx.events, ctx.actor().anchors(), slug)
+                let env = delete_page_tx(ctx.conn, &ctx.events, ctx.actor().anchors(), &page)
                     .map_err(domain)?;
                 (
-                    json!({ "page": page_ref(slug), "deleted": true }),
+                    json!({ "page": page, "deleted": true }),
                     env.into_iter().collect(),
                 )
             }
@@ -1213,15 +952,10 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
                 let (written, env) = write_page_tx(
                     ctx.conn,
                     &ctx.events,
-                    &t.project_dir,
                     &PageWrite {
-                        slug,
-                        body: &body,
-                        verified: &[],
-                        removed: &[],
                         updated_at: Timestamp::now(),
-                        stated: None,
                         anchors: ctx.actor().anchors(),
+                        ..PageWrite::new(OXWIKI, &input.id, &body)
                     },
                 )
                 .map_err(domain)?;
@@ -1252,7 +986,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         Op::new(
             "knowledge.write",
             "delete_page",
-            schema::<SlugInput>(),
+            schema::<PageInput>(),
             false,
             delete,
         )
@@ -1267,7 +1001,7 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
         Op::new(
             "knowledge.write",
             "resync",
-            schema::<SlugInput>(),
+            schema::<ResyncInput>(),
             false,
             resync,
         ),
@@ -1275,807 +1009,4 @@ pub fn ops(target: KnowledgeTarget) -> Vec<Op> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use oxplow_domain::Actor;
-
-    fn dir(fx: &crate::test_fixtures::EffortFixture) -> PathBuf {
-        fx.svc.layout.project_dir.clone()
-    }
-
-    async fn run(
-        fx: &crate::test_fixtures::EffortFixture,
-        name: &str,
-        input: serde_json::Value,
-    ) -> Result<oxplow_domain::CommandOutcome, CommandError> {
-        fx.svc.commands.run(&Actor::Human, name, input, true).await
-    }
-
-    async fn events_of(
-        fx: &crate::test_fixtures::EffortFixture,
-        event_type: &str,
-    ) -> Vec<oxplow_domain::StoredEvent> {
-        fx.svc
-            .event_log_store
-            .read_after(0, 1000)
-            .await
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.envelope.event_type == event_type)
-            .collect()
-    }
-
-    /// P5.C3: one run writes the row, the file and the event.
-    #[tokio::test]
-    async fn one_run_writes_the_row_the_file_and_the_event() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        std::fs::write(dir(&fx).join("src/lib.rs"), "fn x() {}\n").unwrap();
-        let body = format!("# VCS notes\n\nSee [[src/lib.rs]] and [[{}]].\n", fx.task);
-        let out = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "vcs-notes", "body": body }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(out.result["page"], "vcs-notes");
-        let outbound: Vec<&str> = out.result["outbound"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap())
-            .collect();
-        assert!(
-            outbound.contains(&"oxplow:oxplow/file?path=src/lib.rs"),
-            "{outbound:?}"
-        );
-        let page = fx
-            .svc
-            .wiki_page_store
-            .get("vcs-notes")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(page.title, "VCS notes");
-        assert_eq!(
-            std::fs::read_to_string(page_path(&dir(&fx), "vcs-notes")).unwrap(),
-            body
-        );
-        let written = events_of(&fx, "knowledge.page.written").await;
-        assert_eq!(written.len(), 1);
-        assert_eq!(written[0].envelope.cause, out.event_id);
-        assert_eq!(
-            written[0].envelope.subject,
-            vec!["oxplow:oxplow/wiki?slug=vcs-notes".to_string()]
-        );
-
-        // The file the command wrote syncs to a no-op, not a second write.
-        assert!(!crate::wiki_pages::sync_page(
-            &fx.svc.db,
-            &fx.svc.vocabulary,
-            &dir(&fx),
-            "vcs-notes"
-        )
-        .await
-        .unwrap());
-        assert_eq!(events_of(&fx, "knowledge.page.written").await.len(), 1);
-    }
-
-    /// The file is the page: a file that can't be written fails the run,
-    /// and nothing — row, edges, event — is recorded (tsk562).
-    #[tokio::test]
-    async fn a_file_that_cant_be_written_fails_the_run_and_records_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        // A directory where the page's file goes.
-        std::fs::create_dir_all(page_path(&dir(&fx), "blocked")).unwrap();
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "blocked", "body": "# Blocked\n" }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("blocked.md"), "{err}");
-        assert!(fx
-            .svc
-            .wiki_page_store
-            .get("blocked")
-            .await
-            .unwrap()
-            .is_none());
-        assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
-    }
-
-    /// tsk572: one slug rule — a wiki file whose name isn't a slug is not
-    /// a page: syncing it records nothing, and a row it left is removed.
-    #[tokio::test]
-    async fn a_file_whose_name_isnt_a_slug_is_not_a_page() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let wiki = dir(&fx).join(".oxplow/wiki");
-        std::fs::create_dir_all(&wiki).unwrap();
-        std::fs::write(wiki.join("Bad_Name.md"), "# Bad\n").unwrap();
-        crate::wiki_pages::scan_and_sync_all(
-            &fx.svc.db,
-            &fx.svc.vocabulary,
-            &dir(&fx),
-            &fx.svc.wiki_page_store,
-        )
-        .await
-        .unwrap();
-        assert!(fx
-            .svc
-            .wiki_page_store
-            .get("Bad_Name")
-            .await
-            .unwrap()
-            .is_none());
-        assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
-    }
-
-    /// tsk572: `oxplow.knowledge.link` adds under `## Related` — even when a
-    /// section follows it — and the body it writes has no `@version`.
-    #[tokio::test]
-    async fn link_adds_under_related_and_strips_versions() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        std::fs::write(dir(&fx).join("src/lib.rs"), "x").unwrap();
-        for slug in ["b", "c"] {
-            run(&fx, WRITE_PAGE, json!({ "slug": slug, "body": "# P\n" }))
-                .await
-                .unwrap();
-        }
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "a", "body": "# A\n\n## Related\n\n- [[b]]\n\n## Notes\n\nmore\n" }),
-        )
-        .await
-        .unwrap();
-        // A hand edit leaves a version literal behind.
-        let path = page_path(&dir(&fx), "a");
-        let edited = std::fs::read_to_string(&path)
-            .unwrap()
-            .replace("more", "see [[src/lib.rs@abc1234]]");
-        std::fs::write(&path, edited).unwrap();
-
-        run(&fx, LINK, json!({ "page": "a", "target": "c" }))
-            .await
-            .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "# A\n\n## Related\n\n- [[b]]\n- [[c]]\n\n## Notes\n\nsee [[src/lib.rs]]\n"
-        );
-    }
-
-    /// A dangling link is refused, naming it, and nothing is written.
-    #[tokio::test]
-    async fn a_dangling_link_is_refused_naming_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "notes", "body": "# N\n\n[[no-such-page]] and [[src/gone.rs]] and [[tsk9999]]\n" }),
-        )
-        .await
-        .unwrap_err();
-        let message = err.to_string();
-        for target in ["no-such-page", "src/gone.rs", "tsk9999"] {
-            assert!(message.contains(target), "{message}");
-        }
-        assert!(fx.svc.wiki_page_store.get("notes").await.unwrap().is_none());
-        assert!(!page_path(&dir(&fx), "notes").exists());
-        assert!(events_of(&fx, "knowledge.page.written").await.is_empty());
-
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "Not A Slug", "body": "x" }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("slug"), "{err}");
-        // A page may link to itself.
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "self", "body": "# S\n\nsee [[self]]\n" }),
-        )
-        .await
-        .unwrap();
-    }
-
-    /// Only links the page doesn't already have are refused (tsk564): once
-    /// a cited file is gone, the page can still be verified, rewritten and
-    /// linked — a new dangling link is still refused.
-    #[tokio::test]
-    async fn a_link_that_went_dangling_doesnt_block_the_page() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        std::fs::write(dir(&fx).join("src/a.rs"), "a").unwrap();
-        std::fs::write(dir(&fx).join("src/b.rs"), "b").unwrap();
-        let body = "# P\n\nsee [[src/a.rs]] and [[src/b.rs]]\n";
-        run(&fx, WRITE_PAGE, json!({ "slug": "p", "body": body }))
-            .await
-            .unwrap();
-        run(&fx, WRITE_PAGE, json!({ "slug": "q", "body": "# Q\n" }))
-            .await
-            .unwrap();
-        std::fs::remove_file(dir(&fx).join("src/a.rs")).unwrap();
-
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "p", "body": body, "verified_files": ["src/b.rs"] }),
-        )
-        .await
-        .unwrap();
-        run(&fx, LINK, json!({ "page": "p", "target": "q" }))
-            .await
-            .unwrap();
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "p", "body": format!("{body}and [[src/c.rs]]\n") }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("src/c.rs"), "{err}");
-        assert!(!err.to_string().contains("src/a.rs"), "{err}");
-    }
-
-    /// Verified refs must be cited (or under a cited directory, which
-    /// makes an edge of their own); removed ones must be gone.
-    #[tokio::test]
-    async fn verified_and_removed_files_are_checked_against_the_body() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("crates/cp/src")).unwrap();
-        std::fs::write(dir(&fx).join("crates/cp/src/lib.rs"), "").unwrap();
-        std::fs::write(dir(&fx).join("crates/foo.rs"), "").unwrap();
-        let body = "# I\n\nsee [[dir:crates/cp]] and [[crates/foo.rs]]\n";
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "intro", "body": body, "removed_files": ["crates/foo.rs"] }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("crates/foo.rs"), "{err}");
-        let err = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "intro", "body": body, "verified_files": ["crates/other/main.rs"] }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("crates/other/main.rs"), "{err}");
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "intro", "body": body, "verified_files": ["crates/cp/src/lib.rs"] }),
-        )
-        .await
-        .unwrap();
-        let backlinks = fx
-            .svc
-            .page_ref_store
-            .list_backlinks(
-                &oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
-                None,
-            )
-            .await
-            .unwrap();
-        assert!(
-            backlinks
-                .iter()
-                .any(|e| e.source == oxplow_domain::uri::build::wiki_uri("intro")),
-            "{backlinks:?}"
-        );
-        // Rewriting the page (the directory still cited) keeps it.
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "intro", "body": format!("{body}\nMore.\n") }),
-        )
-        .await
-        .unwrap();
-        let backlinks = fx
-            .svc
-            .page_ref_store
-            .list_backlinks(
-                &oxplow_domain::uri::build::file_uri("crates/cp/src/lib.rs"),
-                None,
-            )
-            .await
-            .unwrap();
-        assert!(
-            backlinks
-                .iter()
-                .any(|e| e.source == oxplow_domain::uri::build::wiki_uri("intro")),
-            "{backlinks:?}"
-        );
-    }
-
-    /// A hand edit converges through the same core, as `system:wiki_watch`
-    /// — dangling links and all.
-    #[tokio::test]
-    async fn a_hand_edit_converges_as_the_watcher() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let path = page_path(&dir(&fx), "hand");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "# Hand\n\nsee [[not-yet-written]]\n").unwrap();
-        assert!(
-            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.vocabulary, &dir(&fx), "hand")
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            fx.svc
-                .wiki_page_store
-                .get("hand")
-                .await
-                .unwrap()
-                .unwrap()
-                .title,
-            "Hand"
-        );
-        let written = events_of(&fx, "knowledge.page.written").await;
-        assert_eq!(written[0].envelope.source, "system:wiki_watch");
-        std::fs::remove_file(&path).unwrap();
-        assert!(
-            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.vocabulary, &dir(&fx), "hand")
-                .await
-                .unwrap()
-        );
-        assert!(fx.svc.wiki_page_store.get("hand").await.unwrap().is_none());
-        assert_eq!(events_of(&fx, "knowledge.page.deleted").await.len(), 1);
-    }
-
-    async fn body_of(fx: &crate::test_fixtures::EffortFixture, page: &str) -> Option<String> {
-        let out = fx
-            .svc
-            .sql
-            .query_sql(
-                "SELECT body FROM v_knowledge_body WHERE uri = ?1",
-                vec![oxplow_db::SqlCell::Text(page.into())],
-                None,
-            )
-            .await
-            .unwrap();
-        out.rows.first().map(|r| match &r[0] {
-            oxplow_db::SqlCell::Text(t) => t.clone(),
-            other => panic!("{other:?}"),
-        })
-    }
-
-    /// P6.E2: a page's body is in its row (the UI reads `v_knowledge_body`:
-    /// `.oxplow/` is ignored, so the file isn't readable through the
-    /// workspace), written with it by the command and by the watcher.
-    #[tokio::test]
-    async fn the_body_reads_back_from_v_knowledge_body() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "notes", "body": "# Notes\n\nFirst.\n" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            body_of(&fx, "oxplow:oxplow/wiki?slug=notes")
-                .await
-                .as_deref(),
-            Some("# Notes\n\nFirst.\n")
-        );
-
-        std::fs::write(
-            page_path(&dir(&fx), "notes"),
-            "# Notes\n\nEdited by hand.\n",
-        )
-        .unwrap();
-        assert!(
-            crate::wiki_pages::sync_page(&fx.svc.db, &fx.svc.vocabulary, &dir(&fx), "notes")
-                .await
-                .unwrap()
-        );
-        assert_eq!(
-            body_of(&fx, "oxplow:oxplow/wiki?slug=notes")
-                .await
-                .as_deref(),
-            Some("# Notes\n\nEdited by hand.\n")
-        );
-    }
-
-    async fn stale_ref_count(fx: &crate::test_fixtures::EffortFixture, page: &str) -> i64 {
-        let page = page.to_string();
-        fx.svc
-            .db
-            .read(move |c| {
-                c.query_row(
-                    "SELECT stale_ref_count FROM v_knowledge_page WHERE uri = ?1",
-                    [page],
-                    |r| r.get(0),
-                )
-                .map_err(sql)
-            })
-            .await
-            .unwrap()
-    }
-
-    /// A snapshot of the primary stream in which `path` changed.
-    async fn snapshot_with(fx: &crate::test_fixtures::EffortFixture, path: &str) -> i64 {
-        let path = path.to_string();
-        fx.svc
-            .db
-            .transaction(move |c| {
-                c.execute(
-                    "INSERT INTO snapshot (stream_id, created_at)
-                     SELECT id, '2026-09-30T00:00:00.000000Z' FROM streams WHERE kind = 'primary'",
-                    [],
-                )
-                .map_err(sql)?;
-                let id = c.last_insert_rowid();
-                c.execute(
-                    "INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes, captured_at, storage, snapshot_id)
-                     SELECT id, ?1, 'h', 1, '2026-09-30T00:00:00.000000Z', 'oxplow', ?2
-                     FROM streams WHERE kind = 'primary'",
-                    params![path, id],
-                )
-                .map_err(sql)?;
-                Ok(id)
-            })
-            .await
-            .unwrap()
-    }
-
-    /// Staleness is the primary stream's, like the pin (tsk563): another
-    /// stream's newer snapshot of the file neither makes a page stale nor
-    /// keeps a verified one stale, and every reader agrees.
-    #[tokio::test]
-    async fn another_streams_snapshot_doesnt_make_a_page_stale() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
-        snapshot_with(&fx, "src/lib.rs").await;
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n" }),
-        )
-        .await
-        .unwrap();
-        fx.svc
-            .db
-            .transaction(|c| {
-                c.execute_batch(
-                    "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source,
-                                          worktree_path, created_at, updated_at)
-                       VALUES (99, 'worktree', 'w', 'w', 'r', 'r', '/w',
-                               '2026-09-30T00:00:00.000000Z', '2026-09-30T00:00:00.000000Z');
-                     INSERT INTO snapshot (id, stream_id, created_at)
-                       VALUES (9999, 99, '2026-09-30T00:00:00.000000Z');
-                     INSERT INTO file_snapshot (stream_id, path, blob_hash, size_bytes,
-                                                captured_at, storage, snapshot_id)
-                       VALUES (99, 'src/lib.rs', 'h2', 1, '2026-09-30T00:00:00.000000Z',
-                               'oxplow', 9999);",
-                )
-                .map_err(sql)
-            })
-            .await
-            .unwrap();
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
-        let fresh = freshness(&fx.svc.db, "oxplow:oxplow/wiki?slug=lib")
-            .await
-            .unwrap();
-        assert_eq!(fresh.len(), 1);
-        assert!(!fresh[0].stale, "{fresh:?}");
-        assert_ne!(fresh[0].latest_snapshot, Some(9999));
-    }
-
-    /// P5.C4: `v_knowledge_page.stale_ref_count` rises when a pinned
-    /// file drifts and a snapshot lands, and falls when it is verified.
-    #[tokio::test]
-    async fn stale_ref_count_rises_when_a_pinned_file_drifts() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        std::fs::write(dir(&fx).join("src/lib.rs"), "v1").unwrap();
-        snapshot_with(&fx, "src/lib.rs").await;
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
-
-        snapshot_with(&fx, "src/lib.rs").await;
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 1);
-
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/lib.rs]]\n", "verified_files": ["src/lib.rs"] }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
-        let outbound: String = fx
-            .svc
-            .db
-            .read(|c| {
-                c.query_row(
-                    "SELECT outbound_uris FROM v_knowledge_page WHERE uri = 'oxplow:oxplow/wiki?slug=lib'",
-                    [],
-                    |r| r.get(0),
-                )
-                .map_err(sql)
-            })
-            .await
-            .unwrap();
-        assert_eq!(outbound, r#"["oxplow:oxplow/file?path=src/lib.rs"]"#);
-        let refs: (String, i64) = fx
-            .svc
-            .db
-            .read(|c| {
-                c.query_row(
-                    "SELECT path, stale FROM v_knowledge_ref WHERE page = 'oxplow:oxplow/wiki?slug=lib'",
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .map_err(sql)
-            })
-            .await
-            .unwrap();
-        assert_eq!(refs, ("src/lib.rs".to_string(), 0));
-    }
-
-    /// `verify_files` re-pins the refs it names — all of the page's when it
-    /// names none — against the body the page already has.
-    #[tokio::test]
-    async fn verify_files_repins_the_named_refs_or_all_of_them() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        std::fs::create_dir_all(dir(&fx).join("src")).unwrap();
-        for f in ["a.rs", "b.rs"] {
-            std::fs::write(dir(&fx).join("src").join(f), "v1").unwrap();
-        }
-        snapshot_with(&fx, "src/a.rs").await;
-        snapshot_with(&fx, "src/b.rs").await;
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "lib", "body": "# Lib\n\nsee [[src/a.rs]] and [[src/b.rs]]\n" }),
-        )
-        .await
-        .unwrap();
-        snapshot_with(&fx, "src/a.rs").await;
-        snapshot_with(&fx, "src/b.rs").await;
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 2);
-
-        run(
-            &fx,
-            VERIFY_FILES,
-            json!({ "slug": "lib", "files": ["src/a.rs"] }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 1);
-
-        run(&fx, VERIFY_FILES, json!({ "slug": "lib" }))
-            .await
-            .unwrap();
-        assert_eq!(stale_ref_count(&fx, "oxplow:oxplow/wiki?slug=lib").await, 0);
-
-        let err = run(
-            &fx,
-            VERIFY_FILES,
-            json!({ "slug": "lib", "files": ["src/zzz.rs"] }),
-        )
-        .await
-        .unwrap_err();
-        assert!(err.to_string().contains("verified_files"), "{err}");
-        let err = run(&fx, VERIFY_FILES, json!({ "slug": "nope" }))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("no page `nope`"), "{err}");
-    }
-
-    /// A page an agent's command writes is marked touched by its thread.
-    #[tokio::test]
-    async fn a_written_page_is_attributed_to_the_writing_thread() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let agent = Actor::Agent {
-            session_id: None,
-            thread_id: Some(fx.thread),
-            stream_id: None,
-        };
-        fx.svc
-            .commands
-            .run(
-                &agent,
-                WRITE_PAGE,
-                json!({ "slug": "arch", "body": "# Arch\n" }),
-                false,
-            )
-            .await
-            .unwrap();
-        fx.svc.event_pump.run_once().await.unwrap();
-        let touched = fx
-            .svc
-            .wiki_page_thread_updates
-            .list_for_thread(&fx.thread, 10)
-            .await
-            .unwrap();
-        assert_eq!(
-            touched.iter().map(|t| t.slug.as_str()).collect::<Vec<_>>(),
-            vec!["arch"]
-        );
-    }
-
-    /// Delete is confirmed and takes the row, the file and the edges;
-    /// link adds under Related and refuses a dangling target.
-    /// `id` as the project's knowledge store, its switch applied.
-    async fn choose(fx: &crate::test_fixtures::EffortFixture, id: &str) {
-        fx.svc
-            .config
-            .write()
-            .unwrap()
-            .active_providers
-            .insert(CAPABILITY.into(), id.into());
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        fx.svc
-            .event_pump
-            .settle(&[KnowledgeSwitch::NAME], std::time::Duration::from_secs(10))
-            .await;
-    }
-
-    async fn recorded(fx: &crate::test_fixtures::EffortFixture) -> Vec<String> {
-        fx.svc
-            .wiki_page_store
-            .list()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|p| p.slug)
-            .collect()
-    }
-
-    /// The record is the active store's pages: choosing another store
-    /// empties it (nothing in the wiki's files is touched) and the wiki's
-    /// watch and repair stand down; choosing the wiki again restates it
-    /// from its files.
-    #[tokio::test]
-    async fn the_record_follows_the_active_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "kept", "body": "# Kept\n" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(recorded(&fx).await, ["kept"]);
-        assert!(fx.svc.wiki.live());
-
-        choose(&fx, "none").await;
-        assert!(recorded(&fx).await.is_empty());
-        assert!(dir(&fx).join(".oxplow/wiki/kept.md").exists());
-        assert!(!fx.svc.wiki.live());
-        let err = run(&fx, RESYNC, json!({ "slug": "kept" }))
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("isn't the project's knowledge store"),
-            "{err}"
-        );
-
-        choose(&fx, "oxplow").await;
-        assert!(fx.svc.wiki.live());
-        assert_eq!(recorded(&fx).await, ["kept"]);
-    }
-
-    /// Knowledge is a choice: oxplow's wiki (bundled) or none, which is a
-    /// sink — a write through it lands nowhere and succeeds.
-    #[tokio::test]
-    async fn none_is_a_choice_and_a_sink() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let rows = fx
-            .svc
-            .sql
-            .query_sql(
-                "SELECT provider, active, choosable, optional FROM v_capability_provider
-                  WHERE capability = 'knowledge' ORDER BY provider",
-                Vec::new(),
-                None,
-            )
-            .await
-            .unwrap()
-            .rows;
-        use oxplow_db::SqlCell::{Int, Text};
-        assert_eq!(
-            rows,
-            vec![
-                vec![Text("none".into()), Int(0), Int(1), Int(1)],
-                vec![Text("oxplow".into()), Int(1), Int(1), Int(1)],
-            ]
-        );
-        choose(&fx, "none").await;
-        let out = run(
-            &fx,
-            WRITE_PAGE,
-            json!({ "slug": "kept-nowhere", "body": "# Kept nowhere\n" }),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            out.result,
-            json!({ "page": "oxplow:oxplow/wiki?slug=kept-nowhere", "tracked": false })
-        );
-        assert!(fx
-            .svc
-            .wiki_page_store
-            .get("kept-nowhere")
-            .await
-            .unwrap()
-            .is_none());
-        assert!(!dir(&fx).join(".oxplow/wiki/kept-nowhere.md").exists());
-        // A delete and a link of a page none keeps succeed too.
-        run(&fx, DELETE_PAGE, json!({ "slug": "kept-nowhere" }))
-            .await
-            .unwrap();
-        run(
-            &fx,
-            LINK,
-            json!({ "page": "kept-nowhere", "target": "other" }),
-        )
-        .await
-        .unwrap();
-    }
-
-    #[tokio::test]
-    async fn delete_and_link() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        run(&fx, WRITE_PAGE, json!({ "slug": "a", "body": "# A\n" }))
-            .await
-            .unwrap();
-        run(&fx, WRITE_PAGE, json!({ "slug": "b", "body": "# B\n" }))
-            .await
-            .unwrap();
-
-        let err = run(&fx, LINK, json!({ "page": "a", "target": "nope" }))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("nope"), "{err}");
-        let out = run(&fx, LINK, json!({ "page": "a", "target": "b" }))
-            .await
-            .unwrap();
-        assert!(out.result["outbound"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|v| v == "oxplow:oxplow/wiki?slug=b"));
-        assert_eq!(
-            std::fs::read_to_string(page_path(&dir(&fx), "a")).unwrap(),
-            "# A\n\n## Related\n\n- [[b]]\n"
-        );
-
-        let err = fx
-            .svc
-            .commands
-            .run(&Actor::Human, DELETE_PAGE, json!({ "slug": "b" }), false)
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(err, CommandError::NeedsConfirmation { .. }),
-            "{err:?}"
-        );
-        run(&fx, DELETE_PAGE, json!({ "slug": "b" })).await.unwrap();
-        assert!(fx.svc.wiki_page_store.get("b").await.unwrap().is_none());
-        assert!(!page_path(&dir(&fx), "b").exists());
-        let err = run(&fx, DELETE_PAGE, json!({ "slug": "b" }))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("no page"), "{err}");
-    }
-}
+mod tests;

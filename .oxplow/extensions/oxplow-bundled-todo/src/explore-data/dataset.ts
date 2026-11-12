@@ -55,7 +55,7 @@ export const DIMENSIONS_SQL = "SELECT key, label FROM v_dimension ORDER BY label
 export const SAMPLE_LIMIT = 50;
 
 /** The sample query a picked dataset starts from (its name is the
- *  registry's: `v_work_item`). */
+ *  registry's: `v_task`). */
 export function sampleSql(dataset: string): string {
   return `SELECT * FROM ${dataset} LIMIT ${SAMPLE_LIMIT}`;
 }

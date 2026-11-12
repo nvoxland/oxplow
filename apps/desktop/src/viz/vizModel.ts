@@ -4,6 +4,7 @@
  * entries for loaded viz nodes. React-free so it's unit-tested directly.
  * See `.context/extensions-pages.md`.
  */
+import { toneColor } from "./vizIcons.js";
 import { humanize } from "../kit/humanize.js";
 import type { FormSource } from "./formSource.js";
 import type { VizActionRunner } from "./vizActionRunner.js";
@@ -19,12 +20,12 @@ import {
 } from "../components/format.js";
 import type { ColumnFormat, VizConfig, PageParam, ColumnLink, VizRun, SqlCell, SqlQueryResult } from "../tauri-bridge/generated/bindings.js";
 import { PAGE_CATEGORY_ORDER, type PageDirectoryEntry } from "../components/RailHud/sections.js";
-import { diffRef, duplicateBlockRef, effortDiffRef, fileRefAt, gitCommitRef, metricRef, wikiPageRef } from "../tabs/pageRefs.js";
+import { diffRef, duplicateBlockRef, fileRefAt, gitCommitRef, metricRef, knowledgePageRef } from "../tabs/pageRefs.js";
 import { WORKING, parseRevision, shortRevisionLabel } from "../revision.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { DiffSpec } from "../components/Diff/DiffPane.js";
 import type { AssistantContext } from "../components/Assistant/assistantApi.js";
-import { idOf, parseUri } from "../uri/uri.js";
+import { knowledgeOf, parseUri, requestUri } from "../uri/uri.js";
 
 export interface DisplayColumn {
   key: string;
@@ -122,6 +123,19 @@ export interface RowGroup {
   label: string;
   rows: SqlCell[][];
   ref: LinkTarget | null;
+  /** How many rows the group has: its `rows` are only what shows when
+   *  capped (`capGroups`). */
+  total: number;
+}
+
+/** Each group cut to its cap in `caps` (by group key: `group.compact`
+ *  or `group.grown`); a group with none keeps every row. `total` stays
+ *  what it holds. */
+export function capGroups(groups: RowGroup[], caps: Partial<Record<string, number>>): RowGroup[] {
+  return groups.map((g) => {
+    const cap = caps[g.key];
+    return cap === undefined || g.rows.length <= cap ? g : { ...g, rows: g.rows.slice(0, cap) };
+  });
 }
 
 /** A grouped viz's rows under a heading per distinct `group.by` value:
@@ -137,7 +151,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
   const labelOf = (v: SqlCell): string => (v !== null && viz.group?.labels?.[String(v)]) || formatCell(v);
   const groups = new Map<string, RowGroup>();
   for (const v of viz.group?.values ?? []) {
-    groups.set(v, { key: v, value: v, label: labelOf(v), rows: [], ref: null });
+    groups.set(v, { key: v, value: v, label: labelOf(v), rows: [], ref: null, total: 0 });
   }
   for (const row of result.rows) {
     const v = row[i] ?? null;
@@ -147,6 +161,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
     if (g) {
       if (g.rows.length === 0 && link) g.ref = cellLinkRef(link, by, row, result.columns);
       g.rows.push(row);
+      g.total += 1;
       continue;
     }
     groups.set(key, {
@@ -155,6 +170,7 @@ export function rowGroups(viz: VizConfig, result: SqlQueryResult): RowGroup[] | 
       label: labelOf(v),
       rows: [row],
       ref: link ? cellLinkRef(link, by, row, result.columns) : null,
+      total: 1,
     });
   }
   return [...groups.values()];
@@ -176,6 +192,39 @@ export function rowEmphasized(viz: VizConfig, columns: string[], row: SqlCell[])
 
 /** How far the row is indented: its `depth` cell as a whole number
  *  (0–8), else 0. */
+/** The colour of a row's left edge (`edge`: a column of tones),
+ *  `transparent` where it has none (the edge keeps its width, so rows line
+ *  up, and draws nothing that would box the row in); null when the viz has
+ *  no `edge`. */
+export function rowEdge(viz: VizConfig, columns: string[], row: SqlCell[]): string | null {
+  if (!viz.edge) return null;
+  return toneColor(cellOf(columns, row, viz.edge)) ?? "transparent";
+}
+
+/** A row and the deeper rows under it, in order. */
+export interface RowNest {
+  row: SqlCell[];
+  /** Its index in the result (its test id). */
+  i: number;
+  depth: number;
+  kids: RowNest[];
+}
+
+/** A `depth` list's rows as parents and children: a row followed by
+ *  deeper rows holds them, until a row as shallow as it comes. A row
+ *  deeper than the one before it with no parent shown sits where it is. */
+export function nestRows(rows: readonly (readonly [SqlCell[], number])[], depthOf: (row: SqlCell[]) => number): RowNest[] {
+  const roots: RowNest[] = [];
+  const open: RowNest[] = [];
+  for (const [row, i] of rows) {
+    const n: RowNest = { row, i, depth: depthOf(row), kids: [] };
+    while (open.length > 0 && open[open.length - 1]!.depth >= n.depth) open.pop();
+    (open.length > 0 ? open[open.length - 1]!.kids : roots).push(n);
+    open.push(n);
+  }
+  return roots;
+}
+
 export function rowDepth(viz: VizConfig, columns: string[], row: SqlCell[]): number {
   const v = cellOf(columns, row, viz.depth);
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : 0;
@@ -240,6 +289,9 @@ export function cellLinkRef(
     }
     case "commit":
       return gitCommitRef(s);
+    case "request":
+      // Its ref opens its Changes page.
+      return requestUri(s);
     case "metric":
       return metricRef(s);
     case "page":
@@ -280,13 +332,10 @@ export function cellLinkRef(
         rightVersion: version,
       });
     }
-    case "wiki":
-      return wikiPageRef(s);
-    case "effort-diff": {
-      // A viz row carries the effort's ref (`v_effort.ref`); a cell that
-      // isn't one links nowhere.
-      const id = idOf(s, "oxplow/effort");
-      return id === null ? null : effortDiffRef(id);
+    case "knowledge": {
+      // The page's URI (`v_knowledge_page.uri`).
+      const page = knowledgeOf(s);
+      return page ? knowledgePageRef(page.store, page.id) : null;
     }
   }
 }
@@ -361,6 +410,38 @@ export function itemList(v: SqlCell | undefined): Item[] | null {
   }
 }
 
+/** One mark of a `marks` cell: its text, its tone, its hover; `gap`: it
+ *  starts a new group, a dot before it. */
+export interface Mark {
+  text: string;
+  tone?: string;
+  hint?: string;
+  gap?: boolean;
+}
+
+/** A `marks` cell's marks (a JSON array of strings or `{ text, tone?,
+ *  hint?, gap? }`); null when the value isn't one. */
+export function markList(v: SqlCell | undefined): Mark[] | null {
+  if (typeof v !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(v);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.flatMap((x): Mark[] => {
+      if (typeof x === "string") return x === "" ? [] : [{ text: x }];
+      if (typeof x !== "object" || x === null) return [];
+      const o = x as Record<string, unknown>;
+      if (typeof o.text !== "string" || o.text === "") return [];
+      const mark: Mark = { text: o.text };
+      if (typeof o.tone === "string" && o.tone !== "") mark.tone = o.tone;
+      if (typeof o.hint === "string" && o.hint !== "") mark.hint = o.hint;
+      if (o.gap === true || o.gap === 1) mark.gap = true;
+      return [mark];
+    });
+  } catch {
+    return null;
+  }
+}
+
 /** How a table column's cells wrap. `nowrap`: a date, a number, a value
  *  with a unit, or short values with no spaces stay on one line.
  *  `words`: breaks only between words, so the column is at least its
@@ -368,7 +449,7 @@ export function itemList(v: SqlCell | undefined): Item[] | null {
  *  path) that break anywhere, so it is the column that gives way. */
 export type ColumnWrap = "nowrap" | "words" | "breakable";
 
-const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge"]);
+const NOWRAP_FORMATS: ReadonlySet<ColumnFormat> = new Set(["date", "datetime", "relative", "bytes", "duration", "integer", "percent", "badge", "marks"]);
 const SHORT_VALUE = 20;
 const LONGEST_WORD = 24;
 
@@ -392,6 +473,10 @@ function byFormat(v: string | number, format: ColumnFormat): string | null {
   if (format === "items") {
     const list = itemList(v);
     return list === null ? null : list.map((i) => i.text).join(" · ");
+  }
+  if (format === "marks") {
+    const list = markList(v);
+    return list === null ? null : list.map((m) => m.text).join(" ");
   }
   if (format === "source") {
     const who = sourceValue(v);
@@ -518,14 +603,7 @@ export function rowContext(viz: VizConfig, columns: string[], row: SqlCell[]): {
   return ref ? { uri: ref } : { text: rowMention(viz.id, columns, row).trim() };
 }
 
-/** The numeric row id the `v_*` views use, from a UI effort id like
- *  `eff262` (or a bare number). */
-export function effortRowId(effortId: string): number | null {
-  const m = /^(?:eff)?(\d+)$/.exec(effortId);
-  return m ? Number(m[1]) : null;
-}
-
-/** The numeric row id from any prefixed UI id (`tsk42`, `thr7`, `eff262`,
+/** The numeric row id from any prefixed UI id (`tsk42`, `thr7`, `req262`,
  *  or a bare number). */
 export function numericRowId(id: string): number | null {
   const m = /^[a-z]*(\d+)$/.exec(id);
@@ -551,15 +629,123 @@ export interface TreeNode {
   lazy: boolean;
   state: "loading" | { error: string } | null;
   children: TreeNode[];
+  /** A path tree's folder made from the paths: its `row` is all nulls and
+   *  no row of the result (no menu, no link, no actions). */
+  made?: boolean;
+  /** A path tree's status marks (`tree.status`), in `STATUS_MARKS` order. */
+  marks?: readonly StatusMark[];
+  /** A path tree's full path, its hover. */
+  path?: string;
+}
+
+/** One status mark: the change status it is, its letter, its tone. */
+export interface StatusMark {
+  status: string;
+  letter: string;
+  tone: "success" | "warning" | "danger" | "accent";
+}
+
+/** Core's change statuses (`FileStatus`) as marks, in the order a folder
+ *  lists them (`pages/path_tree.rs` `MARKS`). */
+export const STATUS_MARKS: readonly StatusMark[] = [
+  { status: "added", letter: "A", tone: "success" },
+  { status: "modified", letter: "M", tone: "warning" },
+  { status: "deleted", letter: "D", tone: "danger" },
+  { status: "renamed", letter: "R", tone: "accent" },
+  { status: "untracked", letter: "U", tone: "success" },
+  { status: "conflicted", letter: "C", tone: "danger" },
+];
+
+function statusMark(v: SqlCell | undefined): StatusMark | null {
+  return typeof v === "string" ? (STATUS_MARKS.find((m) => m.status === v) ?? null) : null;
+}
+
+/** The column that is a tree row's id: `tree.id`, or a path tree's path. */
+export function treeIdColumn(viz: VizConfig): string | null {
+  return viz.tree?.id ?? viz.tree?.path ?? null;
+}
+
+const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** A path's last name. */
+function baseName(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1);
+}
+
+/** A tree over paths (`tree.path`, not lazy): each row a file, its folders
+ *  made from its path, folders first then files, each by name; a made
+ *  folder holding one made folder and nothing else joined with it (`a/b`);
+ *  a row's mark its status, a made folder's the marks under it. The
+ *  daemon's `pages/path_tree.rs` builds the same tree for an agent. */
+function pathTreeNodes(viz: VizConfig, result: SqlQueryResult): TreeNode[] {
+  const paths = columnValues(result, viz.tree?.path);
+  if (!paths) return [];
+  const statuses = columnValues(result, viz.tree?.status);
+  interface Dir {
+    row: number | null;
+    children: Map<string, Dir>;
+  }
+  const root: Dir = { row: null, children: new Map() };
+  paths.forEach((p, i) => {
+    const path = p === null ? "" : String(p).replace(/^\/+|\/+$/g, "");
+    if (path === "") return;
+    let at = root;
+    for (const seg of path.split("/")) {
+      let next = at.children.get(seg);
+      if (!next) {
+        next = { row: null, children: new Map() };
+        at.children.set(seg, next);
+      }
+      at = next;
+    }
+    if (at.row === null) at.row = i;
+  });
+  const blank = result.columns.map(() => null);
+  const build = (dir: Dir, prefix: string): TreeNode[] => {
+    const out = [...dir.children.keys()].sort(byName).map((name) => {
+      const d = dir.children.get(name)!;
+      const path = prefix === "" ? name : `${prefix}/${name}`;
+      const children = build(d, path);
+      const own = d.row === null ? null : statusMark(statuses?.[d.row]);
+      const marks = own ? [own] : STATUS_MARKS.filter((m) => children.some((c) => c.marks?.includes(m)));
+      let node: TreeNode = {
+        label: name,
+        row: d.row === null ? blank : result.rows[d.row]!,
+        id: path,
+        branch: children.length > 0,
+        lazy: false,
+        state: null,
+        children,
+        made: d.row === null,
+        marks,
+        path,
+      };
+      // A made folder whose one child is a made folder reads as one row.
+      while (node.made && node.children.length === 1 && node.children[0]!.made && node.children[0]!.branch) {
+        const only = node.children[0]!;
+        node = { ...node, label: `${node.label}/${only.label}`, id: only.id, path: only.path, marks: only.marks, children: only.children };
+      }
+      return node;
+    });
+    // Folders first, then files.
+    return [...out.filter((n) => n.branch), ...out.filter((n) => !n.branch)];
+  };
+  return build(root, "");
 }
 
 /** `tree` viz: each row under the row whose `tree.id` its `tree.parent`
  *  names; a row with no parent, or one not in the result, is a root. A
  *  cycle is broken at the first row seen twice. */
 export function treeNodes(viz: VizConfig, result: SqlQueryResult): TreeNode[] {
-  const ids = columnValues(result, viz.tree?.id);
-  const parents = columnValues(result, viz.tree?.parent);
-  const labels = columnValues(result, viz.tree?.label);
+  if (viz.tree?.path && !viz.tree.lazy) return pathTreeNodes(viz, result);
+  // A lazy path tree is one level: id the path, parent its folder, label
+  // its name, mark its own status.
+  const paths = viz.tree?.path ? columnValues(result, viz.tree.path) : null;
+  const statuses = paths ? columnValues(result, viz.tree?.status) : null;
+  const ids = paths ?? columnValues(result, viz.tree?.id);
+  const parents = paths ? paths.map((p) => (p === null || !String(p).includes("/") ? null : String(p).slice(0, String(p).lastIndexOf("/")))) : columnValues(result, viz.tree?.parent);
+  const labels = paths ? paths.map((p) => (p === null ? null : baseName(String(p)))) : columnValues(result, viz.tree?.label);
   if (!ids || !parents || !labels) return [];
   const key = (v: SqlCell) => (v === null ? null : String(v));
   const idIndex = new Map<string, number>();
@@ -582,7 +768,10 @@ export function treeNodes(viz: VizConfig, result: SqlQueryResult): TreeNode[] {
         if (child) children.push(child);
       }
     });
-    return { label: formatCell(labels[at] ?? null), row: result.rows[at]!, id: key(ids[at] ?? null), branch: children.length > 0, lazy: false, state: null, children };
+    const node: TreeNode = { label: formatCell(labels[at] ?? null), row: result.rows[at]!, id: key(ids[at] ?? null), branch: children.length > 0, lazy: false, state: null, children };
+    if (!paths) return node;
+    const mark = statusMark(statuses?.[at]);
+    return { ...node, made: false, marks: mark ? [mark] : [], path: key(paths[at] ?? null) ?? undefined };
   };
   const roots: TreeNode[] = [];
   parentOf.forEach((p, i) => {
@@ -640,7 +829,8 @@ export function lazyTreeProblem(viz: VizConfig, result: SqlQueryResult): string 
 
 /** The rows a tree draws, in its order: a spliced branch's rows under it. */
 export function drawnTreeRows(nodes: readonly TreeNode[]): SqlCell[][] {
-  return nodes.flatMap((n) => [n.row, ...drawnTreeRows(n.children)]);
+  // A made folder is no row of the result.
+  return nodes.flatMap((n) => [...(n.made ? [] : [n.row]), ...drawnTreeRows(n.children)]);
 }
 
 /** The lazy branches to run: those in `open` that are reachable, a parent
@@ -648,7 +838,8 @@ export function drawnTreeRows(nodes: readonly TreeNode[]): SqlCell[][] {
  *  left open under a closed one keeps its place without running. Each
  *  with its id cell, the lazy param's value. */
 export function wantedBranches(viz: VizConfig, result: SqlQueryResult, open: ReadonlySet<string>, runs: ReadonlyMap<string, BranchRun>): { id: string; value: SqlCell }[] {
-  const idAt = viz.tree?.id ? result.columns.indexOf(viz.tree.id) : -1;
+  const idColumn = treeIdColumn(viz);
+  const idAt = idColumn ? result.columns.indexOf(idColumn) : -1;
   const out: { id: string; value: SqlCell }[] = [];
   const walk = (nodes: readonly TreeNode[]) => {
     for (const n of nodes) {
@@ -975,3 +1166,39 @@ export function sourceValue(v: unknown): Source | null {
   return { kind: kind as Source["kind"], label, ...(typeof uri === "string" && uri !== "" ? { uri } : {}) };
 }
 
+
+/** One option of an action with `options_from`: a row of the page loader
+ *  it names. */
+export interface ActionOption {
+  value: string;
+  label: string;
+  group: string | null;
+}
+
+/** Each action's options, by action id. */
+export type ActionOptions = Record<string, ActionOption[]>;
+
+/** The options of `actions` that take them (`optionsFrom`): the rows of the
+ *  page's loaders by name (`value`, `label`, an optional `group`). A loader
+ *  that didn't run gives none. */
+export function actionOptionsOf(
+  actions: readonly { id: string; optionsFrom?: string | null }[],
+  loaders: Record<string, { result: { columns: string[]; rows: SqlCell[][] } | null } | undefined>,
+): ActionOptions {
+  const out: ActionOptions = {};
+  for (const a of actions) {
+    if (!a.optionsFrom) continue;
+    const result = loaders[a.optionsFrom]?.result;
+    if (!result) continue;
+    const at = (name: string) => result.columns.indexOf(name);
+    const [value, label, group] = [at("value"), at("label"), at("group")];
+    out[a.id] = result.rows
+      .filter((r) => r[value] !== null && r[value] !== undefined)
+      .map((r) => ({
+        value: String(r[value]),
+        label: String(label >= 0 && r[label] !== null ? r[label] : r[value]),
+        group: group >= 0 && r[group] !== null && r[group] !== undefined ? String(r[group]) : null,
+      }));
+  }
+  return out;
+}

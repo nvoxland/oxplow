@@ -80,7 +80,7 @@ async fn project(edit: impl FnOnce(&mut Vec<ScaffoldFile>)) -> (Project, Lines) 
     let lines = corpus(dir.path());
     let mut files = extension_files(
         NAME,
-        Some("oxplow:oxplow/effort?id=eff1"),
+        Some("oxplow:oxplow/request?id=req1"),
         &MetricStarter::default(),
     );
     edit(&mut files);
@@ -568,6 +568,7 @@ async fn the_metric_page_reads_the_definition_the_trend_and_the_recordings() {
                     row: None,
                     input: None,
                     drop: None,
+                    option: None,
                     on_behalf_of: oxplow_domain::Actor::Human,
                     confirmed: false,
                 },
@@ -834,10 +835,10 @@ async fn a_file_that_grows_past_the_limit_keeps_its_facts_and_is_named() {
     );
 }
 
-/// A metric's facts join other entities in a page: here, the files an
-/// effort changed beside how many functions over the limit each has.
+/// A metric's facts join other entities in a page: here, the files a turn
+/// changed beside how many functions over the limit each has.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_page_joins_metric_facts_with_an_efforts_files() {
+async fn a_page_joins_metric_facts_with_a_turns_files() {
     let (p, _) = project(|files| {
         let manifest = files
             .iter()
@@ -848,39 +849,24 @@ async fn a_page_joins_metric_facts_with_an_efforts_files() {
         files.push(ScaffoldFile {
             path: format!("{dir}pages/touched.yaml"),
             content: format!(
-                "title: Touched and complex\ndescription: \"The files an effort changed, with their functions over the limit.\"\n\
-                 loaders:\n  touched:\n    sql: |\n      SELECT f.path AS path, f.value AS functions, e.change_kind AS change\n      FROM metric_findings('{MEASURE}') f\n      JOIN v_effort_file e ON e.path = f.path\n      ORDER BY f.path\n\
+                "title: Touched and complex\ndescription: \"The files a turn changed, with their functions over the limit.\"\n\
+                 loaders:\n  touched:\n    sql: |\n      SELECT f.path AS path, f.value AS functions, t.confidence AS change\n      FROM metric_findings('{MEASURE}') f\n      JOIN v_turn_file t ON t.path = f.path\n      ORDER BY f.path\n\
                  view:\n  viz: table\n  from: touched\n  columns:\n    - {{ key: path, label: File }}\n    - {{ key: functions, label: Functions over the limit }}\n    - {{ key: change, label: Change }}\n"
             ),
         });
     })
     .await;
     p.baseline().await;
-    let opened = p
-        .svc
-        .commands
-        .run(
-            &oxplow_domain::Actor::Human,
-            crate::commands::effort::OPEN,
-            serde_json::json!({ "thread": oxplow_domain::ThreadId::new(1).to_string() }),
-            false,
-        )
-        .await
-        .unwrap();
-    let effort = opened.result["effort"]
-        .as_str()
-        .unwrap()
-        .parse::<oxplow_domain::EffortId>()
-        .expect("an effort");
-    let effort = effort.value();
     p.svc
         .db
         .transaction(move |tx| {
-            tx.execute_batch(&format!(
-                "INSERT INTO effort_file (effort_id, path, change_kind, local_snapshot_id, source)
-                   VALUES ({effort}, 'engine/plan.rs', 'updated', 0, 'claimed'),
-                          ({effort}, 'ui/theme.rs', 'created', 0, 'claimed');"
-            ))
+            tx.execute_batch(
+                "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                   VALUES (900, 1, 'p', '2026-01-01T00:00:00Z');
+                 INSERT INTO turn_file (turn_id, path, stream_id, first_changed_at, last_changed_at, timed, shared)
+                   VALUES (900, 'engine/plan.rs', 1, '2026-01-01T00:00:01Z', '2026-01-01T00:00:02Z', 1, 0),
+                          (900, 'ui/theme.rs', 1, '2026-01-01T00:00:01Z', '2026-01-01T00:00:02Z', 1, 0);",
+            )
             .map_err(oxplow_db::map_sql_err)
         })
         .await
@@ -912,7 +898,7 @@ async fn a_page_joins_metric_facts_with_an_efforts_files() {
         .collect();
     assert_eq!(
         rows,
-        [("engine/plan.rs".to_string(), 2, "updated".to_string())]
+        [("engine/plan.rs".to_string(), 2, "sole".to_string())]
     );
 }
 

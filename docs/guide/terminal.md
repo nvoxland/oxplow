@@ -12,7 +12,7 @@ leaves the session running. The session's status contributes to the
 thread and stream status indicators.
 
 Harness hooks record activity and turn boundaries. Snapshots, test
-evidence, usage, and optional efforts help explain what happened. There
+evidence, usage, and requests help explain what happened. There
 is no task-filing gate or Stop audit requiring an agent to keep working.
 
 Non-writer threads may not change their stream's worktree. Other project

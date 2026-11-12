@@ -15,7 +15,7 @@ mock.module("./api.js", () => ({
         resolve({
           columns: ["uri", "thread_uri", "kind", "harness", "title", "native_title", "display_name", "opened_at"],
           rows: [[`oxplow:oxplow/agent_session?id=ses_${String(params[0])}`, `oxplow:oxplow/thread?id=${String(params[0])}`, "terminal", "claude", "", "", "", ""]],
-          reads: { sources: [], tables: [] },
+          reads: { datasets: [], tables: [], measures: [] },
         }),
       );
     }),

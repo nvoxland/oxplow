@@ -2,7 +2,7 @@
 description: Review the user's open follow-up comments and respond to them.
 ---
 
-The user leaves comments anchored to text across pages (wiki bodies,
+The user leaves comments anchored to text across pages (knowledge page bodies,
 code file lines, task details). Some are just notes-to-self; the ones
 marked **follow-up** want you to act.
 
@@ -30,6 +30,6 @@ Steps:
    `oxplow.knowledge.update_comment { comment, status: "resolved" }`. Leave it open if
    you've replied but the user still needs to weigh in.
 
-File a work item for any follow-up that turns into real shippable
+File a task for any follow-up that turns into real shippable
 work (per the `oxplow-runtime` skill) rather than doing large changes
 straight from a comment reply.

@@ -170,8 +170,8 @@ a missing `stream_id` to the caller's own stream — its header, else its
 thread's — and to the primary only for an anonymous caller (tsk555; the
 extension, page and change tools do the same, tsk574); they replaced
 `read_file`, `read_file_at_ref` and `diff_endpoints`. Change analysis
-and the duplicate scan read through `Trees`, so a closed effort's
-snapshot head is scanned too. (The wiki's old `@<rev>` link syntax went
+and the duplicate scan read through `Trees`, so a finished turn's
+end snapshot is scanned too. (The wiki's old `@<rev>` link syntax went
 in P5.C3: a link names a file; its version is the edge's pin —
 [knowledge.md](./knowledge.md).)
 
@@ -314,7 +314,7 @@ oxplow-foundation on, Git History, the commit page and Uncommitted changes
 show their own content and nothing another extension adds
 (`tests-e2e/specs/pages/plain.spec.ts`; the page-run half is every
 foundation fixture's, which runs with only foundation on —
-[work-items.md](./work-items.md), "Conformance"). The commit and
+[tasks.md](./tasks.md), "Conformance"). The commit and
 Uncommitted pages are foundation documents (their mounts are
 `oxplow/commit.sections` and
 `oxplow/uncommitted-changes.sections`; Git Status embeds the
@@ -369,7 +369,7 @@ was deleted with its tests.
 **Watching, end to end** is one Rust test, `real_watch_tests.rs` in
 `oxplow-app`: services booted as the daemon boots them over a real temp git
 project and its real watcher. A file edit, a folder made after the watch
-started, a 3,000-file burst, a hand-written wiki page, a `generated.exclude`
+started, a 3,000-file burst, a hand-written knowledge page, a `generated.exclude`
 edit of `project.yaml`, and a stream made later (its own ignore rules, its
 commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
 `v_file` or `v_commit`. No browser is involved, so it is not an e2e spec.
@@ -382,10 +382,7 @@ commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
   worktrees with `create_workspace` / `remove_workspace` — the raw `git
   worktree remove/prune` shell-outs went. Its tests need a real
   provider, so they live in `oxplow-app` (`stream_service_tests.rs`).
-- **Branch stamps** on facts and captures (collection, metrics, the
-  effort-lifecycle metrics) read `Vcs::head`.
-- **Revert detection** (token waste) reads the head and the reverted
-  commits with `Vcs::head` / `Vcs::revision`.
+- **Branch stamps** on facts and captures (collection, metrics) read `Vcs::head`.
 - **Workspace context** asks `detect` and the default branch from
   `branches()`.
 - **Text search** is `WorkspaceFiles::search_text`, no longer `git grep`.
@@ -400,10 +397,10 @@ commits) each reach `v_change_file`, `v_snapshot_file`, `v_knowledge_page`,
   and `Services.git` is the provider.
 
 The last git-named surfaces went in their own change (tsk542): the
-version columns on `metric_capture`, `page_ref` and `effort_file` are
+version columns on `metric_capture` and `page_ref` are
 `closest_vcs_rev` / `vcs_rev_exact` (V119 — the VCS's own revision id,
 `Revision::vcs_rev`; pinned dashboard tiles rewritten; `v_capture`,
-`v_effort_file`, `v_test_run` at v2), the metric dimension is
+`v_test_run` at v2), the metric dimension is
 `oxplow.vcs_rev`, the event is `VcsRefsChanged`, the workspace context
 says `vcs_enabled` (the desktop's `vcsEnabled`), the background task
 kind is `vcs`, and the project-root watcher asks `Vcs::detect` instead

@@ -12,9 +12,8 @@ import { personSpec, recordRefOffers } from "../components/refCommandsTestSuppor
 // less those whose `about_when` fails on its row (`notNow`).
 const notNow = new Set<string>();
 const KINDS: Record<string, string[]> = {
-  "oxplow:oxplow/work_item": ["tracker.item.estimate"],
+  "oxplow:oxplow/task": ["tracker.item.estimate"],
   "oxplow:oxplow/commit": ["tracker.commit.sync"],
-  "oxplow:oxplow/effort": ["oxplow.review.accept", "oxplow.review.request_changes"],
   "oxplow:oxplow/agent_session": ["oxplow.agent_session.reopen"],
 };
 
@@ -23,10 +22,8 @@ mock.module("../api.js", () => ({
   ...realApi,
   refCommands: async (ref: string) => (KINDS[ref.split("?")[0]] ?? []).filter((id) => !notNow.has(id)),
   listPersonCommands: async () => [
-    personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "oxplow/work_item", input: { uri: "{{uri}}", points: 3 } }),
+    personSpec("tracker.item.estimate", { label: "Estimate in Fake…", group: "Tracker", about: "oxplow/task", input: { uri: "{{uri}}", points: 3 } }),
     personSpec("tracker.commit.sync", { label: "Sync", group: "Tracker", about: "oxplow/commit", input: { sha: "{{uri.id}}" } }),
-    personSpec("oxplow.review.accept", { label: "Accept Review", group: "Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
-    personSpec("oxplow.review.request_changes", { label: "Request Changes", group: "Review", about: "oxplow/effort", input: { uri: "{{uri}}" } }),
     personSpec("oxplow.agent_session.reopen", {
       label: "Reopen Session",
       group: "Tasks",
@@ -57,12 +54,12 @@ async function openMenu(ref: string) {
 }
 
 test("a page's ref gets its kind's commands at the menu's top level, run with the ref bound", async () => {
-  const view = await openMenu("oxplow:oxplow/work_item?id=W-1&provider=fake");
+  const view = await openMenu("oxplow:oxplow/task?id=W-1&provider=fake");
   // The command's `ui.group` (Tracker) makes no submenu here.
   expect(view.container.querySelector('[data-testid^="menu-item-page-submenu-"]')).toBeNull();
   expect(view.queryByTestId("menu-item-ref-command-tracker.commit.sync")).toBeNull();
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.estimate"));
-  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { uri: "oxplow:oxplow/work_item?id=W-1&provider=fake", points: 3 }]]));
+  await waitFor(() => expect(ran).toEqual([["tracker.item.estimate", { uri: "oxplow:oxplow/task?id=W-1&provider=fake", points: 3 }]]));
   // Running one closes the menu.
   await waitFor(() => expect(view.queryByTestId("menu-item-ref-command-tracker.item.estimate")).toBeNull());
 });
@@ -81,18 +78,9 @@ test("a command the daemon says doesn't apply to the ref's row is not offered", 
 });
 
 test("no commands for the page's kind: the menu has Ask and no commands", async () => {
-  const view = await openMenu("oxplow:oxplow/wiki?slug=notes");
+  const view = await openMenu("oxplow:oxplow/knowledge?id=notes&store=oxwiki");
   expect(view.getByTestId("menu-item-page-ask-assistant")).toBeTruthy();
   expect(view.container.querySelector('[data-testid^="menu-item-ref-command-"]')).toBeNull();
-});
-
-// An effort's page (its diff, `oxplow:oxplow/effort?id=effN`) offers oxplow-bundled's
-// verdicts, each run on that effort.
-test("an effort's page offers Accept Review and Request Changes", async () => {
-  const view = await openMenu("oxplow:oxplow/effort?id=eff3");
-  expect(view.getByTestId("menu-item-ref-command-oxplow.review.request_changes")).toBeTruthy();
-  fireEvent.click(view.getByTestId("menu-item-ref-command-oxplow.review.accept"));
-  await waitFor(() => expect(ran).toEqual([["oxplow.review.accept", { uri: "oxplow:oxplow/effort?id=eff3" }]]));
 });
 
 // Ask the Assistant: the dock's Assistant panel opens, about the page.

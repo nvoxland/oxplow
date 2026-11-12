@@ -118,17 +118,58 @@ pub fn restate_source_backed_tx(
     conn: &rusqlite::Connection,
     extensions: &[ExtensionRow],
 ) -> Result<(), DomainError> {
+    let mut backed: Vec<ExtensionRow> = extensions
+        .iter()
+        .filter(|e| matches!(e.deployment.as_str(), "undeployed" | "not_here"))
+        .cloned()
+        .collect();
+    backed.sort_by(|a, b| a.name.cmp(&b.name));
+    // Rows already as they are aren't written again: the config watcher
+    // restates on every rescan, and a write is a change to everything that
+    // reads `v_extension`.
+    if source_backed(conn)? == backed {
+        return Ok(());
+    }
     conn.execute(
         &format!("DELETE FROM extension_listing WHERE {SOURCE_BACKED}"),
         [],
     )
     .map_err(map_sql_err)?;
-    let backed: Vec<ExtensionRow> = extensions
-        .iter()
-        .filter(|e| matches!(e.deployment.as_str(), "undeployed" | "not_here"))
-        .cloned()
-        .collect();
     insert_extensions(conn, &backed)
+}
+
+/// The source-backed rows as they are, by name.
+fn source_backed(conn: &rusqlite::Connection) -> Result<Vec<ExtensionRow>, DomainError> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT name, namespace, description, path, origin, version, enabled,
+                    purpose, deployment, hash, errors_json, warnings_json,
+                    permissions_json, pending_json, shared
+               FROM extension_listing WHERE {SOURCE_BACKED} ORDER BY name"
+        ))
+        .map_err(map_sql_err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(ExtensionRow {
+                name: r.get(0)?,
+                namespace: r.get(1)?,
+                description: r.get(2)?,
+                path: r.get(3)?,
+                origin: r.get(4)?,
+                version: r.get(5)?,
+                enabled: r.get(6)?,
+                purpose: r.get(7)?,
+                deployment: r.get(8)?,
+                hash: r.get(9)?,
+                errors_json: r.get(10)?,
+                warnings_json: r.get(11)?,
+                permissions_json: r.get(12)?,
+                pending_json: r.get(13)?,
+                shared: r.get(14)?,
+            })
+        })
+        .map_err(map_sql_err)?;
+    rows.collect::<Result<_, _>>().map_err(map_sql_err)
 }
 
 fn insert_extensions(
@@ -266,4 +307,52 @@ pub fn reset_tx(conn: &rusqlite::Connection, listing: &CatalogListing) -> Result
             .map_err(map_sql_err)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Database;
+
+    fn undeployed(description: &str) -> ExtensionRow {
+        ExtensionRow {
+            name: "held".into(),
+            namespace: "held".into(),
+            description: description.into(),
+            path: ".oxplow/extensions/held".into(),
+            origin: "project".into(),
+            version: None,
+            enabled: false,
+            purpose: None,
+            deployment: "undeployed".into(),
+            hash: None,
+            errors_json: "[]".into(),
+            warnings_json: "[]".into(),
+            permissions_json: "{}".into(),
+            pending_json: "[]".into(),
+            shared: false,
+        }
+    }
+
+    /// The config watcher restates the source-backed rows on every rescan
+    /// (macOS drops events whenever a build writes thousands of files):
+    /// rows that are already there are not written again, so nothing that
+    /// reads `v_extension` hears a change that isn't one.
+    #[test]
+    fn restating_the_same_source_backed_rows_writes_nothing() {
+        let db = Database::in_memory();
+        db.with_conn(|conn| {
+            restate_source_backed_tx(conn, &[undeployed("a")]).unwrap();
+            let before = conn.total_changes();
+            restate_source_backed_tx(conn, &[undeployed("a")]).unwrap();
+            assert_eq!(conn.total_changes(), before, "an unchanged restate wrote");
+            restate_source_backed_tx(conn, &[undeployed("b")]).unwrap();
+            assert!(
+                conn.total_changes() > before,
+                "a changed restate wrote nothing"
+            );
+            Ok::<_, rusqlite::Error>(())
+        })
+        .unwrap();
+    }
 }

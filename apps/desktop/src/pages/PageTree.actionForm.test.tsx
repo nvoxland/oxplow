@@ -16,7 +16,7 @@ import type { CommandSpec, FormStart } from "../tauri-bridge/generated/bindings.
 afterEach(cleanup);
 
 const LINK = {
-  id: "oxplow.work_item.link",
+  id: "oxplow.task.link",
   input_schema: {
     type: "object",
     required: ["uri", "target", "link_type"],
@@ -41,7 +41,7 @@ const forms: PageForms = {
 };
 const press: RunPageAction = async () => ({ result: null, auditId: 1, eventId: null, inverse: null }) as never;
 
-/** The page of a work item: its links (with the Link… form action) over
+/** The page of a task: its links (with the Link… form action) over
  *  its comments, which change as the page is read again. */
 function page(comments: string[]) {
   const view = node.stack("page", [
@@ -72,15 +72,15 @@ async function typed() {
   const view = render(tree(page(["first"]), host));
   fireEvent.click(view.getByTestId("viz-action-link"));
   const field = (await view.findByTestId("viz-action-form-fields-target")) as HTMLInputElement;
-  fireEvent.change(field, { target: { value: "oxplow:oxplow/work_item?id=tsk3" } });
-  expect(field.value).toBe("oxplow:oxplow/work_item?id=tsk3");
+  fireEvent.change(field, { target: { value: "oxplow:oxplow/task?id=tsk3" } });
+  expect(field.value).toBe("oxplow:oxplow/task?id=tsk3");
   return { view, field, host };
 }
 
 const standing = (view: ReturnType<typeof render>, field: HTMLInputElement) => {
   const now = view.getByTestId("viz-action-form-fields-target") as HTMLInputElement;
   expect(now).toBe(field);
-  expect(now.value).toBe("oxplow:oxplow/work_item?id=tsk3");
+  expect(now.value).toBe("oxplow:oxplow/task?id=tsk3");
 };
 
 test("the page read again with the same content leaves the typed field standing", async () => {

@@ -296,7 +296,7 @@ pub struct Relationship {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct DatasetSource {
     pub decl: DatasetDecl,
-    /// Where the SQL came from, for error locations (`datasets/work_item.sql`).
+    /// Where the SQL came from, for error locations (`datasets/task.sql`).
     pub file: String,
     pub sql: String,
     /// For a kept earlier version (named `<name>_v<version>`): what it's a
@@ -792,7 +792,7 @@ fn only_name(
     match call.args.as_slice() {
         [arg] => string_literal(arg).ok_or_else(|| {
             invalid(format!(
-                "{}: {what}() takes one quoted name, e.g. {what}('work_item')",
+                "{}: {what}() takes one quoted name, e.g. {what}('task')",
                 at(src, call.start)
             ))
         }),
@@ -2820,18 +2820,18 @@ mod tests {
                 || vec!["a".into()],
             )
         };
-        load(&decl("{ from: id, to: work_item.id }")).unwrap();
-        let err = load(&decl("{ from: nope, to: work_item.id }")).unwrap_err();
+        load(&decl("{ from: id, to: task.id }")).unwrap();
+        let err = load(&decl("{ from: nope, to: task.id }")).unwrap_err();
         assert!(
             err.to_string().contains(
                 "datasets/datasets.yaml:1: `a`'s relationship from `nope` names no field it declares"
             ),
             "{err}"
         );
-        let err = load(&decl("{ from: id, to: work_item }")).unwrap_err();
+        let err = load(&decl("{ from: id, to: task }")).unwrap_err();
         assert!(
             err.to_string().contains(
-                "datasets/datasets.yaml:1: `a`'s relationship to `work_item` isn't `<dataset>.<field>`"
+                "datasets/datasets.yaml:1: `a`'s relationship to `task` isn't `<dataset>.<field>`"
             ),
             "{err}"
         );
@@ -3088,7 +3088,7 @@ mod tests {
         let mut conn = fresh();
         let busy = on_change(source(
             "busy",
-            "SELECT uri, title FROM source('work_item') WHERE state = 'blocked'",
+            "SELECT uri, title FROM source('task') WHERE state = 'blocked'",
             &["uri TEXT", "title TEXT"],
         ));
         compile(&mut conn, "t", std::slice::from_ref(&busy), &view).unwrap();
@@ -3117,11 +3117,11 @@ mod tests {
             .unwrap();
         assert_eq!(
             (materialize.as_deref(), input.as_str()),
-            (Some("on_change"), "work_item")
+            (Some("on_change"), "task")
         );
 
         conn.execute(
-            "INSERT INTO m_v_t_busy VALUES ('oxplow:oxplow/work_item?id=a&provider=oxplow', 'kept')",
+            "INSERT INTO m_v_t_busy VALUES ('oxplow:oxplow/task?id=a&provider=oxtask', 'kept')",
             [],
         )
         .unwrap();
@@ -3141,7 +3141,7 @@ mod tests {
 
         let mut changed = on_change(source(
             "busy",
-            "SELECT uri FROM source('work_item') WHERE state = 'blocked'",
+            "SELECT uri FROM source('task') WHERE state = 'blocked'",
             &["uri TEXT"],
         ));
         changed.decl.version = 2;
@@ -3162,7 +3162,7 @@ mod tests {
             "t",
             &[on_change(source(
                 "busy",
-                "SELECT uri FROM source('work_item')",
+                "SELECT uri FROM source('task')",
                 &["uri TEXT"],
             ))],
             &view,
@@ -3211,11 +3211,7 @@ mod tests {
         let errors = db
             .compile_extension_datasets(vec![ext(
                 "acme",
-                vec![source(
-                    "busy",
-                    "SELECT uri FROM ref('work_item')",
-                    &["uri TEXT"],
-                )],
+                vec![source("busy", "SELECT uri FROM ref('task')", &["uri TEXT"])],
             )])
             .await
             .unwrap();
@@ -3233,7 +3229,7 @@ mod tests {
             "acme",
             vec![on_change(source(
                 "busy",
-                "SELECT uri FROM ref('work_item')",
+                "SELECT uri FROM ref('task')",
                 &["uri TEXT"],
             ))],
         )];
@@ -3259,7 +3255,7 @@ mod tests {
         let verdict = || {
             source(
                 "verdict",
-                "SELECT uri, title FROM ref('work_item')",
+                "SELECT uri, title FROM ref('task')",
                 &["uri TEXT", "title TEXT"],
             )
         };
@@ -3307,7 +3303,7 @@ mod tests {
                 (
                     "v_acme_verdict".into(),
                     "acme-reviews".into(),
-                    "v_work_item".into()
+                    "v_task".into()
                 ),
             ]
         );
@@ -3328,7 +3324,7 @@ mod tests {
                     vec![
                         source(
                             "late",
-                            "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                            "SELECT uri, title FROM ref('task') WHERE state = 'blocked'",
                             &["uri TEXT", "title TEXT"],
                         ),
                         source(
@@ -3361,7 +3357,7 @@ mod tests {
                 (
                     "v_late_work_late".into(),
                     "late-work".into(),
-                    "v_work_item".into()
+                    "v_task".into()
                 ),
                 (
                     "v_late_work_late_count".into(),
@@ -3381,7 +3377,7 @@ mod tests {
                 "late-work",
                 vec![source(
                     "late",
-                    "SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'",
+                    "SELECT uri, title FROM ref('task') WHERE state = 'blocked'",
                     &["uri TEXT", "title TEXT"],
                 )],
             )],
@@ -3392,7 +3388,7 @@ mod tests {
             vec![(
                 "v_late_work_late".into(),
                 "late-work".into(),
-                "v_work_item".into()
+                "v_task".into()
             )]
         );
         assert!(conn.prepare("SELECT * FROM v_digest_late_titles").is_err());
@@ -3410,16 +3406,16 @@ mod tests {
                     "raw",
                     vec![source(
                         "items",
-                        "SELECT uri FROM\n  source('work_item')",
+                        "SELECT uri FROM\n  source('task')",
                         &["uri TEXT"],
                     )],
                 ),
                 ext(
                     "shaky",
                     vec![
-                        source("bad", "SELECT nope FROM ref('work_item')", &["nope"]),
+                        source("bad", "SELECT nope FROM ref('task')", &["nope"]),
                         source("on_bad", "SELECT * FROM ref('bad')", &["nope"]),
-                        source("fine", "SELECT uri FROM ref('work_item')", &["uri TEXT"]),
+                        source("fine", "SELECT uri FROM ref('task')", &["uri TEXT"]),
                         source("lost", "SELECT * FROM ref('missing')", &["x"]),
                     ],
                 ),
@@ -3449,7 +3445,7 @@ mod tests {
         assert!(errors["loop"].join("\n").contains("cycle"), "{errors:?}");
         assert_eq!(
             published(&conn),
-            vec![("v_shaky_fine".into(), "shaky".into(), "v_work_item".into())]
+            vec![("v_shaky_fine".into(), "shaky".into(), "v_task".into())]
         );
     }
 
@@ -3466,10 +3462,10 @@ mod tests {
         };
         let mut late = source(
             "late",
-            "SELECT uri, title FROM ref('work_item')",
+            "SELECT uri, title FROM ref('task')",
             &["uri TEXT", "title TEXT"],
         );
-        late.decl.relationships = vec![rel("uri", "work_item.uri")];
+        late.decl.relationships = vec![rel("uri", "task.uri")];
         let mut digest = source(
             "titles",
             "SELECT uri FROM ref('late-work/late')",
@@ -3477,7 +3473,7 @@ mod tests {
         );
         digest.decl.relationships = vec![
             rel("uri", "late-work/late.uri"),
-            rel("uri", "work_item.nope"),
+            rel("uri", "task.nope"),
             rel("uri", "missing.uri"),
         ];
         let errors = publish(
@@ -3488,9 +3484,8 @@ mod tests {
         assert!(errors["late-work"].is_empty(), "{errors:?}");
         let digest_errors = errors["digest"].join("\n");
         assert!(
-            digest_errors.contains(
-                "`titles`'s relationship to `work_item.nope`: `v_work_item` has no field `nope`"
-            ),
+            digest_errors
+                .contains("`titles`'s relationship to `task.nope`: `v_task` has no field `nope`"),
             "{digest_errors}"
         );
         assert!(
@@ -3510,7 +3505,7 @@ mod tests {
         assert_eq!(
             published("v_late_work_late"),
             Some(serde_json::json!([
-                { "from": "uri", "to": "work_item.uri", "to_view": "v_work_item", "to_field": "uri" }
+                { "from": "uri", "to": "task.uri", "to_view": "v_task", "to_field": "uri" }
             ]))
         );
         assert_eq!(
@@ -3519,23 +3514,23 @@ mod tests {
                 { "from": "uri", "to": "late-work/late.uri", "to_view": "v_late_work_late", "to_field": "uri" }
             ]))
         );
-        assert_eq!(published("v_work_item"), None);
+        assert_eq!(published("v_task"), None);
     }
 
     /// A check (on temp views, recording nothing) reports a bad target too.
     #[test]
     fn a_check_reports_a_relationship_to_no_field() {
         let conn = fresh();
-        let mut m = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        let mut m = source("late", "SELECT uri FROM ref('task')", &["uri TEXT"]);
         m.decl.relationships = vec![RelationshipDecl {
             from: "uri".into(),
-            to: "work_item.nope".into(),
+            to: "task.nope".into(),
         }];
         let checked = check_extensions(&conn, &[ext("late-work", vec![m])], &[]).unwrap();
         assert!(
             checked.errors["late-work"]
                 .join("\n")
-                .contains("`v_work_item` has no field `nope`"),
+                .contains("`v_task` has no field `nope`"),
             "{checked:?}"
         );
     }
@@ -3597,13 +3592,13 @@ mod tests {
     #[test]
     fn a_deprecated_version_is_kept_beside_the_new_one_until_its_date() {
         let mut conn = fresh();
-        let v1 = source("late", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        let v1 = source("late", "SELECT uri FROM ref('task')", &["uri TEXT"]);
         publish(&mut conn, &[ext("late-work", vec![v1])]).unwrap();
 
         let twin = |until: &str, sql: &str| {
             let mut v2 = source(
                 "late",
-                "SELECT uri, title FROM ref('work_item')",
+                "SELECT uri, title FROM ref('task')",
                 &["uri TEXT", "title TEXT"],
             );
             v2.decl.version = 2;
@@ -3631,7 +3626,7 @@ mod tests {
         };
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT uri FROM ref('work_item')")],
+            &[twin("2999-01-01", "SELECT uri FROM ref('task')")],
         )
         .unwrap();
         assert!(errors["late-work"].is_empty(), "{errors:?}");
@@ -3644,7 +3639,7 @@ mod tests {
         // Its SQL must still keep v1's promise.
         let errors = publish(
             &mut conn,
-            &[twin("2999-01-01", "SELECT title FROM ref('work_item')")],
+            &[twin("2999-01-01", "SELECT title FROM ref('task')")],
         )
         .unwrap();
         assert!(
@@ -3654,7 +3649,7 @@ mod tests {
         // Past its date: gone, and said so.
         let errors = publish(
             &mut conn,
-            &[twin("2020-01-01", "SELECT uri FROM ref('work_item')")],
+            &[twin("2020-01-01", "SELECT uri FROM ref('task')")],
         )
         .unwrap();
         assert!(
@@ -3665,7 +3660,7 @@ mod tests {
         );
         assert!(conn.prepare("SELECT * FROM v_late_work_late_v1").is_err());
         // A version that never published has no promise to keep.
-        let mut never = source("fresh", "SELECT uri FROM ref('work_item')", &["uri TEXT"]);
+        let mut never = source("fresh", "SELECT uri FROM ref('task')", &["uri TEXT"]);
         never.decl.version = 3;
         never.decl.deprecated = vec![Deprecated {
             version: 2,
@@ -3704,18 +3699,15 @@ mod tests {
         let late = |sql: &str, cols: &[&str]| ext("late-work", vec![source("late", sql, cols)]);
         {
             let db = crate::Database::open(&path).unwrap();
-            db.compile_extension_datasets(vec![late(
-                "SELECT uri FROM ref('work_item')",
-                &["uri TEXT"],
-            )])
-            .await
-            .unwrap();
+            db.compile_extension_datasets(vec![late("SELECT uri FROM ref('task')", &["uri TEXT"])])
+                .await
+                .unwrap();
         }
         let ro = crate::Database::open_read_only(&path).unwrap();
         let errors = ro
             .check_extension_datasets(
                 vec![late(
-                    "SELECT uri FROM ref('work_item') WHERE state = 'done'",
+                    "SELECT uri FROM ref('task') WHERE state = 'done'",
                     &["uri TEXT"],
                 )],
                 vec![],
@@ -3727,7 +3719,7 @@ mod tests {
         let errors = ro
             .check_extension_datasets(
                 vec![late(
-                    "SELECT uri, title FROM ref('work_item')",
+                    "SELECT uri, title FROM ref('task')",
                     &["uri TEXT", "title TEXT"],
                 )],
                 vec![],

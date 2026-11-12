@@ -8,9 +8,10 @@
 //! - **core**: the fixed ones (the VCS) and, for every optional
 //!   capability, [`NONE`] — nothing implements it;
 //! - **extensions**: `implementations:` naming a built-in in core's
-//!   standard library ([`BUILT_INS`], `entry: oxplow:tasks`), the way a
-//!   collector names `oxplow:junit`. `oxplow-bundled` declares the
-//!   defaults; disabling it takes them away;
+//!   standard library ([`BUILT_INS`], `entry: oxplow:oxtask`), the way a
+//!   collector names `oxplow:junit`. `oxplow-bundled` declares oxtask,
+//!   the task tracker, and `oxplow-foundation` the other defaults;
+//!   disabling bundled leaves no task tracker;
 //! - **provider instances** while they run.
 //!
 //! [`CapabilityRegistry::resolve`] picks the active one: a person's own
@@ -33,6 +34,7 @@ use oxplow_domain::capability::{self, NONE};
 use oxplow_domain::events::schema::{CapabilitySwitched, CapabilitySwitchedV1, EventType as _};
 use oxplow_domain::events::Envelope;
 use oxplow_domain::stores::StreamStore as _;
+use oxplow_domain::tasks::Bucket;
 use oxplow_domain::vocabulary::VocabularyHandle;
 use oxplow_domain::DomainError;
 use serde_json::Value;
@@ -42,24 +44,17 @@ use serde_json::Value;
 /// core resolves the name, like a collector's `oxplow:junit`.
 pub const BUILT_INS: &[BuiltIn] = &[
     BuiltIn {
-        entry: "oxplow:tasks",
-        capability: "work_items",
-        provider: Some("oxplow"),
-        title: "oxplow's tasks",
-        features: &[
-            "hierarchy",
-            "comments",
-            "links",
-            "delete",
-            "ordering",
-            "lists",
-        ],
+        entry: "oxplow:oxtask",
+        capability: "task_tracker",
+        provider: Some("oxtask"),
+        title: "oxtask",
+        features: &["hierarchy", "comments", "links", "delete"],
         id_pattern: Some(r"tsk\d+"),
         fields: &[
             BuiltInField {
                 name: "priority",
                 title: "Priority",
-                kind: oxplow_domain::work_items::FieldKind::Enum,
+                kind: oxplow_domain::tasks::FieldKind::Enum,
                 values: &["urgent", "high", "medium", "low"],
                 read_only: false,
             },
@@ -67,21 +62,20 @@ pub const BUILT_INS: &[BuiltIn] = &[
             BuiltInField {
                 name: "author",
                 title: "Filed by",
-                kind: oxplow_domain::work_items::FieldKind::Enum,
+                kind: oxplow_domain::tasks::FieldKind::Enum,
                 values: &["user", "agent"],
                 read_only: true,
             },
         ],
-        config_schema: None,
-    },
-    BuiltIn {
-        entry: "oxplow:commit-or-switch",
-        capability: "effort_policy",
-        provider: None,
-        title: "A commit lands it, or the task switches",
-        features: &[],
-        id_pattern: None,
-        fields: &[],
+        // Its statuses, each its bucket's only stage.
+        stages: &[
+            ("backlog", "Backlog", Bucket::Backlog),
+            ("ready", "Ready", Bucket::Todo),
+            ("in_progress", "In Progress", Bucket::InProgress),
+            ("blocked", "Blocked", Bucket::Blocked),
+            ("done", "Done", Bucket::Done),
+            ("canceled", "Canceled", Bucket::Canceled),
+        ],
         config_schema: None,
     },
     BuiltIn {
@@ -92,6 +86,7 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &["contents"],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
     // The same capture, recording what changed and keeping no bytes.
@@ -103,17 +98,20 @@ pub const BUILT_INS: &[BuiltIn] = &[
         features: &[],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
-    // Knowledge: pages as Markdown under `.oxplow/wiki`, pinned to snapshots.
+    // Knowledge: oxwiki, pages as Markdown under `.oxplow/oxwiki`. Its
+    // pages' URIs carry its id, so it's declared under `oxwiki` only.
     BuiltIn {
-        entry: "oxplow:wiki",
+        entry: "oxplow:oxwiki",
         capability: "knowledge",
-        provider: None,
-        title: "oxplow's wiki",
-        features: &[],
+        provider: Some("oxwiki"),
+        title: "oxwiki",
+        features: &["edit"],
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     },
     // Agent harnesses: what runs in an agent session.
@@ -186,6 +184,7 @@ const fn harness(
         features,
         id_pattern: None,
         fields: &[],
+        stages: &[],
         config_schema: None,
     }
 }
@@ -195,18 +194,20 @@ const fn harness(
 pub struct BuiltIn {
     pub entry: &'static str,
     pub capability: &'static str,
-    /// The provider id its items' refs carry (`oxplow:oxplow/work_item?id=…&provider=oxplow`), which
+    /// The provider id its items' refs carry (`oxplow:oxplow/task?id=…&provider=oxtask`), which
     /// a declaration of it must use; `None` for a built-in whose
     /// implementation has no id of its own.
     pub provider: Option<&'static str>,
     pub title: &'static str,
     /// The features it has — core's to say, since it's core's code.
     pub features: &'static [&'static str],
-    /// What its items' own ids look like (a work list's; a regex matched
+    /// What its items' own ids look like (a task tracker's; a regex matched
     /// whole): how a loose id in text or a command is one of its items.
     pub id_pattern: Option<&'static str>,
-    /// Its own fields (a work list's, kept in `native`).
+    /// Its own fields (a task tracker's, kept in `native`).
     pub fields: &'static [BuiltInField],
+    /// A task tracker's stages, in order: `(id, title, bucket)`.
+    pub stages: &'static [(&'static str, &'static str, Bucket)],
     /// The JSON Schema a declaration's `config:` must meet; `None` takes
     /// no config.
     pub config_schema: Option<&'static str>,
@@ -217,7 +218,7 @@ pub struct BuiltIn {
 pub struct BuiltInField {
     pub name: &'static str,
     pub title: &'static str,
-    pub kind: oxplow_domain::work_items::FieldKind,
+    pub kind: oxplow_domain::tasks::FieldKind,
     pub values: &'static [&'static str],
     pub read_only: bool,
 }
@@ -227,7 +228,7 @@ fn built_in_fields(b: &BuiltIn) -> Value {
     serde_json::to_value(
         b.fields
             .iter()
-            .map(|f| oxplow_domain::work_items::FieldDecl {
+            .map(|f| oxplow_domain::tasks::FieldDecl {
                 name: f.name.into(),
                 title: f.title.into(),
                 kind: f.kind,
@@ -237,6 +238,23 @@ fn built_in_fields(b: &BuiltIn) -> Value {
             .collect::<Vec<_>>(),
     )
     .expect("fields serialize")
+}
+
+/// A built-in's stages, as an implementation declares them.
+fn built_in_stages(b: &BuiltIn) -> Value {
+    serde_json::to_value(built_in_stage_decls(b)).expect("stages serialize")
+}
+
+/// A built-in's stages as declarations.
+pub fn built_in_stage_decls(b: &BuiltIn) -> Vec<oxplow_domain::tasks::StageDecl> {
+    b.stages
+        .iter()
+        .map(|(id, title, bucket)| oxplow_domain::tasks::StageDecl {
+            id: (*id).into(),
+            title: (*title).into(),
+            bucket: *bucket,
+        })
+        .collect()
 }
 
 /// A built-in's features, as an implementation declares them.
@@ -264,18 +282,12 @@ pub enum Source {
     /// An AI provider: the Rust kind its declaration names (`provider:`,
     /// one of `oxplow_ai_rig::KINDS`), core's code.
     ProviderKind(&'static str),
-    /// A script in an extension (an effort policy written as one): its
-    /// entry, the extension's folder (`tree`,
-    /// `bundled:<name>` for a shipped one), the script's text and the
-    /// scopes it calls (`needs`).
-    Script {
-        entry: String,
-        tree: String,
-        script: String,
-        needs: Vec<String>,
-    },
     /// A provider instance's process.
     External,
+    /// A script in its extension (`implementations:` with a file as its
+    /// `entry`), called through the capability's verbs
+    /// (`providers::script`).
+    Script,
     /// Nothing implements it.
     None,
 }
@@ -285,8 +297,8 @@ impl Source {
         match self {
             Source::Core => "core",
             Source::BuiltIn(_) | Source::ProviderKind(_) => "builtin",
-            Source::Script { .. } => "script",
             Source::External => "external",
+            Source::Script => "script",
             Source::None => "none",
         }
     }
@@ -306,7 +318,17 @@ pub struct Implementation {
     pub features: Value,
     /// Its own fields, as it declares them (a JSON array of `FieldDecl`).
     pub fields: Value,
-    /// What its items' own ids look like (a work list's), when it says.
+    /// A task tracker's stages, as it declares them (a JSON array of
+    /// `StageDecl`); `[]` for any other.
+    pub stages: Value,
+    /// A knowledge store's kinds of page, as it declares them (a JSON array
+    /// of `KindDecl`, its `data.kinds`); `[]`: `note` for a knowledge store,
+    /// nothing for any other.
+    pub kinds: Value,
+    /// Whether a setting offers it now (`when:` in its declaration; true
+    /// without one). One that isn't is declared but off: listed, never used.
+    pub offered: bool,
+    /// What its items' own ids look like (a task tracker's), when it says.
     pub id_pattern: Option<String>,
     /// Its logo as a data URI, when its declaration has an `icon:`.
     pub icon: Option<String>,
@@ -318,6 +340,19 @@ pub struct Implementation {
 }
 
 impl Implementation {
+    /// A knowledge store's kinds of page, as it declares them (`data.kinds`),
+    /// `note` when it declares none; `[]` for any other capability.
+    pub fn kinds(&self) -> Value {
+        if self.capability != crate::knowledge::CAPABILITY {
+            return Value::Array(Vec::new());
+        }
+        match &self.kinds {
+            Value::Array(list) if !list.is_empty() => self.kinds.clone(),
+            _ => serde_json::to_value([oxplow_domain::knowledge::KindDecl::note()])
+                .expect("kinds serialize"),
+        }
+    }
+
     /// Whether it declares `feature`.
     pub fn has_feature(&self, feature: &str) -> bool {
         self.features
@@ -350,6 +385,9 @@ impl Implementation {
             source: Source::None,
             features: Value::Object(features),
             fields: Value::Array(Vec::new()),
+            stages: Value::Array(Vec::new()),
+            kinds: Value::Array(Vec::new()),
+            offered: true,
             // Nothing in text is none's: it keeps no items.
             id_pattern: None,
             icon: None,
@@ -515,7 +553,7 @@ pub struct PreparedCapabilities {
     base: Arc<()>,
     candidate: RegistryState,
     active: Active,
-    work_item_ids: Option<(String, String)>,
+    recognizers: crate::vocabulary_reactor::Recognizers,
     rows: Vec<CapabilityProvider>,
     resolved: Vec<(&'static str, Resolved)>,
 }
@@ -546,8 +584,8 @@ impl PreparedCapabilities {
         &self.active
     }
 
-    pub fn work_item_ids(&self) -> Option<(String, String)> {
-        self.work_item_ids.clone()
+    pub fn recognizers(&self) -> crate::vocabulary_reactor::Recognizers {
+        self.recognizers.clone()
     }
 
     pub(crate) fn selected(&self, capability: &str) -> Option<&str> {
@@ -617,6 +655,9 @@ impl CapabilityRegistry {
                         source: Source::BuiltIn(b.entry),
                         features: built_in_features(b),
                         fields: built_in_fields(b),
+                        stages: built_in_stages(b),
+                        kinds: serde_json::Value::Array(Vec::new()),
+                        offered: true,
                         id_pattern: b.id_pattern.map(str::to_string),
                         icon: None,
                         config: Value::Object(Default::default()),
@@ -666,8 +707,9 @@ impl CapabilityRegistry {
         &self,
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
+        settings: &Settings,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
-        self.prepare_candidate(snapshot, config, None)
+        self.prepare_candidate(snapshot, config, None, settings)
     }
 
     /// Prepare declarations and selections using a host-staged external
@@ -677,8 +719,9 @@ impl CapabilityRegistry {
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
         external: Vec<Implementation>,
+        settings: &Settings,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
-        self.prepare_candidate(snapshot, config, Some(external))
+        self.prepare_candidate(snapshot, config, Some(external), settings)
     }
 
     fn prepare_candidate(
@@ -686,6 +729,7 @@ impl CapabilityRegistry {
         snapshot: &crate::extension::extension_catalog::CatalogSnapshot,
         config: &OxplowConfig,
         external: Option<Vec<Implementation>>,
+        settings: &Settings,
     ) -> Result<PreparedCapabilities, crate::vocabulary_reactor::VocabularyErrors> {
         let errors: crate::vocabulary_reactor::VocabularyErrors = snapshot
             .extensions()
@@ -746,7 +790,7 @@ impl CapabilityRegistry {
         if let Some(external) = external {
             candidate.external = external;
         }
-        candidate.declared = declared_by(snapshot.extensions());
+        candidate.declared = declared_by(snapshot.extensions(), settings);
         candidate.published_config = Some(Arc::new(config.clone()));
         candidate.revision = Arc::new(());
         let all = candidate.implementations();
@@ -756,7 +800,7 @@ impl CapabilityRegistry {
             base,
             candidate,
             active: Self::snapshot_from(&all, config),
-            work_item_ids: Self::work_item_ids_from(&all, config),
+            recognizers: Self::recognizers_from(&all, config),
             rows,
             resolved,
         })
@@ -861,9 +905,10 @@ impl CapabilityRegistry {
         } else {
             (spec.default.to_string(), ChosenBy::Default)
         };
+        // One a setting turned off isn't there to choose.
         if all
             .iter()
-            .any(|i| i.capability == capability && i.id == wanted)
+            .any(|i| i.offered && i.capability == capability && i.id == wanted)
         {
             return Resolved {
                 id: wanted,
@@ -893,10 +938,13 @@ impl CapabilityRegistry {
         let mut by_capability = std::collections::BTreeMap::new();
         for spec in capability::CAPABILITIES {
             if spec.many {
-                // Met while any implementation is declared; a feature while
-                // any of them has it.
-                let served: Vec<&Implementation> =
-                    all.iter().filter(|i| i.capability == spec.id).collect();
+                // Met while any implementation is declared and offered (one
+                // a setting turned off serves nothing); a feature while any
+                // of them has it.
+                let served: Vec<&Implementation> = all
+                    .iter()
+                    .filter(|i| i.offered && i.capability == spec.id)
+                    .collect();
                 if served.is_empty() {
                     continue;
                 }
@@ -952,11 +1000,29 @@ impl CapabilityRegistry {
         }
     }
 
-    /// The active work list's id recognizer under `config`: its id and
+    /// The active task tracker's id recognizer under `config`: its id and
     /// declared `id_pattern`, if it declares one (none doesn't).
-    pub fn work_item_ids(&self, config: &OxplowConfig) -> Option<(String, String)> {
+    /// What text names through the implementations in use under `config`.
+    pub fn recognizers(&self, config: &OxplowConfig) -> crate::vocabulary_reactor::Recognizers {
         let config = self.read_effective_config(config);
-        Self::work_item_ids_from(&self.implementations(), &config)
+        Self::recognizers_from(&self.implementations(), &config)
+    }
+
+    fn recognizers_from(
+        all: &[Implementation],
+        config: &OxplowConfig,
+    ) -> crate::vocabulary_reactor::Recognizers {
+        let mut knowledge_stores: Vec<String> = all
+            .iter()
+            .filter(|i| i.offered && i.capability == crate::knowledge::CAPABILITY)
+            .map(|i| i.id.clone())
+            .collect();
+        knowledge_stores.sort();
+        knowledge_stores.dedup();
+        crate::vocabulary_reactor::Recognizers {
+            task_ids: Self::task_ids_from(all, config),
+            knowledge_stores,
+        }
     }
 
     /// The config the last generation published; before the first one
@@ -970,14 +1036,11 @@ impl CapabilityRegistry {
             .unwrap_or_else(|| Arc::new(fallback.clone()))
     }
 
-    fn work_item_ids_from(
-        all: &[Implementation],
-        config: &OxplowConfig,
-    ) -> Option<(String, String)> {
-        let id = Self::resolve_from(all, config, "work_items").id;
+    fn task_ids_from(all: &[Implementation], config: &OxplowConfig) -> Option<(String, String)> {
+        let id = Self::resolve_from(all, config, "task_tracker").id;
         let pattern = all
             .iter()
-            .find(|i| i.capability == "work_items" && i.id == id)?
+            .find(|i| i.capability == "task_tracker" && i.id == id)?
             .id_pattern
             .clone()?;
         Some((id, pattern))
@@ -1007,7 +1070,7 @@ impl CapabilityRegistry {
     }
 
     /// [`Self::publish`] at construction, before there's a runtime: so the
-    /// first read of `v_capability_provider` (and of `v_work_item`, which
+    /// first read of `v_capability_provider` (and of `v_task`, which
     /// shows the active list's items) sees what's active.
     pub fn publish_now(
         &self,
@@ -1037,9 +1100,12 @@ impl CapabilityRegistry {
         for spec in capability::CAPABILITIES {
             let resolved = Self::resolve_from(all, config, spec.id);
             for i in all.iter().filter(|i| i.capability == spec.id) {
-                // Many serve at once: every declared one is active.
-                let active = spec.many || i.id == resolved.id;
-                let chosen_by = if spec.many {
+                // Many serve at once: every declared one is active — but one
+                // a setting turned off (`when:`) is listed, off, saying so.
+                let active = i.offered && (spec.many || i.id == resolved.id);
+                let chosen_by = if !i.offered {
+                    Some("setting".to_string())
+                } else if spec.many {
                     Some("declared".to_string())
                 } else {
                     active.then(|| resolved.chosen_by.as_str().to_string())
@@ -1058,6 +1124,8 @@ impl CapabilityRegistry {
                     choosable: spec.choosable,
                     optional: spec.optional,
                     fields: i.fields.clone(),
+                    stages: i.stages.clone(),
+                    kinds: i.kinds(),
                     id_pattern: i.id_pattern.clone(),
                     description: i.description.clone(),
                 });
@@ -1081,6 +1149,8 @@ impl CapabilityRegistry {
                         choosable: spec.choosable,
                         optional: spec.optional,
                         fields: Value::Array(Vec::new()),
+                        stages: Value::Array(Vec::new()),
+                        kinds: Value::Array(Vec::new()),
                         id_pattern: None,
                         description: None,
                     });
@@ -1136,36 +1206,104 @@ fn switches(before: &[CapabilityProvider], now: &[(&str, Resolved)]) -> Vec<Capa
         .collect()
 }
 
-/// The implementations `extensions` declare, as the registry holds them.
-pub fn declared_by(extensions: &[crate::extension::extensions::Extension]) -> Vec<Implementation> {
+/// Each namespace's effective configuration, for the implementations a
+/// setting offers (`when:`): [`offering_implementations`]. One missing
+/// offers nothing (it fails closed, as every read of a setting does).
+pub type Settings = std::collections::BTreeMap<String, Value>;
+
+/// The implementations `extensions` declare, as the registry holds them,
+/// each offered as `settings` say.
+pub fn declared_by(
+    extensions: &[crate::extension::extensions::Extension],
+    settings: &Settings,
+) -> Vec<Implementation> {
     extensions
         .iter()
         .filter(|e| e.enabled)
         .flat_map(|e| {
             e.implementations.iter().filter_map(|d| {
-                if let Some(kind) = &d.provider {
-                    return provider_implementation(e, d, kind);
-                }
-                if let Some(script) = &d.script {
-                    return Some(scripted_implementation(e, d, script));
-                }
-                let b = built_in(d.entry.as_deref()?)?;
-                Some(Implementation {
-                    capability: d.capability.clone(),
-                    id: d.id.clone(),
-                    title: d.title.clone().unwrap_or_else(|| b.title.to_string()),
-                    extension: Some(e.name.clone()),
-                    source: Source::BuiltIn(b.entry),
-                    features: built_in_features(b),
-                    fields: built_in_fields(b),
-                    id_pattern: b.id_pattern.map(str::to_string),
-                    icon: d.icon.clone(),
-                    config: d.config.clone(),
-                    description: d.description.clone(),
+                let offered = d.when.as_ref().is_none_or(|when| {
+                    settings
+                        .get(&e.namespace)
+                        .is_some_and(|values| when.holds(values))
+                });
+                declared(e, d).map(|mut i| {
+                    i.offered = offered;
+                    i
                 })
             })
         })
         .collect()
+}
+
+/// What `d` declares, offered.
+fn declared(
+    e: &crate::extension::extensions::Extension,
+    d: &crate::extension::extensions::implementations::ImplementationDecl,
+) -> Option<Implementation> {
+    if let Some(kind) = &d.provider {
+        return provider_implementation(e, d, kind);
+    }
+    if let Some(script) = &d.script {
+        return Some(script_implementation(e, d, script));
+    }
+    let b = built_in(d.entry.as_deref()?)?;
+    Some(Implementation {
+        capability: d.capability.clone(),
+        id: d.id.clone(),
+        title: d.title.clone().unwrap_or_else(|| b.title.to_string()),
+        extension: Some(e.name.clone()),
+        source: Source::BuiltIn(b.entry),
+        features: built_in_features(b),
+        fields: built_in_fields(b),
+        stages: built_in_stages(b),
+        kinds: serde_json::Value::Array(Vec::new()),
+        offered: true,
+        id_pattern: b.id_pattern.map(str::to_string),
+        icon: d.icon.clone(),
+        config: d.config.clone(),
+        description: d.description.clone(),
+    })
+}
+
+/// A script implementation, as the registry holds it: what it declares of
+/// itself — its features, a task tracker's fields, stages and id pattern —
+/// as an external provider's instance row says it.
+fn script_implementation(
+    e: &crate::extension::extensions::Extension,
+    d: &crate::extension::extensions::implementations::ImplementationDecl,
+    script: &crate::extension::extensions::implementations::ScriptImplementation,
+) -> Implementation {
+    let features = script
+        .declared
+        .capabilities
+        .iter()
+        .find(|c| c.capability == d.capability)
+        .map(|c| c.features.clone())
+        .filter(|f| !f.is_null())
+        .unwrap_or_else(|| serde_json::json!({}));
+    Implementation {
+        capability: d.capability.clone(),
+        id: d.id.clone(),
+        title: d.title.clone().unwrap_or_else(|| d.id.clone()),
+        extension: Some(e.name.clone()),
+        source: Source::Script,
+        features,
+        fields: serde_json::to_value(&script.spec.fields).unwrap_or_default(),
+        stages: serde_json::to_value(&script.spec.stages).unwrap_or_default(),
+        kinds: script
+            .declared
+            .capabilities
+            .iter()
+            .find(|c| c.capability == d.capability)
+            .and_then(|c| c.data.get("kinds").cloned())
+            .unwrap_or_default(),
+        offered: true,
+        id_pattern: script.spec.id_pattern.clone(),
+        icon: d.icon.clone(),
+        config: d.config.clone(),
+        description: d.description.clone(),
+    }
 }
 
 /// An AI provider, as the registry holds it: the Rust kind it is. Its one
@@ -1184,6 +1322,9 @@ fn provider_implementation(
         source: Source::ProviderKind(kind.name),
         features: serde_json::json!({ "decide_native": kind.decides_natively }),
         fields: serde_json::Value::Array(Vec::new()),
+        stages: serde_json::Value::Array(Vec::new()),
+        kinds: serde_json::Value::Array(Vec::new()),
+        offered: true,
         id_pattern: None,
         icon: d.icon.clone(),
         config: d.config.clone(),
@@ -1191,44 +1332,128 @@ fn provider_implementation(
     })
 }
 
-/// An implementation written as a script (an effort policy), as the
-/// registry holds it; it declares no features.
-fn scripted_implementation(
-    e: &crate::extension::extensions::Extension,
-    d: &crate::extension::extensions::implementations::ImplementationDecl,
-    script: &str,
-) -> Implementation {
-    Implementation {
-        capability: d.capability.clone(),
-        id: d.id.clone(),
-        title: d.title.clone().unwrap_or_else(|| d.id.clone()),
-        extension: Some(e.name.clone()),
-        source: Source::Script {
-            entry: d.entry.clone().unwrap_or_default(),
-            tree: e.path.clone(),
-            script: script.to_string(),
-            needs: d.needs.clone(),
-        },
-        features: serde_json::json!({}),
-        fields: serde_json::Value::Array(Vec::new()),
-        id_pattern: None,
-        icon: d.icon.clone(),
-        config: d.config.clone(),
-        description: d.description.clone(),
-    }
-}
-
 /// Every skill and slash command the agent gets now: core's, and each
 /// extension's that's offered (one with skills declares `agent`: it doesn't
 /// load otherwise) — what it needs is active, and,
-/// when an implementation lists it, that implementation is the active one.
-/// A name another extension already took is left out (logged).
-pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
+/// when an implementation lists it, that implementation is the active one,
+/// and, when a setting offers it (`when:`), the extension's effective
+/// setting is one of its values. A name another extension already took is
+/// left out (logged).
+pub async fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentText {
     let project_dir = svc.worktrees.project_dir();
     let extensions = svc.extension_catalog.get(project_dir).to_vec();
     let config = crate::config_service::read_config(&svc.config);
-    offered_text(&svc.capabilities, &config, &extensions, |path, file| {
-        crate::extension::extensions::read_extension_file(project_dir, path, file)
+    let settings = offering_settings(svc, &extensions).await;
+    offered_text(
+        &svc.capabilities,
+        &config,
+        &extensions,
+        &settings,
+        |path, file| crate::extension::extensions::read_extension_file(project_dir, path, file),
+    )
+}
+
+/// The effective configuration of each namespace among `extensions` with an
+/// implementation a setting offers (`when:`), as stored now: what one
+/// publication's preparation reads once, so every reader of the declared
+/// implementations ([`declared_by`]) sees the same answer. One that can't be
+/// read is left out, so what it offers isn't (it fails closed).
+pub(crate) async fn offering_implementations(
+    svc: &crate::Services,
+    extensions: &[crate::extension::extensions::Extension],
+) -> Settings {
+    let extensions = extensions.to_vec();
+    svc.db
+        .read(move |conn| Ok(offering_implementations_tx(conn, &extensions)))
+        .await
+        .unwrap_or_default()
+}
+
+/// [`offering_implementations`] in the caller's transaction: what the
+/// publication checks, after it commits, against what it was prepared with.
+pub(crate) fn offering_implementations_tx(
+    conn: &rusqlite::Connection,
+    extensions: &[crate::extension::extensions::Extension],
+) -> Settings {
+    let mut out = Settings::new();
+    for e in extensions
+        .iter()
+        .filter(|e| e.enabled && e.implementations.iter().any(|i| i.when.is_some()))
+    {
+        let Some(declaration) = &e.configuration else {
+            continue;
+        };
+        if out.contains_key(&e.namespace) {
+            continue;
+        }
+        match crate::extension::extension_configuration::effective_values(
+            conn,
+            &e.namespace,
+            declaration,
+        ) {
+            Ok(values) => {
+                out.insert(e.namespace.clone(), values);
+            }
+            Err(error) => {
+                let namespace = &e.namespace;
+                tracing::warn!(%namespace, %error, "its settings can't be read; the implementations they offer are off");
+            }
+        }
+    }
+    out
+}
+
+/// The effective configuration of each namespace among `extensions` with a
+/// skill or an agent context a setting offers (`when:`), as stored now. One
+/// that can't be read (a layer at an old schema version, say) is left out,
+/// so what its settings offer isn't: it fails closed, as every read of it
+/// does.
+pub(crate) async fn offering_settings(
+    svc: &crate::Services,
+    extensions: &[crate::extension::extensions::Extension],
+) -> std::collections::BTreeMap<String, Value> {
+    let mut wanted: Vec<(
+        String,
+        crate::extension::extensions::config_schema::ConfigurationFile,
+    )> = Vec::new();
+    for ext in extensions.iter().filter(|e| e.enabled) {
+        if !(ext.skills.iter().any(|s| s.when.is_some())
+            || ext.contexts.iter().any(|c| c.when.is_some()))
+            || wanted.iter().any(|(ns, _)| ns == &ext.namespace)
+        {
+            continue;
+        }
+        if let Some(declaration) = &ext.configuration {
+            wanted.push((ext.namespace.clone(), declaration.clone()));
+        }
+    }
+    if wanted.is_empty() {
+        return Default::default();
+    }
+    let read = svc
+        .db
+        .read(move |conn| {
+            Ok(wanted
+                .into_iter()
+                .filter_map(|(namespace, declaration)| {
+                    match crate::extension::extension_configuration::effective_values(
+                        conn,
+                        &namespace,
+                        &declaration,
+                    ) {
+                        Ok(values) => Some((namespace, values)),
+                        Err(error) => {
+                            tracing::warn!(%namespace, %error, "its settings can't be read; the skills they offer are left out");
+                            None
+                        }
+                    }
+                })
+                .collect())
+        })
+        .await;
+    read.unwrap_or_else(|error| {
+        tracing::warn!(%error, "reading the settings that offer skills failed");
+        Default::default()
     })
 }
 
@@ -1240,7 +1465,7 @@ pub fn agent_text(svc: &crate::Services) -> oxplow_domain::agent::text::AgentTex
 pub async fn refresh_agent_text(svc: &crate::Services) {
     // The offered capabilities and the extensions' files are read from one
     // generation; an unavailable one is refreshed by the next publication.
-    let Ok(text) = svc.sql.read_generation(async { agent_text(svc) }).await else {
+    let Ok(text) = svc.sql.read_generation(agent_text(svc)).await else {
         return;
     };
     let project_dir = &svc.layout.project_dir;
@@ -1267,7 +1492,7 @@ pub async fn refresh_agent_text(svc: &crate::Services) {
 }
 
 /// On each `capability.switched`: [`refresh_agent_text`], and the
-/// vocabulary rebuilt (it reads the active work list's ids).
+/// vocabulary rebuilt (it reads the active task tracker's ids).
 pub struct AgentTextRefresh {
     services: std::sync::Weak<crate::Services>,
 }
@@ -1299,10 +1524,13 @@ impl crate::event_pump::AsyncEventConsumer for AgentTextRefresh {
 }
 
 /// [`agent_text`] over `extensions`, reading each file with `read`.
+/// `settings` is the effective configuration of each namespace, by namespace:
+/// a skill with `when:` is offered only while its namespace's holds it.
 pub fn offered_text(
     registry: &CapabilityRegistry,
     config: &OxplowConfig,
     extensions: &[crate::extension::extensions::Extension],
+    settings: &std::collections::BTreeMap<String, Value>,
     // `(extension's path, file)`: a file of a skill, read through its
     // extension's folder.
     read: impl Fn(&str, &str) -> Option<String>,
@@ -1322,7 +1550,12 @@ pub fn offered_text(
                         .get(&d.capability, &d.id)
                         .is_some_and(|i| i.extension.as_deref() == Some(ext.name.as_str()))
             });
-            if !owner_active || !active.unmet(&skill.needs).is_empty() {
+            let set = skill.when.as_ref().is_none_or(|when| {
+                settings
+                    .get(&ext.namespace)
+                    .is_some_and(|values| when.holds(values))
+            });
+            if !owner_active || !set || !active.unmet(&skill.needs).is_empty() {
                 continue;
             }
             if text.names(&skill.name) {
@@ -1359,6 +1592,9 @@ mod tests {
             source: Source::BuiltIn(entry),
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
+            stages: serde_json::Value::Array(Vec::new()),
+            kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
@@ -1370,9 +1606,8 @@ mod tests {
         let r = CapabilityRegistry::new(Vec::new(), VocabularyHandle::core());
         if declared {
             r.set_declared(vec![
-                builtin("work_items", "oxplow", "oxplow:tasks"),
-                builtin("effort_policy", "oxplow", "oxplow:commit-or-switch"),
-                builtin("knowledge", "oxplow", "oxplow:wiki"),
+                builtin("task_tracker", "oxtask", "oxplow:oxtask"),
+                builtin("knowledge", "oxwiki", "oxplow:oxwiki"),
             ]);
         }
         r
@@ -1396,23 +1631,23 @@ mod tests {
     #[test]
     fn a_choice_is_the_persons_then_the_projects_then_the_default() {
         let r = registry(true);
-        let res = |c: &OxplowConfig| r.resolve(c, "effort_policy");
+        let res = |c: &OxplowConfig| r.resolve(c, "task_tracker");
         assert_eq!(
             res(&config(&[], &[])),
             Resolved {
-                id: "oxplow".into(),
+                id: "oxtask".into(),
                 chosen_by: ChosenBy::Default,
                 wanted: None
             }
         );
         assert_eq!(
-            res(&config(&[("effort_policy", "none")], &[])).chosen_by,
+            res(&config(&[("task_tracker", "none")], &[])).chosen_by,
             ChosenBy::Project
         );
-        let both = config(&[("effort_policy", "none")], &[("effort_policy", "oxplow")]);
+        let both = config(&[("task_tracker", "none")], &[("task_tracker", "oxtask")]);
         assert_eq!(
             (res(&both).id.as_str(), res(&both).chosen_by),
-            ("oxplow", ChosenBy::Personal)
+            ("oxtask", ChosenBy::Personal)
         );
     }
 
@@ -1423,7 +1658,7 @@ mod tests {
     #[test]
     fn an_unavailable_choice_falls_back() {
         let r = registry(true);
-        let gone = r.resolve(&config(&[("work_items", "issues")], &[]), "work_items");
+        let gone = r.resolve(&config(&[("task_tracker", "issues")], &[]), "task_tracker");
         assert_eq!(
             gone,
             Resolved {
@@ -1434,13 +1669,9 @@ mod tests {
         );
         let disabled = registry(false);
         let none = config(&[], &[]);
-        assert_eq!(disabled.active(&none, "work_items"), NONE);
-        assert_eq!(disabled.active(&none, "effort_policy"), NONE);
-        // The wiki is bundled's: disabled, knowledge is none.
-        assert_eq!(disabled.active(&none, "knowledge"), NONE);
-        assert_eq!(r.active(&none, "knowledge"), "oxplow");
+        assert_eq!(disabled.active(&none, "task_tracker"), NONE);
         assert_eq!(
-            r.active(&config(&[("knowledge", "none")], &[]), "knowledge"),
+            r.active(&config(&[("task_tracker", "none")], &[]), "task_tracker"),
             NONE
         );
         let snapshots = disabled.resolve(&none, "snapshots");
@@ -1460,24 +1691,27 @@ mod tests {
     #[test]
     fn a_running_instance_is_available() {
         let r = registry(true);
-        let c = config(&[("work_items", "issues")], &[]);
+        let c = config(&[("task_tracker", "issues")], &[]);
         let issues = Implementation {
-            capability: "work_items".into(),
+            capability: "task_tracker".into(),
             id: "issues".into(),
             title: "Issues".into(),
             extension: Some("tracker".into()),
             source: Source::External,
             features: Value::Null,
             fields: serde_json::Value::Array(Vec::new()),
+            stages: serde_json::Value::Array(Vec::new()),
+            kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
             id_pattern: None,
             icon: None,
             config: Value::Object(Default::default()),
             description: None,
         };
         r.set_external(issues.clone(), true);
-        assert_eq!(r.active(&c, "work_items"), "issues");
+        assert_eq!(r.active(&c, "task_tracker"), "issues");
         r.set_external(issues, false);
-        assert_eq!(r.active(&c, "work_items"), NONE);
+        assert_eq!(r.active(&c, "task_tracker"), NONE);
     }
 
     /// A capability many implementations serve: every declared one is
@@ -1485,7 +1719,7 @@ mod tests {
     /// one, and nothing is ever a switch.
     #[tokio::test]
     async fn a_many_capability_marks_every_row_active_and_never_switches() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let c = config(&[], &[]);
         svc.capabilities.set_declared(vec![
@@ -1564,12 +1798,13 @@ mod tests {
         );
     }
 
-    /// With `oxplow-bundled` disabled, the defaults still run: the work
-    /// list, the effort policy and snapshots are `oxplow-foundation`'s
-    /// (core's own snapshots default is the active row); filing works.
+    /// With `oxplow-bundled` disabled, the defaults still run: snapshots
+    /// are `oxplow-foundation`'s (core's own snapshots default is the
+    /// active row). oxtask is bundled's, so the task tracker
+    /// resolves to none, and filing is a sink rather than a refusal.
     #[tokio::test]
     async fn disabling_the_bundled_extension_leaves_core_usable() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         svc.config.write().unwrap().extensions = Vec::new();
         std::fs::create_dir_all(svc.layout.project_dir.join(".oxplow")).unwrap();
@@ -1581,8 +1816,7 @@ mod tests {
         svc.extension_catalog.changed();
         crate::test_fixtures::activate_with_problems(svc).await;
         let config = crate::config_service::read_config(&svc.config);
-        assert_eq!(svc.capabilities.active(&config, "work_items"), "oxplow");
-        assert_eq!(svc.capabilities.active(&config, "effort_policy"), "oxplow");
+        assert_eq!(svc.capabilities.active(&config, "task_tracker"), "none");
         let snapshots = svc.capabilities.resolve(&config, "snapshots");
         assert_eq!(
             (snapshots.id.as_str(), snapshots.chosen_by),
@@ -1602,30 +1836,32 @@ mod tests {
             serde_json::to_value(&rows.rows).unwrap(),
             serde_json::json!([["hashes", 0, 1, "builtin"], ["oxplow", 1, 1, "builtin"]])
         );
-        svc.commands
+        let filed = svc
+            .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                crate::commands::work_item::CREATE,
+                crate::commands::task::CREATE,
                 serde_json::json!({ "title": "x" }),
                 false,
             )
             .await
-            .expect("the work list runs with bundled off");
+            .expect("filing is a sink with no task tracker, not a refusal");
+        assert_eq!(filed.result["tracked"], false, "{}", filed.result);
     }
 
     /// The rows say which is active and why, and a choice that isn't
     /// available is listed as such.
     #[tokio::test]
     async fn the_rows_say_what_is_active_and_why() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let c = config(&[("work_items", "issues")], &[("effort_policy", "none")]);
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let c = config(&[("task_tracker", "issues")], &[]);
         fx.svc.capabilities.publish(&c, &fx.svc.db).await.unwrap();
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT capability, provider, active, chosen_by, available FROM v_capability_provider
-                  WHERE capability IN ('work_items', 'effort_policy') ORDER BY capability, provider",
+                  WHERE capability IN ('task_tracker', 'knowledge') ORDER BY capability, provider",
                 vec![],
                 None,
             )
@@ -1634,11 +1870,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
             serde_json::json!([
-                ["effort_policy", "none", 1, "personal", 1],
-                ["effort_policy", "oxplow", 0, null, 1],
-                ["work_items", "issues", 0, null, 0],
-                ["work_items", "none", 1, "fallback", 1],
-                ["work_items", "oxplow", 0, null, 1],
+                ["knowledge", "oxwiki", 1, "declared", 1],
+                ["task_tracker", "issues", 0, null, 0],
+                ["task_tracker", "none", 1, "fallback", 1],
+                ["task_tracker", "oxtask", 0, null, 1],
             ])
         );
     }
@@ -1648,10 +1883,10 @@ mod tests {
     /// one.
     #[tokio::test]
     async fn a_change_of_the_active_one_is_logged() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let default = config(&[], &[]);
-        let off = config(&[("effort_policy", "none")], &[]);
+        let off = config(&[("task_tracker", "none")], &[]);
         // (Startup logged its own choices; only what follows is checked.)
         let startup = svc
             .db
@@ -1690,22 +1925,22 @@ mod tests {
         assert_eq!(
             switches,
             vec![serde_json::json!({
-                "capability": "effort_policy",
-                "from": "oxplow",
+                "capability": "task_tracker",
+                "from": "oxtask",
                 "to": "none",
                 "chosen_by": "project",
             })]
         );
     }
 
-    /// With no work list, the interface is a sink: every verb is offered
+    /// With no task tracker, the interface is a sink: every verb is offered
     /// and succeeds, keeping nothing — a create files nowhere, a change to an
     /// item (one of another list's, a loose id) changes nothing — and the
     /// interface reads empty.
     #[tokio::test]
-    async fn with_no_work_list_the_interface_is_a_sink() {
+    async fn with_no_task_tracker_the_interface_is_a_sink() {
         use serde_json::json;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let agent = oxplow_domain::Actor::Agent {
             session_id: None,
@@ -1716,7 +1951,7 @@ mod tests {
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), NONE.into());
+            .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         let offered: Vec<String> = svc
             .commands
@@ -1725,12 +1960,12 @@ mod tests {
             .map(|c| c.id)
             .collect();
         for name in [
-            "oxplow.work_item.create",
-            "oxplow.work_item.transition",
-            "oxplow.work_item.comment",
-            "oxplow.work_item.link",
-            "oxplow.work_item.reorder",
-            "oxplow.work_item.move",
+            "oxplow.task.create",
+            "oxplow.task.transition",
+            "oxplow.task.comment",
+            "oxplow.task.link",
+            "oxplow.task.reorder",
+            "oxplow.task.assign",
         ] {
             assert!(offered.iter().any(|n| n == name), "{name} offered");
         }
@@ -1739,28 +1974,28 @@ mod tests {
             let agent = agent.clone();
             async move { svc.commands.run(&agent, name, input, false).await.unwrap() }
         };
-        let task = oxplow_tasks::work_item_ref(fx.task);
+        let task = oxplow_oxtask::task_ref(fx.task);
         for (name, input) in [
             (
-                crate::commands::work_item::CREATE,
+                crate::commands::task::CREATE,
                 json!({ "title": "filed nowhere" }),
             ),
             (
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": task, "to": "done" }),
             ),
             (
-                crate::commands::work_item::NAME,
+                crate::commands::task::NAME,
                 json!({ "uri": fx.task.to_string(), "to": "done" }),
             ),
             (
-                crate::commands::work_item::COMMENT,
+                crate::commands::task::COMMENT,
                 json!({ "uri": task, "body": "kept nowhere" }),
             ),
-            (crate::commands::work_item::REORDER, json!({ "uri": task })),
+            (crate::commands::task::REORDER, json!({ "uri": task })),
             (
-                crate::commands::work_item::MOVE,
-                json!({ "uri": task, "to": "backlog" }),
+                crate::commands::task::ASSIGN,
+                json!({ "uri": task, "to": null }),
             ),
         ] {
             assert_eq!(
@@ -1769,34 +2004,37 @@ mod tests {
                 "{name}"
             );
         }
-        use oxplow_tasks::TaskStore as _;
+        use oxplow_oxtask::OxtaskStore as _;
         let kept = svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(
             kept.status,
-            oxplow_tasks::TaskStatus::InProgress,
+            oxplow_oxtask::OxtaskStatus::InProgress,
             "oxplow's task untouched"
         );
         let count = svc
             .sql
-            .query_sql("SELECT count(*) FROM v_work_item", vec![], None)
+            .query_sql("SELECT count(*) FROM v_task", vec![], None)
             .await
             .unwrap();
         assert_eq!(serde_json::to_value(count.rows).unwrap(), json!([[0]]));
     }
 
-    /// A feature the active work list doesn't declare hides what needs it.
+    /// A feature the active task tracker doesn't declare hides what needs it.
     #[test]
     fn a_missing_feature_hides_what_needs_it() {
         let r = registry(true);
         r.set_external(
             Implementation {
-                capability: "work_items".into(),
+                capability: "task_tracker".into(),
                 id: "plain".into(),
                 title: "plain".into(),
                 extension: None,
                 source: Source::External,
-                features: serde_json::json!({ "comments": false, "links": true, "ordering": true }),
+                features: serde_json::json!({ "comments": false, "links": true, "delete": true }),
                 fields: serde_json::Value::Array(Vec::new()),
+                stages: serde_json::Value::Array(Vec::new()),
+                kinds: serde_json::Value::Array(Vec::new()),
+                offered: true,
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
@@ -1804,20 +2042,19 @@ mod tests {
             },
             true,
         );
-        let plain = r.snapshot(&config(&[("work_items", "plain")], &[]));
+        let plain = r.snapshot(&config(&[("task_tracker", "plain")], &[]));
         let needs = |n: &str| vec![n.to_string()];
-        assert_eq!(plain.command_refusal("x", &needs("work_items.links")), None);
-        assert!(plain
-            .command_refusal("x", &needs("work_items.comments"))
-            .is_some());
-        // Ordering and lists are features like the rest.
         assert_eq!(
-            plain.command_refusal("x", &needs("work_items.ordering")),
+            plain.command_refusal("x", &needs("task_tracker.links")),
             None
         );
         assert!(plain
-            .command_refusal("x", &needs("work_items.lists"))
+            .command_refusal("x", &needs("task_tracker.comments"))
             .is_some());
+        assert_eq!(
+            plain.command_refusal("x", &needs("task_tracker.delete")),
+            None
+        );
     }
 
     /// A provider instance's own commands are offered only while it's the
@@ -1827,13 +2064,16 @@ mod tests {
         let r = registry(true);
         r.set_external(
             Implementation {
-                capability: "work_items".into(),
+                capability: "task_tracker".into(),
                 id: "fake".into(),
                 title: "Fake".into(),
                 extension: Some("tracker".into()),
                 source: Source::External,
                 features: Value::Null,
                 fields: serde_json::Value::Array(Vec::new()),
+                stages: serde_json::Value::Array(Vec::new()),
+                kinds: serde_json::Value::Array(Vec::new()),
+                offered: true,
                 id_pattern: None,
                 icon: None,
                 config: serde_json::json!({}),
@@ -1845,17 +2085,17 @@ mod tests {
         assert!(default
             .command_refusal("fake.sync_now", &[])
             .is_some_and(|m| m.contains("Fake's")));
-        let fake = r.snapshot(&config(&[("work_items", "fake")], &[]));
+        let fake = r.snapshot(&config(&[("task_tracker", "fake")], &[]));
         assert_eq!(fake.command_refusal("fake.sync_now", &[]), None);
     }
 
     /// A runtime already on disk gets what's offered (boot refreshes it
     /// for an agent that outlived an upgrade, tsk376): core's skills, the
-    /// work-items skill (any list, none included), and oxplow's tasks' own
-    /// `/work-next` only while they're the list.
+    /// task tracker skill and oxtask's `/next-task` only while a task
+    /// tracker is active (oxtask for `/next-task`).
     #[tokio::test]
     async fn the_runtimes_skills_follow_what_is_offered() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let plugin = svc.layout.project_dir.join(".oxplow/runtime/claude-plugin");
         let (skills, commands) = (plugin.join("skills"), plugin.join("commands"));
@@ -1883,31 +2123,34 @@ mod tests {
                 "{skill:?}"
             );
         }
-        assert!(skills.join("work-items/SKILL.md").is_file());
-        assert!(commands.join("work-next.md").is_file());
+        assert!(skills.join("tasks/SKILL.md").is_file());
+        assert!(commands.join("next-task.md").is_file());
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), NONE.into());
+            .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         refresh_agent_text(svc).await;
-        assert!(skills.join("work-items/SKILL.md").is_file());
-        assert!(!commands.join("work-next.md").exists());
+        assert!(
+            !skills.join("tasks/SKILL.md").exists(),
+            "no tracker, no skill"
+        );
+        assert!(!commands.join("next-task.md").exists());
         assert!(commands.join("configure.md").is_file());
     }
 
     /// An implementation's own fields are declared, and published with its
-    /// row: oxplow's tasks have a priority, none has none.
+    /// row: oxtask have a priority, none has none.
     #[tokio::test]
     async fn an_implementations_fields_are_published() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT provider, fields FROM v_capability_provider
-                  WHERE capability = 'work_items' ORDER BY provider",
+                  WHERE capability = 'task_tracker' ORDER BY provider",
                 vec![],
                 None,
             )
@@ -1923,7 +2166,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(
-            fields("oxplow"),
+            fields("oxtask"),
             serde_json::json!([
                 {
                     "name": "priority",
@@ -1944,18 +2187,18 @@ mod tests {
         assert_eq!(fields(NONE), serde_json::json!([]));
     }
 
-    /// Each work list's id pattern is published beside it, so a screen
+    /// Each task tracker's id pattern is published beside it, so a screen
     /// recognizes its ids in text as core's vocabulary does: oxplow's
     /// `tsk<n>`, nothing for none.
     #[tokio::test]
-    async fn a_work_lists_id_pattern_is_published() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+    async fn a_task_trackers_id_pattern_is_published() {
+        let fx = crate::test_fixtures::services_with_thread().await;
         let out = fx
             .svc
             .sql
             .query_sql(
                 "SELECT provider, id_pattern FROM v_capability_provider
-                  WHERE capability = 'work_items' ORDER BY provider",
+                  WHERE capability = 'task_tracker' ORDER BY provider",
                 vec![],
                 None,
             )
@@ -1963,35 +2206,35 @@ mod tests {
             .unwrap();
         assert_eq!(
             serde_json::to_value(&out.rows).unwrap(),
-            serde_json::json!([[NONE, null], ["oxplow", r"tsk\d+"]])
+            serde_json::json!([[NONE, null], ["oxtask", r"tsk\d+"]])
         );
     }
 
-    /// The vocabulary reads the active work list's own ids in text, as it
-    /// declares them: `tsk42` with oxplow's tasks, nothing with none.
+    /// The vocabulary reads the active task tracker's own ids in text, as it
+    /// declares them: `tsk42` with oxtask, nothing with none.
     #[tokio::test]
     async fn the_vocabulary_reads_the_active_lists_ids() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let found = || {
             oxplow_domain::uri::extract(
                 &svc.vocabulary.current().resources,
                 "see tsk42 and [[tsk7]]",
             )
-            .work_items
+            .tasks
         };
         assert_eq!(
             found(),
             vec![
-                oxplow_domain::uri::build::work_item_uri("oxplow", "tsk42"),
-                oxplow_domain::uri::build::work_item_uri("oxplow", "tsk7"),
+                oxplow_domain::uri::build::task_uri("oxtask", "tsk42"),
+                oxplow_domain::uri::build::task_uri("oxtask", "tsk7"),
             ]
         );
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), NONE.into());
+            .insert("task_tracker".into(), NONE.into());
         crate::test_fixtures::activate_with_problems(svc).await;
         crate::test_fixtures::activate_with_problems(svc).await;
         assert!(found().is_empty(), "{:?}", found());
@@ -2004,7 +2247,7 @@ mod contribution_tests {
     /// `v_contribution`, a disabled one's taken out.
     #[tokio::test]
     async fn a_refresh_publishes_the_contributions() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
         std::fs::create_dir_all(dir.join("skills")).unwrap();
         std::fs::write(
@@ -2105,5 +2348,207 @@ mod contribution_tests {
             checked += 1;
         }
         assert_eq!(checked, 3);
+    }
+}
+
+#[cfg(test)]
+mod setting_tests {
+    use oxplow_db::extension_config_store::{ConfigNamespace, SqliteExtensionConfigStore};
+    use oxplow_domain::extension_state::Scope;
+    use oxplow_domain::Actor;
+    use serde_json::{json, Value};
+
+    use crate::test_fixtures::ThreadFixture;
+
+    /// `acme`: a pick-one `mode` (default `a`), a skill offered while it's
+    /// `a` and one while it's `b`, and its native settings write.
+    fn declare(fx: &ThreadFixture) {
+        let dir = fx.svc.layout.project_dir.join(".oxplow/extensions/acme");
+        std::fs::create_dir_all(dir.join("skills")).unwrap();
+        std::fs::write(
+            dir.join("extension.yaml"),
+            "manifest: 2
+name: acme
+intent:
+  purpose: p
+  examples: [{ name: a }]
+permissions: [agent.write]
+configuration:
+  version: 1
+  schema:
+    type: object
+    additionalProperties: false
+    properties:
+      mode: { type: string, enum: [a, b] }
+  defaults: { mode: a }
+skills:
+  - { name: on-a, file: skills/on-a.md, when: { config: /mode, in: [a] } }
+  - { name: on-b, file: skills/on-b.md, when: { config: /mode, in: [b] } }
+  - { name: always, file: skills/always.md }
+commands:
+  - name: config.write
+    summary: Replace configuration overrides.
+    scope: extension_config.write
+    op: compare_exchange
+",
+        )
+        .unwrap();
+        for name in ["on-a", "on-b", "always"] {
+            std::fs::write(
+                dir.join(format!("skills/{name}.md")),
+                format!("---\nname: {name}\ndescription: d\n---\nGo.\n"),
+            )
+            .unwrap();
+        }
+        fx.svc.extension_catalog.changed();
+    }
+
+    async fn offered(fx: &ThreadFixture) -> Vec<String> {
+        let mut names: Vec<String> = fx
+            .svc
+            .sql
+            .read_generation(super::agent_text(&fx.svc))
+            .await
+            .unwrap()
+            .skills
+            .iter()
+            .map(|s| s.name.clone())
+            .filter(|n| ["on-a", "on-b", "always"].contains(&n.as_str()))
+            .collect();
+        names.sort();
+        names
+    }
+
+    async fn store(fx: &ThreadFixture, scope: Scope, values: Value) {
+        SqliteExtensionConfigStore::new(fx.svc.db.clone())
+            .compare_exchange(
+                ConfigNamespace::new("acme".into(), scope).unwrap(),
+                None,
+                1,
+                values,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// A skill with `when:` is offered only while the extension's effective
+    /// setting is one of its values: the default, then a project layer over
+    /// it, then a personal layer over the project's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_skill_is_offered_by_the_effective_setting() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        declare(&fx);
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert_eq!(offered(&fx).await, ["always", "on-a"], "the default is a");
+
+        store(&fx, Scope::Project, json!({ "mode": "b" })).await;
+        assert_eq!(offered(&fx).await, ["always", "on-b"], "the project's b");
+
+        store(&fx, Scope::Personal, json!({ "mode": "a" })).await;
+        assert_eq!(
+            offered(&fx).await,
+            ["always", "on-a"],
+            "the person's a over the project's b"
+        );
+    }
+
+    /// A settings write through the extension's own command republishes, and
+    /// the runtimes already on disk get the skills the new value offers: no
+    /// restart.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_settings_write_rewrites_the_agents_skills() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        declare(&fx);
+        let skills = fx
+            .svc
+            .layout
+            .project_dir
+            .join(".oxplow/runtime/claude-plugin/skills");
+        std::fs::create_dir_all(&skills).unwrap();
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        super::refresh_agent_text(&fx.svc).await;
+        assert!(skills.join("on-a/SKILL.md").is_file());
+        assert!(!skills.join("on-b").exists());
+
+        fx.svc.extension_activation.spawn(&fx.svc);
+        fx.svc
+            .commands
+            .run(
+                &Actor::Human,
+                "acme.config.write",
+                json!({ "schema_version": 1,
+                        "project": { "expected": null, "values": { "mode": "b" } } }),
+                false,
+            )
+            .await
+            .unwrap();
+        // What the event pump does when the write's `command.executed` arrives.
+        fx.svc
+            .extension_activation
+            .request_config_refresh(&fx.svc.db)
+            .await
+            .unwrap();
+        assert!(
+            crate::test_fixtures::until(std::time::Duration::from_secs(20), || async {
+                skills.join("on-b/SKILL.md").is_file()
+            })
+            .await,
+            "the write republished and rewrote the skills"
+        );
+        assert!(!skills.join("on-a").exists(), "on-a is no longer offered");
+    }
+
+    /// oxtask's skills follow the project's task workflow: by default the
+    /// agent tracks its work (`track-work`); when the person files tasks
+    /// the agent works them (`work-tasks`); with `custom` only the queue
+    /// (`next-task`), the project's own skill says the rest; `off` offers
+    /// none of them.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn oxtask_offers_the_skills_of_the_projects_task_workflow() {
+        let fx = crate::test_fixtures::services_developing_oxplow().await;
+        crate::extension::extension_deploy::deploy(&fx.svc, "oxplow-bundled", true)
+            .await
+            .expect("bundled deploys from its source");
+        crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        let offered = || async {
+            let text = fx
+                .svc
+                .sql
+                .read_generation(super::agent_text(&fx.svc))
+                .await
+                .unwrap();
+            let mut names: Vec<String> = text
+                .skills
+                .iter()
+                .chain(&text.commands)
+                .map(|s| s.name.clone())
+                .filter(|n| ["track-work", "work-tasks", "next-task"].contains(&n.as_str()))
+                .collect();
+            names.sort();
+            names
+        };
+        assert_eq!(offered().await, ["next-task", "track-work"], "the default");
+        let store = SqliteExtensionConfigStore::new(fx.svc.db.clone());
+        let mut expected = None;
+        for (workflow, skills) in [
+            ("person_files", &["next-task", "work-tasks"][..]),
+            ("custom", &["next-task"][..]),
+            ("off", &[][..]),
+        ] {
+            let values = json!({ "tasks": { "workflow": workflow } });
+            expected = Some(
+                store
+                    .compare_exchange(
+                        ConfigNamespace::new("oxplow".into(), Scope::Project).unwrap(),
+                        expected,
+                        2,
+                        values,
+                    )
+                    .await
+                    .unwrap()
+                    .stamp(),
+            );
+            assert_eq!(offered().await, skills, "{workflow}");
+        }
     }
 }

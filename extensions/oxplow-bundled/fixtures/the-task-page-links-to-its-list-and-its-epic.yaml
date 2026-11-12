@@ -1,0 +1,17 @@
+# "See also": a task links to the Work board of the thread it's
+# assigned to (the Task List at its stage when it's nobody's) and to its
+# parent epic.
+given:
+  - { command: oxplow.task.create, input: { title: The epic, assignee: thr1 }, bind: epic }
+  - { command: oxplow.task.create, input: { title: The child, assignee: thr1, parent_uri: $epic.uri }, bind: child }
+  - { command: oxplow.task.create, input: { title: Loose end }, bind: loose }
+when: { page: task-detail, params: { uri: $child.uri, thread_id: 1, stream_id: 1 } }
+expect:
+  see_also:
+    - { title: Work, uri: "oxplow:oxplow/page?page=work&thread_id=1" }
+    - { title: The epic, uri: $epic.uri }
+steps:
+  - params: { uri: $loose.uri }
+    expect:
+      see_also:
+        - { title: Task List, uri: "oxplow:oxplow/page?page=task-list#state=ready" }

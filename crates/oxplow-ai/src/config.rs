@@ -67,10 +67,10 @@ impl BuiltinRole {
     pub fn description(self) -> &'static str {
         match self {
             BuiltinRole::Main => {
-                "General reasoning: extracting structured answers, such as an effort's inferred \
+                "General reasoning: extracting structured answers, such as a change's inferred \
                  decisions"
             }
-            BuiltinRole::Summarize => "Summaries of sessions, efforts and changes",
+            BuiltinRole::Summarize => "Summaries of sessions and changes",
             BuiltinRole::Decide => "Typed yes/no, choice and score questions (e.g. Jev)",
             BuiltinRole::Assistant => {
                 "The Assistant: questions and small tasks in its panel (needs tool calling and \

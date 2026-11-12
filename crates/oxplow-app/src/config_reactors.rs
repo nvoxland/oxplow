@@ -208,7 +208,7 @@ mod tests {
     /// the exclusion again.
     #[tokio::test]
     async fn a_generated_change_reaches_the_captures() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let agent = Actor::Agent {
             session_id: None,
@@ -252,14 +252,14 @@ mod tests {
     /// (`config.metrics` on `config.changed`), not the in-memory bus.
     #[tokio::test]
     async fn a_metrics_change_reseeds_the_catalog_through_the_pump() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         // The project's own extension defines the metric, off by default.
         let ext = svc.layout.project_dir.join(".oxplow/extensions/project");
         std::fs::create_dir_all(&ext).unwrap();
         std::fs::write(
             ext.join("extension.yaml"),
-            "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_work_item, where: \"state = 'todo'\", default: off }\n",
+            "manifest: 2\nname: project\nintent:\n  purpose: test\nmetrics:\n  - { key: work.ready_now, entity: v_task, where: \"state = 'todo'\", default: off }\n",
         )
         .unwrap();
         crate::test_fixtures::activate(&f.svc).await;
@@ -297,7 +297,7 @@ mod tests {
     /// extensions through the catalog's change signal.
     #[tokio::test]
     async fn an_extensions_change_signals_the_catalog() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         crate::config_reactors::register(&svc_arc(&f));
         let mut changes = svc.extension_catalog.changes();
@@ -318,7 +318,7 @@ mod tests {
         assert!(changes.try_recv().is_ok());
     }
 
-    fn svc_arc(f: &crate::test_fixtures::EffortFixture) -> Arc<crate::Services> {
+    fn svc_arc(f: &crate::test_fixtures::ThreadFixture) -> Arc<crate::Services> {
         f.svc.clone()
     }
 }

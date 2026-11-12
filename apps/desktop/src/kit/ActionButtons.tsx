@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useId } from "react";
 
 import { useActionAnchor, useRunner } from "../commands/RunnerContext.js";
-import { ICONS } from "../icons.js";
+import { iconFor } from "../icons.js";
 import type { PageAction } from "./actions.js";
 import { InlineError } from "./InlineError.js";
 
@@ -27,7 +27,7 @@ function ActionButton({ action: a, buttonStyle }: { action: PageAction; buttonSt
   const anchor = a.anchor ?? `action/${local}/${a.id}`;
   const failure = useActionAnchor(anchor);
   const { run } = useRunner();
-  const Icon = a.icon ? ICONS[a.icon] : undefined;
+  const Icon = iconFor(a.icon);
   const label = a.busy ? `${a.label}…` : a.label;
   return (
     <>

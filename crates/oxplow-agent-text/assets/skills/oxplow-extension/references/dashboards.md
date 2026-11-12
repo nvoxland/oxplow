@@ -34,8 +34,8 @@ icon: layout-dashboard
 answers:
   - { question: "How is work going?" }
 loaders:
-  open:   { sql: "SELECT count(*) AS n FROM v_work_item WHERE state != 'done'" }
-  by_day: { sql: "SELECT date(created_at) AS day, count(*) AS n FROM v_work_item GROUP BY 1 ORDER BY 1" }
+  open:   { sql: "SELECT count(*) AS n FROM v_task WHERE state != 'done'" }
+  by_day: { sql: "SELECT date(created_at) AS day, count(*) AS n FROM v_task GROUP BY 1 ORDER BY 1" }
 view:
   grid:
     - { id: open, title: Open, viz: number, from: open, size: small }
@@ -122,6 +122,10 @@ for a page): it runs in a sandbox, so adapt it first:
 - Data comes from what oxplow feeds it (`component.data`, `onUpdate`), never
   from rows pasted into the file: pasted rows are a snapshot.
 - Colours from the theme (`applyTheme`, the kit's classes), not fixed hex.
+- Markdown (a description, a body): `component.renderMarkdown(element,
+  text, { inline: true })` — oxplow parses it as its own views do, links
+  to its pages open them by their titles; never parse it yourself or set
+  `innerHTML`.
 - A library: write TypeScript, import it, declare `build: { run: "<the
   project's install and build command>", output: dist, exclude:
   [node_modules] }` with `bundle: dist/<id>` (bundle to one classic script,

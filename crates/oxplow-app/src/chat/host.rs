@@ -11,6 +11,7 @@ use oxplow_domain::{AgentStatusState, HookKind, StreamId, ThreadId};
 use oxplow_runtime::policy::PolicyDecision;
 use tracing::warn;
 
+use oxplow_domain::agent::observe::Prompt;
 use oxplow_domain::agent::tool::ToolUse;
 use oxplow_domain::hook::TurnRun;
 
@@ -47,6 +48,20 @@ pub trait ChatHost: Send + Sync + 'static {
         None
     }
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str);
+    /// [`Self::turn_started`] for a turn the agent gave its own id.
+    async fn turn_started_as(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        prompt: &str,
+        _harness_turn: Option<&str>,
+    ) {
+        self.turn_started(thread, session_id, prompt).await;
+    }
+    /// The agent named the turn in flight (after it opened): keep its id.
+    async fn turn_identified(&self, _thread: &ThreadId, _session_id: &str, _harness_turn: &str) {}
+    /// A tool call began (its request): recorded open until it finishes.
+    async fn tool_started(&self, _thread: &ThreadId, _session_id: &str, _tool: &ToolUse) {}
     /// A tool call finished: record it. What it leaves for the agent
     /// (nudges) waits in the store for the next prompt's context.
     async fn tool_finished(
@@ -81,6 +96,7 @@ pub trait ChatHost: Send + Sync + 'static {
         change: &super::conn::SubagentChange,
         id: &str,
         kind: Option<&str>,
+        spawned_in: Option<&str>,
     );
     /// The agent put a plan to the person. Recorded; nothing waits on it.
     async fn plan_proposed(&self, thread: &ThreadId, session_id: &str, text: &str);
@@ -130,17 +146,18 @@ impl ServicesChatHost {
         HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
             agent_session_id: Some(self.session),
             session_id: Some(session_id.to_string()),
             payload_json: payload.to_string(),
-            prompt,
+            prompt: prompt.map(Prompt::from),
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         }
     }
 
@@ -237,16 +254,55 @@ impl ChatHost for ServicesChatHost {
     }
 
     async fn turn_started(&self, thread: &ThreadId, session_id: &str, prompt: &str) {
+        self.turn_started_as(thread, session_id, prompt, None).await;
+    }
+
+    async fn turn_started_as(
+        &self,
+        thread: &ThreadId,
+        session_id: &str,
+        prompt: &str,
+        harness_turn: Option<&str>,
+    ) {
         let Some(svc) = self.svc.upgrade() else {
             return;
         };
-        let env = self.envelope(
+        let mut env = self.envelope(
             HookKind::UserPromptSubmit,
             thread,
             session_id,
             serde_json::json!({ "prompt": prompt, "session_id": session_id }),
             Some(prompt.to_string()),
         );
+        env.harness_turn = harness_turn.map(str::to_string);
+        self.ingest(&svc, env).await;
+    }
+
+    async fn turn_identified(&self, thread: &ThreadId, _session_id: &str, harness_turn: &str) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        if let Err(err) = svc
+            .hook_ingest
+            .identify_turn(*thread, self.session, harness_turn.to_string())
+            .await
+        {
+            warn!(?err, "chat: naming the turn failed");
+        }
+    }
+
+    async fn tool_started(&self, thread: &ThreadId, session_id: &str, tool: &ToolUse) {
+        let Some(svc) = self.svc.upgrade() else {
+            return;
+        };
+        let mut env = self.envelope(
+            HookKind::PreToolUse,
+            thread,
+            session_id,
+            serde_json::json!({ "session_id": session_id }),
+            None,
+        );
+        env.tool = Some(tool.clone());
         self.ingest(&svc, env).await;
     }
 
@@ -284,10 +340,7 @@ impl ChatHost for ServicesChatHost {
         };
         // The turn's own counts ride its `agent.turn.ended`; the
         // `token_usage.turns` reactor records them.
-        let mut body = serde_json::json!({
-            "session_id": session_id,
-            crate::hook_ingest::LAST_ASSISTANT_MESSAGE: answer,
-        });
+        let mut body = serde_json::json!({ "session_id": session_id });
         if let Some(t) = tokens {
             body[crate::hook_ingest::TURN_USAGE_KEY] = serde_json::json!({
                 "input": t.input,
@@ -298,6 +351,7 @@ impl ChatHost for ServicesChatHost {
         }
         let mut env = self.envelope(HookKind::Stop, thread, session_id, body, None);
         env.turn_run = run.cloned();
+        env.reading.final_message = answer.map(str::to_string);
         if let Err(err) = svc.hook_ingest.ingest(env).await {
             warn!(?err, "chat: hook ingest failed");
         }
@@ -323,6 +377,7 @@ impl ChatHost for ServicesChatHost {
         change: &super::conn::SubagentChange,
         id: &str,
         kind: Option<&str>,
+        spawned_in: Option<&str>,
     ) {
         use super::conn::SubagentChange;
         let Some(svc) = self.svc.upgrade() else {
@@ -332,15 +387,14 @@ impl ChatHost for ServicesChatHost {
             SubagentChange::Started => (HookKind::SubagentStart, None),
             SubagentChange::Finished(said) => (HookKind::SubagentStop, said.as_deref()),
         };
-        let mut body = serde_json::json!({ "session_id": session_id, "agent_id": id });
-        if let Some(said) = said {
-            body[crate::hook_ingest::LAST_ASSISTANT_MESSAGE] = serde_json::json!(said);
-        }
+        let body = serde_json::json!({ "session_id": session_id, "agent_id": id });
         let mut env = self.envelope(hook, thread, session_id, body, None);
+        env.reading.final_message = said.map(str::to_string);
         env.subagent = Some(oxplow_domain::agent::tool::Subagent {
             id: id.to_string(),
             kind: kind.map(str::to_string),
         });
+        env.harness_turn = spawned_in.map(str::to_string);
         self.ingest(&svc, env).await;
     }
 
@@ -445,6 +499,7 @@ impl ChatHost for ServicesChatHost {
         let env = HookEnvelope {
             session_title: None,
             turn_run: None,
+            reading: Default::default(),
             kind: HookKind::Interrupt,
             thread_id: Some(*thread),
             stream_id: self.stream_id,
@@ -455,7 +510,7 @@ impl ChatHost for ServicesChatHost {
             decision: None,
             tool: None,
             subagent: None,
-            peer: None,
+            harness_turn: None,
         };
         // Its open turn ends interrupted; the agent is gone either way, so
         // the session reads stopped even when no turn was running.

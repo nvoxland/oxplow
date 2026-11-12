@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { PageHost } from "./PageHost.js";
 import { PageNavigationContext } from "../tabs/PageNavigationContext.js";
 import { PageActionContext, PageFormsContext, type PageForms, type RunPageAction } from "./useNodeActions.js";
-import { fakeAction, fakePageRuns, gridPage, loader, tablePage } from "./testing/fakeRun.js";
+import { fakeAction, fakePage, fakePageRuns, fakeRun, gridPage, loader, node, tablePage } from "./testing/fakeRun.js";
 import { createPageRuns, type PageKey } from "../pageRuns.js";
 import { IpcCallError } from "../ipc-error.js";
 import type { CommandSpec, FormStart, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
@@ -52,7 +52,7 @@ test("a shown view (a temp page) offers Save and, in About, Definition as Defini
   const { runs } = fakePageRuns(temp);
   const view = render(<PageHost pageKey={{ ...key, page: "temp/v1" }} runs={runs} onOpenPage={(ref) => opened.push(ref.id)} />);
   await view.findByTestId("action-view-save-page");
-  expect(view.getByTestId("action-view-save-wiki").textContent).toContain("Save to wiki");
+  expect(view.getByTestId("action-view-save-knowledge").textContent).toContain("Save as knowledge page");
   fireEvent.click(view.getByTestId("action-page-about"));
   fireEvent.click(await view.findByTestId("page-about-definition"));
   expect(paramOf(opened[0], "path")).toBe("v1.yaml");
@@ -94,7 +94,7 @@ test("a whole-page action presses on the run, asking first when its command does
   const calls: unknown[][] = [];
   const press: RunPageAction = async (...args) => {
     calls.push(args);
-    if (!args[6]) throw new IpcCallError("Archive needs confirmation", "NEEDS_CONFIRMATION", null, []);
+    if (!args[7]) throw new IpcCallError("Archive needs confirmation", "NEEDS_CONFIRMATION", null, []);
     return { result: null, audit_id: null, event_id: null, inverse: null } as never;
   };
   const { runs } = fakePageRuns(tablePage({ actions: [fakeAction({ id: "archive", label: "Archive" })] }));
@@ -104,9 +104,9 @@ test("a whole-page action presses on the run, asking first when its command does
     </PageActionContext.Provider>,
   );
   fireEvent.click(await findByTestId("action-page-action-archive"));
-  await waitFor(() => expect(calls).toEqual([["run-1", null, "archive", null, null, null, false]]));
+  await waitFor(() => expect(calls).toEqual([["run-1", null, "archive", null, null, null, null, false]]));
   fireEvent.click(await findByTestId("page-action-confirm-run"));
-  await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, true]));
+  await waitFor(() => expect(calls.at(-1)).toEqual(["run-1", null, "archive", null, null, null, null, true]));
   await waitFor(() => expect(queryByTestId("page-action-confirm")).toBeNull());
 });
 
@@ -174,7 +174,7 @@ test("an `open` page action is offered by `when` and opens the URI the press ans
   await waitFor(() => expect(tabActions.map((a) => a.id)).toContain("page-action-current"));
   act(() => tabActions.find((a) => a.id === "page-action-current")!.run());
   await waitFor(() => expect(opened).toEqual(["oxplow:oxplow/file?path=a.rs"]));
-  expect(calls).toEqual([["run-1", null, "current", null, null, null, false]]);
+  expect(calls).toEqual([["run-1", null, "current", null, null, null, null, false]]);
 });
 
 test("a whole-page form action opens its form from page_action_form and submits it as a press", async () => {
@@ -209,7 +209,7 @@ test("a whole-page form action opens its form from page_action_form and submits 
   expect(queryByTestId("page-action-form-unsupported")).toBeNull();
   fireEvent.change(title, { target: { value: "Gamma" } });
   fireEvent.click(getByTestId("viz-action-form-fields-submit"));
-  await waitFor(() => expect(calls.at(-1)).toEqual(["press", "run-1", null, "add", null, { title: "Gamma" }, null, false]));
+  await waitFor(() => expect(calls.at(-1)).toEqual(["press", "run-1", null, "add", null, { title: "Gamma" }, null, null, false]));
 });
 
 test("Refresh is offered only when the page asks for it, and re-runs the run", async () => {
@@ -359,4 +359,45 @@ test("Copy puts the open run's text on the clipboard, as an agent reads it", asy
   } finally {
     Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
   }
+});
+
+// A custom page (its view one `component` node) that is `replaceable:` and
+// another extension stands in for (the Tasks board, `task.board`):
+// the page draws the stand-in, as any replaced node, never its own frame.
+test("a custom page another extension replaces draws the replacement, not its own component", async () => {
+  const lanes = fakeRun(fakePage(node.viz("lanes", "rows"), { id: "beta/lanes", extension: "beta", slug: "lanes" }), {
+    loaders: { rows: loader(["lane"], [["Doing"]]) },
+  });
+  const page = fakePage({ ...node.component("board", "board"), replaceable: "task.board" });
+  const run = fakeRun(page, {});
+  const { runs } = fakePageRuns({ ...run, tree: { ...run.tree, replacedBy: "beta", embed: lanes } });
+  const view = render(<PageHost pageKey={key} runs={runs} />);
+  await view.findByTestId("replacement-task.board");
+  expect(view.container.textContent).toContain("Doing");
+  expect(view.queryByTestId("custom-component")).toBeNull();
+  expect(view.queryByTestId("custom-component-fallback")).toBeNull();
+  expect(view.queryByTestId("custom-component-loading")).toBeNull();
+});
+
+// The rail's own tree is what the page is about, so it leads the rail; a
+// tree that is a form (Task List's New item) is something to do, so it
+// comes last, under the filters and the links.
+test("a rail tree that is a form draws at the rail's bottom; any other leads it", async () => {
+  const base = tablePage({ params: [{ name: "q", label: "Query", role: "filter", type: "text", default: null }] });
+  const withRail = (rail: ReturnType<typeof node.viz>) => {
+    const run = { ...base, page: { ...base.page, rail }, seeAlso: [{ title: "Other", uri: "oxplow:oxplow/page?page=acme/other", description: null }] };
+    return { ...run, rail: { id: rail.id, children: [], embed: null, error: null, replacedBy: null } as unknown as typeof base.tree };
+  };
+  const follows = (a: HTMLElement, b: HTMLElement) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  const form = render(<PageHost pageKey={key} runs={fakePageRuns(withRail(node.viz("add", null, { viz: "form" }))).runs} />);
+  const filters = await form.findByTestId("page-rail-filters");
+  const tree = form.getByTestId("page-rail-tree");
+  expect(follows(filters, tree)).toBe(true);
+  expect(follows(form.getByTestId("page-rail-see-also"), tree)).toBe(true);
+  cleanup();
+
+  const about = render(<PageHost pageKey={key} runs={fakePageRuns(withRail(node.viz("about", "items", { viz: "list" }))).runs} />);
+  const filters2 = await about.findByTestId("page-rail-filters");
+  expect(follows(about.getByTestId("page-rail-tree"), filters2)).toBe(true);
 });

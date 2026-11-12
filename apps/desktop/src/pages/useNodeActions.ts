@@ -20,11 +20,12 @@ export type RunPageAction = (
   row: Record<string, SqlCell> | null,
   input: unknown,
   drop: Drop | null,
+  option: string | null,
   confirmed: boolean,
 ) => Promise<CommandOutcome>;
 
-const daemonRunPageAction: RunPageAction = async (runId, node, action, row, input, drop, confirmed) =>
-  unwrapResult(await commands.runPageAction(runId, node, action, row, input ?? null, drop, confirmed));
+const daemonRunPageAction: RunPageAction = async (runId, node, action, row, input, drop, option, confirmed) =>
+  unwrapResult(await commands.runPageAction(runId, node, action, row, input ?? null, drop, option, confirmed));
 
 /** How a page host presses its actions (the daemon; a test's fake). */
 export const PageActionContext = createContext<RunPageAction>(daemonRunPageAction);
@@ -38,9 +39,9 @@ export type AfterPress = (runId: string) => void;
  *  page's own actions) of open run `runId`. The page id and params a viz
  *  passes are the run's own, which the server holds. */
 export function nodeActionRunner(press: RunPageAction, runId: string | null, node: string | null, after?: AfterPress): VizActionRunner {
-  return async (_page, action, _params, row, _streamId, confirmed, input = null, drop = null) => {
+  return async (_page, action, _params, row, _streamId, confirmed, input = null, drop = null, option = null) => {
     if (!runId) throw new Error("The page isn't open yet; try again in a moment.");
-    const outcome = await press(runId, node, action, row, input, drop, confirmed);
+    const outcome = await press(runId, node, action, row, input, drop, option, confirmed);
     after?.(runId);
     return outcome;
   };

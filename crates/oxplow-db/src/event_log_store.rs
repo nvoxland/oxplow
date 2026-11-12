@@ -21,15 +21,15 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use oxplow_domain::{
-    AgentSessionId, Anchors, DomainError, EffortId, Envelope, EventId, StoredEvent, StreamId,
-    ThreadId, Timestamp,
+    AgentSessionId, Anchors, DomainError, Envelope, EventId, StoredEvent, StreamId, ThreadId,
+    Timestamp,
 };
 
 use crate::database::{map_sql_err, Database};
 use crate::database::{string_to_ts, ts_to_string};
 
 /// Who is writing the events a store's transaction core appends — so a
-/// core (`effort_store::start_tx`, …) logs its own change without every
+/// core (`agent_stores::open_turn_tx`, …) logs its own change without every
 /// caller having to remember, and a command's run can still name itself
 /// as the source and cause.
 #[derive(Clone)]
@@ -135,9 +135,9 @@ fn insert_tx(
         .execute(
             &format!(
             "INSERT INTO event_log
-               (id, type, v, at, source, stream_id, thread_id, effort_id, turn_id, snapshot_id,
+               (id, type, v, at, source, stream_id, thread_id, turn_id, snapshot_id,
                 agent_session_id, subject, payload, payload_hash, cause, dedupe_key)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16){on_conflict}"
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15){on_conflict}"
         ),
             params![
                 env.id.as_str(),
@@ -147,7 +147,6 @@ fn insert_tx(
                 env.source,
                 env.anchors.stream_id.map(|i| i.value()),
                 env.anchors.thread_id.map(|i| i.value()),
-                env.anchors.effort_id.map(|i| i.value()),
                 env.anchors.turn_id,
                 env.anchors.snapshot_id,
                 env.anchors.agent_session_id.map(|i| i.value()),
@@ -186,7 +185,6 @@ fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredEvent> {
             anchors: Anchors {
                 stream_id: row.get::<_, Option<i64>>("stream_id")?.map(StreamId::new),
                 thread_id: row.get::<_, Option<i64>>("thread_id")?.map(ThreadId::new),
-                effort_id: row.get::<_, Option<i64>>("effort_id")?.map(EffortId::new),
                 turn_id: row.get("turn_id")?,
                 snapshot_id: row.get("snapshot_id")?,
                 agent_session_id: row
@@ -556,7 +554,7 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::{
         ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, ConfigChanged,
-        ConfigChangedV2, WorkItemStateChanged, WorkItemStateChangedV1,
+        ConfigChangedV2, TaskStateChanged, TaskStateChangedV1,
     };
     use serde_json::{json, Value};
 
@@ -623,11 +621,11 @@ mod tests {
     async fn append_commits_with_the_state_change_and_reads_back_in_order() {
         let db = Database::in_memory();
         let store = store(&db);
-        let e1 = Envelope::typed::<WorkItemStateChanged>(
+        let e1 = Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: "oxplow:oxplow/work_item?id=tsk4&provider=oxplow".into(),
-                to: oxplow_domain::work_items::CanonicalState::InProgress,
+            &TaskStateChangedV1 {
+                task: "oxplow:oxplow/task?id=tsk4&provider=oxtask".into(),
+                to: oxplow_domain::tasks::Bucket::InProgress,
             },
         )
         .with_dedupe_key("k1")
@@ -636,11 +634,11 @@ mod tests {
             thread_id: Some(ThreadId::new(4)),
             ..Anchors::default()
         })
-        .with_subject(["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"]);
+        .with_subject(["oxplow:oxplow/task?id=tsk4&provider=oxtask"]);
         let e2 = Envelope::typed::<CommandExecuted>(
             "agent:thr4",
             &CommandExecutedV5 {
-                command: "oxplow.work_item.transition".into(),
+                command: "oxplow.task.transition".into(),
                 actor_kind: ActorKind::Agent,
                 actor_id: Some("thr4".into()),
                 outcome: CommandOutcome::Ok,
@@ -743,7 +741,7 @@ mod tests {
         let db = Database::in_memory();
         let store = store(&db);
         let mut unknown = env(None);
-        unknown.event_type = "effort.opened".into();
+        unknown.event_type = "nope.opened".into();
         let err = store.append(unknown).await.unwrap_err();
         assert!(matches!(err, DomainError::Invalid(_)), "{err:?}");
         let mut bad = env(None);
@@ -764,7 +762,7 @@ mod tests {
             "config:",
             "nope:thing",
             "oxplow:oxplow/commit?sha=xyz",
-            "oxplow:oxplow/effort?id=12",
+            "oxplow:oxplow/request?id=12",
         ] {
             let err = store
                 .append(env(None).with_subject([bad]))
@@ -777,7 +775,7 @@ mod tests {
             .append(env(None).with_subject([
                 "oxplow:oxplow/config?key=zones",
                 "oxplow:oxplow/stream?id=str1",
-                "oxplow:oxplow/work_item?id=tsk4&provider=oxplow",
+                "oxplow:oxplow/task?id=tsk4&provider=oxtask",
             ]))
             .await
             .unwrap();

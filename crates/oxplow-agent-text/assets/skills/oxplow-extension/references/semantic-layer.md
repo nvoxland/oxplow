@@ -2,11 +2,11 @@
 
 ## Find the data
 
-- `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_work_item`,
-  `v_effort`, `v_comment`, `v_wiki_page`, `v_snapshot`, `v_measure`,
+- `v_dataset` lists every queryable view (`v_stream`, `v_thread`, `v_task`,
+  `v_request`, `v_comment`, `v_knowledge_page`, `v_snapshot`, `v_measure`,
   `v_capture`, `v_fact`, …) with its doc, and `v_field` documents
   every field (column): `SELECT view, name, sql_type, doc FROM v_field WHERE
-  view = 'v_work_item'`. **Read them first**; don't guess column names.
+  view = 'v_task'`. **Read them first**; don't guess column names.
 - Comment threads on pages are `v_comment`, and each one's messages
   `v_comment_message` (`WHERE comment = <the thread's uri> ORDER BY
   position`).
@@ -15,8 +15,8 @@
   query — with `read_event_content(event_id, output)` for what they
   printed) and `v_agent_nudge` (hints oxplow raised for an agent or a
   person, shown until dismissed).
-- Work items are `v_work_item` (with `v_work_item_link` and
-  `v_work_item_comment`): the active work list's, whichever it is — never
+- Tasks are `v_task` (with `v_task_link` and
+  `v_task_comment`): the active task tracker's, whichever it is — never
   a particular list's own tables.
 - `oxplow_query_sql` runs one read-only `SELECT`/`WITH`. Iterate on the query
   here until the rows are what the user wants, before writing any files.
@@ -50,35 +50,39 @@
 
 ## Refs in scripts and SQL
 
-Everything in oxplow has one identity, its URI (`oxplow:oxplow/effort?id=eff12`,
-`oxplow:oxplow/work_item?id=<id>&provider=oxplow`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/todos`).
+Everything in oxplow has one identity, its URI (`oxplow:oxplow/request?id=req12`,
+`oxplow:oxplow/task?id=<id>&provider=oxtask`, `oxplow:oxplow/file?path=src/a.rs`, `oxplow:oxplow/collector?collector=triage/todos`).
 Carry URIs; never assemble or dissect them:
 
-- **In SQL**, select the dataset's `uri` column (`v_effort.uri`,
-  `v_decision.uri`, `v_thread.uri`, `v_work_item.uri`, …) — each an
-  oxplow URI (`oxplow:oxplow/effort?id=eff12`) — and compare URIs to URIs:
+- **In SQL**, select the dataset's `uri` column (`v_request.uri`,
+  `v_thread.uri`, `v_task.uri`, …) — each an
+  oxplow URI (`oxplow:oxplow/request?id=req12`) — and compare URIs to URIs:
   `WHERE uri = :uri`. To build one, `uri(resource, key1, value1, …)`:
-  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` (an event
+  `uri('oxplow/thread', 'id', json_extract(e.payload, '$.thread'))` (an event
   payload field named for one resource holds a bare id); to read a param back,
-  `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'eff' || id` or `substr(uri, …)`.
+  `uri_param(uri, 'id')`. Never `'oxplow:…' || id`, `'req' || id` or `substr(uri, …)`.
+- **A description's opening line** for a row or a card is
+  `first_sentence(body)`: the first sentence past headings, its inline
+  markdown kept — show it with `format: markdown` (or a component's
+  `renderMarkdown`).
 - **A page of one measure's facts** filters `v_fact` with `f.measure_key =
   read_measure(<key>)`: the page then re-runs only when facts land for that
   measure, not for every measure. Use it on every `v_fact`/`v_capture` read
   of the query.
 - **A field named for one resource is a bare id, not a URI**: a command
-  input `thread` is `thr3`, `effort` is `eff12`, `claim` is the integer `7`.
+  input `thread` is `thr3`, `comment` is the integer `7`.
   Select `uri_param(t.uri, 'id')` to feed one; `{{param.x.id}}` does the
   same in an action's input. A URI goes only where a field can name anything
-  (`uri`, `target`, `subject`) and for work items.
+  (`uri`, `target`, `subject`) and for tasks.
 - **To link to a page from SQL**, `uri('oxplow/page', 'page',
   'oxplow/thread-activity', 'thread_id', thread_id)` gives
   `oxplow:oxplow/page?page=oxplow/thread-activity&thread_id=7`
   (params escaped and sorted, a NULL value left out).
 - **In a script**, build with `uri.build("oxplow/file", path = f["path"])`
   and read with `uri.parse(r)` (`{ resource, params, view }`) /
-  `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/effort")` (which
+  `uri.param(r, "path")` / `uri.id(r, resource = "oxplow/request")` (which
   refuses a URI of another resource) / `uri.resource(r)` / `uri.is_uri(v)`.
-  Never `"oxplow:oxplow/effort?id=" + id` or slicing a URI.
+  Never `"oxplow:oxplow/request?id=" + id` or slicing a URI.
 - **In a page action's input**, pass a row's uri column
   (`{ uri: "{{row.uri}}" }`), not a URI rebuilt from an id.
 - **A URI may dangle.** The thing it names can be deleted, or its
@@ -108,10 +112,10 @@ datasets:
     version: 1
     description: Blocked tasks, oldest first.
     fields:                        # the contract: every column, in order
-      - { name: uri, type: TEXT, doc: The work item. }
+      - { name: uri, type: TEXT, doc: The task. }
       - { name: title, type: TEXT, doc: Title. }
     relationships:                 # optional: a field holding another dataset's values
-      - { from: uri, to: work_item.uri }
+      - { from: uri, to: task.uri }
     tests:
       - { not_null: uri }
       - { unique: uri }
@@ -119,13 +123,13 @@ datasets:
 
 ```sql
 -- datasets/blocked.sql
-SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
+SELECT uri, title FROM ref('task') WHERE state = 'blocked'
 ```
 
 - It publishes as `v_<namespace>_<name>` (dashes as underscores), named by
   the manifest's `namespace:` (default: the extension's name):
   `v_late_work_blocked` for extension `late-work`.
-- Read through `ref()` only: `ref('work_item')` is a core dataset (`v_work_item`),
+- Read through `ref()` only: `ref('task')` is a core dataset (`v_task`),
   `ref('blocked')` your own dataset or synced entity. Another extension's
   dataset is read through an import ("Importing another extension's dataset" below). `source('<table>')` is only
   for your own source tables (`ext__<namespace>__<entity>`).
@@ -133,7 +137,7 @@ SELECT uri, title FROM ref('work_item') WHERE state = 'blocked'
   leave it out for a computed one (`count(*)`, an expression).
 - `relationships: [{ from: <field>, to: <dataset>.<field> }]` says a field
   holds another dataset's values (`to` names the dataset as `ref()` does:
-  `work_item.uri`, `blocked.uri`, `other-ext/items.uri`). `from` must be one
+  `task.uri`, `blocked.uri`, `other-ext/items.uri`). `from` must be one
   of the fields; a `to` that names no dataset or field is an extension error.
   Readers see them in `v_dataset.relationships`. Not part of the contract.
 - **Changing the fields is a breaking change:** bump `version`. To keep
@@ -163,11 +167,11 @@ the binding:
 
 ```yaml
 imports:
-  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=effort_review/reviews", version: 1, optional: true }
+  - { id: reviews, contribution: "oxplow:oxplow/dataset?dataset=my_review/reviews", version: 1, optional: true }
 ```
 
 ```sql
-SELECT work_item, review FROM import_ref('reviews')
+SELECT task, review FROM import_ref('reviews')
 ```
 
 - `optional: true`: when the producer is missing, disabled or exports
@@ -175,7 +179,7 @@ SELECT work_item, review FROM import_ref('reviews')
   mounts the page) is withheld with a warning, and the rest of your
   extension still loads. Without it, your whole extension is blocked.
 - `$OXPLOW_BIN extension check` prints how each import resolved
-  (``import `reviews` → oxplow:oxplow/dataset?dataset=effort_review/reviews v2: available``, or
+  (``import `reviews` → oxplow:oxplow/dataset?dataset=my_review/reviews v2: available``, or
   why not).
 - The producer bumping its dataset's version is a break: your import of
   the old version goes unavailable until you change it. Leave `version`

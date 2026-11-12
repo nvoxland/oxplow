@@ -232,7 +232,7 @@ impl Prepared {
 /// One resource's feed, read in a recompute's read transaction.
 struct Feed<'a> {
     tx: &'a rusqlite::Connection,
-    /// The resource (`oxplow/effort`).
+    /// The resource (`oxplow/thread`).
     kind: &'a str,
     spec: &'a SearchableKind,
     /// A registry of the resource alone, which a row's URI must hold for.
@@ -771,7 +771,7 @@ resources:
     /// searchable (or goes) takes its entries with it.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_searchable_kinds_rows_are_found_and_follow_the_dataset() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         acme(&root, "    searchable: found\n");
@@ -888,7 +888,7 @@ resources:
     /// registry as if those changed, not only the assets' inputs.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_lagged_listener_resyncs_the_searchable_kinds() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         acme(&root, "    searchable: found\n");
@@ -924,7 +924,7 @@ resources:
     /// saying it is searchable.
     #[tokio::test]
     async fn a_kind_whose_view_isnt_compiled_yet_keeps_its_entries() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.search_store
             .upsert(
@@ -976,15 +976,15 @@ resources:
     /// failed has a failure row and nothing else.
     #[tokio::test]
     async fn a_gone_kinds_orphaned_entries_and_failures_leave() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         for (kind, id) in [
             ("acme/pr", "oxplow:acme/pr?id=12"),
-            ("oxplow/wiki", "oxplow:oxplow/wiki?slug=widgets"),
             (
-                "oxplow/work_item",
-                "oxplow:oxplow/work_item?id=tsk7&provider=oxplow",
+                "oxplow/knowledge",
+                "oxplow:oxplow/knowledge?id=widgets&store=oxwiki",
             ),
+            ("oxplow/task", "oxplow:oxplow/task?id=tsk7&provider=oxtask"),
         ] {
             svc.search_store
                 .upsert(kind, id, None, "Widget", "")
@@ -1018,7 +1018,7 @@ resources:
         left.sort();
         assert_eq!(
             left,
-            vec!["oxplow/wiki", "oxplow/work_item"],
+            vec!["oxplow/knowledge", "oxplow/task"],
             "core's entries are untouched"
         );
         let failures = svc
@@ -1038,7 +1038,7 @@ resources:
     /// no kind behind it) is cleared at the next start's sync.
     #[tokio::test]
     async fn a_kind_gone_while_oxplow_was_down_leaves_the_index_at_start() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         svc.search_store
             .upsert(
@@ -1052,8 +1052,8 @@ resources:
             .unwrap();
         svc.search_store
             .upsert(
-                "oxplow/wiki",
-                "oxplow:oxplow/wiki?slug=widgets",
+                "oxplow/knowledge",
+                "oxplow:oxplow/knowledge?id=widgets&store=oxwiki",
                 None,
                 "Widgets",
                 "",
@@ -1084,11 +1084,15 @@ resources:
             .into_iter()
             .map(|h| h.resource)
             .collect();
-        assert_eq!(left, vec!["oxplow/wiki"], "core's entries are untouched");
+        assert_eq!(
+            left,
+            vec!["oxplow/knowledge"],
+            "core's entries are untouched"
+        );
     }
 }
 
-/// Core's kinds (tsk864): tasks, comments, thread notes and wiki pages,
+/// Core's kinds (tsk864): tasks, comments and knowledge pages,
 /// indexed from `v_search_<kind>` by the same assets as an extension's kind.
 #[cfg(test)]
 mod core_tests {
@@ -1169,8 +1173,8 @@ mod core_tests {
     async fn task(svc: &Services, thread: ThreadId, title: &str) -> String {
         run(
             svc,
-            crate::commands::work_item::CREATE,
-            serde_json::json!({ "title": title, "thread": thread.to_string() }),
+            crate::commands::task::CREATE,
+            serde_json::json!({ "title": title, "assignee": thread.to_string() }),
         )
         .await["uri"]
             .as_str()
@@ -1178,7 +1182,7 @@ mod core_tests {
             .to_string()
     }
 
-    /// tsk864: a work item is indexed from `v_search_work_item` — written, edited,
+    /// tsk864: a task is indexed from `v_search_task` — written, edited,
     /// found by its id, gone when deleted — its kind restated as a whole.
     #[tokio::test]
     async fn a_task_edit_restates_its_kind() {
@@ -1188,35 +1192,35 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the new task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/task")
         })
         .await;
-        let id = oxplow_domain::uri::build::work_item_of_uri(&t).unwrap().1;
+        let id = oxplow_domain::uri::build::task_of_uri(&t).unwrap().1;
         assert!(
-            found(&svc, &id, Some(stream.id), "oxplow/work_item").await,
+            found(&svc, &id, Some(stream.id), "oxplow/task").await,
             "its id finds it"
         );
 
         run(
             &svc,
-            crate::commands::work_item::UPDATE,
+            crate::commands::task::UPDATE,
             serde_json::json!({ "uri": t, "title": "Quux the flange" }),
         )
         .await;
         eventually("the edit is found", || {
-            found(&svc, "flange", Some(stream.id), "oxplow/work_item")
+            found(&svc, "flange", Some(stream.id), "oxplow/task")
         })
         .await;
-        assert!(!found(&svc, "sprocket", Some(stream.id), "oxplow/work_item").await);
+        assert!(!found(&svc, "sprocket", Some(stream.id), "oxplow/task").await);
 
         run(
             &svc,
-            crate::commands::work_item::DELETE,
+            crate::commands::task::DELETE,
             serde_json::json!({ "uri": t }),
         )
         .await;
         eventually("the deleted task leaves", || async {
-            entries(&svc, "oxplow/work_item").await.is_empty()
+            entries(&svc, "oxplow/task").await.is_empty()
         })
         .await;
     }
@@ -1230,18 +1234,18 @@ mod core_tests {
         change_loop(&svc);
         task(&svc, thread.id, "Quux the sprocket").await;
         eventually("the task is found", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/task")
         })
         .await;
         svc.config
             .write()
             .unwrap()
             .personal_active_providers
-            .insert("work_items".into(), "none".into());
+            .insert("task_tracker".into(), "none".into());
         let config = crate::config_service::read_config(&svc.config);
         svc.capabilities.publish(&config, &svc.db).await.unwrap();
         eventually("with no list it leaves", || async {
-            entries(&svc, "oxplow/work_item").await.is_empty()
+            entries(&svc, "oxplow/task").await.is_empty()
         })
         .await;
     }
@@ -1257,14 +1261,14 @@ mod core_tests {
         change_loop(&svc);
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         eventually("indexed", || async {
-            entries(&svc, "oxplow/work_item").await.len() == 1
+            entries(&svc, "oxplow/task").await.len() == 1
         })
         .await;
         let refs: Vec<String> = svc
             .db
             .read(|c| {
                 let mut s = c
-                    .prepare("SELECT uri FROM v_search_work_item")
+                    .prepare("SELECT uri FROM v_search_task")
                     .map_err(oxplow_db::map_sql_err)?;
                 let rows = s
                     .query_map([], |r| r.get(0))
@@ -1281,13 +1285,14 @@ mod core_tests {
             oxplow_domain::uri::validate_uri(&kinds, r).unwrap();
         }
         assert_eq!(
-            entries(&svc, "oxplow/work_item").await,
+            entries(&svc, "oxplow/task").await,
             vec![(t.clone(), Some(stream.id.to_string()))]
         );
     }
 
-    /// tsk921: archived work leaves search as its files do — an archived
-    /// thread's tasks, then an archived stream's — and the backlog stays.
+    /// tsk921: archived work leaves search as its files do — the items
+    /// assigned to an archived thread, then an archived stream's — and an
+    /// unassigned item stays.
     #[tokio::test]
     async fn archived_threads_and_streams_leave_search() {
         let (svc, _dir) = services().await;
@@ -1297,10 +1302,10 @@ mod core_tests {
         change_loop(&svc);
         let stays = task(&svc, kept.id, "Stays put").await;
         task(&svc, shelved.id, "Shelved with its thread").await;
-        // A person's item names no thread: the backlog.
+        // An item assigned to nobody is project-wide.
         let backlog = run(
             &svc,
-            crate::commands::work_item::CREATE,
+            crate::commands::task::CREATE,
             serde_json::json!({ "title": "On the backlog" }),
         )
         .await["uri"]
@@ -1308,14 +1313,14 @@ mod core_tests {
             .unwrap()
             .to_string();
         eventually("all three are indexed", || async {
-            entries(&svc, "oxplow/work_item").await.len() == 3
+            entries(&svc, "oxplow/task").await.len() == 3
         })
         .await;
         oxplow_domain::stores::ThreadStore::archive(&*svc.thread_store, &shelved.id)
             .await
             .unwrap();
         eventually("the archived thread's task leaves", || async {
-            entries(&svc, "oxplow/work_item").await
+            entries(&svc, "oxplow/task").await
                 == vec![
                     (stays.clone(), Some(stream.id.to_string())),
                     (backlog.clone(), None),
@@ -1327,13 +1332,13 @@ mod core_tests {
             .unwrap();
         eventually(
             "the archived stream's tasks leave; the backlog stays",
-            || async { entries(&svc, "oxplow/work_item").await == vec![(backlog.clone(), None)] },
+            || async { entries(&svc, "oxplow/task").await == vec![(backlog.clone(), None)] },
         )
         .await;
     }
 
-    /// A task moved to the backlog is indexed there and nowhere else
-    /// (tsk508): its entry's stream follows its thread.
+    /// A task released to nobody is indexed project-wide and nowhere else
+    /// (tsk508): its entry's stream follows the thread it's assigned to.
     #[tokio::test]
     async fn a_moved_task_is_indexed_only_where_it_now_lives() {
         let (svc, _dir) = services().await;
@@ -1343,18 +1348,17 @@ mod core_tests {
         let t = task(&svc, thread.id, "Quux the sprocket").await;
         let id = t.clone();
         eventually("in its thread's stream", || async {
-            entries(&svc, "oxplow/work_item").await
-                == vec![(id.clone(), Some(stream.id.to_string()))]
+            entries(&svc, "oxplow/task").await == vec![(id.clone(), Some(stream.id.to_string()))]
         })
         .await;
         run(
             &svc,
-            crate::commands::work_item::MOVE,
-            serde_json::json!({ "uri": t, "to": "backlog" }),
+            crate::commands::task::ASSIGN,
+            serde_json::json!({ "uri": t, "to": null }),
         )
         .await;
-        eventually("in the backlog", || async {
-            entries(&svc, "oxplow/work_item").await == vec![(id.clone(), None)]
+        eventually("project-wide", || async {
+            entries(&svc, "oxplow/task").await == vec![(id.clone(), None)]
         })
         .await;
     }
@@ -1370,14 +1374,14 @@ mod core_tests {
         task(&svc, thread.id, "Quux the sprocket").await;
         let assets = change_loop(&svc);
         eventually("indexed", || {
-            found(&svc, "sprocket", Some(stream.id), "oxplow/work_item")
+            found(&svc, "sprocket", Some(stream.id), "oxplow/task")
         })
         .await;
         let computed = |svc: Arc<Services>| async move {
             svc.db
                 .read(|c| {
                     c.query_row(
-                        "SELECT computed_at FROM asset_state WHERE asset = 'search:oxplow/work_item'",
+                        "SELECT computed_at FROM asset_state WHERE asset = 'search:oxplow/task'",
                         [],
                         |r| r.get::<_, String>(0),
                     )
@@ -1415,42 +1419,42 @@ mod core_tests {
             .result
     }
 
-    /// Wiki pages: written by command or by hand, gone when deleted.
+    /// Knowledge pages: written by command or by hand, gone when deleted.
     #[tokio::test]
-    async fn wiki_pages_are_indexed() {
+    async fn knowledge_pages_are_indexed() {
         let (svc, dir) = services().await;
         svc.streams.ensure_primary().await.unwrap();
         change_loop(&svc);
         run(
             &svc,
             crate::knowledge::WRITE_PAGE,
-            serde_json::json!({ "slug": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
+            serde_json::json!({ "id": "gears", "body": "# Gears\n\nThe sprocket turns.\n" }),
         )
         .await;
         eventually("the page is found", || {
-            found(&svc, "sprocket", None, "oxplow/wiki")
+            found(&svc, "sprocket", None, "oxplow/knowledge")
         })
         .await;
         std::fs::write(
-            crate::knowledge::page_path(dir.path(), "gears"),
+            oxplow_oxwiki::page_path(dir.path(), "gears"),
             "# Gears\n\nThe flange holds.\n",
         )
         .unwrap();
-        crate::wiki_pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
+        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "gears")
             .await
             .unwrap();
         eventually("a hand edit is found", || {
-            found(&svc, "flange", None, "oxplow/wiki")
+            found(&svc, "flange", None, "oxplow/knowledge")
         })
         .await;
         run(
             &svc,
             crate::knowledge::DELETE_PAGE,
-            serde_json::json!({ "slug": "gears" }),
+            serde_json::json!({ "id": "gears" }),
         )
         .await;
         eventually("the deleted page leaves", || async {
-            entries(&svc, "oxplow/wiki").await.is_empty()
+            entries(&svc, "oxplow/knowledge").await.is_empty()
         })
         .await;
     }
@@ -1539,31 +1543,19 @@ mod core_tests {
             .unwrap();
     }
 
-    /// An effort's title is in its thread's text, so the thread is found by
-    /// a word only an effort says — and still found closed, then archived.
+    /// A thread is found by its title — and still found closed, then
+    /// archived.
     #[tokio::test]
-    async fn a_thread_is_found_by_its_efforts_even_closed_and_archived() {
+    async fn a_thread_is_found_by_its_title_even_closed_and_archived() {
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "Plain title").await;
+        let thread =
+            crate::test_fixtures::new_thread(&svc, stream.id, "Recalibrate the capacitor").await;
         change_loop(&svc);
-        run(
-            &svc,
-            crate::commands::effort::OPEN,
-            serde_json::json!({
-                "thread": thread.id.to_string(),
-                "title": "Recalibrate the flux capacitor",
-            }),
-        )
-        .await;
-        eventually("found by the effort's words", || {
+        eventually("found by its title", || {
             found(&svc, "capacitor", Some(stream.id), "oxplow/thread")
         })
         .await;
-        assert!(
-            found(&svc, "plain", Some(stream.id), "oxplow/thread").await,
-            "by its title"
-        );
         run(
             &svc,
             crate::commands::thread::CLOSE,
@@ -1679,73 +1671,8 @@ mod core_tests {
         );
     }
 
-    /// An effort is found by its title and by the item it was on.
-    #[tokio::test]
-    async fn an_effort_is_found_by_its_title_and_its_work_item() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
-        change_loop(&svc);
-        let item = task(&svc, thread.id, "Unrelated words").await;
-        run(
-            &svc,
-            crate::commands::effort::OPEN,
-            serde_json::json!({
-                "thread": thread.id.to_string(),
-                "title": "Reticulate splines",
-                "work_item": item,
-            }),
-        )
-        .await;
-        eventually("found by its title", || {
-            found(&svc, "reticulate", Some(stream.id), "oxplow/effort")
-        })
-        .await;
-        let native = oxplow_domain::uri::build::work_item_of_uri(&item)
-            .unwrap()
-            .1;
-        assert!(
-            found(&svc, &native, Some(stream.id), "oxplow/effort").await,
-            "by its work item's id"
-        );
-    }
-
-    /// A decision is found by its question and by the choice, why or
-    /// alternatives it holds.
-    #[tokio::test]
-    async fn a_decision_is_found_by_what_it_decided() {
-        let (svc, _dir) = services().await;
-        let stream = svc.streams.ensure_primary().await.unwrap();
-        let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
-        change_loop(&svc);
-        let t = thread.id.value();
-        svc.db
-            .transaction(move |tx| {
-                tx.execute(
-                    "INSERT INTO decision (thread_id, question, choice, alternatives_json, confidence, why, created_at)
-                     VALUES (?1, 'Which cache eviction', 'use the clock sweep', '[\"lru\",\"fifo\"]', 'high',
-                             'because of the pangolin workload', '2026-10-01T00:00:00.000000Z')",
-                    [t],
-                )
-                .map_err(oxplow_db::map_sql_err)?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        eventually("found by the question", || {
-            found(&svc, "eviction", Some(stream.id), "oxplow/decision")
-        })
-        .await;
-        for word in ["pangolin", "sweep", "fifo"] {
-            assert!(
-                found(&svc, word, Some(stream.id), "oxplow/decision").await,
-                "{word}"
-            );
-        }
-    }
-
     /// A feed whose rows only appear is read on from the highest `seq` it
-    /// indexed when the inputs saw inserts only: one new decision is one row
+    /// indexed when the inputs saw inserts only: one new turn is one row
     /// read, and the index is what a whole restate makes. A rewrite (`full`)
     /// reads the whole feed again.
     #[tokio::test]
@@ -1756,15 +1683,15 @@ mod core_tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         let t = thread.id.value();
-        let decide = |question: &'static str| {
+        let decide = |prompt: &'static str| {
             let svc = svc.clone();
             async move {
                 svc.db
                     .transaction(move |tx| {
                         tx.execute(
-                            "INSERT INTO decision (thread_id, question, choice, alternatives_json, confidence, why, created_at)
-                             VALUES (?1, ?2, 'a choice', '[]', 'high', 'a reason', '2026-10-01T00:00:00.000000Z')",
-                            rusqlite::params![t, question],
+                            "INSERT INTO agent_turn (thread_id, prompt, answer, started_at, ended_at)
+                             VALUES (?1, ?2, 'an answer', '2026-10-01T00:00:00.000000Z', '2026-10-01T00:05:00.000000Z')",
+                            rusqlite::params![t, prompt],
                         )
                         .map_err(oxplow_db::map_sql_err)?;
                         Ok(())
@@ -1776,7 +1703,7 @@ mod core_tests {
         for q in ["First question", "Second question", "Third question"] {
             decide(q).await;
         }
-        let index = index_of(&svc, "oxplow/decision").await;
+        let index = index_of(&svc, "oxplow/turn").await;
         index.recompute(true).await.unwrap();
         assert_eq!(index.rows_read.load(Ordering::SeqCst), 3, "a whole read");
 
@@ -1787,7 +1714,7 @@ mod core_tests {
             1,
             "one new row, one row read"
         );
-        let incremental = entries(&svc, "oxplow/decision").await;
+        let incremental = entries(&svc, "oxplow/turn").await;
         assert_eq!(incremental.len(), 4);
 
         // The index is what a whole restate makes, and a recompute with
@@ -1796,7 +1723,7 @@ mod core_tests {
         assert_eq!(index.rows_read.load(Ordering::SeqCst), 0);
         index.recompute(true).await.unwrap();
         assert_eq!(index.rows_read.load(Ordering::SeqCst), 4);
-        assert_eq!(entries(&svc, "oxplow/decision").await, incremental);
+        assert_eq!(entries(&svc, "oxplow/turn").await, incremental);
     }
 
     /// A commit is found by its subject, its message, its author and a
@@ -1823,9 +1750,9 @@ mod core_tests {
         }
     }
 
-    /// A work item's comments are in its text.
+    /// A task's comments are in its text.
     #[tokio::test]
-    async fn a_work_item_is_found_by_its_comments() {
+    async fn a_task_is_found_by_its_comments() {
         let (svc, _dir) = services().await;
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
@@ -1833,18 +1760,18 @@ mod core_tests {
         let item = task(&svc, thread.id, "Plain item").await;
         run(
             &svc,
-            crate::commands::work_item::COMMENT,
+            crate::commands::task::COMMENT,
             serde_json::json!({ "uri": item, "body": "the ocelot repro is attached" }),
         )
         .await;
         eventually("found by a comment", || {
-            found(&svc, "ocelot", Some(stream.id), "oxplow/work_item")
+            found(&svc, "ocelot", Some(stream.id), "oxplow/task")
         })
         .await;
     }
 
     /// A core dataset is named by its bare name in its URI
-    /// (`oxplow:oxplow/dataset?dataset=work_item`), an extension's by
+    /// (`oxplow:oxplow/dataset?dataset=task`), an extension's by
     /// `owner/name`: both are indexed, none skipped.
     #[tokio::test]
     async fn a_core_dataset_is_found_by_its_bare_name() {
@@ -1855,7 +1782,7 @@ mod core_tests {
             entries(&svc, "oxplow/dataset")
                 .await
                 .iter()
-                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=work_item")
+                .any(|(uri, _)| uri == "oxplow:oxplow/dataset?dataset=task")
         })
         .await;
     }
@@ -2019,9 +1946,9 @@ mod core_tests {
         let stream = svc.streams.ensure_primary().await.unwrap();
         let thread = crate::test_fixtures::new_thread(&svc, stream.id, "T").await;
         task(&svc, thread.id, "Quux the sprocket").await;
-        let index = index_of(&svc, "oxplow/work_item").await;
+        let index = index_of(&svc, "oxplow/task").await;
         index.recompute(true).await.unwrap();
-        assert_eq!(entries(&svc, "oxplow/work_item").await.len(), 1);
+        assert_eq!(entries(&svc, "oxplow/task").await.len(), 1);
 
         let (release, writer) = hold_write_lock(&svc.db).await;
 
@@ -2043,6 +1970,6 @@ mod core_tests {
         release.send(()).unwrap();
         writer.await.unwrap().unwrap();
         index.recompute(false).await.unwrap();
-        assert_eq!(entries(&svc, "oxplow/work_item").await.len(), 2);
+        assert_eq!(entries(&svc, "oxplow/task").await.len(), 2);
     }
 }

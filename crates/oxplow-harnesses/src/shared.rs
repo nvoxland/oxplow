@@ -9,6 +9,7 @@ use oxplow_domain::agent::harness::HarnessError;
 use oxplow_domain::agent::observe::HookAnswer;
 use oxplow_domain::agent::text::Text;
 use oxplow_domain::agent::tool::{Plan, ToolKind, ToolUse};
+use oxplow_domain::hook::RunningWork;
 use oxplow_domain::HookKind;
 use serde_json::json;
 
@@ -205,6 +206,86 @@ pub fn subagent_of(body: &serde_json::Value) -> Option<oxplow_domain::agent::too
     })
 }
 
+/// What a Stop's turn left running: its `background_tasks`, the ones not
+/// reported as finished (`status` other than `running` is left out). `None`
+/// when the body has no list.
+pub fn left_running(body: &serde_json::Value) -> Option<Vec<RunningWork>> {
+    let tasks = body.get("background_tasks")?.as_array()?;
+    let text = |t: &serde_json::Value, key: &str| {
+        t.get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    Some(
+        tasks
+            .iter()
+            .filter(|t| text(t, "status").is_none_or(|s| s == "running"))
+            .filter_map(|t| {
+                Some(RunningWork {
+                    id: text(t, "id")?,
+                    kind: text(t, "type"),
+                    description: text(t, "description"),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The files a shell call's response says it changed:
+/// `tool_response.bashEditDiff`'s `changedFiles` and `files[].filePath`,
+/// each once. `moreFiles` (a longer list than it carries) adds nothing.
+fn reported_files(body: &serde_json::Value) -> Vec<String> {
+    let Some(diff) = body.pointer("/tool_response/bashEditDiff") else {
+        return Vec::new();
+    };
+    let named = diff
+        .get("changedFiles")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f.as_str());
+    let diffed = diff
+        .get("files")
+        .and_then(|f| f.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|f| f.get("filePath")?.as_str());
+    let mut out: Vec<String> = Vec::new();
+    for path in named.chain(diffed).filter(|p| !p.is_empty()) {
+        if !out.iter().any(|o| o == path) {
+            out.push(path.to_string());
+        }
+    }
+    out
+}
+
+/// A hook body's meaning in Claude Code's shape (what Claude sends, and
+/// what opencode's bridge translates its events to).
+pub fn claude_shaped_reading(body: &serde_json::Value) -> oxplow_domain::hook::HookReading {
+    let text = |k: &str| {
+        body.get(k)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let end_reason = text("reason");
+    oxplow_domain::hook::HookReading {
+        transcript: text("transcript_path"),
+        final_message: text("last_assistant_message"),
+        waits_on_person: matches!(
+            body.get("notification_type").and_then(|t| t.as_str()),
+            Some("permission_prompt" | "elicitation_dialog" | "agent_needs_input")
+        ),
+        notice: text("message"),
+        compact_summary: text("compact_summary"),
+        compact_trigger: text("trigger"),
+        compaction: body.get("source").and_then(|s| s.as_str()) == Some("compact"),
+        clears_conversation: end_reason.as_deref() == Some("clear"),
+        end_reason,
+    }
+}
+
 /// A tool hook's body in Claude Code's shape (`tool_name`, `tool_input`,
 /// `tool_response`, `tool_use_id`) mapped onto oxplow's vocabulary — what
 /// Claude Code sends, and what opencode's bridge translates its calls to.
@@ -231,6 +312,13 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
         .filter_map(|k| field(k))
         .map(str::to_string)
         .collect();
+    // A shell call's files the harness says it changed (Claude Code's
+    // `bashEditDiff`): evidence when present, and its absence says nothing.
+    let paths = if kind == ToolKind::Shell {
+        reported_files(body)
+    } else {
+        paths
+    };
     let command = (kind == ToolKind::Shell)
         .then(|| field("command"))
         .flatten()
@@ -285,11 +373,16 @@ pub fn claude_shaped_tool_use(body: &serde_json::Value) -> Option<ToolUse> {
             .get("tool_use_id")
             .and_then(|t| t.as_str())
             .map(str::to_string),
+        duration_ms: body.get("duration_ms").and_then(|d| d.as_u64()),
+        sent: None,
+        started_job: None,
         ok,
         exit_code,
         question,
         plan,
         subagent: subagent_of(body),
+        input: body.get("tool_input").filter(|v| !v.is_null()).cloned(),
+        output: body.get("tool_response").filter(|v| !v.is_null()).cloned(),
     })
 }
 
@@ -423,13 +516,18 @@ pub const METADATA_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 pub async fn program_output(
     program: &str,
     args: &[&str],
+    cwd: Option<&std::path::Path>,
 ) -> Result<String, oxplow_domain::agent::harness::HarnessError> {
     use oxplow_domain::agent::harness::HarnessError;
-    let run = tokio::process::Command::new(program)
+    let mut command = tokio::process::Command::new(program);
+    command
         .args(args)
         .stdin(std::process::Stdio::null())
-        .kill_on_drop(true)
-        .output();
+        .kill_on_drop(true);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+    let run = command.output();
     let out = tokio::time::timeout(METADATA_TIMEOUT, run)
         .await
         .map_err(|_| HarnessError::Unavailable(format!("`{program}` didn't answer in time")))?

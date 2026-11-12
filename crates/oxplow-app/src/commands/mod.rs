@@ -27,8 +27,6 @@ pub mod context_basket;
 pub mod credentials;
 pub mod delivery;
 pub mod effect;
-pub mod effort;
-pub mod effort_report;
 pub mod extension_configuration;
 pub mod extension_deploy;
 pub mod extension_jobs;
@@ -42,15 +40,14 @@ pub mod op_error;
 pub mod ops;
 mod proposals;
 pub mod provider_instances;
-pub mod reasoning;
 mod record;
 pub use record::tracking_failed_audit;
 pub mod action_point_offers;
 pub mod ref_commands;
-pub mod review;
 pub mod snapshot;
 mod steps;
 pub mod stream;
+pub mod task;
 pub mod terminal;
 pub mod test_runs;
 pub mod thread;
@@ -58,7 +55,6 @@ pub mod ui;
 mod undo;
 pub mod util;
 pub mod vcs;
-pub mod work_item;
 
 use oxplow_domain::run::{Mode, RunContext};
 use std::collections::BTreeMap;
@@ -785,8 +781,8 @@ enum RunOrigin {
 
 impl RunOrigin {
     /// What the run's `command.executed` is caused by: the event an
-    /// effect reacted to, else what caused the run (an effort policy's
-    /// event, a collector run's trigger).
+    /// effect reacted to, else what caused the run (a collector run's
+    /// trigger).
     fn cause(&self, run: &RunContext) -> Option<oxplow_domain::EventId> {
         match self {
             RunOrigin::Effect(key, _) => Some(oxplow_domain::EventId(key.event_id.clone())),
@@ -1151,7 +1147,7 @@ impl CommandBus {
     }
 
     /// [`Self::run`] as part of `run`: its actor, caused by what caused
-    /// it (an effort policy's event), recorded as its.
+    /// it, recorded as its.
     pub async fn run_in(
         &self,
         run: &RunContext,
@@ -1174,7 +1170,7 @@ impl CommandBus {
     }
 
     /// After a run lands: what it wrote reads back once it returns — its
-    /// projections (a work list's records in `work_item`, the page refs)
+    /// projections (a task tracker's records in `task`, the page refs)
     /// are delivered first — and the pump's loops are woken for the rest.
     async fn landed(&self) {
         if let Err(error) = self.pump.deliver_projections().await {

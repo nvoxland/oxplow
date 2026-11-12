@@ -30,6 +30,115 @@ fn empty_object() -> Value {
     Value::Object(Default::default())
 }
 
+/// `when: { config: <pointer>, in: [<values>] }`: a contribution that is
+/// there only while a setting of its extension's own configuration is one
+/// of `in`. The one condition type every contribution kind that is offered
+/// by a setting shares.
+#[derive(
+    Clone, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigCondition {
+    /// A JSON pointer into the extension's own configuration, naming a
+    /// scalar key of `configuration.schema` (`/tasks/workflow`).
+    pub config: String,
+    /// The values for which it holds: of the key's type, and of its `enum`
+    /// when it has one.
+    #[serde(rename = "in")]
+    #[specta(type = Vec<oxplow_domain::Json>)]
+    pub values: Vec<Value>,
+}
+
+impl ConfigCondition {
+    /// Whether it holds over `effective`, the extension's effective
+    /// configuration values.
+    pub fn holds(&self, effective: &Value) -> bool {
+        effective
+            .pointer(&self.config)
+            .is_some_and(|value| self.values.contains(value))
+    }
+
+    /// Why it can never hold against `declaration` (the extension's own):
+    /// `(code, message)`, or `None` when it can.
+    pub fn problem(
+        &self,
+        declaration: Option<&ConfigurationFile>,
+    ) -> Option<(&'static str, String)> {
+        let pointer = &self.config;
+        let Some(declaration) = declaration else {
+            return Some((
+                "when.undeclared",
+                format!(
+                    "`when` reads `{pointer}` of the extension's own configuration, which it \
+                     doesn't declare (`configuration:` in extension.yaml)"
+                ),
+            ));
+        };
+        let Some(key) = schema_key(&declaration.schema, pointer) else {
+            return Some((
+                "when.unknown_key",
+                format!("`when` names `{pointer}`, no key of `configuration.schema`"),
+            ));
+        };
+        let kind = key.get("type").and_then(Value::as_str);
+        let Some(kind @ ("integer" | "number" | "string" | "boolean")) = kind else {
+            return Some((
+                "when.not_scalar",
+                format!(
+                    "`when` names `{pointer}`, which is a `{}` in the configuration schema; \
+                     it compares a number, string or boolean",
+                    kind.unwrap_or("value of no type")
+                ),
+            ));
+        };
+        if self.values.is_empty() {
+            return Some((
+                "when.empty",
+                format!("`when` on `{pointer}` lists no value in `in`, so it never holds"),
+            ));
+        }
+        let of_kind = |value: &Value| match kind {
+            "integer" => value.is_i64() || value.is_u64(),
+            "number" => value.is_number(),
+            "string" => value.is_string(),
+            _ => value.is_boolean(),
+        };
+        if let Some(value) = self.values.iter().find(|v| !of_kind(v)) {
+            return Some((
+                "when.wrong_type",
+                format!("`when` on `{pointer}` lists {value}, which isn't a `{kind}`"),
+            ));
+        }
+        let choices = key.get("enum").and_then(Value::as_array)?;
+        let outside: Vec<String> = self
+            .values
+            .iter()
+            .filter(|v| !choices.contains(v))
+            .map(Value::to_string)
+            .collect();
+        (!outside.is_empty()).then(|| {
+            (
+                "when.not_in_enum",
+                format!(
+                    "`when` on `{pointer}` lists {}, which its `enum` doesn't allow",
+                    outside.join(", ")
+                ),
+            )
+        })
+    }
+}
+
+/// The schema of the property at JSON pointer `pointer` in `schema`,
+/// following `properties`; `None` when the schema declares no such property.
+pub(crate) fn schema_key<'a>(schema: &'a Value, pointer: &str) -> Option<&'a Value> {
+    let mut node = schema;
+    for token in pointer.strip_prefix('/')?.split('/') {
+        let token = token.replace("~1", "/").replace("~0", "~");
+        node = node.get("properties")?.get(&token)?;
+    }
+    Some(node)
+}
+
 impl ConfigurationFile {
     /// Resolve explicit project/personal fragments with this declaration's
     /// schema. This pure host adapter exposes no credentials or execution rights.

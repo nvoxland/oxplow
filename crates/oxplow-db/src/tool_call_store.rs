@@ -1,6 +1,9 @@
-//! Persisted agent tool calls (`agent_tool_call`), recorded from the
-//! PostToolUse hook. Read through `v_tool_call` and `v_context_read`; the
-//! bundled review policy derives its struggle signal from them. See `.context/semantic-layer.md`.
+//! Persisted agent tool calls (`agent_tool_call`), a projection of the
+//! tool events: a call's row opens at its `agent.tool.requested` (running,
+//! or denied), closes at its `agent.tool.finished`, and is abandoned when
+//! its turn ends with it open. Read through `v_tool_call` and
+//! `v_context_read`; the bundled review policy derives its struggle signal
+//! from them. See `.context/semantic-layer.md`.
 
 use oxplow_domain::DomainError;
 
@@ -9,7 +12,6 @@ use crate::Database;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct NewToolCall {
     pub thread_id: i64,
-    pub effort_id: Option<i64>,
     /// The turn it ran in (`agent_turn.id`).
     pub turn_id: Option<i64>,
     /// The harness's own name for the tool.
@@ -29,6 +31,10 @@ pub struct NewToolCall {
     /// The subagent it ran inside, when one is known.
     pub subagent_id: Option<String>,
     pub subagent_kind: Option<String>,
+    /// The harness's id for the call.
+    pub call_id: Option<String>,
+    /// How long it ran, as the harness timed it (a finish).
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -55,13 +61,12 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
     let n = conn
         .execute(
             "INSERT INTO agent_tool_call
-               (thread_id, effort_id, turn_id, tool, path, detail, ok, at, event_id, kind,
+               (thread_id, turn_id, tool, path, detail, ok, at, event_id, kind,
                 agent_session_id, subagent_id, subagent_kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
             rusqlite::params![
                 call.thread_id,
-                call.effort_id,
                 call.turn_id,
                 call.tool,
                 call.path,
@@ -79,6 +84,174 @@ pub fn record_tx(conn: &rusqlite::Connection, call: &NewToolCall) -> Result<bool
     Ok(n == 1)
 }
 
+/// A call was requested (`request_event`): its row opens, `running`, or
+/// `denied` (and ended) when the policy refused it. Nothing when the row
+/// already exists (a redelivered event).
+pub fn record_request_tx(
+    conn: &rusqlite::Connection,
+    call: &NewToolCall,
+    request_event: &str,
+    denied: bool,
+) -> Result<bool, DomainError> {
+    let at = crate::database::ts_to_string(call.at.unwrap_or_else(oxplow_domain::Timestamp::now));
+    let n = conn
+        .execute(
+            "INSERT INTO agent_tool_call
+               (thread_id, turn_id, tool, path, detail, at, kind, agent_session_id,
+                subagent_id, subagent_kind, call_id, started_at, ended_at, state, request_event_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?6,
+                     CASE WHEN ?12 THEN ?6 END, CASE WHEN ?12 THEN 'denied' ELSE 'running' END, ?13)
+             ON CONFLICT (request_event_id) WHERE request_event_id IS NOT NULL DO NOTHING",
+            rusqlite::params![
+                call.thread_id,
+                call.turn_id,
+                call.tool,
+                call.path,
+                call.detail,
+                at,
+                call.kind,
+                call.agent_session_id,
+                call.subagent_id,
+                call.subagent_kind,
+                call.call_id,
+                denied,
+                request_event,
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
+}
+
+/// A call finished (`call.event_id`, the finish event): the row its
+/// `request_event` opened closes, `finished`, with what the finish
+/// reported and how long it ran (the harness's timing, else since its
+/// request). With no such row, one is written with no start.
+pub fn record_finish_tx(
+    conn: &rusqlite::Connection,
+    call: &NewToolCall,
+    request_event: Option<&str>,
+) -> Result<bool, DomainError> {
+    let at = crate::database::ts_to_string(call.at.unwrap_or_else(oxplow_domain::Timestamp::now));
+    if let Some(request) = request_event {
+        let n = conn
+            .execute(
+                "UPDATE agent_tool_call
+                    SET state = 'finished', event_id = ?2, at = ?3, ended_at = ?3, ok = ?4,
+                        tool = ?5, kind = ?6, path = ?7, detail = ?8,
+                        call_id = coalesce(?9, call_id),
+                        subagent_id = coalesce(?10, subagent_id),
+                        subagent_kind = coalesce(?11, subagent_kind),
+                        duration_ms = coalesce(?12, CAST(round((julianday(?3) - julianday(started_at))
+                                                               * 86400000) AS INTEGER))
+                  WHERE request_event_id = ?1",
+                rusqlite::params![
+                    request,
+                    call.event_id,
+                    at,
+                    call.ok.map(i64::from),
+                    call.tool,
+                    call.kind,
+                    call.path,
+                    call.detail,
+                    call.call_id,
+                    call.subagent_id,
+                    call.subagent_kind,
+                    call.duration_ms.map(|d| d as i64),
+                ],
+            )
+            .map_err(crate::database::map_sql_err)?;
+        if n > 0 {
+            return Ok(true);
+        }
+    }
+    let n = conn
+        .execute(
+            "INSERT INTO agent_tool_call
+               (thread_id, turn_id, tool, path, detail, ok, at, event_id, kind,
+                agent_session_id, subagent_id, subagent_kind, call_id, ended_at, duration_ms,
+                state, request_event_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?7, ?14,
+                     'finished', ?15)
+             ON CONFLICT (event_id) WHERE event_id IS NOT NULL DO NOTHING",
+            rusqlite::params![
+                call.thread_id,
+                call.turn_id,
+                call.tool,
+                call.path,
+                call.detail,
+                call.ok.map(i64::from),
+                at,
+                call.event_id,
+                call.kind,
+                call.agent_session_id,
+                call.subagent_id,
+                call.subagent_kind,
+                call.call_id,
+                call.duration_ms.map(|d| d as i64),
+                request_event,
+            ],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    Ok(n == 1)
+}
+
+/// The files call `call` (its `agent.tool.finished` event, else its
+/// request) names or reports, with their basis: `named` by an edit tool,
+/// `reported` by the harness for a shell call. A call of another kind (a
+/// read, a search) changes no file and records none.
+pub fn record_paths_tx(
+    conn: &rusqlite::Connection,
+    event: &str,
+    kind: &str,
+    paths: &[&str],
+) -> Result<(), DomainError> {
+    let basis = match kind {
+        "edit" => "named",
+        "shell" => "reported",
+        _ => return Ok(()),
+    };
+    for path in paths {
+        conn.execute(
+            "INSERT OR IGNORE INTO agent_tool_call_path (call_id, path, basis)
+             SELECT id, ?2, ?3 FROM agent_tool_call WHERE event_id = ?1 OR request_event_id = ?1",
+            rusqlite::params![event, path, basis],
+        )
+        .map_err(crate::database::map_sql_err)?;
+    }
+    Ok(())
+}
+
+/// What owned the calls left running: the turn that ended, or the agent
+/// session that ended (a call made with no turn open, a background
+/// subagent's after the Stop, has only its session).
+#[derive(Debug, Clone, Copy)]
+pub enum CallOwner {
+    Turn(i64),
+    Session(i64),
+}
+
+/// `owner` ended at `at` with calls still running: they are `abandoned`,
+/// ended then, with no duration (they never finished).
+pub fn abandon_running_tx(
+    conn: &rusqlite::Connection,
+    owner: CallOwner,
+    at: oxplow_domain::Timestamp,
+) -> Result<usize, DomainError> {
+    let at = crate::database::ts_to_string(at);
+    let (column, id) = match owner {
+        CallOwner::Turn(t) => ("turn_id", t),
+        CallOwner::Session(s) => ("agent_session_id", s),
+    };
+    conn.execute(
+        &format!(
+            "UPDATE agent_tool_call SET state = 'abandoned', ended_at = ?2
+              WHERE {column} = ?1 AND state = 'running'"
+        ),
+        rusqlite::params![id, at],
+    )
+    .map_err(crate::database::map_sql_err)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,9 +266,8 @@ mod tests {
                    VALUES (1, 'primary', 'p', 'main', 'refs/heads/main', 'local', '/tmp/x', '2026-01-01', '2026-01-01');
                  INSERT INTO threads (id, stream_id, title, created_at, updated_at)
                    VALUES (1, 1, 'T', '2026-01-01', '2026-01-01');
-                 INSERT INTO task (id, thread_id, title, status, priority, created_by, created_at, updated_at)
-                   VALUES (1, 1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');
-                 INSERT INTO effort (id, work_item, thread_id, started_at) VALUES (1, 'oxplow:oxplow/work_item?id=tsk1&provider=oxplow', 1, '2026-01-01');",
+                 INSERT INTO oxtask (id, title, status, priority, created_by, created_at, updated_at)
+                   VALUES (1, 'Task', 'in_progress', 'medium', 'agent', '2026-01-01', '2026-01-01');",
             )
         })
         .await
@@ -107,7 +279,6 @@ mod tests {
     fn call(kind: &str, path: Option<&str>, ok: Option<bool>) -> NewToolCall {
         NewToolCall {
             thread_id: 1,
-            effort_id: Some(1),
             tool: kind.into(),
             kind: kind.into(),
             path: path.map(str::to_string),
@@ -203,5 +374,186 @@ mod tests {
             json!([[".context/usability.md"]])
         );
         assert_eq!(rows("SELECT count(*) FROM v_tool_call").await, json!([[2]]));
+    }
+
+    /// A turn's time splits into its tool calls (the union of their
+    /// intervals: two calls overlap), its waits on the person (each to the
+    /// next status, the last cut at the turn's end) and the rest, with no
+    /// time counted twice; a denied call never ran.
+    #[tokio::test]
+    async fn a_turns_time_splits_into_tools_waits_and_the_rest() {
+        let db = Database::in_memory();
+        let at = |s: u32| format!("2026-01-01T00:00:{s:02}.000000Z");
+        let mut seed = format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{a}', '{a}');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+               VALUES (1, 1, 't', '{a}', '{a}');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at)
+               VALUES (1, 1, 'go', '{a}', '2026-01-01T00:01:00.000000Z');",
+            a = at(0)
+        );
+        for (state, start, end) in [
+            ("finished", 10, 30),
+            ("finished", 20, 40),
+            ("denied", 45, 45),
+            // Finished after the turn ended (an interrupt): cut at its end.
+            ("finished", 50, 70),
+        ] {
+            let at = |s: u32| format!("2026-01-01T00:{:02}:{:02}.000000Z", s / 60, s % 60);
+            seed += &format!(
+                "INSERT INTO agent_tool_call (thread_id, turn_id, tool, at, kind, state, started_at, ended_at)
+                   VALUES (1, 1, 'Bash', '{e}', 'shell', '{state}', '{s}', '{e}');",
+                s = at(start),
+                e = at(end)
+            );
+        }
+        for (i, (state, when)) in [
+            ("running", 0),
+            ("awaiting_user", 42),
+            // Its detail changes: still one wait.
+            ("awaiting_user", 44),
+            ("running", 50),
+            ("awaiting_user", 55),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            seed += &format!(
+                "INSERT INTO event_log (id, type, v, at, source, turn_id, subject, payload)
+                   VALUES ('s{i}', 'agent.status.changed', 2, '{t}', 'test', 1, '[]',
+                           '{{\"state\":\"{state}\"}}');",
+                t = at(when)
+            );
+        }
+        db.transaction(move |tx| {
+            tx.execute_batch(&seed)
+                .map_err(crate::database::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let row: (i64, i64, i64, i64, i64) = db
+            .read(|c| {
+                c.query_row(
+                    "SELECT duration_ms, tool_ms, waits, wait_ms, other_ms FROM v_turn_activity",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )
+                .map_err(crate::database::map_sql_err)
+            })
+            .await
+            .unwrap();
+        // Tools 10–40 and 50–60 (40 s); waits 42–50 and 55–60 (13 s); the
+        // rest is 60 less the 48 s either covered.
+        assert_eq!(row, (60_000, 40_000, 2, 13_000, 12_000));
+    }
+
+    /// A turn's files are joined by time: a file the watcher saw change
+    /// inside the turn is the turn's — `claimed` when a call of the turn
+    /// named it, `shared` when another turn on the stream ran then, else
+    /// `sole`; a file changed before the prompt is not, even when the turn's
+    /// end take captured it; a capture with no change time is placed by the
+    /// capture alone.
+    #[tokio::test]
+    async fn a_turns_files_are_joined_by_time_with_their_confidence() {
+        let db = Database::in_memory();
+        let at = |s: i64| {
+            let s = s + 600;
+            format!("2026-01-01T00:{:02}:{:02}.000000Z", s / 60, s % 60)
+        };
+        let mut seed = format!(
+            "INSERT INTO streams (id, kind, title, branch, branch_ref, branch_source, worktree_path, created_at, updated_at)
+               VALUES (1, 'primary', 'a', 'main', 'r', 'r', '/r', '{a}', '{a}');
+             INSERT INTO threads (id, stream_id, title, created_at, updated_at)
+               VALUES (1, 1, 'one', '{a}', '{a}'), (2, 1, 'two', '{a}', '{a}');
+             INSERT INTO agent_turn (id, thread_id, prompt, started_at, ended_at)
+               VALUES (1, 1, 'go', '{t1s}', '{t1e}'), (2, 2, 'go too', '{t2s}', '{t2e}');
+             INSERT INTO agent_tool_call (id, thread_id, turn_id, tool, at, kind, state)
+               VALUES (1, 1, 1, 'Edit', '{t1s}', 'edit', 'finished');
+             INSERT INTO agent_tool_call_path (call_id, path, basis) VALUES (1, 'e.rs', 'named');",
+            a = at(-600),
+            t1s = at(0),
+            t1e = at(60),
+            t2s = at(30),
+            t2e = at(90),
+        );
+        // Two takes, each logged as the store does (its files, then its
+        // op): (path, first change, last change). `None` change times are a
+        // capture the watcher gave none for.
+        for (snapshot, captured, op, files) in [
+            (1, 50, ("quiet", None), vec![("d.rs", None, None)]),
+            (
+                2,
+                61,
+                ("quiet", None),
+                vec![
+                    ("a.rs", Some(10), Some(12)),
+                    ("b.rs", Some(40), Some(45)),
+                    ("c.rs", Some(-5), Some(-5)),
+                    ("e.rs", Some(20), Some(20)),
+                ],
+            ),
+            // Turn 1's end take, landing after it closed while turn 2 runs,
+            // with no change time: both turns', and shared for both.
+            (3, 70, ("turn_end", Some(1)), vec![("f.rs", None, None)]),
+        ] {
+            let c = at(captured);
+            seed += &format!(
+                "INSERT INTO snapshot (id, stream_id, created_at) VALUES ({snapshot}, 1, '{c}');"
+            );
+            let time = |t: Option<i64>| t.map_or("NULL".to_string(), |t| format!("'{}'", at(t)));
+            for (path, first, last) in &files {
+                seed += &format!(
+                    "INSERT INTO file_snapshot (stream_id, path, captured_at, first_changed_at, last_changed_at, snapshot_id)
+                       VALUES (1, '{path}', '{c}', {f}, {l}, {snapshot});",
+                    f = time(*first),
+                    l = time(*last),
+                );
+            }
+            let (trigger, turn) = op;
+            seed += &format!(
+                "INSERT INTO snapshot_op (stream_id, snapshot_id, trigger, turn_id, at, elapsed_ms, file_count)
+                   VALUES (1, {snapshot}, '{trigger}', {t}, '{c}', 0, {n});",
+                t = turn.map_or("NULL".to_string(), |t: i64| t.to_string()),
+                n = files.len(),
+            );
+        }
+        db.transaction(move |tx| {
+            tx.execute_batch(&seed)
+                .map_err(crate::database::map_sql_err)
+        })
+        .await
+        .unwrap();
+        let rows: Vec<(i64, String, String)> = db
+            .read(|c| {
+                let mut stmt = c
+                    .prepare(
+                        "SELECT turn_id, path, confidence FROM v_turn_file ORDER BY turn_id, path",
+                    )
+                    .map_err(crate::database::map_sql_err)?;
+                let rows = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                    .map_err(crate::database::map_sql_err)?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(crate::database::map_sql_err)
+            })
+            .await
+            .unwrap();
+        let row = |t: i64, p: &str, c: &str| (t, p.to_string(), c.to_string());
+        assert_eq!(
+            rows,
+            vec![
+                // a.rs changed at 10 s, before turn 2 started: turn 1's alone.
+                row(1, "a.rs", "sole"),
+                row(1, "b.rs", "shared"),
+                row(1, "d.rs", "shared"),
+                row(1, "e.rs", "claimed"),
+                row(1, "f.rs", "shared"),
+                row(2, "b.rs", "shared"),
+                row(2, "d.rs", "shared"),
+                row(2, "f.rs", "shared"),
+                // e.rs changed at 20 s, before turn 2 started.
+            ]
+        );
     }
 }

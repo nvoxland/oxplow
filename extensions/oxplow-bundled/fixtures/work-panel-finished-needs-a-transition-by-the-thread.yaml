@@ -1,0 +1,20 @@
+# A task a thread only filed, commented on or was prompted with is not its
+# finished work when someone else closes it; one its agent moved is.
+given:
+  - { command: oxplow.task.create, input: { title: Only commented, stage: todo }, bind: commented }
+  - { command: oxplow.task.create, input: { title: Moved by it, stage: todo }, bind: moved }
+  - observe:
+      turn:
+        prompt: Look at both
+        during:
+          - { command: oxplow.task.comment, input: { uri: $commented.uri, body: "looked" }, as: agent }
+          - { command: oxplow.task.transition, input: { uri: $moved.uri, to: in_progress }, as: agent }
+  # The person closes both.
+  - { command: oxplow.task.transition, input: { uri: $commented.uri, to: done } }
+  - { command: oxplow.task.transition, input: { uri: $moved.uri, to: done } }
+when: { part: oxplow/work-panel, params: { thread_id: 1 } }
+expect:
+  loaders:
+    work:
+      rows:
+        - { grp: Finished, title: Moved by it }

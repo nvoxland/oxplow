@@ -1,5 +1,5 @@
 # Gets {"rows": [...]} from the collector's `input` query: every open task
-# with `last_touched_at` (its latest edit, comment activity or effort) and
+# with `last_touched_at` (its latest edit or comment activity) and
 # `days_idle` (whole days since then, computed by the query — the sandbox
 # has no clock). Keeps the ones idle for a week or more.
 STALE_AFTER_DAYS = 7

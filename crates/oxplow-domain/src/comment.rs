@@ -1,5 +1,5 @@
 //! Comments: threaded annotations anchored to a text selection on any
-//! page (wiki body, code file lines, task detail, …).
+//! page (knowledge page body, code file lines, task detail, …).
 //!
 //! A [`Comment`] is the thread anchor + metadata; the back-and-forth
 //! lives in [`CommentMessage`] rows (including the first message). The
@@ -58,8 +58,8 @@ pub struct Comment {
     /// The agent thread the comment was first added in. Nullable so a
     /// content comment survives the thread being archived.
     pub thread_id: Option<ThreadId>,
-    /// What the comment is on: a URI (`oxplow:oxplow/wiki?slug=intro`,
-    /// a file's, a work item's) — the same the `page_ref` graph and tabs
+    /// What the comment is on: a URI (`oxplow:oxplow/knowledge?id=intro&store=oxwiki`,
+    /// a file's, a task's) — the same the `page_ref` graph and tabs
     /// use.
     pub target: String,
     pub quote: String,

@@ -4,15 +4,15 @@
 //!
 //! - the **row** of the dataset its resource resolves through (its
 //!   declaration's `resolve:`), every column, by its `ref`;
-//! - what sits **beside** it, for the resources that have some: a work
-//!   item's links and comments, a commit's files, an effort's files;
+//! - what sits **beside** it, for the resources that have some: a
+//!   task's links and comments, a commit's files, a turn's files;
 //! - its **content**, for the resources whose body no dataset holds: a file
 //!   at a revision (`oxplow:oxplow/file?path=src/a.rs&rev=git:HEAD#lines=10-40`;
 //!   the working tree when it names none, in the stream asked for else the
 //!   caller's), an event's stored body (`#part=input`, `output`, `prompt`,
 //!   `result` or `summary`; the caller's own stream's only), a model call's
 //!   (`#part=request` or `response`; not one another agent's thread asked
-//!   for), a page's definition.
+//!   for), a page's definition, a knowledge page's body.
 //!
 //! Content is cut at [`MAX_CONTENT`] bytes, saying so.
 
@@ -39,7 +39,7 @@ const MAX_RELATED: usize = 200;
 pub struct RefRead {
     /// The URI as read, canonical.
     pub uri: String,
-    /// Its resource (`oxplow/effort`).
+    /// Its resource (`oxplow/turn`).
     pub resource: String,
     /// The resolving dataset's row, every column; `None` for a resource no
     /// dataset holds (a file).
@@ -69,14 +69,14 @@ pub enum ReadError {
 /// query's `?1` the URI (its view left out).
 const RELATED: &[(&str, &str, &str)] = &[
     (
-        r::WORK_ITEM,
+        r::TASK,
         "links",
-        "SELECT * FROM v_work_item_link WHERE from_uri = ?1 ORDER BY created_at",
+        "SELECT * FROM v_task_link WHERE from_uri = ?1 ORDER BY created_at",
     ),
     (
-        r::WORK_ITEM,
+        r::TASK,
         "comments",
-        "SELECT * FROM v_work_item_comment WHERE uri = ?1 ORDER BY created_at",
+        "SELECT * FROM v_task_comment WHERE uri = ?1 ORDER BY created_at",
     ),
     (
         r::COMMIT,
@@ -84,9 +84,9 @@ const RELATED: &[(&str, &str, &str)] = &[
         "SELECT * FROM v_commit_file WHERE sha = (SELECT sha FROM v_commit WHERE uri = ?1) ORDER BY path",
     ),
     (
-        r::EFFORT,
+        r::TURN,
         "files",
-        "SELECT * FROM v_effort_file WHERE effort_id = (SELECT id FROM v_effort WHERE uri = ?1) ORDER BY path",
+        "SELECT * FROM v_turn_file WHERE turn_id = (SELECT id FROM v_agent_turn WHERE uri = ?1) ORDER BY path",
     ),
 ];
 
@@ -184,6 +184,20 @@ pub async fn read(
                 }
                 (r::AI_CALL, Some(part)) => {
                     out.set_content(ai_call_body(svc, &param("id"), part, reader.thread).await?);
+                }
+                // A knowledge page's content is its body, as its store kept it.
+                (r::KNOWLEDGE, _) => {
+                    let body = rows(
+                        svc,
+                        "SELECT body FROM v_knowledge_body WHERE uri = ?1",
+                        &reference,
+                    )
+                    .await?;
+                    if let Some(Value::String(body)) =
+                        body.into_iter().next().and_then(|mut r| r.remove("body"))
+                    {
+                        out.set_content(body);
+                    }
                 }
                 _ => {}
             }
@@ -529,9 +543,9 @@ mod tests {
         ));
     }
 
-    /// A work item is its row with its links and comments beside it.
+    /// A task is its row with its links and comments beside it.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_work_item_is_its_row_links_and_comments() {
+    async fn a_task_is_its_row_links_and_comments() {
         let (_dir, svc) = project().await;
         let created = |title: &str| {
             let svc = svc.clone();
@@ -540,7 +554,7 @@ mod tests {
                 svc.commands
                     .run(
                         &Actor::Human,
-                        "oxplow.work_item.create",
+                        "oxplow.task.create",
                         json!({ "title": title }),
                         false,
                     )
@@ -556,11 +570,11 @@ mod tests {
         let other = created("Ship it").await;
         for (id, input) in [
             (
-                "oxplow.work_item.link",
+                "oxplow.task.link",
                 json!({ "uri": item, "target": other, "link_type": "blocks" }),
             ),
             (
-                "oxplow.work_item.comment",
+                "oxplow.task.comment",
                 json!({ "uri": item, "body": "Seen on Safari only." }),
             ),
         ] {

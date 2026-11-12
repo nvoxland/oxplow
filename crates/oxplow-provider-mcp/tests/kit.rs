@@ -1,6 +1,6 @@
 //! P7.A6: the `notes` fixture extension — an MCP server behind oxplow's
 //! adapter — passes `oxplow extension test`: the handshake, the tool pin at
-//! check, its `create` example, the read-back, and the work-items
+//! check, its `create` example, the read-back, and the task tracker
 //! conformance suite through a throwaway host over the adapter.
 //! `OXPLOW_BLESS=1` rewrites its golden transcript.
 
@@ -65,7 +65,7 @@ async fn the_notes_extension_passes_extension_test_over_the_adapter() {
         )
         .unwrap();
     }
-    for ran in ["work_items suite", "read items", "discover"] {
+    for ran in ["task_tracker suite", "read items", "discover"] {
         assert!(
             report.ran.iter().any(|r| r == ran),
             "{ran}: {:?}",
@@ -119,7 +119,7 @@ async fn the_notes_extension_passes_extension_test_with_its_server_by_url() {
 
     let report = test_extension(dir.path(), "notes", true).await.unwrap();
     assert_eq!(report.error_lines(), Vec::<String>::new());
-    for ran in ["work_items suite", "read items", "discover"] {
+    for ran in ["task_tracker suite", "read items", "discover"] {
         assert!(
             report.ran.iter().any(|r| r == ran),
             "{ran}: {:?}",

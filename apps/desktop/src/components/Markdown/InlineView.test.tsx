@@ -46,7 +46,7 @@ test("a rejected inline spec shows its source and daemon's validation error", as
   expect(view.getByTestId("inline-page-error").textContent).toContain(SPEC);
 });
 
-test("a restored wiki view binds the inline page's declared picks without leaking host view keys", async () => {
+test("a restored knowledge page view binds the inline page's declared picks without leaking host view keys", async () => {
   const { runs, calls } = fakePageRuns(run());
   const source = "title: Picked\nparams: [{ name: selected, role: selection }]\nview: { markdown: Ready }";
   const nav = { viewParams: { selected: "kept-row", comment: "cmt3" } } as unknown as PageNavigation;

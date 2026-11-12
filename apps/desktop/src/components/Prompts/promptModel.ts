@@ -4,7 +4,7 @@
 /** One question a person can ask, with who offers it. */
 export interface CatalogPrompt {
   prompt: string;
-  /** A ref kind (`file`, `commit`, `effort`): a page for one offers it. */
+  /** A ref kind (`file`, `commit`, `request`): a page for one offers it. */
   about: string | null;
   source: { kind: "extension"; name: string };
 }

@@ -37,7 +37,7 @@ test("the Alerts row counts the undelivered events, or isn't there", () => {
 test("failed reactions read from v_effect_run, and say what failed on what", () => {
   const rows = {
     columns: ["effect", "event_id", "event_seq", "attempt", "reason", "event_type", "retry_at"],
-    rows: [["acme/mark-done", "e1", 41, 1, "interrupted: a step outside oxplow may have run", "work_item.state_changed", null]],
+    rows: [["acme/mark-done", "e1", 41, 1, "interrupted: a step outside oxplow may have run", "task.state_changed", null]],
     truncated: false,
     reads: { datasets: ["v_effect_run", "v_event"], tables: [], measures: [] },
     freshness: {},
@@ -49,7 +49,7 @@ test("failed reactions read from v_effect_run, and say what failed on what", () 
     eventSeq: 41,
     attempt: 1,
     reason: "interrupted: a step outside oxplow may have run",
-    eventType: "work_item.state_changed",
+    eventType: "task.state_changed",
     retryAt: null,
   });
 });

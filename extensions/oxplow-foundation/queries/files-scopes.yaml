@@ -1,5 +1,5 @@
 title: File scopes
-description: Which files the Directory page lists - all of them, or on the worktree only those changed in the working tree, since the default branch, or since the upstream.
+description: Which files the Directory page lists - all of them, or on the worktree only those changed in the working tree (with the untracked ones or without), since the default branch, or since the upstream.
 params:
 - name: stream_id
 - name: filesystem
@@ -11,7 +11,10 @@ loaders:
     sql: |
       SELECT 'all' AS value, 'All files' AS label
       UNION ALL
-      SELECT 'uncommitted', 'Uncommitted changes'
+      SELECT 'uncommitted', 'Uncommitted, with untracked files'
+      WHERE :filesystem = 'oxplow:local' AND :rev = '' AND EXISTS (SELECT 1 FROM v_stream s JOIN v_branch b ON b.kind = 'local' AND b.name = s.branch WHERE s.id = :stream_id)
+      UNION ALL
+      SELECT 'changed', 'Uncommitted, tracked files only'
       WHERE :filesystem = 'oxplow:local' AND :rev = '' AND EXISTS (SELECT 1 FROM v_stream s JOIN v_branch b ON b.kind = 'local' AND b.name = s.branch WHERE s.id = :stream_id)
       UNION ALL
       SELECT d.name, 'Changes since ' || d.name

@@ -259,7 +259,8 @@ pub async fn page_spec(svc: &Services, page: String) -> Result<PageSpec, IpcErro
 
 /// A press of one of an open run's actions: a whole-page action (no
 /// `node`), or a node's (`<embed id>/<node id>` inside an embed), on `row`
-/// for a row action. The server binds the run's params and checks the row
+/// for a row action, with `option` the value of the one pressed for an
+/// action with options. The server binds the run's params and checks the row
 /// is one it holds.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_page_action(
@@ -270,6 +271,7 @@ pub async fn run_page_action(
     row: Option<BTreeMap<String, SqlCell>>,
     input: Option<oxplow_domain::Json>,
     drop: Option<oxplow_app::viz_actions::Drop>,
+    option: Option<String>,
     confirmed: bool,
 ) -> Result<oxplow_domain::CommandOutcome, IpcError> {
     use oxplow_app::pages::actions::{run_page_action, PageActionCall};
@@ -283,6 +285,7 @@ pub async fn run_page_action(
             row,
             input: input.map(|j| j.0),
             drop,
+            option,
             on_behalf_of: Actor::Human,
             confirmed,
         },

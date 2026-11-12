@@ -37,7 +37,7 @@
 //! ([`RETRY_DELAYS`]); waiting, it doesn't count against the effect's
 //! health, and the attempt that exhausts the retries counts once.
 //! The retry sends exactly what the failed attempt composed, kept with it
-//! while the retry is scheduled ([`Resend`]); a `oxplow.work_item.create` in it
+//! while the retry is scheduled ([`Resend`]); a `oxplow.task.create` in it
 //! files on the tracker active when it's sent, as every create does
 //! (tsk1058). An
 //! attempt cut off by oxplow stopping is retried the same way, timed from
@@ -706,7 +706,7 @@ fn safe_to_resend(svc: &Services, calls: &[CommandCall]) -> bool {
             // A sink (none: the list went away) never takes a retry: the
             // work was meant for a list, and resending it nowhere would
             // lose it quietly.
-            crate::commands::work_item::provider_for(&svc.work_items, &call.name, &call.input)
+            crate::commands::task::provider_for(&svc.tasks, &call.name, &call.input)
                 .is_some_and(|p| !p.sink && p.features.idempotent_writes)
         })
 }
@@ -975,19 +975,19 @@ mod tests {
     use super::*;
     use oxplow_domain::events::schema::EventType as _;
     use oxplow_domain::events::schema::{
-        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, WorkItemEdited,
-        WorkItemStateChanged, WorkItemStateChangedV1,
+        ActorKind, CommandExecuted, CommandExecutedV5, CommandOutcome, TaskEdited,
+        TaskStateChanged, TaskStateChangedV1,
     };
-    use oxplow_domain::work_items::CanonicalState;
+    use oxplow_domain::tasks::Bucket;
     use oxplow_domain::Envelope;
     use serde_json::Value;
     use std::path::Path;
 
-    const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\npermissions: [sql.read, commands:oxplow.work_item.*, commands:oxplow.probe.*]\neffects:\n";
+    const HEAD: &str = "manifest: 2\nname: acme\nintent: { purpose: Effects., origin: null, examples: [] }\npermissions: [sql.read, commands:oxplow.task.*, commands:oxplow.probe.*]\neffects:\n";
 
     /// Marks a finished item's title.
-    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
-    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
+    const MARK_DONE: &str = "  - id: mark-done\n    summary: Mark a finished item.\n    on: [task.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: mark.star\n";
+    const MARK: &str = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE uri = :task\", \"params\": {\"task\": x[\"event\"][\"payload\"][\"task\"]}})\n    uri = x[\"event\"][\"payload\"][\"task\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"title\"] + \" (done)\"}}]}\n";
 
     /// Write extension `acme` into the project and publish the generation
     /// that carries it.
@@ -1017,11 +1017,11 @@ mod tests {
 
     /// The task's state change, anchored to the fixture's thread as the
     /// command that makes it would: an effect reacting runs for that thread.
-    fn state_changed(fx: &crate::test_fixtures::TaskEffortFixture, to: CanonicalState) -> Envelope {
-        let mut env = Envelope::typed::<WorkItemStateChanged>(
+    fn state_changed(fx: &crate::test_fixtures::TaskFixture, to: Bucket) -> Envelope {
+        let mut env = Envelope::typed::<TaskStateChanged>(
             "human",
-            &WorkItemStateChangedV1 {
-                work_item: oxplow_tasks::work_item_ref(fx.task),
+            &TaskStateChangedV1 {
+                task: oxplow_oxtask::task_ref(fx.task),
                 to,
             },
         );
@@ -1029,8 +1029,8 @@ mod tests {
         env
     }
 
-    async fn title(fx: &crate::test_fixtures::TaskEffortFixture) -> String {
-        use oxplow_tasks::TaskStore as _;
+    async fn title(fx: &crate::test_fixtures::TaskFixture) -> String {
+        use oxplow_oxtask::OxtaskStore as _;
         fx.svc.task_store.get(fx.task).await.unwrap().unwrap().title
     }
 
@@ -1042,12 +1042,12 @@ mod tests {
     /// manifest's: each after the effects its `after:` names.
     #[tokio::test(flavor = "multi_thread")]
     async fn effects_run_after_the_effects_they_name() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let skip = "def transform(x):\n    return {\"skip\": \"noted\"}\n";
         let effect = |id: &str, after: &str| {
             format!(
-                "  - id: {id}\n    summary: s\n    on: [work_item.state_changed]\n    entry: skip.star\n    after: [{after}]\n"
+                "  - id: {id}\n    summary: s\n    on: [task.state_changed]\n    entry: skip.star\n    after: [{after}]\n"
             )
         };
         extension(
@@ -1063,7 +1063,7 @@ mod tests {
         .await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         consumer.handle(&ev).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT effect FROM v_effect_run ORDER BY id").await,
@@ -1079,18 +1079,18 @@ mod tests {
     /// consumer wait on that consumer's checkpoint for the events it handles.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_after_a_collector_or_core_consumer_gates_its_events() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(
             svc,
-            "  - id: react\n    summary: s\n    on: [work_item.state_changed]\n    entry: skip.star\n    after: [page_ref.work_item]\n",
+            "  - id: react\n    summary: s\n    on: [task.state_changed]\n    entry: skip.star\n    after: [page_ref.task]\n",
             &[("skip.star", "def transform(x):\n    return {\"skip\": \"x\"}\n")],
         )
         .await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         assert_eq!(
-            consumer.after_for("work_item.state_changed"),
-            vec!["page_ref.work_item".to_string()]
+            consumer.after_for("task.state_changed"),
+            vec!["page_ref.task".to_string()]
         );
         assert!(consumer.after_for("snapshot.taken").is_empty());
     }
@@ -1100,14 +1100,14 @@ mod tests {
     /// that run; a redelivery writes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_approved_effect_reacts_once_with_its_run_caused_by_the_event() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
         let before = title(&fx).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        assert!(consumer.handles("work_item.state_changed"));
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
+        assert!(consumer.handles("task.state_changed"));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
@@ -1137,21 +1137,18 @@ mod tests {
     /// `v_event`; the run records the read.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_reads_the_events_own_row() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
-        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [work_item.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
+        let stamp = "  - id: stamp\n    summary: Stamp the event's seq.\n    on: [task.state_changed]\n    where: { to: done }\n    needs: [sql.read]\n    entry: stamp.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT seq, type FROM v_event WHERE id = :event_id AND seq = :event_seq\", \"params\": {\"event_id\": x[\"event\"][\"id\"], \"event_seq\": x[\"event\"][\"seq\"]}})\n    uri = x[\"event\"][\"payload\"][\"task\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": uri, \"title\": rows[0][\"type\"] + \" #\" + str(rows[0][\"seq\"])}}]}\n";
         extension(svc, stamp, &[("stamp.star", script)]).await;
         start(svc).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
             .unwrap();
-        assert_eq!(
-            title(&fx).await,
-            format!("work_item.state_changed #{}", ev.seq)
-        );
+        assert_eq!(title(&fx).await, format!("task.state_changed #{}", ev.seq));
         // The script ran before its reaction; the reaction's run records
         // what the script called.
         let audit = svc.commands.audit_store().list_recent(1).await.unwrap();
@@ -1172,7 +1169,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            format!("{reaction:?}").contains(&format!("work_item.state_changed #{}", ev.seq)),
+            format!("{reaction:?}").contains(&format!("task.state_changed #{}", ev.seq)),
             "{reaction:?}"
         );
     }
@@ -1181,7 +1178,7 @@ mod tests {
     /// input schema rather than compiling its own.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_reactions_command_shares_the_sequences_validator() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let bus = &fx.svc.commands;
         let (a, b) = (
             effect_command(bus, Vec::new(), Vec::new(), BTreeMap::new()).unwrap(),
@@ -1193,13 +1190,13 @@ mod tests {
     /// Nothing before it started, and a `where` that doesn't match skips.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_never_reacts_to_the_past_or_to_what_where_excludes() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
-        let early = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let early = log(svc, state_changed(&fx, Bucket::Done)).await;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         consumer.handle(&early).await.unwrap();
-        let blocked = log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
+        let blocked = log(svc, state_changed(&fx, Bucket::Blocked)).await;
         consumer.handle(&blocked).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT count(*) FROM v_effect_run").await,
@@ -1211,12 +1208,12 @@ mod tests {
     /// and then interrupted is recorded failed and never sent again.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_interrupted_reaction_is_failed_not_sent_again() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
         let before = title(&fx).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before, "not sent again");
         let run = rows(svc, "SELECT state, reason FROM v_effect_run").await;
@@ -1231,7 +1228,7 @@ mod tests {
     /// and a person may retry it. A live one is the pump's to find.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_cut_off_backfill_or_automatic_attempt_is_recovered_at_start() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
@@ -1248,12 +1245,12 @@ mod tests {
                     .unwrap()
             }
         };
-        let cut_off = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let cut_off = log(svc, state_changed(&fx, Bucket::Done)).await;
         claim(&cut_off, ReactionOrigin::Backfill).await;
-        let live = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let live = log(svc, state_changed(&fx, Bucket::Done)).await;
         claim(&live, ReactionOrigin::Live).await;
         // tsk935: an automatic attempt cut off the same way is recovered too.
-        let auto = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let auto = log(svc, state_changed(&fx, Bucket::Done)).await;
         claim(&auto, ReactionOrigin::Auto).await;
 
         assert_eq!(recover_interrupted(svc).await.unwrap(), 2);
@@ -1300,7 +1297,7 @@ mod tests {
 
     /// A reaction of two steps: the item marked inside oxplow, then a
     /// write outside it (`oxplow.probe.write`).
-    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"work_item\"]\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
+    const PROBE: &str = "def transform(x):\n    ref = x[\"event\"][\"payload\"][\"task\"]\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": ref, \"title\": \"probed\"}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 1}}]}\n";
 
     /// `oxplow.probe.write`: a write outside oxplow that keeps each idempotency
     /// key it is sent, and fails while `fail` is set.
@@ -1353,7 +1350,7 @@ mod tests {
     /// own run of the command carries none.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_step_sends_the_same_key_on_every_attempt() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", PROBE)]).await;
         start(svc).await;
@@ -1361,7 +1358,7 @@ mod tests {
         let keys: Arc<parking_lot::Mutex<Vec<Option<String>>>> = Arc::default();
         let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
         register_probe(svc, keys.clone(), fail.clone());
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1397,7 +1394,7 @@ mod tests {
         use crate::commands::{Command, Handler, HandlerOutput, Invocation};
         use oxplow_domain::events::schema::{ConfigChanged, ConfigChangedV2};
         use oxplow_domain::{Access, Atomicity, CommandSpec, Confirm, Lifecycle};
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         const TWO_STEPS: &str = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.probe.note\", \"input\": {\"n\": 1}}, {\"name\": \"oxplow.probe.write\", \"input\": {\"n\": 2}}]}\n";
         extension(svc, MARK_DONE, &[("mark.star", TWO_STEPS)]).await;
@@ -1444,7 +1441,7 @@ mod tests {
         )
         .unwrap();
         svc.commands.register(note).unwrap();
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1487,13 +1484,13 @@ mod tests {
     /// retry is not asked; a reaction that didn't fail isn't retried.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_retries_an_interrupted_reaction() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
         register(svc);
         let before = title(&fx).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &ev).await;
         assert_eq!(title(&fx).await, before);
 
@@ -1547,7 +1544,7 @@ mod tests {
             .unwrap();
         assert_eq!(title(&fx).await, format!("{before} (done)"));
         // A reaction never made isn't one to retry either.
-        let other = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let other = log(svc, state_changed(&fx, Bucket::Done)).await;
         let refused = retry(svc, &human, &other, true).await.unwrap_err();
         assert!(refused.to_string().contains("hasn't reacted"), "{refused}");
         // An agent retries an interrupted one without being asked.
@@ -1556,7 +1553,7 @@ mod tests {
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let third = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let third = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &third).await;
         let out = retry(svc, &agent, &third, false).await.unwrap();
         assert_eq!(out.result["outcome"], json!("ok"));
@@ -1566,12 +1563,12 @@ mod tests {
     /// live reaction needs — the effect enabled.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_retry_needs_an_enabled_effect() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         start(svc).await;
         register(svc);
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         interrupt(svc, &ev).await;
         let human = oxplow_domain::Actor::Human;
 
@@ -1614,7 +1611,7 @@ mod tests {
     /// an agent presses runs it without asking.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_page_a_person_presses_retries_with_confirmation_and_an_agents_does_not_ask() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let page = |presser: oxplow_domain::Actor| oxplow_domain::Actor::Page {
             page_id: "oxplow/alerts-reactions".into(),
@@ -1677,18 +1674,18 @@ mod tests {
     /// and stops after a chain of [`MAX_CHAIN`] effect runs.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_loop_guard_holds() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
-        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [task.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE uri = :task\", \"params\": {\"task\": x[\"event\"][\"payload\"][\"task\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
-        let r = oxplow_tasks::work_item_ref(fx.task);
+        let r = oxplow_oxtask::task_ref(fx.task);
         svc.commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.work_item.update",
+                "oxplow.task.update",
                 json!({ "uri": r, "title": "renamed" }),
                 false,
             )
@@ -1699,7 +1696,7 @@ mod tests {
             let edits = svc.event_log_store.read_after(0, 10_000).await.unwrap();
             for e in edits
                 .iter()
-                .filter(|e| e.envelope.event_type == WorkItemEdited::TYPE)
+                .filter(|e| e.envelope.event_type == TaskEdited::TYPE)
             {
                 // The person's edit carries no thread; an effect runs for
                 // its event's, so anchor the delivered copy to the fixture's.
@@ -1728,9 +1725,9 @@ mod tests {
             cause = Some(executed.id.clone());
             log(svc, executed).await;
         }
-        let mut chained = Envelope::typed::<WorkItemEdited>(
+        let mut chained = Envelope::typed::<TaskEdited>(
             "effect:other/e3",
-            &serde_json::from_value(json!({ "work_item": r, "fields": ["title"] })).unwrap(),
+            &serde_json::from_value(json!({ "task": r, "fields": ["title"] })).unwrap(),
         );
         chained.cause = cause;
         let chained = log(svc, chained).await;
@@ -1754,9 +1751,9 @@ mod tests {
     /// reaction is recorded `proposed`, with the proposal.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_command_that_asks_leaves_a_proposal() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
-        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n";
+        let script = "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"]}}]}\n";
         extension(
             svc,
             &MARK_DONE.replace("entry: mark.star", "entry: drop.star"),
@@ -1764,7 +1761,7 @@ mod tests {
         )
         .await;
         start(svc).await;
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&ev)
             .await
@@ -1776,7 +1773,7 @@ mod tests {
             rows(svc, "SELECT json_extract(payload, '$.outcome') FROM v_event WHERE type = 'effect.result'").await,
             json!([["proposed"]])
         );
-        use oxplow_tasks::TaskStore as _;
+        use oxplow_oxtask::OxtaskStore as _;
         assert!(
             svc.task_store.get(fx.task).await.unwrap().is_some(),
             "nothing deleted"
@@ -1787,7 +1784,7 @@ mod tests {
     /// stops reacting — and log the disable.
     #[tokio::test(flavor = "multi_thread")]
     async fn three_failures_disable_an_effect() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(
             svc,
@@ -1798,7 +1795,7 @@ mod tests {
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
-            let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+            let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(
@@ -1809,7 +1806,7 @@ mod tests {
             .await,
             json!([["effect", "disabled"]])
         );
-        let fourth = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let fourth = log(svc, state_changed(&fx, Bucket::Done)).await;
         consumer.handle(&fourth).await.unwrap();
         assert_eq!(
             rows(svc, "SELECT count(*) FROM v_effect_run").await,
@@ -1842,12 +1839,12 @@ mod tests {
     /// `cancelled`, not `failed`, and it doesn't count toward disabling.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_disabled_extensions_effect_run_is_cancelled_not_failed() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
         start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         let running = {
             let (consumer, ev) = (consumer.clone(), ev.clone());
             tokio::spawn(async move { consumer.handle(&ev).await })
@@ -1885,12 +1882,12 @@ mod tests {
     /// notice it by: the run ends at once, not when the script's timeout does.
     #[tokio::test(flavor = "multi_thread")]
     async fn turning_off_an_extension_stops_a_script_that_is_computing() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", SPIN)]).await;
         start(svc).await;
         let consumer = Arc::new(EffectTriggers::new(Arc::downgrade(svc)));
-        let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
         let running = {
             let (consumer, ev) = (consumer.clone(), ev.clone());
             tokio::spawn(async move { consumer.handle(&ev).await })
@@ -1919,7 +1916,7 @@ mod tests {
     /// Skipped and proposed reactions aren't failures.
     #[tokio::test(flavor = "multi_thread")]
     async fn skipped_and_proposed_reactions_dont_count_as_failures() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let skip = MARK_DONE
             .replace("id: mark-done", "id: skips")
@@ -1933,14 +1930,14 @@ mod tests {
                 ("skip.star", "def transform(x):\n    return {\"skip\": \"not today\"}\n"),
                 (
                     "drop.star",
-                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.work_item.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"]}}]}\n",
+                    "def transform(x):\n    return {\"commands\": [{\"name\": \"oxplow.task.delete\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"]}}]}\n",
                 ),
             ],
         ).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for _ in 0..3 {
-            let ev = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+            let ev = log(svc, state_changed(&fx, Bucket::Done)).await;
             consumer.handle(&ev).await.unwrap();
         }
         assert_eq!(
@@ -1973,7 +1970,7 @@ mod tests {
     /// counts the other extension's runs.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_reacts_to_another_extensions_type_at_its_latest_version() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let owner = |types: &str| {
@@ -2002,7 +1999,7 @@ mod tests {
             "def transform(x):\n    p = dict(x[\"payload\"])\n    p[\"by\"] = \"unknown\"\n    return p\n",
         );
         // The subscriber: retitles the fixture's task with what it saw.
-        let task = oxplow_tasks::work_item_ref(fx.task);
+        let task = oxplow_oxtask::task_ref(fx.task);
         write(
             &root,
             ".oxplow/extensions/acme/extension.yaml",
@@ -2012,7 +2009,7 @@ mod tests {
             &root,
             ".oxplow/extensions/acme/note.star",
             &format!(
-                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
+                "def transform(x):\n    e = x[\"event\"]\n    return {{\"commands\": [{{\"name\": \"oxplow.task.update\", \"input\": {{\"uri\": \"{task}\", \"title\": \"#%d v%d by %s\" % (e[\"payload\"][\"number\"], e[\"v\"], e[\"payload\"][\"by\"])}}}}]}}\n"
             ),
         );
         crate::test_fixtures::activate_with_problems(svc).await;
@@ -2089,15 +2086,15 @@ mod tests {
 
     /// An effect that retitles the fixture's task with the first ref its
     /// event is about.
-    async fn retitle_by_subject(fx: &crate::test_fixtures::TaskEffortFixture) {
-        let task = oxplow_tasks::work_item_ref(fx.task);
+    async fn retitle_by_subject(fx: &crate::test_fixtures::TaskFixture) {
+        let task = oxplow_oxtask::task_ref(fx.task);
         extension(
             &fx.svc,
-            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [work_item.state_changed]\n    entry: note.star\n",
+            "  - id: note\n    summary: Retitle by what the event is about.\n    on: [task.state_changed]\n    entry: note.star\n",
             &[(
                 "note.star",
                 &format!(
-                    "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.work_item.update\", \"input\": {{\"uri\": \"{task}\", \"title\": x[\"event\"][\"subject\"][0]}}}}]}}\n"
+                    "def transform(x):\n    return {{\"commands\": [{{\"name\": \"oxplow.task.update\", \"input\": {{\"uri\": \"{task}\", \"title\": x[\"event\"][\"subject\"][0]}}}}]}}\n"
                 ),
             )],
         )
@@ -2109,18 +2106,18 @@ mod tests {
     /// subject than its stored row) is reacted to as delivered.
     #[tokio::test(flavor = "multi_thread")]
     async fn an_effect_reacts_to_the_delivered_event_not_the_log() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         retitle_by_subject(&fx).await;
         start(svc).await;
-        let mut stored = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let mut stored = log(svc, state_changed(&fx, Bucket::Done)).await;
         stored.envelope.id = oxplow_domain::EventId::generate();
-        stored.envelope.subject = vec!["oxplow:oxplow/effort?id=eff77".into()];
+        stored.envelope.subject = vec!["oxplow:oxplow/request?id=req77".into()];
         EffectTriggers::new(Arc::downgrade(svc))
             .handle(&stored)
             .await
             .unwrap();
-        assert_eq!(title(&fx).await, "oxplow:oxplow/effort?id=eff77");
+        assert_eq!(title(&fx).await, "oxplow:oxplow/request?id=req77");
     }
 
     async fn run_as_person(
@@ -2142,14 +2139,14 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_and_the_live_consumer_keep_off_each_others_events() {
         use crate::commands::effect::BACKFILL_PLAN;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
-        let past = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let past = log(svc, state_changed(&fx, Bucket::Done)).await;
         start(svc).await;
         // The live consumer hasn't reached this one yet.
-        let after = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let after = log(svc, state_changed(&fx, Bucket::Done)).await;
         let plan = run_as_person(svc, BACKFILL_PLAN, json!({ "effect": "acme/mark-done" }))
             .await
             .unwrap();
@@ -2205,14 +2202,14 @@ mod tests {
     /// filling the first pages never hide the matches after them.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_plan_reads_past_what_where_excludes() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         for _ in 0..5 {
-            log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
+            log(svc, state_changed(&fx, Bucket::Blocked)).await;
         }
-        let first = log(svc, state_changed(&fx, CanonicalState::Done)).await;
-        let last = log(svc, state_changed(&fx, CanonicalState::Done)).await;
+        let first = log(svc, state_changed(&fx, Bucket::Done)).await;
+        let last = log(svc, state_changed(&fx, Bucket::Done)).await;
         start(svc).await;
         let (_, decl) = find_effect(svc, "acme/mark-done").unwrap();
         let vocabulary = svc.vocabulary.current();
@@ -2249,17 +2246,17 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_never_plans_the_effects_own_events() {
         use crate::commands::effect::BACKFILL_PLAN;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
-        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [work_item.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
-        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_work_item WHERE uri = :work_item\", \"params\": {\"work_item\": x[\"event\"][\"payload\"][\"work_item\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.work_item.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"work_item\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
+        let bang = "  - id: bang\n    summary: Add a bang.\n    on: [task.edited]\n    needs: [sql.read]\n    entry: bang.star\n";
+        let script = "def transform(x):\n    rows = scope(\"sql.read\", {\"sql\": \"SELECT title FROM v_task WHERE uri = :task\", \"params\": {\"task\": x[\"event\"][\"payload\"][\"task\"]}})\n    return {\"commands\": [{\"name\": \"oxplow.task.update\", \"input\": {\"uri\": x[\"event\"][\"payload\"][\"task\"], \"title\": rows[0][\"title\"] + \"!\"}}]}\n";
         extension(svc, bang, &[("bang.star", script)]).await;
         register(svc);
-        let r = oxplow_tasks::work_item_ref(fx.task);
+        let r = oxplow_oxtask::task_ref(fx.task);
         let edited = |source: &str| {
-            Envelope::typed::<WorkItemEdited>(
+            Envelope::typed::<TaskEdited>(
                 source,
-                &serde_json::from_value(json!({ "work_item": r, "fields": ["title"] })).unwrap(),
+                &serde_json::from_value(json!({ "task": r, "fields": ["title"] })).unwrap(),
             )
         };
         // A person's edit, and one the effect's own run made (its source).
@@ -2280,7 +2277,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_reacts_to_what_the_effect_never_saw() {
         use crate::commands::effect::{BACKFILL, BACKFILL_PLAN};
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
@@ -2289,9 +2286,9 @@ mod tests {
         // excludes.
         let mut past = Vec::new();
         for _ in 0..3 {
-            past.push(log(svc, state_changed(&fx, CanonicalState::Done)).await);
+            past.push(log(svc, state_changed(&fx, Bucket::Done)).await);
         }
-        log(svc, state_changed(&fx, CanonicalState::Blocked)).await;
+        log(svc, state_changed(&fx, Bucket::Blocked)).await;
         start(svc).await;
         let consumer = EffectTriggers::new(Arc::downgrade(svc));
         for ev in &past {
@@ -2381,13 +2378,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_keeps_to_its_range_and_its_batch() {
         use crate::commands::effect::{backfill, Range, BACKFILL, BACKFILL_PLAN};
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         extension(svc, MARK_DONE, &[("mark.star", MARK)]).await;
         register(svc);
         let mut past = Vec::new();
         for _ in 0..3 {
-            past.push(log(svc, state_changed(&fx, CanonicalState::Done)).await);
+            past.push(log(svc, state_changed(&fx, Bucket::Done)).await);
         }
         start(svc).await;
         let planned = |input: Value| async move {
@@ -2433,13 +2430,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn a_backfill_stops_when_the_effect_is_disabled() {
         use crate::commands::effect::BACKFILL;
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+        let fx = crate::test_fixtures::services_with_task().await;
         let svc = &fx.svc;
         let broken = "def transform(x):\n    return 1 // 0\n";
         extension(svc, MARK_DONE, &[("mark.star", broken)]).await;
         register(svc);
         for _ in 0..5 {
-            log(svc, state_changed(&fx, CanonicalState::Done)).await;
+            log(svc, state_changed(&fx, Bucket::Done)).await;
         }
         let input = json!({ "effect": "acme/mark-done" });
         start(svc).await;

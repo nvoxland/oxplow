@@ -15,7 +15,7 @@
 //!   - id: burndown
 //!     title: Burndown
 //!     bundle: components/burndown        # default components/<id>; holds index.html
-//!     commands: [oxplow.work_item.transition]
+//!     commands: [oxplow.task.transition]
 //! ```
 
 use oxplow_domain::diagnostic::Diagnostic;
@@ -969,8 +969,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let ext = load_permitted(
             d.path(),
-            "permissions: [commands:oxplow.work_item.transition]\n",
-            "  - { id: burndown, title: Burndown, description: '  Work left in a sprint.  ', commands: [oxplow.work_item.transition] }\n",
+            "permissions: [commands:oxplow.task.transition]\n",
+            "  - { id: burndown, title: Burndown, description: '  Work left in a sprint.  ', commands: [oxplow.task.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         assert_eq!(
@@ -980,8 +980,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let plain = load_permitted(
             d.path(),
-            "permissions: [commands:oxplow.work_item.transition]\n",
-            "  - { id: burndown, title: Burndown, commands: [oxplow.work_item.transition] }\n",
+            "permissions: [commands:oxplow.task.transition]\n",
+            "  - { id: burndown, title: Burndown, commands: [oxplow.task.transition] }\n",
         );
         assert_eq!(plain.custom_components[0].description, None);
     }
@@ -991,13 +991,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let ext = load_permitted(
             d.path(),
-            "permissions: [commands:oxplow.work_item.transition]\n",
-            "  - { id: burndown, title: Burndown, commands: [oxplow.work_item.transition] }\n",
+            "permissions: [commands:oxplow.task.transition]\n",
+            "  - { id: burndown, title: Burndown, commands: [oxplow.task.transition] }\n",
         );
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let c = &ext.custom_components[0];
         assert_eq!(c.bundle, "components/burndown");
-        assert_eq!(c.commands, vec!["oxplow.work_item.transition"]);
+        assert_eq!(c.commands, vec!["oxplow.task.transition"]);
         let viz = custom_viz(&ext, "burn");
         assert_eq!(
             viz.custom.as_ref().unwrap().props.as_ref().unwrap()["color"],
@@ -1132,8 +1132,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         load_permitted(
             d.path(),
-            "permissions: [commands:nope.no.cmd, commands:oxplow.work_item.transition]\n",
-            "  - { id: burndown, commands: [nope.no.cmd, oxplow.work_item.transition] }\n",
+            "permissions: [commands:nope.no.cmd, commands:oxplow.task.transition]\n",
+            "  - { id: burndown, commands: [nope.no.cmd, oxplow.task.transition] }\n",
         );
         write(
             d.path(),
@@ -1144,7 +1144,7 @@ mod tests {
         let layer = crate::sql_gateway::SqlGateway::new(oxplow_db::Database::in_memory());
         let cat = crate::extension::extension_catalog::ExtensionCatalog::new();
         let schema = |n: &str| {
-            (n == "oxplow.work_item.transition").then(|| serde_json::json!({ "type": "object" }))
+            (n == "oxplow.task.transition").then(|| serde_json::json!({ "type": "object" }))
         };
         let v = crate::extension::extensions::validate_extension(
             &layer,
@@ -1160,7 +1160,7 @@ mod tests {
             errs.contains("declares command `nope.no.cmd`, which isn't registered"),
             "{errs}"
         );
-        assert!(!errs.contains("oxplow.work_item.transition"), "{errs}");
+        assert!(!errs.contains("oxplow.task.transition"), "{errs}");
         assert!(
             said(&v.warnings).contains("the kit's `chart` viz may already cover it"),
             "{:?}",

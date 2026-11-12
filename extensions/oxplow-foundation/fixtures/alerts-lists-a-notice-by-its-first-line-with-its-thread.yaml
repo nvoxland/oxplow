@@ -10,5 +10,5 @@ expect:
     notices:
       rows:
         - message: "Muted x for the agent. It said:"
-          source: '{"kind":"agent","label":"Helper","uri":"oxplow:oxplow/page?page=thread-work&thread=thr2"}'
+          source: '{"kind":"agent","label":"Helper","uri":"oxplow:oxplow/page?page=thread-tasks&thread=thr2"}'
 

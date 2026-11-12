@@ -34,7 +34,7 @@ import { Page } from "../tabs/Page.js";
 import { useOptionalPageNavigation, usePageTitle, useTabActions } from "../tabs/PageNavigationContext.js";
 import type { TabRef } from "../tabs/tabState.js";
 import type { Node, PageParam, PageRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { PageRail, switchSections } from "./PageRail.js";
+import { PageRail, PageRailTree, railTreeLast, switchSections } from "./PageRail.js";
 import { contentsHas, railHas, viewFills } from "./railHas.js";
 import { ComponentPage, type ComponentPageHost } from "./PageComponent.js";
 import type { BridgeHost } from "../viz/ComponentFrame.js";
@@ -91,7 +91,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
   const page = run?.page ?? null;
   // A shown view is a page file on `oxplow:temp`: what Save reads.
   const viewFile = page?.origin.extension === TEMP_EXTENSION ? `${page.slug}.yaml` : null;
-  const [saveAs, setSaveAs] = useState<"wiki" | "page" | null>(null);
+  const [saveAs, setSaveAs] = useState<"knowledge" | "page" | null>(null);
   // About this page opens over the page's top right, under its ☰.
   const [about, setAbout] = useState(false);
   const open = (uri: string) => {
@@ -99,8 +99,9 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     else onOpenPage?.({ id: uri });
   };
   // A page whose view is one component *is* that component: it says the
-  // title and the actions, which core draws.
-  const whole = page?.view.kind === "component";
+  // title and the actions, which core draws. One another extension stands
+  // in for (`replaceable:`) is drawn as any replaced node, by `PageTree`.
+  const whole = page?.view.kind === "component" && !run?.tree.replacedBy;
   const [frameTitle, setFrameTitle] = useState<string | null>(null);
   const [frameActions, setFrameActions] = useState<FrameAction[]>([]);
   const frameHost = useRef<BridgeHost | null>(null);
@@ -140,7 +141,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
     ...(page ? [{ id: "page-copy", label: copied ? "Copied" : "Copy", title: "Copy what the page shows, as text", standard: true, icon: "copy", run: copy }] : []),
     ...(page ? [{ id: "page-about", label: "About this page", standard: true, run: () => setAbout(true) }] : []),
     ...(viewFile ? [
-      { id: "view-save-wiki", label: "Save to wiki…", standard: true, run: () => setSaveAs("wiki") },
+      { id: "view-save-knowledge", label: "Save as knowledge page…", standard: true, run: () => setSaveAs("knowledge") },
       { id: "view-save-page", label: "Save as Page…", standard: true, run: () => setSaveAs("page") },
     ] : []),
     // A page re-runs on its own when oxplow's data changes; Refresh is for
@@ -257,6 +258,7 @@ export function PageHost({ pageKey, runs, focus = null, onOpenPage, onChange, re
             <PageRail run={run} runId={runId} onApply={apply} picked={picked} streamId={streamId} onOpenPage={onOpenPage} />
             {contentsHas(run, fills) ? <Contents root={body} /> : null}
             {fills ? null : <RailSeeAlso run={run} onOpenPage={onOpenPage} openWith={openWith} />}
+            {railTreeLast(run) ? <PageRailTree run={run} runId={runId} onApply={apply} streamId={streamId} onOpenPage={onOpenPage} /> : null}
             {saveAs && viewFile ? <SaveTempViewForm key={saveAs} kind={saveAs} file={viewFile} streamId={streamId} initialTitle={title} onClose={() => setSaveAs(null)} onSaved={open} /> : null}
           </>
         ) : undefined

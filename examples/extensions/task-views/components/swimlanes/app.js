@@ -1,19 +1,13 @@
-// task_views/swimlanes: the work list as one column per state. Drag a card to
-// another column to move it; drag within a column to reorder it (only when the
-// active list keeps an order); click a title to rename; click a card to open it.
+// task_views/swimlanes: the task tracker as one column per stage of the active
+// list, in its order. Drag a card to another column to move it; drag within a
+// column to reorder it (only when the active list keeps an order); click a
+// title to rename; click a card to open it.
 //
-// It reads `v_work_item` through its page's `swimlanes` loader and changes items only
-// through the work-item interface commands, so it works with any work list.
+// It reads `v_task` through its page's `swimlanes` loader and the list's
+// stages through its `stages` loader, and changes items only through the
+// task interface commands, so it works with any task tracker.
 (function () {
   "use strict";
-
-  const STATES = [
-    ["todo", "To do"],
-    ["in_progress", "In progress"],
-    ["blocked", "Blocked"],
-    ["done", "Done"],
-    ["canceled", "Canceled"],
-  ];
 
   const note = document.getElementById("note");
   const board = document.getElementById("board");
@@ -28,27 +22,10 @@
     note.hidden = true;
   };
 
-  /** Whether the active work list keeps an order: its features say `ordering`. */
-  function hasOrdering(features) {
-    const cell = features && features.rows && features.rows[0] ? features.rows[0][0] : null;
-    if (cell === null || cell === undefined) return false;
-    let list = cell;
-    if (typeof cell === "string") {
-      try {
-        list = JSON.parse(cell);
-      } catch (_) {
-        list = cell.split(/[\s,]+/);
-      }
-    }
-    if (Array.isArray(list)) return list.includes("ordering");
-    if (list && typeof list === "object") return Object.keys(list).includes("ordering");
-    return list === "ordering";
-  }
-
   oxplow.connect().then((component) => {
     component.applyTheme();
     let current = component.data.swimlanes;
-    let ordering = hasOrdering(component.data.features);
+    let stageRows = component.data.stages;
     let editing = false;
     let dragRef = null;
     // A card is being dragged: redrawing would remove it from under the
@@ -70,26 +47,26 @@
 
     component.onUpdate(({ data }) => {
       current = data.swimlanes;
-      ordering = hasOrdering(data.features);
+      stageRows = data.stages;
       if (editing || dragging) stale = true;
       else draw();
     });
     draw();
 
     function draw() {
-      const columns = current.columns;
-      const at = (row, name) => row[columns.indexOf(name)];
-      const items = current.rows.map((row) => ({
-        uri: at(row, "uri"),
-        title: at(row, "title"),
-        state: at(row, "state"),
-      }));
+      const read = (data) => {
+        const at = (row, name) => row[data.columns.indexOf(name)];
+        return (names) => data.rows.map((row) => Object.fromEntries(names.map((n) => [n, at(row, n)])));
+      };
+      const items = read(current)(["uri", "title", "stage"]);
+      // One lane per stage of the active list, in its order.
+      const stages = read(stageRows)(["value", "label"]);
       board.replaceChildren();
-      for (const [state, label] of STATES) {
-        const cards = items.filter((i) => i.state === state);
+      for (const { value: stage, label } of stages) {
+        const cards = items.filter((i) => i.stage === stage);
         const lane = document.createElement("section");
         lane.className = "lane";
-        lane.dataset.state = state;
+        lane.dataset.stage = stage;
         const head = document.createElement("h3");
         head.textContent = label + " ";
         const count = document.createElement("span");
@@ -110,17 +87,16 @@
           dragRef = null;
           const from = items.find((i) => i.uri === ref);
           if (!from) return;
-          if (from.state !== state) {
-            change("oxplow.work_item.transition", { uri: ref, to: state }).catch(() => {});
+          if (from.stage !== stage) {
+            change("oxplow.task.transition", { uri: ref, to: stage }).catch(() => {});
             return;
           }
-          // Within its column: only a work list that keeps an order can be reordered.
-          if (!ordering) return;
+          // Within its column: its place in its assignee's queue.
           const target = e.target.closest && e.target.closest(".card");
           const over = target ? cards.find((i) => i.uri === target.dataset.ref) : cards[cards.length - 1];
           if (!over || over.uri === ref) return;
           const input = cards.indexOf(from) > cards.indexOf(over) ? { uri: ref, before: over.uri } : { uri: ref, after: over.uri };
-          change("oxplow.work_item.reorder", input).catch(() => {});
+          change("oxplow.task.reorder", input).catch(() => {});
         });
         board.append(lane);
       }
@@ -185,7 +161,7 @@
       };
       form.addEventListener("submit", (e) => {
         e.preventDefault();
-        change("oxplow.work_item.update", { uri: item.uri, title: input.value }).then(
+        change("oxplow.task.update", { uri: item.uri, title: input.value }).then(
           () => leave(),
           (err) => {
             if (err && err.field) {

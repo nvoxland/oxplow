@@ -1,0 +1,52 @@
+title: Git (collapsed)
+description: The panel in one line — the uncommitted files' counts (added, modified, deleted, untracked, and the lines), each in its colour, and a merge or rebase in progress; or, in the Overview, only how far the branch is from its upstream and the default branch it is a worktree of. No buttons; the panel's Branch view has them.
+params:
+- name: stream_id
+  label: Stream
+# The panel's header toggle: every part declares it, so they agree.
+- name: show
+  role: filter
+  label: Show
+  default: changed_untracked
+  options:
+  - { value: changed_untracked, label: Uncommitted and untracked, icon: assets/file-plus.svg }
+  - { value: changed, label: Uncommitted, icon: assets/file-diff.svg }
+  - { value: overview, label: Overview, icon: layout-dashboard }
+loaders:
+  uncommitted_line:
+    page: oxplow/worktree-files
+    loader: line
+    params: { stream_id: { param: stream_id }, show: { param: show } }
+  sync_line:
+    page: oxplow/branch-status
+    loader: line
+    params: { stream_id: { param: stream_id } }
+view:
+  switch:
+    param: show
+    children:
+    - id: files
+      title: Files
+      hide_title: true
+      from: uncommitted_line
+      viz: list
+      columns:
+      - key: changes
+        label: Changes
+        format: marks
+        link:
+          kind: page
+          from: page
+      empty: Working tree clean
+    # Where the branch stands: ↑/↓ against its upstream and, on a worktree,
+    # the default branch it is a worktree of.
+    - id: overview
+      title: Overview
+      hide_title: true
+      from: sync_line
+      viz: list
+      columns:
+      - key: sync
+        label: Commits
+        format: marks
+      empty: No branch is checked out.

@@ -43,7 +43,7 @@ pub struct AddInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
     /// What it's anchored to: a page's URI
-    /// (`oxplow:oxplow/wiki?slug=some-page`, `oxplow:oxplow/file?path=src/a.rs`).
+    /// (`oxplow:oxplow/knowledge?id=some-page&store=oxwiki`, `oxplow:oxplow/file?path=src/a.rs`).
     pub target: String,
     /// The text it's about.
     #[serde(default)]
@@ -401,10 +401,10 @@ mod tests {
     }
 
     use super::*;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
     use oxplow_domain::stores::CommentStore as _;
 
-    fn agent(fx: &EffortFixture) -> Actor {
+    fn agent(fx: &ThreadFixture) -> Actor {
         Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
@@ -412,7 +412,7 @@ mod tests {
         }
     }
 
-    async fn add(fx: &EffortFixture, actor: &Actor, input: Value) -> Result<Value, CommandError> {
+    async fn add(fx: &ThreadFixture, actor: &Actor, input: Value) -> Result<Value, CommandError> {
         fx.svc
             .commands
             .run(actor, ADD, input, false)
@@ -421,7 +421,7 @@ mod tests {
     }
 
     fn comment_on(stream: &str, thread: Option<&str>) -> Value {
-        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::wiki_uri("a-page"),
+        let mut v = json!({ "stream": stream, "target": oxplow_domain::uri::build::knowledge_uri("oxwiki", "a-page"),
                             "quote": "the words", "body": "what about this?" });
         if let Some(t) = thread {
             v["thread"] = json!(t);
@@ -434,7 +434,7 @@ mod tests {
     /// the run.
     #[tokio::test]
     async fn the_author_is_the_actor_and_an_agent_comments_in_its_own_thread() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = StreamId::new(1).to_string();
         let mine = add(&fx, &agent(&fx), comment_on(&stream, None))
             .await
@@ -473,7 +473,7 @@ mod tests {
     /// join on `v_comment`.
     #[tokio::test]
     async fn a_threads_messages_are_read_in_order() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let stream = StreamId::new(1).to_string();
         let c = add(&fx, &agent(&fx), comment_on(&stream, None))
             .await
@@ -516,7 +516,7 @@ mod tests {
     /// was.
     #[tokio::test]
     async fn undoing_a_relink_of_an_orphaned_comment_orphans_it_again() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let c = add(
             &fx,
             &Actor::Human,
@@ -585,7 +585,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unchanged_anchor_writes_nothing() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let c = add(
             &fx,
             &Actor::Human,
@@ -676,7 +676,7 @@ mod tests {
     /// delete runs without asking.
     #[tokio::test]
     async fn resolve_undoes_and_delete_asks_a_person() {
-        let fx = services_with_effort().await;
+        let fx = services_with_thread().await;
         let c = add(
             &fx,
             &Actor::Human,
@@ -697,7 +697,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let status = |fx: &EffortFixture| {
+        let status = |fx: &ThreadFixture| {
             let store = fx.svc.comment_store.clone();
             async move { store.get(cid).await.unwrap().unwrap().comment.status }
         };

@@ -395,6 +395,13 @@ impl Host {
         // A config change reaches what runs, as at boot; what it asks to
         // publish, [`Host::settle`] publishes.
         oxplow_app::config_reactors::register(&self.svc);
+        // Each request's stored analysis (`v_request_observation`,
+        // `v_request_metric_delta`), an asset as at boot: recomputed with
+        // the materialized datasets before a read.
+        oxplow_app::boot::register_stored_analyses(&self.svc);
+        // A settings write republishes the datasets that read it, and a
+        // collector's new entity the ones it lets compile, as at boot.
+        oxplow_app::boot::register_extension_datasets(&self.svc);
         // The one change loop, as at boot: materialized datasets refill.
         oxplow_app::datasets_changed::spawn(
             self.svc.db.clone(),

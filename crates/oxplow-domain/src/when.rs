@@ -52,12 +52,12 @@ pub const CONTEXT_KEYS: &[ContextKey] = &[
     ContextKey {
         name: "pageDirty",
         kind: KeyKind::Bool,
-        doc: "The page shown has unsaved edits (a file's, a wiki page's): its Save would write them.",
+        doc: "The page shown has unsaved edits (a file's, a knowledge page's): its Save would write them.",
     },
     ContextKey {
         name: "pageKind",
         kind: KeyKind::Str,
-        doc: "What the page shown is: a route's page (`git-dashboard`, `acme/prs`) or the resource its URI names (`oxplow/file`, `oxplow/wiki`); empty when none is.",
+        doc: "What the page shown is: a route's page (`git-dashboard`, `acme/prs`) or the resource its URI names (`oxplow/file`, `oxplow/knowledge`); empty when none is.",
     },
     ContextKey {
         name: "shellAvailable",
@@ -590,7 +590,7 @@ mod tests {
     /// window publishes, each compared to a value of its kind.
     #[test]
     fn a_when_names_known_keys_compared_to_their_kind() {
-        check("fileShown && pageDirty || pageKind == wiki && streamKind =~ /^w/").unwrap();
+        check("fileShown && pageDirty || pageKind == knowledge && streamKind =~ /^w/").unwrap();
         for (src, says) in [
             ("fileDirt", "`fileDirt` isn't a context key"),
             ("pageDirty == yes", "compare it to `true` or `false`"),

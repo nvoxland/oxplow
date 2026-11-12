@@ -15,7 +15,7 @@ use crate::database::{map_sql_err, Database};
 /// One implementation of a capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CapabilityProvider {
-    /// `work_items`, `effort_policy`, `snapshots`, `vcs`, `knowledge`.
+    /// `task_tracker`, `snapshots`, `vcs`, `knowledge`.
     pub capability: String,
     /// The implementation's id (`oxplow`, `git`, `issues`, `none`).
     pub provider: String,
@@ -44,7 +44,13 @@ pub struct CapabilityProvider {
     pub optional: bool,
     /// Its own fields, as it declares them (a JSON array).
     pub fields: Value,
-    /// What a work list's own ids look like (a regex matched whole), if
+    /// A task tracker's stages, in order, as it declares them (a JSON array
+    /// of `{ id, title, bucket }`); `[]` for any other.
+    pub stages: Value,
+    /// A knowledge store's kinds of page, as it declares them (a JSON array
+    /// of `{ id, title, bucket }`); `[]` for any other.
+    pub kinds: Value,
+    /// What a task tracker's own ids look like (a regex matched whole), if
     /// it says: how its ids are recognized in text.
     pub id_pattern: Option<String>,
     /// One sentence saying what it is; `None` when its declaration says nothing.
@@ -55,8 +61,9 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
     conn.execute(
         "INSERT INTO capability_provider
            (capability, provider, extension, features_json, active, title, source, available,
-            chosen_by, capability_title, choosable, optional, fields_json, id_pattern, description)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            chosen_by, capability_title, choosable, optional, fields_json, id_pattern, description,
+            stages_json, kinds_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             row.capability,
             row.provider,
@@ -73,6 +80,8 @@ fn insert_tx(conn: &Connection, row: &CapabilityProvider) -> Result<(), DomainEr
             row.fields.to_string(),
             row.id_pattern,
             row.description,
+            row.stages.to_string(),
+            row.kinds.to_string(),
         ],
     )
     .map_err(map_sql_err)?;
@@ -91,7 +100,7 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
         .prepare(
             "SELECT capability, provider, extension, features_json, active, title, source,
                     available, chosen_by, capability_title, choosable, optional, fields_json,
-                    id_pattern, description
+                    id_pattern, description, stages_json, kinds_json
                FROM capability_provider ORDER BY capability, provider",
         )
         .map_err(map_sql_err)?;
@@ -99,6 +108,8 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
         .query_map([], |r| {
             let features: String = r.get(3)?;
             let fields: String = r.get(12)?;
+            let stages: String = r.get(15)?;
+            let kinds: String = r.get(16)?;
             Ok(CapabilityProvider {
                 capability: r.get(0)?,
                 provider: r.get(1)?,
@@ -115,6 +126,8 @@ pub fn list_tx(conn: &Connection) -> Result<Vec<CapabilityProvider>, DomainError
                 fields: serde_json::from_str(&fields).unwrap_or(Value::Null),
                 id_pattern: r.get(13)?,
                 description: r.get(14)?,
+                stages: serde_json::from_str(&stages).unwrap_or(Value::Null),
+                kinds: serde_json::from_str(&kinds).unwrap_or(Value::Null),
             })
         })
         .map_err(map_sql_err)?;
@@ -157,6 +170,8 @@ mod tests {
             choosable: true,
             optional: false,
             fields: serde_json::json!([]),
+            stages: serde_json::json!([]),
+            kinds: serde_json::json!([]),
             id_pattern: None,
             description: None,
         }
@@ -167,12 +182,12 @@ mod tests {
         let db = Database::in_memory();
         let store = SqliteCapabilityStore::new(db.clone());
         let reset = |rows: Vec<CapabilityProvider>| db.transaction(move |tx| reset_tx(tx, &rows));
-        let mut fake = row("work_items", "fake", json!({ "comments": false }));
+        let mut fake = row("task_tracker", "fake", json!({ "comments": false }));
         fake.extension = Some("tracker".into());
         fake.available = false;
         fake.chosen_by = None;
         reset(vec![
-            row("work_items", "oxplow", json!({ "comments": true })),
+            row("task_tracker", "oxtask", json!({ "comments": true })),
             fake.clone(),
         ])
         .await
@@ -181,7 +196,7 @@ mod tests {
             store.list().await.unwrap(),
             vec![
                 fake,
-                row("work_items", "oxplow", json!({ "comments": true }))
+                row("task_tracker", "oxtask", json!({ "comments": true }))
             ]
         );
         reset(vec![row("vcs", "git", json!({ "remotes": true }))])

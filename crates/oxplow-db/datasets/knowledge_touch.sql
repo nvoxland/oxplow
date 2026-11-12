@@ -1,3 +1,3 @@
-SELECT p.uri AS page, u.thread_id, u.last_seen_at
-FROM source('wiki_page_thread_update') u
-JOIN ref('knowledge_page') p ON p.slug = u.slug
+SELECT p.uri AS page, t.thread_id, t.last_seen_at
+FROM source('knowledge_page_touch') t
+JOIN ref('knowledge_page') p ON p.uri = t.uri

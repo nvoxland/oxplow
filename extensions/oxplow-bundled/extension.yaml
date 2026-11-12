@@ -1,15 +1,18 @@
 manifest: 2
 name: oxplow-bundled
 namespace: oxplow
-description: What comes with oxplow beyond its foundation, cleaned up. Holds the review datasets, event types and commands so far; the rest moves here from oxplow-bundled-todo one piece at a time.
+description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
-# Its commands read the review datasets with their own SQL.
-permissions: [sql.read]
+# Its task tracker's skill is written to the agent's runtime (`/oxplow:next-task`).
+permissions: [files.read, agent.write]
+# Its Work board is a custom component in TypeScript (src/board/), built
+# into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
+build: { run: "bun run build", output: dist, exclude: [node_modules] }
 intent:
   purpose: >-
     Hold the optional features oxplow ships once each has been cleaned up. So
-    far that is the review and analysis datasets, their settings and the
-    verdict decorators, event types and commands. Their names come from the
+    far that is the review and analysis datasets, their settings, the Work
+    panel and board, and their event types and commands. Their names come from the
     `oxplow` namespace, so they stay when a piece moves between extensions.
   origin: null
 datasets:
@@ -40,90 +43,82 @@ datasets:
       - { name: expected, type: "", doc: "Its usual partners, `, `-separated (for `usual-co-changers-absent`)." }
       - { name: dormant_days, type: "", doc: "Days since a commit last touched it (for `dormant`; 90 when never)." }
   - name: deviation
-    version: 1
-    description: "Files each effort changed outside the area its work item names: a file is in the area when the item's title or body names it, or one of its directories at least two levels deep (`src/ui`). An item that names no area has none."
+    version: 2
+    description: "Files each request changed outside the area its tasks name: a file is in the area when a task's title or body names it, or one of its directories at least two levels deep (`src/ui`). A request whose tasks name no area has none."
     fields:
-      - { name: effort_id, type: INTEGER, doc: "The effort (v_effort.id)." }
+      - { name: request_id, type: INT, doc: "The request (v_request.id)." }
       - { name: path, type: TEXT, doc: "Repo-relative file path." }
-      - { name: change_kind, type: TEXT, doc: "`created`, `updated` or `deleted`." }
   - name: struggle
-    version: 1
-    description: "Where the agent had trouble in an effort, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
+    version: 2
+    description: "Where the agent had trouble in a request, by this review policy's thresholds: a file edited 5+ times (`repeated_edits`) or 3+ failed shell commands (`failed_commands`). Likely places for mistakes."
     fields:
-      - { name: effort_id, type: INTEGER, doc: "Effort." }
+      - { name: request_id, type: INT, doc: "The request (v_request.id)." }
       - { name: thread_id, type: INTEGER, doc: "Thread." }
       - { name: agent_session_id, type: INTEGER, doc: "The agent session it happened in; NULL when not recorded." }
       - { name: kind, type: "", doc: "`repeated_edits` or `failed_commands`." }
       - { name: subject, type: TEXT, doc: "The file path, or `shell` (failed shell commands, whatever the harness)." }
       - { name: count, type: "", doc: "How many edits / failures." }
-  - name: claim_status
-    version: 3
-    key: [uri]
-    description: "Whether each of the agent's claims is backed, by this review policy's rule: it cites evidence (`v_claim.evidence` — a run, a test, a file, or `reviewer` when a person verified it) or a person verified it (`v_claim.review`), or it is `tests_pass` and its effort's latest test run (`v_test_run`) passed with at least one test. A claim a person dismissed has no row: it counts neither as backed nor as unbacked."
+  - name: ready_queue
+    version: 1
+    description: "What to pick up next, as `next-task` picks it. Ready means `todo` with no open blocker. Per thread: its assigned ready items in its queue's order; when the first is an epic, it and its ready descendants as one unit (`role` `epic`, `child`), else every ready one that isn't an epic (`ready`). The pool (`thread_id` NULL, `role` `pool`): ready items assigned to nobody that aren't epics, the most pressing first."
     fields:
-      - { name: uri, type: TEXT, doc: "The claim (`v_claim.uri`)." }
-      - { name: effort_id, type: INTEGER, doc: "Its effort (v_effort.id), if one was open." }
-      - { name: verified, type: INT, doc: "1 when something backs it, else 0." }
-      - { name: backed_by, type: TEXT, doc: "`evidence` (it cites some) or `latest run` (a passing latest test run backs `tests pass`); NULL when nothing does." }
-  - name: verdicts
-    version: 3
-    key: [seq]
-    materialize: { incremental: seq }
-    description: "Every verdict a reviewer gave (`oxplow.review.accepted` / `.changes_requested`), oldest first — appended as each lands, so reading the latest never scans the log. Read from the events' envelopes alone, which retention keeps: a verdict outlives its payload."
+      - { name: thread_id, type: INTEGER, doc: "The thread whose queue it is in (v_thread.id); NULL for the pool." }
+      - { name: uri, type: TEXT, doc: "The task." }
+      - { name: title, type: TEXT, doc: "Its title." }
+      - { name: native_id, type: TEXT, doc: "Its tracker's own id (`tsk42`)." }
+      - { name: role, type: TEXT, doc: "`epic`, `child`, `ready` or `pool`." }
+      - { name: ord, type: NUM, doc: "Its place: 1 is next." }
+  - name: task_workflow
+    version: 1
+    description: "How this project's agents use tasks (oxtask's setting, one row): `workflow` is `agent_tracks` (the agent tracks everything), `person_files` (the person files, the agent works them), `custom` (the project's own extension says) or `off`; `definition_of_done` is the project's text, empty for none. Set with `oxplow.tasks.set_workflow`."
     fields:
-      - { name: seq, type: INTEGER, doc: "The verdict's event (v_event.seq)." }
-      - { name: uri, type: TEXT, doc: "The effort reviewed (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: verdict, type: TEXT, doc: "`accepted` or `changes_requested`." }
-      - { name: forced, type: "", doc: "1 when accepted although claims were unverified or decisions unreviewed (the event names them)." }
-  - name: verdict
-    version: 2
-    key: [uri]
-    description: "Each effort's latest verdict, as its decorators show it: a chip on the effort's page and a badge where a page row links to it."
-    fields:
-      - { name: uri, type: TEXT, doc: "The effort (`oxplow:oxplow/effort?id=eff<id>`)." }
-      - { name: label, type: TEXT, doc: "`Accepted`, `Accepted (forced)` or `Changes requested`." }
-      - { name: color, type: TEXT, doc: "`green`, `orange` or `red`." }
+      - { name: workflow, type: TEXT, doc: "`agent_tracks`, `person_files`, `custom` or `off`." }
+      - { name: definition_of_done, type: TEXT, doc: "What done means here, one item per line; empty for none." }
   - name: finished_cleared
     version: 2
     key: [thread_id]
-    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.work.clear_finished`), read from the events' envelopes."
+    # Stored: it reads the event log, which every agent event writes, and a
+    # live view of it would make the Work panel re-run on each one. A
+    # recompute that finds the same rows writes nothing, so its readers
+    # hear only a clear.
+    materialize: on_change
+    description: "When the person last cleared each thread's Finished list in the Work panel (`oxplow.tasks.clear_finished`), read from the events' envelopes."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
       - { name: cleared_at, type: TEXT, doc: "When it was last cleared (RFC 3339)." }
-  - name: thread_work
-    version: 4
-    description: "Each thread's Work panel, one row per line in display order, from the active work list (`v_work_item`): what's in progress (the item, under its epic with the epic's other children, and an open effort no item names), up to 10 ready items, and the last 5 finished items, wiki pages and unlinked efforts since the list was cleared."
+  - name: thread_tasks
+    version: 9
+    description: "Each thread's Work panel, one row per line in display order: the tasks the thread is working on (a project-manager view of tasks, never of turns or requests). In progress is the tasks assigned to it in progress (under their epic with the epic's other children); Up next is the ready and blocked tasks assigned to the thread, in its queue's order; Finished is the done tasks a request on the thread worked on (each once) and the knowledge pages it touched, since the list was cleared. It reads no request, so it changes only when tasks, their requests' links or the thread's knowledge touches do; what a thread's request is doing now is v_request's (the Work panel reads it for its own thread)."
     fields:
       - { name: thread_id, type: INT, doc: "The thread (v_thread.id)." }
-      - { name: grp, type: TEXT, doc: "`In progress`, `Ready` or `Finished`." }
+      - { name: grp, type: TEXT, doc: "`In progress`, `Up next` or `Finished`." }
       - { name: g, type: INT, doc: "The group's place (0, 1, 3)." }
       - { name: ord, type: INT, doc: "The line's place in its group." }
       - { name: title, type: TEXT, doc: "What to show." }
-      - { name: icon, type: TEXT, doc: "A viz icon name: a work-item state (`todo`, `in_progress`, `done`, …), `epic` or `wiki`." }
-      - { name: uri, type: TEXT, doc: "What the line opens (`work_item:…`, `oxplow:oxplow/wiki?slug=<slug>`, `oxplow:oxplow/effort?id=eff<id>`)." }
+      - { name: icon, type: TEXT, doc: "A viz icon name: a task state (`todo`, `blocked`, `in_progress`, `done`, …), `epic` or `knowledge`." }
+      - { name: uri, type: TEXT, doc: "What the line opens (a task's URI, a knowledge page's)." }
       - { name: depth, type: INT, doc: "1 for an epic's child, else 0." }
-      - { name: active, type: INT, doc: "1 for the item, or the unlinked effort, in progress." }
+      - { name: active, type: INT, doc: "1 for a task in progress on this thread." }
 event_types:
   types:
-    - type: oxplow.review.accepted
-      v: 1
-      schema: event_types/accepted.json
-      summary: A person accepted an effort's work. Subject — the effort, its work item and any claim or decision accepted unchecked.
-    - type: oxplow.review.changes_requested
-      v: 1
-      schema: event_types/changes_requested.json
-      summary: A person sent an effort's work back with changes requested. Subject — the effort and its work item.
-    - type: oxplow.work.finished_cleared
+    - type: oxplow.tasks.finished_cleared
       v: 1
       schema: event_types/finished_cleared.json
       summary: A person cleared a thread's Finished list in the Work panel. Subject — the thread.
 ui:
-  # The verdict where the effort is shown: it shows; it never acts.
-  decorators:
-    - { dataset: verdict, resource: oxplow/effort, placement: ref-chip, label: label, color: color }
-    - { dataset: verdict, resource: oxplow/effort, placement: row-badge, label: label, color: color }
+  # A task's page shows the agent's tokens on it and what another
+  # thread shares with it.
+  mounts:
+    - { page: task-tokens, at: oxplow/task-detail.sections }
+    - { page: item-shared-work, at: oxplow/task-detail.sections }
+    # A request's Changes page shows where it left its task's area and
+    # where its agent struggled (empty on a snapshot's or a turn's).
+    - { page: what-deviated, at: oxplow/diff-view.sections }
+    - { page: struggled, at: oxplow/diff-view.sections }
+    # Settings → Integrations: how this project's agents use tasks.
+    - { page: task-workflow-settings, at: oxplow/settings.integrations }
 configuration:
-  version: 1
+  version: 2
   schema:
     type: object
     additionalProperties: false
@@ -149,93 +144,46 @@ configuration:
       struggle:
         type: object
         additionalProperties: false
-        description: When the agent is said to have struggled in an effort.
+        description: When the agent is said to have struggled in a request.
         properties:
           repeatedEdits: { type: integer, minimum: 1, description: Edits of one file at or above which it counts. }
           failedCommands: { type: integer, minimum: 1, description: Failed shell commands at or above which they count. }
+      tasks:
+        type: object
+        additionalProperties: false
+        description: How this project's agents use oxtask's tasks.
+        properties:
+          workflow:
+            type: string
+            enum: [off, person_files, agent_tracks, custom]
+            description: "off: oxtask tells agents nothing about tasks (the tracker's own commands stay); person_files: the agent works the tasks people file and assign; agent_tracks: the agent takes or files a task for each piece of work; custom: the project's own extension says how."
+          definitionOfDone:
+            type: string
+            maxLength: 1000
+            description: "What done means here, one item per line (tests pass, committed, …); the agent checks it before closing a task. Empty for none."
   defaults:
     changeInterest: { complexityWeight: 0.6, parameterWeight: 0.4, longFunctionLines: 60, longFunctionScale: 40 }
     coChange: { minShared: 3, windowDays: 180, maxFilesPerCommit: 50, dormantDays: 90 }
     struggle: { repeatedEdits: 5, failedCommands: 3 }
+    tasks: { workflow: agent_tracks, definitionOfDone: "" }
 commands:
   # This extension's review-policy settings (`configuration:` above), through
   # the host's configuration scope. A person sets them; a change republishes
   # the datasets that read them.
-  - name: review_policy.read
-    summary: The review policy's effective settings, where each came from, and the stamps a write needs.
-    scope: extension_config.read
-    op: snapshot
-    example: {}
-  - name: review_policy.write
-    summary: Set the review policy's project or personal settings (a compare-and-swap on the stamps `review_policy.read` returns).
-    scope: extension_config.write
-    op: compare_exchange
-    example: {"schema_version": 1, "project": {"expected": {"schema_version": 1, "revision": 2}, "values": {"struggle": {"repeatedEdits": 4}}}, "personal": null}
-  - name: review.accept
-    summary: Accept an effort's work — comment the review on its work item and mark it done. Refuses while a claim is unverified (a dismissed one doesn't count) or an inferred decision unreviewed, unless forced.
+  - name: tasks.set_workflow
+    summary: "Choose how this project's agents use tasks (off, person files and the agent works them, the agent tracks everything, or the project's own way) and what \"done\" means here, for the project. The task state and the reminder follow at the next prompt; the skills offered change for agent sessions started after it. A person's own setting of the workflow, when there is one, still wins for them (the result says so)."
     input_schema:
       type: object
-      required: [effort]
       properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        force: { type: boolean, description: "Accept even with unverified claims or unreviewed decisions; they're listed in the comment." }
+        workflow: { type: string, enum: [off, person_files, agent_tracks, custom], description: "The workflow preset." }
+        definition_of_done: { type: string, contentMediaType: text/markdown, maxLength: 1000, description: "What done means here, one item per line; empty for none." }
+      minProperties: 1
       additionalProperties: false
-    entry: handlers/accept.star
-    needs: [sql.read]
-    confirm: always
-    ui: { label: Accept Review, group: Review, about: oxplow/effort, about_when: work_item, input: { effort: "{{uri.id}}" } }
-    examples:
-      - name: reviewed
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: an unverified claim
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        refused: 1 unverified claim
-      - name: forced
-        input: { effort: "eff1", force: true }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: '[{"claim":"oxplow:oxplow/claim?id=1","statement":"tests pass"}]', inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: another provider's item
-        input: { effort: "eff2" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: no work item
-        input: { effort: "eff3" }
-        answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: has no work item
-  - name: review.request_changes
-    summary: Send an effort's work back — comment a checklist of its unverified claims, inferred decisions and files outside its work item's area (and your note) on the item, and move it back to todo.
-    input_schema:
-      type: object
-      required: [effort]
-      properties:
-        effort: { type: string, description: "The effort (`eff<id>`)." }
-        note: { type: string, description: "What else to change." }
-      additionalProperties: false
-    entry: handlers/request_changes.star
-    needs: [sql.read]
-    confirm: always
-    ui: { label: Request Changes, group: Review, about: oxplow/effort, about_when: work_item, input: { effort: "{{uri.id}}" } }
-    examples:
-      - name: a file outside the area
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: '["src/db/store.py"]' }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: nothing to ask for
-        input: { effort: "eff1" }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: nothing to ask for
-      - name: another provider's item
-        input: { effort: "eff2", note: "Add the migration." }
-        answers: { sql.read: [[{ work_item: "oxplow:oxplow/work_item?id=ENG-12&provider=issues", unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        expect_commands: [oxplow.work_item.comment, oxplow.work_item.transition]
-      - name: no work item
-        input: { effort: "eff3", note: "x" }
-        answers: { sql.read: [[{ work_item: null, unverified: "[]", inferred: "[]", deviated: "[]" }]] }
-        refused: has no work item
-  - name: work.clear_finished
+    example: {"workflow": "person_files", "definition_of_done": "Tests pass.\nCommitted."}
+    entry: handlers/set_workflow.star
+    needs: [extension_config.read]
+    access: write
+  - name: tasks.clear_finished
     summary: Clear a thread's Finished list in the Work panel — what finished before now stops showing there.
     input_schema:
       type: object
@@ -247,3 +195,179 @@ commands:
     access: record
     examples:
       - { name: clears, input: { thread_id: 3 }, expect_commands: [] }
+  # The person's menu entry for foundation's `task.create`: an agent
+  # runs foundation's; this adds the label, shortcut and form a person uses.
+  - name: task.new
+    summary: "The person's menu entry for `oxplow.task.create`: New Task… opens the new-task form and shows the task it files."
+    scope: task_tracker.write
+    op: create
+    ui: {"label": "New Task…", "group": "Tasks", "keywords": ["task"], "form": "oxplow:oxplow/page?page=new-task", "shortcut": "Ctrl/Cmd+Shift+N", "open_after": "{{result.uri}}"}
+    example: {"title": "Fix the login redirect loop", "body": "Signing in from /settings bounces back to /login.", "stage": "todo"}
+  # The person's menu entry for foundation's `knowledge.write_page`: an
+  # agent runs foundation's; this adds the label and the form a person uses.
+  - name: knowledge.new_page
+    summary: "The person's menu entry for `oxplow.knowledge.write_page`: New Knowledge Page… opens the form and shows the page it writes."
+    scope: knowledge.write
+    op: write_page
+    ui: { label: "New Knowledge Page…", group: Knowledge, keywords: [knowledge, page, note, write], form: "oxplow:oxplow/page?page=new-knowledge-page", open_after: "{{result.page}}" }
+    example: {"title": "Auth flow", "body": "# Auth flow\n\nThe callback validates `next` before redirecting.", "verified_files": []}
+custom_components:
+  # The Work board: the tasks as cards in a column per stage, its own
+  # toolbar, drag and card menu; oxplow draws its nav bar and confirms.
+  - id: board
+    title: Board
+    description: "The tasks as a kanban board: a column per stage of the list, drag a card to move it, a card's menu to set its stage, fields and assignee."
+    bundle: dist/board
+    commands: [oxplow.task.transition, oxplow.task.update, oxplow.task.assign, oxplow.task.reorder, oxplow.task.delete]
+panels:
+  # What the thread is working on: its open task (with its epic), the
+  # items assigned to it next, and what it finished; collapsed, the task.
+  # Its header has no count, and opens the Work board.
+  - { id: work, title: Work, icon: list-checks, scope: thread, body: work-panel, collapsed: work-line, open: 'oxplow:oxplow/page?page=work' }
+  # What is assigned to the person: their open tasks, counted; the header
+  # opens the Assigned to you page. Project-wide, so the thread is not a param.
+  - { id: assigned, title: Assigned to you, icon: user, scope: project, body: assigned-panel, collapsed: assigned-line, count: assigned-count, open: 'oxplow:oxplow/page?page=assigned-to-you' }
+# oxplow's own task tracker, oxtask, is declared here: with only
+# oxplow-foundation running there is no task tracker. Its agent skill is the
+# ready queue (`/oxplow:next-task`).
+skills:
+  # How an agent uses tasks is the project's task workflow (`tasks.workflow`):
+  # `off` offers none of these; `custom` only the queue, the project's own
+  # skill saying the rest.
+  - { name: next-task, kind: command, file: commands/next-task.md, when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] } }
+  # The agent tracks what it works on as tasks (the default).
+  - { name: track-work, file: skills/track-work/SKILL.md, when: { config: /tasks/workflow, in: [agent_tracks] } }
+  # The person files the tasks; the agent works them.
+  - { name: work-tasks, file: skills/work-tasks/SKILL.md, when: { config: /tasks/workflow, in: [person_files] } }
+# What the agent should know now, while oxtask is the active tracker and
+# the project's workflow uses tasks: the thread's task in progress, the
+# next three in its queue, and the project's definition of done; nothing
+# when there is none of them (core tells an agent that was told before
+# that it no longer holds). Sent once, then on change, and again after a
+# compaction.
+context:
+  - id: task-state
+    doc: "The thread's task in progress, the next three in its queue, and the project's definition of done."
+    needs: [task_tracker]
+    when: { config: /tasks/workflow, in: [person_files, agent_tracks, custom] }
+    query: |
+      WITH here AS (SELECT uri('oxplow/thread', 'id', 'thr' || :thread_id) AS uri),
+      mine AS (
+        SELECT w.title, w.native_id, w.state, w.rank, w.created_at
+        FROM v_task w, here WHERE w.assignee = here.uri
+      ),
+      active AS (
+        SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
+        FROM (SELECT * FROM mine WHERE state = 'in_progress' ORDER BY rank IS NULL, rank, created_at)
+      ),
+      up_next AS (
+        SELECT group_concat('"' || title || '" (' || native_id || ')', ', ') AS s
+        FROM (SELECT title, native_id FROM v_oxplow_ready_queue
+              WHERE thread_id = :thread_id ORDER BY ord LIMIT 3)
+      ),
+      done_means AS (SELECT trim(definition_of_done) AS d FROM v_oxplow_task_workflow)
+      SELECT coalesce('In progress on this thread: ' || active.s || '.', 'Nothing is in progress on this thread.')
+             || coalesce(char(10) || 'Up next: ' || up_next.s || '.', '')
+             || CASE WHEN done_means.d <> '' THEN char(10) || 'Done means:' || char(10) || done_means.d ELSE '' END AS text
+      FROM active, up_next, done_means
+      WHERE (active.s IS NOT NULL OR up_next.s IS NOT NULL OR done_means.d <> '')
+        AND EXISTS (SELECT 1 FROM v_capability_provider p
+                     WHERE p.capability = 'task_tracker' AND p.provider = 'oxtask' AND p.active = 1)
+implementations:
+  - { capability: task_tracker, id: oxtask, entry: "oxplow:oxtask", skills: [next-task, track-work, work-tasks], description: "The task tracker that oxplow keeps itself." }
+advisories:
+  # oxtask's opinion (the `track-work` skill): an agent tracks what it works
+  # on as tasks. At the first edit of a request (a file an edit call named or
+  # the harness reported a shell call changed), while the thread has no task
+  # in progress and the request has no task linked (an agent that took a
+  # task, edited and moved it to done did everything right), the agent is
+  # reminded once per request, in the same turn. Only while oxtask is the
+  # active task tracker.
+  - id: untracked-work
+    on: post-tool-use
+    once_per: request
+    query: |
+      SELECT 'This request changed files, and no task is in progress on this thread. If it is '
+             || 'work the person will want to see on the Work panel, take or file its task and '
+             || 'move it to in progress (the `track-work` skill); a small fix needs none.' AS message
+      WHERE :request_id IS NOT NULL
+        -- Only in the workflow where the agent tracks everything.
+        AND config('/tasks/workflow') = 'agent_tracks'
+        AND EXISTS (SELECT 1 FROM v_capability_provider
+                     WHERE capability = 'task_tracker' AND provider = 'oxtask' AND active = 1)
+        AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id
+                     WHERE t.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = :request_id)
+        AND NOT EXISTS (SELECT 1 FROM v_task w JOIN v_thread th ON th.uri = w.assignee
+                         WHERE th.id = :thread_id AND w.state = 'in_progress')
+# Whether the work was tracked: of the requests that changed files, the share
+# that has a task linked. It reads no workflow setting: it measures what
+# happened, whatever the workflow.
+collectors:
+  - id: oxplow.request_tracked
+    doc: Whether a request that changed files has a task linked, recorded when a turn of it ends and none of its turns runs.
+    runtime: starlark
+    entry: collectors/request/tracked.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request,
+             EXISTS (SELECT 1 FROM v_request_task rt WHERE rt.request_id = r.id) AS tracked,
+             r.started_at AS placed_at
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                          WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
+         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn pt ON pt.id = p.turn_id
+                      WHERE pt.request_id = t.request_id)
+    facts: [oxplow.request_tracked]
+  # What the project knows: the pages it keeps, restated whenever a page is
+  # written, recorded or deleted, and whether a request read any.
+  - id: oxplow.knowledge_pages
+    doc: How many knowledge pages there are and how many are stale, by store and bucket, restated when a page is written, recorded or deleted, and when a snapshot changes a file a page cites (knowledge.page.drifted), since a cited file drifting is what makes a page stale; a snapshot of an uncited file restates nothing.
+    runtime: starlark
+    entry: collectors/knowledge/pages.star
+    on: [knowledge.page.written, knowledge.page.recorded, knowledge.page.deleted, knowledge.page.drifted]
+    input: |
+      SELECT n.placed_at, n.day, g.store, g.bucket, g.pages, g.stale
+        FROM (SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS placed_at, date('now') AS day) n
+        LEFT JOIN (SELECT store, bucket, count(*) AS pages,
+                          sum(CASE WHEN stale_ref_count > 0 THEN 1 ELSE 0 END) AS stale
+                     FROM v_knowledge_page GROUP BY store, bucket) g ON 1 = 1
+    facts: [knowledge.pages, knowledge.stale_pages]
+  - id: oxplow.request_read_knowledge
+    doc: Whether a request that changed files read a knowledge page, recorded when a turn of it ends and none of its turns runs.
+    runtime: starlark
+    entry: collectors/knowledge/read.star
+    on: [agent.turn.ended]
+    input: |
+      SELECT r.uri AS request,
+             EXISTS (SELECT 1 FROM v_knowledge_read k JOIN v_agent_turn kt ON kt.id = k.turn_id
+                      WHERE k.actor = 'agent' AND kt.request_id = r.id) AS read,
+             r.started_at AS placed_at
+        FROM v_agent_turn t
+        JOIN v_request r ON r.id = t.request_id
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_agent_turn o
+                          WHERE o.request_id = t.request_id AND o.ended_at IS NULL)
+         AND EXISTS (SELECT 1 FROM v_tool_call_path p JOIN v_agent_turn pt ON pt.id = p.turn_id
+                      WHERE pt.request_id = t.request_id)
+    facts: [knowledge.read_requests]
+dimensions:
+  - {"key": "oxplow.knowledge_store", "label": "Knowledge store", "valueType": "categorical", "description": "The store that keeps a knowledge page, such as oxwiki."}
+  - {"key": "oxplow.knowledge_bucket", "label": "Knowledge bucket", "valueType": "categorical", "description": "What a knowledge page is for: note, memory or instruction."}
+measures:
+  # The page counts: one capture per day, replaced when a page changes.
+  - {"key": "knowledge.pages", "title": "Knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages there are, by store and bucket, as of the day's last change."}
+  - {"key": "knowledge.stale_pages", "title": "Stale knowledge pages", "unit": "count", "temporalSemantics": "semi-additive", "fold": "last", "captureScope": "complete", "description": "How many knowledge pages cite a file that changed since the page was pinned; num is the stale pages, den the pages."}
+  # One capture per request at its start, replaced when the request is
+  # recorded again: 1 when an agent read a page, 0 when not.
+  - {"key": "knowledge.read_requests", "title": "Request read knowledge", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when an agent read a knowledge page in a request that changed files, else 0, as of its latest turn."}
+  # One capture per request at its start, replaced when the request is
+  # recorded again: 1 when tracked, 0 when not.
+  - {"key": "oxplow.request_tracked", "title": "Request tracked", "unit": "count", "subjectKind": "request", "temporalSemantics": "non-additive", "fold": "sum", "captureScope": "complete", "description": "1 when a request that changed files has a task linked, else 0, as of its latest turn."}
+metrics:
+  - {"key":"tasks.tracked_requests_pct","title":"Tracked requests","measure": "oxplow.request_tracked", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files which have a task link.","sliceableDims":["oxplow.branch"]}
+  - {"key":"knowledge.pages","title":"Knowledge pages","measure": "knowledge.pages", "expression": "SUM(value)", "unit":"count","direction":"neutral","displayKind":"gauge","category":"operational","description":"How many knowledge pages the enabled stores keep.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}
+  - {"key":"knowledge.stale_pct","title":"Stale knowledge","measure": "knowledge.stale_pages", "expression": "RATIO(num, den)", "unit":"%","direction":"lower-better","displayKind":"gauge","category":"operational","description":"The share of knowledge pages that cite a file which changed since the page was pinned.","sliceableDims":["oxplow.knowledge_store","oxplow.knowledge_bucket"]}
+  - {"key":"knowledge.read_requests_pct","title":"Requests that read knowledge","measure": "knowledge.read_requests", "expression": "RATIO(num, den)", "unit":"%","direction":"higher-better","displayKind":"gauge","category":"operational","description":"The share of the requests that changed files in which an agent read a knowledge page.","sliceableDims":["oxplow.branch"]}

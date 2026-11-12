@@ -1,0 +1,14 @@
+# A task's Link… adds a link to another item and Unlink, on its own end,
+# removes it; the Links part reads each change.
+given:
+  - { command: oxplow.task.create, input: { title: Item with notes }, bind: item }
+  - { command: oxplow.task.create, input: { title: Third item }, bind: other }
+when: { part: task-links, params: { uri: $item.uri } }
+expect: { loaders: { links: { rows: 0 } } }
+steps:
+  - press: { action: link, node: links, input: { target: $other.uri } }
+    expect: { ok: true }
+  - expect: { loaders: { links: { rows: [{ item: Third item, link_type: relates_to, outbound: 1 }] } } }
+  - press: { action: unlink, node: links, row: { other: $other.uri, link_type: relates_to } }
+    expect: { ok: true }
+  - expect: { loaders: { links: { rows: 0 } } }

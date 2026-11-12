@@ -10,7 +10,7 @@ use crate::{
     commands::Actor,
     events::{Anchors, EventId},
     extension_job::{AttemptFence, JobId},
-    ids::{AgentSessionId, EffortId, StreamId, ThreadId},
+    ids::{AgentSessionId, StreamId, ThreadId},
     run::{RunContext, RunId},
     uri::OxplowUri,
 };
@@ -330,7 +330,6 @@ fn valid_actor(actor: &Actor, depth: usize) -> Result<bool, JobContextError> {
 fn valid_anchors(anchors: &Anchors) -> bool {
     anchors.stream_id.is_none_or(|id| id.value() > 0)
         && anchors.thread_id.is_none_or(|id| id.value() > 0)
-        && anchors.effort_id.is_none_or(|id| id.value() > 0)
         && anchors.agent_session_id.is_none_or(|id| id.value() > 0)
         && anchors.turn_id.is_none_or(|id| id > 0)
         && anchors.snapshot_id.is_none_or(|id| id > 0)
@@ -551,7 +550,6 @@ fn valid_wire_actor(
 struct WireAnchors {
     stream_id: Option<StreamId>,
     thread_id: Option<ThreadId>,
-    effort_id: Option<EffortId>,
     turn_id: Option<i64>,
     agent_session_id: Option<AgentSessionId>,
     snapshot_id: Option<i64>,
@@ -562,7 +560,6 @@ impl From<WireAnchors> for Anchors {
         Self {
             stream_id: a.stream_id,
             thread_id: a.thread_id,
-            effort_id: a.effort_id,
             turn_id: a.turn_id,
             agent_session_id: a.agent_session_id,
             snapshot_id: a.snapshot_id,
@@ -573,7 +570,6 @@ impl From<WireAnchors> for Anchors {
 fn valid_wire_anchors(a: &WireAnchors) -> bool {
     a.stream_id.is_none_or(|id| id.value() > 0)
         && a.thread_id.is_none_or(|id| id.value() > 0)
-        && a.effort_id.is_none_or(|id| id.value() > 0)
         && a.agent_session_id.is_none_or(|id| id.value() > 0)
         && a.turn_id.is_none_or(|id| id > 0)
         && a.snapshot_id.is_none_or(|id| id > 0)

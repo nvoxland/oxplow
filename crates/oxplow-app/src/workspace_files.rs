@@ -630,7 +630,7 @@ mod tests {
     /// refused rather than landing in the primary worktree.
     #[tokio::test]
     async fn writes_refuse_an_unknown_stream_instead_of_the_primary() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let files = &fx.svc.workspace_files;
         let primary = fx.svc.layout.project_dir.clone();
         for stream in [None, Some("str999"), Some("junk")] {
@@ -649,7 +649,7 @@ mod tests {
     /// workspace's `.gitignore`, not the primary's.
     #[tokio::test]
     async fn a_streams_files_follow_its_own_ignores() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let other = tempdir().unwrap();
         std::fs::write(other.path().join(".gitignore"), "local.txt\n").unwrap();
         std::fs::write(other.path().join("local.txt"), "needle\n").unwrap();

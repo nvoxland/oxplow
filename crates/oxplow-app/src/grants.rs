@@ -44,8 +44,8 @@ pub fn collector_request(spec: &CollectorSpec, needs: &[String]) -> GrantRequest
     }
 }
 
-/// A script that composes commands — an effect, an extension command, an
-/// effort policy — asks for the scopes it calls.
+/// A script that composes commands — an effect or an extension command —
+/// asks for the scopes it calls.
 pub fn script_request(needs: &[String]) -> GrantRequest {
     GrantRequest {
         scopes: scopes(needs),
@@ -108,7 +108,7 @@ mod tests {
     /// A script's request is the scopes it needs, not the capabilities.
     #[test]
     fn a_scripts_request_is_its_scopes() {
-        let r = script_request(&["sql.read".into(), "work_items.comments".into()]);
+        let r = script_request(&["sql.read".into(), "task_tracker.comments".into()]);
         assert_eq!(r.scopes, ["sql.read".to_string()].into());
         assert!(r.program.is_none());
     }

@@ -20,8 +20,9 @@ test("a declared logo is drawn as an image, in the text color", () => {
   const { getByTestId, container } = render(<AgentIcon icon={MARK} size={13} />);
   const el = getByTestId("agent-icon");
   expect(el.getAttribute("data-icon")).toBe("declared");
-  expect(el.getAttribute("style")).toContain(MARK);
-  expect(el.getAttribute("style")?.toLowerCase()).toContain("currentcolor");
+  const mask = getByTestId("svg-icon");
+  expect(mask.getAttribute("style")).toContain(MARK);
+  expect(mask.getAttribute("style")?.toLowerCase()).toContain("currentcolor");
   expect(container.querySelector("svg")).toBeNull();
   expect(container.querySelector("script")).toBeNull();
 });

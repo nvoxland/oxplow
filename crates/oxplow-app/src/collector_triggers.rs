@@ -65,7 +65,7 @@ pub fn triggered_by(spec: &CollectorSpec, event: &StoredEvent) -> bool {
 /// Hand `event` to the fact engine, which runs the fact collectors it
 /// triggers over one corpus: a snapshot's files (its whole tree for a
 /// whole-tree collector, which alone runs on a take that recorded none),
-/// an effort's end snapshot, or else the stream's latest snapshot.
+/// or else the stream's latest snapshot.
 /// Only those `select` picks: one level of the compiled order, of the ones
 /// that run at once (a collector whose pacing defers this event's type
 /// waits for `crate::pacing`).
@@ -92,12 +92,25 @@ async fn run_fact_collectors(
                     .await;
             }
         }
-        "effort.finished" => {
-            let effort = crate::effort_lifecycle::effort_of(&event)?;
-            if let Some(thread) = anchors.thread_id {
-                svc.metrics
-                    .run_effort_collectors(&thread, &effort, Some(event.clone()), &now)
-                    .await;
+        // A stream's HEAD moved: its whole-tree collectors restate the tree.
+        "vcs.head.moved" => {
+            if let Some(stream) = anchors.stream_id {
+                if let Ok(Some(latest)) = svc
+                    .snapshot_store
+                    .latest_snapshot_id_for_stream(stream)
+                    .await
+                {
+                    svc.metrics
+                        .run_snapshot_collectors(
+                            stream,
+                            latest,
+                            false,
+                            Some(event.clone()),
+                            &now,
+                            None,
+                        )
+                        .await;
+                }
             }
         }
         _ => svc.metrics.run_event_collectors(event.clone(), &now).await,
@@ -219,7 +232,7 @@ impl AsyncEventConsumer for CollectorTriggers {
 
     /// Only the collectors `event_type` triggers wait on their `after:`
     /// (tsk711): a `snapshot.taken` collector doesn't wait on the
-    /// `change.analyze` an `effort.finished` collector names.
+    /// `change.analyze` a `task.state_changed` collector names.
     fn after_for(&self, event_type: &str) -> Vec<String> {
         self.predecessors(Some(event_type))
     }
@@ -335,7 +348,7 @@ impl CollectorTriggers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::lifecycle::log_claim as log;
+    use crate::test_fixtures::lifecycle::log_task_done as log;
     use oxplow_domain::Envelope;
     use serde_json::json;
 
@@ -360,11 +373,11 @@ mod tests {
         crate::test_fixtures::activate_with_problems(svc).await
     }
 
-    const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"effort\": r[\"effort\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
+    const SEEN: &str = "def transform(input):\n    return {\"entities\": {\"seen\": [{\"ev\": r[\"ev\"], \"id\": r[\"id\"], \"thread\": r[\"thread\"], \"kind\": input[\"event\"][\"type\"]} for r in input[\"rows\"]]}}\n";
 
-    fn on_claims(filter: &str) -> String {
+    fn on_task_done(filter: &str) -> String {
         format!(
-            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [effort.claim_verified]{filter}\n    input: \"SELECT :effort_id AS effort, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, effort: int, kind: text }} }}\n"
+            "  - id: seen\n    runtime: starlark\n    entry: seen.star\n    on: [task.state_changed]{filter}\n    input: \"SELECT :thread_id AS thread, :event_seq AS ev, :event_id AS id\"\n    sync: upsert\n    entities:\n      - {{ name: seen, key: ev, columns: {{ ev: int, id: text, thread: int, kind: text }} }}\n"
         )
     }
 
@@ -420,22 +433,22 @@ mod tests {
     /// redelivered event writes nothing.
     #[tokio::test]
     async fn an_on_collector_runs_once_per_event_with_its_anchors() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        extension(&fx.svc, &on_claims(""), &[("seen.star", SEEN)]).await;
+        let fx = crate::test_fixtures::services_with_thread().await;
+        extension(&fx.svc, &on_task_done(""), &[("seen.star", SEEN)]).await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let ev = log(&fx.svc, fx.effort, "reviewer").await;
+        let ev = log(&fx.svc, fx.thread, "reviewer").await;
         assert!(consumer.handles(&ev.envelope.event_type));
         consumer.handle(&ev).await.unwrap();
         consumer.handle(&ev).await.unwrap();
         // tsk1002: `:event_id` is the event's id and `:event_seq` its seq,
         // as an effect's `input` binds them.
         assert_eq!(
-            rows(&fx.svc, "SELECT ev, id, effort, kind FROM v_work_seen").await,
+            rows(&fx.svc, "SELECT ev, id, thread, kind FROM v_work_seen").await,
             json!([[
                 ev.seq,
                 ev.envelope.id.to_string(),
-                fx.effort.value(),
-                "effort.claim_verified"
+                fx.thread.value(),
+                "task.state_changed"
             ]])
         );
         assert_eq!(
@@ -457,17 +470,17 @@ mod tests {
     /// allows, for that event, then clears.
     #[tokio::test]
     async fn a_settled_collector_waits_then_runs_once_for_the_latest_event() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_claims("\n    settle: 30s"),
+            &on_task_done("\n    settle: 30s"),
             &[("seen.star", SEEN)],
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let first = log(&fx.svc, fx.effort, "reviewer").await;
+        let first = log(&fx.svc, fx.thread, "reviewer").await;
         consumer.handle(&first).await.unwrap();
-        let latest = log(&fx.svc, fx.effort, "reviewer").await;
+        let latest = log(&fx.svc, fx.thread, "reviewer").await;
         consumer.handle(&latest).await.unwrap();
         assert_eq!(
             rows(&fx.svc, "SELECT count(*) FROM v_collector_run").await,
@@ -501,16 +514,16 @@ mod tests {
     /// runs once none does and nothing has changed for that long.
     #[tokio::test]
     async fn an_idle_collector_waits_out_a_running_turn() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_claims("\n    idle: 2m"),
+            &on_task_done("\n    idle: 2m"),
             &[("seen.star", SEEN)],
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         consumer
-            .handle(&log(&fx.svc, fx.effort, "reviewer").await)
+            .handle(&log(&fx.svc, fx.thread, "reviewer").await)
             .await
             .unwrap();
         let thread = fx.thread.value();
@@ -552,21 +565,23 @@ mod tests {
     /// A `where` filter skips an event whose payload doesn't match.
     #[tokio::test]
     async fn a_where_filter_skips() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         extension(
             &fx.svc,
-            &on_claims("\n    where: { evidence: reviewer }"),
+            &on_task_done(
+                "\n    where: { task: \"oxplow:oxplow/task?id=reviewer&provider=issues\" }",
+            ),
             &[("seen.star", SEEN)],
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let other = log(&fx.svc, fx.effort, "oxplow:oxplow/run?id=3").await;
+        let other = log(&fx.svc, fx.thread, "other").await;
         consumer.handle(&other).await.unwrap();
         assert_eq!(
             rows(&fx.svc, "SELECT count(*) FROM v_collector_run").await,
             json!([[0]])
         );
-        let mine = log(&fx.svc, fx.effort, "reviewer").await;
+        let mine = log(&fx.svc, fx.thread, "reviewer").await;
         consumer.handle(&mine).await.unwrap();
         assert_eq!(
             rows(&fx.svc, "SELECT ev FROM v_work_seen").await,
@@ -578,14 +593,14 @@ mod tests {
     /// the handler succeeds and the other collectors still run.
     #[tokio::test]
     async fn a_failing_collector_is_recorded_not_dead_lettered() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let broken = on_claims("")
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let broken = on_task_done("")
             .replace("id: seen", "id: broken")
             .replace("entry: seen.star", "entry: broken.star")
             .replace("name: seen", "name: broken");
         extension(
             &fx.svc,
-            &format!("{broken}{}", on_claims("")),
+            &format!("{broken}{}", on_task_done("")),
             &[
                 ("seen.star", SEEN),
                 ("broken.star", "def transform(input):\n    return 1 // 0\n"),
@@ -593,7 +608,7 @@ mod tests {
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
-        let ev = log(&fx.svc, fx.effort, "reviewer").await;
+        let ev = log(&fx.svc, fx.thread, "reviewer").await;
         consumer.handle(&ev).await.unwrap();
         assert_eq!(
             rows(
@@ -613,33 +628,36 @@ mod tests {
     /// name; a collector's own type never triggers one.
     #[tokio::test]
     async fn after_and_handles_follow_the_declarations() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        crate::effort_reactors::register(&fx.svc);
+        let fx = crate::test_fixtures::services_with_thread().await;
+        crate::change_reactor::register(&fx.svc);
         crate::test_fixtures::install_code_metrics(&fx.svc.layout.project_dir);
         extension(
             &fx.svc,
-            &on_claims("").replace("    input:", "    after: [effort.evidence]\n    input:"),
+            &on_task_done("").replace("    input:", "    after: [change.analyze]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
         let consumer = CollectorTriggers::new(Arc::downgrade(&fx.svc));
         assert_eq!(
-            consumer.after_for("effort.claim_verified"),
-            vec!["effort.evidence".to_string()]
+            consumer.after_for("task.state_changed"),
+            vec!["change.analyze".to_string()]
         );
         // tsk711: predecessors follow the event's own collectors — an event
-        // no collector waiting on `effort.evidence` handles doesn't wait.
+        // no collector waiting on `change.analyze` handles doesn't wait.
         assert_eq!(consumer.after_for("snapshot.taken"), Vec::<String>::new());
         assert_eq!(
             consumer.after(),
-            vec!["effort.evidence".to_string()],
+            vec![
+                "change.analyze".to_string(),
+                "token_usage.turns".to_string()
+            ],
             "every predecessor, for ordering"
         );
-        assert!(consumer.handles("effort.claim_verified"));
+        assert!(consumer.handles("task.state_changed"));
         // The default-on code gauges (the test extension's) handle `snapshot.taken`; an
         // event no collector names isn't handled.
         assert!(consumer.handles("snapshot.taken"));
-        assert!(!consumer.handles("work_item.created"));
+        assert!(!consumer.handles("task.created"));
         assert!(!consumer.handles("collector.synced"));
     }
 
@@ -647,9 +665,9 @@ mod tests {
     /// after the collectors its `after:` names.
     #[tokio::test]
     async fn collectors_run_after_the_collectors_they_name() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let one = |id: &str, after: &str| {
-            on_claims("")
+            on_task_done("")
                 .replace("  - id: seen\n", &format!("  - id: {id}\n"))
                 .replace("name: seen,", &format!("name: {id},"))
                 .replace("entry: seen.star", &format!("entry: {id}.star"))
@@ -664,7 +682,7 @@ mod tests {
             ],
         )
         .await;
-        let ev = log(&fx.svc, fx.effort, "e").await;
+        let ev = log(&fx.svc, fx.thread, "e").await;
         CollectorTriggers::new(Arc::downgrade(&fx.svc))
             .handle(&ev)
             .await
@@ -683,10 +701,10 @@ mod tests {
     /// can't be honored.
     #[tokio::test]
     async fn a_collector_after_nothing_is_a_load_error() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let held = extension(
             &fx.svc,
-            &on_claims("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
+            &on_task_done("").replace("    input:", "    after: [no.such_consumer]\n    input:"),
             &[("seen.star", SEEN)],
         )
         .await;
@@ -769,7 +787,7 @@ mod tests {
     /// `oxplow:oxplow/collector?collector=<owner>/<id>`, caused by that `collector.synced`.
     #[tokio::test]
     async fn a_collector_emits_its_extensions_events_with_its_run() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         emitter(svc,
             &prs(""),
@@ -833,7 +851,7 @@ mod tests {
         for (trigger, events, says) in [
             (
                 "",
-                "[{\"type\": \"work_item.created\", \"payload\": {}}]".to_string(),
+                "[{\"type\": \"task.created\", \"payload\": {}}]".to_string(),
                 "may emit only the event types `acme-pr` declares",
             ),
             (
@@ -856,7 +874,7 @@ mod tests {
         ] {
             // Each on its own project: three failures in a row would
             // disable the collector, which is another rule's business.
-            let fx = crate::test_fixtures::services_with_effort().await;
+            let fx = crate::test_fixtures::services_with_thread().await;
             let svc = &fx.svc;
             emitter(svc, &prs(trigger), &[("prs.star", &prs_script(&events))]).await;
             crate::test_fixtures::activate_with_problems(svc).await;
@@ -894,7 +912,7 @@ mod tests {
     /// recorded as skipped, not as a failure.
     #[tokio::test]
     async fn collectors_on_each_others_events_stop_at_the_guard() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let echo = |id: &str, on: &str| {
             format!("  - id: {id}\n    runtime: starlark\n    entry: {id}.star\n    on: [acme_pr.{on}]\n    sync: upsert\n    entities:\n      - {{ name: {id}, key: n, columns: {{ n: int }} }}\n")

@@ -187,7 +187,7 @@ mod tests {
     /// can't, nor can a page it presses; the person's page can.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_sets_the_agents_in_order() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let ids: Vec<String> = svc
             .harnesses
@@ -258,7 +258,7 @@ mod tests {
     /// it), by a person, an agent or a page for either.
     #[tokio::test(flavor = "multi_thread")]
     async fn anyone_sets_the_prompt_addition() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let prompt = || crate::config_service::read_config(&svc.config).agent_prompt_append;
         svc.commands
@@ -304,7 +304,7 @@ mod tests {
     /// unregistered agent is refused at its field.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_person_sets_an_agents_declared_setting() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let harness = svc
             .harnesses

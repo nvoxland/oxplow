@@ -1,6 +1,6 @@
 //! A composite's **steps** (P7 review, tsk713): when one of the calls a
 //! composite makes leaves the bus's transaction — an `External` command,
-//! `work_item.*` on another provider's item — the calls can't be one
+//! `task.*` on another provider's item — the calls can't be one
 //! all-or-nothing run. They run as steps instead:
 //!
 //! 1. **Checked first.** Every call is routed and checked before any runs

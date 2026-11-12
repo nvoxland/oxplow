@@ -2,7 +2,7 @@
 when:
   page: oxplow/implementation
   params:
-    uri: "oxplow:oxplow/implementation?implementation=oxplow/work_items.oxplow"
+    uri: "oxplow:oxplow/implementation?implementation=oxplow/knowledge.oxwiki"
 expect:
   see_also:
     contains:

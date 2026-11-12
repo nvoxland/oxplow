@@ -7,11 +7,11 @@
 //! effects:
 //!   - id: announce-done          # [a-z0-9-]+, unique in the extension
 //!     summary: Note a finished item on its thread.
-//!     on: [work_item.state_changed]
+//!     on: [task.state_changed]
 //!     where: { to: done }        # optional: payload fields equal to these
 //!     needs: [sql.read]              # the scopes its script calls
 //!     entry: effects/announce.star   # transform({event}) → {commands, events?} | {skip}
-//!     after: [page_ref.work_item]    # optional: what it runs after on one event
+//!     after: [page_ref.task]    # optional: what it runs after on one event
 //! ```
 //!
 //! It starts when a generation that runs it first publishes — its
@@ -387,8 +387,8 @@ pub async fn dry_run(
 /// limited to `needs` and answered from `answers` (a fixture's, in call
 /// order) or for real (reads through `layer`), the other services it may
 /// use built from `sources`: what it composes, nothing run. Off the async
-/// runtime, under the effects' budget. An effect's dry run and an effort
-/// policy written as a script both run through it.
+/// runtime, under the effects' budget. An effect's dry run runs through
+/// it.
 pub async fn run_over(
     layer: &crate::sql_gateway::SqlGateway,
     run: &oxplow_domain::run::RunContext,
@@ -555,7 +555,7 @@ intent: { purpose: Effects., origin: null, examples: [] }
 effects:
   - id: announce-done
     summary: Note a finished item.
-    on: [work_item.state_changed]
+    on: [task.state_changed]
     where: { to: done }
     entry: effects/announce.star
 ";
@@ -588,7 +588,7 @@ effects:
         assert!(ext.errors.is_empty(), "{:?}", ext.errors);
         let e = &ext.effects[0];
         assert_eq!(e.name(), "acme/announce-done");
-        assert_eq!(e.on, vec!["work_item.state_changed".to_string()]);
+        assert_eq!(e.on, vec!["task.state_changed".to_string()]);
         assert_eq!(e.filter.get("to").map(String::as_str), Some("done"));
         assert_eq!(e.declared_at, ".oxplow/extensions/acme/extension.yaml:5");
     }
@@ -597,10 +597,10 @@ effects:
     fn a_broken_effect_is_an_error_at_its_line() {
         for (from, to, says) in [
             (
-                "on: [work_item.state_changed]",
+                "on: [task.state_changed]",
                 // A core namespace's type that doesn't exist (another
                 // extension's would be a subscription: P9.D1).
-                "on: [work_item.never]",
+                "on: [task.never]",
                 "isn't a registered event type",
             ),
             (
@@ -650,7 +650,7 @@ effects:
     /// happened before. A later deploy of it keeps where it started.
     #[tokio::test]
     async fn an_effect_reacts_only_to_events_after_its_deployment() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         write_acme(&root, MANIFEST, SCRIPT);

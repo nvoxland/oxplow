@@ -32,7 +32,7 @@ and it has a fixture that proves the collector. Scaffold it with the
 returns the files:
 
 ```
-oxplow.metric.scaffold { name: "complex-fns", language: "rust", glob: "src/**/*.rs", origin: "<your effort ref>" }
+oxplow.metric.scaffold { name: "complex-fns", language: "rust", glob: "src/**/*.rs", origin: "<your request ref>" }
 → { "name": "complex-fns", "dir": ".oxplow/extensions/complex-fns",
     "files": [ { "path": ".oxplow/extensions/complex-fns/extension.yaml", "content": "…" }, … ] }
 ```

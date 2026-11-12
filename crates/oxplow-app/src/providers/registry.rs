@@ -6,9 +6,9 @@
 //! [`ProviderRegistry::reconcile`] makes the running set match it — at
 //! boot and on every config change. Starting an instance checks consent,
 //! spawns, handshakes and `check`s its config; only then is its
-//! capability's provider (`ExternalWorkItems`) registered in the
+//! capability's provider (`ExternalTaskTracker`) registered in the
 //! capability's registry — its verbs run as the dispatching
-//! `work_item.<verb>` — and its other declared commands on the bus as
+//! `task.<verb>` — and its other declared commands on the bus as
 //! `<id>.<name>` (`Atomicity::External`), under the namespace `<id>` it
 //! then holds. Every restart goes through consent again.
 //!
@@ -103,6 +103,9 @@ pub struct HostDeps {
     pub events: crate::events::EventBus,
     /// Every capability's implementations: an instance's while it runs.
     pub capabilities: Arc<crate::capabilities::CapabilityRegistry>,
+    /// Each stream's worktree: where a script implementation's `tree.read`
+    /// reads.
+    pub captures: crate::snapshot_capture_registry::SnapshotCaptureRegistry,
 }
 
 /// Whose an instance is (P9.B2).
@@ -348,7 +351,7 @@ struct Live {
 pub struct Instance {
     /// `<extension>/<instance id>`.
     pub name: String,
-    /// The instance's id: its refs' segment (`oxplow:oxplow/work_item?id=…&provider=<id>`), its
+    /// The instance's id: its refs' segment (`oxplow:oxplow/task?id=…&provider=<id>`), its
     /// commands' namespace, its capability provider's id. A provider's
     /// default instance has the provider's.
     pub id: String,
@@ -1269,58 +1272,72 @@ impl Instance {
     }
 
     /// A returned event as the envelope the bus logs: a type it declared,
-    /// and (for a work-item record) an item of its own. `filed_on` is the
-    /// thread a new item was filed on (`oxplow.work_item.create`'s, tsk1058).
+    /// and (for a task record) an item of its own.
     pub(crate) fn envelope(
         &self,
         actor: &Actor,
-        filed_on: Option<oxplow_domain::ThreadId>,
         draft: EventDraft,
     ) -> Result<Envelope, CommandError> {
-        let failed = |message: String| CommandError::Failed { message };
-        if !self
-            .declared
-            .event_types
-            .iter()
-            .any(|t| t.event_type == draft.event_type && t.v == draft.v)
-        {
-            return Err(failed(format!(
-                "provider `{}` returned `{}@{}`, which it doesn't declare",
-                self.name, draft.event_type, draft.v
-            )));
-        }
-        let contract = spec::contract_of(&self.spec);
-        if let Some(record) = contract
-            .records
-            .filter(|r| r.event == (draft.event_type.as_str(), draft.v))
-        {
-            let row = draft.payload[record.key]["uri"]
-                .as_str()
-                .unwrap_or_default();
-            if !owns(contract, &self.id, row) {
-                return Err(failed(format!(
-                    "provider `{}` recorded `{row}`, which isn't one of its {}s",
-                    self.name, record.entity
-                )));
-            }
-        }
-        for subject in &draft.subject {
-            check_subject(&self.spec.capability, &self.id, &self.ext.name, subject)
-                .map_err(failed)?;
-        }
-        // The thread an item was filed on anchors its record, so it keeps
-        // that thread (tsk1041, tsk1058); otherwise an agent's thread
-        // anchors what it did.
-        let mut anchors = match actor {
-            Actor::Agent { .. } => actor.anchors(),
-            _ => oxplow_domain::Anchors::default(),
-        };
-        if filed_on.is_some() {
-            anchors.thread_id = filed_on;
-        }
-        Envelope::new(draft.event_type, draft.v, actor.source(), draft.payload)
-            .map(|e| e.with_subject(draft.subject).with_anchors(anchors))
-            .map_err(|e| failed(e.to_string()))
+        super::endpoint::envelope_of(
+            &self.name,
+            &self.id,
+            &self.ext.name,
+            &self.spec.capability,
+            |event_type, v| {
+                self.declared
+                    .event_types
+                    .iter()
+                    .any(|t| t.event_type == event_type && t.v == v)
+            },
+            actor,
+            draft,
+        )
+    }
+}
+
+/// An instance answers its capability's verbs through its process.
+#[async_trait::async_trait]
+impl super::endpoint::Endpoint for Instance {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn extension(&self) -> &str {
+        &self.ext.name
+    }
+
+    fn declared(&self) -> &InitializeResult {
+        &self.declared
+    }
+
+    fn stages(&self) -> &[oxplow_domain::tasks::StageDecl] {
+        &self.spec.stages
+    }
+
+    fn id_pattern(&self) -> Option<&str> {
+        self.spec.id_pattern.as_deref()
+    }
+
+    async fn invoke(
+        &self,
+        run: &RunContext,
+        verb: &str,
+        input: Value,
+        idempotency_key: Option<String>,
+    ) -> Result<InvokeResult, CommandError> {
+        Instance::invoke(self, run, verb, input, idempotency_key).await
+    }
+
+    fn envelope(&self, actor: &Actor, draft: EventDraft) -> Result<Envelope, CommandError> {
+        Instance::envelope(self, actor, draft)
+    }
+
+    async fn restart(&self) {
+        self.end_process().await;
     }
 }
 
@@ -1345,8 +1362,8 @@ pub fn check_subject(
 }
 
 /// Whether `r` is one of instance `id`'s own URIs under `contract`: a
-/// URI with a `provider` param (`oxplow:oxplow/work_item?id=ENG-12&provider=issues`)
-/// is that instance's; one without (`oxplow:oxplow/wiki?slug=x`) is the
+/// URI with a `provider` param (`oxplow:oxplow/task?id=ENG-12&provider=issues`)
+/// is that instance's; one without (`oxplow:oxplow/knowledge?id=x&store=oxwiki`) is the
 /// active implementation's, so any well-formed one is.
 pub(super) fn owns(
     contract: &oxplow_domain::capability::ProviderContract,
@@ -1368,12 +1385,14 @@ fn instance_in(resource: &str, r: &str) -> Option<String> {
 }
 
 /// One capability's side of the host: what turns a started instance into
-/// the capability's implementation (the work list's `ExternalWorkItems`,
-/// an external effort policy) and takes it out again.
+/// the capability's implementation (the task tracker's `ExternalTaskTracker`,
+/// an external snapshots provider) and takes it out again.
 /// Validated capability adapter awaiting registration. Construction cannot
 /// mutate a live registry; publication is a synchronous map change only.
 pub struct PreparedProviderCapability {
     features: Value,
+    /// A knowledge store's kinds of page (its `data.kinds`); `[]` otherwise.
+    kinds: Value,
     publish: Box<dyn FnOnce() + Send>,
 }
 
@@ -1381,8 +1400,19 @@ impl PreparedProviderCapability {
     pub(super) fn new(features: Value, publish: impl FnOnce() + Send + 'static) -> Self {
         Self {
             features,
+            kinds: Value::Array(Vec::new()),
             publish: Box::new(publish),
         }
+    }
+
+    /// With the kinds of page it keeps (a knowledge store's).
+    pub(super) fn with_kinds(mut self, kinds: Value) -> Self {
+        self.kinds = kinds;
+        self
+    }
+
+    pub fn kinds(&self) -> &Value {
+        &self.kinds
     }
 
     pub fn features(&self) -> &Value {
@@ -1396,16 +1426,22 @@ impl PreparedProviderCapability {
 }
 
 pub trait CapabilityHost: Send + Sync {
-    /// The capability it hosts (`work_items`).
+    /// The capability it hosts (`task_tracker`).
     fn capability(&self) -> &'static str;
     /// Whether `id` already names one of this capability's
     /// implementations: an instance can't take it.
     fn has(&self, id: &str) -> bool;
-    /// Validate and construct an adapter without registering it. Its features
-    /// and synchronous publication action belong to one activation candidate.
-    fn prepare(&self, instance: &Arc<Instance>) -> Result<PreparedProviderCapability, String>;
+    /// Validate and construct an adapter over `endpoint` — a started
+    /// instance, or a script implementation (`providers::script`) — without
+    /// registering it. Its features and synchronous publication action
+    /// belong to one activation candidate.
+    fn prepare(
+        &self,
+        endpoint: &Arc<dyn super::endpoint::Endpoint>,
+    ) -> Result<PreparedProviderCapability, String>;
 
-    /// Take a stopped instance's implementation out.
+    /// Take a stopped instance's (or a withdrawn script's) implementation
+    /// out.
     fn retire(&self, id: &str);
 }
 
@@ -1447,6 +1483,10 @@ pub struct ProviderRegistry {
     instances_gate: tokio::sync::Mutex<()>,
     /// Numbers each sign-in, so a finished one untracks only itself.
     sign_in_seq: std::sync::atomic::AtomicU32,
+    /// The script implementations the last generation published, each
+    /// `(capability, id)`: what the next one retires
+    /// (`ProviderRegistry::publish_scripts`).
+    pub(super) published_scripts: parking_lot::Mutex<Vec<(String, String)>>,
 }
 
 /// Where `scope`'s credentials are kept: the project's key, or the
@@ -1561,7 +1601,14 @@ impl ProviderRegistry {
             sign_in_gates: parking_lot::Mutex::new(BTreeMap::new()),
             instances_gate: tokio::sync::Mutex::new(()),
             sign_in_seq: std::sync::atomic::AtomicU32::new(1),
+            published_scripts: parking_lot::Mutex::new(Vec::new()),
         })
+    }
+
+    /// The host of `capability`, when a provider or a script may
+    /// implement it.
+    pub(super) fn host(&self, capability: &str) -> Option<&Arc<dyn CapabilityHost>> {
+        self.hosts.get(capability)
     }
 
     pub async fn get(&self, instance: &str) -> Option<Arc<Instance>> {
@@ -2164,7 +2211,7 @@ impl ProviderRegistry {
         let events = out
             .events
             .into_iter()
-            .map(|d| instance.envelope(invocation.actor(), None, d))
+            .map(|d| instance.envelope(invocation.actor(), d))
             .collect::<Result<Vec<_>, _>>()?;
         let inverse = match out.inverse {
             None => None,
@@ -3386,7 +3433,7 @@ impl crate::commands::ProviderRouter for ProviderRegistry {
 }
 
 /// The instance a URI is of: one of the URIs a capability's instances
-/// own (`oxplow:oxplow/work_item?id=ENG-12&provider=issues`).
+/// own (`oxplow:oxplow/task?id=ENG-12&provider=issues`).
 fn instance_of_ref(r: &str) -> Option<String> {
     oxplow_domain::capability::CAPABILITIES
         .iter()

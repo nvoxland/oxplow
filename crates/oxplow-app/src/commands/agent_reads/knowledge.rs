@@ -1,5 +1,5 @@
 //! `knowledge.read` operations: the comments people anchored in pages
-//! (`oxplow.knowledge.comments`) and how far a wiki page's pinned file ref
+//! (`oxplow.knowledge.comments`) and how far a knowledge page's pinned file ref
 //! has drifted from the file (`oxplow.knowledge.drift`).
 
 use oxplow_domain::comment::CommentThread;
@@ -25,9 +25,12 @@ pub struct ListCommentsParams {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct WikiRefDriftParams {
-    /// Wiki slug (without `.md`).
-    pub slug: String,
+pub struct KnowledgeDriftParams {
+    /// The page's store: needed only when several are enabled.
+    #[serde(default)]
+    pub store: Option<String>,
+    /// The store's page id (oxwiki: its slug).
+    pub id: String,
     /// Repo-relative file path referenced by the page.
     pub path: String,
 }
@@ -176,13 +179,15 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
             "knowledge.read",
             "drift",
             services,
-            |svc, _, p: WikiRefDriftParams| async move {
-                let drift = crate::wiki_drift::compute_wiki_ref_drift(
+            |svc, _, p: KnowledgeDriftParams| async move {
+                let store = svc.knowledge.resolve(p.store.as_deref())?;
+                let page = oxplow_domain::uri::build::knowledge_uri(store.id(), &p.id);
+                let drift = crate::knowledge_drift::compute_knowledge_drift(
                     &svc.page_ref_store,
                     &svc.snapshot_store,
                     &svc.snapshot_content,
                     &svc.layout.project_dir,
-                    &p.slug,
+                    &page,
                     &p.path,
                 )
                 .await
@@ -265,10 +270,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         crate::test_fixtures::init_git_repo(dir.path());
         let svc = crate::Services::in_memory(dir.path()).await.unwrap();
-        let wiki = dir.path().join(".oxplow").join("wiki");
-        std::fs::create_dir_all(&wiki).unwrap();
-        std::fs::write(wiki.join("intro.md"), "see [[crates/foo.rs]]").unwrap();
-        crate::wiki_pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "intro")
+        let folder = oxplow_oxwiki::oxwiki_dir(dir.path());
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("intro.md"), "see [[crates/foo.rs]]").unwrap();
+        oxplow_oxwiki::pages::sync_page(&svc.db, &svc.vocabulary, dir.path(), "intro")
             .await
             .unwrap();
         let actor = Actor::Agent {
@@ -279,7 +284,7 @@ mod tests {
         let status = |path: &str| {
             let svc = svc.clone();
             let actor = actor.clone();
-            let input = json!({ "slug": "intro", "path": path });
+            let input = json!({ "id": "intro", "path": path });
             async move {
                 svc.commands
                     .run(&actor, "oxplow.knowledge.drift", input, false)

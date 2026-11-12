@@ -1,6 +1,6 @@
 # oxplow/repair-disabled: when an extension's contribution is
-# disabled after repeated failures, file one work item asking for it to be
-# repaired — on the active work list, whichever provider that is — and
+# disabled after repeated failures, file one task asking for it to be
+# repaired — on the active task tracker, whichever provider that is — and
 # comment on that item when the contribution is disabled again while it is
 # still open. oxplow never sends the item to an agent; a person does.
 #
@@ -11,13 +11,13 @@
 _REASON_MAX = 80
 _ERRORS_SHOWN = 5
 
-# The active work list's provider, when one is running (`none` files
+# The active task tracker's provider, when one is running (`none` files
 # nowhere), and the contribution's open repair item.
 _STATE = """
 SELECT (SELECT provider FROM v_capability_provider
-         WHERE capability = 'work_items' AND active = 1 AND available = 1
+         WHERE capability = 'task_tracker' AND active = 1 AND available = 1
            AND provider <> 'none') AS provider,
-       (SELECT w.uri FROM v_work_item_link l JOIN v_work_item w ON w.uri = l.from_uri
+       (SELECT w.uri FROM v_task_link l JOIN v_task w ON w.uri = l.from_uri
          WHERE l.to_uri = :contribution AND l.link_type = 'about'
            AND w.state NOT IN ('done', 'canceled')
          ORDER BY w.uri DESC LIMIT 1) AS open_item
@@ -69,7 +69,7 @@ def transform(x):
 
     state = scope("sql.read", {"sql": _STATE, "params": {"contribution": p["contribution"]}})[0]
     if not state["provider"]:
-        return {"skip": "no work list is running to file a repair item on"}
+        return {"skip": "no task tracker is running to file a repair item on"}
 
     found = scope("sql.read", {
         "sql": _FAILURES,
@@ -86,7 +86,7 @@ def transform(x):
             lines.extend(["", "Recent failures (newest first):", ""])
             lines.extend(["- " + md_text(e) for e in errors[:_ERRORS_SHOWN]])
         return {"commands": [{
-            "name": "oxplow.work_item.comment",
+            "name": "oxplow.task.comment",
             "input": {"uri": state["open_item"], "body": "\n".join(lines)},
         }]}
 
@@ -110,7 +110,7 @@ def transform(x):
         "4. Say what you changed on this item. A person enables it again (`oxplow.contribution.enable`, Settings → Extensions); you can't.",
     ])
     return {"commands": [{
-        "name": "oxplow.work_item.create",
+        "name": "oxplow.task.create",
         "input": {
             "title": _title(prefix, reason),
             "body": "\n".join(body),

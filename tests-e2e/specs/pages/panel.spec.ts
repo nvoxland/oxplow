@@ -6,7 +6,7 @@ import { expandRailSection, load } from "../../support/ui.js";
 const body = `title: Glider body
 loaders:
   gliders:
-    sql: SELECT title FROM v_work_item WHERE title LIKE 'Glider %' ORDER BY title
+    sql: SELECT title FROM v_task WHERE title LIKE 'Glider %' ORDER BY title
 view:
   id: gliders
   viz: table
@@ -18,7 +18,7 @@ view:
 const count = `title: Glider count
 loaders:
   n:
-    sql: SELECT count(*) AS n FROM v_work_item WHERE title LIKE 'Glider %'
+    sql: SELECT count(*) AS n FROM v_task WHERE title LIKE 'Glider %'
 badge: { loader: n, column: n }
 view: { id: n, viz: number, from: n }
 `;
@@ -37,7 +37,7 @@ test("a left-nav panel draws its body page, and its badge page's number", async 
   await expect(section.getByTestId(`rail-section-toggle-${id}`)).not.toContainText("1");
 
   // A write the body reads shows in it, and the badge counts it.
-  await run(daemon, "oxplow.work_item.create", { title: "Glider sugar", thread: daemon.thread });
+  await run(daemon, "oxplow.task.create", { title: "Glider sugar", assignee: daemon.thread });
   await expect(section.getByTestId("rail-panel-body")).toContainText("Glider sugar");
   await expect(section.getByTestId(`rail-section-toggle-${id}`)).toContainText("1");
 });

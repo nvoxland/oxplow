@@ -167,6 +167,75 @@ pub fn mark_delivered_tx(
     Ok(())
 }
 
+/// Record the turn the deliveries of a prompt landed in — the thread's open
+/// turn (of `session` when known), which the prompt opened or went into —
+/// on the handoffs `handoffs` and the basket items `basket` it carried,
+/// and link that turn to what it was given (`prompt_mention`: each page
+/// or source of an item, each handoff). Nothing when no turn is open.
+pub fn link_delivered_tx(
+    conn: &Connection,
+    thread: ThreadId,
+    session: Option<i64>,
+    handoffs: &[oxplow_domain::HandoffId],
+    basket: &[i64],
+) -> Result<(), DomainError> {
+    use oxplow_domain::uri::build::{handoff_uri, turn_uri};
+    let turn: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM agent_turn
+              WHERE thread_id = ?1 AND ended_at IS NULL
+                AND (?2 IS NULL OR agent_session_id = ?2)
+              ORDER BY started_at DESC, id DESC LIMIT 1",
+            params![thread.value(), session],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_sql_err)?;
+    let Some(turn) = turn else {
+        return Ok(());
+    };
+    let source = turn_uri(oxplow_domain::AgentTurnId::new(turn));
+    let mention = |target: String| {
+        crate::page_ref_store::upsert_edge_tx(
+            conn,
+            &crate::page_ref_store::PageRefEdge::new(
+                &source,
+                target,
+                crate::page_ref_projections::RT_PROMPT_MENTION,
+            ),
+        )
+    };
+    for id in handoffs {
+        conn.execute(
+            "UPDATE handoff SET delivered_turn_id = ?2 WHERE id = ?1 AND delivered_turn_id IS NULL",
+            params![id.value(), turn],
+        )
+        .map_err(map_sql_err)?;
+        mention(handoff_uri(*id))?;
+    }
+    for id in basket {
+        conn.execute(
+            "UPDATE thread_context_item SET delivered_turn_id = ?2
+              WHERE id = ?1 AND delivered_turn_id IS NULL",
+            params![id, turn],
+        )
+        .map_err(map_sql_err)?;
+        let uri: Option<String> = conn
+            .query_row(
+                "SELECT source_uri FROM thread_context_item WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?
+            .flatten();
+        if let Some(uri) = uri {
+            mention(uri)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,7 +311,9 @@ mod tests {
                         tx,
                         thread,
                         &NewItem {
-                            source_uri: Some(format!("oxplow:oxplow/wiki?slug={n}")),
+                            source_uri: Some(format!(
+                                "oxplow:oxplow/knowledge?id={n}&store=oxwiki"
+                            )),
                             ..NewItem::default()
                         },
                     )?);
@@ -265,7 +336,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             removed.source_uri.as_deref(),
-            Some("oxplow:oxplow/wiki?slug=1")
+            Some("oxplow:oxplow/knowledge?id=1&store=oxwiki")
         );
         let cleared = db
             .transaction(move |tx| clear_tx(tx, thread))
@@ -285,5 +356,71 @@ mod tests {
             .unwrap()
             .delivered_at
             .is_some());
+    }
+
+    /// What a prompt's context carried is recorded on the turn it landed in
+    /// and linked from it; with no turn open nothing is.
+    #[tokio::test]
+    async fn the_delivered_basket_and_handoffs_are_linked_from_the_open_turn() {
+        let (db, thread) = with_thread().await;
+        let (item, none_yet) = db
+            .transaction(move |tx| {
+                tx.execute(
+                    "INSERT INTO thread_context_item (thread_id, kind, source_uri, added_at)
+                     VALUES (1, 'page', 'oxplow:oxplow/commit?sha=abc1234', '2026-01-01')",
+                    [],
+                )
+                .map_err(map_sql_err)?;
+                let item = tx.last_insert_rowid();
+                let handoff = oxplow_domain::HandoffId::new(7);
+                // No turn open: nothing recorded.
+                link_delivered_tx(tx, thread, None, &[handoff], &[item])?;
+                let none_yet: i64 = tx
+                    .query_row("SELECT COUNT(*) FROM page_ref", [], |r| r.get(0))
+                    .map_err(map_sql_err)?;
+                tx.execute(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at) VALUES (3, 1, 'p', 'a')",
+                    [],
+                )
+                .map_err(map_sql_err)?;
+                link_delivered_tx(tx, thread, None, &[handoff], &[item])?;
+                Ok((item, none_yet))
+            })
+            .await
+            .unwrap();
+        assert_eq!(none_yet, 0);
+        let (turn, edges): (Option<i64>, Vec<(String, String)>) = db
+            .transaction(move |tx| {
+                let turn = tx
+                    .query_row(
+                        "SELECT delivered_turn_id FROM thread_context_item WHERE id = ?1",
+                        [item],
+                        |r| r.get(0),
+                    )
+                    .map_err(map_sql_err)?;
+                let mut stmt = tx
+                    .prepare("SELECT source_uri, target_uri FROM page_ref ORDER BY target_uri")
+                    .map_err(map_sql_err)?;
+                let edges = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map_err(map_sql_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(map_sql_err)?;
+                Ok((turn, edges))
+            })
+            .await
+            .unwrap();
+        assert_eq!(turn, Some(3));
+        let from = "oxplow:oxplow/turn?id=trn3".to_string();
+        assert_eq!(
+            edges,
+            vec![
+                (from.clone(), "oxplow:oxplow/commit?sha=abc1234".to_string()),
+                (
+                    from,
+                    oxplow_domain::uri::build::handoff_uri(oxplow_domain::HandoffId::new(7))
+                ),
+            ]
+        );
     }
 }

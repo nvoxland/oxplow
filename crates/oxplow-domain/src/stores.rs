@@ -32,7 +32,7 @@ pub trait StreamStore: Send + Sync {
     async fn set_branch(&self, id: &StreamId, branch: &str) -> Result<bool, DomainError>;
     async fn delete(&self, id: &StreamId) -> Result<(), DomainError>;
     /// Soft-delete: stamp `archived_at` so the row drops out of
-    /// `list()` but stays referenced from history (efforts, snapshots,
+    /// `list()` but stays referenced from history (turns, snapshots,
     /// page_visit). Idempotent — re-archiving an already-archived row
     /// is a no-op.
     async fn archive(&self, id: &StreamId) -> Result<(), DomainError>;

@@ -82,6 +82,13 @@ impl PreparedProviderGeneration {
                     .map(|capability| capability.features().clone())
                     .unwrap_or_default(),
                 fields: serde_json::to_value(&staged.instance.spec.fields).unwrap_or_default(),
+                stages: serde_json::to_value(&staged.instance.spec.stages).unwrap_or_default(),
+                kinds: staged
+                    .capability
+                    .as_ref()
+                    .map(|capability| capability.kinds().clone())
+                    .unwrap_or_default(),
+                offered: true,
                 id_pattern: staged.instance.spec.id_pattern.clone(),
                 icon: None,
                 config: serde_json::json!({}),
@@ -200,7 +207,11 @@ impl ProviderRegistry {
         let base = self.running.lock().await.clone();
         let mut staged = Vec::new();
         let mut ids = BTreeSet::new();
-        let declared = crate::capabilities::declared_by(snapshot.extensions());
+        // Only the ids matter here (a conflict is one, offered or not).
+        let declared = crate::capabilities::declared_by(
+            snapshot.extensions(),
+            &crate::capabilities::Settings::new(),
+        );
 
         // One instance that can't run never holds back the others: it is
         // left out and its state says why (the way the instance's
@@ -324,10 +335,9 @@ impl ProviderRegistry {
                 Some(current) => (current.clone(), true),
                 None => (instance, false),
             };
-            let capability = match self
-                .host_of(&instance)
-                .and_then(|host| host.prepare(&instance))
-            {
+            let capability = match self.host_of(&instance).and_then(|host| {
+                host.prepare(&(instance.clone() as Arc<dyn crate::providers::endpoint::Endpoint>))
+            }) {
                 Ok(capability) => capability,
                 Err(reason) => {
                     refused(&reason);

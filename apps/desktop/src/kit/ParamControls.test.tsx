@@ -13,6 +13,9 @@ function param(over: Partial<PageParam> & { name: string }): PageParam {
 
 type Query = (sql: string) => Promise<SqlQueryResult>;
 
+/** What a select shows: its chosen option's text. */
+const picked = (el: HTMLElement) => (el as HTMLSelectElement).selectedOptions[0]?.textContent ?? null;
+
 function setup(p: PageParam, value: SqlCell, query?: Query) {
   const applied: [string, SqlCell][] = [];
   const view = render(<ParamRow param={p} value={value} onApply={(n, v) => applied.push([n, v])} query={query} />);
@@ -52,16 +55,18 @@ test("Escape closes an edit and keeps the value from before it opened", () => {
   expect(valueButton().textContent).toBe("a");
 });
 
-test("a choice shows its option's label and applies the one picked", () => {
+// A value picked from a list is its select at rest: one click opens it (a
+// button swapped for a select on click only focused it).
+test("a choice is its select at rest, showing its option's label, and applies the one picked", () => {
   const p = param({ name: "mode", type: "choice", default: "a", options: [{ value: "a", label: "Recent" }, { value: "b", label: "Most visited" }] });
-  const { applied, valueButton, edit, view } = setup(p, "a");
-  expect(valueButton().textContent).toBe("Recent");
-  fireEvent.click(valueButton());
+  const { applied, edit, view } = setup(p, "a");
+  expect(view.queryByTestId("page-param-mode-value")).toBeNull();
+  expect(picked(edit())).toBe("Recent");
+  expect(document.activeElement).not.toBe(edit());
   expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Recent", "Most visited"]);
   fireEvent.change(edit(), { target: { value: "b" } });
   expect(applied).toEqual([["mode", "b"]]);
-  expect(view.queryByTestId("page-param-mode-edit")).toBeNull();
-  expect(valueButton().textContent).toBe("Most visited");
+  expect((edit() as HTMLSelectElement).value).toBe("b");
 });
 
 // A choice with `options_from` asks the daemon for the param's options
@@ -86,11 +91,9 @@ test("a dynamic choice loads its options for its page and param with the page's 
   const p = param({ name: "end", type: "choice", options_from: "x/ends" });
   const applied: [string, SqlCell][] = [];
   const view = render(<ParamRow param={p} value="snap:2" values={{ start: "snap:1", end: "snap:2", other: 1 }} streamId="str1" onApply={(n, v) => applied.push([n, v])} optionsSource={source} page="x/changes" />);
-  const valueButton = () => view.getByTestId("page-param-end-value");
-  await waitFor(() => expect(valueButton().textContent).toBe("Second"));
-  expect(runs).toEqual([["x/changes", "end", { start: "snap:1", end: "snap:2", other: 1 }, "str1"]]);
-  fireEvent.click(valueButton());
   const edit = view.getByTestId("page-param-end-edit") as HTMLSelectElement;
+  await waitFor(() => expect(picked(edit)).toBe("Second"));
+  expect(runs).toEqual([["x/changes", "end", { start: "snap:1", end: "snap:2", other: 1 }, "str1"]]);
   expect([...edit.querySelectorAll("optgroup")].map((g) => g.label)).toEqual(["Snapshots"]);
   expect([...edit.options].map((o) => o.textContent)).toEqual(["Working tree", "First", "Second"]);
   fireEvent.change(edit, { target: { value: "working" } });
@@ -99,9 +102,8 @@ test("a dynamic choice loads its options for its page and param with the page's 
 
 test("a text param named like an id param picks what exists, shown by its title", async () => {
   const query: Query = async () => ({ columns: ["value", "label"], rows: [["t1", "First"], ["t2", "Second"]] }) as unknown as SqlQueryResult;
-  const { applied, valueButton, edit } = setup(param({ name: "thread_id", type: "text" }), "t2", query);
-  await waitFor(() => expect(valueButton().textContent).toBe("Second"));
-  fireEvent.click(valueButton());
+  const { applied, edit } = setup(param({ name: "thread_id", type: "text" }), "t2", query);
+  await waitFor(() => expect(picked(edit())).toBe("Second"));
   fireEvent.change(edit(), { target: { value: "0" } });
   expect(applied).toEqual([["thread_id", "t1"]]);
 });
@@ -146,9 +148,8 @@ test("a search's Escape puts back the value it had when it opened", async () => 
 
 test("a branch shows All branches for none and lists the local branches", async () => {
   const query: Query = async () => ({ columns: ["name"], rows: [["main"], ["topic"]] }) as unknown as SqlQueryResult;
-  const { applied, valueButton, edit } = setup(param({ name: "br", type: "branch" }), null, query);
-  expect(valueButton().textContent).toBe("All branches");
-  fireEvent.click(valueButton());
+  const { applied, edit } = setup(param({ name: "br", type: "branch" }), null, query);
+  expect(picked(edit())).toBe("All branches");
   await waitFor(() => expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["All branches", "main", "topic"]));
   fireEvent.change(edit(), { target: { value: "topic" } });
   expect(applied).toEqual([["br", "topic"]]);
@@ -156,19 +157,17 @@ test("a branch shows All branches for none and lists the local branches", async 
 
 test("a date_range shows its preset's name and applies the preset picked", () => {
   const p = param({ name: "range", label: "When", type: "date_range", default: "30d", presets: ["7d", "30d", "all"] });
-  const { applied, valueButton, edit } = setup(p, "30d");
-  expect(valueButton().textContent).toBe("Last 30 days");
-  fireEvent.click(valueButton());
+  const { applied, edit } = setup(p, "30d");
+  expect(picked(edit())).toBe("Last 30 days");
   expect([...(edit() as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Last 7 days", "Last 30 days", "All time", "Custom…"]);
   fireEvent.change(edit(), { target: { value: "7d" } });
   expect(applied).toEqual([["range", "7d"]]);
 });
 
 // Two dates don't fit a 320px row: Custom… opens them over the page.
-test("Custom… opens a popover with two dates; Escape closes it with focus on the value", () => {
+test("Custom… opens a popover with two dates; Escape closes it with focus on the select", () => {
   const p = param({ name: "range", label: "When", type: "date_range", default: "30d" });
-  const { applied, valueButton, edit, view } = setup(p, "30d");
-  fireEvent.click(valueButton());
+  const { applied, edit, view } = setup(p, "30d");
   fireEvent.change(edit(), { target: { value: "__custom__" } });
   const pop = view.getByTestId("page-param-range-custom");
   expect(pop.getAttribute("role")).toBe("dialog");
@@ -176,13 +175,12 @@ test("Custom… opens a popover with two dates; Escape closes it with focus on t
   expect(applied).toEqual([["range", "2026-10-01.."]]);
   fireEvent.keyDown(view.getByTestId("page-param-range-from"), { key: "Escape" });
   expect(view.queryByTestId("page-param-range-custom")).toBeNull();
-  expect(view.queryByTestId("page-param-range-edit")).toBeNull();
-  expect(document.activeElement).toBe(valueButton());
+  expect(document.activeElement).toBe(edit());
 });
 
 test("a custom range shows its two ends", () => {
-  const { valueButton } = setup(param({ name: "range", type: "date_range" }), "2026-10-01..2026-10-20");
-  expect(valueButton().textContent).toBe("2026-10-01 – 2026-10-20");
+  const { edit } = setup(param({ name: "range", type: "date_range" }), "2026-10-01..2026-10-20");
+  expect(picked(edit())).toBe("2026-10-01 – 2026-10-20");
 });
 
 test("a row whose value isn't its default is marked changed", () => {
@@ -213,4 +211,18 @@ test("a ParamList shows six rows, the rest behind More (N), and a changed one al
   expect(more.textContent).toBe("More (2)");
   fireEvent.click(more);
   expect(shown()).toEqual(params.map((p) => p.name));
+});
+
+// A value you type (text, search) reads as a text box at rest: no caret, a
+// search empty says "Search…"; a value you pick is its select.
+test("a typed value has no caret and an empty search says Search…; a choice is its select", () => {
+  const search = setup(param({ name: "q", type: "search" }), null);
+  expect(search.valueButton().className).toContain("ox-param-typed");
+  expect(search.valueButton().textContent).toBe("Search…");
+  cleanup();
+  const text = setup(param({ name: "author_name", type: "text" }), "ana");
+  expect(text.valueButton().className).toContain("ox-param-typed");
+  cleanup();
+  const choice = setup(param({ name: "mode", type: "choice", default: "a", options: [{ value: "a", label: "A", icon: null }] }), "a");
+  expect(choice.edit().className).not.toContain("ox-param-typed");
 });

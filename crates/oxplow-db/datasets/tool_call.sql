@@ -1,1 +1,1 @@
-SELECT id, thread_id, effort_id, turn_id, tool, kind, path, detail, ok, at, event_id, agent_session_id, subagent_id, subagent_kind FROM source('agent_tool_call')
+SELECT id, thread_id, turn_id, tool, kind, path, detail, ok, at, event_id, agent_session_id, subagent_id, subagent_kind, call_id, state, started_at, ended_at, duration_ms FROM source('agent_tool_call')

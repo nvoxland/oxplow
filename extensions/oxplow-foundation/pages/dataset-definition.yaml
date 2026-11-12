@@ -7,7 +7,7 @@ params:
 - name: uri
   label: Dataset
 answers:
-- {"question":"What does this dataset hold, and what are its fields?","about":"oxplow/dataset","params":{"uri":"oxplow:oxplow/dataset?dataset=work_item"},"skill":"oxplow-extension"}
+- {"question":"What does this dataset hold, and what are its fields?","about":"oxplow/dataset","params":{"uri":"oxplow:oxplow/dataset?dataset=task"},"skill":"oxplow-extension"}
 loaders:
   about:
     sql: |

@@ -127,6 +127,9 @@ mod tests {
             source: Source::BuiltIn(entry),
             features: serde_json::json!({}),
             fields: serde_json::json!([]),
+            stages: serde_json::json!([]),
+            kinds: serde_json::Value::Array(Vec::new()),
+            offered: true,
             id_pattern: None,
             icon: None,
             config: serde_json::json!({}),
@@ -188,7 +191,7 @@ mod tests {
     /// the running registry lists it.
     #[tokio::test]
     async fn the_built_in_agents_ship_a_logo() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let listed = listing(&fx.svc.harnesses, &fx.svc.capabilities, &[]);
         for id in ["claude", "codex", "opencode"] {
             let icon = listed
@@ -212,7 +215,7 @@ mod tests {
             &[
                 declared("agent_harness", "claude", "oxplow:claude-code"),
                 declared("agent_harness", "codex", "oxplow:codex-cli"),
-                declared("work_items", "oxplow", "oxplow:tasks"),
+                declared("task_tracker", "oxplow", "oxplow:oxtask"),
             ],
         );
         assert_eq!(r.names(), ["claude", "codex"]);

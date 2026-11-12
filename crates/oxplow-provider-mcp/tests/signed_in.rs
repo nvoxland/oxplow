@@ -71,7 +71,7 @@ async fn create(svc: &oxplow_app::Services, title: &str) -> Result<(), String> {
     svc.commands
         .run(
             &Actor::Human,
-            "oxplow.work_item.create",
+            "oxplow.task.create",
             json!({ "title": title }),
             false,
         )
@@ -124,7 +124,7 @@ async fn a_signed_in_bearer_renews_once_when_its_server_stops_taking_it() {
         .write()
         .unwrap()
         .active_providers
-        .insert("work_items".into(), "notes".into());
+        .insert("task_tracker".into(), "notes".into());
     svc.config.write().unwrap().extension_instances.insert(
         INSTANCE.into(),
         oxplow_config::ExtensionInstanceConfig {

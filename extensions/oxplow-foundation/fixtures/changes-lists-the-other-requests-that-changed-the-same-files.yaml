@@ -1,0 +1,29 @@
+# The Changes page lists the other requests, on any thread, whose turns
+# changed a file of this change within its time window - each with its
+# thread and the shared files. A request that changed other files is not
+# listed, and neither is the request the page is about.
+given:
+  - { command: oxplow.thread.create, input: { stream: str1, title: Beta }, bind: beta }
+  - observe: { snapshot: { trigger: startup, branch: main, files: [{ path: a.txt, hash: h1 }, { path: b.txt, hash: h1 }] } }
+  - observe: { turn: { prompt: Edit a here, tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }] } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h2 }, { path: b.txt, hash: h1 }] } }
+  - observe: { turn: { prompt: Edit a there, thread: $beta.id, tools: [{ name: Edit, kind: edit, paths: [a.txt], ok: true }] } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h3 }, { path: b.txt, hash: h1 }] } }
+  - observe: { turn: { prompt: Edit b there, thread: $beta.id, tools: [{ name: Edit, kind: edit, paths: [b.txt], ok: true }] } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h3 }, { path: b.txt, hash: h2 }] } }
+  - observe: { change: { kind: range, target: "snap:1..snap:3", files: [{ path: a.txt, status: modified }] } }
+  - observe: { change: { kind: range, target: "snap:1..snap:2", files: [{ path: a.txt, status: modified }] } }
+when: { page: diff-view, params: { stream_id: 1, start: "snap:1", end: "snap:3" } }
+expect:
+  loaders:
+    concurrent:
+      rows:
+        - { prompt: Edit a here, thread: $any, shared: a.txt }
+        - { prompt: Edit a there, thread: Beta, shared: a.txt }
+steps:
+  # The first request's own page: the second one is outside its window and
+  # it does not list itself.
+  - params: { uri: "oxplow:oxplow/request?id=req1", stream_id: 1, start: "", end: "" }
+    expect:
+      loaders:
+        concurrent: { rows: 0 }

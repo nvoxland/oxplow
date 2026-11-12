@@ -197,12 +197,12 @@ async fn a_streaming_request_gets_its_own_notifications_until_its_reply() {
                     (notify::PROGRESS, json!({ "id": id, "message": "page 1" })),
                     (
                         notify::RECORD,
-                        json!({ "id": id, "entity": "work_item", "row": { "n": 1 } }),
+                        json!({ "id": id, "entity": "task", "row": { "n": 1 } }),
                     ),
                     (notify::STATE, json!({ "id": id, "state": { "after": 1 } })),
                     (
                         notify::RECORD,
-                        json!({ "id": 999, "entity": "work_item", "row": {} }),
+                        json!({ "id": 999, "entity": "task", "row": {} }),
                     ),
                 ] {
                     provider.notify(method, params).await.unwrap();

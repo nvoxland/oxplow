@@ -19,6 +19,8 @@ export interface VizActionDeps {
     confirmed: boolean,
     /** Where the dragged row landed, for a drag action. */
     drop?: Drop | null,
+    /** The `value` of the option pressed, for an action with options. */
+    option?: string | null,
   ): Promise<CommandOutcome>;
   /** A toast; with `undo`, it offers Undo. */
   toast(message: string, undo?: () => void, open?: () => void): void;
@@ -111,11 +113,12 @@ export async function performVizAction(
   confirmed: boolean,
   deps: VizActionDeps,
   drop: Drop | null = null,
+  option: string | null = null,
 ): Promise<VizActionOutcome> {
   const ran = await deps.run(
     action.label,
     async () => {
-      const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop);
+      const outcome = await deps.press(run.config.id, action.id, run.params, row, streamId, confirmed, drop, option);
       // An `open` action ran nothing: it says the URI to open, as a link does.
       if (action.open) {
         const uri = (outcome.result as { opened?: unknown } | null)?.opened;

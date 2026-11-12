@@ -255,9 +255,9 @@ export interface ThreadState {
   threads: Thread[];
 }
 
-// Work items are read through the work-item interface by `workItems.ts`,
+// Tasks are read through the task interface by `tasks.ts`,
 // which owns their shape.
-export type { WorkItem } from "./workItems.js";
+export type { Task } from "./tasks.js";
 
 
 /** Why a snapshot take ran (`snapshot_op.trigger`). */
@@ -295,19 +295,6 @@ export interface SnapshotSummary {
   counts: { created: number; updated: number; deleted: number };
 }
 
-
-export interface TaskEffort {
-  id: string;
-  /** The work item worked on (`work_item:oxplow:tsk42`, or another
-   *  provider's `work_item:issues:ENG-12`). */
-  work_item: string;
-  started_at: string;
-  ended_at: string | null;
-  start_snapshot_id: string | null;
-  end_snapshot_id: string | null;
-  /** The effort's summary prose (canonical text). */
-  summary: string | null;
-}
 
 export const BACKLOG_SCOPE = "__backlog__";
 
@@ -380,9 +367,9 @@ export async function listStreams(): Promise<Stream[]> {
 }
 
 /// Site-wide BM25 search. `streamId` scopes file/stream-bound hits to one
-/// worktree (project-global hits like wiki always included); `null` searches
+/// worktree (project-global hits like knowledge pages always included); `null` searches
 /// everything. `resources` optionally restricts to searchable resources
-/// (`v_resource.searchable`: `oxplow/wiki`) or `oxplow/file`.
+/// (`v_resource.searchable`: `oxplow/knowledge`) or `oxplow/file`.
 export async function searchSite(
   query: string,
   streamId: string | null,
@@ -493,7 +480,7 @@ export async function reportTabs(report: TabReport): Promise<TabReportAnswer> {
   return unwrap(await commands.reportTabs(report));
 }
 
-/// Analyze a change (a commit, an effort, or a stream's working tree) if
+/// Analyze a change (a commit, a request, or a stream's working tree) if
 /// needed and return its `v_change` row. See `.context/semantic-layer.md`.
 
 export { openInSystemBrowser } from "./tauri-bridge/systemBrowser.js";
@@ -875,26 +862,41 @@ export interface RemoteBranchTarget {
   branch: string;
 }
 
-/** Write a wiki page — the `oxplow.knowledge.write_page` command (P5.C3): the
- *  row, its links and the file, in one audited run. Every `[[link]]` must
- *  resolve (a dangling one is refused, named). `verifiedFiles` are files
- *  re-checked against the page: their freshness pins move to now. */
-export async function writeWikiPage(
-  slug: string,
-  body: string,
-  options?: { verifiedFiles?: string[] },
-): Promise<void> {
-  await runCommand("oxplow.knowledge.write_page", {
-    slug,
-    body,
-    verified_files: options?.verifiedFiles ?? [],
+/** Write a knowledge page — the `oxplow.knowledge.write_page` command: the
+ *  page in its store, its links and its file pins, in one audited run. Every
+ *  `[[link]]` must resolve (a dangling one is refused, named). `store` is
+ *  needed only when several stores are enabled; `id` may be left out (the
+ *  store derives it from `title`). `verifiedFiles` are files re-checked
+ *  against the page: their freshness pins move to now. Returns the page's
+ *  URI. */
+export async function writeKnowledgePage(input: {
+  store?: string;
+  id?: string;
+  title?: string;
+  body: string;
+  verifiedFiles?: string[];
+  removedFiles?: string[];
+}): Promise<string | null> {
+  const result = await runCommand("oxplow.knowledge.write_page", {
+    ...(input.store ? { store: input.store } : {}),
+    ...(input.id ? { id: input.id } : {}),
+    ...(input.title ? { title: input.title } : {}),
+    body: input.body,
+    verified_files: input.verifiedFiles ?? [],
+    ...(input.removedFiles ? { removed_files: input.removedFiles } : {}),
   });
+  const uri = (result.result as { uri?: unknown } | null | undefined)?.uri;
+  return typeof uri === "string" ? uri : null;
 }
 
-/** Delete a wiki page (`oxplow.knowledge.delete_page`, destructive): the person
- *  has confirmed. */
-export async function deleteWikiPage(slug: string, confirmed: boolean): Promise<void> {
-  await runCommand("oxplow.knowledge.delete_page", { slug }, confirmed);
+/** Delete a knowledge page (`oxplow.knowledge.delete_page`, destructive): the
+ *  person has confirmed. */
+export async function deleteKnowledgePage(input: { store?: string; id: string }, confirmed: boolean): Promise<void> {
+  await runCommand(
+    "oxplow.knowledge.delete_page",
+    { ...(input.store ? { store: input.store } : {}), id: input.id },
+    confirmed,
+  );
 }
 
 // ---- Comments ----
@@ -1097,7 +1099,6 @@ export function awaitBackgroundTask(taskId: string): Promise<BackgroundTask | nu
 
 export type { MetricSpec, SeriesPoint } from "./metricsSql.js";
 
-import { effortUri, idOf } from "./uri/uri.js";
 
 /** Rows a metric reader returned, and what the query read — hand `reads` to
  *  `useRerunOnChange` so the view refreshes when (and only when) they change. */
@@ -1143,18 +1144,6 @@ export async function undoCommand(auditId: number, confirmed = false): Promise<C
 export async function decideProposal(id: number, approve: boolean): Promise<CommandOutcome | null> {
   return unwrap(await commands.decideProposal(id, approve));
 }
-
-/** Efforts whose span overlaps `[windowStart, windowEnd]` (RFC-3339) — the
- *  Metrics Explorer's effort-band overlay (tsk233). */
-export async function listEffortsInWindow(
-  windowStart: string,
-  windowEnd: string,
-): Promise<TaskEffort[]> {
-  return unwrap(
-    await commands.listEffortsInWindow(windowStart, windowEnd),
-  ) as unknown as TaskEffort[];
-}
-
 
 /** Snapshot row — one per `request_snapshot()` call that captured
  *  anything. Local History dashboard surfaces this list. */
@@ -1233,77 +1222,23 @@ export async function filesAt(streamId: string, revision: Revision): Promise<str
   return unwrap(await commands.filesAt(streamId || null, revision));
 }
 
-/** One (snapshot, effort) pair. `completedHere` is true when the
- *  effort ended exactly at this snapshot; otherwise the effort was
- *  in flight at this snapshot. Callers group by `snapshotId` and
- *  resolve task titles via `getTaskSummaries` (the IPC only carries
- *  effort columns). */
-export interface EffortAtSnapshot {
-  snapshotId: number;
-  effortId: string;
-  /** The effort's work item ref; `null` while it's unlinked. */
-  workItem: string | null;
-  threadId: string;
-  startSnapshotId: number | null;
-  endSnapshotId: number | null;
-  completedHere: boolean;
-}
-
-/** For each snapshot id in the input list, the wiki slugs whose
- *  body changed in that snapshot. Drives wiki badges on the
+/** For each snapshot id in the input list, the URIs of the knowledge pages
+ *  whose body changed in that snapshot. Drives knowledge badges on the
  *  Local History dashboard. */
-export async function listWikiSlugsForSnapshots(
+export async function listKnowledgePagesForSnapshots(
   snapshotIds: number[],
-): Promise<Array<{ snapshotId: number; slug: string }>> {
-  const rows = unwrap(
-    await commands.listWikiSlugsForSnapshots(snapshotIds),
-  ) as unknown as Array<[number, string]>;
-  return rows.map(([snapshotId, slug]) => ({ snapshotId, slug }));
-}
-
-/** Efforts' titles (`v_effort.title`: their own, else their item's, else
- *  their first prompt's first line), by effort id (`eff12`). */
-export async function effortTitles(effortIds: string[]): Promise<Map<string, string>> {
-  if (effortIds.length === 0) return new Map();
-  const res = await querySql(
-    `SELECT uri, title FROM v_effort WHERE uri IN (SELECT value FROM json_each(?1)) AND title IS NOT NULL`,
-    [JSON.stringify(effortIds.map(effortUri))],
-    10_000,
-  );
-  return new Map(res.rows.map((r) => [idOf(String(r[0]), "oxplow/effort") ?? "", String(r[1])] as [string, string]));
-}
-
-export async function listEffortsAtSnapshots(
-  snapshotIds: number[],
-): Promise<EffortAtSnapshot[]> {
-  const rows = unwrap(
-    await commands.listEffortsAtSnapshots(snapshotIds),
-  ) as unknown as Array<{
+): Promise<Array<{ snapshotId: number; uri: string }>> {
+  const rows = unwrap(await commands.listKnowledgePagesForSnapshots(snapshotIds)) as unknown as Array<{
     snapshot_id: number;
-    effort: {
-      id: string;
-      work_item: string | null;
-      thread_id: string;
-      start_snapshot_id: number | null;
-      end_snapshot_id: number | null;
-    };
+    uri: string;
   }>;
-  return rows.map((r) => ({
-    snapshotId: r.snapshot_id,
-    effortId: r.effort.id,
-    workItem: r.effort.work_item,
-    threadId: r.effort.thread_id,
-    startSnapshotId: r.effort.start_snapshot_id,
-    endSnapshotId: r.effort.end_snapshot_id,
-    completedHere: r.effort.end_snapshot_id === r.snapshot_id,
-  }));
+  return rows.map((row) => ({ snapshotId: row.snapshot_id, uri: row.uri }));
 }
 
 export interface SnapshotTakenEventPayload {
   streamId: string;
   snapshotId: string;
   trigger: SnapshotTrigger;
-  effortId: string | null;
   threadId: string | null;
 }
 
@@ -1321,7 +1256,6 @@ export function subscribeSnapshotEvents(
       streamId: eventStreamId,
       snapshotId: String(event.snapshotId),
       trigger: event.trigger as SnapshotTrigger,
-      effortId: (event.effortId as string | null | undefined) ?? null,
       threadId: (event.threadId as string | null | undefined) ?? null,
     });
   });
@@ -1517,7 +1451,6 @@ export function userInterruptEnvelope(sessionId: string, threadId: string, strea
     agent_session_id: sessionId,
     session_id: null,
     payload_json: JSON.stringify({ source: "user-escape" }),
-    prompt: null,
     decision: null,
   };
 }

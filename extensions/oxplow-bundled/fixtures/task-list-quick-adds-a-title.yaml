@@ -1,0 +1,14 @@
+# Task List's quick add asks only for a title; it files the stage the
+# list shows (its first to-do stage for a started or closed one), for
+# nobody.
+when: { form: task-list, node: add, params: { state: todo, stream_id: 1 } }
+expect:
+  values: { stage: todo }
+  fields: [title]
+steps:
+  - when: { form: task-list, node: add, params: { state: backlog, stream_id: 1 } }
+    expect:
+      values: { stage: backlog }
+  - when: { form: task-list, node: add, params: { state: done, stream_id: 1 } }
+    expect:
+      values: { stage: todo }

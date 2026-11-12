@@ -8,7 +8,7 @@
 //!   all or nothing, one audit row and `command.executed` with the
 //!   children's events caused by it, undone by the inverses of the
 //!   children that changed something, reversed.
-//! - Any call leaves it (an `External` command, `work_item.*` on another
+//! - Any call leaves it (an `External` command, `task.*` on another
 //!   provider's item): its **steps** run in order (`steps.rs`), each
 //!   landing as it runs, with no undo (P7 review, tsk713).
 //!
@@ -88,27 +88,24 @@ pub struct SequenceCall {
     pub input: Value,
 }
 
-/// `SequenceInput`'s schema, with its example input: closing a work item
-/// and reporting the effort, one audited run.
+/// `SequenceInput`'s schema, with its example input: closing a task and
+/// commenting on it, one audited run.
 fn sequence_schema() -> Value {
     let mut schema =
         serde_json::to_value(schemars::schema_for!(SequenceInput)).expect("schema serializes");
-    let item = oxplow_domain::uri::build::work_item_uri("oxplow", "tsk12");
+    let item = oxplow_domain::uri::build::task_uri("oxtask", "tsk12");
     if let Some(object) = schema.as_object_mut() {
         object.insert(
             "examples".into(),
             serde_json::json!([{
                 "calls": [
                     {
-                        "name": "oxplow.work_item.transition",
+                        "name": "oxplow.task.transition",
                         "input": { "uri": item, "to": "done" }
                     },
                     {
-                        "name": "oxplow.effort.report",
-                        "input": {
-                            "summary": "Fixed the login redirect loop.",
-                            "impacts": [{ "kind": "file", "id": "src/auth.rs", "action": "updated" }]
-                        }
+                        "name": "oxplow.task.comment",
+                        "input": { "uri": item, "body": "Fixed the login redirect loop." }
                     }
                 ]
             }]),
@@ -173,24 +170,24 @@ pub fn sequence_command() -> Command {
 mod tests {
     use super::*;
     use oxplow_domain::Actor;
-    use oxplow_tasks::work_item_ref;
-    use oxplow_tasks::TaskStore as _;
+    use oxplow_oxtask::task_ref;
+    use oxplow_oxtask::OxtaskStore as _;
     use serde_json::json;
 
-    /// Two `work_item.*` commands as one run by an agent: a work list's
+    /// Two `task.*` commands as one run by an agent: a task tracker's
     /// verbs run outside the transaction, so the sequence runs them as
     /// steps — one audit row naming the sequence with the children in its
     /// result, the children's events caused by that one
     /// `command.executed`, and no undo of the whole.
     #[tokio::test]
-    async fn a_sequence_of_work_item_commands_is_one_audited_run_of_steps() {
-        let fx = crate::test_fixtures::services_with_task_effort().await;
+    async fn a_sequence_of_task_commands_is_one_audited_run_of_steps() {
+        let fx = crate::test_fixtures::services_with_task().await;
         let agent = Actor::Agent {
             session_id: None,
             thread_id: Some(fx.thread),
             stream_id: None,
         };
-        let task = work_item_ref(fx.task);
+        let task = task_ref(fx.task);
         let out = fx
             .svc
             .commands
@@ -198,8 +195,8 @@ mod tests {
                 &agent,
                 SEQUENCE,
                 json!({ "calls": [
-                    { "name": "oxplow.work_item.update", "input": { "uri": task, "title": "Renamed" } },
-                    { "name": "oxplow.work_item.transition", "input": { "uri": task, "to": "done" } },
+                    { "name": "oxplow.task.update", "input": { "uri": task, "title": "Renamed" } },
+                    { "name": "oxplow.task.transition", "input": { "uri": task, "to": "done" } },
                 ] }),
                 false,
             )
@@ -207,12 +204,9 @@ mod tests {
             .unwrap();
         let after = fx.svc.task_store.get(fx.task).await.unwrap().unwrap();
         assert_eq!(after.title, "Renamed");
-        assert_eq!(after.status, oxplow_tasks::TaskStatus::Done);
+        assert_eq!(after.status, oxplow_oxtask::OxtaskStatus::Done);
         assert_eq!(out.result["children"].as_array().unwrap().len(), 2);
-        assert_eq!(
-            out.result["children"][1]["name"],
-            "oxplow.work_item.transition"
-        );
+        assert_eq!(out.result["children"][1]["name"], "oxplow.task.transition");
         assert!(out.inverse.is_none(), "steps aren't undoable");
 
         let audits = oxplow_db::SqliteCommandAuditStore::new(fx.svc.db.clone())
@@ -232,7 +226,7 @@ mod tests {
             .filter(|e| e.envelope.event_type == "command.executed")
             .collect::<Vec<_>>();
         assert_eq!(executed.len(), 1);
-        for t in ["work_item.edited", "work_item.state_changed"] {
+        for t in ["task.edited", "task.state_changed"] {
             let caused = events
                 .iter()
                 .find(|e| e.envelope.event_type == t)

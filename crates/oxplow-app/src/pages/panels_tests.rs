@@ -37,12 +37,12 @@ view: { viz: table, from: things }
     write(
         dir.path(),
         &format!("{ext}/parts/line.yaml"),
-        "title: Things line\nparams: [{ name: thread_id }]\nloaders:\n  line: { sql: \"SELECT 'thread ' || :thread_id AS line\" }\nview: { viz: list, from: line }\n",
+        "title: Things line\nparams: [{ name: thread_id }, { name: mode, default: few, options: [{ value: few, label: Few }, { value: many, label: Many }] }]\nloaders:\n  line: { sql: \"SELECT 'thread ' || :thread_id AS line, :mode AS mode\" }\nview: { viz: list, from: line }\n",
     );
     write(
         dir.path(),
         &format!("{ext}/parts/n.yaml"),
-        "title: Things count\nparams: [{ name: thread_id }]\nloaders:\n  n: { sql: \"SELECT 1 AS x UNION ALL SELECT 2 UNION ALL SELECT 3\" }\nview: { viz: table, from: n }\n",
+        "title: Things count\nparams: [{ name: thread_id }, { name: mode, default: few, options: [{ value: few, label: Few }, { value: many, label: Many }] }]\nloaders:\n  n: { sql: \"SELECT 1 AS x UNION ALL SELECT 2 UNION ALL SELECT 3\" }\nview: { viz: table, from: n }\n",
     );
     write(
         dir.path(),
@@ -131,7 +131,8 @@ async fn a_thread_panel_runs_every_part_for_the_thread_and_the_toggle_only_on_th
                 .into_iter()
                 .map(|(v, l)| crate::pages::spec::ChoiceOption {
                     value: v.into(),
-                    label: l.into()
+                    label: l.into(),
+                    icon: None,
                 })
                 .collect(),
             value: "few".into(),
@@ -148,6 +149,12 @@ async fn a_thread_panel_runs_every_part_for_the_thread_and_the_toggle_only_on_th
         .await
         .unwrap();
     assert_eq!(cell(&run.body, "things", 1), SqlCell::Text("many".into()));
+    // The collapsed view is the same view, smaller: a toggle it declares
+    // too has the body's value.
+    assert_eq!(
+        cell(run.collapsed.as_ref().unwrap(), "line", 1),
+        SqlCell::Text("many".into())
+    );
     assert_eq!(run.choices[0].value, "many");
     // A pick the body no longer offers falls back to the default, not an error.
     let gone = BTreeMap::from([("mode".to_string(), "gone".to_string())]);
@@ -269,7 +276,7 @@ async fn an_open_part_run_carries_its_view_on_every_snapshot() {
 /// (a pick it no longer offers is its default), every other part with no
 /// param of its own, and nothing for a part the panel hasn't.
 #[tokio::test]
-async fn a_part_request_names_its_page_and_only_the_body_takes_the_toggles() {
+async fn a_part_request_names_its_page_and_every_part_that_declares_a_toggle_takes_it() {
     use crate::pages::runner::RunTarget;
     let (_dir, svc) = project().await;
     let things = find_panel(&svc, "acme/things").await.unwrap();
@@ -288,12 +295,30 @@ async fn a_part_request_names_its_page_and_only_the_body_takes_the_toggles() {
         body.params,
         BTreeMap::from([("mode".to_string(), SqlCell::Text("few".into()))])
     );
+    let line = part_request(&svc, &things, PanelPart::Collapsed, ctx.clone(), &gone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        line.params,
+        BTreeMap::from([("mode".to_string(), SqlCell::Text("few".into()))])
+    );
     let count = part_request(&svc, &things, PanelPart::Count, ctx.clone(), &gone)
         .await
         .unwrap()
         .unwrap();
     assert!(matches!(&count.target, RunTarget::Page(p) if p == "acme/n"));
-    assert!(count.params.is_empty());
+    // Every part that declares the toggle follows the header: the count
+    // counts what the body shows.
+    assert_eq!(
+        count.params,
+        BTreeMap::from([("mode".to_string(), SqlCell::Text("few".into()))])
+    );
+    let alarm = part_request(&svc, &things, PanelPart::Badge, ctx.clone(), &gone)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(alarm.params.is_empty(), "the badge declares no toggle");
     let plain = find_panel(&svc, "acme/plain").await.unwrap();
     assert!(part_request(&svc, &plain, PanelPart::Badge, ctx, &gone)
         .await

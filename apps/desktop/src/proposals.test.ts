@@ -89,12 +89,12 @@ test("a composite lists its children; anything else uses its summary; destructiv
       command: "review.finish",
       key: "review.finish {}",
       preview: { command: "review.finish", summary: "Finish the review.", input: {}, destructive: true },
-      dryRun: { result: null, children: [{ name: "oxplow.work_item.transition" }, { name: "oxplow.work_item.delete" }] },
+      dryRun: { result: null, children: [{ name: "oxplow.task.transition" }, { name: "oxplow.task.delete" }] },
     }),
   );
   expect(s.title).toBe("Finish the review.");
   expect(s.change).toBeNull();
-  expect(s.children).toEqual(["oxplow.work_item.transition", "oxplow.work_item.delete"]);
+  expect(s.children).toEqual(["oxplow.task.transition", "oxplow.task.delete"]);
   expect(s.destructive).toBe(true);
 });
 
@@ -120,7 +120,7 @@ test("a row's decision reads through; a read that doesn't select it is pending",
   const withDecision = {
     ...result([]),
     columns: ["id", "uri", "command", "preview", "decision", "decided_at"],
-    rows: [[4, "oxplow:oxplow/proposal?id=4", "oxplow.work_item.delete", "{}", "approved", "2026-10-03T00:00:00Z"]],
+    rows: [[4, "oxplow:oxplow/proposal?id=4", "oxplow.task.delete", "{}", "approved", "2026-10-03T00:00:00Z"]],
   } as unknown as SqlQueryResult;
   expect(proposalsFromResult(withDecision)[0]).toMatchObject({ id: 4, decision: "approved", decidedAt: "2026-10-03T00:00:00Z" });
   const pendingOnly = { ...result([]), rows: [[5, "oxplow:oxplow/proposal?id=5", "t", "oxplow.config.set", "{}", "agent", null, null, "k", "{}", null]] } as unknown as SqlQueryResult;

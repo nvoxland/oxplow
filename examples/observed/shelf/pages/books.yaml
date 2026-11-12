@@ -1,0 +1,24 @@
+title: Books
+description: Every book of every enabled store. Read only.
+icon: book-open
+category: Shelf
+loaders:
+  books:
+    sql: |
+      SELECT uri, title, author, store
+      FROM v_shelf_book
+      ORDER BY title
+view:
+  stack:
+    - id: new
+      action_point: shelf/book.new
+      context: {}
+    - id: books
+      title: Books
+      from: books
+      viz: table
+      columns:
+        - { key: title, label: Title, link: { kind: page, from: uri } }
+        - { key: author, label: Author }
+        - { key: store, label: Store, width: 110 }
+      empty: No books yet. A store extension fills this list.

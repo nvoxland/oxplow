@@ -24,11 +24,6 @@ pub async fn run_command(
         .commands
         .run(&Actor::Human, &id, input.0, confirmed)
         .await?;
-    // A write may have opened or closed an effort: let its snapshot pin
-    // land before the UI reads what follows.
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -155,9 +150,6 @@ pub async fn run_command_for_call(
 ) -> Result<CommandOutcome, IpcError> {
     let actor = svc.client_host.caller(&client, &call)?;
     let outcome = svc.commands.run(&actor, &id, input.0, false).await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -180,9 +172,6 @@ pub async fn undo_command(
         .commands
         .undo(&Actor::Human, audit_id.value(), confirmed)
         .await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(outcome)
 }
 
@@ -205,9 +194,6 @@ pub async fn decide_proposal(
         .commands
         .approve(&Actor::Human, proposal.value())
         .await?;
-    if outcome.audit_id.is_some() {
-        svc.efforts.settle_lifecycle().await;
-    }
     Ok(Some(outcome))
 }
 
@@ -234,8 +220,8 @@ mod tests {
         let err = crate::dispatch(
             "run_command",
             json!({
-                "id": "oxplow.work_item.transition",
-                "input": { "uri": "oxplow:oxplow/work_item?id=tsk999&provider=oxplow", "to": "done" },
+                "id": "oxplow.task.transition",
+                "input": { "uri": "oxplow:oxplow/task?id=tsk999&provider=oxtask", "to": "done" },
                 "confirmed": true,
             }),
             &svc,
@@ -255,7 +241,7 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(row.0, "oxplow.work_item.transition");
+        assert_eq!(row.0, "oxplow.task.transition");
         assert_ne!(row.1, "ok");
         // A run that succeeds, or fails before any run, names none.
         let unknown = crate::dispatch(
@@ -419,10 +405,10 @@ mod tests {
                 .await
             }
         };
-        // A command that asks asks the person over IPC: a work item's delete.
+        // A command that asks asks the person over IPC: a task's delete.
         let made = crate::dispatch(
             "run_command",
-            json!({ "id": "oxplow.work_item.create", "input": { "title": "T" }, "confirmed": false }),
+            json!({ "id": "oxplow.task.create", "input": { "title": "T" }, "confirmed": false }),
             &svc,
         )
         .await
@@ -432,7 +418,7 @@ mod tests {
             async move {
                 crate::dispatch(
                     "run_command",
-                    json!({ "id": "oxplow.work_item.delete", "input": { "uri": uri }, "confirmed": confirmed }),
+                    json!({ "id": "oxplow.task.delete", "input": { "uri": uri }, "confirmed": confirmed }),
                     &svc,
                 )
                 .await
@@ -493,7 +479,7 @@ mod tests {
             .commands
             .run(
                 &oxplow_domain::Actor::Human,
-                "oxplow.work_item.create",
+                "oxplow.task.create",
                 json!({ "title": "Proposed away" }),
                 false,
             )
@@ -505,12 +491,7 @@ mod tests {
             async move {
                 let err = svc
                     .commands
-                    .run(
-                        &effect,
-                        "oxplow.work_item.delete",
-                        json!({ "uri": uri }),
-                        false,
-                    )
+                    .run(&effect, "oxplow.task.delete", json!({ "uri": uri }), false)
                     .await
                     .unwrap_err();
                 let oxplow_domain::CommandError::Proposed { proposal, .. } = err else {
@@ -537,7 +518,7 @@ mod tests {
                     .run(
                         &oxplow_domain::Actor::Human,
                         "oxplow.sql.query",
-                        json!({ "sql": "SELECT count(*) FROM v_work_item WHERE title = 'Proposed away'" }),
+                        json!({ "sql": "SELECT count(*) FROM v_task WHERE title = 'Proposed away'" }),
                         false,
                     )
                     .await

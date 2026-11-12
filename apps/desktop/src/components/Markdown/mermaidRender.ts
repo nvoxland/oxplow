@@ -20,7 +20,7 @@ export function loadMermaid() {
         theme: "dark",
         securityLevel: "loose",
         // Mermaid 12 made ELK the default layout; pin dagre so existing
-        // wiki diagrams keep the layout they were written against.
+        // knowledge-page diagrams keep the layout they were written against.
         layout: "dagre",
       });
       return mod.default;
@@ -80,7 +80,7 @@ export async function attachPanZoom(
   const svgPanZoom = await loadSvgPanZoom();
   const instance = svgPanZoom(svg, {
     zoomEnabled: true,
-    // Mouse-wheel zoom is hostile inside a scrollable wiki page —
+    // Mouse-wheel zoom is hostile inside a scrollable knowledge page —
     // users expect the wheel to scroll the article, not silently
     // resize the diagram. The +/− toolbar buttons drive zoom.
     mouseWheelZoomEnabled: false,

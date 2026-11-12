@@ -1,5 +1,5 @@
 title: Thread sessions
-description: The agent sessions of a thread (every open thread's open sessions when none is named), each with its name, harness, status, how its conversation was bound, when it was last active, the efforts it worked in and its stream — and beneath each, the subagents that acted in it.
+description: The agent sessions of a thread (every open thread's open sessions when none is named), each with its name, harness, status, how its conversation was bound, when it was last active, the tasks its requests worked on and its stream — and beneath each, the subagents that acted in it.
 params:
 - name: thread
   label: Thread (`thr3`)
@@ -24,12 +24,13 @@ loaders:
              max(coalesce(ss.last_seen_at, ''),
                  coalesce((SELECT max(coalesce(t.ended_at, t.started_at)) FROM v_agent_turn t
                             WHERE t.agent_session_id = ss.id), '')) AS last_activity,
-             coalesce((SELECT group_concat(e.title, '; ')
-                         FROM (SELECT DISTINCT title FROM v_effort
-                                WHERE thread_id = ss.thread_id
-                                  AND started_at <= coalesce(ss.closed_at, '9999')
-                                  AND coalesce(ended_at, '9999') >= ss.opened_at
-                                ORDER BY started_at) e), '') AS efforts,
+             coalesce((SELECT group_concat(x.title, '; ')
+                         FROM (SELECT w.title AS title
+                                 FROM v_agent_turn t
+                                 JOIN v_request_task rt ON rt.request_id = t.request_id
+                                 JOIN v_task w ON w.uri = rt.task
+                                WHERE t.agent_session_id = ss.id
+                                GROUP BY w.uri ORDER BY min(rt.at), w.uri) x), '') AS tasks,
              coalesce((SELECT title FROM v_stream WHERE id = ss.stream_id), '') AS stream
       FROM ss
       LEFT JOIN v_agent_session_status st ON st.agent_session_id = ss.id
@@ -56,8 +57,8 @@ view:
     label: Conversation
   - key: last_activity
     label: Last active
-  - key: efforts
-    label: Efforts
+  - key: tasks
+    label: Tasks
   - key: stream
     label: Stream
   empty: No agent sessions.

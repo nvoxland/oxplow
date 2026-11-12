@@ -142,10 +142,10 @@ mod tests {
     #[test]
     fn rewrites_own_references_and_leaves_other_words() {
         let r = Rename::new("triage", "my-triage", None);
-        let text = "SELECT * FROM v_triage_x; page triage/summarize; run triage.todos.decide; wiki slug triage-summary; other-triage/x; end of triage.\n";
+        let text = "SELECT * FROM v_triage_x; page triage/summarize; run triage.todos.decide; knowledge id triage-summary; other-triage/x; end of triage.\n";
         assert_eq!(
             r.text(text),
-            "SELECT * FROM v_my_triage_x; page my_triage/summarize; run my_triage.todos.decide; wiki slug triage-summary; other-triage/x; end of triage.\n"
+            "SELECT * FROM v_my_triage_x; page my_triage/summarize; run my_triage.todos.decide; knowledge id triage-summary; other-triage/x; end of triage.\n"
         );
     }
 

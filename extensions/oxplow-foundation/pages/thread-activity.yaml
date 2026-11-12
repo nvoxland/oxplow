@@ -1,0 +1,89 @@
+title: Thread activity
+description: "What a thread's agent did, turn by turn, under the request each turn belongs to: prompt, session, model, context and compactions, files, test runs and tokens."
+icon: activity
+category: Activity
+params:
+- name: thread
+  label: Thread (`thr3`)
+  type: choice
+  role: filter
+  options_from: '#threads'
+  default: ''
+loaders:
+  # The open threads, the most recently active first; a closed one is
+  # still named by its id.
+  threads:
+    sql: |
+      SELECT 'thr' || t.id AS value, t.title AS label
+      FROM v_thread t
+      WHERE t.closed_at IS NULL
+      ORDER BY (SELECT max(a.started_at) FROM v_agent_turn a WHERE a.thread_id = t.id) DESC, t.id
+  thread_activity:
+    sql: |
+      WITH turns AS (
+        SELECT t.id, t.uri, t.thread_id, t.agent_session_id, t.started_at, t.ended_at,
+               nullif(trim(coalesce(t.model, '') || ' ' || coalesce(t.effort, '')), '') AS ran_on,
+               -- Tokens in the context at the turn's end, of the window when the harness gave one.
+               CASE WHEN t.context_tokens IS NULL THEN NULL
+                    WHEN t.context_window IS NULL THEN (t.context_tokens / 1000) || 'k'
+                    ELSE (t.context_tokens / 1000) || 'k of ' || (t.context_window / 1000) || 'k ('
+                         || (100 * t.context_tokens / t.context_window) || '%)' END AS context,
+               t.source, t.sender,
+               trim(CASE WHEN instr(t.prompt, char(10)) > 0
+                         THEN substr(t.prompt, 1, instr(t.prompt, char(10)) - 1)
+                         ELSE t.prompt END) AS prompt,
+               t.request_id
+        FROM v_agent_turn t
+        WHERE t.thread_id = (SELECT id FROM v_thread WHERE uri = uri('oxplow/thread', 'id', :thread))
+      )
+      SELECT coalesce(nullif(trim(CASE WHEN instr(r.prompt, char(10)) > 0
+                                       THEN substr(r.prompt, 1, instr(r.prompt, char(10)) - 1)
+                                       ELSE r.prompt END), ''),
+                      'No request') AS section,
+             coalesce(CASE WHEN u.source = 'peer' THEN 'Message from ' || coalesce(u.sender, 'another session') END,
+                      nullif(u.prompt, ''),
+                      '(no prompt)') AS prompt,
+             CASE WHEN u.agent_session_id IS NOT NULL THEN 'Session ' || u.agent_session_id END AS session,
+             u.ran_on,
+             u.context || CASE WHEN (SELECT count(*) FROM v_event ev WHERE ev.type = 'agent.context.compacted' AND ev.turn_id = u.id) > 0
+                               THEN ', compacted ' || (SELECT count(*) FROM v_event ev WHERE ev.type = 'agent.context.compacted' AND ev.turn_id = u.id) || '×'
+                               ELSE '' END AS context,
+             (SELECT count(DISTINCT c.path) FROM v_tool_call c WHERE c.turn_id = u.id AND c.path IS NOT NULL) AS files,
+             (SELECT count(*) FROM v_test_run r WHERE r.turn_id = u.id) AS runs,
+             (SELECT sum(k.input_tokens + k.output_tokens + k.cache_creation_input_tokens + k.cache_read_input_tokens)
+                FROM v_token_usage k WHERE k.turn_id = u.id) AS tokens,
+             u.started_at AS at,
+             u.uri AS turn_ref,
+             r.uri AS request_uri
+      FROM turns u
+      LEFT JOIN v_request r ON r.id = u.request_id
+      ORDER BY u.started_at DESC, u.id DESC
+view:
+  from: thread_activity
+  viz: list
+  group:
+    by: section
+    link:
+      kind: page
+      from: request_uri
+  columns:
+  - key: prompt
+    label: Turn
+    link:
+      kind: page
+      from: turn_ref
+  - key: session
+    label: Session
+  - key: ran_on
+    label: Model
+  - key: context
+    label: Context
+  - key: files
+    label: Files
+  - key: runs
+    label: Runs
+  - key: tokens
+    label: Tokens
+  - key: at
+    label: When
+  empty: No turns on this thread yet.

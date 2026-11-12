@@ -1,0 +1,11 @@
+# One page cites a file that changed after the page was pinned, one cites
+# nothing: 50% stale. The counts are restated when the snapshot that sees
+# the file change lands, with no page written after it.
+given:
+  - observe: { turn: { prompt: Make the file, write: { path: a.txt, body: one } } }
+  - observe: { snapshot: { files: [{ path: a.txt, hash: h1 }] } }
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Cites, body: "# Cites\n\nSee [[file:a.txt]]." } }
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Plain, body: "# Plain\n\nNothing cited." } }
+  - observe: { snapshot: { files: [{ path: a.txt, hash: h2 }] } }
+when: { sql: "SELECT MEASURE('knowledge.stale_pct') AS pct FROM metric_grid('month')" }
+expect: { rows: [{ pct: 50.0 }] }

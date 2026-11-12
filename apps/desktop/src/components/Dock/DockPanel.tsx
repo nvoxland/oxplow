@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 
-import { ICONS } from "../../icons.js";
+import { ICONS, iconFor } from "../../icons.js";
 import { OpenPageLink } from "../../kit/OpenPageLink.js";
 import type { TabRef } from "../../tabs/tabState.js";
 import { dockStore, DOCK_MAX_HEIGHT_MARGIN, DOCK_MIN_HEIGHT, useDockState } from "./dockStore.js";
@@ -77,7 +77,7 @@ export function DockPanel({ streamId, onOpenPage }: { streamId: string | null; o
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
   };
   const Body = panel.Body;
-  const Icon = ICONS[panel.icon] ?? ICONS["box"]!;
+  const Icon = iconFor(panel.icon) ?? ICONS.box;
   return (
     <div
       ref={rootRef}

@@ -1,0 +1,23 @@
+title: Shared work
+description: Whether requests on another thread worked on this item, changed the files its requests changed, or whether a sibling under its epic sits on another thread.
+params:
+- name: uri
+loaders:
+  item_shared_work:
+    page: oxplow/shared-work-rows
+    loader: shared_work
+    params: { task: { param: uri } }
+view:
+  from: item_shared_work
+  viz: list
+  group:
+    by: section
+  columns:
+  - key: what
+    label: What
+    link:
+      kind: page
+      from: uri
+  - key: threads
+    label: Threads
+  empty: Nothing is shared across threads.

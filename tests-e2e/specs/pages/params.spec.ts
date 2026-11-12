@@ -78,8 +78,10 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   const { commits, rail, filters } = await openHistory(page, daemon);
   // The rail is the page's one place for controls: its filters as rows
   // (a label beside its value), the selection, and where it comes from.
-  await expect(filters.getByTestId("page-param-range-value")).toHaveText("Last 30 days");
-  await expect(filters.getByTestId("page-param-q-value")).toHaveText("Any");
+  // A range is its select at rest (one click opens it); a search reads as
+  // a text box, "Search…" while empty.
+  await expect(filters.getByTestId("page-param-range-edit").locator("option:checked")).toHaveText("Last 30 days");
+  await expect(filters.getByTestId("page-param-q-value")).toHaveText("Search…");
   // `commit` is what a row click picks: never an input.
   await expect(rail.getByTestId("page-param-commit")).toHaveCount(0);
   await expect(rail.getByTestId("page-rail-selection")).toContainText("Click a row to select it.");
@@ -126,12 +128,11 @@ test("the rail's filters narrow a page, a row click shows the next section its p
   await expect(filters.getByTestId("page-param-q-value")).toHaveText("numbat");
 
   // A custom range opens over the page; Escape closes it.
-  await filters.getByTestId("page-param-range-value").click();
   await filters.getByTestId("page-param-range-edit").selectOption("__custom__");
   await expect(page.getByTestId("page-param-range-custom")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(shown(page).getByTestId("page-param-range-custom")).toHaveCount(0);
-  await expect(filters.getByTestId("page-param-range-value")).toBeFocused();
+  await expect(filters.getByTestId("page-param-range-edit")).toBeFocused();
 
   // Merges only: none of these is one. The section stays and says so.
   await filters.getByTestId("page-param-merges-edit").check();

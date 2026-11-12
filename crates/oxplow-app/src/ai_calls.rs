@@ -97,7 +97,7 @@ mod tests {
     /// calls recorded as its own thread; a failed call has no response.
     #[tokio::test]
     async fn a_calls_bodies_are_read_scoped_to_their_caller() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let (base, _) = oxplow_ai_fake::mock(
             "/chat/completions",
             200,

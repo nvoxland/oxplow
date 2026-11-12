@@ -1,0 +1,23 @@
+# Settings → Integrations → Task workflow: the four workflows, each with
+# what the agent will do, the current one marked (the default, agent
+# tracks everything). Use This picks another for the project; the form
+# saves the definition of done, and the workflow chosen stays.
+when: { part: task-workflow-settings }
+expect:
+  loaders:
+    workflows:
+      rows:
+        - { value: agent_tracks, current: 1 }
+        - { value: person_files, current: 0 }
+        - { value: custom, current: 0 }
+        - { value: "off", current: 0 }
+    done_means: { rows: [{ definition_of_done: "" }] }
+steps:
+  - press: { action: use, node: workflows, row: { value: person_files } }
+    expect: { ok: true }
+  - submit: { node: done_means, input: { definition_of_done: "- Tests pass.\n- Committed." } }
+    expect: { ok: true }
+  - expect:
+      loaders:
+        workflows: { rows: { contains: [{ value: person_files, current: 1, can_use: 0 }, { value: agent_tracks, current: 0, can_use: 1 }] } }
+        done_means: { rows: [{ definition_of_done: "- Tests pass.\n- Committed." }] }

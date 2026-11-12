@@ -1,0 +1,13 @@
+# "See also": a knowledge page links to the Knowledge index, to its
+# freshness, and to the tasks and knowledge pages that link to it.
+given:
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Otters, body: "# Otters\n" } }
+  - { command: oxplow.knowledge.write_page, input: { store: oxwiki, title: Holts, body: "# Holts\n\nSee [[otters]].\n" } }
+  - { command: oxplow.task.create, input: { title: Feed the otters, body: "See [[otters]].", assignee: thr1 } }
+when: { page: knowledge-page, params: { uri: "oxplow:oxplow/knowledge?id=otters&store=oxwiki", store: oxwiki, id: otters } }
+expect:
+  see_also:
+    - { title: Knowledge, uri: "oxplow:oxplow/page?page=knowledge" }
+    - { title: Knowledge Freshness, uri: "oxplow:oxplow/page?page=knowledge-freshness#id=otters&store=oxwiki" }
+    - { title: Feed the otters, uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }
+    - { title: Holts, uri: "oxplow:oxplow/knowledge?id=holts&store=oxwiki" }

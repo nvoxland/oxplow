@@ -10,6 +10,8 @@ categories:
 
 <!-- more -->
 
+> Efforts were removed on 2026-11-10. This post is kept as written; where it says "effort", read the requests and turns that replaced them.
+
 ## Why the change
 
 Through 0.6 I kept adding pages for questions I guessed people would have. Every project cares about different numbers and different workflows, so I was never going to guess them all, and each new screen was more Rust and React to maintain.

@@ -4,14 +4,14 @@
 //! `.context/agent-model.md` (Nudge persistence).
 //!
 //! A thin typed read/write surface. The one-shot
-//! dedup (so a nudge fires at most once per effort) lives in the
+//! dedup (so a nudge fires at most once per request) lives in the
 //! service, so the store only ever records nudges that actually fired.
 
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use oxplow_domain::{DomainError, EffortId, ThreadId, Timestamp};
+use oxplow_domain::{DomainError, RequestId, ThreadId, Timestamp};
 
 use crate::database::Database;
 use crate::database::{string_to_ts, ts_to_string};
@@ -48,9 +48,8 @@ impl Audience {
 pub struct AgentNudge {
     pub id: i64,
     pub thread_id: String,
-    /// Open effort the nudge fired against, if any (some nudge kinds fire
-    /// thread-scoped with no open effort).
-    pub effort_id: Option<String>,
+    /// The request of the turn it fired in, when it fired in one.
+    pub request_id: Option<String>,
     /// Well-known kind: `report-less-run` | `coverage-target` (open-ended).
     pub kind: String,
     /// The full message text that was surfaced to the agent.
@@ -70,7 +69,6 @@ pub struct AgentNudge {
 #[derive(Debug, Clone, Default)]
 pub struct NewAgentNudge {
     pub thread_id: String,
-    pub effort_id: Option<String>,
     pub kind: String,
     pub message: String,
     pub trigger: Option<String>,
@@ -90,9 +88,9 @@ fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
     Ok(AgentNudge {
         id: row.get(0)?,
         thread_id: ThreadId::new(row.get::<_, i64>(1)?).to_string(),
-        effort_id: row
+        request_id: row
             .get::<_, Option<i64>>(2)?
-            .map(|v| EffortId::new(v).to_string()),
+            .map(|v| RequestId::new(v).to_string()),
         kind: row.get(3)?,
         message: row.get(4)?,
         trigger: row.get(5)?,
@@ -108,27 +106,29 @@ fn row_to_nudge(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentNudge> {
 }
 
 const SELECT_COLS: &str =
-    "id, thread_id, effort_id, kind, message, trigger, created_at, turn_id, delivered_at, audience";
+    "id, thread_id, request_id, kind, message, trigger, created_at, turn_id, delivered_at, audience";
 
-/// Where a one-shot mark is kept: a thread, or one of its efforts.
+/// Where a one-shot mark is kept: a thread, or one of its requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OnceScope {
     pub thread: i64,
-    pub effort: Option<i64>,
+    pub request: Option<i64>,
 }
 
 impl OnceScope {
     pub fn thread(thread: i64) -> Self {
         Self {
             thread,
-            effort: None,
+            request: None,
         }
     }
 
-    pub fn effort(thread: i64, effort: i64) -> Self {
+    /// A request of the thread: a mark here is fresh for the next request,
+    /// and deliveries are counted within it.
+    pub fn request(thread: i64, request: i64) -> Self {
         Self {
             thread,
-            effort: Some(effort),
+            request: Some(request),
         }
     }
 }
@@ -141,6 +141,11 @@ pub struct SqliteAgentNudgeStore {
 impl SqliteAgentNudgeStore {
     pub fn new(db: Database) -> Self {
         Self { db }
+    }
+
+    /// The database the marks and nudges live in.
+    pub fn database(&self) -> &Database {
+        &self.db
     }
 
     /// Insert a nudge row. Returns the new row id, or `None` when a nudge
@@ -196,16 +201,16 @@ impl SqliteAgentNudgeStore {
     }
 
     /// How many `kind` nudges reached the agent in `scope`: within the
-    /// effort, or anywhere on the thread.
+    /// request, or (no request) outside any request, on the thread's own.
     pub async fn delivered(&self, scope: OnceScope, kind: &str) -> Result<i64, DomainError> {
         let kind = kind.to_string();
         self.db
             .call(move |conn| {
                 conn.query_row(
                     "SELECT count(*) FROM agent_nudge
-                      WHERE thread_id = ?1 AND (?2 IS NULL OR effort_id = ?2) AND kind = ?3
+                      WHERE thread_id = ?1 AND request_id IS ?3 AND kind = ?2
                         AND audience = 'agent' AND delivered_at IS NOT NULL",
-                    params![scope.thread, scope.effort, kind],
+                    params![scope.thread, kind, scope.request],
                     |r| r.get(0),
                 )
             })
@@ -249,33 +254,16 @@ impl SqliteAgentNudgeStore {
             .call(move |conn| {
                 conn.query_row(
                     "SELECT EXISTS (SELECT 1 FROM once_mark
-                      WHERE thread_id = ?1 AND coalesce(effort_id, 0) = coalesce(?2, 0)
-                        AND mark = ?3)",
-                    params![scope.thread, scope.effort, mark],
+                      WHERE thread_id = ?1 AND coalesce(request_id, 0) = coalesce(?3, 0)
+                        AND mark = ?2)",
+                    params![scope.thread, mark, scope.request],
                     |r| r.get(0),
                 )
             })
             .await
     }
 
-    /// Nudges fired against an effort, newest-first.
-    pub async fn list_for_effort(&self, effort_id: &str) -> Result<Vec<AgentNudge>, DomainError> {
-        let effort_val = EffortId::try_from_str(effort_id).map(|e| e.value());
-        self.db
-            .call(move |conn| {
-                let sql = format!(
-                    "SELECT {SELECT_COLS} FROM agent_nudge
-                      WHERE effort_id = ?1
-                      ORDER BY created_at DESC, id DESC"
-                );
-                let mut stmt = conn.prepare(&sql)?;
-                let rows = stmt.query_map(params![effort_val], row_to_nudge)?;
-                rows.collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .await
-    }
-
-    /// All nudges for a thread (effort-scoped and thread-only), newest-first.
+    /// All nudges for a thread, newest-first.
     pub async fn list_for_thread(&self, thread_id: &str) -> Result<Vec<AgentNudge>, DomainError> {
         let thread_val = ThreadId::try_from_str(thread_id).map(|t| t.value());
         self.db
@@ -303,24 +291,18 @@ pub fn record_tx(
     let thread_val = ThreadId::try_from_str(&nudge.thread_id)
         .ok_or_else(|| DomainError::Invalid(format!("bad thread id: {}", nudge.thread_id)))?
         .value();
-    let effort_val = match &nudge.effort_id {
-        Some(e) => Some(
-            EffortId::try_from_str(e)
-                .ok_or_else(|| DomainError::Invalid(format!("bad effort id: {e}")))?
-                .value(),
-        ),
-        None => None,
-    };
     let now = ts_to_string(Timestamp::now());
     conn.query_row(
         "INSERT INTO agent_nudge
-           (thread_id, effort_id, kind, message, trigger, created_at, turn_id, cause, audience)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-         ON CONFLICT (cause, kind, coalesce(effort_id, 0)) WHERE cause IS NOT NULL DO NOTHING
+           (thread_id, kind, message, trigger, created_at, turn_id, cause, audience,
+            request_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                 (SELECT t.request_id FROM agent_turn t WHERE t.id = ?6))
+         ON CONFLICT (cause, kind, coalesce(request_id, 0))
+           WHERE cause IS NOT NULL DO NOTHING
          RETURNING id",
         params![
             thread_val,
-            effort_val,
             nudge.kind,
             nudge.message,
             nudge.trigger,
@@ -377,13 +359,15 @@ pub fn claim_once_tx(
 ) -> Result<bool, DomainError> {
     let n = conn
         .execute(
-            "INSERT INTO once_mark (thread_id, effort_id, mark, fired_at) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (thread_id, coalesce(effort_id, 0), mark) DO NOTHING",
+            "INSERT INTO once_mark (thread_id, mark, fired_at, request_id)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (thread_id, coalesce(request_id, 0), mark)
+             DO NOTHING",
             params![
                 scope.thread,
-                scope.effort,
                 mark,
-                ts_to_string(Timestamp::now())
+                ts_to_string(Timestamp::now()),
+                scope.request
             ],
         )
         .map_err(crate::database::map_sql_err)?;
@@ -448,9 +432,10 @@ fn mark_delivered_tx(
 mod tests {
     use super::*;
 
-    /// Build a minimal stream → thread → task → effort chain so FK-on
-    /// inserts of nudges succeed. Returns `(store, thread_id, effort_id)`.
-    async fn fixture() -> (SqliteAgentNudgeStore, String, String) {
+    /// Build a minimal stream → thread chain with two requests, each with
+    /// one turn (`trn1` in `req1`, `trn2` in `req2`), so FK-on inserts of
+    /// nudges succeed. Returns `(store, thread_id)`.
+    async fn fixture() -> (SqliteAgentNudgeStore, String) {
         let db = Database::in_memory();
         let db2 = db.clone();
         tokio::task::spawn_blocking(move || {
@@ -466,16 +451,11 @@ mod tests {
                      VALUES (1, 1, 't', ?1, ?1)",
                     [now],
                 )?;
-                conn.execute(
-                    "INSERT INTO task (thread_id, title, status, priority, created_by, created_at, updated_at)
-                     VALUES (1, 't', 'in_progress', 'medium', 'user', ?1, ?1)",
-                    [now],
-                )?;
-                let task_id = conn.last_insert_rowid();
-                conn.execute(
-                    "INSERT INTO effort (work_item, thread_id, started_at)
-                     VALUES ('oxplow:oxplow/work_item?id=tsk&provider=oxplow' || ?1, 1, ?2)",
-                    params![task_id, now],
+                conn.execute_batch(
+                    "INSERT INTO agent_turn (id, thread_id, prompt, started_at)
+                       VALUES (1, 1, 'p', '2026-06-13T00:00:00Z'), (2, 1, 'q', '2026-06-13T00:01:00Z');
+                     INSERT INTO request (id, thread_id, first_turn_id) VALUES (1, 1, 1), (2, 1, 2);
+                     UPDATE agent_turn SET request_id = id;",
                 )?;
                 Ok(())
             })
@@ -483,17 +463,14 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        (
-            SqliteAgentNudgeStore::new(db),
-            "thr1".to_string(),
-            "eff1".to_string(),
-        )
+        (SqliteAgentNudgeStore::new(db), "thr1".to_string())
     }
 
-    fn sample(kind: &str, effort: Option<&str>) -> NewAgentNudge {
+    /// A nudge of `kind` fired in turn `turn` (its request is the turn's).
+    fn sample(kind: &str, turn: Option<i64>) -> NewAgentNudge {
         NewAgentNudge {
             thread_id: "thr1".into(),
-            effort_id: effort.map(str::to_string),
+            turn_id: turn,
             kind: kind.into(),
             message: format!("a {kind} nudge"),
             trigger: Some("cargo test".into()),
@@ -505,10 +482,10 @@ mod tests {
     /// response picks it up; a redelivered cause fires nothing new.
     #[tokio::test]
     async fn undelivered_nudges_are_taken_once_and_causes_dedupe() {
-        let (store, thread, _effort) = fixture().await;
+        let (store, thread) = fixture().await;
         let caused = |kind: &str| NewAgentNudge {
             cause: Some("evt-1".into()),
-            ..sample(kind, Some("eff1"))
+            ..sample(kind, Some(1))
         };
         assert!(store
             .record(caused("report-less-run"))
@@ -525,8 +502,8 @@ mod tests {
             .await
             .unwrap()
             .is_some());
-        // The same event and kind for another effort (here: none) is its
-        // own nudge (tsk510).
+        // The same event and kind outside a request (no turn) is its own
+        // nudge (tsk510).
         assert!(store
             .record(NewAgentNudge {
                 cause: Some("evt-1".into()),
@@ -551,26 +528,26 @@ mod tests {
 
     /// A one-shot mark is durable: a new store over the same database (a
     /// restart) sees it, and claiming it again says so. A thread's mark and
-    /// its effort's are separate.
+    /// its request's are separate.
     #[tokio::test]
     async fn once_marks_survive_a_restart() {
-        let (store, _thread, _effort) = fixture().await;
-        let effort = OnceScope::effort(1, 1);
+        let (store, _thread) = fixture().await;
+        let request = OnceScope::request(1, 1);
         let thread = OnceScope::thread(1);
-        assert!(store.claim_once(effort, "report-less-run").await.unwrap());
-        assert!(!store.claim_once(effort, "report-less-run").await.unwrap());
+        assert!(store.claim_once(request, "report-less-run").await.unwrap());
+        assert!(!store.claim_once(request, "report-less-run").await.unwrap());
         assert!(!store.has_fired(thread, "report-less-run").await.unwrap());
         assert!(store.claim_once(thread, "report-less-run").await.unwrap());
         let restarted = SqliteAgentNudgeStore::new(store.db.clone());
         assert!(restarted
-            .has_fired(effort, "report-less-run")
+            .has_fired(request, "report-less-run")
             .await
             .unwrap());
         assert!(restarted
             .has_fired(thread, "report-less-run")
             .await
             .unwrap());
-        assert!(!restarted.has_fired(effort, "acme/other").await.unwrap());
+        assert!(!restarted.has_fired(request, "acme/other").await.unwrap());
     }
 
     /// The agent takes its undelivered nudges oldest first, oxplow's own
@@ -578,7 +555,7 @@ mod tests {
     /// the rest are held for its next hook. A person's are never its.
     #[tokio::test]
     async fn the_agent_takes_its_nudges_within_a_budget() {
-        let (store, thread, _effort) = fixture().await;
+        let (store, thread) = fixture().await;
         let nudge = |kind: &str, message: &str, audience: Audience| NewAgentNudge {
             thread_id: "thr1".into(),
             kind: kind.into(),
@@ -619,7 +596,7 @@ mod tests {
     /// isn't theirs to dismiss.
     #[tokio::test]
     async fn a_person_dismisses_their_hint() {
-        let (store, _thread, _effort) = fixture().await;
+        let (store, _thread) = fixture().await;
         let raise = |audience: Audience| NewAgentNudge {
             thread_id: "thr1".into(),
             kind: "x/p".into(),
@@ -643,12 +620,12 @@ mod tests {
     /// hint was evaluated on a thread.
     #[tokio::test]
     async fn deliveries_and_evaluations_are_counted() {
-        let (store, thread, _effort) = fixture().await;
-        for effort in [Some("eff1"), Some("eff1"), None] {
+        let (store, thread) = fixture().await;
+        for turn in [Some(1), Some(1), None] {
             store
                 .record(NewAgentNudge {
                     thread_id: "thr1".into(),
-                    effort_id: effort.map(str::to_string),
+                    turn_id: turn,
                     kind: "x/a".into(),
                     message: "m".into(),
                     ..Default::default()
@@ -658,7 +635,7 @@ mod tests {
         }
         assert_eq!(
             store
-                .delivered(OnceScope::effort(1, 1), "x/a")
+                .delivered(OnceScope::request(1, 1), "x/a")
                 .await
                 .unwrap(),
             0
@@ -666,14 +643,17 @@ mod tests {
         store.take_for_agent(&thread, 1_000).await.unwrap();
         assert_eq!(
             store
-                .delivered(OnceScope::effort(1, 1), "x/a")
+                .delivered(OnceScope::request(1, 1), "x/a")
                 .await
                 .unwrap(),
             2
         );
+        // The thread's own scope counts what reached the agent outside any
+        // request: deliveries inside a request are that request's, so a turn
+        // with no request isn't muted by them.
         assert_eq!(
             store.delivered(OnceScope::thread(1), "x/a").await.unwrap(),
-            3
+            1
         );
         store
             .evaluated(1, vec!["x/a".into(), "x/b".into()])
@@ -694,55 +674,38 @@ mod tests {
 
     #[tokio::test]
     async fn record_then_list_round_trips_fields() {
-        let (store, _thread, effort) = fixture().await;
+        let (store, thread) = fixture().await;
         let id = store
-            .record(sample("report-less-run", Some("eff1")))
+            .record(sample("report-less-run", Some(2)))
             .await
             .unwrap()
             .expect("a new nudge is written");
-        let got = store.list_for_effort(&effort).await.unwrap();
-        assert_eq!(got.len(), 1);
-        let n = &got[0];
-        assert_eq!(n.id, id);
+        store.record(sample("configure", None)).await.unwrap();
+        let got = store.list_for_thread(&thread).await.unwrap();
+        assert_eq!(got.len(), 2);
+        let n = got.iter().find(|n| n.id == id).unwrap();
         assert_eq!(n.kind, "report-less-run");
-        assert_eq!(n.effort_id.as_deref(), Some("eff1"));
+        assert_eq!(n.request_id.as_deref(), Some("req2"), "its turn's request");
         assert_eq!(n.thread_id, "thr1");
         assert_eq!(n.message, "a report-less-run nudge");
         assert_eq!(n.trigger.as_deref(), Some("cargo test"));
+        let bare = got.iter().find(|n| n.id != id).unwrap();
+        assert_eq!(bare.request_id, None);
     }
 
+    /// A mark in a request's scope is fresh for the next request, and the
+    /// thread's is separate from both.
     #[tokio::test]
-    async fn list_for_thread_includes_effort_scoped_and_thread_only() {
-        let (store, thread, _effort) = fixture().await;
-        store
-            .record(sample("report-less-run", Some("eff1")))
+    async fn once_marks_are_per_request() {
+        let (store, _thread) = fixture().await;
+        let (one, two) = (OnceScope::request(1, 1), OnceScope::request(1, 2));
+        assert!(store.claim_once(one, "acme/hint").await.unwrap());
+        assert!(!store.claim_once(one, "acme/hint").await.unwrap());
+        assert!(store.claim_once(two, "acme/hint").await.unwrap());
+        assert!(store.has_fired(one, "acme/hint").await.unwrap());
+        assert!(!store
+            .has_fired(OnceScope::thread(1), "acme/hint")
             .await
-            .unwrap();
-        // A thread-only nudge (no open effort).
-        store.record(sample("configure", None)).await.unwrap();
-        let all = store.list_for_thread(&thread).await.unwrap();
-        assert_eq!(all.len(), 2);
-        // The effort filter only sees the effort-scoped one.
-        let eff = store.list_for_effort("eff1").await.unwrap();
-        assert_eq!(eff.len(), 1);
-        assert_eq!(eff[0].kind, "report-less-run");
-    }
-
-    #[tokio::test]
-    async fn deleting_effort_cascades_to_nudges() {
-        let (store, thread, effort) = fixture().await;
-        store
-            .record(sample("coverage-target", Some("eff1")))
-            .await
-            .unwrap();
-        // Deleting the parent effort removes its nudges (ON DELETE CASCADE).
-        store
-            .db
-            .call(|conn| conn.execute("DELETE FROM effort WHERE id = 1", []))
-            .await
-            .unwrap();
-        assert!(store.list_for_effort(&effort).await.unwrap().is_empty());
-        // Thread-scoped lookup also empty (the row is gone, not orphaned).
-        assert!(store.list_for_thread(&thread).await.unwrap().is_empty());
+            .unwrap());
     }
 }

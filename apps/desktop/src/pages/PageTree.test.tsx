@@ -90,7 +90,7 @@ test("a row action runs on the open run, naming the node and the row", async () 
   );
   fireEvent.contextMenu(getByTestId("viz-row-1"));
   fireEvent.click(getByTestId("menu-item-viz-action-finish"));
-  await waitFor(() => expect(calls).toEqual([["run-1", "items", "finish", { id: "b", title: "Beta" }, null, null, false]]));
+  await waitFor(() => expect(calls).toEqual([["run-1", "items", "finish", { id: "b", title: "Beta" }, null, null, null, false]]));
 });
 
 test("an embedded node's action names it by its path", async () => {
@@ -107,7 +107,7 @@ test("an embedded node's action names it by its path", async () => {
   );
   fireEvent.contextMenu(getByTestId("viz-row-0"));
   fireEvent.click(getByTestId("menu-item-viz-action-drop"));
-  await waitFor(() => expect(calls).toEqual([["run-1", "side/notes", "drop", { note: "n1" }, null, null, false]]));
+  await waitFor(() => expect(calls).toEqual([["run-1", "side/notes", "drop", { note: "n1" }, null, null, null, false]]));
 });
 
 function Focused({ run, registry, focus, ms }: { run: PageRun; registry: NodeRegistry; focus: string | null; ms?: number }) {
@@ -236,7 +236,7 @@ test("an embedded page's own actions are buttons above it, pressed naming the em
     </PageActionContext.Provider>,
   );
   fireEvent.click(getByTestId("viz-action-tidy"));
-  await waitFor(() => expect(calls).toEqual([["run-1", "notes", "tidy", null, null, null, false]]));
+  await waitFor(() => expect(calls).toEqual([["run-1", "notes", "tidy", null, null, null, null, false]]));
 });
 
 // A section's title says what it is; `hide_title` only keeps it from being

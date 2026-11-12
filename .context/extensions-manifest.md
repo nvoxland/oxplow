@@ -25,14 +25,14 @@ extensions may share a name) is the one place those facts live.
 its `Display`; [resources.md](./resources.md) "Using URIs"): the resource
 `oxplow/<kind>` with the kind's own name as the key param,
 `oxplow:oxplow/<kind>?<kind>=<namespace>/<id>`
-— `oxplow:oxplow/job?job=effort_review/review`,
+— `oxplow:oxplow/job?job=review/review`,
 `oxplow:oxplow/collector?collector=triage/todos`,
 `oxplow:oxplow/page?page=github/pr`,
-`oxplow:oxplow/dataset?dataset=effort_review/reviews` — or,
+`oxplow:oxplow/dataset?dataset=review/reviews` — or,
 for a kind whose names are already global (`ContributionKind::global_name`:
 command, measure, metric, dimension, event type, resource),
 `oxplow:oxplow/<kind>?<kind>=<name>` —
-`oxplow:oxplow/command?command=oxplow.review.accept`,
+`oxplow:oxplow/command?command=oxplow.tasks.clear_finished`,
 `oxplow:oxplow/metric?metric=acme.todos`.
 Storage (`v_contribution.uri`, `v_extension_run.contribution`,
 `v_job_run.job`), events, manifests (imports, exports, `where:`), grant
@@ -56,7 +56,7 @@ the first extension's metric when two declare one key). `version:`, when
 given, is checked by `manifest_v2::valid_version`; a bundled extension's
 version is oxplow's own. Every kind is described: collectors
 (global: a fact collector's id), effects, commands (global: the bus id),
-advisories, skills (global: the name), implementations (global:
+advisories, agent contexts, skills (global: the name), implementations (global:
 `<capability>/<id>`), providers (global: the id, which is also the default
 instance's id, its URIs' segment and its commands' namespace), measures,
 metrics and dimensions (global: the key), datasets (global: the
@@ -71,7 +71,7 @@ replacements and custom components (all mounted, no global name).
 `v_<namespace>_<entity>`), an event type (`<namespace>.<…>`), a command id,
 and every contribution's id — `ContributionId { namespace, kind, local }`,
 `<namespace>/<local>`: pages, panels, effects, collectors, jobs, AI
-profiles (`<namespace>/<profile>` in `ai.yaml`), advisories, custom
+profiles (`<namespace>/<profile>` in `ai.yaml`), advisories, agent contexts, custom
 components, providers and their instances (`extensionInstances:` keys),
 resources — are named by the manifest's `namespace:` (default: the name,
 `-` → `_`). So is what is stored under them: `contribution_health`
@@ -80,7 +80,7 @@ namespace), `effect_state`/`effect_run`, jobs, `panel_layout`, settings
 (`extension_config.namespace`), private state (`extension_state.namespace`),
 collector and instance credentials and extension secrets (keychain
 accounts). Everything oxplow ships is in `oxplow`, so a user sees
-`v_oxplow_verdict`, `oxplow.review.accepted` and `oxplow/collectors`
+`v_oxplow_struggle` and `oxplow/collectors`
 whichever shipped extension declares them, and a piece moves between
 foundation, bundled and the holder without a stored or shown name
 changing. `oxplow` is the only namespace extensions share
@@ -157,7 +157,7 @@ dataset references and withholds contributions before catalog publication.
 Exports are explicit opt-in. A stable contribution kind or a legacy alias
 does not make a contribution public.
 
-- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=effort_review/reviews`). An
+- Targets are contribution URIs (`oxplow:oxplow/dataset?dataset=review/reviews`). An
   import of a globally named kind (`oxplow:oxplow/command?command=acme.pr.merge`) is of
   whichever extension declares that name.
   An import has a consumer-local binding name, a positive integer contract
@@ -213,7 +213,7 @@ an ordinary `ref('<producer>/<dataset>')`, retaining lineage and native contract
 checks; a page loader's becomes its quoted published view. An
 unavailable import withholds the page (and its slot mounts), and
 `extension test` skips the examples that run it. SQL grants still apply.
-`examples/extensions/effort-review` (producer: `exports` its `reviews`
+a review extension under `examples/extensions/` (producer: `exports` its `reviews`
 dataset) and `examples/extensions/review-badges` (consumer: an optional
 import read by its pages and a slot mount) are the working pair; the
 review-badges test in `crates/oxplow-sdk/tests/examples.rs` covers available,
@@ -325,8 +325,12 @@ smaller. There is no permissive fallback, external retrieval or secret lookup.
 manifest defaults and private Project/Personal override rows, resolves them in
 that order, validates the effective schema and reports per-leaf origins.
 `extension_config.read` is distinct from core app-settings `config.read`.
-Native operations are `snapshot` (effective values, origins and layer stamps)
-and `inspect` (stamps only, including old schema versions). Scripts declare
+Native operations are `snapshot` (effective values, origins, layer stamps,
+and `layers: { project, personal }`, each layer's values as stored or
+null) and `inspect` (stamps only, including old schema versions). A write
+replaces a whole layer, so a script that changes one key merges it into
+`layers.project` and writes the result back (oxtask's
+`tasks.set_workflow`). Scripts declare
 `needs: [extension_config.read]` and call
 `scope("extension_config.read", {})`. Composers read their existing connection;
 effects, collectors and provider host calls use an owned DB read per call.
@@ -350,11 +354,19 @@ Reading such a layer fails closed with a `/schema_version` error, distinct
 from a stale-stamp conflict (`/expected`).
 
 **Changing the schema version.** There is no migration runner. When an
-extension changes its configuration schema `version`, activation leaves stored
-layers alone. A layer stored at the old version fails closed on every read
+extension raises its configuration schema `version`, each publication
+carries a stored layer at an older version forward when the new schema still
+takes its values (`extension_configuration::carry_forward_tx`, in the
+publication transaction, before datasets compile): the layer is restamped
+at the new version, its values as stored, its revision one higher. "Takes"
+is the new declaration resolving with that layer alone over the defaults
+(and the other layer when that one is already current). A layer the new
+schema doesn't take is left alone and fails closed on every read
 (`/schema_version`) until the extension's own command writes it at the new
 version: a compare-and-swap with the old stamp as `expected`, both layers in
-one audited transaction. Values are never discarded or rewritten by the host.
+one audited transaction. A layer at a *newer* version than the declared one
+(after a rollback) is never touched. The host never discards or changes a
+layer's values.
 
 Reset uses an empty override object at a newer revision, retaining stale-token
 rejection. Disable/uninstall retain local rows for explicit recovery/reinstall;
@@ -386,11 +398,23 @@ advisories' queries — reads its own configuration with
   transaction (`PreparedExtensionDatabase::replace_tx`), so the view carries
   the literal; a stored configuration that can't be resolved holds that
   extension back like a dataset that doesn't compile. **A change republishes:**
-  the generation records the configuration the datasets were compiled against
-  (`ConfigSignature`, beside the entity signature), the entities consumer
+  the generation records the configuration it was published with, for every
+  extension with a configuration reader (`configuration_readers`: datasets
+  that call `config()`, skills with `when:`, implementations with `when:`;
+  `ConfigSignature`, beside the
+  entity signature), the entities consumer
   checks it after each `command.executed` (`request_config_refresh`; a write
   through `extension_config.write` is one) and requests an activation when it
   differs; a changed definition refills a materialized dataset.
+- **An implementation offered by a setting** (`implementations:` entry with
+  `when: { config, in }`, checked at load like a skill's): the publication
+  reads the extension's effective values once
+  (`capabilities::offering_implementations`, in activation's `prepare`), so
+  the capability rows, the vocabulary's recognizers and the running adapters
+  agree. One whose setting doesn't hold is **declared but off**: its
+  `v_capability_provider` row is `active = 0, chosen_by = 'setting'`, no
+  adapter runs it, a choice can't land on it. foundation's oxwiki
+  (`when: { config: /oxwiki, in: [true] }`) is the first.
 - **Pages and advisories** read the values stored now each time they run
   (`SqlGateway::with_extension_config`), so a change applies to the next
   run with no republish. A check (`oxplow extension check`, the effect report)
@@ -405,8 +429,11 @@ advisories' queries — reads its own configuration with
   division applies to an integer setting (write `1.0 * config(...)` to divide
   as a real).
 
-oxplow-bundled uses it for its review-policy constants;
-`oxplow.review_policy.read` / `.write` are its commands over the scope above.
+oxplow's own extensions share the namespace `oxplow`, so they share one
+configuration (foundation's `oxwiki`, bundled's review-policy constants and
+task workflow, each a key of it, all at one `version`), and one pair of
+commands over the scope above, foundation's (it always runs):
+`oxplow.settings.read` / `.write`.
 The holder (`extensions-bundled.md`) keeps the advisories' settings and
 `oxplow.advisory_policy.read` / `.write`.
 Pinned by `extension_sql_config_tests.rs` and
@@ -444,6 +471,24 @@ it through a script command that reads the stamp and composes the
 extension's own `state.write/compare_exchange` command with it
 (`triage.todos.decide`): the read and the swap land in one transaction,
 and a concurrent change refuses the second rather than losing it.
+
+**A capability implementation's script writes its state too**
+(`needs: [state.write]`, `scope("state.write", { scope, area, expected,
+schema_version, values })`, answering the new stamp). A verb is called by core,
+with no command around it, so the write is not inside a command's audited
+transaction: `StateSource::write` runs the same compare-exchange in a
+transaction of its own, with the same host checks as `StateHost::compare_exchange`
+(the run declared `state.write`, is allowed it by the extension's grant, is
+live; the owner is the current deployment) before the write and again before it
+commits, a refusal rolling it back. The namespace is the owner's only; the
+call is counted in the run's scope trace. **Limits:** a namespace is replaced
+whole and holds at most 1 MiB serialized and 256 keys
+(`oxplow_domain::extension_state`), so a script that keeps a big tree there (a
+snapshots implementation keeping file text) reads and rewrites all of it at
+each mark — slow, and it fails once the namespace is over the cap. It is not
+blocked, and nothing prunes it. A verb that read and wrote under a stamp that
+has since moved is refused ("read its stamp again and retry"); calls to one
+implementation are not serialized (a snapshots mark is).
 
 Provider `host/call` serves the same state read using the provider contribution
 identity captured from an exact enabled catalog declaration at instance creation,
@@ -494,7 +539,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >     deployments": boot deploys nothing);
 >   - Explore Data (oxplow-bundled's custom page, with Save as Page);
 >   - **bundled extensions** (compiled in, read-only, reserved names).
->     `oxplow-bundled` holds the effort review packet and the analytics
+>     `oxplow-bundled` holds the request review packet and the analytics
 >     pages; core works with it disabled;
 >   - `exec` **sources** that bring external records in as entities. The
 >     mechanics and decisions are in
@@ -503,7 +548,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 >   - **slots** on pages (`oxplow/diff-view.sections`,
 >     `commit.sections`, `uncommitted-changes.sections`,
 >     `new-session.sections`, `diff.file-header`; oxplow-bundled's
->     `oxplow/work-item.sections` and `tasks.sections`), **advisories**, per-project **disabling**;
+>     `oxplow/task-detail.sections`), **advisories**, per-project **disabling**;
 >   - page alerts, panels, and extension-declared measures, metrics,
 >     dimensions and fact collectors (see extensions-jobs.md "Contributing metrics");
 >   - whole-page and row actions;
@@ -531,7 +576,7 @@ over a database file); adversarial and concurrency coverage is still to do.
   and `effects:` (extensions-events.md "Effects"), through one swappable vocabulary. A change
   is reviewed by its impact — rows, collector outputs, effects'
   reactions — at any revision, on the CLI (`extension check --impact`)
-  and in an effort's review (extensions-deploy.md "Reviewing by impact"). Datasets declare keys and may materialize on a
+  and in a request's review (extensions-deploy.md "Reviewing by impact"). Datasets declare keys and may materialize on a
   clock or incrementally ([semantic-layer.md](./semantic-layer.md)).
   Changes go live with `oxplow.extension.deploy` (extensions-deploy.md "Sources and deployments").
 
@@ -540,7 +585,7 @@ over a database file); adversarial and concurrency coverage is still to do.
 - **Controls in core, instruments in extensions.** Core supplies the page
   and reference graph, stream/thread shell,
   agent surfaces, diff and inspection primitives, the semantic layer, and
-  safe host services. Tasks, knowledge storage, and effort policy have
+  safe host services. Tasks and knowledge storage have
   selectable implementations, including none where supported. Collected
   evidence and analysis mechanisms are shared infrastructure; particular
   workflow policies and presentations belong in extensions. The
@@ -560,7 +605,7 @@ over a database file); adversarial and concurrency coverage is still to do.
   scoped bridge instead; arbitrary app-window code remains outside that
   contract.
 - **Presentations are policy.** Bundled pages provide useful starting
-  views, including exceptions at an effort boundary. Trends, reports and
+  views, including exceptions at a request boundary. Trends, reports and
   domain-specific dashboards are equally valid extension presentations;
   the semantic data and metrics are reusable independently of a view.
 
@@ -581,7 +626,7 @@ requires: [tracker]      # optional: other extensions it needs on (extensions-de
 build: { run: bun run build, output: dist, exclude: [node_modules] } # optional: built at deploy (extensions-deploy.md "Builds")
 intent:                  # required
   purpose: What question it answers, or what job it does
-  origin: oxplow:oxplow/effort?id=eff42   # the thread/effort URI that created it, or null
+  origin: oxplow:oxplow/request?id=req42   # the thread/request URI that created it, or null
   examples:              # inputs → expected outputs; fixtures for `extension test`
     - { name: …, input: {…}, expect: … }
 # kinds
@@ -597,12 +642,13 @@ ui:                  # what it adds to the core UI (a command's own `ui:` puts i
   decorators: …      # labels from its datasets on core URIs (stable since P10; see extensions-slots.md "Decorators")
   replacements: …    # a page in place of a named core component (see extensions-slots.md "Replacements")
 advisories:  [...]   # see extensions-commands.md "Advisories"
+context:     [...]   # text for the agent's context, sent once then on change (`{ id, doc, needs?, when?, query }` returning `text`; needs `agent.write`); see extensions-commands.md "Agent context"
 datasets:   [...]   # SQL datasets: DatasetDecl entries (`fields:`, optional `relationships: [{ from, to: <dataset>.<field> }]`) + datasets/<name>.sql → v_<namespace>_<name>; `key: [fields]`; `materialize: on_change | { every: 1h } | { incremental: <field> }` stores one (semantic-layer.md "Datasets" vocabulary, "Extension datasets", "Materialized datasets"); the old `datasets:` / `columns:` are unknown keys with a hint
 panels: …           # left-nav panels, each a page compact (see "Panels")
 commands:  [...]   # Starlark scripts composing core commands, a scope's or its provider's operations (see extensions-commands.md "Commands")
-resources: …        # kinds of thing a URI can name (see extensions-events.md "Resources"); each has an optional one-sentence `description:`
+resources: …        # kinds of thing a URI can name (see extensions-events.md "Resources"); each has an optional one-sentence `description:`; a `capability: knowledge` entry adds a knowledge store (several run at once) and may declare `features: { edit: true }` (oxplow writes its pages; off when not declared) and `data: { kinds: [{ id, title, bucket }] }` (`bucket` is `note`, `memory` or `instruction`; none means `note`)
 event_types: …      # its own namespace's event types (stable; see extensions-events.md "Event types", P8)
-implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults); each has an optional one-sentence `description:`
+implementations: …  # capability implementations it declares (oxplow-foundation declares the defaults): a built-in (`entry: "oxplow:<name>"`), an AI provider's Rust kind (`provider:`), or a script of the extension (`entry: <file>.star`, `needs:`) for any capability with verbs (see extensions-commands.md "Implementations"); each has an optional one-sentence `description:`
 skills: …           # skills and slash commands for the coding agent
 providers: [...]    # external providers over the provider protocol — a program, or an MCP server behind oxplow's adapter (providers.md)
 effects: …          # scripts reacting to logged events by composing commands (see extensions-events.md "Effects")
@@ -690,3 +736,14 @@ name that isn't one is an unknown slot, an action that isn't `{ id,
 label, command, input?, row? }` a field error.
 `Extension.manifest_version` is the
 version the file declares.
+
+## `models:`, `fills:`, `storage:`, `files:`, `action_points:` (contract, being built)
+
+New manifest keys of the shared-models work. Their contracts:
+[models.md](./models.md) (`models:`, `fills:`, fields),
+[extensions-permissions.md](./extensions-permissions.md) "Store services"
+(`storage:`, `files:`), [extensions-slots.md](./extensions-slots.md)
+"Action points" (`action_points:`, `ui.at`, `ui.about.accepts`),
+[extensions-jobs.md](./extensions-jobs.md) "Triggers for observers" (the
+new `on:` kinds). `requires:` may name an extension in another namespace
+(a store requires its model's owner).

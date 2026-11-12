@@ -22,9 +22,9 @@ given:
 when: { page: oxplow/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
 expect:
   loaders:
-    upstream:
+    upstream/branch:
       rows:
-        - heading: Worktree
+        - heading: Worktree of main
           compared: null
           ahead_says: 1 commit main lacks
           behind_says: 1 commit from main
@@ -32,9 +32,12 @@ expect:
           is_behind: 1
           can_merge_out: 1
           target_stream: 1
-  nodes:
-    - { id: upstream, actions: [merge-out, merge-base, rebase-base, publish, push, pull, fetch] }
 steps:
+  # The Branch part Git Status shows: its buttons.
+  - when: { part: oxplow/git-branch, params: { stream_id: 2 }, view: { stream: $feat.id } }
+    expect:
+      nodes:
+        - { id: branch, actions: [merge-out, merge-base, rebase-base, publish, push, pull, fetch] }
   - when: { page: oxplow/streams, params: { stream_id: 2 }, view: { stream: $feat.id } }
     expect:
       loaders:
@@ -55,9 +58,9 @@ steps:
         git_dashboard_between: { rows: [{ subject: more }] }
       nodes:
         - { id: apart, actions: [merge-out, merge-in, rebase] }
-  - press: { action: merge-out, node: upstream }
+  - press: { action: merge-out, node: upstream/branch }
     expect: { ok: true }
   - when: { page: oxplow/git-dashboard, params: { stream_id: 2 }, view: { stream: $feat.id } }
     expect:
       loaders:
-        upstream: { rows: [{ is_ahead: 0, is_behind: 1, can_merge_out: 0, ahead_says: null, behind_says: 2 commits from main }] }
+        upstream/branch: { rows: [{ is_ahead: 0, is_behind: 1, can_merge_out: 0, ahead_says: null, behind_says: 2 commits from main }] }

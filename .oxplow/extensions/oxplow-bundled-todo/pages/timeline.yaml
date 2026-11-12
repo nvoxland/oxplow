@@ -1,7 +1,7 @@
 title: Timeline
 icon: history
 category: Activity
-keywords: efforts sessions commits threads time axis history
+keywords: requests sessions commits threads time axis history
 params:
 - name: from
   role: filter

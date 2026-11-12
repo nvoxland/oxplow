@@ -21,8 +21,8 @@ given:
           - { name: mcp__oxplow__run_command, kind: mcp, ok: true }
           - { name: mcp__other__thing, kind: mcp, ok: true }
   - observe: { turn: { thread: $beta.id, prompt: three, tools: [{ name: mcp__oxplow__oxplow_query_sql, kind: mcp, ok: true }] } }
-  - { command: oxplow.work_item.create, input: { title: Task, thread: thr1 }, bind: item, as: agent }
-  - { command: oxplow.work_item.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
+  - { command: oxplow.task.create, input: { title: Task, assignee: thr1 }, bind: item, as: agent }
+  - { command: oxplow.task.transition, input: { uri: $item.uri, to: in_progress }, as: agent }
   - observe: { hint: { hint: x/never, evaluated: 120 } }
   - observe: { hint: { hint: x/spoke, evaluated: 40 } }
   - observe: { nudge: { kind: x/spoke, message: m, delivered: true } }
@@ -41,18 +41,18 @@ expect:
         - { hint: x/spoke, evaluated: 40, fired: 1, delivered: 1 }
 steps:
   # An agent's refused commands count; a person's are not the agent's.
-  - when: { command: oxplow.work_item.transition, input: { uri: $item.uri, to: ready }, as: agent }
+  - when: { command: oxplow.task.transition, input: { uri: $item.uri, to: ready }, as: agent }
     expect: { ok: false, refused: ready }
-  - when: { command: oxplow.work_item.transition, input: { uri: $item.uri, to: ready }, as: agent }
+  - when: { command: oxplow.task.transition, input: { uri: $item.uri, to: ready }, as: agent }
     expect: { ok: false, refused: ready }
-  - when: { command: oxplow.work_item.create, input: { title: "" }, as: person }
+  - when: { command: oxplow.task.create, input: { title: "" }, as: person }
     expect: { ok: false, refused: title }
   - when: { page: oxplow/agent-interface }
     expect:
       loaders:
         interface_commands:
           rows:
-            - { command: oxplow.work_item.transition, runs: 3, invalid: 2 }
-            - { command: oxplow.work_item.create, runs: 1, invalid: 0 }
-  - when: { page: oxplow/interface-command-errors, params: { command: oxplow.work_item.transition } }
+            - { command: oxplow.task.transition, runs: 3, invalid: 2 }
+            - { command: oxplow.task.create, runs: 1, invalid: 0 }
+  - when: { page: oxplow/interface-command-errors, params: { command: oxplow.task.transition } }
     expect: { loaders: { interface_command_errors: { rows: [{ outcome: invalid }] } } }

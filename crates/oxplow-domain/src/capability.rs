@@ -10,7 +10,7 @@
 
 use schemars::JsonSchema;
 
-use crate::work_items::OXPLOW;
+use crate::tasks::OXTASK;
 use serde::{Deserialize, Serialize};
 
 /// Why a capability's active implementation is the one it is.
@@ -42,7 +42,7 @@ impl ChosenBy {
 /// One capability, as core declares it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilitySpec {
-    /// `work_items`, `effort_policy`, …: the key under `activeProviders`.
+    /// `task_tracker`, `knowledge`, …: the key under `activeProviders`.
     pub id: &'static str,
     /// How a person names it.
     pub title: &'static str,
@@ -77,8 +77,8 @@ pub struct ProviderContract {
     /// The verbs core calls on it. A verb is `confirm: never` and `access:
     /// record`: core's call is what a person confirms and what is gated.
     pub verbs: &'static [Verb],
-    /// The command family a verb runs as (`oxplow.work_item` →
-    /// `oxplow.work_item.create`), so an inverse naming a verb undoes
+    /// The command family a verb runs as (`oxplow.task` →
+    /// `oxplow.task.create`), so an inverse naming a verb undoes
     /// through it; `None` when core calls the verbs itself.
     pub dispatch: Option<&'static str>,
     /// The event types it may emit, each `(type, v)`; the schema it
@@ -86,7 +86,7 @@ pub struct ProviderContract {
     pub events: &'static [(&'static str, u32)],
     /// What its collectors stream; `None` when it reads nothing in.
     pub records: Option<Record>,
-    /// The resource whose URIs an instance owns (`oxplow/work_item`, its
+    /// The resource whose URIs an instance owns (`oxplow/task`, its
     /// `provider` param the instance); `None` when it owns none.
     pub resource: Option<&'static str>,
     /// Whether it keeps items: a manifest's `fields` and `id_pattern` apply.
@@ -142,10 +142,10 @@ impl ProviderContract {
     }
 }
 
-/// A work list's: the `work_item.<verb>` commands dispatch to its verbs,
-/// it records its items as `work_item.recorded@2`, and owns
-/// `oxplow:oxplow/work_item?id=…&provider=<instance>`.
-pub const WORK_ITEMS: ProviderContract = ProviderContract {
+/// A task tracker's: the `task.<verb>` commands dispatch to its verbs,
+/// it records its items as `task.recorded@3`, and owns
+/// `oxplow:oxplow/task?id=…&provider=<instance>`.
+pub const TASK_TRACKER: ProviderContract = ProviderContract {
     verbs: &[
         Verb {
             name: "create",
@@ -175,39 +175,16 @@ pub const WORK_ITEMS: ProviderContract = ProviderContract {
             name: "delete",
             needs: Need::Feature("delete"),
         },
-        Verb {
-            name: "reorder",
-            needs: Need::Feature("ordering"),
-        },
-        Verb {
-            name: "move",
-            needs: Need::Feature("lists"),
-        },
     ],
-    dispatch: Some("oxplow.work_item"),
-    events: &[("work_item.recorded", 3)],
+    dispatch: Some("oxplow.task"),
+    events: &[("task.recorded", 3)],
     records: Some(Record {
-        entity: "work_item",
-        event: ("work_item.recorded", 3),
+        entity: "task",
+        event: ("task.recorded", 3),
         key: "item",
     }),
-    resource: Some("oxplow/work_item"),
+    resource: Some("oxplow/task"),
     items: true,
-    data: None,
-};
-
-/// An effort policy's: core offers it each event a policy reacts to and
-/// runs the commands it answers with (`.context/work-tracking.md`).
-pub const EFFORT_POLICY: ProviderContract = ProviderContract {
-    verbs: &[Verb {
-        name: "react",
-        needs: Need::Always,
-    }],
-    dispatch: None,
-    events: &[],
-    records: None,
-    resource: None,
-    items: false,
     data: None,
 };
 
@@ -242,7 +219,7 @@ pub const SNAPSHOTS: ProviderContract = ProviderContract {
 /// page commands dispatch to its verbs, each answering the page's
 /// `knowledge.page.recorded@1` (the body it kept and the refs it states),
 /// and its collector streams its pages (edited outside oxplow) as the same
-/// records. Its pages are `oxplow:oxplow/wiki?slug=<slug>`: bare refs, the active store's.
+/// records. Its pages are `oxplow:oxplow/knowledge?id=<slug>&store=oxwiki`: bare refs, the active store's.
 pub const KNOWLEDGE: ProviderContract = ProviderContract {
     verbs: &[
         Verb {
@@ -253,22 +230,41 @@ pub const KNOWLEDGE: ProviderContract = ProviderContract {
             name: "delete_page",
             needs: Need::Always,
         },
-        Verb {
-            name: "link",
-            needs: Need::Always,
-        },
     ],
     dispatch: None,
-    events: &[("knowledge.page.recorded", 2)],
+    events: &[("knowledge.page.recorded", 3)],
     records: Some(Record {
         entity: "knowledge_page",
-        event: ("knowledge.page.recorded", 2),
+        event: ("knowledge.page.recorded", 3),
         key: "page",
     }),
-    resource: Some("oxplow/wiki"),
+    resource: Some("oxplow/knowledge"),
     items: false,
-    data: None,
+    data: Some(KNOWLEDGE_DATA),
 };
+
+/// What a knowledge store declares of itself: its kinds of page, each in
+/// one of core's buckets (`knowledge::KindDecl`); none declared: `note`.
+pub const KNOWLEDGE_DATA: &str = r#"{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kinds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "bucket"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "title": { "type": "string", "minLength": 1 },
+          "bucket": { "enum": ["note", "memory", "instruction"] }
+        }
+      }
+    }
+  }
+}"#;
 
 /// An agent harness's (`.context/agent-model.md`): core launches its
 /// sessions through it, has it map its tool hooks and render its answers,
@@ -381,32 +377,20 @@ pub const NONE: &str = "none";
 /// Every capability core declares.
 pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
-        id: "work_items",
-        title: "Work list",
+        id: "task_tracker",
+        title: "Task tracker",
         choosable: true,
         optional: true,
         many: false,
-        default: "oxplow",
+        default: "oxtask",
         features: &[
             "hierarchy",
             "comments",
             "links",
             "delete",
             "idempotent_writes",
-            "ordering",
-            "lists",
         ],
-        provider: Some(&WORK_ITEMS),
-    },
-    CapabilitySpec {
-        id: "effort_policy",
-        title: "Effort policy",
-        choosable: true,
-        optional: true,
-        many: false,
-        default: "oxplow",
-        features: &[],
-        provider: Some(&EFFORT_POLICY),
+        provider: Some(&TASK_TRACKER),
     },
     CapabilitySpec {
         id: "snapshots",
@@ -431,11 +415,11 @@ pub const CAPABILITIES: &[CapabilitySpec] = &[
     CapabilitySpec {
         id: "knowledge",
         title: "Knowledge",
-        choosable: true,
-        optional: true,
-        many: false,
-        default: "oxplow",
-        features: &[],
+        choosable: false,
+        optional: false,
+        many: true,
+        default: "oxwiki",
+        features: &["edit"],
         provider: Some(&KNOWLEDGE),
     },
     CapabilitySpec {
@@ -490,9 +474,9 @@ pub fn contract(id: &str) -> Option<&'static ProviderContract> {
 }
 
 /// Why `id` can't name a provider or one of its instances — the segment
-/// of its refs (`oxplow:oxplow/work_item?id=…&provider=<id>`) and its command namespace — or `None`
+/// of its refs (`oxplow:oxplow/task?id=…&provider=<id>`) and its command namespace — or `None`
 /// when it can: lowercase letters, digits and underscores, starting with
-/// a letter, and none of oxplow's own (`oxplow`, a core namespace). One
+/// a letter, and none of oxplow's own (`oxplow`, `oxtask`, a core namespace). One
 /// rule for a provider's id and an instance's.
 pub fn instance_id_problem(id: &str) -> Option<String> {
     let well_formed = id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
@@ -503,7 +487,8 @@ pub fn instance_id_problem(id: &str) -> Option<String> {
         Some(format!(
             "`{id}` must be lowercase letters, digits and underscores, starting with a letter"
         ))
-    } else if id == OXPLOW || crate::events::schema::CORE_NAMESPACES.contains(&id) {
+    } else if id == "oxplow" || id == OXTASK || crate::events::schema::CORE_NAMESPACES.contains(&id)
+    {
         Some(format!("`{id}` is reserved for oxplow"))
     } else {
         None
@@ -553,7 +538,7 @@ pub fn check_against(schema: &str, value: &serde_json::Value, what: &str) -> Res
 }
 
 /// Check one declared need: a scope (`sql.read`,
-/// [`crate::scope`]), a capability (`work_items`), or one of its
+/// [`crate::scope`]), a capability (`task_tracker`), or one of its
 /// features (`snapshots.contents`), as core declares them.
 pub fn check_need(need: &str) -> Result<(), String> {
     if crate::scope::scope(crate::service::need_scope(need)).is_some() {
@@ -641,9 +626,9 @@ mod tests {
         }
         assert_eq!(
             choosable().map(|c| c.id).collect::<Vec<_>>(),
-            ["work_items", "effort_policy", "snapshots", "knowledge"]
+            ["task_tracker", "snapshots"]
         );
-        assert_eq!(spec("knowledge").map(|c| c.optional), Some(true));
+        assert_eq!(spec("knowledge").map(|c| c.optional), Some(false));
         for c in CAPABILITIES.iter().filter(|c| c.many) {
             assert!(
                 !c.choosable && !c.optional,
@@ -658,6 +643,7 @@ mod tests {
                 .map(|c| (c.id, c.default))
                 .collect::<Vec<_>>(),
             [
+                ("knowledge", "oxwiki"),
                 ("agent_harness", "claude"),
                 ("ai_provider", "anthropic"),
                 ("filesystem", "local")
@@ -668,7 +654,7 @@ mod tests {
     }
 
     /// What a process may implement is what core gives a contract: the
-    /// work list, the effort policy, snapshots, knowledge, an agent harness
+    /// task tracker, snapshots, knowledge, an agent harness
     /// and a filesystem. The rest are core's or built-ins'.
     #[test]
     fn a_process_implements_only_a_capability_with_a_contract() {
@@ -679,8 +665,7 @@ mod tests {
                 .map(|c| c.id)
                 .collect::<Vec<_>>(),
             [
-                "work_items",
-                "effort_policy",
+                "task_tracker",
                 "snapshots",
                 "knowledge",
                 "agent_harness",
@@ -694,27 +679,27 @@ mod tests {
     /// feature is one the capability declares.
     #[test]
     fn a_contracts_verbs_follow_the_declared_features() {
-        let work = contract("work_items").unwrap();
+        let work = contract("task_tracker").unwrap();
         assert_eq!(
             work.required(&serde_json::json!({})),
             ["create", "update", "transition"]
         );
         assert_eq!(
-            work.required(&serde_json::json!({"links": true, "lists": true, "comments": false})),
-            ["create", "update", "transition", "link", "unlink", "move"]
+            work.required(&serde_json::json!({"links": true, "comments": false})),
+            ["create", "update", "transition", "link", "unlink"]
         );
-        assert!(work.verb("reorder").is_some() && work.verb("estimate").is_none());
-        let policy = contract("effort_policy").unwrap();
-        assert_eq!(policy.required(&serde_json::json!({})), ["react"]);
+        // Who works on an item and its place in their queue are core's.
+        assert!(work.verb("assign").is_none() && work.verb("reorder").is_none());
+        assert!(work.verb("estimate").is_none());
         let knowledge = contract("knowledge").unwrap();
         assert_eq!(
             knowledge.required(&serde_json::json!({})),
-            ["write_page", "delete_page", "link"]
+            ["write_page", "delete_page"]
         );
-        assert_eq!(knowledge.resource, Some("oxplow/wiki"));
+        assert_eq!(knowledge.resource, Some("oxplow/knowledge"));
         assert_eq!(
             knowledge.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("knowledge_page", ("knowledge.page.recorded", 2), "page"))
+            Some(("knowledge_page", ("knowledge.page.recorded", 3), "page"))
         );
         let snapshots = contract("snapshots").unwrap();
         assert_eq!(
@@ -743,25 +728,18 @@ mod tests {
         }
     }
 
-    /// A work list owns its items' refs and streams them as records; an
-    /// effort policy owns nothing and emits nothing.
+    /// A task tracker owns its items' refs and streams them as records.
     #[test]
     fn a_contract_says_what_its_provider_owns_and_emits() {
-        let work = contract("work_items").unwrap();
-        assert_eq!(work.events, [("work_item.recorded", 3)]);
-        assert_eq!(work.resource, Some("oxplow/work_item"));
+        let work = contract("task_tracker").unwrap();
+        assert_eq!(work.events, [("task.recorded", 3)]);
+        assert_eq!(work.resource, Some("oxplow/task"));
         assert_eq!(
             work.records.map(|r| (r.entity, r.event, r.key)),
-            Some(("work_item", ("work_item.recorded", 3), "item"))
+            Some(("task", ("task.recorded", 3), "item"))
         );
-        assert_eq!(work.dispatch, Some("oxplow.work_item"));
+        assert_eq!(work.dispatch, Some("oxplow.task"));
         assert!(work.items);
-        let policy = contract("effort_policy").unwrap();
-        assert!(policy.events.is_empty() && policy.records.is_none());
-        assert_eq!(
-            (policy.resource, policy.dispatch, policy.items),
-            (None, None, false)
-        );
     }
 
     #[test]
@@ -774,12 +752,12 @@ mod tests {
 
     #[test]
     fn a_need_names_a_capability_or_one_of_its_features() {
-        assert!(check_need("work_items").is_ok());
+        assert!(check_need("task_tracker").is_ok());
         assert!(check_need("snapshots.contents").is_ok());
         assert!(check_need("teleport")
             .unwrap_err()
             .contains("isn't a capability"));
-        assert!(check_need("work_items.flying")
+        assert!(check_need("task_tracker.flying")
             .unwrap_err()
             .contains("isn't a feature"));
     }

@@ -208,7 +208,7 @@ mod tests {
             "sha: 0123456789abcdef0123456789abcdef01234567",
             "sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
             "id: 123e4567-e89b-12d3-a456-426614174000",
-            "ref: work_item:oxplow:tsk1",
+            "ref: task:oxplow:tsk1",
             "entry: handlers/some_very_long_handler_name_for_a_command.star",
             "# prose mentioning ghp_ or sk- or AKIA as prefixes",
             "words: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

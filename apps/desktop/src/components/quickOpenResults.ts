@@ -144,7 +144,7 @@ export interface QuickOpenBuild {
 /// (already BM25-ranked), minus file hits whose path matched by name
 /// above, and minus file hits from other streams (project-wide search
 /// returns every stream's files, but another worktree's aren't openable
-/// here — tasks/wiki/notes/comments stay project-wide).
+/// here — tasks/knowledge pages/notes/comments stay project-wide).
 export function buildQuickOpenResults(input: {
   query: string;
   /** The page directory; null while the extensions load — then nothing
@@ -162,7 +162,7 @@ export function buildQuickOpenResults(input: {
   }
   const tokens = q.split(/\s+/).filter(Boolean);
   // Full (uncapped) matched sets. Pages also match their optional
-  // `keywords` so e.g. the Tasks page (label "Tasks") is still found by
+  // `keywords` so e.g. the Work page (label "Work") is still found by
   // typing "dashboard"; the best title match ranks first (`pageRank`).
   const matchedPages: QuickOpenResult[] = input.pages
     .map((entry, at) => ({ entry, at, rank: pageRank(entry, tokens) }))
@@ -174,7 +174,7 @@ export function buildQuickOpenResults(input: {
     .map((entry) => ({ kind: "command", entry }));
   const matchedFilesAll = input.files.filter((file) => matchesAllTokens(file.path.toLowerCase(), tokens));
   const matchedPathsAll = new Set(matchedFilesAll.map((f) => f.path));
-  // Keep file hits only from the current stream (+ global); tasks/wiki/
+  // Keep file hits only from the current stream (+ global); tasks/knowledge/
   // notes/comments are project-wide. A null/undefined stream disables
   // the filter (keep everything).
   const streamScopedHits =
@@ -239,7 +239,7 @@ export type LauncherRow =
 /// prefixed so they never collide with a static directory page's id (both
 /// can be visible when Recent + a category are expanded). Visit rows don't
 /// persist the ref payload, so `refFromTabId` rebuilds an openable ref from
-/// the id (a bare `{id,kind}` would leave file/wiki/task pages unopenable).
+/// the id (a bare `{id,kind}` would leave file/knowledge/task pages unopenable).
 /// Label falls back to the ref id when the stored visit label is empty.
 export function buildRecentEntries(
   visits: Array<{ refId: string; label: string }>,

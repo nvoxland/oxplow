@@ -3,7 +3,7 @@
 # `list_lit`; a def is a list whose HEAD symbol is `defn`/`defn-`. Anchoring to
 # the head (`.`) avoids counting a symbol that merely happens to be named `defn`
 # elsewhere — e.g. a local binding `(let [defn 1] defn)`. Its facts are per-file
-# (subject "file:<path>", nonzero only), so an effort's change attributes
+# (subject "file:<path>", nonzero only), so a request's change attributes
 # through its files. and a per-file
 # `oxplow.ast_hit` FACT (rule="defn") — the metric is the SPEC
 # Sum(oxplow.ast_hit) filtered by that rule (epic tsk12).

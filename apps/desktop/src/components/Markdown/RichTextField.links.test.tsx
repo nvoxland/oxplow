@@ -1,16 +1,16 @@
 import { afterEach, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 
-import { setResources, type Resource } from "../../resources.js";
+import { setResources, type Resource } from "../../resourceStore.js";
 import { PageNavigationContext, type PageNavigation } from "../../tabs/PageNavigationContext.js";
-import { pageUri, resourceUri, workItemUri } from "../../uri/uri.js";
+import { pageUri, resourceUri, taskUri } from "../../uri/uri.js";
 import { RichTextField } from "./RichTextField.js";
 
 // tsk976: a link in an editable body opens its page whatever it names —
 // a task, an extension's ref — as it does in a read-only one (both through
 // `linkRef` and `openRef`).
 
-const ITEM = workItemUri("oxplow", "tsk1");
+const ITEM = taskUri("oxtask", "tsk1");
 const PR = resourceUri("acme/pr", { id: 12 });
 
 const ACME_PR: Resource = {
@@ -32,7 +32,7 @@ afterEach(() => {
   setResources([]);
 });
 
-test("a work item link and an extension's ref open their pages", async () => {
+test("a task link and an extension's ref open their pages", async () => {
   setResources([ACME_PR]);
   const opened: string[] = [];
   const nav = { navigate: () => {}, openRef: (ref: string) => opened.push(ref) } as unknown as PageNavigation;

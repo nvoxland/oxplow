@@ -1,0 +1,19 @@
+# The Changes page frames a turn, and the request it belongs to, on the
+# stream's snapshot line: from the last take at or before it started to its
+# turn_end take; the change row of each, when analysis has made one, is
+# only looked up.
+given:
+  - observe: { snapshot: { trigger: startup, branch: main, files: [{ path: a.txt, hash: h1 }] } }
+  - observe: { turn: { prompt: Edit a } }
+  - observe: { snapshot: { trigger: turn_end, branch: main, files: [{ path: a.txt, hash: h2 }] } }
+when: { page: diff-view, params: { uri: "oxplow:oxplow/turn?id=trn1", stream_id: 1 } }
+expect:
+  loaders:
+    row: { rows: [{ subject: turn, start_rev: "snap:1", end_rev: "snap:2", in_progress: 0 }] }
+    header: { rows: [{ what: Turn, from_label: $any, to_label: $any }] }
+steps:
+  - params: { uri: "oxplow:oxplow/request?id=req1", stream_id: 1 }
+    expect:
+      loaders:
+        row: { rows: [{ subject: request, start_rev: "snap:1", end_rev: "snap:2", in_progress: 0 }] }
+        header: { rows: [{ what: Request }] }

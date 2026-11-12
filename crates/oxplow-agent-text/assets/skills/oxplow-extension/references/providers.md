@@ -32,7 +32,7 @@ An extension with an **external provider** (`providers:` — a program that
    The extension declares `process.run` (and its `network`
    hosts and `secrets`), which a person approves when it is deployed, and
    enables the provider in Settings → Integrations; you can't do either.
-   A work-items provider is a **backend for the project's own work**,
+   A task tracker is a **backend for the project's own work**,
    with the visibility the person wants (a local tracker like beads), not
    a team's tracker: when it's the active one, every new item goes there.
    `$OXPLOW_BIN extension new provider` scaffolds a complete one (manifest,

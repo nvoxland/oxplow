@@ -1,8 +1,8 @@
-//! The knowledge conformance suite (P5.C4, `.context/knowledge.md`): what
+//! The knowledge conformance suite (`.context/knowledge.md`): what
 //! every knowledge store must do, checked through what a person and an
 //! agent see — the `oxplow.knowledge.*` commands in, core's record
 //! (`v_knowledge_page`, `v_knowledge_body`, the pins, the event log) out.
-//! It runs in-tree against oxplow's wiki and, through the conformance kit
+//! It runs in-tree against oxwiki and, through the conformance kit
 //! (`oxplow extension test`), against a provider process, the same way:
 //! core never special-cases its own store.
 //!
@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use oxplow_domain::Actor;
 use serde_json::json;
 
-pub use crate::work_items_conformance::Finding;
+pub use crate::task_tracker_conformance::Finding;
 
 /// A page as core records it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,10 +24,10 @@ struct PageRow {
     updated_at: String,
 }
 
-/// Run every check against the project's active store as `actor` — one
-/// who may delete (a person: an agent's destructive call is left for a
-/// person to confirm).
-pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
+/// Run every check against the enabled store `store` as `actor` — one who
+/// may delete (a person: an agent's destructive call is left for a person
+/// to confirm). Every command names the store, so it runs beside others.
+pub async fn suite(svc: &crate::Services, store: &str, actor: &Actor) -> Vec<Finding> {
     let world = World {
         svc,
         drifts: AtomicU32::new(0),
@@ -39,7 +39,9 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
     let body = format!("# Conformance\n\nRelies on [[{file}]].\n");
     let write = |body: &str, verified: &[&str]| {
         json!({
-            "slug": "conformance-page",
+            "store": store,
+            "id": "conformance-page",
+            "title": "Conformance",
             "body": body,
             "verified_files": verified,
         })
@@ -53,10 +55,7 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
 
     // 1. A write lands the page, its body and its event.
     let page = match run(write(&body, &[]), crate::knowledge::WRITE_PAGE).await {
-        // The result names the page by its slug; the record is keyed by its ref.
-        Ok(result) => {
-            oxplow_domain::uri::build::wiki_uri(result["page"].as_str().unwrap_or_default())
-        }
+        Ok(result) => result["page"].as_str().unwrap_or_default().to_string(),
         Err(e) => {
             fail("write", format!("write failed: {e}"));
             return findings;
@@ -137,15 +136,21 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
         Err(_) => {}
     }
 
-    // 4. A link lands in the page.
+    if page != oxplow_domain::uri::build::knowledge_uri(store, "conformance-page") {
+        fail("write", format!("the write named another page: `{page}`"));
+    }
+
+    // 4. A link lands in the page, through the store, naming the other page
+    //    by its store.
     let other = "conformance-other";
     let _ = run(
-        json!({ "slug": other, "body": "# Other\n" }),
+        json!({ "store": store, "id": other, "body": "# Other\n" }),
         crate::knowledge::WRITE_PAGE,
     )
     .await;
+    let target = format!("{store}:{other}");
     match run(
-        json!({ "page": "conformance-page", "target": other }),
+        json!({ "store": store, "id": "conformance-page", "target": target }),
         crate::knowledge::LINK,
     )
     .await
@@ -155,7 +160,7 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
             let linked = world
                 .body(&page)
                 .await
-                .is_some_and(|b| b.contains(&format!("[[{other}]]")));
+                .is_some_and(|b| b.contains(&format!("[[{target}]]")));
             if !linked {
                 fail("link", format!("`{page}`'s body doesn't link `{other}`"));
             }
@@ -163,9 +168,14 @@ pub async fn suite(svc: &crate::Services, actor: &Actor) -> Vec<Finding> {
     }
 
     // 5. A delete takes the page, and says so.
-    for slug in ["conformance-page", other] {
-        if let Err(e) = run(json!({ "slug": slug }), crate::knowledge::DELETE_PAGE).await {
-            fail("delete", format!("delete of `{slug}` failed: {e}"));
+    for id in ["conformance-page", other] {
+        if let Err(e) = run(
+            json!({ "store": store, "id": id }),
+            crate::knowledge::DELETE_PAGE,
+        )
+        .await
+        {
+            fail("delete", format!("delete of `{id}` failed: {e}"));
         }
     }
     world.settle().await;
@@ -306,12 +316,12 @@ impl World<'_> {
 mod tests {
     use super::*;
 
-    /// oxplow's wiki passes the suite, as a person: a delete is
-    /// destructive, and an agent's is left for the person to confirm.
+    /// oxwiki passes the suite, as a person: a delete is destructive, and
+    /// an agent's is left for the person to confirm.
     #[tokio::test]
-    async fn the_oxplow_wiki_is_a_conforming_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
-        let findings = suite(&fx.svc, &Actor::Human).await;
+    async fn oxwiki_is_a_conforming_store() {
+        let fx = crate::test_fixtures::services_with_thread().await;
+        let findings = suite(&fx.svc, oxplow_domain::knowledge::OXWIKI, &Actor::Human).await;
         assert_eq!(findings, vec![]);
     }
 }

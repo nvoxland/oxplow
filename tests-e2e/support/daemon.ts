@@ -333,10 +333,9 @@ export async function waitForModels<T>(daemon: Daemon, datasets: string[], write
 
 type SearchHit = { kind: string; title: string };
 
-/** Wait until site search finds `query` among `kind` hits (`task`,
- *  `wiki`): the index is built in the background after a write. */
-/** Wait until site search finds `query` under `resource` (`wiki` is
- *  `oxplow/wiki`; a name with a `/` is taken as it is). */
+/** Wait until site search finds `query` under `resource` (`task`,
+ *  `knowledge`: `oxplow/<name>`; a name with a `/` is taken as it is). The
+ *  index is built in the background after a write. */
 export async function searchable(daemon: Daemon, query: string, resource: string): Promise<void> {
   const name = resource.includes("/") ? resource : `oxplow/${resource}`;
   await until(`search to index "${query}" (${name})`, 30_000, async () => {

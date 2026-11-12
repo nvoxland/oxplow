@@ -77,3 +77,50 @@ test("every rail group's body is indented from its heading", () => {
   const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   expect(sheet).toMatch(/\.ox-rail-group\s*>\s*:not\(\.ox-rail-group-head\)\s*\{[^}]*margin-left:\s*var\(--space-3\)/);
 });
+
+// A rail panel's part (`.ox-compact`) is narrow: its sections sit close, a
+// detail's facts are short lines with no rules, and a fact's buttons wrap
+// under its value as small buttons whose labels never break.
+test("a compact part is tight: close sections, ruleless facts, buttons that wrap whole", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-compact [^{]*\.ox-section[^{]*\{[^}]*margin-top:\s*var\(--space-2\)/);
+  expect(sheet).toMatch(/\.ox-compact \.ox-fact dt,\s*\.ox-compact \.ox-fact dd\s*\{[^}]*border-bottom:\s*0/);
+  expect(sheet).toMatch(/\.ox-compact \.ox-fact dd\s*\{[^}]*flex-wrap:\s*wrap/);
+  expect(sheet).toMatch(/\.ox-compact \.ox-fact-actions \.ox-button\s*\{[^}]*white-space:\s*nowrap/);
+});
+
+// A component that draws its own menu (the Tasks board's card menu) draws it
+// with the kit's: a raised list over the page, its items full-width buttons
+// that light up under the pointer and the keyboard, a rule between groups
+// and a danger look for a delete.
+test("the kit has a menu: a raised list of items, separators and a danger item", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-menu\s*\{[^}]*position:\s*fixed[^}]*background:\s*var\(--surface-elevated\)/);
+  expect(sheet).toMatch(/\.ox-menu-item\s*\{[^}]*width:\s*100%/);
+  expect(sheet).toMatch(/\.ox-menu-item:hover,\s*\.ox-menu-item:focus-visible\s*\{[^}]*background:\s*var\(--accent-soft-bg\)/);
+  expect(sheet).toMatch(/\.ox-menu-separator\s*\{[^}]*border-top:\s*1px solid var\(--border-subtle\)/);
+  expect(sheet).toMatch(/\.ox-menu-item\.ox-danger\s*\{[^}]*color:\s*var\(--severity-critical\)/);
+});
+
+// A component's frame scrolls with the app's thin scrollbars (index.html),
+// not WebKit's default bar, from the theme's tokens.
+test("the kit draws the app's thin scrollbars", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/::-webkit-scrollbar\s*\{[^}]*width:\s*10px/);
+  expect(sheet).toMatch(/::-webkit-scrollbar-track[^{]*\{[^}]*background:\s*transparent/);
+  expect(sheet).toMatch(/::-webkit-scrollbar-thumb\s*\{[^}]*background:\s*var\(--border-subtle\)/);
+  expect(sheet).toMatch(/::-webkit-scrollbar-thumb:hover\s*\{[^}]*background:\s*var\(--border-strong\)/);
+});
+
+// A list's parent and its children (a `depth` list, the board's epics) are
+// one raised panel: its top line the parent, its bottom edge where they end.
+test("the kit has a nesting panel", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-nest\s*\{[^}]*background:\s*var\(--surface-elevated\)[^}]*border:\s*1px solid var\(--border-strong\)[^}]*border-radius:\s*var\(--radius-md\)/);
+});
+
+// A param value you type has no caret: it reads as a text box.
+test("a typed param value draws no caret", () => {
+  const sheet = readFileSync(SHEET, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  expect(sheet).toMatch(/\.ox-param-value\.ox-param-typed::after\s*\{[^}]*content:\s*none/);
+});

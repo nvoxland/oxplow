@@ -6,7 +6,7 @@ use std::path::Path;
 
 use oxplow_app::extension::extensions::EXTENSIONS_DIR;
 use oxplow_domain::contribution::{extension_namespace, ContributionKind};
-use oxplow_domain::uri::build::work_item_uri;
+use oxplow_domain::uri::build::task_uri;
 
 use crate::{title_case, Kind, SdkError};
 
@@ -26,7 +26,7 @@ pub struct Contribution {
 
 /// The kinds `extension add` takes.
 pub const ADDABLE: &str =
-    "`page`, `collector`, `command`, `effect`, `component`, `advisory` or `skill`";
+    "`page`, `collector`, `command`, `effect`, `component`, `advisory`, `context` or `skill`";
 
 /// Every service the table offers, with the builtin that reaches it.
 fn services_list() -> String {
@@ -60,7 +60,7 @@ pub(crate) fn build(
     command: Option<(&str, &str)>,
 ) -> Result<Contribution, SdkError> {
     let ns = extension_namespace(namespace);
-    let work_item = work_item_uri("oxplow", "tsk1");
+    let task = task_uri("oxtask", "tsk1");
     let mut files: Vec<(String, String)> = Vec::new();
     let mut write = |rel: &str, body: String| -> Result<(), SdkError> {
         files.push((rel.to_string(), body));
@@ -84,7 +84,7 @@ pub(crate) fn build(
                  \x20 items:\n\
                  \x20   sql: |\n\
                  \x20     SELECT w.uri, w.title, w.state, w.updated_at\n\
-                 \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                 \x20     FROM v_task w JOIN v_thread t ON t.uri = w.assignee\n\
                  \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                  \x20     ORDER BY w.updated_at DESC\n\
                  view:\n\
@@ -96,8 +96,8 @@ pub(crate) fn build(
                  \x20 actions:\n\
                  \x20   # In each row's right-click menu: a command run as the person, the\n\
                  \x20   # row's values bound in (`{{{{row.<column>}}}}`).\n\
-                 \x20   - {{ id: start, label: Start, command: oxplow.work_item.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
-                 \x20 empty: No open work items in this stream.\n",
+                 \x20   - {{ id: start, label: Start, command: oxplow.task.transition, input: {{ uri: \"{{{{row.uri}}}}\", to: in_progress }}, row: true }}\n\
+                 \x20 empty: No open tasks in this stream.\n",
                 title = title_case(id)
             ),
         )?;
@@ -140,7 +140,7 @@ pub(crate) fn build(
              \x20   entry: collectors/{id}.star\n\
              \x20   # Services its script may use: {services}.\n\
              \x20   needs: []\n\
-             \x20   input: \"SELECT uri, title, state FROM v_work_item\"\n\
+             \x20   input: \"SELECT uri, title, state FROM v_task\"\n\
              \x20   entities:\n\
              \x20     - {{ name: {entity}, key: uri, columns: {{ uri: text, title: text }} }}\n"
                         ),
@@ -153,7 +153,7 @@ pub(crate) fn build(
              \x20   version: 1\n\
              \x20   description: \"TODO: what these rows are.\"\n\
              \x20   fields:\n\
-             \x20     - {{ name: uri, type: TEXT, doc: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
+             \x20     - {{ name: uri, type: TEXT, doc: \"The task (oxplow:oxplow/task?id=<id>&provider=<provider>).\" }}\n\
              \x20     - {{ name: title, type: TEXT, doc: \"Its title.\" }}\n"
                         ),
                     ),
@@ -179,7 +179,7 @@ pub(crate) fn build(
              # as the caller (in one transaction when every one can, else as steps) — or {\"refuse\": \"why\"}. No I/O.\n\
              def transform(x):\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.task.comment\", \"input\": {\"uri\": x[\"input\"][\"uri\"], \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?;
@@ -188,25 +188,25 @@ pub(crate) fn build(
                     "commands",
                     format!(
                         "\x20 # Registered as {ns}.{id} (<namespace>.<area>.<verb>); its script composes core commands, run as the\n\
-             \x20 # caller: in one transaction when every one can, else as steps (a work list's verbs run outside it).\n\
+             \x20 # caller: in one transaction when every one can, else as steps (a task tracker's verbs run outside it).\n\
              \x20 - name: {id}\n\
-             \x20   summary: \"TODO: what it does. Here: comment on a work item.\"\n\
+             \x20   summary: \"TODO: what it does. Here: comment on a task.\"\n\
              \x20   input_schema:\n\
              \x20     type: object\n\
              \x20     required: [uri]\n\
              \x20     properties:\n\
-             \x20       uri: {{ type: string, description: \"The work item (oxplow:oxplow/work_item?id=<id>&provider=<provider>).\" }}\n\
+             \x20       uri: {{ type: string, description: \"The task (oxplow:oxplow/task?id=<id>&provider=<provider>).\" }}\n\
              \x20     additionalProperties: false\n\
              \x20   entry: {file}\n\
              \x20   # Who may run it: a person, an agent, a page (each child command checks its own too).\n\
              \x20   \
-             \x20   # On a work item's page (Commands) and a row's right-click.\n\
-             \x20   ui: {{ label: {label}, about: oxplow/work_item, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
+             \x20   # On a task's page (Commands) and a row's right-click.\n\
+             \x20   ui: {{ label: {label}, about: oxplow/task, input: {{ uri: \"{{{{uri}}}}\" }} }}\n\
              \x20   examples:\n\
-             \x20     - {{ name: happy, input: {{ uri: \"{work_item}\" }}, expect_commands: [oxplow.work_item.comment] }}\n"
+             \x20     - {{ name: happy, input: {{ uri: \"{task}\" }}, expect_commands: [oxplow.task.comment] }}\n"
                     ),
                 )],
-                vec!["commands:oxplow.work_item.comment"],
+                vec!["commands:oxplow.task.comment"],
             )
         }
         Kind::Effect => {
@@ -216,9 +216,9 @@ pub(crate) fn build(
              # (the event envelope, at its type's newest version) and returns the\n\
              # commands to run — or {\"skip\": \"why\"}. No I/O.\n\
              def transform(x):\n\
-             \x20   uri = x[\"event\"][\"payload\"][\"work_item\"]\n\
+             \x20   uri = x[\"event\"][\"payload\"][\"task\"]\n\
              \x20   return {\"commands\": [\n\
-             \x20       {\"name\": \"oxplow.work_item.comment\", \"input\": {\"uri\": uri, \"body\": \"TODO: the note\"}},\n\
+             \x20       {\"name\": \"oxplow.task.comment\", \"input\": {\"uri\": uri, \"body\": \"TODO: the note\"}},\n\
              \x20   ]}\n"
                 .to_string(),
         )?;
@@ -229,13 +229,13 @@ pub(crate) fn build(
              \x20 # rights under this extension's permissions, and only on events logged\n\
              \x20 # after it started; a command that asks becomes a proposal.\n\
              \x20 - id: on-done\n\
-             \x20   summary: \"TODO: what it does. Here: comment on a work item when it's done.\"\n\
-             \x20   on: [work_item.state_changed]\n\
+             \x20   summary: \"TODO: what it does. Here: comment on a task when it's done.\"\n\
+             \x20   on: [task.state_changed]\n\
              \x20   where: { to: done }\n\
              \x20   entry: effects/on-done.star\n"
                         .replace("on-done", id),
                 )],
-                vec!["commands:oxplow.work_item.comment"],
+                vec!["commands:oxplow.task.comment"],
             )
         }
         Kind::Component => {
@@ -256,7 +256,7 @@ pub(crate) fn build(
                      \x20 items:\n\
                      \x20   sql: |\n\
                      \x20     SELECT w.uri, w.title, w.state\n\
-                     \x20     FROM v_work_item w JOIN v_thread t ON t.id = w.thread_id\n\
+                     \x20     FROM v_task w JOIN v_thread t ON t.uri = w.assignee\n\
                      \x20     WHERE t.stream_id = :stream_id AND w.state IN ('todo', 'in_progress', 'blocked')\n\
                      \x20     ORDER BY w.updated_at DESC\n\
                      view:\n\
@@ -320,18 +320,38 @@ pub(crate) fn build(
              \x20 # A {advisory}: a query run at a moment (`on`: post-tool-use, prompt or\n\
              \x20 # turn-end) whose rows reach the agent (`audience: person` raises them in\n\
              \x20 # Alerts instead). Each row's `message` is what it hears; `once_per` says how\n\
-             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :effort_id. A shared\n\
+             \x20 # often. Params: :thread_id, :stream_id, :turn_id, :request_id. A shared\n\
              \x20 # extension's advisories run once a person approves them.\n\
              \x20 - id: {id}\n\
              \x20   on: turn-end\n\
-             \x20   once_per: effort\n\
+             \x20   once_per: request\n\
              \x20   query: |\n\
-             \x20     SELECT printf('TODO: what the agent should hear. Here: this effort has changed %d files.',\n\
-             \x20                    count(DISTINCT f.path)) AS message\n\
-             \x20     FROM v_effort e JOIN v_effort_file f ON f.effort_id = e.id\n\
-             \x20     WHERE e.id = :effort_id AND e.ended_at IS NULL\n\
-             \x20     HAVING count(DISTINCT f.path) >= 15\n",
+             \x20     SELECT printf('TODO: what the agent should hear. Here: this request has changed %d files.',\n\
+             \x20                    count(DISTINCT p.path)) AS message\n\
+             \x20     FROM v_tool_call_path p JOIN v_agent_turn t ON t.id = p.turn_id\n\
+             \x20     WHERE t.request_id = :request_id\n\
+             \x20     HAVING count(DISTINCT p.path) >= 15\n",
                     advisory = ContributionKind::Advisory.spec().title.to_lowercase()
+                ),
+            )],
+            vec!["agent.write"],
+        ),
+        Kind::Context => (
+            vec![(
+                "context",
+                format!(
+                    "\
+             \x20 # An {context}: what the agent should know now, as one short text.\n\
+             \x20 # Its query returns a `text` column (one row; none says nothing). The\n\
+             \x20 # agent gets it on its first prompt, then only when it changes, and again\n\
+             \x20 # after a compaction. Params: :thread_id, :stream_id, :request_id (NULL when\n\
+             \x20 # unknown). At most 1,500 characters reach the agent.\n\
+             \x20 - id: {id}\n\
+             \x20   doc: \"TODO: what it tells the agent.\"\n\
+             \x20   query: |\n\
+             \x20     SELECT 'TODO: what the agent should know. Here: open threads in this stream: ' || count(*) AS text\n\
+             \x20     FROM v_thread WHERE stream_id = :stream_id AND closed_at IS NULL\n",
+                    context = ContributionKind::AgentContext.spec().title.to_lowercase()
                 ),
             )],
             vec!["agent.write"],
@@ -351,7 +371,7 @@ pub(crate) fn build(
                     format!(
                         "\
              \x20 # A {skill} the coding agent loads when it's relevant; `kind: command`\n\
-             \x20 # makes it a slash command a person runs. `needs: [work_items]` offers it only\n\
+             \x20 # makes it a slash command a person runs. `needs: [task_tracker]` offers it only\n\
              \x20 # while that capability is active.\n\
              \x20 - name: {id}\n\
              \x20   file: skills/{id}/SKILL.md\n",

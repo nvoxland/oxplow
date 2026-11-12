@@ -6,7 +6,7 @@ out. The point is that re-deriving any of this is expensive and the traps
 below fail **silently** — a wrong profile looks exactly like a right one.
 
 Detailed capture-by-capture numbers live on the `metric-path-db-contention`
-wiki page. That page is in `.oxplow/wiki/`, which is **gitignored** — so
+knowledge page. That page is in `.oxplow/oxwiki/`, which is **gitignored** — so
 anything that must survive a fresh clone belongs here, not there.
 
 ## The harness: `cube_equivalence`
@@ -20,8 +20,8 @@ That makes it both the profiling harness *and* the correctness gate: any
 metric-path optimization must leave all series identical to the fact oracle.
 Use it for both. Every optimization below was verified this way.
 
-**It does not cover the effort-delta reads.** `cube_equivalence` walks specs and
-the cube; `effort_metric_deltas` (the effort panel) is a different read path with
+**It does not cover the request-delta reads.** `cube_equivalence` walks specs and
+the cube; the request metric deltas (the request analysis) are a different read path with
 its own queries, and the biggest single hotspot ever measured here lived in it
 (tsk239, below) while the harness reported a clean profile. A green
 `cube_equivalence` is necessary, not sufficient — profile the live app too.
@@ -55,7 +55,7 @@ and **attach mode freezes the app** — always launch, never attach.
 threads too. By raw sample count a metric-path profile reads as ~90%
 `__psynch_cvwait` — that is threads *sleeping*, not CPU. Weighting by
 `samples.threadCPUDelta` (µs) gives a completely different and correct
-ranking. A historical "43% mutex contention" figure on the wiki page is
+ranking. A historical "43% mutex contention" figure on the knowledge page is
 suspect for exactly this reason.
 
 **2. `--unstable-presymbolicate` is not optional.** Without it the saved
@@ -82,39 +82,37 @@ Already fixed — **do not re-optimize these**:
 - `representative_facts_by_slice` was **38% of backend CPU** in a live capture;
   most calls no longer run it at all (tsk239/tsk242, below).
 
-## Open-effort evidence (2026-10-16)
+## Live-request evidence (2026-10-16)
 
-An effort open for days holds thousands of token reports (`otel-tokens`
-writes one per live agent about every 30 s; two efforts here held 13,459
-and 9,437 captures and 315,686 facts). The `effort_evidence` asset
-recomputes every open effort when the cube moves, and each report moved it,
-so each report meant reading the effort's whole history: `sample` put the
-daemon at 50–120% of a core with no turn in flight, in
-`refresh_effort_evidence` → `captures_for_effort` + `facts_for_captures`
+A request that runs for days holds thousands of token reports (`otel-tokens`
+writes one per live agent about every 30 s; two long-running spans of work
+here held 13,459 and 9,437 captures and 315,686 facts). The
+`request_analysis` asset recomputes every live request when the cube moves,
+and each report moved it, so each report meant reading the request's whole
+history: `sample` put the daemon at 50–120% of a core with no turn in
+flight, in the read of the span's captures and their facts
 (`row_to_capture`, `fact_row_mapper`).
 
-What a recompute reads now:
+What a recompute reads:
 
-- **The effort's captures as groups** — `effort_capture_groups`: per
-  producer and trigger, the count and the newest id. A spec's memo key holds
-  the groups of the producers it reads, so a capture of any other producer
-  (all of an agent's work is stamped with the effort) leaves it as it was and
-  reads no rows.
+- **The captures as groups**: per producer and trigger, the count and the
+  newest id. A spec's memo key holds the groups of the producers it reads,
+  so a capture of any other producer (all of an agent's work is stamped with
+  its turn) leaves it as it was and reads no rows.
 - **A `sum` spec folds** (`SumFold`): the total, the fact count and the
   newest point of the reports covered so far, with how many there were. A new
-  report is read alone (`effort_captures_after`) and added; the fold starts
-  over if a covered capture is gone (the count before the old newest id no
-  longer matches) or the spec or the effort's window changed.
-- **Observations and coverage read only the effort's run captures**
-  (`effort_captures_by_trigger`), not every report.
+  report is read alone and added; the fold starts over if a covered capture
+  is gone (the count before the old newest id no longer matches) or the spec
+  or the request's window changed.
+- **Observations and coverage read only the run captures**, not every
+  report.
 
-Measured (release, `a_long_open_effort_recomputes_in_milliseconds`,
-13,000 token reports of two facts each): reading the effort's captures and
-facts again **57.6 ms** (what each recompute did before, per effort, with
-twice the facts on the live database); a whole recompute after one more
-report **6.7 ms**. Pinned by `a_token_report_folds_into_the_total_without_
-rereading_the_effort` (one report reads one capture and two facts, and the
-fold equals a read from scratch) and `a_capture_nothing_reads_costs_no_reads`.
+Measured (release, 13,000 token reports of two facts each): reading the
+captures and facts again **57.6 ms** (what each recompute did before, per
+span, with twice the facts on the live database); a whole recompute after
+one more report **6.7 ms**. A test pins that one report reads one capture
+and two facts and that the fold equals a read from scratch, and another that
+a capture nothing reads costs no reads.
 
 ## oxplow-bundled's co-change pairs (P7.B5, 2026-10-02)
 
@@ -131,8 +129,8 @@ last-touch lookup using `idx_git_commit_file_path`.
 ## oxplow-bundled's deviation model (P7.C5, 2026-10-02)
 
 `v_oxplow_deviation` (an extension dataset with a recursive CTE over
-every effort file's directory prefixes) computes all efforts at once:
-**0.21 s** over this repo's 658 efforts / 5,484 effort files (sqlite3 on
+every request file's directory prefixes) computes all requests at once.
+Measured on its predecessor (the same query per span of work): **0.21 s** over this repo's 658 spans / 5,484 span files (sqlite3 on
 the live database, the same SQL over the physical tables). It stays a
 live view; `materialize: on_change` would recompute on every task edit
 for a read that's cheap enough as is. Revisit when a What Deviated slot
@@ -224,7 +222,7 @@ per-case facts** (tsk514), not the fold.
 
 **Where the facts are:** `oxplow.test_case` and `oxplow.test_duration` are
 87.5% of all facts (the `fact` table is 1.9 GB, its indexes another
-1.4 GB). 1,979 of the 2,044 `tests` captures are effort-stamped, which the
+1.4 GB). 1,979 of the 2,044 `tests` captures are stamped to the work that made them, which the
 opt-in `metricRetentionDays` keeps unconditionally — so no retention
 setting reclaimed them.
 
@@ -243,7 +241,7 @@ test). A seed reads what's left.
 
 ## Zero-splice producer discovery (tsk239)
 
-The effort panel asks, per measure, "which producers emit this metric's slice"
+The request analysis asks, per measure, "which producers emit this metric's slice"
 so a clean run zero-fills instead of reading blank. Answering it by scanning
 every fact of the measure cost 38% of live backend CPU — 917k rows scanned to
 return 277, with a temp b-tree because the slice key includes the open
@@ -317,24 +315,24 @@ optimizing the computation itself. The memo key is then usually obvious and
 provably correct: `capture_id → captured_at` is a function, so memoizing on it
 is right **regardless of row order** — ordering only affects hit rate.
 
-## An effort's metric deltas, memoized by what each spec reads
+## A request's metric deltas, memoized by what each spec reads
 
-`CollectionService::effort_metric_deltas` computes one delta per metric
-spec for an effort; the `effort_evidence` asset recomputes them whenever
-the metric cube moves, which an agent's token report (an `otel-tokens`
-capture every 10–15 s, stamped with the open effort) does. `delta_memo`
+The metric engine computes one delta per metric spec for a request; the
+`request_analysis` asset recomputes them whenever the metric cube moves,
+which an agent's token report (an `otel-tokens` capture every 10–15 s,
+stamped with its turn) does. `delta_memo`
 skips a spec whose inputs didn't move, so the key (`delta_inputs`) must hold
-only what the spec's delta can read: the spec, the effort's span, stream and
-claimed files, the capture token of the producers of its source measure, and
-**the effort's own captures of those producers** (the run and window
-families read their facts; the file family matches the effort's id on those
+only what the spec's delta can read: the spec, the request's span, stream and
+changed files, the capture token of the producers of its source measure, and
+**the request's own captures of those producers** (the run and window
+families read their facts; the file family matches the request on those
 producers' captures) — the coverage family instead its test-run captures. Keying
-on *all* the effort's captures made each token report invalidate every
+on *all* the request's captures made each token report invalidate every
 spec, including the file family, which reloads the producers' whole capture
 history and two whole-repo captures' facts: 10–20 s of CPU per recompute in
-a debug build, back to back. `an_effort_stamped_capture_recomputes_only_its_producers_specs`
-holds it: another producer's capture stamped to the effort recomputes
-nothing; one of the spec's own producers does.
+a debug build, back to back. A test holds it: another producer's capture
+stamped to the request recomputes nothing; one of the spec's own producers
+does.
 
 ## The renderer is not the problem (at idle)
 
@@ -671,10 +669,10 @@ find the few rows that differ. `KindSearchIndex::recompute(full)` now reads,
 for a core kind whose view has a `seq` column, only the rows past the highest
 `seq` it indexed when the inputs saw inserts only; `full` (any UPDATE or
 DELETE, the first build, a deploy or vocabulary change) and a fresh process
-read whole. `search_decision` and `search_turn` declare `seq` (their row
+read whole. `search_turn` declares `seq` (its row
 id); the others cannot say that no insert changes or removes an existing row
 (see `extensions-events.md`). Pinned by
-`an_insert_only_recompute_reads_only_the_new_rows`: three decisions, a whole
+`an_insert_only_recompute_reads_only_the_new_rows`: three rows, a whole
 read of 3; one more, a read of 1; nothing new, a read of 0; a whole read of
 4 leaves the same entries. The saving is bounded by the kinds that qualify
 and by `full` (a turn's end is an update): this is not measured on the live
@@ -784,11 +782,11 @@ map took 1.2 s, mostly allocating it). Don't go back to per-pair
 questions or pair maps; the cross product is not "tiny by construction",
 and at 50 ms it isn't worth persisting.
 
-## Effort evidence after the cube, through the shared engine (2026-10-06)
+## Request evidence after the cube, through the shared engine (2026-10-06)
 
 Right after boot the daemon went from ~150 MB to 1.7–2.2 GB: the
-`effort_evidence` asset's first build raced the cube's backfill, so every
-per-path effort delta missed the cube (`cube_series` serves only when the
+evidence asset's first build raced the cube's backfill, so every
+per-path delta missed the cube (`cube_series` serves only when the
 watermark covers every capture) and folded the measure's whole history —
 on a per-call `MetricEngine` whose fold memo was always empty. Evidence
 now reads the cube asset as its input (it recomputes after the cube,
@@ -796,12 +794,12 @@ never while it's pending; `assets.rs`), and `CollectionService` uses the
 app's one engine. A spec with `min_value`/`max_value` still can't be
 cube-served; it folds once per capture token, shared.
 
-## Effort deltas recompute only what moved (2026-10-06)
+## Deltas recompute only what moved (2026-10-06)
 
 Token counts land as captures every ~18 s, and each one, through the cube,
-recomputed every open effort's delta for every spec. `CollectionService`
-now memoizes each (effort, spec) delta on what it's computed from: the
-spec, the effort's span, start/end snapshots, stream and claimed files,
+recomputed every live span's delta for every spec. `CollectionService`
+now memoizes each (request, spec) delta on what it's computed from: the
+spec, the request's span, start/end snapshots, stream and changed files,
 its own captures, and the capture token of its source measure's
 producers. A token capture moves only the token specs' inputs; the rest
 reuse their row. A formula spec (no source measure) always recomputes.
@@ -1069,17 +1067,20 @@ both datasets.
 
 A burst of commits is one re-read in the UI: every reader of change events
 goes through `coalesce` (`apps/desktop/src/viz/rerun.ts`, 100 ms after
-the last event) — `useRerunOnChange`, the wiki title cache
-(`wikiTitleCache.ts`, which also re-reads once after an in-flight read
+the last event) — `useRerunOnChange`, the knowledge title cache
+(`knowledgeTitleCache.ts`, which also re-reads once after an in-flight read
 that missed a change) and `useChange`. A new reader of events adopts it
 rather than re-reading per event. Writers help from their side by
 committing a unit of work once (a duplicate scan stores its findings in
 one transaction). **The boot page-ref repair** (`page_ref_backfill.rs`,
 run once per projection-code hash and schema version — it used to be
 once per build, ~59 s of a thread at every restart after a dev rebuild)
-restates every work item, effort, note and finding slice: it writes them in
+restates every task, note and finding slice: it writes them in
 batches of 1000 through `SqlitePageRefStore::replace_sources`, one
-transaction each. Written one commit per row, it once sent ~250k change
+transaction each, and writes only a source whose stored edges differ (a
+run after a comment edit to a projection file once rewrote all 222,884
+findings' edges: 42 s with the database's writes held in ~400 ms
+chunks). Written one commit per row, it once sent ~250k change
 events at boot (a quarter of a million piled-up findings): the events
 socket lagged, the UI re-read for a minute and terminal input timed out.
 
@@ -1354,7 +1355,7 @@ never opened by the harness): **all 72 series identical to the fact oracle**,
 72 specs in 27,778 ms from facts → 1,823 ms with the cube, and the three
 specs are no longer among the ones the cube declines (5 remain, all
 unrelated: `oxplow.coverage.branch_pct`, `repo.eval_usage`,
-`repo.focused_tests`, `repo.hardcoded_secrets`, `work.open_tasks`):
+`repo.focused_tests`, `repo.hardcoded_secrets`, `task.open`):
 
 | spec | From facts | From the cube |
 |---|---|---|
@@ -1370,6 +1371,54 @@ Starting from the open sessions and taking each one's newest event takes 18 ms
 on the same data. A query plan test holds it (`agent_stores`). The
 `slow page loader` log line names a loader of 50 ms or more, and a page's
 `spec` run through `oxplow_run_page` times a query in place.
+
+## Shared work joins by ids (measured 2026-11-11)
+
+The task page's Shared work section (`oxplow-bundled`'s
+`shared-work-rows`) timed out (`query_sql: timed out after 5s`) on this
+repo's database: 52 live requests, 130 live turns, joined to
+`v_turn_file` and `v_request_task` on their `uri` columns. Each section
+alone timed out. The same query joined on `turn_id` / `request_id`
+answers at once (735 shared files, 35 shared items). The rule is in
+`resources.md` "Join two views by their ids".
+
+When no id exists on one side (a `page_ref`'s `source_uri` to a turn: a
+turn's key `trn3` is not its integer `id`), keep the indexed side first.
+The task page's `prompted` loader joined `v_page_ref` to `v_agent_turn`
+on `t.uri = r.source_uri` with `ORDER BY t.id DESC`; the plan was `SCAN t`
+then a `page_ref` probe per turn (all ~4,200 turns, 80–350 ms while
+agents wrote), even for a task nothing names. `FROM v_page_ref r CROSS
+JOIN v_agent_turn t` makes it `SEARCH page_ref USING INDEX
+idx_page_ref_target` first: no turn work when nothing names the task, one
+pass over the turns per mention.
+
+## Every page's queries, timed (measured 2026-11-11)
+
+Each SQL loader of oxplow-foundation's and oxplow-bundled's pages, parts
+and queries (268), run alone through `oxplow_query_sql` on this repo's
+database, earlier loaders it reads inlined as CTEs. A batch of pages run
+in parallel through `oxplow_run_page` logged 2–5 s for the metric pages;
+alone they are under 50 ms, so time one query at a time. What was slow and
+what changed:
+
+| Loader | Before | After | Why |
+|---|---|---|---|
+| `v_subagent` (thread-sessions) | 3.5–4 s, past 5 s for a whole column | one pass | a subquery per subagent re-read the subagent events (id inside the payload) and scanned every tool call (no index by subagent); now grouped once each (`the_subagent_model_reads_events_and_calls_once`) |
+| shared-work-rows, a thread | 2.0 s | 35 ms | items joined `v_task` by uri before grouping; group first, title after |
+| shared-work-rows, a 225-request task | 2–4 s | 135 ms | the task's files read from the files in; `CROSS JOIN` from its requests out |
+| diff-view `row`, a turn / no subject | 1.1–1.6 s | 6–25 ms | next to the turn arm, `rq` walked every turn, each scanning every turn for its request's first; driven from the request id now |
+| diff-view `row`, a 24-turn request | 2.1 s | ~0.5 s | the same, and its `turn_end` takes found from its turns |
+| branch-status `status`, `marks` | ~160 ms each | 6 ms | the divergence pinned in a join's `ON`, which narrows nothing (semantic-layer.md "Narrowed by the query") |
+
+`v_agent_conversation` (~420 ms: listing opencode's sessions runs
+`opencode session list`, a process start, on every read, and its pages
+re-read on every turn) keeps each harness's list until a conversation is
+bound or for 30 s (`saved_conversations.rs`); no other live dataset starts
+a program. Left as they are: the
+streams page's `apart` (~170 ms: it compares every branch with the base,
+as a per-row head can't narrow it), item-requests on a 225-request task
+(~250 ms, a file confidence check per file), task-rows `items` (~150 ms,
+every task).
 
 ## File watching at scale (measured 2026-11-06)
 

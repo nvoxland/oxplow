@@ -33,7 +33,7 @@ the latest value, with how much it moved in the range.
 
 Ask your agent for one instead of assembling it by hand:
 
-> Make me a dashboard with test duration, coverage, and tokens per effort,
+> Make me a dashboard with test duration, coverage, and tokens per request,
 > as numbers.
 
 It writes the page with `oxplow.extension.new_dashboard` and

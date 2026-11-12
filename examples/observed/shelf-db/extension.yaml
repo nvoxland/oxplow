@@ -1,0 +1,62 @@
+manifest: 2
+name: shelf-db
+description: Books kept in the extension's own SQLite file.
+engine: ">=0.7"
+version: 0.1.0
+requires: [shelf]
+intent:
+  purpose: >-
+    Show a store over its own SQLite file. The extension owns the file and
+    its migrations. A collector follows the file with a sqlite trigger and
+    states a snapshot. A rating field rides on each row. Commands add and
+    remove books.
+  origin: null
+  examples:
+    - name: adding-a-book-puts-a-row-in-the-model-with-its-rating
+      input: { command: shelf-db.book.add }
+      expect: a row with fields shelf-db rating
+permissions: [model.write, store.sql]
+storage: { sqlite: true }
+fills:
+  - model: shelf/book
+    stores: [shelf-db]
+    fields:
+      - { name: rating, title: Rating, kind: number }
+collectors:
+  - id: shelf-db.books
+    doc: Reads the book table and states the books of this store.
+    runtime: starlark
+    entry: collectors/books.star
+    needs: [model.write, store.sql]
+    on: [start, { sqlite: own }]
+commands:
+  - name: book.add
+    summary: Add a book to the database. The collector then adds the row.
+    input_schema:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+        author: { type: string }
+        rating: { type: integer, minimum: 0, maximum: 5 }
+      additionalProperties: false
+    entry: handlers/add.star
+    needs: [store.sql]
+    access: write
+    ui: { label: "New Book (database)", at: shelf/book.new }
+    example: { title: Dune, author: Herbert, rating: 4 }
+  - name: book.remove
+    summary: Remove a book of this store.
+    input_schema:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+      additionalProperties: false
+    entry: handlers/remove.star
+    needs: [store.sql]
+    access: write
+    ui:
+      label: Remove
+      about: { resource: shelf/book, accepts: { store: shelf-db } }
+    example: { id: dune }

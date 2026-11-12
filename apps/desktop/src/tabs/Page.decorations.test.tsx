@@ -20,29 +20,29 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         commands: [],
-        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", resource: "oxplow/work_item", placement: "ref-chip", label: "label", color: "color" }],
+        decorators: [{ id: "flags/0", extension: "flags", view: "v_flags_flags", resource: "oxplow/task", placement: "ref-chip", label: "label", color: "color" }],
       },
     },
-    // P10 (K1): oxplow-bundled's verdict, on the effort it was given on.
+    // A decorator on the request it was given on.
     {
-      name: "oxplow-bundled",
+      name: "audit",
       enabled: true, pages: [],
       ui: {
         slots: [],
         commands: [],
         decorators: [
-          { id: "oxplow/0", extension: "oxplow-bundled", view: "v_oxplow_verdict", resource: "oxplow/effort", placement: "ref-chip", label: "label", color: "color" },
+          { id: "audit/0", extension: "audit", view: "v_audit_state", resource: "oxplow/request", placement: "ref-chip", label: "label", color: "color" },
         ],
       },
     },
   ],
   querySql: async (sql: string, ...rest: unknown[]) => {
-    if (sql.includes("FROM v_oxplow_verdict")) {
+    if (sql.includes("FROM v_audit_state")) {
       return {
         columns: ["uri", "label", "color"],
-        rows: [["oxplow:oxplow/effort?id=eff7", "Changes requested", "red"]],
+        rows: [["oxplow:oxplow/request?id=req7", "Needs a look", "red"]],
         truncated: false,
-        reads: { datasets: ["v_oxplow_verdict"], tables: [], measures: [] },
+        reads: { datasets: ["v_audit_state"], tables: [], measures: [] },
         freshness: {},
       };
     }
@@ -50,7 +50,7 @@ mock.module("../api.js", () => ({
     queries.push(sql);
     return {
       columns: ["uri", "label", "color"],
-      rows: [["oxplow:oxplow/work_item?id=W-1&provider=fake", "urgent", "#ff0000"]],
+      rows: [["oxplow:oxplow/task?id=W-1&provider=fake", "urgent", "#ff0000"]],
       truncated: false,
       reads: { datasets: ["v_flags_flags"], tables: [], measures: [] },
       freshness: {},
@@ -69,7 +69,7 @@ const nav = {
   goForward() {},
   canGoBack: false,
   canGoForward: false,
-  ask: { ref: "oxplow:oxplow/work_item?id=W-1&provider=fake" },
+  ask: { ref: "oxplow:oxplow/task?id=W-1&provider=fake" },
 } as unknown as PageNavigation;
 
 const page = () =>
@@ -96,17 +96,17 @@ test("a disabled extension decorates nothing", async () => {
   expect(queries).toHaveLength(0);
 });
 
-// An effort opens as its diff, the effort's ref in the navigation.
-test("an effort page shows its review verdict as a chip", async () => {
-  const effortNav = { ...nav, ask: { ref: "oxplow:oxplow/effort?id=eff7" } } as unknown as PageNavigation;
+// A request page, the request's ref in the navigation.
+test("a request page shows its decorator as a chip", async () => {
+  const requestNav = { ...nav, ask: { ref: "oxplow:oxplow/request?id=req7" } } as unknown as PageNavigation;
   const view = render(
-    <PageNavigationContext.Provider value={effortNav}>
+    <PageNavigationContext.Provider value={requestNav}>
       <Page title="Changes" chips={[{ label: "closed" }]}>
         body
       </Page>
     </PageNavigationContext.Provider>,
   );
-  await waitFor(() => expect(view.getByTestId("page-chips").textContent).toBe("closedChanges requested"));
+  await waitFor(() => expect(view.getByTestId("page-chips").textContent).toBe("closedNeeds a look"));
 });
 
 // `mock.module` is process-wide: put the real module back so the files that

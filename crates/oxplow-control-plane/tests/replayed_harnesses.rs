@@ -172,6 +172,29 @@ async fn a_recorded_claude_code_session_is_recorded_canonically() {
     replay("claude/hooks.jsonl", "claude", "claude.txt").await;
 }
 
+/// Claude Code's Bash PostToolUse carries `bashEditDiff` on some calls: the
+/// files it says the call changed are on that call's tool event; a Bash
+/// call without it names none (its absence says nothing).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_shell_calls_reported_files_are_on_its_tool_call() {
+    let r = replayed("claude/hooks.jsonl", "claude").await;
+    let bash: Vec<_> = events_of(&r, "agent.tool.finished")
+        .await
+        .into_iter()
+        .filter(|p| p["tool"] == "Bash")
+        .collect();
+    let reported: Vec<_> = bash
+        .iter()
+        .filter(|p| p["paths"].as_array().is_some_and(|a| !a.is_empty()))
+        .collect();
+    assert_eq!(reported.len(), 2, "{bash:#?}");
+    assert!(reported.iter().all(|p| p["paths"][0] == "claude.txt"));
+    assert!(
+        bash.len() > reported.len(),
+        "a call without the field names none"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_opencode_session_is_recorded_canonically() {
     let r = replay("opencode/hooks.jsonl", "opencode", "opencode.txt").await;
@@ -235,12 +258,18 @@ async fn a_session_that_never_waited_fails_the_permission_check() {
 }
 
 /// Claude Code's background subagent, recorded: its own call carries its
-/// id, it starts and finishes once, its hand-back opens a turn with no
-/// person's prompt, and the session resumes the parent.
+/// id, it starts and finishes once, its hand-back opens a turn of the
+/// subagent's that goes on with the one it started in, and the session
+/// resumes the parent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_claude_code_subagent_is_attributed() {
     let r = replayed("claude/subagent.jsonl", "claude").await;
-    assert_eq!(events_of(&r, "agent.prompt.submitted").await.len(), 1);
+    let sources: Vec<_> = events_of(&r, "agent.prompt.submitted")
+        .await
+        .iter()
+        .map(|p| p["source"].clone())
+        .collect();
+    assert_eq!(sources, ["person", "subagent"]);
     assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 1);
     assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 1);
     let bash: Vec<_> = events_of(&r, "agent.tool.finished")
@@ -257,11 +286,37 @@ async fn a_recorded_claude_code_subagent_is_attributed() {
         .list_for_thread(&r.thread, 10)
         .await
         .unwrap();
-    let mut prompts: Vec<_> = turns.iter().map(|t| t.prompt.clone()).collect();
-    prompts.sort();
+    // The hand-back's turn is the subagent's, its text kept, and it goes on
+    // with the turn the subagent started in.
+    use oxplow_domain::hook::TurnSource;
+    let mut turns = turns;
+    turns.sort_by_key(|t| t.id.value());
     assert_eq!(
-        prompts,
-        ["", "use a Task subagent to count the lines in claude.txt"]
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [Some(TurnSource::Person), Some(TurnSource::Subagent)]
+    );
+    let first = turns
+        .iter()
+        .find(|t| t.source == Some(TurnSource::Person))
+        .unwrap();
+    assert_eq!(
+        first.prompt,
+        "use a Task subagent to count the lines in claude.txt"
+    );
+    let handback = turns
+        .iter()
+        .find(|t| t.source == Some(TurnSource::Subagent))
+        .unwrap();
+    assert!(
+        handback.prompt.starts_with("<agent-message"),
+        "{}",
+        handback.prompt
+    );
+    let started = events_of(&r, "agent.turn.started").await;
+    let cause: Vec<_> = started.iter().map(|p| p["cause_turn"].clone()).collect();
+    assert_eq!(
+        cause,
+        [serde_json::Value::Null, first.id.to_string().into()]
     );
     assert_eq!(resume_of(&r).await, "56cfaf9b-c90e-4ffd-9689-bd94f89e2426");
 }
@@ -272,10 +327,10 @@ async fn a_recorded_claude_code_subagent_is_attributed() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_recorded_claude_code_peer_message_opens_a_turn_of_its_own() {
     let r = replayed("claude/peer_message.jsonl", "claude").await;
-    assert!(events_of(&r, "agent.prompt.submitted").await.is_empty());
-    let received = events_of(&r, "agent.peer_message.received").await;
+    let received = events_of(&r, "agent.prompt.submitted").await;
     assert_eq!(received.len(), 1);
-    assert_eq!(received[0]["from"], "oxplow-main");
+    assert_eq!(received[0]["source"], "peer");
+    assert_eq!(received[0]["sender"], "oxplow-main");
     let turns = r
         .svc
         .agent_turn_store
@@ -283,6 +338,374 @@ async fn a_recorded_claude_code_peer_message_opens_a_turn_of_its_own() {
         .await
         .unwrap();
     assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].prompt, "");
+    assert_eq!(turns[0].source, Some(oxplow_domain::hook::TurnSource::Peer));
+    assert!(
+        turns[0]
+            .prompt
+            .contains("You can mark the ticket done now."),
+        "the message is kept"
+    );
     assert_eq!(turns[0].answer.as_deref(), Some("Marked it done."));
+}
+
+/// The tool calls of a replay that finished, by tool name, oldest first.
+async fn tools_of(r: &Replayed) -> Vec<String> {
+    events_of(r, "agent.tool.finished")
+        .await
+        .iter()
+        .map(|p| p["tool"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// Claude Code's background shell, recorded: the Bash call that starts it
+/// opens its job (kind shell), the `<task-notification>` that finishes it
+/// is a background job's report and not a person's prompt, it opens a turn
+/// that goes on with the one the job started in, and the SubagentStop
+/// after each Stop (an empty `agent_type`: an internal helper) opens and
+/// closes no subagent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_claude_code_background_shell_is_a_job_from_its_start_to_its_report() {
+    let r = replayed("claude/background_shell.jsonl", "claude").await;
+    let received = events_of(&r, "agent.prompt.submitted").await;
+    let sources: Vec<_> = received.iter().map(|p| p["source"].clone()).collect();
+    assert_eq!(sources, ["person", "background_job"]);
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 0);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 0);
+    assert_eq!(tools_of(&r).await, ["Read", "Bash", "Read"]);
+
+    use oxplow_domain::hook::TurnSource;
+    let mut turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    turns.sort_by_key(|t| t.id.value());
+    assert_eq!(
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [Some(TurnSource::Person), Some(TurnSource::BackgroundJob)]
+    );
+    assert!(turns[1]
+        .answer
+        .as_deref()
+        .unwrap()
+        .contains("done-sleeping"));
+
+    // One job: opened by the Bash call, finished by the notice.
+    type Job = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+    let jobs: Vec<Job> = r
+        .svc
+        .db
+        .read(|c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT harness_job_id, kind, start_basis, started_turn, report_turn, status, state
+                       FROM v_agent_job ORDER BY id",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    let trn =
+        |t: &oxplow_domain::AgentTurn| Some(format!("oxplow:oxplow/turn?id=trn{}", t.id.value()));
+    assert_eq!(
+        jobs,
+        [(
+            "bkrmmrzrm".to_string(),
+            Some("shell".to_string()),
+            Some("reported".to_string()),
+            trn(&turns[0]),
+            trn(&turns[1]),
+            Some("completed".to_string()),
+            "reported".to_string(),
+        )]
+    );
+}
+
+/// Claude Code's cross-session messages, recorded from the sender's side:
+/// the peer's reply and the idle notice the sender asked for each open a
+/// turn that is a peer's, not the person's; the ListAgents and SendMessage
+/// calls are ordinary tool calls.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_claude_code_cross_session_exchange_is_not_the_persons_prompts() {
+    let r = replayed("claude/cross_session.jsonl", "claude").await;
+    let received = events_of(&r, "agent.prompt.submitted").await;
+    let sources: Vec<_> = received.iter().map(|p| p["source"].clone()).collect();
+    assert_eq!(sources, ["person", "peer", "peer"]);
+    assert_eq!(received[1]["sender"], "rec-project-f9");
+    assert_eq!(received[2]["sender"], "rec-project-f9");
+    assert_eq!(
+        tools_of(&r).await,
+        ["ToolSearch", "ListAgents", "SendMessage"]
+    );
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 0);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 0);
+    let mut turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    turns.sort_by_key(|t| t.id.value());
+    use oxplow_domain::hook::TurnSource;
+    assert_eq!(
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [
+            Some(TurnSource::Person),
+            Some(TurnSource::Peer),
+            Some(TurnSource::Peer)
+        ]
+    );
+    assert!(turns[1].prompt.contains("all tests passed"));
+    assert!(turns[2].prompt.starts_with("[Cross-session idle notice]"));
+    // The idle notice joins the turn whose `SendMessage` asked for it
+    // (`notify_when_idle`); the peer's reply names no send and links none.
+    let started = events_of(&r, "agent.turn.started").await;
+    assert_eq!(started[2]["cause_turn"], turns[0].id.to_string());
+    assert!(started[1]["cause_turn"].is_null());
+}
+
+/// A replay's turns, oldest first: source, outcome, error, question and
+/// prompt as the turn view reads them.
+type TurnRow = (
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+);
+async fn turn_rows(r: &Replayed) -> Vec<TurnRow> {
+    r.svc
+        .db
+        .read(|c| {
+            let mut stmt = c
+                .prepare(
+                    "SELECT source, outcome, error, question, prompt FROM v_agent_turn ORDER BY id",
+                )
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap()
+}
+
+/// opencode's abort, recorded: the Stop with `MessageAbortedError` ends the
+/// person's turn as interrupted; the shell's PostToolUse that lands after
+/// that Stop and the second Stop (a second `session.idle`) open and end
+/// nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_abort_ends_one_turn_as_interrupted() {
+    let r = replayed("opencode/abort.jsonl", "opencode").await;
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].0.as_deref(), Some("person"));
+    assert_eq!(turns[0].1, "interrupted");
+    assert_eq!(turns[0].2, None);
+    assert_eq!(events_of(&r, "agent.turn.started").await.len(), 1);
+    assert_eq!(events_of(&r, "agent.turn.ended").await.len(), 1);
+    assert_eq!(tools_of(&r).await, ["Bash"]);
+    assert_eq!(events_of(&r, "agent.prompt.submitted").await.len(), 1);
+    // Nothing after the first Stop wakes the agent: its last state is idle.
+    let states: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .iter()
+        .map(|p| p["state"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some("idle"),
+        "{states:?}"
+    );
+}
+
+/// opencode's API error, recorded (a 401): the Stop carrying the error ends
+/// the turn as errored with the error's name and message; the second Stop
+/// ends nothing more.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_api_error_ends_one_turn_as_errored() {
+    let r = replayed("opencode/error.jsonl", "opencode").await;
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].1, "errored");
+    assert_eq!(
+        turns[0].2.as_deref(),
+        Some("APIError: Missing Authentication header")
+    );
+    assert_eq!(events_of(&r, "agent.turn.ended").await.len(), 1);
+}
+
+/// opencode's question tool, recorded: the tool hook and the question
+/// events both report it (two PreToolUse and two PostToolUse), but it is
+/// one tool call, one `ask` and one wait on the person that ends with the
+/// answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_question_is_one_tool_call_and_one_wait() {
+    let r = replayed("opencode/question.jsonl", "opencode").await;
+    assert_eq!(tools_of(&r).await, ["AskUserQuestion"]);
+    assert_eq!(events_of(&r, "agent.tool.requested").await.len(), 1);
+    let waits: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .into_iter()
+        .filter(|p| p["state"] == "awaiting_user")
+        .collect();
+    assert_eq!(waits.len(), 1, "{waits:#?}");
+    assert!(waits[0]["detail"]
+        .as_str()
+        .is_some_and(|d| d.contains("Which function would you like to add to calc.py?")));
+    let states: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .iter()
+        .map(|p| p["state"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some("idle"),
+        "{states:?}"
+    );
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].1, "completed");
+}
+
+/// opencode's foreground subagent, recorded: the `task` call brackets a
+/// child session that starts and stops once; the child's tools post as the
+/// parent thread and are the subagent's; the Task call finishes once, after
+/// the SubagentStop; one turn of the person's; the session resumes the
+/// parent, not the child.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_foreground_subagent_is_attributed() {
+    let r = replayed("opencode/foreground_subagent.jsonl", "opencode").await;
+    let child = "ses_e3790fc8effebOoNfzkmVROGC0";
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 1);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 1);
+    assert_eq!(tools_of(&r).await, ["Glob", "Read", "Task"]);
+    let finished = events_of(&r, "agent.tool.finished").await;
+    for call in &finished[..2] {
+        assert_eq!(call["subagent"]["id"], child, "{call}");
+        assert_eq!(call["subagent"]["kind"], "task");
+    }
+    assert!(
+        finished[2]["subagent"].is_null(),
+        "the Task call is the parent's"
+    );
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].0.as_deref(), Some("person"));
+    assert_eq!(turns[0].1, "completed");
+    assert_eq!(resume_of(&r).await, "ses_e37910853ffekC2k67PjoCQfso");
+}
+
+/// opencode's background subagent, recorded: the parent stops while the
+/// child runs; the child's result arrives as a synthetic `<task …>` user
+/// message, which opens a turn of the subagent's (not the person's, and
+/// not a second prompt of theirs) that goes on with the turn it started
+/// in; the child finishes once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_background_subagent_hands_back_without_a_prompt() {
+    let r = replayed("opencode/background_subagent.jsonl", "opencode").await;
+    let child = "ses_e379029c4ffeCDHywhBAdL2b7J";
+    let received = events_of(&r, "agent.prompt.submitted").await;
+    let sources: Vec<_> = received.iter().map(|p| p["source"].clone()).collect();
+    assert_eq!(sources, ["person", "subagent"], "{received:#?}");
+    assert_eq!(events_of(&r, "agent.subagent.started").await.len(), 1);
+    assert_eq!(events_of(&r, "agent.subagent.finished").await.len(), 1);
+    assert_eq!(tools_of(&r).await, ["Task", "Read"]);
+    let read = &events_of(&r, "agent.tool.finished").await[1];
+    assert_eq!(read["subagent"]["id"], child, "{read}");
+    use oxplow_domain::hook::TurnSource;
+    let mut turns = r
+        .svc
+        .agent_turn_store
+        .list_for_thread(&r.thread, 10)
+        .await
+        .unwrap();
+    turns.sort_by_key(|t| t.id.value());
+    assert_eq!(
+        turns.iter().map(|t| t.source).collect::<Vec<_>>(),
+        [Some(TurnSource::Person), Some(TurnSource::Subagent)]
+    );
+    assert!(
+        turns[1].prompt.starts_with("<task id="),
+        "{}",
+        turns[1].prompt
+    );
+    assert!(turns[1].answer.as_deref().unwrap().contains("mul"));
+    let started = events_of(&r, "agent.turn.started").await;
+    assert_eq!(started[1]["cause_turn"], turns[0].id.to_string());
+    // The child is one job, started in the first turn, reported in the second.
+    let jobs: Vec<(String, Option<String>, Option<String>)> = r
+        .svc
+        .db
+        .read(|c| {
+            let mut stmt = c
+                .prepare("SELECT harness_job_id, kind, status FROM v_agent_job ORDER BY id")
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map_err(oxplow_db::map_sql_err)?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(oxplow_db::map_sql_err)
+        })
+        .await
+        .unwrap();
+    assert_eq!(jobs.len(), 1, "{jobs:?}");
+    assert_eq!(jobs[0].0, child);
+    assert_eq!(resume_of(&r).await, "ses_e37903460ffegmpoSj2OY79zTd");
+}
+
+/// opencode's `/compact`, recorded: it posts no prompt, so no turn of the
+/// person's opens; the one turn (the earlier prompt) ends at its Stop; the
+/// compaction is recorded once, as a manual one, and the Stop after it
+/// (the summary message's idle) opens and ends no turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_recorded_opencode_compaction_is_recorded_and_opens_no_turn() {
+    let r = replayed("opencode/compaction.jsonl", "opencode").await;
+    let turns = turn_rows(&r).await;
+    assert_eq!(turns.len(), 1, "{turns:#?}");
+    assert_eq!(turns[0].0.as_deref(), Some("person"));
+    assert_eq!(turns[0].1, "completed");
+    assert_eq!(events_of(&r, "agent.prompt.submitted").await.len(), 1);
+    let compacted = events_of(&r, "agent.context.compacted").await;
+    assert_eq!(compacted.len(), 1, "{compacted:#?}");
+    assert_eq!(compacted[0]["trigger"], "manual");
+    assert_eq!(tools_of(&r).await, ["Read", "Read"]);
+    let states: Vec<_> = events_of(&r, "agent.status.changed")
+        .await
+        .iter()
+        .map(|p| p["state"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        states.last().map(String::as_str),
+        Some("idle"),
+        "{states:?}"
+    );
 }

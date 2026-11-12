@@ -92,7 +92,7 @@ async fn refs(peer: &Peer, handle: &Handle, incoming: &mut Receiver<Incoming>) -
             method::READ,
             &ReadParams {
                 handle: handle.clone(),
-                collector: "work_items".into(),
+                collector: "tasks".into(),
                 state: None,
             },
         )
@@ -251,10 +251,10 @@ async fn a_peer_drives_the_fake_over_stdio() {
         .unwrap();
     assert_eq!(
         created.result,
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake" })
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake" })
     );
-    assert_eq!(created.events[0].event_type, "work_item.recorded");
-    assert_eq!(created.events[0].payload["item"]["native_state"], "Backlog");
+    assert_eq!(created.events[0].event_type, "task.recorded");
+    assert_eq!(created.events[0].payload["item"]["stage"], "ready");
     invoke(&peer, &handle, "create", json!({ "title": "Second" }))
         .await
         .unwrap();
@@ -262,16 +262,16 @@ async fn a_peer_drives_the_fake_over_stdio() {
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "in_progress" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake", "to": "doing" }),
     )
     .await
     .unwrap();
-    assert_eq!(moved.events[0].payload["item"]["native_state"], "Doing");
+    assert_eq!(moved.events[0].payload["item"]["stage"], "doing");
     let refused = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-9&provider=fake", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-9&provider=fake", "to": "shipped" }),
     )
     .await
     .unwrap_err();
@@ -287,7 +287,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
             method::READ,
             &ReadParams {
                 handle: handle.clone(),
-                collector: "work_items".into(),
+                collector: "tasks".into(),
                 state: None,
             },
         )
@@ -313,8 +313,8 @@ async fn a_peer_drives_the_fake_over_stdio() {
     assert_eq!(
         streamed,
         vec![
-            json!("oxplow:oxplow/work_item?id=W-2&provider=fake"),
-            json!("oxplow:oxplow/work_item?id=W-1&provider=fake")
+            json!("oxplow:oxplow/task?id=W-2&provider=fake"),
+            json!("oxplow:oxplow/task?id=W-1&provider=fake")
         ]
     );
     assert_eq!(state, Some(json!({ "cursor": 3, "seen": 2 })));
@@ -323,7 +323,7 @@ async fn a_peer_drives_the_fake_over_stdio() {
             method::READ,
             &ReadParams {
                 handle: handle.clone(),
-                collector: "work_items".into(),
+                collector: "tasks".into(),
                 state,
             },
         )
@@ -396,7 +396,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
                 method::READ,
                 &ReadParams {
                     handle: handle.clone(),
-                    collector: "work_items".into(),
+                    collector: "tasks".into(),
                     state: None,
                 },
             )
@@ -451,7 +451,7 @@ async fn the_read_hooks_stream_progress_fail_midway_and_misreport() {
     let (_, seen) = read(&peer, &handle, &mut incoming).await;
     assert_eq!(
         seen[0].1["row"]["uri"],
-        "oxplow:oxplow/work_item?id=X-1&provider=other"
+        "oxplow:oxplow/task?id=X-1&provider=other"
     );
 }
 
@@ -486,13 +486,13 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         .unwrap();
     assert_eq!(
         created.result["uri"],
-        "oxplow:oxplow/work_item?id=W-1&provider=fake_second"
+        "oxplow:oxplow/task?id=W-1&provider=fake_second"
     );
     let moved = invoke(
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake_second", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake_second", "to": "shipped" }),
     )
     .await;
     assert!(moved.is_ok(), "{moved:?}");
@@ -501,7 +501,7 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         &peer,
         &handle,
         "transition",
-        json!({ "uri": "oxplow:oxplow/work_item?id=W-1&provider=fake", "to": "done" }),
+        json!({ "uri": "oxplow:oxplow/task?id=W-1&provider=fake", "to": "shipped" }),
     )
     .await;
     assert!(
@@ -570,113 +570,6 @@ async fn the_fake_takes_its_id_from_the_host_and_reports_a_missing_credential() 
         ),
         "{refused:?}"
     );
-}
-
-/// Its effort-policy mode (`OXPLOW_FAKE_CAPABILITY=effort_policy`): it
-/// declares the one verb `react` and composes efforts for an item's
-/// moves — open on `in_progress` with a thread, close the item's open
-/// efforts (read through `host/call`) on `done` — and skips the rest.
-#[tokio::test]
-async fn as_an_effort_policy_it_composes_efforts() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_oxplow-provider-fake"))
-        .env("OXPLOW_FAKE_CAPABILITY", "effort_policy")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .expect("spawn the fake");
-    let stdout = child.stdout.take().unwrap();
-    let stdin = child.stdin.take().unwrap();
-    let (peer, mut incoming) = Peer::spawn(stdout, stdin);
-    let declared = initialize(&peer).await;
-    assert_eq!(declared, oxplow_provider_fake::policy_declarations());
-    assert_eq!(declared.capabilities[0].capability, "effort_policy");
-    assert_eq!(
-        declared
-            .commands
-            .iter()
-            .map(|c| c.name.as_str())
-            .collect::<Vec<_>>(),
-        vec!["react"]
-    );
-    assert!(declared.event_types.is_empty() && declared.collectors.is_empty());
-    let handle = check(&peer).await;
-    // The host answers its reads: the item's one open effort.
-    let answering = peer.clone();
-    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let seen = asked.clone();
-    tokio::spawn(async move {
-        while let Some(Incoming::Request { id, method, params }) = incoming.recv().await {
-            assert_eq!(method, method::HOST_CALL);
-            seen.lock().unwrap().push(params);
-            let _ = answering.respond(id, Ok(json!([{ "id": 7 }]))).await;
-        }
-    });
-    let event = |to: &str, thread: Option<&str>| {
-        json!({ "event": {
-            "id": format!("e-{to}"), "type": "work_item.state_changed", "v": 1, "seq": 1,
-            "source": "human", "subject": ["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"],
-            "payload": { "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "to": to },
-            "anchors": { "thread_id": thread },
-        }})
-    };
-    let started = keyed(
-        &peer,
-        &handle,
-        "react",
-        event("in_progress", Some("thr3")),
-        Some("react:e1"),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        started.result,
-        json!({ "commands": [{ "name": "oxplow.effort.open",
-                               "input": { "thread": "thr3", "work_item": "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" } }] })
-    );
-    let done = keyed(
-        &peer,
-        &handle,
-        "react",
-        event("done", None),
-        Some("react:e2"),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        done.result,
-        json!({ "commands": [{ "name": "oxplow.effort.close",
-                               "input": { "effort": "eff7", "reason": "switch" } }] })
-    );
-    let asked = asked.lock().unwrap().clone();
-    assert_eq!(asked.len(), 1);
-    assert_eq!(asked[0]["key"], "react:e2");
-    assert_eq!(asked[0]["scope"], "sql.read");
-    assert_eq!(
-        asked[0]["args"]["params"]["work_item"],
-        "oxplow:oxplow/work_item?id=tsk1&provider=oxplow"
-    );
-    let skipped = keyed(
-        &peer,
-        &handle,
-        "react",
-        event("blocked", Some("thr3")),
-        Some("react:e3"),
-    )
-    .await
-    .unwrap();
-    assert!(skipped.result.get("skip").is_some(), "{}", skipped.result);
-    // A start with no thread has nowhere to open an effort.
-    let nowhere = keyed(
-        &peer,
-        &handle,
-        "react",
-        event("in_progress", None),
-        Some("react:e4"),
-    )
-    .await
-    .unwrap();
-    assert!(nowhere.result.get("skip").is_some(), "{}", nowhere.result);
 }
 
 /// Its snapshots mode (`OXPLOW_FAKE_CAPABILITY=snapshots`): a fake that
@@ -1032,8 +925,13 @@ fn spawn_knowledge(state: Option<&std::path::Path>) -> (Child, Peer, Receiver<In
     (child, peer, incoming)
 }
 
-fn page_write(slug: &str, body: &str) -> Value {
-    json!({ "slug": slug, "body": body, "verified_files": [], "removed_files": [] })
+fn page_write(id: &str, body: &str) -> Value {
+    json!({ "id": id, "body": body, "verified_files": [], "removed_files": [] })
+}
+
+/// A page of the fake (the instance `fake`).
+fn page(id: &str) -> String {
+    oxplow_domain::uri::build::knowledge_uri("fake", id)
 }
 
 #[tokio::test]
@@ -1043,14 +941,15 @@ async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
     assert_eq!(declared, oxplow_provider_fake::knowledge_declarations());
     let capability = &declared.capabilities[0];
     assert_eq!(capability.capability, "knowledge");
-    assert_eq!(capability.features, json!({}));
+    assert_eq!(capability.features, json!({ "edit": true }));
+    assert_eq!(capability.data["kinds"][0]["bucket"], "note");
     assert_eq!(
         declared
             .commands
             .iter()
             .map(|c| c.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["write_page", "delete_page", "link"]
+        vec!["write_page", "delete_page"]
     );
     for c in &declared.commands {
         assert_eq!((c.confirm.as_str(), c.access.as_str()), ("never", "record"));
@@ -1066,7 +965,7 @@ async fn as_a_knowledge_provider_it_declares_its_verbs_event_and_collector() {
             declared.event_types[0].event_type.as_str(),
             declared.event_types[0].v
         ),
-        ("knowledge.page.recorded", 2)
+        ("knowledge.page.recorded", 3)
     );
     assert_eq!(
         (
@@ -1088,72 +987,56 @@ async fn as_a_knowledge_provider_a_write_answers_the_page_and_its_record() {
         "write_page",
         page_write(
             "design",
-            "See [[src/lib.rs]] and [[other-page]], [[src/lib.rs]] again.",
+            "See [[src/lib.rs]] and [[other-page]], [[vault:Notes]], [[src/lib.rs]] again.",
         ),
     )
     .await
     .unwrap();
-    assert_eq!(wrote.result, json!({ "page": "design" }));
+    assert_eq!(wrote.result, json!({ "id": "design" }));
     assert_eq!(wrote.events.len(), 1);
     let event = &wrote.events[0];
     assert_eq!(event.event_type, "knowledge.page.recorded");
-    assert_eq!(event.v, 2);
+    assert_eq!(event.v, 3);
+    assert_eq!(event.subject, vec![page("design")]);
+    let record = &event.payload["page"];
+    assert_eq!(record["uri"], page("design"));
+    assert_eq!(record["kind"], "note");
+    assert_eq!(record["title"], "design");
     assert_eq!(
-        event.subject,
-        vec!["oxplow:oxplow/wiki?slug=design".to_string()]
-    );
-    let page = &event.payload["page"];
-    assert_eq!(page["uri"], "oxplow:oxplow/wiki?slug=design");
-    assert_eq!(page["title"], "design");
-    assert_eq!(
-        page["uris"],
+        record["uris"],
         json!([
             "oxplow:oxplow/file?path=src/lib.rs",
-            "oxplow:oxplow/wiki?slug=other-page"
+            "oxplow:oxplow/knowledge?id=other-page&store=oxwiki",
+            "oxplow:oxplow/knowledge?id=Notes&store=vault",
         ])
     );
-    assert!(page.get("deleted").is_none());
-    assert!(page["updated_at"].as_str().unwrap().ends_with('Z'));
+    assert!(record.get("deleted").is_none());
+    assert!(record["updated_at"].as_str().unwrap().ends_with('Z'));
 
-    // A link goes under Related; the record states the new ref.
-    let linked = invoke(
+    // With no id it takes one from the title.
+    let titled = invoke(
         &peer,
         &handle,
-        "link",
-        json!({ "page": "oxplow:oxplow/wiki?slug=design", "target": "oxplow:oxplow/wiki?slug=third" }),
+        "write_page",
+        json!({ "title": "Auth Flow", "body": "x", "verified_files": [], "removed_files": [] }),
     )
     .await
     .unwrap();
-    assert_eq!(linked.result, json!({}));
-    let page = &linked.events[0].payload["page"];
-    assert!(
-        page["body"]
-            .as_str()
-            .unwrap()
-            .contains("## Related\n\n[[third]]"),
-        "{page}"
-    );
-    assert_eq!(
-        page["uris"],
-        json!([
-            "oxplow:oxplow/file?path=src/lib.rs",
-            "oxplow:oxplow/wiki?slug=other-page",
-            "oxplow:oxplow/wiki?slug=third"
-        ])
-    );
+    assert_eq!(titled.result, json!({ "id": "auth-flow" }));
+    assert_eq!(titled.events[0].payload["page"]["uri"], page("auth-flow"));
 
-    let deleted = invoke(&peer, &handle, "delete_page", json!({ "slug": "design" }))
+    let deleted = invoke(&peer, &handle, "delete_page", json!({ "id": "design" }))
         .await
         .unwrap();
     assert_eq!(deleted.result, json!({}));
     assert_eq!(deleted.events[0].payload["page"]["deleted"], json!(true));
 
     for (verb, input) in [
-        ("delete_page", json!({ "slug": "design" })),
-        ("delete_page", json!({ "slug": "nope" })),
+        ("delete_page", json!({ "id": "design" })),
+        ("delete_page", json!({ "id": "nope" })),
         (
-            "link",
-            json!({ "page": "oxplow:oxplow/wiki?slug=nope", "target": "x" }),
+            "write_page",
+            json!({ "body": "x", "verified_files": [], "removed_files": [] }),
         ),
     ] {
         let refused = invoke(&peer, &handle, verb, input).await;
@@ -1226,7 +1109,7 @@ async fn as_a_knowledge_provider_it_streams_changed_pages_and_keeps_them() {
         .collect();
     assert_eq!(
         slugs,
-        vec!["oxplow:oxplow/wiki?slug=b", "oxplow:oxplow/wiki?slug=a"],
+        vec![page("b"), page("a")],
         "in revision order, a's rewrite last"
     );
     assert_eq!(rows[1]["row"]["body"], "uno");

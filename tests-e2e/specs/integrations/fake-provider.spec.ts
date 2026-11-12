@@ -3,8 +3,8 @@ import { expect, test } from "../../support/fixtures.js";
 import { inFrame, open, shown } from "../../support/ui.js";
 
 // Only what the shell shows: the Integrations frame's config form (oxplow's
-// `openForm`), check, toggle and sync, and the right-click choice of the work
-// list. That an item reaches the tracker and comes back on a sync is the
+// `openForm`), check, toggle and sync, and the right-click choice of the
+// task tracker. That an item reaches the tracker and comes back on a sync is the
 // provider tests' (`providers/tests.rs`).
 test("a person configures, checks and enables the fake tracker from Integrations", async ({ page, daemon }) => {
   await open(page, daemon, "oxplow:oxplow/page?page=settings#area=integrations");
@@ -32,23 +32,23 @@ test("a person configures, checks and enables the fake tracker from Integrations
   await fakeRow.click({ button: "right" });
   await page.getByTestId("menu-item-viz-action-use-project").click();
   await expect(fakeRow).toContainText("The project uses it");
-  // The choice is the daemon's once it lists the fake as the active work list.
-  await until("the fake to be the active work list", 30_000, async () => {
+  // The choice is the daemon's once it lists the fake as the active task tracker.
+  await until("the fake to be the active task tracker", 30_000, async () => {
     const out = await ipc<{ rows: unknown[][] }>(daemon, "query_sql", {
-      sql: "SELECT 1 FROM v_capability_provider WHERE capability = 'work_items' AND provider = 'fake' AND active = 1 AND available = 1",
+      sql: "SELECT 1 FROM v_capability_provider WHERE capability = 'task_tracker' AND provider = 'fake' AND active = 1 AND available = 1",
     });
     return out.rows.length === 1;
   });
-  // An item on the active work list, so the frame's sync has one to bring.
-  await run(daemon, "oxplow.work_item.create", { title: "Kiwi from oxplow" });
+  // An item on the active task tracker, so the frame's sync has one to bring.
+  await run(daemon, "oxplow.task.create", { title: "Kiwi from oxplow" });
   // An external item reaches oxplow's models through its collector's read.
   // Integrations is the last section of a long page, and the choices above
   // changed the Capabilities table over it: the frame may now be below the
   // fold, where the browser doesn't run its animation frames, and a click
   // waits for the button to be stable by those. A person scrolls to it.
   integrations = await inFrame(page, "Integrations");
-  await integrations.getByTestId("integration-sync-e2e/fake-work_items").click();
-  await expect(integrations.getByTestId("integration-collector-e2e/fake-work_items")).toContainText(/1 record/);
+  await integrations.getByTestId("integration-sync-e2e/fake-tasks").click();
+  await expect(integrations.getByTestId("integration-collector-e2e/fake-tasks")).toContainText(/1 record/);
 });
 
 // A command the frame runs that fails says so once. One that names a field

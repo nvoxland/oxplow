@@ -1,17 +1,17 @@
 //! `oxplow-dev`: helpers for working on oxplow itself, never shipped.
 //!
-//! `oxplow-dev wiki …` does the same for the project's wiki, through the
-//! `knowledge.*` commands (the wiki as the store, whatever the project
-//! has active).
+//! `oxplow-dev knowledge …` does the same for the project's knowledge
+//! pages, through the `knowledge.*` commands, with oxwiki as the store
+//! (`--store oxwiki`, the one it runs), whatever the project has enabled.
 //!
-//! `oxplow-dev task …` reads and changes oxplow's tasks while the project
-//! has no work list active (none chosen in Settings → Capabilities). It runs oxplow's own `work_item.*` commands on a command
+//! `oxplow-dev task …` reads and changes oxtask while the project
+//! has no task tracker active (none chosen in Settings → Capabilities). It runs oxplow's own `task.*` commands on a command
 //! bus over the project's database, as the app would — validation, audit,
 //! events and all — on a bus that doesn't check what's active. So the rows
 //! and the log are the task system's own, and turning the extension back
 //! on shows all of it. The database is opened as it is
 //! (`Database::open_existing`): nothing migrated or recompiled under the
-//! running app. Its reads are oxplow's own task table, not the work-item
+//! running app. Its reads are oxplow's own task table, not the task
 //! interface (which shows only the active list's items): the one place
 //! outside oxplow's implementation that reads it, on purpose. See
 //! `.context/working-in-this-repo.md` "oxplow-dev".
@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use oxplow_app::commands::CommandBus;
 use oxplow_db::{Database, SqliteEventLogStore};
-use oxplow_domain::work_items::WorkItemsRegistry;
+use oxplow_domain::tasks::TaskTrackers;
 use oxplow_domain::{Actor, ThreadId};
 use serde_json::{json, Map, Value};
 
@@ -35,11 +35,11 @@ oxplow-dev task comment <id> <body>
 oxplow-dev task link <id> <target> <blocks|discovered_from|relates_to|duplicates|supersedes|replies_to|about>
 oxplow-dev task unlink <id> <target> <link type>
 
-oxplow-dev wiki list                         the pages (slug, title)
-oxplow-dev wiki show <slug>
-oxplow-dev wiki write <slug> [--title T] [--file F]   body from F, else stdin
-oxplow-dev wiki delete <slug>
-oxplow-dev wiki search <text>                pages whose slug, title or body has it
+oxplow-dev knowledge list [--store oxwiki]   the pages (id, title)
+oxplow-dev knowledge show <id> [--store S]
+oxplow-dev knowledge write <id> [--title T] [--file F] [--store S]   body from F, else stdin
+oxplow-dev knowledge delete <id> [--store S]
+oxplow-dev knowledge search <text> [--store S]   pages whose id, title or body has it
 oxplow-dev extension status                  what the next boot would run, and what it
                                              would hold back and why (safe while oxplow runs)
 oxplow-dev extension deploy [<name>]         deploy <name>'s source as the app does,
@@ -61,7 +61,7 @@ oxplow-dev extension test [<name> …] [--only <example,…>] [--require-ui] [--
 
 oxplow-dev --help                            this
 
-<id> is a task's id (tsk12) or ref (work_item:oxplow:tsk12); a link's
+<id> is a task's id (tsk12) or ref (task:oxplow:tsk12); a link's
 <target> is a task too, or any ref the task is `about` (collector:x/y). The project is
 the current directory's (or --project <dir>); the acting thread is
 --thread <thrN>, else $OXPLOW_THREAD_ID, else none (as a person).";
@@ -98,9 +98,9 @@ async fn run(mut args: Vec<String>, env_thread: Option<String>) -> Result<String
             let tasks = Tasks::open(&project, thread.as_deref())?;
             tasks.run(args.split_off(1)).await
         }
-        Some("wiki") => {
+        Some("knowledge") => {
             let tasks = Tasks::open(&project, thread.as_deref())?;
-            tasks.wiki(args.split_off(1)).await
+            tasks.knowledge(args.split_off(1)).await
         }
         Some("extension") => extension(&project, &args[1..]).await,
         _ => Err(format!("usage:\n{USAGE}")),
@@ -164,8 +164,12 @@ async fn deploy_from_outside(project: &Path, name: Option<&String>) -> Result<St
     };
     let mut out = Vec::new();
     let mut failed = Vec::new();
-    for name in &names {
-        match oxplow_app::extension::extension_deploy::deploy(&svc, name, true).await {
+    // One change to what runs: the set is checked against itself.
+    let results =
+        oxplow_app::extension::extension_deploy::deploy_together(&svc, &names, true).await;
+    for (name, result) in &results {
+        let name = name.as_str();
+        match result {
             Ok(deployed) => {
                 out.push(format!(
                     "{name}: {} {}{}",
@@ -341,7 +345,7 @@ fn take_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     Some(value)
 }
 
-/// oxplow's tasks over the project's database.
+/// oxtask over the project's database.
 struct Tasks {
     db: Database,
     bus: Arc<CommandBus>,
@@ -355,14 +359,14 @@ impl Tasks {
             .map_err(|e| format!("{}: {e}", layout.state_db_path.display()))?;
         let vocabulary = oxplow_domain::vocabulary::VocabularyHandle::core();
         let log = SqliteEventLogStore::new(db.clone(), vocabulary.clone());
-        // The work-item interface's projections, so a write here reads
+        // The task interface's projections, so a write here reads
         // back at once (the app's pump delivers the rest).
         let pump = Arc::new(oxplow_app::event_pump::EventPump::new(
             db.clone(),
             log.clone(),
             vec![
-                Arc::new(oxplow_app::work_items::WorkItemsProjection),
-                Arc::new(oxplow_app::page_ref_consumers::PageRefWorkItemConsumer { vocabulary }),
+                Arc::new(oxplow_app::tasks::TasksProjection),
+                Arc::new(oxplow_app::page_ref_consumers::PageRefTaskConsumer { vocabulary }),
             ],
         ));
         // No `with_capabilities`: every registered command is offered,
@@ -373,11 +377,10 @@ impl Tasks {
             Arc::new(oxplow_app::agent_policy::AgentPolicy),
             pump,
         ));
-        let work_items =
-            WorkItemsRegistry::new(Arc::new(|| oxplow_app::work_items::PROVIDER.to_string()));
-        work_items.register(
-            oxplow_app::work_items::built_in_provider(oxplow_app::work_items::BUILT_IN, &db)
-                .ok_or("oxplow's tasks aren't a built-in work list")?,
+        let tasks = TaskTrackers::new(Arc::new(|| oxplow_app::tasks::PROVIDER.to_string()));
+        tasks.register(
+            oxplow_app::tasks::built_in_provider(oxplow_app::tasks::BUILT_IN, &db)
+                .ok_or("oxtask aren't a built-in task tracker")?,
         );
         let links = oxplow_app::link_check::LinkDeps {
             project_dir: layout.project_dir.clone(),
@@ -385,34 +388,32 @@ impl Tasks {
             db: db.clone(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
         };
-        use oxplow_app::commands::work_item as w;
+        use oxplow_app::commands::task as w;
         for op in [
-            w::transition_op(work_items.clone(), db.clone()),
-            w::create_op(work_items.clone(), links.clone()),
-            w::update_op(work_items.clone(), links.clone()),
-            w::link_op(work_items.clone(), links.clone()),
-            w::unlink_op(work_items.clone(), links),
-            w::comment_op(work_items.clone()),
+            w::transition_op(tasks.clone(), db.clone()),
+            w::create_op(tasks.clone(), links.clone()),
+            w::update_op(tasks.clone(), links.clone()),
+            w::link_op(tasks.clone(), links.clone()),
+            w::unlink_op(tasks.clone(), links),
+            w::comment_op(tasks.clone()),
         ] {
             bus.add_op(op).map_err(|e| e.to_string())?;
         }
-        // The wiki as the knowledge store, whatever the project has
-        // active: pages are `.oxplow/wiki/<slug>.md`, recorded as the app does.
-        let wiki_id = "oxplow-dev-wiki";
-        let stores = Arc::new(oxplow_domain::knowledge::KnowledgeRegistry::new(Arc::new(
-            move || wiki_id.to_string(),
-        )));
-        stores.register(Arc::new(oxplow_app::knowledge::WikiKnowledge {
-            id: wiki_id.into(),
+        // oxwiki as the knowledge store, whatever the project has enabled:
+        // pages are `.oxplow/oxwiki/<slug>.md`, recorded as the app does.
+        let stores = Arc::new(oxplow_domain::knowledge::KnowledgeStores::new());
+        stores.register(Arc::new(oxplow_oxwiki::OxwikiStore {
             project_dir: layout.project_dir.clone(),
         }));
+        let oxwiki = Arc::new(oxplow_oxwiki::OxwikiPresence::default());
+        oxwiki.set(true);
         for op in oxplow_app::knowledge::ops(oxplow_app::knowledge::KnowledgeTarget {
             project_dir: layout.project_dir.clone(),
             vcs: Arc::new(oxplow_app::vcs::GitProvider),
             db: db.clone(),
             vocabulary: oxplow_domain::vocabulary::VocabularyHandle::core(),
             stores,
-            wiki: Arc::new(oxplow_app::knowledge::WikiFollow::default()),
+            oxwiki,
         })
         .into_iter()
         {
@@ -460,13 +461,13 @@ impl Tasks {
                 put(&mut input, "body", body);
                 put(&mut input, "parent_uri", parent);
                 put(&mut input, "state", state);
-                self.command("oxplow.work_item.create", input).await
+                self.command("oxplow.task.create", input).await
             }
             Some("transition") => {
                 let mut input = Map::new();
                 input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("to".into(), json!(arg(2, "<state>")?));
-                self.command("oxplow.work_item.transition", input).await
+                self.command("oxplow.task.transition", input).await
             }
             Some("update") => {
                 let mut input = Map::new();
@@ -474,30 +475,31 @@ impl Tasks {
                 put(&mut input, "title", title);
                 put(&mut input, "body", body);
                 put(&mut input, "parent_uri", parent);
-                self.command("oxplow.work_item.update", input).await
+                self.command("oxplow.task.update", input).await
             }
             Some("comment") => {
                 let mut input = Map::new();
                 input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("body".into(), json!(arg(2, "<body>")?));
-                self.command("oxplow.work_item.comment", input).await
+                self.command("oxplow.task.comment", input).await
             }
             Some(verb @ ("link" | "unlink")) => {
                 let mut input = Map::new();
                 input.insert("uri".into(), json!(arg(1, "<id>")?));
                 input.insert("target".into(), json!(arg(2, "<target>")?));
                 input.insert("link_type".into(), json!(arg(3, "<link type>")?));
-                self.command(&format!("oxplow.work_item.{verb}"), input)
-                    .await
+                self.command(&format!("oxplow.task.{verb}"), input).await
             }
             _ => Err(format!("usage:\n{USAGE}")),
         }
     }
 
-    /// `oxplow-dev wiki …`: the pages through the knowledge commands.
-    async fn wiki(&self, mut args: Vec<String>) -> Result<String, String> {
+    /// `oxplow-dev knowledge …`: the pages through the knowledge commands.
+    async fn knowledge(&self, mut args: Vec<String>) -> Result<String, String> {
         let title = take_flag(&mut args, "--title");
         let file = take_flag(&mut args, "--file");
+        let store = take_flag(&mut args, "--store")
+            .unwrap_or_else(|| oxplow_domain::knowledge::OXWIKI.to_string());
         if let Some(unknown) = args.iter().find(|a| a.starts_with("--")) {
             return Err(format!("unknown option `{unknown}`\nusage:\n{USAGE}"));
         }
@@ -506,10 +508,19 @@ impl Tasks {
                 .cloned()
                 .ok_or_else(|| format!("missing {what}\nusage:\n{USAGE}"))
         };
+        let page_input = |id: String| {
+            let mut input = Map::new();
+            input.insert("store".into(), json!(store));
+            input.insert("id".into(), json!(id));
+            input
+        };
         match args.first().map(String::as_str) {
             Some("list") => {
                 let rows = self
-                    .rows("SELECT slug, title FROM wiki_page ORDER BY slug", vec![])
+                    .rows(
+                        "SELECT id, title FROM knowledge_page WHERE store = ?1 ORDER BY id",
+                        vec![store.clone()],
+                    )
                     .await?;
                 Ok(rows
                     .iter()
@@ -518,23 +529,24 @@ impl Tasks {
                     .join("\n"))
             }
             Some("show") => {
-                let slug = arg(1, "<slug>")?;
+                let id = arg(1, "<id>")?;
                 let rows = self
                     .rows(
-                        "SELECT title, body FROM wiki_page WHERE slug = ?1",
-                        vec![slug.clone()],
+                        "SELECT title, body FROM knowledge_page WHERE store = ?1 AND id = ?2",
+                        vec![store.clone(), id.clone()],
                     )
                     .await?;
-                let r = rows.first().ok_or_else(|| format!("no page `{slug}`"))?;
+                let r = rows.first().ok_or_else(|| format!("no page `{id}`"))?;
                 Ok(r[1].clone())
             }
             Some("search") => {
                 let needle = format!("%{}%", arg(1, "<text>")?);
                 let rows = self
                     .rows(
-                        "SELECT slug, title FROM wiki_page
-                          WHERE slug LIKE ?1 OR title LIKE ?1 OR body LIKE ?1 ORDER BY slug",
-                        vec![needle],
+                        "SELECT id, title FROM knowledge_page
+                          WHERE store = ?1 AND (id LIKE ?2 OR title LIKE ?2 OR body LIKE ?2)
+                          ORDER BY id",
+                        vec![store.clone(), needle],
                     )
                     .await?;
                 Ok(rows
@@ -544,7 +556,7 @@ impl Tasks {
                     .join("\n"))
             }
             Some("write") => {
-                let slug = arg(1, "<slug>")?;
+                let id = arg(1, "<id>")?;
                 let body = match file {
                     Some(path) => {
                         std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?
@@ -556,17 +568,14 @@ impl Tasks {
                         body
                     }
                 };
-                let mut input = Map::new();
-                input.insert("slug".into(), json!(slug));
+                let mut input = page_input(id);
                 input.insert("body".into(), json!(body));
                 put(&mut input, "title", title);
                 self.command("oxplow.knowledge.write_page", input).await
             }
             Some("delete") => {
-                let mut input = Map::new();
-                input.insert("slug".into(), json!(arg(1, "<slug>")?));
                 // Naming the page to delete is the confirmation.
-                self.confirmed_command("oxplow.knowledge.delete_page", input)
+                self.confirmed_command("oxplow.knowledge.delete_page", page_input(arg(1, "<id>")?))
                     .await
             }
             _ => Err(format!("usage:\n{USAGE}")),
@@ -604,20 +613,20 @@ impl Tasks {
         let mut result = out.result;
         let task = result["uri"]
             .as_str()
-            .and_then(oxplow_tasks::task_of_work_item_ref);
+            .and_then(oxplow_oxtask::oxtask_of_task_ref);
         if let (Some(task), Value::Object(fields)) = (task, &mut result) {
             fields.insert("id".into(), json!(task.to_string()));
         }
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     }
 
-    /// Oxplow's tasks, from its own table: whatever work list is active
+    /// Oxplow's tasks, from its own table: whatever task tracker is active
     /// (the interface shows only the active one's), this is oxplow's.
     async fn list(&self, all: bool) -> Result<String, String> {
         let rows = self
             .rows(
                 &format!(
-                    "SELECT 'tsk' || id, status, title FROM task WHERE deleted_at IS NULL {}
+                    "SELECT 'tsk' || id, status, title FROM oxtask WHERE deleted_at IS NULL {}
                      ORDER BY id",
                     if all {
                         ""
@@ -636,7 +645,7 @@ impl Tasks {
     }
 
     async fn show(&self, id: &str) -> Result<String, String> {
-        let id = oxplow_domain::uri::build::work_item_of_uri(id)
+        let id = oxplow_domain::uri::build::task_of_uri(id)
             .map_or(id.to_string(), |(_, item)| item)
             .trim_start_matches("tsk")
             .to_string();
@@ -644,7 +653,7 @@ impl Tasks {
             .rows(
                 "SELECT 'tsk' || id, status, title,
                         coalesce('tsk' || parent_id, ''), coalesce(description, '')
-                   FROM task WHERE id = ?1 AND deleted_at IS NULL",
+                   FROM oxtask WHERE id = ?1 AND deleted_at IS NULL",
                 vec![id.clone()],
             )
             .await?;
@@ -761,7 +770,7 @@ mod tests {
         let logged: i64 = db
             .read(|c| {
                 c.query_row(
-                    "SELECT count(*) FROM event_log WHERE type = 'work_item.state_changed'",
+                    "SELECT count(*) FROM event_log WHERE type = 'task.state_changed'",
                     [],
                     |r| r.get(0),
                 )
@@ -818,33 +827,36 @@ mod tests {
         assert!(err.contains("tsk"), "{err}");
     }
 
-    /// The wiki is read and written through the knowledge commands: a page
-    /// written (body from a file) is listed, shown and found by search, its
-    /// links are checked, a note lands on the thread, and a deleted page is
+    /// Knowledge pages are read and written through the knowledge commands,
+    /// oxwiki the store: a page written (body from a file) is listed, shown
+    /// and found by search, its links are checked, and a deleted page is
     /// gone — the record and the file as the app keeps them.
     #[tokio::test]
-    async fn the_wiki_is_read_and_written_through_the_knowledge_commands() {
+    async fn knowledge_pages_are_read_and_written_through_the_knowledge_commands() {
         let dir = project().await;
         let p = dir.path();
         let body = p.join("body.md");
         std::fs::write(&body, "# Wombats\n\nThey dig burrows.\n").unwrap();
         let body = body.display().to_string();
-        let written = dev(p, &["wiki", "write", "wombats", "--file", &body])
+        let written = dev(p, &["knowledge", "write", "wombats", "--file", &body])
             .await
             .unwrap();
-        assert!(written.contains(r#""page": "wombats""#), "{written}");
-        assert!(p.join(".oxplow/wiki/wombats.md").is_file());
-        assert!(dev(p, &["wiki", "list"])
+        assert!(
+            written.contains(r#""page": "oxplow:oxplow/knowledge?id=wombats&store=oxwiki""#),
+            "{written}"
+        );
+        assert!(p.join(".oxplow/oxwiki/wombats.md").is_file());
+        assert!(dev(p, &["knowledge", "list"])
             .await
             .unwrap()
             .contains("wombats\tWombats"));
-        let shown = dev(p, &["wiki", "show", "wombats"]).await.unwrap();
+        let shown = dev(p, &["knowledge", "show", "wombats"]).await.unwrap();
         assert!(shown.contains("They dig burrows."), "{shown}");
-        assert!(dev(p, &["wiki", "search", "BURROWS"])
+        assert!(dev(p, &["knowledge", "search", "BURROWS"])
             .await
             .unwrap()
             .contains("wombats"));
-        assert!(dev(p, &["wiki", "search", "platypus"])
+        assert!(dev(p, &["knowledge", "search", "platypus"])
             .await
             .unwrap()
             .is_empty());
@@ -852,7 +864,7 @@ mod tests {
         dev(
             p,
             &[
-                "wiki",
+                "knowledge",
                 "write",
                 "wombats",
                 "--title",
@@ -863,28 +875,31 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(dev(p, &["wiki", "list"])
+        assert!(dev(p, &["knowledge", "list"])
             .await
             .unwrap()
             .contains("wombats\tWombat facts"));
         std::fs::write(&body, "# Bad\n\nSee [[file:nope/missing.rs]].\n").unwrap();
-        let err = dev(p, &["wiki", "write", "bad", "--file", &body])
+        let err = dev(p, &["knowledge", "write", "bad", "--file", &body])
             .await
             .unwrap_err();
         assert!(err.contains("nope/missing.rs"), "{err}");
-        assert!(!dev(p, &["wiki", "list"]).await.unwrap().contains("bad"));
-        dev(p, &["wiki", "delete", "wombats"]).await.unwrap();
-        assert!(!p.join(".oxplow/wiki/wombats.md").exists());
-        assert!(dev(p, &["wiki", "list"]).await.unwrap().is_empty());
+        assert!(!dev(p, &["knowledge", "list"])
+            .await
+            .unwrap()
+            .contains("bad"));
+        dev(p, &["knowledge", "delete", "wombats"]).await.unwrap();
+        assert!(!p.join(".oxplow/oxwiki/wombats.md").exists());
+        assert!(dev(p, &["knowledge", "list"]).await.unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn a_bad_wiki_call_says_how_to_call() {
+    async fn a_bad_knowledge_call_says_how_to_call() {
         let dir = project().await;
         for args in [
-            &["wiki", "frobnicate"][..],
-            &["wiki", "show"],
-            &["wiki", "write", "x", "--bogus", "1"],
+            &["knowledge", "frobnicate"][..],
+            &["knowledge", "show"],
+            &["knowledge", "write", "x", "--bogus", "1"],
         ] {
             let err = dev(dir.path(), args).await.unwrap_err();
             assert!(
@@ -1044,6 +1059,53 @@ mod tests {
         let again = dev(p, &["extension", "deploy"]).await.unwrap();
         for name in ["oxplow-foundation", "acme"] {
             assert!(again.contains(&format!("{name}: already runs")), "{again}");
+        }
+    }
+
+    /// With no name, the extensions deploy as one change to what runs:
+    /// oxplow's own two moving their shared settings to a new version
+    /// together are checked against each other, never against the running
+    /// copy of the other (foundation, first, once was refused for
+    /// bundled's old version, and needed a second run).
+    #[tokio::test]
+    async fn deploy_with_no_name_deploys_a_shared_settings_version_together() {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let dir = developing_oxplow_with_a_stale_foundation().await;
+        let p = dir.path();
+        let foundation = p.join(".oxplow/extensions/oxplow-foundation/extension.yaml");
+        let bundled = p.join(".oxplow/extensions/oxplow-bundled/extension.yaml");
+        std::fs::create_dir_all(bundled.parent().unwrap()).unwrap();
+        let bundled_at = |version: u32| {
+            format!(
+                "manifest: 2\nname: oxplow-bundled\nnamespace: oxplow\nintent:\n  purpose: test\n\
+                 configuration:\n  version: {version}\n  schema:\n    type: object\n    \
+                 properties:\n      bundledKey: {{ type: integer }}\n"
+            )
+        };
+        std::fs::write(&bundled, bundled_at(2)).unwrap();
+        std::fs::write(
+            p.join(".oxplow/project.yaml"),
+            "enableBundledExtensions: false\nextensions: [oxplow-bundled]\n",
+        )
+        .unwrap();
+        let first = dev(p, &["extension", "deploy"]).await.unwrap();
+        for name in ["oxplow-foundation", "oxplow-bundled"] {
+            assert!(first.contains(&format!("{name}: deployed")), "{first}");
+        }
+
+        let text = std::fs::read_to_string(&foundation).unwrap();
+        assert!(text.contains("\n  version: 2\n"), "{text}");
+        std::fs::write(
+            &foundation,
+            text.replace("\n  version: 2\n", "\n  version: 3\n"),
+        )
+        .unwrap();
+        std::fs::write(&bundled, bundled_at(3)).unwrap();
+        let both = dev(p, &["extension", "deploy"]).await.unwrap();
+        for name in ["oxplow-foundation", "oxplow-bundled"] {
+            assert!(both.contains(&format!("{name}: deployed")), "{both}");
         }
     }
 

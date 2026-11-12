@@ -94,7 +94,7 @@ fn is_namespace(s: &str) -> bool {
 }
 
 /// A resource's name within its extension: lowercase letters, digits and
-/// `_`, starting with a letter (`file`, `work_item`).
+/// `_`, starting with a letter (`file`, `task`).
 fn is_name(s: &str) -> bool {
     let mut chars = s.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase())

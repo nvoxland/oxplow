@@ -29,7 +29,7 @@ use oxplow_domain::tree_diff::ChangeStatus;
 use oxplow_domain::StreamId;
 use oxplow_fs_watch::WatchEventKind;
 
-pub use crate::work_items_conformance::{Finding, SuiteRun};
+pub use crate::task_tracker_conformance::{Finding, SuiteRun};
 
 /// The directory (under the worktree) the suite's files live in.
 const SCRATCH: &str = "conformance-snapshots";
@@ -312,7 +312,7 @@ impl Ctx<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -321,11 +321,11 @@ mod tests {
 
     use super::*;
     use crate::snapshot_capture::SnapshotCaptureService;
-    use crate::test_fixtures::{services_with_effort, EffortFixture};
+    use crate::test_fixtures::{services_with_thread, ThreadFixture};
 
     /// The fixture's stream with a capture service whose settle gate is
     /// off and whose predrain wait is `predrain`.
-    fn stream_of(f: &EffortFixture, predrain: Duration) -> StreamId {
+    pub(crate) fn stream_of(f: &ThreadFixture, predrain: Duration) -> StreamId {
         let stream = StreamId::new(1);
         let svc = Arc::new(
             SnapshotCaptureService::new(
@@ -345,7 +345,7 @@ mod tests {
     }
 
     /// `id` as the project's snapshot implementation, its switch applied.
-    async fn choose(f: &EffortFixture, id: &str) {
+    pub(crate) async fn choose(f: &ThreadFixture, id: &str) {
         f.svc
             .config
             .write()
@@ -365,7 +365,7 @@ mod tests {
     #[tokio::test]
     async fn every_built_in_snapshot_implementation_passes() {
         for id in ["oxplow", "hashes"] {
-            let f = services_with_effort().await;
+            let f = services_with_thread().await;
             let stream = stream_of(&f, Duration::ZERO);
             choose(&f, id).await;
             let active = f.svc.snapshots.active().expect("an active implementation");
@@ -379,7 +379,7 @@ mod tests {
     /// so, through the interface.
     #[tokio::test]
     async fn a_mark_that_ran_over_its_budget_is_flagged() {
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let stream = stream_of(&f, Duration::from_millis(300));
         let active = f.svc.snapshots.active().unwrap();
         std::fs::write(f.svc.layout.project_dir.join("slow.txt"), "slow").unwrap();
@@ -443,7 +443,7 @@ mod tests {
             }
         }
 
-        let f = services_with_effort().await;
+        let f = services_with_thread().await;
         let stream = stream_of(&f, Duration::ZERO);
         let run = suite(
             &f.svc,

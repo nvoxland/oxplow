@@ -40,8 +40,6 @@ pub struct SnapshotCaptureRegistryConfig {
     /// The project's `generated` lists. Each service's filter is its own,
     /// rooted at its stream's worktree.
     pub generated: oxplow_config::GeneratedConfig,
-    /// Lets each service's quiet trigger yield to an open agent turn.
-    pub open_turn_probe: Option<crate::snapshot_capture::OpenTurnProbe>,
 }
 
 /// Per-stream registry of [`SnapshotCaptureService`]s. Look up by
@@ -51,7 +49,7 @@ pub struct SnapshotCaptureRegistryConfig {
 pub struct SnapshotCaptureRegistry {
     services: Arc<RwLock<HashMap<StreamId, Arc<SnapshotCaptureService>>>>,
     /// `primary_id` lets a caller about the primary stream fetch its
-    /// service without already knowing its id — the wiki watcher, MCP
+    /// service without already knowing its id — the oxwiki watcher, MCP
     /// file-ref-version resolver, and bootloader logs. Set once at boot.
     primary_id: Arc<RwLock<Option<StreamId>>>,
     /// The `generated` lists now, for *future* `register()` calls.
@@ -110,7 +108,7 @@ impl SnapshotCaptureRegistry {
             let generated = self.generated.read().unwrap_or_else(|e| e.into_inner());
             WorkspaceFilter::for_project(&worktree, &generated.exclude, &generated.include)
         };
-        let mut svc = SnapshotCaptureService::new(
+        let svc = SnapshotCaptureService::new(
             self.config.snapshot_store.clone(),
             self.config.blobs.clone(),
             worktree,
@@ -120,9 +118,6 @@ impl SnapshotCaptureRegistry {
             filter,
         )
         .with_sparse_history(matches!(stream.kind, oxplow_domain::StreamKind::Worktree));
-        if let Some(probe) = &self.config.open_turn_probe {
-            svc = svc.with_open_turn_probe(probe.clone());
-        }
         let svc = Arc::new(svc);
         svc.set_content_policy(self.content_policy());
         svc.set_idle(self.idle.load(std::sync::atomic::Ordering::SeqCst));
@@ -256,7 +251,7 @@ impl SnapshotCaptureRegistry {
             .collect()
     }
 
-    /// Mark `id` as the primary stream, for callers about it (the wiki
+    /// Mark `id` as the primary stream, for callers about it (the oxwiki
     /// watcher, the MCP file-ref-version resolver). Must be called after
     /// the corresponding `register` so the lookup actually resolves.
     pub fn set_primary(&self, id: StreamId) {
@@ -295,7 +290,6 @@ mod tests {
             blobs: BlobStore::new(project.join(".oxplow/snapshots")),
             max_file_bytes: 1_000_000,
             generated: Default::default(),
-            open_turn_probe: None,
         }
     }
 

@@ -641,9 +641,24 @@ fn valid(name: &str) -> Result<(), DomainError> {
     }
 }
 
-/// Activate `changes`, staging again when a change made meanwhile (a
-/// config reload, a provider's restart) overtook the candidate.
+/// Activate `changes`, every one going live or the problems the error.
 async fn activate(svc: &Arc<Services>, changes: &LiveChanges) -> Result<(), DomainError> {
+    let problems = activate_holding(svc, changes).await?;
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems_of(svc, TxError::Aborted(problems)))
+    }
+}
+
+/// Activate `changes`, staging again when a change made meanwhile (a
+/// config reload, a provider's restart) overtook the candidate. What
+/// didn't go live, by extension (each held, its last working version
+/// staying): empty when all did.
+async fn activate_holding(
+    svc: &Arc<Services>,
+    changes: &LiveChanges,
+) -> Result<VocabularyErrors, DomainError> {
     let mut attempts = 0;
     loop {
         attempts += 1;
@@ -654,10 +669,19 @@ async fn activate(svc: &Arc<Services>, changes: &LiveChanges) -> Result<(), Doma
         {
             Ok(_) => {
                 after_activation(svc).await;
-                return Ok(());
+                return Ok(VocabularyErrors::new());
             }
             Err(TxError::Aborted(problems)) if problems.contains_key("<host>") && attempts < 3 => {}
-            Err(error) => return Err(problems_of(svc, error)),
+            Err(TxError::Aborted(problems)) => {
+                // The rest went live.
+                if changes.keys().any(|name| !problems.contains_key(name))
+                    && problems.keys().all(|name| changes.contains_key(name))
+                {
+                    after_activation(svc).await;
+                }
+                return Ok(problems);
+            }
+            Err(TxError::Storage(error)) => return Err(error),
         }
     }
 }
@@ -758,6 +782,113 @@ pub async fn deploy(
     name: &str,
     confirmed: bool,
 ) -> Result<Deployed, DeployError> {
+    deploy_together(svc, &[name.to_string()], confirmed)
+        .await
+        .pop()
+        .map_or_else(|| Err(invalid("nothing to deploy").into()), |(_, r)| r)
+}
+
+/// Deploy each of `names` as [`deploy`] does, as one change to what runs:
+/// each is staged (checked, built, copied, recorded), then all go live in
+/// one activation. So a change that spans them — oxplow's own extensions
+/// moving their shared settings to a new version — is checked against the
+/// others' new versions, never the ones running. One that doesn't stage,
+/// or doesn't go live (held, its last working version staying), is its own
+/// error; the rest go live. A result per name, in order.
+pub async fn deploy_together(
+    svc: &Arc<Services>,
+    names: &[String],
+    confirmed: bool,
+) -> Vec<(String, Result<Deployed, DeployError>)> {
+    let mut results: Vec<(String, Option<Result<Deployed, DeployError>>)> = Vec::new();
+    let mut ready: Vec<(usize, Deployed, Option<String>, bool)> = Vec::new();
+    for name in names {
+        let staged = stage_deploy(svc, name, confirmed).await;
+        let at = results.len();
+        results.push((
+            name.clone(),
+            match staged {
+                Ok(Staged::Already(deployed)) => Some(Ok(deployed)),
+                Ok(Staged::Ready {
+                    deployed,
+                    target,
+                    enabled_now,
+                }) => {
+                    ready.push((at, deployed, target, enabled_now));
+                    None
+                }
+                Err(e) => Some(Err(e)),
+            },
+        ));
+    }
+    if !ready.is_empty() {
+        let changes: LiveChanges = ready
+            .iter()
+            .map(|(_, d, target, _)| (d.name.clone(), target.clone()))
+            .collect();
+        let refused = activate_holding(svc, &changes).await;
+        // A problem of no extension deployed here (the host's) refuses
+        // them all.
+        let all_refused = match &refused {
+            Ok(problems) => problems.keys().any(|k| !changes.contains_key(k)),
+            Err(_) => true,
+        };
+        for (at, deployed, _, enabled_now) in ready {
+            let name = deployed.name.clone();
+            let error = match &refused {
+                Err(e) => Some(e.clone()),
+                Ok(problems) if all_refused => {
+                    Some(problems_of(svc, TxError::Aborted(problems.clone())))
+                }
+                Ok(problems) => problems.get(&name).map(|why| {
+                    problems_of(
+                        svc,
+                        TxError::Aborted(VocabularyErrors::from([(name.clone(), why.clone())])),
+                    )
+                }),
+            };
+            results[at].1 = Some(match error {
+                Some(e) => {
+                    undo_turn_on(svc, &name, enabled_now);
+                    Err(e.into())
+                }
+                None => prune(svc, &name)
+                    .await
+                    .map(|()| deployed)
+                    .map_err(Into::into),
+            });
+        }
+    }
+    results
+        .into_iter()
+        .map(|(name, r)| {
+            let r = r.unwrap_or_else(|| Err(invalid("not deployed").into()));
+            (name, r)
+        })
+        .collect()
+}
+
+/// What staging an extension for a deploy found.
+enum Staged {
+    /// Its deployment is already the one that runs: nothing to activate.
+    Already(Deployed),
+    /// Its deployment is recorded: `target` is its change to the live set,
+    /// `enabled_now` whether staging turned it on (a refusal takes it back).
+    Ready {
+        deployed: Deployed,
+        target: Option<String>,
+        enabled_now: bool,
+    },
+}
+
+/// Everything [`deploy`] does to `name` short of going live: check its
+/// source, approve its permissions, turn it on, build it, copy it into the
+/// store and record the deployment.
+async fn stage_deploy(
+    svc: &Arc<Services>,
+    name: &str,
+    confirmed: bool,
+) -> Result<Staged, DeployError> {
     valid(name)?;
     let project = svc.layout.project_dir.clone();
     let source = source_of(&project, name)?;
@@ -834,14 +965,14 @@ pub async fn deploy(
     });
     let enabled_now = turn_on(svc, name)?;
     if live_now {
-        return Ok(Deployed {
+        return Ok(Staged::Already(Deployed {
             name: name.to_string(),
             hash,
             already: true,
             warnings: loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
             commit,
             dirty,
-        });
+        }));
     }
     if target.is_some() {
         let built_before = extension_store::deployment_dir(&project, name, &hash).is_dir();
@@ -929,24 +1060,22 @@ pub async fn deploy(
             .transaction(move |tx| store_rows::record_tx(tx, &row))
             .await?;
     }
-    let changes = LiveChanges::from([(name.to_string(), target)]);
-    if let Err(error) = activate(svc, &changes).await {
-        undo_turn_on(svc, name, enabled_now);
-        return Err(error.into());
-    }
-    prune(svc, name).await?;
-    Ok(Deployed {
-        name: name.to_string(),
-        hash,
-        already: false,
-        warnings: [
-            loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
-            size_warnings(name, size),
-            removal.into_iter().collect(),
-        ]
-        .concat(),
-        commit,
-        dirty,
+    Ok(Staged::Ready {
+        deployed: Deployed {
+            name: name.to_string(),
+            hash,
+            already: false,
+            warnings: [
+                loaded.warnings.iter().map(|w| loaded.shown(w)).collect(),
+                size_warnings(name, size),
+                removal.into_iter().collect(),
+            ]
+            .concat(),
+            commit,
+            dirty,
+        },
+        target,
+        enabled_now,
     })
 }
 
@@ -1718,7 +1847,7 @@ mod tests {
     /// A deploy that reaches no further than what runs goes live at once.
     #[tokio::test]
     async fn a_deploy_within_the_active_permissions_goes_live_at_once() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source_with(svc, "One", AI);
         deploy(svc, "acme", true).await.unwrap();
@@ -1756,7 +1885,7 @@ mod tests {
     /// source had uncommitted changes; rollback names the target's.
     #[tokio::test]
     async fn a_deployment_records_the_commit_and_whether_it_was_dirty() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let files = [
             ".oxplow/extensions/acme/extension.yaml",
@@ -1822,7 +1951,7 @@ mod tests {
 
     #[tokio::test]
     async fn source_diff_of_an_undeployed_source_adds_everything() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
@@ -1835,7 +1964,7 @@ mod tests {
 
     #[tokio::test]
     async fn source_diff_of_what_runs_does_not_differ() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
@@ -1848,7 +1977,7 @@ mod tests {
 
     #[tokio::test]
     async fn source_diff_of_a_worktree_copy_names_added_removed_and_changed() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         write(
@@ -1871,7 +2000,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_deploy_that_removes_a_page_warns() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         let first = deploy(svc, "acme", true).await.unwrap();
@@ -1900,7 +2029,7 @@ mod tests {
     /// and is deployed when asked.
     #[tokio::test]
     async fn write_page_creates_the_extension_and_deploys_when_asked() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let written = write_page(svc, "my-pages", "overview", PAGE_SPEC, true, true)
             .await
@@ -1925,7 +2054,7 @@ mod tests {
     /// A spec that doesn't parse is refused and nothing is written.
     #[tokio::test]
     async fn write_page_refuses_a_spec_that_does_not_parse() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let err = write_page(
             svc,
@@ -1948,7 +2077,7 @@ mod tests {
     /// A bundled extension is never written to.
     #[tokio::test]
     async fn write_page_refuses_a_bundled_extension() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let err = write_page(&fx.svc, "oxplow-bundled", "x", PAGE_SPEC, false, true)
             .await
             .unwrap_err();
@@ -1959,7 +2088,7 @@ mod tests {
     /// grid, named after its title, written and deployed.
     #[tokio::test]
     async fn a_new_dashboard_is_an_empty_grid_page_in_dashboards() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let out = svc
             .commands
@@ -2030,7 +2159,7 @@ mod tests {
     #[tokio::test]
     async fn write_page_is_refused_from_a_worktree_stream() {
         use oxplow_domain::stores::StreamStore as _;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let mut other = svc.stream_store.list().await.unwrap().pop().unwrap();
         other.id = oxplow_domain::StreamId::placeholder();
@@ -2069,7 +2198,7 @@ mod tests {
     /// A source outside the project has no commit to record.
     #[tokio::test]
     async fn a_source_outside_the_project_has_no_provenance() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let project = svc.layout.project_dir.clone();
         let elsewhere = tempfile::tempdir().unwrap();
@@ -2088,7 +2217,7 @@ mod tests {
     /// A new version asks only about what it adds to what runs.
     #[tokio::test]
     async fn a_new_version_asks_only_about_the_permissions_it_adds() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source_with(svc, "One", AI);
         deploy(svc, "acme", true).await.unwrap();
@@ -2103,7 +2232,7 @@ mod tests {
     /// though nothing changed in its source.
     #[tokio::test]
     async fn deploying_an_extension_that_is_off_asks_to_turn_it_on() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source_with(svc, "One", AI);
         deploy(svc, "acme", true).await.unwrap();
@@ -2127,7 +2256,7 @@ mod tests {
     /// names what it adds, writes nothing, and goes live once confirmed.
     #[tokio::test]
     async fn a_deploy_that_adds_a_permission_pauses_until_confirmed() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         deploy(svc, "acme", false).await.unwrap();
@@ -2151,7 +2280,7 @@ mod tests {
     /// Rolling back to a deployment that reaches further asks the same way.
     #[tokio::test]
     async fn rollback_to_a_wider_deployment_asks_too() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source_with(svc, "One", AI);
         deploy(svc, "acme", true).await.unwrap();
@@ -2186,7 +2315,7 @@ mod tests {
     /// nothing; once the requirement is deployed, it goes.
     #[tokio::test]
     async fn a_deploy_refuses_when_a_required_extension_is_off() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         other(svc, "tracker", "");
@@ -2209,7 +2338,7 @@ mod tests {
     /// and the dependant can't come back on without it.
     #[tokio::test]
     async fn disabling_a_required_extension_is_refused_while_something_requires_it() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         other(svc, "tracker", "");
@@ -2264,7 +2393,7 @@ mod tests {
     /// edit there redeploys nothing, a changed command does.
     #[tokio::test]
     async fn a_build_runs_on_deploy_and_its_output_is_in_the_deployment_but_not_its_hash() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = source_built(svc, "One", BUILD);
@@ -2294,7 +2423,7 @@ mod tests {
     /// rolling back to another command asks again.
     #[tokio::test]
     async fn a_new_or_changed_build_command_asks_first() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
@@ -2331,7 +2460,7 @@ mod tests {
     /// in the store, and the error says why.
     #[tokio::test]
     async fn a_failing_build_changes_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", "echo broken >&2; exit 3");
@@ -2349,7 +2478,7 @@ mod tests {
     /// bundle the manifest declares is refused and leaves nothing behind.
     #[tokio::test]
     async fn a_build_that_doesnt_write_what_it_declares_is_refused() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(
@@ -2372,7 +2501,7 @@ mod tests {
     /// out of git, and unsharing takes those lines back out too.
     #[tokio::test]
     async fn sharing_ignores_the_build_output() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
@@ -2399,7 +2528,7 @@ mod tests {
     /// to deploy, its listing naming the build that deploy would run.
     #[tokio::test]
     async fn boot_leaves_a_built_extension_undeployed_with_the_build_line_pending() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_built(svc, "One", BUILD);
@@ -2419,7 +2548,7 @@ mod tests {
     /// its listing says what its deploy will ask for.
     #[tokio::test]
     async fn boot_leaves_a_declaring_extension_undeployed_and_says_what_it_needs() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_with(svc, "One", AI);
@@ -2458,7 +2587,7 @@ mod tests {
     /// extension is not touched: it runs from its deployment).
     #[tokio::test]
     async fn an_undeployed_extension_leaves_the_listing_when_its_source_is_deleted() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source_with(svc, "One", AI);
@@ -2498,7 +2627,7 @@ mod tests {
     /// proposal naming what it adds, and a person's approval deploys it.
     #[tokio::test]
     async fn an_agents_deploy_that_adds_permissions_becomes_a_proposal_whose_approval_deploys() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source_with(svc, "One", AI);
         let agent = oxplow_domain::Actor::Agent {
@@ -2543,7 +2672,7 @@ mod tests {
     /// the shipped deployment's permissions are what runs.
     #[tokio::test]
     async fn a_bundled_deploy_with_the_shipped_permissions_asks_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = root.join(".oxplow/extensions/oxplow-bundled");
@@ -2568,7 +2697,7 @@ mod tests {
     /// the list `permissions:` is: `[]` for the baseline.
     #[tokio::test]
     async fn v_extension_lists_each_extensions_permissions() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
@@ -2604,7 +2733,7 @@ mod tests {
     /// extension is the team's.
     #[tokio::test]
     async fn v_extension_marks_a_source_that_moved_on_and_a_shared_one() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let row = || async {
             svc.sql
@@ -2659,7 +2788,7 @@ mod tests {
     #[tokio::test]
     async fn the_extension_page_offers_deploy_only_when_the_source_moved_on() {
         use crate::pages::open_runs::PageRuns;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
@@ -2688,7 +2817,7 @@ mod tests {
     async fn the_extension_page_actions_disable_enable_and_remove() {
         use crate::pages::actions::{run_page_action, PageActionCall};
         use crate::pages::open_runs::PageRuns;
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
@@ -2707,6 +2836,7 @@ mod tests {
                     row: None,
                     input: None,
                     drop: None,
+                    option: None,
                     on_behalf_of: oxplow_domain::Actor::Human,
                     confirmed: true,
                 },
@@ -2723,7 +2853,7 @@ mod tests {
     /// again changes nothing.
     #[tokio::test]
     async fn a_deploy_runs_a_source_and_only_a_deploy_does() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
@@ -2781,7 +2911,7 @@ mod tests {
     /// not turned on.
     #[tokio::test]
     async fn a_broken_source_changes_nothing() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
@@ -2797,7 +2927,7 @@ mod tests {
     /// keeps its source.
     #[tokio::test]
     async fn turning_off_and_removing_keep_the_source() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let dir = source(svc, "One");
@@ -2820,7 +2950,7 @@ mod tests {
     /// list; unsharing undoes both.
     #[tokio::test]
     async fn sharing_moves_an_extension_between_the_lists_and_into_git() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
@@ -2855,7 +2985,7 @@ mod tests {
     /// deploys it; one listed with neither is listed as not here.
     #[tokio::test]
     async fn boot_deploys_nothing_an_enabled_source_is_undeployed() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         source(svc, "One");
@@ -2953,7 +3083,7 @@ mod tests {
     /// takes it away again.
     #[tokio::test]
     async fn deploying_foundation_registers_the_commands_its_deployment_declares() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         let name = "oxplow-foundation";
@@ -3003,7 +3133,7 @@ mod tests {
     /// way to the shipped one, never to no foundation, and says so.
     #[tokio::test]
     async fn a_foundation_deployment_that_fails_at_boot_falls_back_to_the_shipped_one() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let project = svc.layout.project_dir.clone();
         let name = "oxplow-foundation";
@@ -3496,7 +3626,7 @@ mod tests {
     /// so a big one deploys and says how big it is.
     #[tokio::test]
     async fn a_big_extension_deploys_with_a_warning() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let dir = source(svc, "One");
         std::fs::write(dir.join("data.bin"), vec![0u8; 26 * 1024 * 1024]).unwrap();
@@ -3523,7 +3653,7 @@ mod tests {
     /// `intent.examples`.
     #[tokio::test]
     async fn a_deploy_returns_the_extension_s_warnings() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         let deployed = deploy(svc, "acme", true).await.unwrap();
@@ -3541,7 +3671,7 @@ mod tests {
     /// published first doesn't drop them.
     #[tokio::test]
     async fn a_restart_keeps_what_was_deployed() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         source(svc, "One");
         deploy(svc, "acme", true).await.unwrap();
@@ -3557,7 +3687,7 @@ mod tests {
     /// The bundled extensions run their shipped deployments from the store.
     #[tokio::test]
     async fn bundled_extensions_run_from_the_store() {
-        let fx = crate::test_fixtures::services_with_effort().await;
+        let fx = crate::test_fixtures::services_with_thread().await;
         let svc = &fx.svc;
         let root = svc.layout.project_dir.clone();
         for b in crate::bundled_extensions::BUNDLED {

@@ -13,17 +13,17 @@ const realQuerySql = realApi.querySql;
 // to the real module so other test files keep working.
 const calls: boolean[] = [];
 const commandRuns: Array<[string, unknown]> = [];
-// What the daemon answers (`ref_commands`) for a work item: the kind's
+// What the daemon answers (`ref_commands`) for a task: the kind's
 // commands, less those whose `about_when` fails on its row (`notNow`).
 const notNow = new Set<string>();
 mock.module("../api.js", () => ({
   ...realApi,
   refCommands: async (ref: string) =>
-    ref.startsWith("oxplow:oxplow/work_item") ? ["tracker.item.flag", "tracker.item.reopen"].filter((id) => !notNow.has(id)) : [],
+    ref.startsWith("oxplow:oxplow/task") ? ["tracker.item.flag", "tracker.item.reopen"].filter((id) => !notNow.has(id)) : [],
   getCommand: async () => Promise.reject(new Error("no bridge in tests")),
   listPersonCommands: async () => [
-    personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "oxplow/work_item", input: { uri: "{{uri}}" } }),
-    personSpec("tracker.item.reopen", { label: "Reopen It", group: "Tracker", about: "oxplow/work_item", about_when: "closed", input: { uri: "{{uri}}" } }),
+    personSpec("tracker.item.flag", { label: "Flag It", group: "Tracker", about: "oxplow/task", input: { uri: "{{uri}}" } }),
+    personSpec("tracker.item.reopen", { label: "Reopen It", group: "Tracker", about: "oxplow/task", about_when: "closed", input: { uri: "{{uri}}" } }),
   ],
   listExtensions: async () => [
     {
@@ -32,7 +32,7 @@ mock.module("../api.js", () => ({
       ui: {
         slots: [],
         decorators: [
-          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", resource: "oxplow/work_item", placement: "row-badge", label: "label", color: null },
+          { id: "tracker/0", extension: "tracker", view: "v_tracker_flags", resource: "oxplow/task", placement: "row-badge", label: "label", color: null },
         ],
       },
     },
@@ -41,7 +41,7 @@ mock.module("../api.js", () => ({
     if (!sql.includes("FROM v_tracker_flags")) return (realQuerySql as (...a: unknown[]) => unknown)(sql, ...rest);
     return {
       columns: ["uri", "label"],
-      rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow", "flaky"]],
+      rows: [["oxplow:oxplow/task?id=tsk1&provider=oxtask", "flaky"]],
       truncated: false,
       reads: { datasets: ["v_tracker_flags"], tables: [], measures: [] },
       freshness: {},
@@ -91,14 +91,14 @@ const viz: VizConfig = {
   parts: [],
   launcherCategory: null,
   hidden: false,
-  actions: [{ id: "finish", label: "Finish", command: "oxplow.work_item.transition", input: {}, row: true }],
+  actions: [{ id: "finish", label: "Finish", command: "oxplow.task.transition", input: {}, row: true }],
   alert: null,
   origin: { extension: "", source: null, running: "", deployment: null, bundled: false },
 };
 const run: VizRun = {
   config: viz,
   params: {},
-  result: { columns: ["uri"], rows: [["oxplow:oxplow/work_item?id=tsk1&provider=oxplow"]], truncated: false },
+  result: { columns: ["uri"], rows: [["oxplow:oxplow/task?id=tsk1&provider=oxtask"]], truncated: false },
 };
 
 // A row action that asks for confirmation must ask wherever the row is —
@@ -155,7 +155,7 @@ test("a row's linked ref gets its kind's commands", async () => {
   fireEvent.contextMenu(view.getByTestId("viz-row-0"));
   fireEvent.click(await waitFor(() => view.getByTestId("menu-item-ref-commands-Tracker")));
   fireEvent.click(view.getByTestId("menu-item-ref-command-tracker.item.flag"));
-  await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" }]]));
+  await waitFor(() => expect(commandRuns).toEqual([["tracker.item.flag", { uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" }]]));
 });
 
 // A command whose `about_when` fails on the row's ref (the daemon leaves it
@@ -198,4 +198,41 @@ test("a linked cell gets its ref's badges", async () => {
 // run after this one don't see this file's extensions.
 afterAll(() => {
   mock.module("../api.js", () => pristineApi);
+});
+
+// An action with options is a submenu in the row's menu: one entry per
+// option, the row's own (`current`) checked and not offered, and the one
+// picked is what the press sends.
+test("an action with options offers each option, the row's own checked", async () => {
+  const options: Array<string | null | undefined> = [];
+  const pressing: VizActionRunner = async (_id, _action, _params, _row, _streamId, _confirmed, _input, _drop, option) => {
+    options.push(option);
+    return { result: null, audit_id: 1, event_id: null, inverse: null };
+  };
+  const marked: VizRun = {
+    ...run,
+    config: {
+      ...viz,
+      actions: [{ id: "mark", label: "Mark", command: "oxplow.task.transition", input: {}, row: true, optionsFrom: "stages", current: "stage" }],
+    },
+    result: { columns: ["uri", "stage"], rows: [["oxplow:oxplow/task?id=tsk1&provider=oxtask", "ready"]], truncated: false },
+  };
+  const actionOptions = {
+    mark: [
+      { value: "ready", label: "Ready", group: null },
+      { value: "done", label: "Done", group: null },
+    ],
+  };
+  const { getByTestId } = rtlRender(
+    <VizActionRunnerContext.Provider value={pressing}>
+      <VizView run={marked} onOpenPage={() => {}} actionOptions={actionOptions} />
+    </VizActionRunnerContext.Provider>,
+  );
+  fireEvent.contextMenu(getByTestId("viz-row-0"));
+  fireEvent.click(getByTestId("menu-item-viz-action-mark"));
+  const own = getByTestId("menu-item-viz-action-mark-ready") as HTMLButtonElement;
+  expect(own.textContent).toContain("✓");
+  expect(own.disabled).toBe(true);
+  fireEvent.click(getByTestId("menu-item-viz-action-mark-done"));
+  await waitFor(() => expect(options).toEqual(["done"]));
 });

@@ -888,7 +888,7 @@ async fn a_page_acting_for_an_agent_is_treated_as_the_agent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_external_run_whose_record_fails_still_reports_success() {
     let (db, bus) = bus();
-    let mut spec = kv_spec("oxplow.kv.effort", Confirm::Never);
+    let mut spec = kv_spec("oxplow.kv.thing", Confirm::Never);
     spec.atomicity = Atomicity::External;
     let writes = db.clone();
     bus.register(
@@ -920,7 +920,7 @@ async fn an_external_run_whose_record_fails_still_reports_success() {
     let out = bus
         .run(
             &Actor::Human,
-            "oxplow.kv.effort",
+            "oxplow.kv.thing",
             json!({"k": "e", "v": "1"}),
             false,
         )
@@ -1094,7 +1094,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
     bus.register_namespace(
         "oxplow",
         "oxplow:oxplow/extension?name=oxplow-bundled",
-        vec![cmd("oxplow.review.accept")],
+        vec![cmd("oxplow.tasks.clear_finished")],
     )
     .unwrap();
     assert_eq!(bus.namespace_owner("oxplow").as_deref(), Some("oxplow"));
@@ -1102,7 +1102,7 @@ async fn a_namespace_is_one_owners_and_oxplow_is_oxplows() {
     // Unregistering a source takes only its commands.
     assert_eq!(
         bus.unregister_source("oxplow:oxplow/extension?name=oxplow-bundled"),
-        vec!["oxplow.review.accept".to_string()]
+        vec!["oxplow.tasks.clear_finished".to_string()]
     );
     assert!(bus.input_schema("oxplow.kv.set").is_some());
     assert_eq!(
@@ -1262,7 +1262,7 @@ fn calls(items: &[(&str, &str, &str)]) -> Value {
 }
 
 /// Step 0 holds for a composed call as for a direct one: a child
-/// that needs what isn't active (a work list, say) is
+/// that needs what isn't active (a task tracker, say) is
 /// refused at its place in the calls — whether the composite runs in
 /// one transaction or as steps — and nothing lands.
 #[tokio::test(flavor = "multi_thread")]
@@ -1278,7 +1278,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
     ));
     let (db, bus) = composing_bus_on(db, bus.with_capabilities(registry, config));
     let mut needy = kv_spec("oxplow.kv.needy", Confirm::Never);
-    needy.needs = vec!["work_items".into()];
+    needy.needs = vec!["task_tracker".into()];
     bus.register(Command::new(needy, kv_set()).unwrap())
         .unwrap();
 
@@ -1308,7 +1308,7 @@ async fn a_composed_call_needs_what_a_direct_one_does() {
             .unwrap_err();
         assert!(
             matches!(&err, CommandError::Invalid { field: Some(f), message }
-                if f == "/calls/1/name" && message.contains("`oxplow.kv.needy`: Needs: Work list")),
+                if f == "/calls/1/name" && message.contains("`oxplow.kv.needy`: Needs: Task tracker")),
             "{why}: {err:?}"
         );
         assert_eq!(kv_value(&db, "a").await, None, "{why}: nothing landed");
@@ -2427,7 +2427,7 @@ async fn a_command_says_what_it_does_when_it_asks() {
 /// they do, and neither is presented as destroying something.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rebase_and_a_merge_say_what_they_do() {
-    let fx = crate::test_fixtures::services_with_effort().await;
+    let fx = crate::test_fixtures::services_with_thread().await;
     for (name, words) in [
         ("oxplow.git.rebase", "Replay"),
         ("oxplow.vcs.merge", "Merge"),

@@ -7,17 +7,21 @@ use crate::{
 use oxplow_domain::diagnostic::Diagnostic;
 
 pub struct PreparedRuntimeAdapters {
-    work_items: crate::work_items::PreparedWorkItems,
+    tasks: crate::tasks::PreparedTaskTracker,
     harnesses: crate::harnesses::PreparedHarnesses,
-    policies: crate::effort_policy::PreparedEffortPolicies,
     knowledge: crate::knowledge::PreparedKnowledge,
     snapshots: crate::snapshots::PreparedSnapshots,
     models: crate::ai_service::PreparedModelProviders,
+    scripts: crate::providers::script::PreparedScripts,
     jobs: std::sync::Arc<crate::extension::extension_job_operations::JobOperationRegistry>,
 }
 
 impl PreparedRuntimeAdapters {
-    pub fn prepare(svc: &Services, snapshot: &CatalogSnapshot) -> Result<Self, VocabularyErrors> {
+    pub fn prepare(
+        svc: &Services,
+        snapshot: &CatalogSnapshot,
+        settings: &crate::capabilities::Settings,
+    ) -> Result<Self, VocabularyErrors> {
         let load_errors: VocabularyErrors = snapshot
             .extensions()
             .iter()
@@ -27,8 +31,13 @@ impl PreparedRuntimeAdapters {
         if !load_errors.is_empty() {
             return Err(load_errors);
         }
-        let declared = crate::capabilities::declared_by(snapshot.extensions());
+        // What a setting turned off (`when:`) is declared, never run.
+        let declared: Vec<_> = crate::capabilities::declared_by(snapshot.extensions(), settings)
+            .into_iter()
+            .filter(|i| i.offered)
+            .collect();
         let jobs = svc.jobs.prepare_registry(snapshot)?;
+        let scripts = svc.providers.prepare_scripts(snapshot)?;
         let mut errors = VocabularyErrors::new();
         let models = crate::ai_service::prepare_built_ins(&declared).map_err(|failures| {
             for (id, message) in failures {
@@ -41,12 +50,9 @@ impl PreparedRuntimeAdapters {
         if !errors.is_empty() {
             return Err(errors);
         }
-        let trees = std::sync::Arc::new(svc.metrics.clone())
-            as std::sync::Arc<dyn crate::services::TreeSource>;
         Ok(Self {
-            work_items: crate::work_items::prepare_built_ins(&declared, &svc.db),
+            tasks: crate::tasks::prepare_built_ins(&declared, &svc.db),
             harnesses: crate::harnesses::prepare_built_ins(&declared),
-            policies: crate::effort_policy::prepare_built_ins(&declared, &svc.sql, &trees),
             knowledge: crate::knowledge::prepare_built_ins(&declared, &svc.layout.project_dir),
             snapshots: crate::snapshots::prepare_built_ins(
                 &declared,
@@ -54,6 +60,7 @@ impl PreparedRuntimeAdapters {
                 &svc.snapshot_files(),
             ),
             models: models.expect("all adapter errors were rejected"),
+            scripts,
             jobs,
         })
     }
@@ -63,20 +70,19 @@ impl PreparedRuntimeAdapters {
     /// swaps and the database commit. This method alone does not establish a
     /// coherent activation boundary.
     pub(crate) fn publish_maps(self, svc: &Services) {
-        self.work_items.publish(&svc.work_items);
+        self.tasks.publish(&svc.tasks);
         self.harnesses.publish(&svc.harnesses);
-        self.policies.publish(&svc.effort_policies);
-        self.knowledge.publish_maps(&svc.knowledge, &svc.wiki);
+        self.knowledge.publish_maps(&svc.knowledge, &svc.oxwiki);
         self.snapshots
             .publish(&svc.snapshots, &svc.snapshot_captures);
         self.models.publish(svc.ai.providers());
+        svc.providers.publish_scripts(self.scripts);
         svc.jobs.publish_registry(self.jobs);
     }
 
     /// Follow explicit selections from the prepared capability candidate,
     /// without resolving through live capability/config callbacks.
-    pub(crate) fn follow_selected(svc: &Services, knowledge: &str, snapshots: &str) {
-        svc.wiki.follow(knowledge);
+    pub(crate) fn follow_selected(svc: &Services, snapshots: &str) {
         crate::snapshots::apply_selected_policy(&svc.snapshots, &svc.snapshot_captures, snapshots);
     }
 }

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Extension, VizConfig, VizRun, SqlCell } from "../tauri-bridge/generated/bindings.js";
-import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, effortRowId, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap } from "./vizModel.js";
+import { rowMention, markParts, treeNodes, lazyTreeNodes, lazyTreeProblem, drawnTreeRows, wantedBranches, timelineEntries, stepItems, sectionRows, sectionParts, itemList, hunkRows, codeRows, diffRow, editorRow, embedRow, parseLines, mergeDirectory, barRows, lineSeries, sparklineValues, numericRowId, treemapItems, cellLinkRef, changedParams, foldedAway, displayColumns, formatCell, parseParamInput, limitRows, slugify, rowAssistantContext, isTimestamp, rowGroups, rowEmphasized, rowDepth, columnWrap, nestRows, actionOptionsOf } from "./vizModel.js";
 import { formatMetricValue, formatShortDateTime } from "../components/format.js";
 import { diffSpecOf, duplicateBlockOf, isPage, lineOf, pagePayload } from "../tabs/pageRefs.js";
 import type { TabRef } from "../tabs/tabState.js";
@@ -11,7 +13,7 @@ const viz = (over: Partial<VizConfig> = {}): VizConfig => ({
   slug: "waiting",
   title: "Waiting on me",
   description: "Blocked tasks",
-  query: "SELECT ref, title FROM v_work_item",
+  query: "SELECT ref, title FROM v_task",
   viz: "table",
   params: [],
   columns: [],
@@ -125,16 +127,20 @@ describe("row groups and styling", () => {
 });
 
 describe("cellLinkRef", () => {
-  const cols = ["id", "title", "path", "slug", "effort"];
-  const row = [42, "Fix it", "src/a.ts", "auth-flow", "oxplow:oxplow/effort?id=eff7"];
+  const cols = ["id", "title", "path", "page", "request"];
+  const row = [42, "Fix it", "src/a.ts", "oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki", "oxplow:oxplow/request?id=req7"];
 
   test("a page link reads its ref from `from`", () => {
-    expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/work_item?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/work_item?id=E-1&provider=issues");
+    expect(cellLinkRef({ kind: "page", from: "uri", line: null, base: null, head: null }, "title", [...row, "oxplow:oxplow/task?id=E-1&provider=issues"], [...cols, "uri"])).toBe("oxplow:oxplow/task?id=E-1&provider=issues");
   });
-  test("file / wiki / effort-diff links default to the column itself", () => {
+  test("file / knowledge links default to the column itself", () => {
     expect(cellLinkRef({ kind: "file", from: null, line: null, base: null, head: null }, "path", row, cols)?.id).toBe("oxplow:oxplow/file?path=src/a.ts");
-    expect(cellLinkRef({ kind: "wiki", from: null, line: null, base: null, head: null }, "slug", row, cols)?.id).toBe("oxplow:oxplow/wiki?slug=auth-flow");
-    expect(cellLinkRef({ kind: "effort-diff", from: null, line: null, base: null, head: null }, "effort", row, cols)?.id).toBe("oxplow:oxplow/effort?id=eff7");
+    expect(cellLinkRef({ kind: "knowledge", from: null, line: null, base: null, head: null }, "page", row, cols)?.id).toBe("oxplow:oxplow/knowledge?id=auth-flow&store=oxwiki");
+  });
+  test("a request link opens the request's Changes page from its id", () => {
+    const at = (id: number | string) => cellLinkRef({ kind: "request", from: "id", line: null, base: null, head: null }, "title", [id], ["id"]);
+    expect(at(7)).toBe("oxplow:oxplow/request?id=req7");
+    expect(at("req7")).toBe("oxplow:oxplow/request?id=req7");
   });
   test("null or missing target gives no link", () => {
     expect(cellLinkRef({ kind: "file", from: "path", line: null, base: null, head: null }, "title", [null, "x", null, null, null], cols)).toBeNull();
@@ -194,7 +200,7 @@ describe("changedParams", () => {
         { name: "range", label: null, default: "30d", type: "date_range" },
       ],
     });
-    expect(changedParams(l, { merges: 0, range: "30d", uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" })).toEqual({ uri: "oxplow:oxplow/work_item?id=tsk1&provider=oxplow" });
+    expect(changedParams(l, { merges: 0, range: "30d", uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" })).toEqual({ uri: "oxplow:oxplow/task?id=tsk1&provider=oxtask" });
     expect(changedParams(l, { merges: true, range: "7d" })).toEqual({ merges: true, range: "7d" });
   });
 });
@@ -227,14 +233,6 @@ describe("rowAssistantContext", () => {
       label: null,
       text: '[oxplow page review/waiting row: id=42, title="Fix it"]',
     });
-  });
-});
-
-describe("effortRowId", () => {
-  test("the numeric id v_* views use, from an effort id like eff262", () => {
-    expect(effortRowId("eff262")).toBe(262);
-    expect(effortRowId("262")).toBe(262);
-    expect(effortRowId("nope")).toBeNull();
   });
 });
 
@@ -297,7 +295,7 @@ describe("chart data", () => {
 test("numericRowId strips a UI id prefix", () => {
   expect(numericRowId("tsk42")).toBe(42);
   expect(numericRowId("thr7")).toBe(7);
-  expect(numericRowId("eff262")).toBe(262);
+  expect(numericRowId("req262")).toBe(262);
   expect(numericRowId("12")).toBe(12);
   expect(numericRowId("abc")).toBeNull();
 });
@@ -334,15 +332,15 @@ describe("change links", () => {
       cols,
     )!;
     expect(spec(working).rightVersion).toEqual("working");
-    // An effort's change is between two snapshots; those open too.
-    const effort = cellLinkRef(
+    // A change between two snapshots; those open too.
+    const between = cellLinkRef(
       { kind: "diff-at", from: "path", line: null, base: "base", head: "head" },
       "path",
       ["a", null, "snap:3", "snap:4", null],
       cols,
     )!;
-    expect(spec(effort).leftVersion).toEqual("snap:3");
-    expect(spec(effort).rightVersion).toEqual("snap:4");
+    expect(spec(between).leftVersion).toEqual("snap:3");
+    expect(spec(between).rightVersion).toEqual("snap:4");
     // A cell that isn't a revision opens nothing rather than a guess.
     expect(
       cellLinkRef(
@@ -376,7 +374,7 @@ describe("change links", () => {
 });
 
 test("page links name any ref, which opens where its kind's page says", () => {
-  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/work_item?id=tsk3&provider=oxplow"], ["p"])).toBe("oxplow:oxplow/work_item?id=tsk3&provider=oxplow");
+  expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/task?id=tsk3&provider=oxtask"], ["p"])).toBe("oxplow:oxplow/task?id=tsk3&provider=oxtask");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/page?page=git-dashboard"], ["p"])).toBe("oxplow:oxplow/page?page=git-dashboard");
   expect(cellLinkRef({ kind: "page", from: null, line: null, base: null, head: null }, "p", ["oxplow:oxplow/handoff?id=hnd1"], ["p"])).toBe("oxplow:oxplow/handoff?id=hnd1");
 });
@@ -409,6 +407,69 @@ describe("structure components (P6.A2)", () => {
       { label: "root", children: [{ label: "child", children: [{ label: "grandchild", children: [] }] }] },
       { label: "orphan", children: [] },
     ]);
+  });
+
+  // A tree over paths (`tree.path`): the same cases as the daemon's
+  // (`pages/path_tree.rs`), so what an agent reads is what the window draws.
+  describe("a path tree", () => {
+    const pathViz = viz({ viz: "tree", tree: { path: "path", status: "status" } as never });
+    const shown = (rows: [string, string | null][]) => {
+      const out: string[] = [];
+      const walk = (nodes: ReturnType<typeof treeNodes>, depth: number) => {
+        for (const n of nodes) {
+          const marks = (n.marks ?? []).map((m) => m.letter).join("");
+          const row = n.made ? "" : ` #${rows.findIndex((r) => r[0] === n.row[0])}`;
+          out.push(`${"  ".repeat(depth)}${n.label} ${marks}${row}`);
+          walk(n.children, depth + 1);
+        }
+      };
+      walk(treeNodes(pathViz, result(["path", "status"], rows)), 0);
+      return out;
+    };
+
+    test("folders are made and carry the marks under them", () => {
+      expect(shown([["src/ui/a.rs", "modified"], ["src/new.rs", "added"], ["old.rs", "deleted"], ["README.md", null]])).toEqual([
+        "src AM",
+        "  ui M",
+        "    a.rs M #0",
+        "  new.rs A #1",
+        "README.md  #3",
+        "old.rs D #2",
+      ]);
+    });
+
+    test("a chain of lone folders is one row", () => {
+      expect(shown([[".agents/skills/x/SKILL.md", "untracked"], ["a/b/c.rs", "added"], ["a/d.rs", "added"]])).toEqual([
+        ".agents/skills/x U",
+        "  SKILL.md U #0",
+        "a A",
+        "  b A",
+        "    c.rs A #1",
+        "  d.rs A #2",
+      ]);
+    });
+
+    test("a folder row keeps its row and status", () => {
+      expect(shown([["lib", "renamed"], ["lib/x/y.rs", "weird"]])).toEqual(["lib R #0", "  x ", "    y.rs  #1"]);
+    });
+
+    test("each node's id is its path, a made folder's row no row of the result", () => {
+      const nodes = treeNodes(pathViz, result(["path", "status"], [["a/b/c.rs", "added"]]));
+      expect(nodes[0]).toMatchObject({ id: "a/b", label: "a/b", made: true, branch: true });
+      expect(nodes[0]!.children[0]).toMatchObject({ id: "a/b/c.rs", label: "c.rs", made: false });
+      expect(drawnTreeRows(nodes)).toEqual([["a/b/c.rs", "added"]]);
+    });
+
+    // A lazy one is one folder's level: names from the paths, no folders
+    // made, each row's own status.
+    test("a lazy path tree is the level it was given, by name", () => {
+      const lazy = viz({ viz: "tree", tree: { path: "path", status: "status", lazy: "folder", branch: "d" } as never, params: [{ name: "folder", label: null, default: "", options: [] }] as never });
+      const nodes = lazyTreeNodes(lazy, result(["path", "status", "d"], [["src/ui", null, 1], ["src/a.rs", "modified", 0]]), new Set(), new Map());
+      expect(nodes.map((n) => [n.id, n.label, n.lazy, (n.marks ?? []).map((m) => m.letter).join("")])).toEqual([
+        ["src/ui", "ui", true, ""],
+        ["src/a.rs", "a.rs", false, "M"],
+      ]);
+    });
   });
 
   // A lazy tree (`tree.lazy`): the result is one level; a row the `branch`
@@ -699,6 +760,13 @@ describe("foldedAway", () => {
   });
 });
 
+test("a row mention is the text the Rust reader (uri::prompt_refs) pins", () => {
+  const fx = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../../../crates/oxplow-domain/tests/fixtures/prompt_refs.json"), "utf8"),
+  ).row_mention;
+  expect(rowMention(fx.page, fx.columns, fx.row)).toBe(fx.text);
+});
+
 test("a row that links nowhere is a mention of its page node's row", () => {
   expect(rowMention("acme/list#items", ["id", "n"], ["a", 2])).toBe('[oxplow page acme/list#items row: id="a", n=2] ');
 });
@@ -739,5 +807,34 @@ describe("columnWrap", () => {
   });
   test("an empty column is words", () => {
     expect(columnWrap(null, false, [])).toBe("words");
+  });
+});
+
+// A `depth` list nests: a row followed by deeper rows is their parent, and
+// they sit in its panel until a row as shallow as it comes.
+test("nestRows makes each parent hold the deeper rows after it", () => {
+  const rows = [["Epic", 0], ["Child", 1], ["Grandchild", 2], ["Child 2", 1], ["Loose", 0], ["Orphan", 1]].map((r, i) => [r as unknown[], i] as const);
+  const shape = (ns: ReturnType<typeof nestRows>): unknown[] => ns.map((n) => (n.kids.length ? [n.i, shape(n.kids)] : n.i));
+  expect(shape(nestRows(rows as never, (r) => r[1] as number))).toEqual([[0, [[1, [2]], 3]], [4, [5]]]);
+  expect(shape(nestRows([], () => 0))).toEqual([]);
+});
+
+describe("actionOptionsOf", () => {
+  test("an action's options are the rows of the loader it names", () => {
+    const loaders = {
+      stages: { result: { columns: ["value", "label", "group"], rows: [["ready", "Ready", "todo"], ["done", null, null], [null, "x", null]] } },
+    };
+    const options = actionOptionsOf(
+      [{ id: "mark", optionsFrom: "stages" }, { id: "open" }, { id: "assign", optionsFrom: "threads" }],
+      loaders,
+    );
+    // A null label shows the value; a row with no value is no option; a
+    // loader that didn't run gives none.
+    expect(options).toEqual({
+      mark: [
+        { value: "ready", label: "Ready", group: "todo" },
+        { value: "done", label: "done", group: null },
+      ],
+    });
   });
 });

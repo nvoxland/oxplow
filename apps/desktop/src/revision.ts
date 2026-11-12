@@ -60,7 +60,7 @@ export function revisionFromSlot(slot: string | null): Revision {
 
 /** True when `s` looks like a git commit sha (7–40 hex chars) — tells a
  *  real Change-Analysis commit target from a synthetic diff-view key
- *  like `endpoints:…` / `effort:…`. */
+ *  like `endpoints:…` / `turn:…`. */
 export function isGitSha(s: string): boolean {
   return /^[0-9a-f]{7,40}$/i.test(s);
 }

@@ -228,14 +228,14 @@ fn scope_calls_are_answered_by_the_host_outside_the_budget() {
     let ran = w
         .run(
             &budget(200),
-            ScriptRun::starlark(script, json!({ "uri": "oxplow:oxplow/effort?id=eff1" }))
+            ScriptRun::starlark(script, json!({ "uri": "oxplow:oxplow/request?id=req1" }))
                 .with_scope(&mut serve),
             None,
         )
         .unwrap();
     assert_eq!(
         ran.value,
-        json!({ "rows": [{ "n": 1 }], "x": "oxplow:oxplow/effort?id=eff1" })
+        json!({ "rows": [{ "n": 1 }], "x": "oxplow:oxplow/request?id=req1" })
     );
     assert_eq!(asked, [r#"sql.read {"sql":"SELECT 1"}"#]);
     // A refusal fails the script with the host's reason.

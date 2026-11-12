@@ -15,14 +15,11 @@ use crate::change_analysis::ChangeTarget;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct EnsureChangeParams {
-    /// `commit` (a commit vs its parent), `effort` (an effort's start →
-    /// end), `working` (a stream's uncommitted work vs HEAD) or `range`
-    /// (any two revisions).
+    /// `commit` (a commit vs its parent), `working` (a stream's uncommitted
+    /// work vs HEAD) or `range` (any two revisions).
     pub kind: String,
     /// For `commit`: a sha or revspec (`HEAD`, `main~2`).
     pub sha: Option<String>,
-    /// For `effort`: the effort id (`eff42`).
-    pub effort_id: Option<String>,
     /// For `range`: the older side, a revision (`working`, `snap:<id>`,
     /// `git:<rev>`); omitted, the whole tree at `head`.
     pub base: Option<String>,
@@ -54,9 +51,6 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                     sha: need(p.sha.clone(), "sha")?,
                     stream_id: stream.clone(),
                 },
-                "effort" => ChangeTarget::Effort {
-                    effort_id: need(p.effort_id.clone(), "effort_id")?,
-                },
                 "working" => ChangeTarget::Working {
                     stream_id: need(stream.clone(), "stream_id")?,
                 },
@@ -68,7 +62,7 @@ pub fn ops(services: ServicesSlot) -> Vec<Op> {
                 other => {
                     return Err(invalid(
                         "/kind",
-                        format!("kind `{other}` isn't commit, effort, working or range"),
+                        format!("kind `{other}` isn't commit, working or range"),
                     ))
                 }
             };

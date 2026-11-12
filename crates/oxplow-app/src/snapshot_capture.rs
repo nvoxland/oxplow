@@ -31,7 +31,7 @@ use oxplow_db::analytics_stores::TakeOutcome;
 use oxplow_db::{FileSnapshot, SnapshotStorage, SqliteSnapshotStore, TakeRecord};
 use oxplow_domain::snapshot::SnapshotTrigger;
 use oxplow_domain::vcs::{ObjectStore, Revision, Vcs};
-use oxplow_domain::{EffortId, ThreadId};
+use oxplow_domain::ThreadId;
 
 /// What a snapshot take is for: why it runs, what it belongs to, and how
 /// long its caller will wait (P2.2/P2.3; `.context/data-model.md`
@@ -43,7 +43,6 @@ pub struct TakeRequest {
     pub thread_id: Option<ThreadId>,
     /// `agent_turn.id`.
     pub turn_id: Option<i64>,
-    pub effort_id: Option<EffortId>,
     /// The caller's time budget; recorded on the op, reported when
     /// exceeded.
     pub budget: Option<Duration>,
@@ -87,7 +86,6 @@ impl From<SnapshotTrigger> for TakeRequest {
             trigger,
             thread_id: None,
             turn_id: None,
-            effort_id: None,
             budget: None,
             provider: None,
         }
@@ -106,10 +104,9 @@ pub const DEFAULT_SETTLE_DURATION: Duration = Duration::from_millis(1000);
 /// giving the fs-watch debouncer (250 ms in
 /// `stream_watch`) time to deliver any in-flight events through
 /// the broadcast channel and into the dirty set. Without this, an
-/// edit followed almost immediately by the close (`oxplow.effort.report`) produces an
-/// empty bracket — the edit hasn't propagated yet, so
-/// `end_snapshot_id == start_snapshot_id` and the file-review diff
-/// reports the claim as unchanged.
+/// edit followed almost immediately by a turn's end produces an empty
+/// take — the edit hasn't propagated yet, so the turn's end snapshot
+/// equals its start and its diff reports the file as unchanged.
 ///
 /// 300 ms = 250 ms debouncer + a 50 ms cushion for the broadcast
 /// hop + run_watcher loop. Tests override via
@@ -126,13 +123,9 @@ pub const DEFAULT_MARKER_WAIT: Duration = Duration::from_secs(2);
 const MARKER_NAME: &str = ".take-marker-";
 
 /// How long the worktree must stay still (no fs-watch change) before a
-/// `quiet` take records human edits made between agent turns (P2.4).
+/// `quiet` take records what changed, whoever changed it and whatever
+/// turns are open.
 pub const DEFAULT_QUIET_PERIOD: Duration = Duration::from_secs(3);
-
-/// "Is an agent mid-turn anywhere on this stream?" — the quiet trigger
-/// yields to an open turn, whose `turn_end` take captures the same edits.
-pub type OpenTurnProbe =
-    Arc<dyn Fn(StreamId) -> futures::future::BoxFuture<'static, bool> + Send + Sync>;
 
 /// A capped rayon pool for the startup sweep's read+hash+blob fan-out,
 /// so hashing a large worktree doesn't peg every core — the sweep is
@@ -211,6 +204,18 @@ struct DirtyEntry {
     staging: Option<CaptureStaging>,
     first_seen: Instant,
     last_kind: WatchEventKind,
+    /// When the watcher first and last reported the path changed since the
+    /// previous take. `None` for a path the startup sweep found: no one
+    /// heard it change, so its time lies only between two takes.
+    changed: Option<(Timestamp, Timestamp)>,
+}
+
+/// What a `git_refs` take left the worktree at.
+struct GitRefsTake {
+    /// The snapshot the worktree is at.
+    snapshot: i64,
+    /// Whether it was re-stamped with the new HEAD (the tree was clean).
+    restamped: bool,
 }
 
 #[derive(Clone)]
@@ -298,7 +303,6 @@ struct Inner {
     activity: tokio::sync::Notify,
     /// Tells the quiet trigger to exit (see [`SnapshotCaptureService::shutdown`]).
     quiet_shutdown: tokio::sync::Notify,
-    open_turn_probe: Option<OpenTurnProbe>,
     /// Set once the quiet trigger runs: a second `spawn_watcher` (the
     /// registry hands back an existing service) mustn't start another.
     quiet_spawned: std::sync::atomic::AtomicBool,
@@ -326,11 +330,14 @@ struct Inner {
     /// there was nothing to sweep). Starts `true` so a service that
     /// never runs a startup sweep (non-primary streams) never gates;
     /// boot flips it `false` for the duration of the primary's sweep via
-    /// [`SnapshotCaptureService::begin_initial_sweep`]. Effort-start
-    /// awaits this ([`SnapshotCaptureService::await_initial_ready`]) so
-    /// an effort's baseline reflects the whole pre-edit tree, not a
-    /// half-swept one.
+    /// [`SnapshotCaptureService::begin_initial_sweep`]. A run's mark and
+    /// the startup diff await this
+    /// ([`SnapshotCaptureService::await_initial_ready`]) so they read the
+    /// whole tree, not a half-swept one.
     initial_ready: tokio::sync::watch::Sender<bool>,
+    /// `true` once the git-refs listener has read the HEAD it counts moves
+    /// from.
+    head_seeded: tokio::sync::watch::Sender<bool>,
 }
 
 impl SnapshotCaptureService {
@@ -369,11 +376,11 @@ impl SnapshotCaptureService {
                 last_activity: Mutex::new(None),
                 activity: tokio::sync::Notify::new(),
                 quiet_shutdown: tokio::sync::Notify::new(),
-                open_turn_probe: None,
                 quiet_spawned: std::sync::atomic::AtomicBool::new(false),
                 shutdown: tokio::sync::Notify::new(),
                 refilter: tokio::sync::Notify::new(),
                 initial_ready: tokio::sync::watch::channel(true).0,
+                head_seeded: tokio::sync::watch::channel(false).0,
             }),
         }
     }
@@ -385,14 +392,14 @@ impl SnapshotCaptureService {
     }
 
     /// Signal that the initial sweep finished (or had nothing to do),
-    /// releasing any effort-start waiters.
+    /// releasing any waiters.
     pub fn mark_initial_complete(&self) {
         let _ = self.inner.initial_ready.send_replace(true);
     }
 
     /// Wait until this stream's initial startup snapshot is complete —
     /// returns immediately when it already is (or when this stream never
-    /// sweeps). Effort-start awaits this so the baseline is whole.
+    /// sweeps). A run's mark awaits this so the baseline is whole.
     pub async fn await_initial_ready(&self) {
         let mut rx = self.inner.initial_ready.subscribe();
         // Err only if the sender dropped (it lives in `inner`'s Arc, so
@@ -468,16 +475,6 @@ impl SnapshotCaptureService {
         self.inner.workspace_filter.clone()
     }
 
-    /// Whether this stream's workspace filter excludes `rel` (a
-    /// worktree-relative path) from capture — the project's
-    /// `generated.exclude` list or `.gitignore`. A path that answers
-    /// `true` here is never snapshotted, so nothing downstream can
-    /// observe it as changed; effort attribution uses this to leave
-    /// such paths out of a claim entirely (tsk249).
-    pub fn excluded_from_capture(&self, rel: &Path) -> bool {
-        self.inner.workspace_filter.ignore(rel, false)
-    }
-
     /// This stream's history holds only what it touched: a worktree stream.
     pub fn with_sparse_history(mut self, sparse: bool) -> Self {
         if let Some(inner) = Arc::get_mut(&mut self.inner) {
@@ -517,16 +514,6 @@ impl SnapshotCaptureService {
             inner.quiet_period = period;
         } else {
             warn!("with_quiet_period called after the service was shared; ignoring");
-        }
-        self
-    }
-
-    /// Supply the open-turn probe the quiet trigger consults.
-    pub fn with_open_turn_probe(mut self, probe: OpenTurnProbe) -> Self {
-        if let Some(inner) = Arc::get_mut(&mut self.inner) {
-            inner.open_turn_probe = Some(probe);
-        } else {
-            warn!("with_open_turn_probe called after the service was shared; ignoring");
         }
         self
     }
@@ -573,21 +560,6 @@ impl SnapshotCaptureService {
                 }
             });
         (before.branch, revision)
-    }
-
-    /// The version triple for a file ref pinned to `snapshot_id` in this
-    /// stream ([`crate::file_ref_version::resolve`]).
-    pub async fn resolve_file_version(
-        &self,
-        snapshot_id: i64,
-    ) -> Result<crate::file_ref_version::ResolvedFileVersion, oxplow_domain::DomainError> {
-        crate::file_ref_version::resolve(
-            &self.inner.store,
-            &*self.inner.vcs,
-            &self.inner.project_dir,
-            snapshot_id,
-        )
-        .await
     }
 
     /// Reads this stream's captured bytes from whichever store holds them.
@@ -643,10 +615,10 @@ impl SnapshotCaptureService {
     }
 
     /// The quiet trigger: after the worktree has been still for
-    /// `quiet_period`, take a `quiet` snapshot of what changed — unless
-    /// an agent turn is open on this stream (its `turn_end` take will
-    /// capture the same edits) or a take already drained everything.
-    /// Human edits between turns get a snapshot of their own this way.
+    /// `quiet_period`, take a `quiet` snapshot of what changed — unless a
+    /// take already drained everything. The worktree's record does not
+    /// depend on turns: edits get their own snapshot whoever made them and
+    /// whatever turns are open.
     pub fn spawn_quiet_trigger(&self) -> tokio::task::JoinHandle<()> {
         if self.inner.quiet_spawned.swap(true, Ordering::SeqCst) {
             debug!("snapshot: quiet trigger already running for this stream");
@@ -699,11 +671,6 @@ impl SnapshotCaptureService {
         {
             return; // a take already drained it
         }
-        if let Some(probe) = &self.inner.open_turn_probe {
-            if probe(self.inner.stream_id).await {
-                return; // the open turn's end take captures these edits
-            }
-        }
         if let Err(e) = self.request_snapshot(SnapshotTrigger::Quiet).await {
             debug!(error = %e, "snapshot: quiet take failed");
         }
@@ -731,12 +698,20 @@ impl SnapshotCaptureService {
         self.inner.quiet_shutdown.notify_one();
     }
 
-    /// Spawn a listener that turns a move of this stream's refs (`moves`,
-    /// the VCS watcher's channel) into a snapshot request. It fires
-    /// whenever HEAD or any ref moves (commit, branch switch, fetch, pull,
-    /// rebase, …), so a fresh commit shows up in Local History as a
-    /// snapshot row tagged with the new HEAD even when the worktree
-    /// itself didn't change between snapshots.
+    /// Spawn a listener that turns a move of this stream's HEAD into a
+    /// snapshot request and a `vcs.head.moved` event. `moves` is the VCS
+    /// watcher's channel, which fires for any change under the repository's
+    /// `refs/` (a commit in another worktree, a fetch, a `packed-refs`
+    /// rewrite, a lock file): the listener reads this worktree's own HEAD
+    /// (branch and commit) and acts only when it differs from the one it
+    /// last saw. The HEAD at start is the first one seen, so starting is
+    /// not a move. A move is spent only once its take returned a snapshot
+    /// and the event is logged: a take that fails, or finds the stream with
+    /// no snapshot yet, leaves it to the next ref event. A fresh commit
+    /// therefore shows up in Local History as a snapshot tagged with the new
+    /// HEAD even when the worktree itself didn't change between snapshots,
+    /// and however many file or ref events the commit made, it is one take
+    /// and one event.
     pub fn spawn_git_refs_listener(
         &self,
         moves: &crate::ref_moves::RefMoves,
@@ -744,28 +719,83 @@ impl SnapshotCaptureService {
         let mut rx = moves.subscribe();
         let this = self.clone();
         tokio::spawn(async move {
-            // A missed move may have been this stream's: the take is
-            // idempotent, so it takes.
+            let mut seen = this.current_head().await;
+            this.inner.head_seeded.send_replace(true);
+            // A missed move may have been this stream's: reading HEAD
+            // decides, so it is looked at as if it were.
             while let Some(moved) = rx.recv().await {
-                if moved.may_concern(this.inner.stream_id) {
-                    if let Err(e) = this.request_snapshot_for_git_refs().await {
-                        debug!(error = %e, "snapshot: git-refs trigger failed");
+                if !moved.may_concern(this.inner.stream_id) {
+                    continue;
+                }
+                let Some(head) = this.current_head().await else {
+                    continue;
+                };
+                if seen.as_ref() == Some(&head) {
+                    continue; // another worktree's ref, a fetch, a lock file
+                }
+                let take = match this.git_refs_take().await {
+                    Ok(Some(take)) => take,
+                    Ok(None) => {
+                        debug!("snapshot: no snapshot to follow the HEAD move yet; kept");
+                        continue;
                     }
+                    Err(e) => {
+                        debug!(error = %e, "snapshot: git-refs trigger failed; the move is kept");
+                        continue;
+                    }
+                };
+                let (from, to) = (
+                    seen.as_ref().and_then(|(_, rev)| rev.clone()),
+                    head.1.clone(),
+                );
+                let logged = this
+                    .inner
+                    .store
+                    .log_head_moved(
+                        this.inner.stream_id,
+                        from,
+                        to,
+                        take.restamped.then_some(take.snapshot),
+                        "system:snapshot_capture".into(),
+                    )
+                    .await;
+                match logged {
+                    Ok(()) => seen = Some(head),
+                    Err(e) => warn!(error = %e, "snapshot: logging the HEAD move failed; kept"),
                 }
             }
         })
     }
 
+    /// This worktree's HEAD as the git-refs listener tells moves: its
+    /// branch and its commit. `None` when it can't be read.
+    async fn current_head(&self) -> Option<(Option<String>, Option<String>)> {
+        let head = self.inner.vcs.head(&self.inner.project_dir).await.ok()?;
+        Some((head.branch, head.revision))
+    }
+
+    /// Resolves once the git-refs listener has read the HEAD it counts moves
+    /// from (a test commits only after this).
+    pub async fn git_refs_listener_ready(&self) {
+        let mut ready = self.inner.head_seeded.subscribe();
+        let _ = ready.wait_for(|up| *up).await;
+    }
+
     /// Drain any pending dirty files (a `git_refs` take), then — if the
     /// worktree is clean and HEAD moved past what the current snapshot
     /// records — re-stamp it with the new HEAD
-    /// (`SqliteSnapshotStore::record_head_moved`: a `head_moved` op and
-    /// `vcs.head.moved`, in one transaction). No new snapshot: the tree
-    /// didn't change, the existing snapshot just now also is a new
-    /// commit. Called from `spawn_git_refs_listener`.
+    /// (`SqliteSnapshotStore::record_head_moved`: a `head_moved` op). No new
+    /// snapshot: the tree didn't change, the existing snapshot just now also
+    /// is a new commit. The snapshot the worktree is at after it.
     pub async fn request_snapshot_for_git_refs(
         &self,
     ) -> Result<Option<i64>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.git_refs_take().await?.map(|take| take.snapshot))
+    }
+
+    async fn git_refs_take(
+        &self,
+    ) -> Result<Option<GitRefsTake>, Box<dyn std::error::Error + Send + Sync>> {
         if self.is_idle() {
             return Ok(None);
         }
@@ -781,29 +811,31 @@ impl SnapshotCaptureService {
         let Some(current) = after_drain else {
             return Ok(None);
         };
+        let unstamped = GitRefsTake {
+            snapshot: current,
+            restamped: false,
+        };
         let head = self.clean_head().await.1;
         let Some(head) = head else {
             // Dirty (the next take records the commit) or not a repo.
-            return Ok(after_drain);
+            return Ok(Some(unstamped));
         };
         let Some(moved) = self
             .inner
             .store
-            .record_head_moved(
-                self.inner.stream_id,
-                current,
-                head,
-                "system:snapshot_capture".into(),
-            )
+            .record_head_moved(self.inner.stream_id, current, head)
             .await?
         else {
-            return Ok(after_drain);
+            return Ok(Some(unstamped));
         };
         info!(
             snapshot_id = moved.snapshot_id,
             "snapshot: re-stamped the current snapshot with the new HEAD",
         );
-        Ok(Some(moved.snapshot_id))
+        Ok(Some(GitRefsTake {
+            snapshot: moved.snapshot_id,
+            restamped: true,
+        }))
     }
 
     /// `watcher` is this stream's watch, which judges by this stream's filter.
@@ -934,6 +966,19 @@ impl SnapshotCaptureService {
     /// from real ones. Callers without an event source (tests, manual
     /// triggers) pass `WatchEventKind::Other`.
     pub fn mark_dirty(&self, path: PathBuf, kind: WatchEventKind) {
+        let now = Timestamp::now();
+        self.mark_dirty_changed(path, kind, (now, now));
+    }
+
+    /// [`Self::mark_dirty`] for a path whose change was heard at `changed`
+    /// (first, last): a path put back after a failed take keeps the times
+    /// it was first heard at.
+    fn mark_dirty_changed(
+        &self,
+        path: PathBuf,
+        kind: WatchEventKind,
+        changed: (Timestamp, Timestamp),
+    ) {
         let mut set = self.inner.dirty.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         set.entry(path)
@@ -944,11 +989,16 @@ impl SnapshotCaptureService {
                 // downgrade an already-staged entry — keep its
                 // pre-computed metadata so capture stays fast.
                 e.last_kind = kind.clone();
+                e.changed = Some(match e.changed {
+                    Some((first, last)) => (first.min(changed.0), last.max(changed.1)),
+                    None => changed,
+                });
             })
             .or_insert_with(|| DirtyEntry {
                 staging: None,
                 first_seen: now,
                 last_kind: kind,
+                changed: Some(changed),
             });
     }
 
@@ -970,12 +1020,16 @@ impl SnapshotCaptureService {
         let bypass = Instant::now()
             .checked_sub(Duration::from_secs(3600))
             .unwrap_or_else(Instant::now);
+        // A change the watcher already heard keeps its times; the sweep
+        // itself heard nothing.
+        let changed = set.get(&path).and_then(|e| e.changed);
         set.insert(
             path,
             DirtyEntry {
                 staging: Some(staging),
                 first_seen: bypass,
                 last_kind: WatchEventKind::Other,
+                changed,
             },
         );
     }
@@ -1069,8 +1123,8 @@ impl SnapshotCaptureService {
     /// those get a deletion row when the dirty set is captured.
     ///
     /// Honors the service's `WorkspaceFilter`, so build dirs
-    /// and `.oxplow/` internals are skipped (wiki pages pass through
-    /// because the filter explicitly allows `.oxplow/wiki/`).
+    /// and `.oxplow/` internals are skipped (oxwiki pages pass through
+    /// because the filter explicitly allows `.oxplow/oxwiki/`).
     ///
     /// Doesn't write anything itself — call `request_snapshot` after
     /// to flush the dirty set.
@@ -1084,7 +1138,7 @@ impl SnapshotCaptureService {
         // snapshot lists the whole tree) is gone (tsk71): metric baselines now
         // run `scan_kind = 'full'` captures over the RECONSTRUCTED tree of an
         // ordinary snapshot, so nothing needs a fabricated full-tree snapshot
-        // any more — and fabricating one polluted effort file-attribution.
+        // any more — and fabricating one polluted file attribution.
         self.enqueue_tree_diff(Path::new("")).await
     }
 
@@ -1555,8 +1609,19 @@ impl SnapshotCaptureService {
             set.drain().collect()
         };
         if drained.is_empty() {
-            return self.record(req, Vec::new(), started, policy).await;
+            return self
+                .record(req, Vec::new(), HashMap::new(), started, policy)
+                .await;
         }
+        // When the watcher heard each path change, kept for the rows.
+        let changed: HashMap<String, (Timestamp, Timestamp)> = drained
+            .iter()
+            .filter_map(|(path, entry)| {
+                entry
+                    .changed
+                    .map(|c| (rel_of(&self.inner.project_dir, path), c))
+            })
+            .collect();
         let capture_started = Instant::now();
         let drained_count = drained.len();
         // Split into:
@@ -1768,8 +1833,8 @@ impl SnapshotCaptureService {
         // Send-bound cycle on the anonymous Future types
         // (request_snapshot → capture_inner → tokio::spawn(...) →
         // request_snapshot). The quiet trigger re-arms for entries left
-        // dirty (see `quiet_take`), and any other take — a turn end, an
-        // effort bracket, a git-refs change — picks them up too. Fresh-file
+        // dirty (see `quiet_take`), and any other take — a turn end, a
+        // run's mark, a git-refs change — picks them up too. Fresh-file
         // captures may land in a later snapshot than the one that
         // first observed them — a small latency cost for completely
         // suppressing transient-file rows.
@@ -1795,7 +1860,9 @@ impl SnapshotCaptureService {
                 trigger = ?req.trigger,
                 "snapshot request: nothing to capture (all deferred or dropped)",
             );
-            return self.record(req, Vec::new(), started, policy).await;
+            return self
+                .record(req, Vec::new(), HashMap::new(), started, policy)
+                .await;
         }
 
         debug!(
@@ -1806,7 +1873,7 @@ impl SnapshotCaptureService {
             capture_ms = capture_started.elapsed().as_millis() as u64,
             "snapshot request: rows assembled",
         );
-        self.record(req, rows, started, policy).await
+        self.record(req, rows, changed, started, policy).await
     }
 
     /// Record a take with `rows` (possibly none): stamp the branch HEAD is
@@ -1821,6 +1888,7 @@ impl SnapshotCaptureService {
         &self,
         req: TakeRequest,
         rows: Vec<FileSnapshot>,
+        changed: HashMap<String, (Timestamp, Timestamp)>,
         started: Instant,
         policy: ContentPolicy,
     ) -> Result<Option<TakeOutcome>, Box<dyn std::error::Error + Send + Sync>> {
@@ -1832,13 +1900,37 @@ impl SnapshotCaptureService {
         } else {
             self.clean_head().await
         };
+        // The git blob id of each oxplow-stored row's bytes, read back from
+        // the blobs just written: what lets a commit's blob be compared with
+        // a row without reading bytes later.
+        let git_oids = if policy.keeps() {
+            let blobs = self.inner.blobs.clone();
+            let objects = self.inner.vcs.object_store(&self.inner.project_dir);
+            let stored: Vec<(String, String)> = rows
+                .iter()
+                .filter(|r| r.storage == SnapshotStorage::Oxplow)
+                .filter_map(|r| Some((r.path.clone(), r.blob_hash.clone()?)))
+                .collect();
+            tokio::task::spawn_blocking(move || {
+                stored
+                    .into_iter()
+                    .filter_map(|(path, hash)| {
+                        let bytes = blobs.read(&hash).ok()?;
+                        Some((path, objects.id_of(&bytes).0))
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .await
+            .unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
         let take = TakeRecord {
             stream_id: self.inner.stream_id,
             rows,
             trigger: req.trigger,
             thread_id: req.thread_id,
             turn_id: req.turn_id,
-            effort_id: req.effort_id,
             branch,
             revision,
             elapsed_ms: started.elapsed().as_millis() as u64,
@@ -1853,8 +1945,11 @@ impl SnapshotCaptureService {
             }),
             contents: policy.keeps(),
             handle: None,
+            changed_at: changed,
+            git_oids,
         };
         let paths: Vec<String> = take.rows.iter().map(|r| r.path.clone()).collect();
+        let heard = take.changed_at.clone();
         let outcome = match self.inner.store.record_take(take).await {
             Ok(Some(outcome)) => outcome,
             Ok(None) => return Ok(None),
@@ -1862,7 +1957,12 @@ impl SnapshotCaptureService {
                 // The drained paths go back in the dirty set, so the next
                 // take records them rather than losing the edits.
                 for path in paths {
-                    self.mark_dirty(self.inner.project_dir.join(path), WatchEventKind::Other);
+                    let times = heard.get(&path).copied();
+                    let full = self.inner.project_dir.join(&path);
+                    match times {
+                        Some(times) => self.mark_dirty_changed(full, WatchEventKind::Other, times),
+                        None => self.mark_dirty(full, WatchEventKind::Other),
+                    }
                 }
                 return Err(e.into());
             }
@@ -1878,7 +1978,7 @@ impl SnapshotCaptureService {
         }
         info!(
             snapshot_id = outcome.snapshot_id,
-            op = outcome.op_seq,
+            op = ?outcome.op_seq,
             unchanged = outcome.unchanged,
             files = outcome.file_count,
             trigger = ?req.trigger,
@@ -1952,9 +2052,16 @@ mod tests {
     async fn svc_for(
         project: &std::path::Path,
     ) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>) {
+        let (svc, store, _db) = svc_with_db(project).await;
+        (svc, store)
+    }
+
+    async fn svc_with_db(
+        project: &std::path::Path,
+    ) -> (SnapshotCaptureService, Arc<SqliteSnapshotStore>, Database) {
         let db = Database::in_memory();
         seed_stream(&db).await;
-        let store = Arc::new(SqliteSnapshotStore::new(db));
+        let store = Arc::new(SqliteSnapshotStore::new(db.clone()));
         let blobs = BlobStore::new(project.join(".oxplow/snapshots"));
         // Tests bypass the settle gate so they observe immediate
         // captures; the gate is independently tested elsewhere.
@@ -1969,7 +2076,77 @@ mod tests {
         )
         .with_settle_duration(Duration::ZERO)
         .with_predrain_delay(Duration::ZERO);
-        (svc, store)
+        (svc, store, db)
+    }
+
+    /// `(path, first_changed_at, last_changed_at)` of every captured row.
+    async fn change_times(db: &Database) -> Vec<(String, Option<Timestamp>, Option<Timestamp>)> {
+        db.read(|conn| {
+            let bad = |e: rusqlite::Error| oxplow_domain::DomainError::Invalid(e.to_string());
+            let mut stmt = conn
+                .prepare(
+                    "SELECT path, first_changed_at, last_changed_at FROM file_snapshot ORDER BY path",
+                )
+                .map_err(bad)?;
+            let rows = stmt
+                .query_map([], |r| {
+                    let at = |i: usize| -> rusqlite::Result<Option<Timestamp>> {
+                        Ok(r.get::<_, Option<String>>(i)?
+                            .map(|t: String| Timestamp::parse(&t).unwrap()))
+                    };
+                    Ok((r.get::<_, String>(0)?, at(1)?, at(2)?))
+                })
+                .map_err(bad)?;
+            rows.collect::<Result<Vec<_>, _>>().map_err(bad)
+        })
+        .await
+        .unwrap()
+    }
+
+    /// Two files the watcher heard changing apart, captured in one take, carry
+    /// their own times (first and last report); the take's own time is no
+    /// stand-in for them.
+    #[tokio::test]
+    async fn two_files_changed_apart_and_taken_together_carry_their_own_times() {
+        let project = tempdir().unwrap();
+        let (svc, _store, db) = svc_with_db(project.path()).await;
+        let a = project.path().join("a.txt");
+        let b = project.path().join("b.txt");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        svc.mark_dirty(b.clone(), WatchEventKind::Other);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        // `a` is heard again after `b`.
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        svc.request_snapshot(SnapshotTrigger::Quiet).await.unwrap();
+        let times = change_times(&db).await;
+        let [(pa, a_first, a_last), (pb, b_first, b_last)] = &times[..] else {
+            panic!("{times:?}");
+        };
+        assert_eq!((pa.as_str(), pb.as_str()), ("a.txt", "b.txt"));
+        let ms = |t: &Option<Timestamp>| t.expect("heard by the watcher").unix_ms();
+        assert!(ms(b_first) - ms(a_first) >= 350, "{times:?}");
+        assert_eq!(ms(b_first), ms(b_last), "b was heard once");
+        assert!(ms(a_last) - ms(a_first) >= 750, "{times:?}");
+        assert!(ms(a_last) > ms(b_last), "{times:?}");
+    }
+
+    /// A change no one heard (the startup sweep found it) is known only to
+    /// lie between two takes: no time.
+    #[tokio::test]
+    async fn a_file_the_startup_sweep_found_carries_no_change_time() {
+        let project = tempdir().unwrap();
+        let (svc, _store, db) = svc_with_db(project.path()).await;
+        std::fs::write(project.path().join("swept.txt"), "x").unwrap();
+        svc.enqueue_startup_diff().await.unwrap();
+        svc.request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap();
+        let times = change_times(&db).await;
+        assert_eq!(times.len(), 1, "{times:?}");
+        assert_eq!((times[0].1, times[0].2), (None, None));
     }
 
     /// Init a git repo at `dir` and commit `files` so they're clean
@@ -2061,7 +2238,7 @@ mod tests {
     }
 
     /// A worktree stream has no row for a file it never touched. A rescan of
-    /// its root must not record them all as new: an open effort would see
+    /// its root must not record them all as new: a running turn would see
     /// thousands of files added.
     #[tokio::test]
     async fn a_rescan_of_a_sparse_stream_records_no_clean_file_it_has_no_history_for() {
@@ -2847,13 +3024,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        svc.git_refs_listener_ready().await;
         let parent = repo.find_commit(head1).unwrap();
         let head2 = repo
             .commit(Some("HEAD"), &sig, &sig, "2", &tree, &[&parent])
             .unwrap();
-
-        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
-        let _listener = svc.spawn_git_refs_listener(&moves);
         // Its move, then more than the channel holds of another stream's,
         // before the listener runs: its own is dropped.
         moves.moved(TEST_STREAM);
@@ -2868,6 +3045,170 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         }
         panic!("the lagged listener never took");
+    }
+
+    /// A repo with one commit holding `tracked.txt`.
+    fn repo_with_one_commit(
+        dir: &std::path::Path,
+    ) -> (git2::Repository, git2::Oid, std::path::PathBuf) {
+        let repo = git2::Repository::init(dir).unwrap();
+        let mut cfg = repo.config().unwrap();
+        cfg.set_str("user.name", "t").unwrap();
+        cfg.set_str("user.email", "t@example.com").unwrap();
+        std::fs::write(dir.join(".gitignore"), ".oxplow\n").unwrap();
+        let tracked = dir.join("tracked.txt");
+        std::fs::write(&tracked, "v1").unwrap();
+        let mut idx = repo.index().unwrap();
+        idx.add_path(std::path::Path::new("tracked.txt")).unwrap();
+        idx.add_path(std::path::Path::new(".gitignore")).unwrap();
+        idx.write().unwrap();
+        let tree = repo.find_tree(idx.write_tree().unwrap()).unwrap();
+        let sig = repo.signature().unwrap();
+        let head = repo
+            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
+        drop(tree);
+        (repo, head, tracked)
+    }
+
+    /// The `vcs.head.moved` events logged for the stream, in order.
+    async fn head_moves(db: &Database) -> Vec<serde_json::Value> {
+        db.read(|conn| {
+            let mut stmt = conn
+                .prepare("SELECT payload FROM event_log WHERE type = 'vcs.head.moved' ORDER BY seq")
+                .map_err(oxplow_db::map_sql_err)?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(oxplow_db::map_sql_err)?;
+            Ok(rows
+                .map(|r| serde_json::from_str(&r.unwrap()).unwrap())
+                .collect::<Vec<_>>())
+        })
+        .await
+        .unwrap()
+    }
+
+    /// A ref that moved somewhere else in the repository (another worktree's
+    /// commit, a fetch, a lock file) fires this stream's ref channel too, but
+    /// its own HEAD did not move: it takes nothing and logs nothing. Nor is
+    /// the app starting a move: the HEAD at start is where moves count from.
+    #[tokio::test]
+    async fn a_ref_moved_elsewhere_in_the_repository_causes_no_take_on_this_stream() {
+        let project = tempdir().unwrap();
+        let (_repo, _head, tracked) = repo_with_one_commit(project.path());
+        let (svc, store, db) = svc_with_db(project.path()).await;
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        svc.git_refs_listener_ready().await;
+        // An edit waits for a take of its own; refs move elsewhere three times.
+        for _ in 0..3 {
+            moves.moved(TEST_STREAM);
+        }
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        assert!(store.list_ops(TEST_STREAM, 20).await.unwrap().is_empty());
+        assert!(store.list_for_path("tracked.txt").await.unwrap().is_empty());
+        assert!(head_moves(&db).await.is_empty());
+    }
+
+    /// A commit in this worktree is one take, stamped with the new HEAD, and
+    /// one `vcs.head.moved { from, to }`, however many ref events it made.
+    #[tokio::test]
+    async fn a_commit_in_this_worktree_gives_one_take_and_one_head_move() {
+        let project = tempdir().unwrap();
+        let (repo, head1, tracked) = repo_with_one_commit(project.path());
+        let (svc, store, db) = svc_with_db(project.path()).await;
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        let first = svc
+            .request_snapshot(SnapshotTrigger::Startup)
+            .await
+            .unwrap()
+            .unwrap();
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        svc.git_refs_listener_ready().await;
+
+        let sig = repo.signature().unwrap();
+        let parent = repo.find_commit(head1).unwrap();
+        let tree = parent.tree().unwrap();
+        let head2 = repo
+            .commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+            .unwrap();
+        for _ in 0..5 {
+            moves.moved(TEST_STREAM);
+        }
+        let want = Some(Revision::git(head2.to_string()));
+        for _ in 0..100 {
+            if store.get_snapshot_revision(first).await.unwrap() == want
+                && !head_moves(&db).await.is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(store.get_snapshot_revision(first).await.unwrap(), want);
+        let triggers: Vec<SnapshotTrigger> = store
+            .list_ops(TEST_STREAM, 20)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|o| o.trigger)
+            .collect();
+        assert_eq!(
+            triggers,
+            vec![SnapshotTrigger::HeadMoved, SnapshotTrigger::Startup]
+        );
+        let moved = head_moves(&db).await;
+        assert_eq!(moved.len(), 1, "{moved:?}");
+        assert_eq!(moved[0]["from"], head1.to_string());
+        assert_eq!(moved[0]["to"], head2.to_string());
+        assert_eq!(moved[0]["snapshot"], first);
+    }
+
+    /// A move is spent only once its take has landed: a take that fails
+    /// leaves it for the next ref event.
+    #[tokio::test]
+    async fn a_failed_take_leaves_the_head_move_for_the_next_event() {
+        let project = tempdir().unwrap();
+        let (repo, head1, tracked) = repo_with_one_commit(project.path());
+        // A stream with no row: the take's snapshot insert fails its FK.
+        let db = Database::in_memory();
+        let store = Arc::new(SqliteSnapshotStore::new(db.clone()));
+        let svc = SnapshotCaptureService::new(
+            store.clone(),
+            BlobStore::new(project.path().join(".oxplow/snapshots")),
+            project.path().to_path_buf(),
+            std::sync::Arc::new(crate::vcs::GitProvider),
+            TEST_STREAM,
+            1_000_000,
+            oxplow_fs_watch::WorkspaceFilter::default(),
+        )
+        .with_settle_duration(Duration::ZERO)
+        .with_predrain_delay(Duration::ZERO);
+        let moves = crate::ref_moves::RefMoves::new(crate::events::EventBus::new());
+        let _listener = svc.spawn_git_refs_listener(&moves);
+        svc.git_refs_listener_ready().await;
+        let sig = repo.signature().unwrap();
+        let parent = repo.find_commit(head1).unwrap();
+        let tree = parent.tree().unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "second", &tree, &[&parent])
+            .unwrap();
+        svc.mark_dirty(tracked.clone(), WatchEventKind::Other);
+        moves.moved(TEST_STREAM);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(head_moves(&db).await.is_empty(), "the take failed");
+
+        // The store is whole again: the next ref event takes the move.
+        seed_stream(&db).await;
+        moves.moved(TEST_STREAM);
+        for _ in 0..100 {
+            if !head_moves(&db).await.is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(head_moves(&db).await.len(), 1);
     }
 
     #[tokio::test]
@@ -2934,9 +3275,8 @@ mod tests {
             Some(Revision::git(head2_oid.to_string()))
         );
 
-        // The op log tells the story, newest first: the second git-refs
-        // take (unchanged), the head move, the first git-refs take
-        // (unchanged), the startup take.
+        // The op log tells the story, newest first: the head move, then the
+        // startup take. The git-refs takes found nothing and logged none.
         let triggers: Vec<SnapshotTrigger> = store
             .list_ops(TEST_STREAM, 10)
             .await
@@ -2946,12 +3286,7 @@ mod tests {
             .collect();
         assert_eq!(
             triggers,
-            vec![
-                SnapshotTrigger::GitRefs,
-                SnapshotTrigger::HeadMoved,
-                SnapshotTrigger::GitRefs,
-                SnapshotTrigger::Startup,
-            ]
+            vec![SnapshotTrigger::HeadMoved, SnapshotTrigger::Startup]
         );
     }
 
@@ -2971,17 +3306,11 @@ mod tests {
         }
     }
 
-    fn probe(open: bool) -> OpenTurnProbe {
-        Arc::new(move |_| Box::pin(async move { open }))
-    }
-
     #[tokio::test]
-    async fn a_quiet_worktree_with_no_open_turn_gets_a_quiet_snapshot() {
+    async fn a_worktree_still_for_the_period_gets_a_quiet_snapshot() {
         let project = tempdir().unwrap();
         let (svc, store) = svc_for(project.path()).await;
-        let svc = svc
-            .with_quiet_period(Duration::from_millis(40))
-            .with_open_turn_probe(probe(false));
+        let svc = svc.with_quiet_period(Duration::from_millis(40));
         let _quiet = svc.spawn_quiet_trigger();
         // A human edits twice in quick succession: one take, after the
         // second edit has been still for a whole period.
@@ -3002,35 +3331,34 @@ mod tests {
         svc.shutdown();
     }
 
+    /// A take made inside the period empties the set: the quiet firing then
+    /// finds nothing waiting, takes nothing and logs no operation.
     #[tokio::test]
-    async fn an_open_turn_holds_the_quiet_trigger_and_its_end_take_captures_the_edit() {
+    async fn a_take_made_inside_the_period_leaves_the_quiet_firing_nothing_to_do() {
         let project = tempdir().unwrap();
         let (svc, store) = svc_for(project.path()).await;
-        let svc = svc
-            .with_quiet_period(Duration::from_millis(30))
-            .with_open_turn_probe(probe(true));
+        let svc = svc.with_quiet_period(Duration::from_millis(150));
         let _quiet = svc.spawn_quiet_trigger();
         let a = project.path().join("edit.rs");
         std::fs::write(&a, "fn main() {}").unwrap();
         svc.mark_dirty(a.clone(), WatchEventKind::Other);
         svc.note_activity();
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        assert!(store.list_ops(TEST_STREAM, 20).await.unwrap().is_empty());
-        // The turn ends: its take gets the edit.
+        // Another request captures the edit before the period is over.
         svc.request_snapshot(SnapshotTrigger::TurnEnd)
             .await
             .unwrap();
+        tokio::time::sleep(Duration::from_millis(400)).await;
         let ops = store.list_ops(TEST_STREAM, 20).await.unwrap();
-        assert_eq!(ops.len(), 1);
+        assert_eq!(ops.len(), 1, "{ops:?}");
         assert_eq!(ops[0].trigger, SnapshotTrigger::TurnEnd);
-        assert_eq!(ops[0].file_count, 1);
         svc.shutdown();
     }
 
+    /// A take that captured files logs one op, anchored to its trigger; what
+    /// the renderer hears of it is `ui.push`'s (from the logged event). A
+    /// request on a clean worktree answers the current snapshot and logs none.
     #[tokio::test]
-    /// Each take records its own op, anchored to its trigger; what the
-    /// renderer hears of it is `ui.push`'s (from the logged event).
-    async fn each_take_records_its_own_anchored_op() {
+    async fn a_take_that_captured_files_logs_one_anchored_op_and_a_clean_request_logs_none() {
         let project = tempdir().unwrap();
         let a = project.path().join("a.txt");
         std::fs::write(&a, "one").unwrap();
@@ -3041,13 +3369,12 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        // Nothing dirty: an op on the same snapshot.
+        // Nothing dirty: the current snapshot, and no op.
         let again = svc
             .request_snapshot(TakeRequest {
-                trigger: SnapshotTrigger::EffortEnd,
+                trigger: SnapshotTrigger::Manual,
                 thread_id: None,
                 turn_id: None,
-                effort_id: None,
                 budget: Some(Duration::from_secs(5)),
                 provider: None,
             })
@@ -3055,11 +3382,30 @@ mod tests {
             .unwrap();
         assert_eq!(again, Some(first));
         let ops = store.list_ops(TEST_STREAM, 5).await.unwrap();
+        assert_eq!(ops.len(), 1, "{ops:?}");
+        assert_eq!(ops[0].trigger, SnapshotTrigger::Startup);
+        assert_eq!(ops[0].snapshot_id, first);
+        // A take that captures a file logs its op with who asked.
+        std::fs::write(&a, "two").unwrap();
+        svc.mark_dirty(a.clone(), WatchEventKind::Other);
+        let second = svc
+            .request_snapshot(TakeRequest {
+                trigger: SnapshotTrigger::Manual,
+                thread_id: None,
+                turn_id: None,
+                budget: Some(Duration::from_secs(5)),
+                provider: None,
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(second, first);
+        let ops = store.list_ops(TEST_STREAM, 5).await.unwrap();
         assert_eq!(ops.len(), 2);
-        assert_eq!(ops[0].trigger, SnapshotTrigger::EffortEnd);
+        assert_eq!(ops[0].trigger, SnapshotTrigger::Manual);
         assert_eq!(
             (ops[0].snapshot_id, ops[0].parent_snapshot_id),
-            (first, Some(first))
+            (second, Some(first))
         );
         assert_eq!(ops[0].budget_ms, Some(5000));
         assert!(!ops[0].over_budget);
@@ -3262,7 +3608,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(
             !waiter.is_finished(),
-            "effort-start gate must block while the initial sweep is in flight",
+            "the initial-sweep gate must block while the sweep is in flight",
         );
         svc.mark_initial_complete();
         tokio::time::timeout(Duration::from_millis(500), waiter)
@@ -3276,7 +3622,7 @@ mod tests {
         let project = tempdir().unwrap();
         let svc = bare_service(project.path()).await;
         // No begin_initial_sweep → ready by default (a stream that never
-        // sweeps must not block effort-start forever).
+        // sweeps must not block a waiter forever).
         tokio::time::timeout(Duration::from_millis(200), svc.await_initial_ready())
             .await
             .expect("an un-swept service must not gate");
@@ -3847,7 +4193,6 @@ mod tests {
                 vcs: std::sync::Arc::new(crate::vcs::GitProvider),
                 max_file_bytes: 1_000_000,
                 generated: Default::default(),
-                open_turn_probe: None,
             },
         );
         let stream = |id: i64| oxplow_domain::Stream {

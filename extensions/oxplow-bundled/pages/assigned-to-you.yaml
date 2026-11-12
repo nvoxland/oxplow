@@ -1,0 +1,71 @@
+title: Assigned to you
+description: The open tasks assigned to you, in progress then up next in your queue order, each with its stage and under its epic.
+icon: user
+category: Work
+keywords: assigned me my tasks queue person
+needs:
+- task_tracker
+# Everything assigned to the person: a project-wide view (the panel is
+# project-scoped).
+loaders:
+  # Open tasks assigned to the person (an epic is context, never a line of
+  # its own unless it is itself assigned). A task under an epic follows the
+  # epic's header row; the groups and the queue order are
+  # `rank IS NULL, rank, created_at`. `n` is the line's place.
+  lines:
+    sql: |
+      WITH mine AS (
+        SELECT t.*, row_number() OVER (ORDER BY t.rank IS NULL, t.rank, t.created_at, t.uri) AS pos
+        FROM v_task t
+        WHERE t.assignee = uri('oxplow/person')
+          AND t.state IN ('in_progress', 'todo', 'blocked')
+      ),
+      grouped AS (
+        SELECT m.*, CASE WHEN m.state = 'in_progress' THEN 0 ELSE 1 END AS g FROM mine m
+      ),
+      epic AS (
+        SELECT g, parent_uri, min(pos) AS first_pos FROM grouped
+        WHERE parent_uri IS NOT NULL GROUP BY g, parent_uri
+      ),
+      lines AS (
+        SELECT g, pos AS s1, 0 AS s2, title, state AS icon, uri, 0 AS depth, coalesce(stage_title, stage) AS stage
+        FROM grouped WHERE parent_uri IS NULL
+        UNION ALL
+        SELECT e.g, e.first_pos, 0, p.title, 'epic', p.uri, 0, NULL
+        FROM epic e JOIN v_task p ON p.uri = e.parent_uri
+        UNION ALL
+        SELECT c.g, e.first_pos, c.pos, c.title, c.state, c.uri, 1, coalesce(c.stage_title, c.stage)
+        FROM grouped c JOIN epic e ON e.g = c.g AND e.parent_uri = c.parent_uri
+      )
+      SELECT CASE g WHEN 0 THEN 'In progress' ELSE 'Up next' END AS grp,
+             title, icon, uri, depth, stage
+      FROM lines ORDER BY g, s1, s2
+  # The first line of the glance: the task in progress, else the next one.
+  line:
+    sql: |
+      SELECT title, state AS icon, uri, 0 AS depth, coalesce(stage_title, stage) AS stage
+      FROM v_task
+      WHERE assignee = uri('oxplow/person') AND state IN ('in_progress', 'todo', 'blocked')
+      ORDER BY state <> 'in_progress', rank IS NULL, rank, created_at, uri
+      LIMIT 1
+  # The open ones, for the panel's header.
+  open_count:
+    sql: |
+      SELECT count(*) AS tasks FROM v_task
+      WHERE assignee = uri('oxplow/person') AND state IN ('in_progress', 'todo', 'blocked')
+view:
+  from: lines
+  viz: list
+  group:
+    by: grp
+  depth: depth
+  columns:
+  - key: title
+    label: Task
+    icon: icon
+    link:
+      kind: page
+      from: uri
+  - key: stage
+    label: Stage
+  empty: Nothing is assigned to you.

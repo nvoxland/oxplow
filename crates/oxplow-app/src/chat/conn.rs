@@ -119,7 +119,13 @@ pub enum Incoming {
         id: String,
         /// What kind it is (its role or path), when Codex says.
         kind: Option<String>,
+        /// The harness's id of the turn that spawned it, when it said
+        /// (Codex's turn id, a child's `rootTurnId`).
+        spawned_in: Option<String>,
     },
+    /// A turn of the thread began, under the agent's own id for it (Codex's
+    /// `turn.id`).
+    TurnStarted(String),
     /// A tool call a child agent finished, in the child's own thread:
     /// recorded as the child's, in the parent's session.
     ChildCall {

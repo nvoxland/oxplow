@@ -5,14 +5,14 @@ import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@
 import { PluginKey } from "@tiptap/pm/state";
 
 import { PageKindIcon } from "../../pageKinds.js";
-import type { MentionRef } from "./MarkdownView.js";
-import { refLinkOf } from "./MarkdownView.js";
+import type { MentionRef } from "./markdownLinks.js";
+import { refLinkOf } from "./markdownLinks.js";
 import type { RefOption, RefSearch } from "./refOptions.js";
 
 export interface RefCompletionOptions {
   /** Where `[[` looks; none, and `[[` is plain text. */
   search: RefSearch | null;
-  /** A work item id that is the active list's (`refLinkOf`). */
+  /** A task id that is the active list's (`refLinkOf`). */
   mentionRef: MentionRef;
 }
 

@@ -4,7 +4,7 @@
 //! - The diff against parent#0 produces `(git-commit:<sha>) --
 //!   touched_file --> (file:<path>)` edges.
 //! - The commit message (subject + body) is run through the shared
-//!   ref extractor so `(git-commit:<sha>) --work_item_mention/
+//!   ref extractor so `(git-commit:<sha>) --task_mention/
 //!   wikilink/finding_mention--> (target)` edges appear too.
 //!
 //! Idempotent. The indexer uses [`SqlitePageRefStore::replace_source`]
@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use oxplow_db::page_ref_projections::{
-    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_WORK_ITEM, RT_TOUCHED_FILE, RT_WIKILINK,
+    RT_BODY_COMMIT, RT_BODY_FINDING, RT_BODY_TASK, RT_TOUCHED_FILE, RT_WIKILINK,
 };
 use oxplow_db::{PageRefEdge, SqlitePageRefStore};
 use oxplow_domain::uri::build;
@@ -71,7 +71,7 @@ pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<Pa
     }
     // Parsed-message edges. Subject + body run through the shared
     // extractor so the same wikilink + inline-mention rules that
-    // apply to wiki bodies and task descriptions also apply to
+    // apply to knowledge page bodies and task descriptions also apply to
     // commit messages.
     let mut combined = String::new();
     combined.push_str(&detail.info.subject);
@@ -80,11 +80,11 @@ pub fn commit_edges(kinds: &ResourceRegistry, detail: &RevisionDetail) -> Vec<Pa
         combined.push_str(&detail.body);
     }
     let refs = extract(kinds, &combined);
-    for item in refs.work_items {
-        out.push(PageRefEdge::new(&source, item, RT_BODY_WORK_ITEM));
+    for item in refs.tasks {
+        out.push(PageRefEdge::new(&source, item, RT_BODY_TASK));
     }
-    for w in refs.wikis {
-        out.push(PageRefEdge::new(&source, build::wiki_uri(&w), RT_WIKILINK));
+    for page in refs.knowledge {
+        out.push(PageRefEdge::new(&source, page, RT_WIKILINK));
     }
     for f in refs.findings {
         out.push(PageRefEdge::new(
@@ -169,7 +169,7 @@ pub async fn index_recent(
 ///
 /// A commit the scan hasn't reached yet is new history: the workspace's
 /// scan runs first, so it is indexed and logged as the scan always does
-/// (`vcs.commit.indexed`, which lands efforts). One still missing is old
+/// (`vcs.commit.indexed`, which links its requests). One still missing is old
 /// history, past the horizon: stored and linked, not logged.
 pub async fn ensure_commit(
     svc: &crate::Services,
@@ -296,7 +296,7 @@ pub async fn refresh(svc: &crate::Services) -> usize {
 
 /// Index the new history reachable from workspace `ws`'s head (found
 /// from `stream`, when it is one's): each new commit stored, linked to
-/// the tasks whose effort's work it holds, and logged. How many.
+/// the requests whose work it holds, and logged. How many.
 async fn index_workspace(
     svc: &crate::Services,
     ws: &Path,
@@ -314,7 +314,7 @@ async fn index_workspace(
     .await;
     for (sha, committed) in &indexed {
         if let Err(e) = crate::commit_links::link_commit(svc, ws, sha, *committed).await {
-            tracing::warn!(?e, %sha, "linking a commit to its effort failed");
+            tracing::warn!(?e, %sha, "linking a commit to its requests failed");
         }
         if let Some(stream) = stream {
             log_indexed(svc, stream, sha, *committed).await;
@@ -442,11 +442,11 @@ fn branch_rows(branches: &[Branch], streams: &[(i64, String)]) -> Vec<oxplow_db:
 mod tests {
     use super::*;
 
-    /// The core kinds with oxplow's tasks as the work list (`tsk<n>`).
+    /// The core kinds with oxtask as the task tracker (`tsk<n>`).
     fn tasks_kinds() -> oxplow_domain::uri::resources::ResourceRegistry {
         oxplow_domain::uri::resources::foundation()
             .clone()
-            .with_work_item_ids("oxplow", r"tsk\d+")
+            .with_task_ids("oxtask", r"tsk\d+")
             .unwrap()
     }
     use oxplow_domain::vcs::{FileStatus, RevisionFile, RevisionInfo};
@@ -494,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn message_body_picks_up_task_and_wiki_refs() {
+    fn message_body_picks_up_task_and_knowledge_refs() {
         let c = commit(
             "abc1234567890",
             "Resolve tsk42 and clarify [[architecture]]",
@@ -504,8 +504,8 @@ mod tests {
         let edges = commit_edges(&tasks_kinds(), &c);
         let targets: Vec<_> = edges.iter().map(|e| e.target.clone()).collect();
         use oxplow_domain::uri::build;
-        assert!(targets.contains(&build::work_item_uri("oxplow", "tsk42")));
-        assert!(targets.contains(&build::wiki_uri("architecture")));
+        assert!(targets.contains(&build::task_uri("oxtask", "tsk42")));
+        assert!(targets.contains(&build::knowledge_uri("oxwiki", "architecture")));
         assert!(targets.contains(&build::finding_uri("fnd-7")));
     }
 
@@ -528,11 +528,11 @@ mod tests {
     /// `v_tag`. A stream's history is a recursive read from its head.
     /// A query that names a commit by its sha reads it whether or not the
     /// index has reached it: a new one is indexed as the scan indexes it
-    /// (logged, so efforts land), one no head reaches is stored quietly,
+    /// (logged, so its requests link), one no head reaches is stored quietly,
     /// and one git doesn't know reads no rows and no error.
     #[tokio::test]
     async fn a_commit_a_query_names_is_indexed_on_demand() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "a\n").unwrap();
@@ -596,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_stream_head_is_indexed_and_history_reads_from_its_head() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let root = svc.layout.project_dir.clone();
         std::fs::write(root.join("a.txt"), "a\n").unwrap();
@@ -750,7 +750,7 @@ mod tests {
         // tsk42 has the commit as a backlink.
         let inbound = page_refs
             .list_backlinks(
-                &oxplow_domain::uri::build::work_item_uri("oxplow", "tsk42"),
+                &oxplow_domain::uri::build::task_uri("oxtask", "tsk42"),
                 None,
             )
             .await
@@ -855,7 +855,7 @@ mod tests {
     /// and `v_branch.upstream / ahead / behind`, a detached HEAD included.
     #[tokio::test]
     async fn the_refs_scan_says_where_each_stream_is_and_how_far_its_branch_has_parted() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let ws = f._dir.path().to_path_buf();
         let git = |args: &[&str]| {
             let out = std::process::Command::new("git")

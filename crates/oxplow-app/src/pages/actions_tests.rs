@@ -19,7 +19,7 @@ async fn titles(svc: &crate::Services) -> Vec<String> {
     let r = svc
         .sql
         .run(oxplow_db::SqlQuery::new(
-            "SELECT title FROM v_work_item ORDER BY title",
+            "SELECT title FROM v_task ORDER BY title",
         ))
         .await
         .unwrap();
@@ -49,6 +49,7 @@ fn call(
         }),
         input: None,
         drop: None,
+        option: None,
         on_behalf_of: Actor::Human,
         confirmed: false,
     }
@@ -216,7 +217,7 @@ async fn a_form_node_starts_from_its_defaults_and_submits() {
         .await
         .unwrap();
     let start = page_form(&svc, &runs, &id, "view").await.unwrap();
-    assert_eq!(start.command.id, "oxplow.work_item.create");
+    assert_eq!(start.command.id, "oxplow.task.create");
     assert_eq!(start.values["title"], serde_json::json!("drafted"));
     let states: Vec<&str> = start.choices["state"]
         .iter()

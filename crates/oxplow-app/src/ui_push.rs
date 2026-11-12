@@ -63,7 +63,6 @@ impl EventConsumer for UiPush {
                 trigger,
                 thread_id: env.anchors.thread_id,
                 turn_id: env.anchors.turn_id,
-                effort_id: env.anchors.effort_id,
             });
         }
         Ok(())
@@ -104,7 +103,7 @@ mod tests {
     /// `SnapshotTaken` through `ui.push`; an unchanged take doesn't.
     #[tokio::test]
     async fn a_logged_snapshot_reaches_the_ui() {
-        let f = crate::test_fixtures::services_with_effort().await;
+        let f = crate::test_fixtures::services_with_thread().await;
         let svc = &f.svc;
         let mut ui = svc.events.subscribe_ui();
         use oxplow_domain::stores::StreamStore as _;

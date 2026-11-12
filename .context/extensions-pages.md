@@ -7,7 +7,7 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
 - **Change links.** `diff-at` (`from` path, optional `line`, `base` and
   `head` columns holding the change's labels; join `v_change`) opens that
   file's diff between the two sides (commit shas / `HEAD` → git refs,
-  `working tree` → disk, `snapshot N` → that snapshot, so an effort's
+  `working tree` → disk, `snapshot N` → that snapshot, so a request's
   change links too). `compare` takes
   a `path:start-end|peer:start-end` value (build it in SQL) plus an
   optional `head` version column and opens the side-by-side
@@ -28,16 +28,6 @@ The page YAML: metadata, params, loaders, view nodes, actions, checks, custom co
   over every row it shows (`all: true`: a Clear, a Retry all) is offered
   only while there are rows (`offeredWholePage`). Those buttons close the
   section, under its rows, never over them (`PartButtons`).
-  The effort page opens with its
-  **verdict** above the slots: the `effort.verdict` replacement target
-  (extensions-slots.md "Replacements"), which core leaves empty — what counts as tested,
-  covered or backed is a review policy's. oxplow-bundled's
-  `effort-verdict` page is the default (the last test run, diff coverage
-  against the `oxplow.coverage.abs_pct` metric's `warnAt`, unverified
-  claims, decisions to confirm); another extension may bring its own and
-  the person chooses. The task page links to the effort page as
-  **Review**: on each effort's activity card, and in the details rail for
-  the newest effort.
 
 ## Pages
 
@@ -82,8 +72,7 @@ a typo is an error at the line):
   query take a subset: "Three kinds, by folder" above).
   A page's `description` says what the page is (what it shows, for
   what, over which scope and order), not what you can do on it. A page
-  whose purpose is an action (a form to file an item, hand off work or
-  verify a claim) may name that action; never list UI mechanics ("drag
+  whose purpose is an action (a form to file an item, or hand off work) may name that action; never list UI mechanics ("drag
   to reorder", "right-click for the rest") or the actions on offer.
 - **`loaders:`**: named loaders ("Loaders" below).
 - **`view:`**, and an optional `rail:`: a tree of nodes ("View nodes").
@@ -145,8 +134,8 @@ Where it lives, and what is loaded:
   needs, and the page shows that instead of an error.
 - `tool: <name>`: the page is also an MCP tool `<namespace>_<tool>`, its
   input the params, its call `oxplow.page.run`. Kept for the few questions
-  agents ask every session (foundation's `thread_work`, `work_next`,
-  `effort_summary`, `catalog`); everything else is `oxplow_find_page`,
+  agents ask every session (foundation's `thread_tasks`, `next_task`,
+  `catalog`); everything else is `oxplow_find_page`,
   then `oxplow_run_page`.
 - `answers: [{ question, about?, params, skill? }]` (`PageAnswer`): the
   questions the page answers. `oxplow_find_page` scores shared words:
@@ -216,10 +205,11 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   is shown, so it is in the `#` and a change replaces the entry; a
   `switch`'s param is a filter by default. `selection` is derived, never
   written: a column `select`s the param, the rail shows the picked row
-  instead of an input, it is in the `#`, and a pick pushes an entry. `view`
+  instead of an input (not on a page that fills: its viz draws the picks), it is in the `#`, and a pick pushes an entry. `view`
   rides the `#` like a filter but is state the page or the system sets:
   the rail never draws it (not in Filters, not counted for Reset) and a
-  person never edits it; a `for:` page may take one (`ParamRole::rides_view`
+  person never edits it; a `for:` page may take one, and a custom page whose
+  component draws its own controls declares them so (the Work board) (`ParamRole::rides_view`
   is the one test for "rides the `#`"). A `filter`, `selection` or `view`
   param found in a `?` is refused.
 - **`options_from`** makes a choice whose options rows list: `value`,
@@ -242,7 +232,7 @@ A param (`PageParam`) takes `name`, `label`, `default`, `options`,
   checked; a run takes any text, and the query says what an unknown value
   means. An agent's page tool (`agent_tools::params_schema`) emits no
   `enum` for it, only words saying which query or loader lists them. A param named
-  `uri`, `effort_id`, `thread_id` or `stream_id` draws as a picker over
+  `uri`, `thread_id` or `stream_id` draws as a picker over
   the matching dataset, by title (`viz/vizParams.ts`); any other is typed.
 - **Implicit params.** A param named `stream_id` or `thread_id` is bound
   to the viewer's context (`ViewContext`, numeric ids) unless the caller
@@ -322,8 +312,13 @@ loader says so. Do filtering and `LIMIT` in SQL.
 **Open runs** (`pages/open_runs.rs`): a window's open page keeps its run
 and the request that made it. A change to a dataset one of its loaders read
 (a command loader's `reads`), or to a param it binds (`head_sha` reads
-`v_stream`), re-runs the loaders that depend on it (`dirty_loaders`).
-`OxplowEvent::PageRunChanged` names the loaders whose rows differ (an
+`v_stream`), re-runs the loaders that depend on it (`dirty_loaders`);
+the rest keep their rows (`unreached`). A `page:` loader reads what its
+loader's chain on the other page read, not only the temp tables that
+loader selects from (`runner::chain_reads`): the Branch part borrows
+`branch-status`'s `facts`, which reads `v_branch_divergence` only through
+`status` and `marks`, and kept its old marks after a Merge out until
+this was so. `OxplowEvent::PageRunChanged` names the loaders whose rows differ (an
 embedded page's as `<embed id>/<loader>`), and the window fetches only
 those. A catalog change (a deploy) re-runs every open run
 (`page_runs.notify_everything()`).
@@ -368,7 +363,13 @@ unique in the page. `#node=<id>` in a link lands on it. `title`,
   in a dry run like a role block's; the desktop draws it in `VizNode`
   (`leadOf`) and `text.rs` writes it under the heading.
 
-**Vizes** (`Viz`): `table`, `list`, `number`, `markdown` (the first row's
+**Vizes** (`Viz`): `table`, `list` (in a compact view, a rail panel, each
+row one dense line: the headline, then the other columns small beside it,
+no divider; its group headings fold nothing — what holds it folds it),
+`icons` (each row as its first `columns` entry's `icon` alone, side by
+side, the value the hover and name, the `link` what a click opens: a list
+made small, a panel's collapsed view; checked: that column must name an
+`icon`; an agent reads it as the list), `number`, `markdown` (the first row's
 `markdown: { text: <column> }`, else its first column, drawn by the one
 Markdown component, `.context/markdown.md`; `base: <column>` names the URI
 the text came from, a file whose folder its relative links and images
@@ -423,10 +424,44 @@ subsections stay in the reading column. Agent text: a `###` heading (the
 link in parentheses), the facts as `**label**: value` lines, then the body.
 The Definition page's View outline reads it as "Sections of `loader`".
 
+**A tree over paths** (`tree: { path, status? }`, in place of `id` /
+`parent` / `label`, never beside them — `shape_problem`): each row is a
+file, its folders are made from its path (folders first, then files, each
+by name), and a made folder holding one made folder and nothing else is
+joined with it into one row (`.agents/skills`). A made folder is no row of
+the result: no link, no menu, no actions; a click folds it. `status` is
+core's change vocabulary (`FileStatus`: added, modified, deleted, renamed,
+untracked, conflicted), drawn as one coloured letter at the row's end (A M
+D R U C); a made folder shows the marks of what is under it. The row's
+label is its name (a joined chain's names), drawn by the column whose key
+is the path (so its `link` still reads the whole row), the full path on
+hover, cut with "…" when long. A lazy path tree (`lazy`, `branch`) is one
+folder's level: id, parent and label come from the path alone, and a row's
+mark is its own status. The rule lives twice, once per reader, from the
+same cases: `pages/path_tree.rs` (what an agent reads: `- src/ AM`) and
+`viz/vizModel.ts` `treeNodes`. Foundation's `worktree-files` query is what
+the Git panel, the Uncommitted page and Directory read; Commit and the diff view
+give their own `path, status` rows.
+
+**Compact** (a rail panel's part, `.ox-compact` in the kit's sheet): its
+sections sit close, a detail's facts are short lines with no rules, a
+fact's buttons wrap under its value, small and whole. A panel's body keeps
+its buttons (its section buttons and a detail's fact buttons: `RailHud`
+passes `partButtons`), its collapsed line has none (one line of stats). A viz shows its first 8 rows
+(`COMPACT_ROWS`), then a "+N more" row (`viz-more`). In a rail panel it is
+a button that grows the panel to the whole rail (`PageTree` `onMore`), where
+the body shows every row (`uncapped`) and scrolls; with no `onMore` it is
+text. A tree counts the rows
+it shows, not the rows it has: folding a branch frees room. Its "+N more"
+counts the result's rows it doesn't show (a folded branch shows all under
+it), not the folder rows made from paths, so a panel of files says how many
+files are left.
+
 Each component names the columns it draws from in its own block: `chart`
 (`x`, `y`, `series`, `label`, `size`, `group`, and a `line`'s `targets`: a
 target line from that column's last non-null value), `tree` (`id`,
-`parent`, `label`; lazy: `lazy`, `branch`), `timeline` (`at`, `label`,
+`parent`, `label`, or `path` in their place, and `status`; lazy: `lazy`,
+`branch`), `timeline` (`at`, `label`,
 `uri`), `steps` (`label`, `status`), `sections` (`title`; optional `id`,
 `link`, `body`), `hunks` (`path`, `from`, `to` — two
 revisions, `working` / `snap:<id>` / `git:<rev>`), `code` (`path`,
@@ -492,6 +527,8 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - **A `rail:` tree** draws first in the page's rail, under its root's
   `title` as a group (bare without one): what the page is about, such as
   the branch a history is of. A row it picks sets the page's view param.
+  A tree that is a form (a quick add) draws last instead, under the
+  filters and the links.
 
 **Columns** (`PageColumn`): `key`, `label`, `link`, `unit`, `icon`,
 `tone`, `width`, `format`, `highlight`, `select`, `expand`, `when`.
@@ -502,8 +539,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   reads "(none)".
 
 - `link: { kind, from, line?, base?, head? }` makes a cell a link
-  (kinds: `task`, `file`, `wiki`, `effort-diff`, `commit`, `metric`,
-  `page`, `diff-at`, `compare`). `page` opens any oxplow URI. The pages
+  (kinds: `task`, `file`, `knowledge`, `commit`, `metric`, `request`,
+  `page`, `diff-at`, `compare`). `page` opens any oxplow URI. `request`
+  takes a request's id (`v_request.id`, or `req<id>`) and opens its
+  Changes page, so a column of ids (`v_request_metric_delta.request_id`)
+  links without building the URI in SQL (`viz/vizModel.ts` `cellLinkRef`). The pages
   a column's links open are the page's **origin**
   (`viz/linkOrigin.ts`, `.context/pages-and-tabs.md` "Origins"): Up and
   Down step through the rows that have one.
@@ -518,10 +558,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   shows as a metric value (`16.4 s`, `42.5%`).
 - `icon` and `tone` each name another column of the row. `icon`'s value
   is an icon drawn before the cell from a fixed vocabulary
-  (`viz/vizIcons.tsx`): the work glyphs (`ready` / `todo`,
-  `in_progress`, `blocked`, `done`, `canceled`, `archived`), a file's
+  (`viz/vizIcons.tsx`): the work glyphs, one per bucket (`backlog`,
+  `todo`, `in_progress`, `blocked`, `done`, `canceled`: pass
+  `v_task.state`, never a list's own stage), a file's
   status (`added`, `modified`, `deleted`, `renamed`, `untracked`,
-  `conflicted`), the kinds (`epic`, `task`, `wiki`, `file`, `folder`,
+  `conflicted`), the kinds (`epic`, `task`, `knowledge`, `file`, `folder`,
   `commit`, `diff`, `metric`, `dashboard`, `comment`), the resource icon
   names (`extension_resources::ICONS`), and any page kind's icon. `tone`'s
   value is `accent`, `success`, `warning`, `danger` or `muted`. Values
@@ -530,7 +571,11 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 - `width` is pixels (a table lays out fixed; cells are cut to one line).
   `format` (`ColumnFormat`): `date`, `datetime`, `relative`, `bytes`,
   `duration` (ms), `integer`, `percent` (a 0–1 fraction), `sparkline` (a
-  JSON array of numbers), `badge` (a pill in the column's `tone`), `items` (a JSON array of
+  JSON array of numbers), `badge` (a pill in the column's `tone`),
+  `markdown` (inline markdown on its line: `Markdown inline`, the viewer
+  keeping only `INLINE_ELEMENTS` — emphasis, code, links, a wikilink by
+  its title — and unwrapping blocks; `first_sentence(body)` is its usual
+  value), `items` (a JSON array of
   strings or `{text, hint?, uri?}`, drawn inline separated by " · ", the
   hint on hover, the uri a link; an agent reads `text (hint) · text`),
   `source` (who caused the row, a JSON object `{kind, label, uri?}` with
@@ -538,7 +583,13 @@ whose loader does not return one (`viz_column_problems`). An agent reads
   every Alerts row uses, its kind's icon and label, a link with a `uri`;
   an agent reads `agent in <label>`, `extension <label>`, `You`). It
   changes only what a person sees; an agent reads the raw value (but for
-  `items` and `source`).
+  `items`, `marks` and `source`). `marks` (a JSON array of strings or
+  `{text, tone?, hint?, gap?}`): short marks drawn tight, each in its tone, the
+  hint on hover (`MarksCell`), a `gap: true` mark starting a new group
+  after a muted dot; an agent reads them joined by spaces (a group after
+  ` · `), a hint in parentheses. The Git panel's changes line is one: `4A
+  5M · +179 −175 · 2U`, coloured: the tracked files, the lines, the
+  untracked files.
 - A timestamp cell shows in local time, its full time on hover.
 - A `table` sizes its columns and stripes its rows with no page settings.
   The renderer picks each column's wrap from its `format` and the texts
@@ -555,9 +606,24 @@ whose loader does not return one (`viz_column_problems`). An agent reads
 under a heading per distinct `by` value, in the order each first appears,
 folding (▾ / ▸) and counting its rows; `labels: { value: heading }` names a
 heading in plain words while the value stays what a drop binds
-(`in_progress: In Progress`); `emphasis` (`list` / `table` /
+(`in_progress: In Progress`); `compact: { value: n }` and `grown: { value:
+n }` (`list` only) cap a group's rows in a rail panel and in one grown to the
+whole rail: the heading still counts them all, and the group ends in "+N
+more", which grows the panel, or, grown, opens the page its header opens. A
+group not named shows every row, and a list that caps its groups isn't cut
+at the panel's row cap. A page and an agent's read show every row
+(`capGroups`, `VizView.rows.test.tsx`); `emphasis` (`list` / `table` /
 `tree`) highlights rows with a truthy value; `depth` (`list` / `table`) is
-a whole number 0–8 that indents. They are never shown as cells.
+a whole number 0–8 that nests: in a full-width `list` a row followed by
+deeper rows is their parent, and the two are one raised panel (the kit's
+`ox-nest`, as the Work board's epics: the parent row its top line, with
+its link, menu and fold; its bottom edge where the children end; panels
+nest; `nestRows` in `vizModel.ts`), while a compact list (a rail panel) and
+a `table` indent instead; `edge` (`list` / `table`) is a tone
+(`danger`, `warning`, … as a column's `tone`) drawn as a bar down the row's
+left side, an invisible one of the same width where it has none, so rows
+line up without being boxed in (`rowEdge`; Task
+List's urgent and high items). They are never shown as cells.
 
 Every `list`, `table` or `tree` row's menu has Ask the Assistant and Add
 to Context (the first page it links to, else the row as text); a row drags
@@ -569,7 +635,7 @@ usability.md "Keyboard").
 
 `actions:` on a page or a viz node: `{ id, label, command | open, input, row?,
 group?, all?, form?, fixed?, fields?, about?, choices?, then?, when?, enabled?, fact?, primary?,
-prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm? }` (`PageAction`).
+prominent?, submenu?, icon?, drag?, bulk?, key?, edit?, confirm?, options_from?, current? }` (`PageAction`).
 `input` binds `{{param.x}}` and, on a row action, `{{row.x}}`
 (`{{row.x|json}}`: the JSON a text cell holds, typed; the one filter,
 checked at load). A page action with `when` or `{{row.*}}` and no `row`
@@ -649,6 +715,22 @@ is gone, is the toast's (usability.md "A person's command that fails").
   result. What becomes of the acting page is `then`: `open` (default; Back
   returns), `replace` (it leaves history), `stay` (nothing opens) or
   `close`. Outside a page (a panel) a page opens in a new tab.
+- **`options_from: <loader>` is one action with a choice in it** (a Mark
+  ▸ of a list's stages, an Assign to ▸ of the open threads): the rows of
+  that loader of the same page (`value`, `label`, an optional `group`)
+  are its options. A row's menu draws it as a submenu, one entry per
+  option (`viz-action-<id>-<value>`); `current: <column>` names the row's
+  column holding the option it is in now, drawn checked and not offered.
+  With `bulk`, the marks bar draws a select. The press sends the option's
+  `value` (`PageActionCall.option`, `oxplow_run_page_action`'s `option`);
+  the server finds that row in the run's loader (`pressed_option`,
+  pages/actions.rs) and binds `{{option.value}}` / `{{option.label}}`, so
+  only what the page offered runs. It is a row action only (no `drag`,
+  `form`, `edit`, `group` or `key`), its `input` must use `{{option.*}}`,
+  and `{{option.*}}` without `options_from` is refused (spec.rs); the
+  loader must exist (schema.rs `options_loader_missing`) and `current`
+  be a column of the viz's loader. The desktop reads the options from
+  the run's loaders (`actionOptionsOf`, vizModel.ts).
 - `edit: true` makes an action the Save of a `markdown` viz's editor. Its
   one input field bound to `{{row.<text column>}}` and not `fixed` takes
   the text (`markdown_problem`).

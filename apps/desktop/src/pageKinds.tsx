@@ -2,7 +2,7 @@
  * Page-kind scheme metadata.
  *
  * `kindForTabId` extracts the kind from a tab id like
- * `file:src/foo.ts` → `"file"`, `work_item:oxplow:tsk42` → `"work_item"`,
+ * `file:src/foo.ts` → `"file"`, `task:oxplow:tsk42` → `"task"`,
  * or, for a declared page, its page id: `page:tasks` → `"tasks"`,
  * `page:gh/open-prs` → `"gh/open-prs"` (what visits and bookmarks
  * record, `recordedPageKind`).
@@ -29,11 +29,11 @@ import {
   type LucideIcon,
   MessageSquareText,
   MessagesSquare,
-  Scale,
 } from "lucide-react";
 import type { ComponentProps, ReactElement } from "react";
-import { ICONS } from "./icons.js";
-import { resourceIcon, resourceInfo } from "./resources.js";
+import { iconFor } from "./icons.js";
+import { resourceIcon } from "./resources.js";
+import { resourceInfo } from "./resourceStore.js";
 import { useExtensions } from "./extensionsStore.js";
 import { recordedPageKind, refFromTabId } from "./tabs/pageRefs.js";
 import type { Extension } from "./tauri-bridge/generated/bindings.js";
@@ -59,15 +59,13 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
     case "directory":
       return Folder;
     case "diff":
-    // A snapshot, an effort and a turn open as their diff (P2.11).
+    // A snapshot and a turn open as their diff (P2.11).
     case "snapshot":
-    case "effort":
     case "turn":
+    case "request":
       return GitCompare;
-    case "wiki":
+    case "knowledge":
       return BookOpen;
-    case "work_item":
-    // Comment anchors and the rail's finished list still say `task`.
     case "task":
       return CheckSquare;
     case "commit":
@@ -89,8 +87,6 @@ export function pageKindIconComponent(kind: string, extensions: Extension[] | nu
       return Forward;
     case "comment":
       return MessageSquareText;
-    case "decision":
-      return Scale;
 
     case "metric":
       return Gauge;
@@ -117,7 +113,7 @@ function declaredPageOf(extensions: Extension[] | null, kind: string): { icon: s
  *  id or it names none. */
 export function declaredPageIcon(extensions: Extension[] | null, kind: string): LucideIcon | null {
   const icon = declaredPageOf(extensions, kind)?.icon;
-  return icon ? (ICONS[icon] ?? null) : null;
+  return iconFor(icon);
 }
 
 export interface PageKindIconProps extends Omit<ComponentProps<LucideIcon>, "ref"> {
@@ -161,10 +157,10 @@ function DeclaredPageIcon({ kind, size, ...rest }: PageKindIconProps): ReactElem
  */
 export function pageKindLabel(kind: string, extensions: Extension[] | null = null): string {
   switch (kind) {
-    case "wiki":
-      return "wiki page";
-    case "work_item":
-      return "work item";
+    case "knowledge":
+      return "knowledge page";
+    case "task":
+      return "task";
     case "agent_session":
       return "agent session";
     default:
@@ -174,8 +170,8 @@ export function pageKindLabel(kind: string, extensions: Extension[] | null = nul
 
 /**
  * The kind a tab id renders as — an entity ref's kind
- * (`work_item:oxplow:tsk42` → `work_item`, `file:src/a.rs@git:HEAD` →
- * `file`) or a declared page's id (`page:diff-view?effort=eff9` →
+ * (`task:oxplow:tsk42` → `task`, `file:src/a.rs@git:HEAD` →
+ * `file`) or a declared page's id (`page:diff-view#start=snap:1&end=snap:2` →
  * `diff-view`, `page:gh/open-prs` → `gh/open-prs`).
  * Text that is not a tab id comes back unchanged so a caller can still
  * label it. The chrome uses this for icons and kind chips.

@@ -1,0 +1,23 @@
+[package]
+name = "oxplow-oxwiki"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+oxplow-domain = { workspace = true }
+oxplow-db = { workspace = true }
+oxplow-fs-watch = { workspace = true }
+async-trait = { workspace = true }
+rusqlite = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+oxplow-workspace-hack = { version = "0.1", path = "../oxplow-workspace-hack" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,31 @@
+# Old test runs' detail is compacted daily, but a run keeps what a request's
+# outcome reads from it (its counts and failed tests): a request recorded
+# again after its earlier runs were compacted still counts them, and its
+# figures don't shrink. Here two red runs (a and b, then a) are compacted
+# before a background job's report brings a green run.
+given:
+  - { command: oxplow.agent_session.open, input: { thread: thr1, harness: claude }, bind: ses }
+  - observe:
+      turn:
+        session: $ses.id
+        prompt: Fix the failing tests
+        tools: [{ name: Bash, kind: shell, command: "sleep 9", call_id: c1, ok: true }]
+        runs:
+          - { at: "2026-01-01T00:00:01Z", cases: [{ name: a, status: failed }, { name: b, status: failed }, { name: c, status: passed }] }
+          - { at: "2026-01-01T00:00:11Z", cases: [{ name: a, status: failed }, { name: b, status: passed }] }
+  - observe: { detail_compaction: { keep: 0 } }
+  - observe:
+      turn:
+        session: $ses.id
+        job: c1
+        prompt: "<task-notification>c1</task-notification>"
+        runs:
+          - { at: "2026-01-01T00:00:31Z", cases: [{ name: a, status: passed }] }
+when:
+  sql: SELECT dims_json, value FROM v_fact WHERE measure_key = 'oxplow.request_test_outcome' ORDER BY dims_json
+expect:
+  rows:
+    - { dims_json: '{"oxplow.tests_stat":"at_close"}', value: 0.0 }
+    - { dims_json: '{"oxplow.tests_stat":"distinct_failed"}', value: 2.0 }
+    - { dims_json: '{"oxplow.tests_stat":"peak"}', value: 2.0 }
+    - { dims_json: '{"oxplow.tests_stat":"red_runs"}', value: 2.0 }

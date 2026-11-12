@@ -19,6 +19,7 @@ import type { PickedRow } from "./railGroups.js";
 import { FormSourceContext } from "../viz/formSource.js";
 import { VizActionRunnerContext } from "../viz/vizActionRunner.js";
 import { ActionForm, VizView, useVizActions } from "../viz/VizView.js";
+import { actionOptionsOf } from "../viz/vizModel.js";
 import { CollapsibleSections } from "../components/CollapsibleSections.js";
 import { pageTabRef } from "../tabs/pageRefs.js";
 import { actionDoes, actionEnabled, offeredWholePage } from "../viz/vizActions.js";
@@ -123,6 +124,12 @@ export interface PageTreeProps {
   onSetParam?(name: string, value: SqlCell, row?: PickedRow): void;
   /** Drawn small (a rail panel): its vizes compact, a few rows each. */
   compact?: boolean;
+  /** Asks for the next size up: a compact viz's "+N more" calls it (a
+   *  rail panel grows to the whole rail; grown, it opens its page). */
+  onMore?(): void;
+  /** Compact but not cut at a few rows (a rail panel grown to the whole
+   *  rail): every row, except a list's groups capped by `group.grown`. */
+  uncapped?: boolean;
   /** Its vizes' whole-viz actions as buttons above them; default: unless
    *  compact (an expanded row's page is compact and keeps them). */
   partButtons?: boolean;
@@ -150,7 +157,7 @@ function NodeView(props: NodeViewProps) {
   const id = `${prefix}${at.id}`;
   const own = at.error ? <NodeError message={at.error} /> : def ? <NodeBody {...props} def={def} id={id} /> : <Unknown {...props} />;
   // A node another extension's page stands in for (`replaceable:
-  // work_item.board`): the run decided whose and ran it, drawn as an embed.
+  // task.board`): the run decided whose and ran it, drawn as an embed.
   const body =
     at.replacedBy && def?.replaceable ? (
       <Replaced
@@ -375,7 +382,8 @@ function VizNode(props: NodeViewProps & { def: Node; id: string }) {
         partButtons={props.partButtons ?? !compact}
         isPage={isPage}
         componentView={componentView}
-        {...(compact ? { compact: true, maxRows: COMPACT_ROWS } : {})}
+        actionOptions={actionOptionsOf(vizRun.config.actions, run.loaders)}
+        {...(compact ? { compact: true, ...(props.uncapped ? {} : { maxRows: COMPACT_ROWS }), ...(props.onMore ? { onMore: props.onMore } : {}) } : {})}
       />
     </VizPagesContext.Provider>
     </FormSourceContext.Provider>

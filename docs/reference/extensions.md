@@ -25,8 +25,8 @@ oxplow extension test my-review            # run its examples on a throwaway oxp
 
 `new` takes a kind instead of `extension` to start from that kind's
 starter: `page`, `collector`, `command`, `effect`, `provider`,
-`component`, `policy`, `advisory`, `skill` or `panel`. A provider takes `--capability` for what it
-implements: `work_items` (the default), `effort_policy`,
+`component`, `advisory`, `skill` or `panel`. A provider takes `--capability` for what it
+implements: `task_tracker` (the default),
 `agent_harness` (a harness that tells its subagents apart also declares
 the `subagents` feature; see the provider protocol), `snapshots` (its
 example marks a one-file tree under `fixtures/tree`; the `contents`
@@ -144,7 +144,7 @@ pages, collectors, commands, effects, advisories, skills or providers. Their
 exports and dependent mounts are withheld too. Each unavailable optional
 import is one warning naming why and everything it withheld:
 `` optional import `items` for `oxplow:oxplow/dataset?dataset=maker/items` v1 is unavailable: maker
-is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow.work-item.sections-0` ``.
+is disabled; withheld: `oxplow:oxplow/page?page=review-ui/items`, `oxplow:oxplow/slot?slot=review-ui/oxplow.task-detail.sections-0` ``.
 Missing required imports and
 dependency cycles block the extension with source-located errors.
 
@@ -231,8 +231,9 @@ lists each declared reference with Set… and Revoke.
 | `effects` | scripts that react to logged events | below |
 | `advisories` | guidance queries for the coding agent |  |
 | `skills` | skills and slash commands for the coding agent |  |
-| `implementations` | an implementation of a capability: a built-in, or an AI provider or effort policy written as a script | below |
-| `providers` | an external program implementing a capability, such as the work list | [Provider protocol](provider-protocol.md) |
+| `context` | text for the coding agent's context, sent once, then when it changes |  |
+| `implementations` | an implementation of a capability: a built-in, or an AI provider | below |
+| `providers` | an external program implementing a capability, such as the task tracker | [Provider protocol](provider-protocol.md) |
 | `pages/*.yaml` (files, not a key) | a page: its data loaders and the view that shows them | [Pages](../guide/pages.md) |
 | `panels` | a rail panel showing its pages compact |  |
 | `ui.mounts` | a page placed at another page's slot (`at: <namespace>/<page>.<slot>`) |  |
@@ -288,7 +289,7 @@ collectors:
   optional token counts and whether usage is observed, estimated or unknown.
 - A script that uses a service it doesn't declare doesn't load: `check`
   says which builtin and which `needs` entry fixes it.
-- A command's, an effect's or an effort policy's script composes
+- A command's or an effect's script composes
   commands and may run more than once, so it never asks a model. A
   command's script reads the semantic layer but not the tree: oxplow
   composes it inside a database transaction.
@@ -303,7 +304,7 @@ collectors:
   - id: prs
     runtime: starlark        # starlark | jaq | exec
     entry: collectors/prs.star
-    input: "SELECT uri, title FROM v_work_item"
+    input: "SELECT uri, title FROM v_task"
     on: { every: 15m }  # or manual (the default), or { on: [event types] }
     entities:
       - { name: pr, key: number, columns: { number: int, title: text } }
@@ -318,7 +319,7 @@ them.
 
 A Starlark or jaq collector runs sandboxed: no files, network,
 environment or credentials beyond the services it declares. Every Starlark and jaq script — collectors,
-commands, effects, policies — runs in its own worker process, which is
+commands, effects — runs in its own worker process, which is
 stopped when it runs past its time budget or its memory cap (`scripts:`
 in Settings reference). It needs no permission, with one exception:
 a Starlark script that calls a model (`ai_classify`, `ai_score`,
@@ -363,7 +364,7 @@ commands:
     input_schema: { type: object, required: [uri], properties: { uri: { type: string } } }
     entry: handlers/finish.star     # transform(x) → { commands: [...] } | { refuse: "why" }
     needs: [sql.read]               # the scopes its script calls
-    ui: { label: Finish Review, group: Review, about: oxplow/work_item, input: { uri: "{{uri}}" } }
+    ui: { label: Finish Review, group: Review, about: oxplow/task, input: { uri: "{{uri}}" } }
 ```
 
 A command with `about` is offered on every ref of that resource. Add
@@ -382,8 +383,8 @@ the page's own actions, sorted by label.
   `scope("sql.read", { sql, params, page: { limit: 500, offset: 0 } })`
   returns `{ rows, more, next_offset }` (`limit` at most 1,000). Give
   the query an `ORDER BY`, or pages can overlap or skip rows; without
-  one the answer carries a `warning`. This rule also applies to effects,
-  effort policies and provider host calls. A complete result does not
+  one the answer carries a `warning`. This rule also applies to effects
+  and provider host calls. A complete result does not
   prove every source was collected.
 - URIs are carried, not assembled. Every script has `uri`:
   `uri.build(resource, **params)` makes one (`uri.build("oxplow/file",
@@ -391,18 +392,18 @@ the page's own actions, sorted by label.
   `uri.param(u, name)`, `uri.id(u, resource=)`, `uri.resource(u)` and
   `uri.is_uri(v)` read one. In SQL, select a dataset's `uri` column and
   compare URIs to URIs (`WHERE uri = :uri`); build one with
-  `uri('oxplow/effort', 'id', json_extract(e.payload, '$.effort'))` and
+  `uri('oxplow/request', 'id', json_extract(e.payload, '$.request'))` and
   read a param with `uri_param(uri, 'id')`. Don't concatenate
-  `'oxplow:oxplow/effort?id=' || id` or slice a URI. A field named for one
-  resource (a command input `thread`, `effort`, `session`, `claim`, an event
+  `'oxplow:oxplow/request?id=' || id` or slice a URI. A field named for one
+  resource (a command input `thread`, `request`, `session`, an event
   payload field) carries that resource's bare id, not a URI: a page or form
   that feeds one selects `uri_param(x.uri, 'id')` (or the dataset's integer
-  `id` for a claim or decision), and a script builds a URI with
-  `uri.build("oxplow/effort", id = e)` only where it becomes a link target
+  `id` for a proposal), and a script builds a URI with
+  `uri.build("oxplow/request", id = e)` only where it becomes a link target
   or is compared with a `uri`. A URI can outlive what it names, so store it even when
   the thing may go.
 - `ui` says how a person meets it. `about` names a resource
-  (`oxplow/work_item`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
+  (`oxplow/task`, `acme/pr`) and offers the command on a URI of it, its page and rows. `input` binds `{{stream}}` and `{{thread}}` (bare ids),
   `{{uri}}` (the page's URI) or `{{uri.id}}` (its key), each as a whole string. `form` opens a
   page to gather the input instead; offered on a URI (`about`), the page
   opens with `uri=<uri>`, which a page's form prefills from with
@@ -448,7 +449,7 @@ chooses the model for it, and a job that declares `tools` takes none here. The r
 is private and limited to 1 MiB and 64 nesting levels. `cancel` and
 `snapshot` take `{id}`. The `intentKey` is what the job is about, one job
 per key: asking again with it returns the same job. Put the subject in it
-(`review:eff12`), and read it back as the snapshot's `intentKey` or
+(`review:req12`), and read it back as the snapshot's `intentKey` or
 `v_job_run.intent_key`. The host records intent before a worker starts, and
 the extension must declare `permissions: [ai.compute]` before a job can
 spend an AI provider key, and a person approves that when the extension is
@@ -493,7 +494,7 @@ script can ask for "the model that reviews" without naming one:
 ```yaml
 ai_profiles:
   - id: review                      # [a-z][a-z0-9_]*, unique in the extension
-    description: Reviews an effort's evidence.   # at most 4096 bytes
+    description: Reviews a request's evidence.   # at most 4096 bytes
     fallback: summarize             # main | summarize | decide (required)
     features: [tool_calling]        # optional: text | tool_calling | streaming | image
 ```
@@ -538,7 +539,7 @@ resources:
 - A resource has no page of its own to name. A URI opens as itself, and
   a page you declare with `for:` draws it ("Showing a resource" below).
 - `about:` on a command or a prompt, and `resource:` on a decorator, take
-  a resource name: `oxplow/work_item`, `github/pr`.
+  a resource name: `oxplow/task`, `github/pr`.
 
 `oxplow extension check` refuses an unknown dataset, a pattern
 outside that subset, an icon oxplow doesn't draw, and a resource or
@@ -599,16 +600,15 @@ The same table is the `v_replaceable` dataset.
 <!-- replaceables:begin (generated from oxplow_domain::replaceable::REPLACEABLE; bless with OXPLOW_BLESS=1) -->
 | Target | What it is | Bound to a provider | Version | Props | View |
 |---|---|---|---|---|---|
-| `work_item.board` | board | no | 1 | `scope`, `thread_id` | — |
-| `work_item.list` | list | no | 1 | `scope`, `thread_id` | — |
-| `work_item.detail` | description editor | no | 1 | `uri` | — |
-| `work_item.detail.state` | state control | yes | 1 | `uri` | — |
+| `task.board` | board | no | 2 | `scope`, `thread_id` | `show`, `priority`, `q` |
+| `task.list` | list | no | 2 | `scope`, `thread_id` | — |
+| `task.detail` | description editor | no | 1 | `uri` | — |
+| `task.detail.state` | state control | yes | 1 | `uri` | — |
 | `vcs.history.graph` | history graph | no | 2 | `head_sha`, `reveal_sha`, `limit` | `q`, `author`, `branch` |
-| `effort.verdict` | effort verdict | no | 1 | `effort_id` | — |
 <!-- replaceables:end -->
 
-A view of work items reads `v_work_item` and changes items only through
-the interface commands (`oxplow.work_item.update`, `transition`,
+A view of tasks reads `v_task` and changes items only through
+the interface commands (`oxplow.task.update`, `transition`,
 `reorder`, `move`, …), so it works with whichever list is active; the
 active list's `features` (`v_capability_provider`) say which of them it
 takes.
@@ -619,7 +619,7 @@ takes.
 effects:
   - id: announce-done
     summary: Note a finished item on its thread.
-    on: [work_item.state_changed]
+    on: [task.state_changed]
     where: { to: done }
     needs: [sql.read]
     entry: effects/announce.star    # transform({ event }) → { commands } | { skip: "why" }
@@ -638,7 +638,7 @@ which run first:
 ```yaml
 effects:
   - id: notify
-    on: [work_item.state_changed]
+    on: [task.state_changed]
     entry: effects/notify.star
     after: [react, "collector:acme/gather", change.analyze]
 ```
@@ -649,7 +649,7 @@ An entry is one of:
   any extension's (the short forms of `oxplow:oxplow/effect?effect=…` and
   `oxplow:oxplow/collector?collector=…`);
 - one of oxplow's own steps, by name (`change.analyze`, `collection`,
-  `page_ref.work_item`, …), or as `consumer:<name>`.
+  `page_ref.task`, …), or as `consumer:<name>`.
 
 A target nothing declares, or contributions that wait on each other, is
 a load error, and the contribution doesn't run. A target in a disabled
@@ -664,19 +664,19 @@ handling logged it).
 
 ### The event your script gets
 
-An effect, an effort policy and an `on:` collector all get the same
+An effect and an `on:` collector both get the same
 event object. A Starlark or jaq collector gets it as `input.event`, and
 an exec collector as `{"event": …}` on stdin (`{}` when nothing
 triggered it):
 
 ```json
 {
-  "id": "0199…", "type": "work_item.state_changed", "v": 1, "seq": 812,
+  "id": "0199…", "type": "task.state_changed", "v": 1, "seq": 812,
   "at": "2026-10-09T14:02:11.120000Z", "source": "agent:thr3",
-  "subject": ["oxplow:oxplow/work_item?id=tsk4&provider=oxplow"],
-  "anchors": { "stream_id": "str1", "thread_id": "thr3", "effort_id": null,
+  "subject": ["oxplow:oxplow/task?id=tsk4&provider=oxtask"],
+  "anchors": { "stream_id": "str1", "thread_id": "thr3",
                "turn_id": 41, "agent_session_id": "ses2", "snapshot_id": null },
-  "payload": { "work_item": "oxplow:oxplow/work_item?id=tsk4&provider=oxplow", "to": "done" },
+  "payload": { "task": "oxplow:oxplow/task?id=tsk4&provider=oxtask", "to": "done" },
   "cause": null
 }
 ```
@@ -720,37 +720,6 @@ implementations:
 - Declaring a provider needs `ai.compute`: it points a person's key
   at its URL. A person approves it when the extension is deployed.
 
-### Effort policies
-
-An effort policy decides when a thread's effort opens, closes and links
-to a work item. oxplow's own opens one per commit or task switch; a
-script can be yours instead. `oxplow extension new policy <name>`
-writes one that opens an item's effort when an agent starts it on a
-thread and closes it when the item is done. For a fuller one, see
-the `prompt-efforts` example (`oxplow extension new --from prompt-efforts`): it gives every prompt that changes
-files an effort of its own, reacting to each turn's `thread.checkpoint`.
-
-```yaml
-implementations:
-  - capability: effort_policy
-    id: acme                       # what Settings → Capabilities offers
-    title: Acme's policy
-    entry: policies/acme.star      # transform({ event }) → { commands } | { skip: "why" }
-    needs: [sql.read]              # the scopes it calls
-```
-
-- The script gets one of core's events (`type`, `payload`, `subject`,
-  and `anchors` such as the `thread_id` an agent moved an item on) and
-  returns the commands to run, or a skip. It can't append events.
-- It reads oxplow only through `scope("sql.read", { sql, params })`,
-  and only when it `needs` it.
-- It runs from the extension's deployment, under its declared
-  permissions. A changed file needs a redeploy, which asks only if it adds
-  a permission.
-- An intent example dry-runs it: `input: { implementation: acme,
-  event: { type, payload, anchors? }, answers? }`, `expect: { commands:
-  [names] }` or `{ skip: $any }`.
-
 ## Checking and testing
 
 `oxplow extension check` loads the extension the way oxplow does and
@@ -772,8 +741,7 @@ services each script uses.
 
 `oxplow extension test` runs on a throwaway oxplow: the check, then
 each intent example's fixture, then each declared provider's
-handshake, examples and conformance suite, and each policy script's
-conformance suite. Its report carries the same import lines. A
+handshake, examples and conformance suite. Its report carries the same import lines. A
 command's fixture may check what the command answers, `expect: { result:
 {...} }`, compared on the keys you name. A job's fixture can make the
 data its tools read first: `setup: [{ command, input?, as? }]` runs

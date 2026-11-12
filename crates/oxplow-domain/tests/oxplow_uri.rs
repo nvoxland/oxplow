@@ -63,7 +63,7 @@ fn a_built_uri_is_canonical() {
 #[test]
 fn any_uri_tells_oxplows_from_the_rest() {
     assert!(matches!(
-        AnyUri::parse("oxplow:oxplow/effort?id=eff1"),
+        AnyUri::parse("oxplow:oxplow/request?id=req1"),
         Ok(AnyUri::Oxplow(_))
     ));
     assert!(matches!(
@@ -75,6 +75,6 @@ fn any_uri_tells_oxplows_from_the_rest() {
         Ok(AnyUri::External(_))
     ));
     // An oxplow: string that isn't a valid one is refused, never external.
-    assert!(AnyUri::parse("oxplow:effort").is_err());
+    assert!(AnyUri::parse("oxplow:request").is_err());
     assert!(AnyUri::parse("not a uri").is_err());
 }

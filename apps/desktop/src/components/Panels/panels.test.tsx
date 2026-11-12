@@ -98,15 +98,15 @@ test("the rail opens a panel's collapsed and count pages with its body", async (
 });
 
 // A body page's choice params are the panel's header toggle; the
-// viewer's pick goes with the body part only (the others don't declare it).
-test("a choice param sends the viewer's pick with the body part only", async () => {
+// viewer's pick goes with every part (the daemon keeps what each declares).
+test("a choice param sends the viewer's pick with every part", async () => {
   const { runs, opened } = fakePageRunsBy((key) => runOf(key.page));
   const panels = [panel("thread", { body: "x/body", collapsed: "x/line" })];
   const view = renderHook(() => useExtensionPanelRuns(panels, "str2", "thr7", { "x/p": { mode: "top" } }, runs));
   await waitFor(() => expect(view.result.current["x/p"]?.collapsed?.run.page.id).toBe("x/line"));
   const of = (page: string) => opened.find((o) => o.key.page === page)?.key.panel;
   expect(of("x/body")).toEqual({ panel: "x/p", part: "body", choices: { mode: "top" } });
-  expect(of("x/line")).toEqual({ panel: "x/p", part: "collapsed", choices: {} });
+  expect(of("x/line")).toEqual({ panel: "x/p", part: "collapsed", choices: { mode: "top" } });
   view.unmount();
   cleanup();
 });
@@ -136,7 +136,7 @@ test("a panel opens a run per part, the body with the picks", async () => {
   await waitFor(() => expect(view.result.current["y/p"]?.collapsed?.run.page.id).toBe("y/line"));
   const of = (page: string) => opened.find((o) => o.key.page === page)?.key.panel;
   expect(of("y/body")).toEqual({ panel: "y/p", part: "body", choices: { mode: "top" } });
-  expect(of("y/line")).toEqual({ panel: "y/p", part: "collapsed", choices: {} });
+  expect(of("y/line")).toEqual({ panel: "y/p", part: "collapsed", choices: { mode: "top" } });
   expect(of("y/body2")).toEqual({ panel: "y/q", part: "body", choices: {} });
   await waitFor(() => expect(view.result.current["y/p"]?.count).toBe(4));
   await waitFor(() => expect(view.result.current["y/q"]?.count).toBe(9));

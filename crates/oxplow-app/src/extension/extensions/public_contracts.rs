@@ -178,7 +178,7 @@ pub(super) fn load(
     }
 }
 
-/// A manifest's contribution ref (`oxplow:oxplow/dataset?dataset=effort_review/reviews`,
+/// A manifest's contribution ref (`oxplow:oxplow/dataset?dataset=change_review/reviews`,
 /// `oxplow:oxplow/command?command=acme.pr.merge`). A global name says no owner: in an export or
 /// guard it is the extension's own; in an import the owner is found when
 /// imports resolve ([`resolve_global_imports`]), until then its extension

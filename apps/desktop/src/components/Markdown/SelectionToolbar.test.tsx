@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import type { Editor } from "@tiptap/core";
 
-import { wikiUri } from "../../uri/uri.js";
+import { knowledgeUri } from "../../uri/uri.js";
 import { getMarkdown } from "./richTextExtensions.js";
 import { RichTextField } from "./RichTextField.js";
 import { selectionToolbarVisible } from "./SelectionToolbar.js";
@@ -57,7 +57,7 @@ test("Link takes a web URL, a wikilink, and nothing to remove it", async () => {
     editor.chain().focus().setTextSelection({ from: 1, to: 6 }).run();
   });
   link("local-snapshots");
-  expect(getMarkdown(editor)).toBe(`[Hello](${wikiUri("local-snapshots")}) world`);
+  expect(getMarkdown(editor)).toBe(`[Hello](${knowledgeUri("oxwiki", "local-snapshots")}) world`);
   act(() => {
     editor.chain().focus().setTextSelection({ from: 1, to: 6 }).run();
   });

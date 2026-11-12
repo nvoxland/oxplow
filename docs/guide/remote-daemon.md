@@ -48,7 +48,7 @@ fast with an error instead of a hung window. Successful connections
 are remembered for one-click reconnect.
 
 The window reloads into the full app shell against the remote
-project. Streams, tasks, files, terminals, the wiki — everything is
+project. Streams, tasks, files, terminals, knowledge pages — everything is
 the remote box's state.
 
 ## Disconnects
