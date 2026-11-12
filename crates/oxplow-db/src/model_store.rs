@@ -11,12 +11,13 @@ use std::collections::BTreeMap;
 
 use oxplow_domain::DomainError;
 use rusqlite::{params, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::database::{map_sql_err, ts_to_string};
 
 /// A declared column's type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ModelType {
     Text,
     Int,
@@ -53,12 +54,12 @@ impl ModelType {
 
 /// A markdown body column: its refs become edges; `pins` pins its file
 /// and directory refs to the primary stream's latest snapshot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Markdown {
     pub pins: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelColumn {
     pub name: String,
     pub ty: ModelType,
@@ -85,7 +86,7 @@ impl ModelColumn {
 }
 
 /// A model as its owner declared it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelDecl {
     /// The owner extension.
     pub extension: String,
@@ -141,7 +142,7 @@ impl ModelDecl {
 }
 
 /// A field a namespace declares on a model.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldDecl {
     pub name: String,
     pub title: String,
@@ -286,6 +287,12 @@ fn validate(decl: &ModelDecl) -> Result<(), DomainError> {
             decl.key
         ))),
     }
+}
+
+/// Whether `decl` is a model the store can keep: its names, key and
+/// columns (what a manifest's `models:` is checked against).
+pub fn check_decl(decl: &ModelDecl) -> Result<(), DomainError> {
+    validate(decl)
 }
 
 /// The stored shape: (column, SQL type), the implicit ones included.

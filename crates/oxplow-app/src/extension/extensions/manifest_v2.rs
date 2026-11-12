@@ -237,6 +237,19 @@ pub struct ManifestV2 {
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::action_points::ActionPointFile>>")]
     pub action_points: Option<Value>,
+    /// Shared models it declares: tables other extensions may fill through
+    /// their collectors' `models` output.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::shared_models::ModelFile>>")]
+    pub models: Option<Value>,
+    /// Shared models it fills as a store, with its stores and fields.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::shared_models::FillFile>>")]
+    pub fills: Option<Value>,
+    /// Fields it adds to another extension's model's items.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<super::shared_models::FieldsFile>>")]
+    pub fields: Option<Value>,
     /// Left-nav panels, each showing its pages compact.
     #[serde(default)]
     #[schemars(with = "Option<Vec<super::PanelFile>>")]

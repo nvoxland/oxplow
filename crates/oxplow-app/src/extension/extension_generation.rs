@@ -16,6 +16,9 @@ pub struct PreparedExtensionDatabase {
     /// Declared entities, created empty when absent so datasets over them
     /// compile before their collectors first run.
     entities: Vec<oxplow_db::collector_store::EntityTable>,
+    /// The enabled extensions' shared models (`.context/models.md`): their
+    /// tables made before the datasets that read them compile.
+    models: crate::models::ModelRegistry,
     datasets: Vec<ExtensionDatasets>,
     vocabulary: PreparedVocabulary,
     contributions: Vec<oxplow_domain::contribution::Descriptor>,
@@ -191,6 +194,7 @@ impl PreparedExtensionDatabase {
         Self {
             configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
+            models: crate::models::ModelRegistry::of(snapshot.extensions()),
             datasets,
             vocabulary,
             contributions,
@@ -251,6 +255,11 @@ impl PreparedExtensionDatabase {
     /// This makes no outer commit and never swaps the running vocabulary. The
     /// activation owner must commit, coordinate in-memory publication and check
     /// candidate identity under its publication boundary before exposing it.
+    /// The shared models this generation publishes.
+    pub fn models(&self) -> &crate::models::ModelRegistry {
+        &self.models
+    }
+
     pub fn replace_tx(
         &self,
         tx: &rusqlite::Transaction<'_>,
@@ -260,6 +269,9 @@ impl PreparedExtensionDatabase {
             .map_err(oxplow_db::map_sql_err)?;
         let result = (|| {
             oxplow_db::collector_store::ensure_entities_tx(tx, &self.entities)?;
+            for spec in self.models.models.values() {
+                oxplow_db::model_store::ensure_model_tx(tx, &spec.decl)?;
+            }
             let mut candidate = self.datasets.clone();
             for (extension, namespace, declaration) in &self.configurations {
                 let values = crate::extension::extension_configuration::effective_values(

@@ -798,6 +798,7 @@ impl ExtensionActivation {
                     commands.apply();
                     capabilities.apply();
                     svc.vocabulary.swap(vocabulary);
+                    svc.models.swap(database.models().clone());
                     metrics.publish(&svc.metrics);
                     providers.withdraw_maps();
                     adapters

@@ -32,6 +32,7 @@ pub mod manifest_v2;
 pub mod public_contracts;
 pub mod replacements;
 pub mod schema;
+pub mod shared_models;
 pub mod skills;
 pub mod storage;
 use crate::pages::schema::PageKind;
@@ -443,6 +444,11 @@ pub struct Extension {
     pub storage: storage::ExtensionStorage,
     /// Action points it declares (`action_points:`; valid ones).
     pub action_points: Vec<action_points::ActionPointDecl>,
+    /// Shared models it declares, fills and adds fields to (`models:`,
+    /// `fills:`, `fields:`; valid ones). Host-side only.
+    #[serde(default)]
+    #[specta(skip)]
+    pub shared_models: shared_models::Declared,
     /// Its `version:` (semver), when it declares one; required to share.
     pub version: Option<String>,
     /// Its contributions as descriptors (`extensions::descriptors`): the
@@ -1738,6 +1744,7 @@ pub(crate) fn empty_extension(name: &str, path: &str, origin: &str) -> Extension
         ai_profiles: Vec::new(),
         storage: Default::default(),
         action_points: Vec::new(),
+        shared_models: Default::default(),
         version: None,
         contributions: Vec::new(),
         configuration: None,
@@ -1881,6 +1888,22 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             ext.event_types = declared;
             ext.errors.extend(errors);
         }
+        // Its shared models; each one's change event is one of its declared
+        // types, with core's schema.
+        let (shared, errors) = shared_models::parse(
+            m.models.as_ref(),
+            m.fills.as_ref(),
+            m.fields.as_ref(),
+            name,
+            &ext.namespace,
+            &file,
+            &manifest,
+        );
+        ext.event_types
+            .types
+            .extend(shared_models::change_events(&shared, &file));
+        ext.shared_models = shared;
+        ext.errors.extend(errors);
         // After `event_types`: an effect may react to its own types — and
         // to another extension's (P9.D1), which resolves when that one is
         // here (`subscriptions`).
@@ -3517,6 +3540,7 @@ pub(crate) fn clear_contributions(ext: &mut Extension) {
     ext.providers.clear();
     ext.custom_components.clear();
     ext.event_types = Default::default();
+    ext.shared_models = Default::default();
     ext.resources.clear();
     ext.effects.clear();
     ext.implementations.clear();

@@ -17,11 +17,11 @@ use oxplow_db::model_store::{
 use oxplow_db::EventCtx;
 use oxplow_domain::events::{Anchors, Envelope, EventId};
 use oxplow_domain::vocabulary::Vocabulary;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 /// A model an enabled extension declares.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelSpec {
     pub decl: ModelDecl,
     /// Other extensions may fill it.
@@ -31,7 +31,7 @@ pub struct ModelSpec {
 }
 
 /// What one extension may write into one model.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FillSpec {
     pub extension: String,
     /// `<owner ns>/<model>`.
@@ -42,7 +42,7 @@ pub struct FillSpec {
 }
 
 /// Fields an extension declares on a model it doesn't fill.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldsSpec {
     pub extension: String,
     pub namespace: String,
@@ -69,6 +69,47 @@ impl Models {
 
     pub fn swap(&self, registry: ModelRegistry) {
         *self.0.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(registry);
+    }
+}
+
+impl ModelRegistry {
+    /// The enabled extensions' models, fills and field declarations. A fill
+    /// of a model no enabled extension declares, of one that isn't open, or
+    /// with a store id another extension already writes is left out (its
+    /// writes are refused, naming the reason).
+    pub fn of(extensions: &[crate::extension::extensions::Extension]) -> Self {
+        let mut out = Self::default();
+        for e in extensions.iter().filter(|e| e.enabled) {
+            for m in &e.shared_models.models {
+                out.models.entry(m.decl.id()).or_insert_with(|| m.clone());
+            }
+        }
+        for e in extensions.iter().filter(|e| e.enabled) {
+            for f in &e.shared_models.fills {
+                let Some(spec) = out.models.get(&f.model) else {
+                    continue;
+                };
+                if !spec.open && spec.decl.extension != f.extension {
+                    continue;
+                }
+                let taken = out.fills.iter().any(|o| {
+                    o.model == f.model
+                        && o.extension != f.extension
+                        && o.stores.iter().any(|s| f.stores.contains(s))
+                });
+                if !taken {
+                    out.fills.push(f.clone());
+                }
+            }
+            out.fields.extend(
+                e.shared_models
+                    .fields
+                    .iter()
+                    .filter(|f| out.models.contains_key(&f.model))
+                    .cloned(),
+            );
+        }
+        out
     }
 }
 

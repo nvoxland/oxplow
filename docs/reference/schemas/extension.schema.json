@@ -235,6 +235,50 @@
       },
       "default": null
     },
+    "action_points": {
+      "description": "Named places where several extensions offer the same kind of\naction; a command joins one with `ui: { at: <id> }`.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ActionPointFile"
+      },
+      "default": null
+    },
+    "models": {
+      "description": "Shared models it declares: tables other extensions may fill through\ntheir collectors' `models` output.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ModelFile"
+      },
+      "default": null
+    },
+    "fills": {
+      "description": "Shared models it fills as a store, with its stores and fields.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/FillFile"
+      },
+      "default": null
+    },
+    "fields": {
+      "description": "Fields it adds to another extension's model's items.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/FieldsFile"
+      },
+      "default": null
+    },
     "panels": {
       "description": "Left-nav panels, each showing its pages compact.",
       "type": [
@@ -1934,14 +1978,26 @@
         },
         "about": {
           "description": "The ref kind it acts on (`task`, `request`): offered on that\nref's page and rows. `None`: it needs no ref, and search offers it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/About"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "about_when": {
+          "description": "A column of `about`'s dataset row (the dataset its resource\nresolves through) that must be truthy — not null, 0, `\"\"` or false —\nfor the command to be offered on a ref of that kind: the same rule\nas a page action's `when`. A ref whose state fails it isn't offered\nthe command at all (the daemon answers, `ref_commands`). Needs\n`about`; the column is checked against the dataset when the\nextensions load. Absent, every ref of the kind is offered it.",
           "type": [
             "string",
             "null"
           ],
           "default": null
         },
-        "about_when": {
-          "description": "A column of `about`'s dataset row (the dataset its resource\nresolves through) that must be truthy — not null, 0, `\"\"` or false —\nfor the command to be offered on a ref of that kind: the same rule\nas a page action's `when`. A ref whose state fails it isn't offered\nthe command at all (the daemon answers, `ref_commands`). Needs\n`about`; the column is checked against the dataset when the\nextensions load. Absent, every ref of the kind is offered it.",
+        "at": {
+          "description": "The named action point it joins (`<namespace>/<name>`, declared\nby an extension's `action_points:`): the point's page places it,\nand it runs with the point's context as its input. Excludes\n`about` (an item command). Its `input` binds the context's keys\n(`{ parent: \"{{context.parent}}\" }`, a key the page left out stays\nunset); without one the input is the whole context.",
           "type": [
             "string",
             "null"
@@ -2010,6 +2066,73 @@
       "additionalProperties": false,
       "required": [
         "label"
+      ]
+    },
+    "About": {
+      "description": "`ui.about`: the resource kind (the short form, a string) or the object\nform `{ resource, accepts? }` that also filters the items.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/AboutItem"
+        }
+      ]
+    },
+    "AboutItem": {
+      "type": "object",
+      "properties": {
+        "resource": {
+          "type": "string"
+        },
+        "accepts": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ItemAccepts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "resource"
+      ]
+    },
+    "ItemAccepts": {
+      "description": "A `ui.about` command's filter on the item it is offered on.",
+      "type": "object",
+      "properties": {
+        "store": {
+          "description": "The store ids of the item URI's `store` param it is offered on:\none id or a list; each is an exact id, or a renderer's `accepts`\nrule (`present`, `absent`, an anchored id pattern).",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StoreFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "StoreFilter": {
+      "description": "One store id or a list of them.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       ]
     },
     "MenuPlace": {
@@ -2219,6 +2342,192 @@
         "tool_calling",
         "streaming",
         "image"
+      ]
+    },
+    "ActionPointFile": {
+      "description": "The on-disk shape.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "doc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "context": {
+          "description": "`{ <key>: <type> }`; a key written `name?` is optional.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ContextType"
+          },
+          "default": {}
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label"
+      ]
+    },
+    "ContextType": {
+      "description": "The type of one context key.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "string",
+            "int",
+            "bool"
+          ]
+        },
+        {
+          "description": "A ref (`oxplow:…`): a string.",
+          "type": "string",
+          "const": "uri"
+        }
+      ]
+    },
+    "ModelFile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "resource": {
+          "type": "string"
+        },
+        "open": {
+          "type": "boolean",
+          "default": false
+        },
+        "key": {
+          "type": "string"
+        },
+        "store_param": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "change_event": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "columns": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "resource",
+        "key",
+        "columns"
+      ]
+    },
+    "FillFile": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "stores": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "id_pattern": {
+          "description": "How its ids look in text (bare links; not used yet).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "stages": {
+          "description": "A task store's stages (bundled's task model; not used yet).",
+          "default": null
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldFile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model"
+      ]
+    },
+    "FieldFile": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "values": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "read_only": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "title",
+        "kind"
+      ]
+    },
+    "FieldsFile": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FieldFile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "fields"
       ]
     },
     "PanelFile": {

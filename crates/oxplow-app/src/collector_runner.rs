@@ -2896,46 +2896,27 @@ pub(crate) mod tests {
     /// its `cursor` is kept for the next run.
     #[tokio::test]
     async fn a_collectors_models_output_fills_the_model_and_keeps_its_cursor() {
-        use oxplow_db::model_store::{ModelColumn, ModelDecl, ModelType};
         let fx = crate::test_fixtures::services_with_thread().await;
         let root = fx.svc.layout.project_dir.clone();
+        // The owner declares the model, its resource and its change event;
+        // the store fills it.
+        extension(
+            &root,
+            "shelf",
+            "manifest: 2\nname: shelf\nintent:\n  purpose: test\nresources:\n  - name: book\n    description: A book.\n    label: Book\n    params: { store: { required: true }, id: { required: true } }\nmodels:\n  - name: book\n    resource: book\n    open: true\n    key: id\n    change_event: shelf.book.changed\n    columns: { id: text, title: text }\n",
+            &[],
+        );
         extension(
             &root,
             "shelves",
-            "manifest: 2\nname: shelves\nintent:\n  purpose: test\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n",
+            "manifest: 2\nname: shelves\nintent:\n  purpose: test\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n",
             &[(
                 "books.star",
                 "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}], \"cursor\": {\"n\": 1}}\n",
             )],
         );
-        crate::test_fixtures::activate_with_problems(&fx.svc).await;
-        let mut registry = crate::models::ModelRegistry::default();
-        registry.models.insert(
-            "shelf/book".into(),
-            crate::models::ModelSpec {
-                decl: ModelDecl {
-                    extension: "shelf".into(),
-                    namespace: "shelf".into(),
-                    name: "book".into(),
-                    resource: "shelf/book".into(),
-                    key: "id".into(),
-                    store_param: "store".into(),
-                    columns: vec![
-                        ModelColumn::new("id", ModelType::Text),
-                        ModelColumn::new("title", ModelType::Text),
-                    ],
-                },
-                open: true,
-                change_event: None,
-            },
-        );
-        registry.fills.push(crate::models::FillSpec {
-            extension: "shelves".into(),
-            model: "shelf/book".into(),
-            stores: vec!["shelves".into()],
-            fields: vec![],
-        });
-        fx.svc.models.swap(registry);
+        let problems = crate::test_fixtures::activate_with_problems(&fx.svc).await;
+        assert!(problems.is_empty(), "{problems:?}");
         let out = fx
             .svc
             .commands
@@ -2972,6 +2953,20 @@ pub(crate) mod tests {
             .unwrap();
         assert_eq!(title, "Dune");
         assert_eq!(cursor, r#"{"n":1}"#);
+        let changed: Vec<_> = fx
+            .svc
+            .event_log_store
+            .read_after(0, 1000)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.envelope.event_type == "shelf.book.changed")
+            .collect();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(
+            changed[0].envelope.payload["uri"],
+            "oxplow:shelf/book?id=dune&store=shelves"
+        );
     }
 
     /// P7.C2: three failed runs in a row disable a collector; then
