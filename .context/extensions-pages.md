@@ -685,6 +685,9 @@ is gone, is the toast's (usability.md "A person's command that fails").
   `edit`, `open`, `fixed`, `fields`, `choices` or `input`; `drag`, `bulk`,
   `row`, `options_from`, `when` work as for a command. A fixture presses it
   like any action (`press: { action, node, row }`, `expect: { ok, result }`).
+  A `point:` no enabled extension declares is a **warning**
+  (`action.unknown_point`, at `check` and at load: its owner may be off):
+  "enable the extension that declares it, or check the name".
 - An action runs as the page for whoever pressed it
   (`Actor::Page { page_id, on_behalf_of }`; `pages/actions.rs`,
   `viz_actions::prepare_resolved`), so it grants no power. A press names
