@@ -248,6 +248,25 @@ fills:
   change to the provider program; its writes become its own commands (one
   per provider operation, as today). `TasksProjection` and
   `KnowledgeRecords` go once the adapter stands in for them.
+  **Built (adapter, beside the projections).** `providers/model_records.rs`
+  (`records.models`, an async pump consumer) turns each `task.recorded` /
+  `knowledge.page.recorded` of a running provider instance into a
+  `ModelOutput` for `oxplow/task_record` / `oxplow/knowledge_record`
+  (store = the instance id, `upsert` of one row or `delete`), applied with
+  `apply_tx`: cause `trigger`, the record's anchors, source
+  `provider:<instance>`. A task row has its stage's title and bucket (as the
+  instance declares its stages), the first-seen `closed_at` / `created_at`,
+  the instance's declared `native` fields as `fields`, and `links` /
+  `comments` when the record states them (a link whose type the model's
+  enum lacks, or whose target is no ref, is dropped with a warning); a page
+  row's stated `uris` are its `refs`. The fills come from the registry:
+  `ModelRegistry::with_provider_fills` adds, from the generation's
+  capability rows (`PreparedCapabilities::rows`, called in
+  `PreparedExtensionDatabase::with_vocabulary`), one fill per available
+  external instance (task_tracker -> task_record, knowledge ->
+  knowledge_record), written as the provider's extension; the views list
+  its store because the fill is in the swapped registry. Bundled off (the
+  models undeclared) -> no fill, the consumer returns without error.
 
 ## A script that composes a store's write (decided 2026-11-12)
 

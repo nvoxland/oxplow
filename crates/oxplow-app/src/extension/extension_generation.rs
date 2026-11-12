@@ -198,7 +198,15 @@ impl PreparedExtensionDatabase {
         Self {
             configurations,
             entities: crate::collector_runner::declared_entity_tables(snapshot.extensions()),
-            models: crate::models::ModelRegistry::of(snapshot.extensions()),
+            models: {
+                // The running provider instances fill the record models under
+                // their own ids (`providers::model_records`).
+                let registry = crate::models::ModelRegistry::of(snapshot.extensions());
+                match &capabilities {
+                    Some(c) => registry.with_provider_fills(c.rows()),
+                    None => registry,
+                }
+            },
             datasets,
             vocabulary,
             contributions,

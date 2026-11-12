@@ -112,6 +112,78 @@ impl ModelRegistry {
     }
 }
 
+/// The model a provider instance of `capability` fills under its own id
+/// (`.context/models.md` "Providers"): its records are read as that
+/// model's rows by `providers::model_records`.
+pub fn provider_model(capability: &str) -> Option<&'static str> {
+    match capability {
+        "task_tracker" => Some("oxplow/task_record"),
+        "knowledge" => Some("oxplow/knowledge_record"),
+        _ => None,
+    }
+}
+
+impl ModelRegistry {
+    /// Add the fills of the running provider instances (`rows` are the
+    /// capability rows of a generation): an external instance of a task
+    /// tracker fills `oxplow/task_record`, of a knowledge store
+    /// `oxplow/knowledge_record`, as store = its instance id, written by its
+    /// extension; its own fields are the fill's. Nothing is added when the
+    /// model isn't declared and open (bundled off), or when another
+    /// extension already writes that store id.
+    pub fn with_provider_fills(
+        mut self,
+        rows: &[oxplow_db::capability_store::CapabilityProvider],
+    ) -> Self {
+        for row in rows
+            .iter()
+            .filter(|r| r.source == "external" && r.available)
+        {
+            let (Some(extension), Some(model)) = (&row.extension, provider_model(&row.capability))
+            else {
+                continue;
+            };
+            let Some(spec) = self.models.get(model) else {
+                continue;
+            };
+            if !spec.open {
+                continue;
+            }
+            let taken = self
+                .fills
+                .iter()
+                .any(|f| f.model == model && f.stores.contains(&row.provider));
+            if taken {
+                continue;
+            }
+            let fields =
+                serde_json::from_value::<Vec<oxplow_domain::tasks::FieldDecl>>(row.fields.clone())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|f| FieldDecl {
+                        name: f.name,
+                        title: f.title,
+                        kind: match f.kind {
+                            oxplow_domain::tasks::FieldKind::Enum => "enum",
+                            oxplow_domain::tasks::FieldKind::Text => "text",
+                            oxplow_domain::tasks::FieldKind::Number => "number",
+                        }
+                        .into(),
+                        values: (!f.values.is_empty()).then_some(f.values),
+                        read_only: f.read_only,
+                    })
+                    .collect();
+            self.fills.push(FillSpec {
+                extension: extension.clone(),
+                model: model.into(),
+                stores: vec![row.provider.clone()],
+                fields,
+            });
+        }
+        self
+    }
+}
+
 impl ModelRegistry {
     /// What the enabled extensions' declarations can't both have, as errors
     /// on the later extension: a store id two extensions write into one
