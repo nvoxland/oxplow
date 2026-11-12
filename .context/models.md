@@ -181,7 +181,9 @@ models:
   changed; an unchanged row logs none. `cause: reconcile` (a `start`
   snapshot) is for catching up: the owner's reactions that mean "this
   happened now" (linking a request, assigning on start) act only on
-  `trigger` and `fields`. A change to a parent's children logs the
+  `trigger` and `fields`. A fields change names each field that moved,
+  `fields.<namespace>.<name>`, in `changed`, with its value in `before` /
+  `after` (an assignment is `fields.oxplow.assignee`). A change to a parent's children logs the
   parent's event with `changed: [<child>]`.
 
 ## Filling a model (a store)
@@ -290,8 +292,11 @@ turn) that changed the tool. Linking a request to a task "by the change
 falling in a turn's window" needs better: the plan is that
 `oxplow.extension_store.write` and `oxplow.extension_files.write` fire the
 composing extension's observers directly with the command's anchors and
-cause, so the change event is the command's. `oxplow.model.set_fields`
-should carry the command's anchors too (it carries none today).
+cause, so the change event is the command's. Built: a store's write is
+observed as its command, and its change events (and `set_fields'`) carry the
+command's thread and open turn; a collector's first run is a reconcile only
+when no command started it, so filing an item in a turn is that turn's
+change.
 
 ## Bundled's models (the target of the vertical slice)
 

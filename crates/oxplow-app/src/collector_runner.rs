@@ -1332,7 +1332,10 @@ async fn run_collector_once(
                                 source: &writer_source,
                                 cause: Some(synced_id.clone()),
                                 anchors: anchors.clone(),
-                                why: if reconcile || first {
+                                // A first run a command started (its own
+                                // write, observed) is that command's, not a
+                                // catch-up.
+                                why: if reconcile || (first && anchors.thread_id.is_none()) {
                                     crate::models::Cause::Reconcile
                                 } else {
                                     crate::models::Cause::Trigger

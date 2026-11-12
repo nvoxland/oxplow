@@ -5,10 +5,11 @@
 #
 # Gets {"rows": [...], "event": {...}}: one row {request, thread_id,
 # thread_uri} when the change's turn has a request; none otherwise (a
-# change made outside any turn). Returns the (request, task, basis) row:
-# `transition` when the change moved the state, `assigned` when it was a
-# field write and the task is now assigned to this thread (the event names
-# no field and no value: `changed` is just ["fields"]), else `edited`. Rows accumulate (sync: upsert).
+# change made outside any turn). Returns the (request, task, basis) row,
+# from what the change event says: `filed` for a new item (no state
+# before), `transition` when it moved the state, `assigned` when oxplow's
+# assignee field became this thread, else `edited`. Rows accumulate (sync:
+# upsert).
 
 def transform(x):
     if not x["rows"]:
@@ -16,9 +17,13 @@ def transform(x):
     r = x["rows"][0]
     p = x["event"]["payload"]
     changed = p.get("changed", [])
-    if "state" in changed:
+    before = p.get("before") or {}
+    after = p.get("after") or {}
+    if "state" in changed and "state" not in before:
+        basis = "filed"
+    elif "state" in changed:
         basis = "transition"
-    elif p["cause"] == "fields" and r["assignee"] != None and r["assignee"] == r["thread_uri"]:
+    elif "fields.oxplow.assignee" in changed and after.get("fields.oxplow.assignee") == r["thread_uri"]:
         basis = "assigned"
     else:
         basis = "edited"

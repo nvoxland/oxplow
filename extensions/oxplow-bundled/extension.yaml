@@ -413,12 +413,10 @@ collectors:
     on: [oxplow.task_record.changed]
     where: { cause: [trigger, fields] }
     input: |
-      SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri,
-             (SELECT json_extract(f.fields, '$.oxplow.assignee') FROM v_oxplow_task_record f WHERE f.uri = json_extract(ev.payload, '$.uri')) AS assignee
+      SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
         LEFT JOIN v_thread th ON th.id = t.thread_id
-        JOIN v_event ev ON ev.id = :event_id
        WHERE t.id = :turn_id
     sync: upsert
     entities:

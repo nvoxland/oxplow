@@ -29,8 +29,8 @@ steps:
   - when: { sql: "SELECT state, assignee FROM v_oxplow_task_next" }
     expect: { rows: [{ state: done, assignee: null }] }
   - when: { sql: "SELECT basis, thread_id FROM v_oxplow_request_task_next ORDER BY basis" }
-    expect: { rows: [{ basis: assigned, thread_id: 1 }, { basis: transition, thread_id: 1 }] }
-  # The first write of a row logs cause `reconcile`, even from a command in a
-  # turn: so a create links nothing (a gap, see the report).
+    expect: { rows: [{ basis: assigned, thread_id: 1 }, { basis: filed, thread_id: 1 }, { basis: transition, thread_id: 1 }] }
+  # Filing it in a turn is that turn's change (`trigger`), as moving it is;
+  # the effect's assignments are `fields`.
   - when: { sql: "SELECT group_concat(cause) AS causes FROM (SELECT json_extract(payload, '$.cause') AS cause FROM v_event WHERE type = 'oxplow.task_record.changed' ORDER BY seq)" }
-    expect: { rows: [{ causes: 'reconcile,trigger,fields,trigger,fields' }] }
+    expect: { rows: [{ causes: 'trigger,trigger,fields,trigger,fields' }] }

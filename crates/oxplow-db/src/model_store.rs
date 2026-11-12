@@ -1565,16 +1565,38 @@ fn stored_fields_tx(
 }
 
 /// Restate `namespace`'s fields on `uri` to `fields`; whether they moved.
+/// Restate `namespace`'s fields on `uri` to `fields`, and say what moved:
+/// each changed field as `fields.<namespace>.<name>`, with its value
+/// before and after (JSON; null when absent). Empty when nothing moved.
 fn put_fields_tx(
     conn: &rusqlite::Connection,
     model: &str,
     uri: &str,
     namespace: &str,
     fields: &BTreeMap<String, String>,
-) -> Result<bool, DomainError> {
-    if &stored_fields_tx(conn, model, uri, namespace)? == fields {
-        return Ok(false);
+) -> Result<Vec<(String, Value, Value)>, DomainError> {
+    let stored = stored_fields_tx(conn, model, uri, namespace)?;
+    if &stored == fields {
+        return Ok(Vec::new());
     }
+    let parse = |v: Option<&String>| {
+        v.and_then(|v| serde_json::from_str::<Value>(v).ok())
+            .unwrap_or(Value::Null)
+    };
+    let moved: Vec<(String, Value, Value)> = stored
+        .keys()
+        .chain(fields.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .filter(|name| stored.get(*name) != fields.get(*name))
+        .map(|name| {
+            (
+                format!("fields.{namespace}.{name}"),
+                parse(stored.get(name)),
+                parse(fields.get(name)),
+            )
+        })
+        .collect();
     conn.execute(
         "DELETE FROM model_field_value WHERE model = ?1 AND uri = ?2 AND namespace = ?3",
         params![model, uri, namespace],
@@ -1587,7 +1609,20 @@ fn put_fields_tx(
         )
         .map_err(map_sql_err)?;
     }
-    Ok(true)
+    Ok(moved)
+}
+
+/// Name each moved field on `change`, with its value before and after.
+fn note_fields(change: &mut ModelChange, moved: Vec<(String, Value, Value)>) {
+    if moved.is_empty() {
+        return;
+    }
+    change.changed.push("fields".into());
+    for (name, before, after) in moved {
+        change.changed.push(name.clone());
+        change.before.insert(name.clone(), before);
+        change.after.insert(name, after);
+    }
 }
 
 /// Tombstone `uri`: the row is hidden, its fields and edges kept for
@@ -2267,9 +2302,8 @@ pub fn write_tx(
         if children_moved {
             restate_child_edges_tx(conn, decl, kinds, &uri)?;
         }
-        if put_fields_tx(conn, &model, &uri, store, &row.fields)? {
-            change.changed.push("fields".into());
-        }
+        let moved = put_fields_tx(conn, &model, &uri, store, &row.fields)?;
+        note_fields(&mut change, moved);
         if change.changed.is_empty() {
             out.unchanged += 1;
         } else {
@@ -2321,11 +2355,12 @@ pub fn write_fields_tx(
         }
     }
     merged.extend(new);
-    if !put_fields_tx(conn, &decl.id(), uri, namespace, &merged)? {
+    let moved = put_fields_tx(conn, &decl.id(), uri, namespace, &merged)?;
+    if moved.is_empty() {
         return Ok(None);
     }
     let mut change = ModelChange::new(uri.to_string(), &store, id_text(id), ChangeOp::Upserted);
-    change.changed = vec!["fields".into()];
+    note_fields(&mut change, moved);
     Ok(Some(change))
 }
 
@@ -2845,7 +2880,14 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(changed.unwrap().changed, vec!["fields".to_string()]);
+        let changed = changed.unwrap();
+        assert_eq!(
+            changed.changed,
+            vec!["fields".to_string(), "fields.shelf-score.score".to_string()],
+            "a fields change names each field that moved"
+        );
+        assert_eq!(changed.before["fields.shelf-score.score"], Value::Null);
+        assert_eq!(changed.after["fields.shelf-score.score"], json!(9));
         let fields = |r: &[(String, String, String, Option<String>)]| -> Value {
             serde_json::from_str(r[0].3.as_deref().unwrap()).unwrap()
         };
