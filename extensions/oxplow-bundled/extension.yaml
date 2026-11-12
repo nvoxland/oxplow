@@ -4,7 +4,7 @@ namespace: oxplow
 description: What comes with oxplow beyond its foundation, cleaned up. Holds the review and analysis datasets, their settings and the Work board so far; the rest moves here from oxplow-bundled-todo one piece at a time.
 engine: ">=0.7"
 # Its task tracker's skill is written to the agent's runtime (`/oxplow:next-task`).
-permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields']
+permissions: [files.read, agent.write, sql.read, 'commands:oxplow.model.set_fields', 'commands:oxplow.tasks.assign']
 # Its Work board is a custom component in TypeScript (src/board/), built
 # into dist/ when oxplow is built and on every deploy; dist/ isn't committed.
 build: { run: "bun run build", output: dist, exclude: [node_modules] }
@@ -146,7 +146,7 @@ datasets:
       - { name: active, type: INT, doc: "1 for a task in progress on this thread." }
 effects:
   - id: assign-on-start
-    summary: Assign a task to the thread that started it; clear the assignment when it is done or canceled.
+    summary: An agent starting a task puts it last in its thread's queue; closing a task clears its assignee and place.
     on: [oxplow.task_record.changed]
     where: { cause: trigger }
     entry: effects/assign_on_start.star
@@ -190,7 +190,7 @@ models:
     search: { title: title, body: body }
     columns:
       id: text
-      title: text
+      title: { type: text, markdown: {} }
       body: { type: text, markdown: {} }
       state: { type: text, values: [backlog, todo, in_progress, blocked, done, canceled] }
       stage: text
@@ -489,7 +489,9 @@ collectors:
     on: [oxplow.task_record.changed]
     where: { cause: [trigger, fields] }
     input: |
-      SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri
+      SELECT r.uri AS request, t.thread_id AS thread_id, th.uri AS thread_uri,
+             (SELECT group_concat(x.key, char(10)) FROM v_oxplow_request_task_next x
+               WHERE x.request = r.uri) AS known
         FROM v_agent_turn t
         JOIN v_request r ON r.id = t.request_id
         LEFT JOIN v_thread th ON th.id = t.thread_id
@@ -507,7 +509,10 @@ collectors:
         JOIN v_thread th ON th.id = t.thread_id
         JOIN v_page_ref p ON p.source_uri = t.uri AND p.ref_type = 'prompt_mention'
                          AND p.target_resource = 'oxplow/task'
-       WHERE t.id = :turn_id AND t.source = 'person'
+       -- A link keeps the first evidence (core's insert or ignore).
+       WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task_next x
+                          WHERE x.key = r.uri || '|' || p.target_uri || '|prompt')
     sync: upsert
   - id: oxplow.request_task_assigned
     doc: "TEMPORARY (the flip's `oxplow.request_task` family): links the request of a turn that ended to the tasks in progress and assigned to its thread (basis `assigned`)."
@@ -520,7 +525,10 @@ collectors:
         JOIN v_request r ON r.id = t.request_id
         JOIN v_thread th ON th.id = t.thread_id
         JOIN v_oxplow_task_next w ON w.assignee = th.uri AND w.state = 'in_progress'
+       -- A link keeps the first evidence (core's insert or ignore).
        WHERE t.id = :turn_id
+         AND NOT EXISTS (SELECT 1 FROM v_oxplow_request_task_next x
+                          WHERE x.key = r.uri || '|' || w.uri || '|assigned')
     sync: upsert
   # What the project knows: the pages it keeps, restated whenever a page is
   # written, recorded or deleted, and whether a request read any.
