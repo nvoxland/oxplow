@@ -2387,7 +2387,11 @@ mod tests {
                 "oxplow.handoff.resolve",
                 // A settings write for the project, its stamps read first.
                 "oxplow.knowledge.set_oxwiki",
+                // Bundled's assignment and queue order: oxplow's fields on
+                // a task, through `oxplow.model.set_fields`.
+                "oxplow.tasks.assign",
                 "oxplow.tasks.clear_finished",
+                "oxplow.tasks.reorder",
                 "oxplow.tasks.set_workflow",
             ]
         );
