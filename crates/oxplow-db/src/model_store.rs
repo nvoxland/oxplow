@@ -101,6 +101,17 @@ pub struct ModelDecl {
     /// `provider`).
     pub store_param: String,
     pub columns: Vec<ModelColumn>,
+    /// The columns search indexes as a row's title and body: a generated
+    /// searchable view `v_<ns>_search_<name>`.
+    #[serde(default)]
+    pub search: Option<ModelSearch>,
+}
+
+/// What a model's generated searchable view indexes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelSearch {
+    pub title: String,
+    pub body: String,
 }
 
 impl ModelDecl {
@@ -121,6 +132,12 @@ impl ModelDecl {
     /// `v_<ns>_<name>`: the live rows.
     pub fn view(&self) -> String {
         format!("v_{}_{}", self.ns(), self.name)
+    }
+
+    /// `v_<ns>_search_<name>`: what search indexes, when it declares
+    /// `search`.
+    pub fn search_view(&self) -> String {
+        format!("v_{}_search_{}", self.ns(), self.name)
     }
 
     /// `v_<ns>_<name>_all`: the removed rows too.
@@ -277,6 +294,16 @@ fn validate(decl: &ModelDecl) -> Result<(), DomainError> {
                 decl.id(),
                 c.name
             )));
+        }
+    }
+    if let Some(search) = &decl.search {
+        for col in [&search.title, &search.body] {
+            if !decl.column(col).is_some_and(|c| c.ty == ModelType::Text) {
+                return Err(invalid(format!(
+                    "model `{}`: search names `{col}`, which isn't a text column",
+                    decl.id()
+                )));
+            }
         }
     }
     match decl.column(&decl.key) {
@@ -448,7 +475,92 @@ pub fn ensure_model_tx(conn: &rusqlite::Connection, decl: &ModelDecl) -> Result<
         ))
         .map_err(map_sql_err)?;
     }
-    register_field_view_tx(conn, decl, &field_view, &select)
+    register_field_view_tx(conn, decl, &field_view, &select)?;
+    if let Some(search) = &decl.search {
+        let view = decl.search_view();
+        let select = format!(
+            "SELECT t.uri, t.{} AS title, coalesce(t.{}, '') AS body, t.written_at AS version \
+             FROM {} t WHERE t.removed_at IS NULL",
+            quote(&search.title),
+            quote(&search.body),
+            quote(&decl.table())
+        );
+        let create_view = format!("CREATE VIEW {} AS {select}", quote(&view));
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'view' AND name = ?1",
+                [&view],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_sql_err)?;
+        if current.as_deref() != Some(create_view.as_str()) {
+            conn.execute_batch(&format!(
+                "DROP VIEW IF EXISTS {}; {create_view};",
+                quote(&view)
+            ))
+            .map_err(map_sql_err)?;
+        }
+        register_view_tx(
+            conn,
+            decl,
+            &view,
+            &format!("search_{}", decl.name),
+            &format!("What search indexes of the shared model `{}`.", decl.id()),
+            &select,
+            serde_json::json!([
+                {"name": "uri", "type": "TEXT", "doc": "The item."},
+                {"name": "title", "type": "TEXT", "doc": "Its title."},
+                {"name": "body", "type": "TEXT", "doc": "What search reads."},
+                {"name": "version", "type": "TEXT", "doc": "When oxplow last wrote it."}
+            ]),
+        )?;
+    }
+    Ok(())
+}
+
+/// Record a generated view as its owner's dataset (an entity).
+fn register_view_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    view: &str,
+    name: &str,
+    description: &str,
+    select: &str,
+    contract: Value,
+) -> Result<(), DomainError> {
+    let current: Option<String> = conn
+        .query_row("SELECT sql FROM dataset WHERE view = ?1", [view], |r| {
+            r.get(0)
+        })
+        .optional()
+        .map_err(map_sql_err)?;
+    if current.as_deref() == Some(select) {
+        return Ok(());
+    }
+    let now = ts_to_string(oxplow_domain::Timestamp::now());
+    conn.execute(
+        "INSERT INTO dataset (view, name, owner, version, description, sql, compiled_at, kind)
+         VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'entity')
+         ON CONFLICT (view) DO UPDATE SET description = excluded.description,
+             sql = excluded.sql, compiled_at = excluded.compiled_at",
+        params![view, name, decl.extension, description, select, now],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        "INSERT INTO dataset_contract (view, version, columns_json, recorded_at)
+         VALUES (?1, 1, ?2, ?3)
+         ON CONFLICT (view, version) DO UPDATE SET columns_json = excluded.columns_json,
+             recorded_at = excluded.recorded_at",
+        params![view, contract.to_string(), now],
+    )
+    .map_err(map_sql_err)?;
+    conn.execute(
+        "INSERT OR IGNORE INTO dataset_input (view, input, kind) VALUES (?1, ?2, 'source')",
+        params![view, decl.table()],
+    )
+    .map_err(map_sql_err)?;
+    Ok(())
 }
 
 /// Record the long field view as its owner's dataset.
@@ -1296,6 +1408,10 @@ mod tests {
             resource: "shelf/book".into(),
             key: "id".into(),
             store_param: "store".into(),
+            search: Some(ModelSearch {
+                title: "title".into(),
+                body: "body".into(),
+            }),
             columns: vec![
                 ModelColumn::new("id", ModelType::Text),
                 ModelColumn::new("title", ModelType::Text),
@@ -2081,5 +2197,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(decls, 1);
+    }
+
+    /// A model with `search` has a searchable view of its live rows.
+    #[tokio::test]
+    async fn a_searchable_model_has_its_search_view() {
+        let db = Database::in_memory();
+        write(
+            &db,
+            "s",
+            vec![],
+            ModelWrite::Upsert {
+                rows: vec![row(
+                    json!({"id": "b1", "title": "Dune", "body": "A desert."}),
+                )],
+                delete: vec![],
+                rename: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let (title, body): (String, String) = db
+            .read(|tx| {
+                tx.query_row("SELECT title, body FROM v_shelf_search_book", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .map_err(map_sql_err)
+            })
+            .await
+            .unwrap();
+        assert_eq!((title.as_str(), body.as_str()), ("Dune", "A desert."));
     }
 }

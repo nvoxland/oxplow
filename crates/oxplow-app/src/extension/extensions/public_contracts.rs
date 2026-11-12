@@ -760,13 +760,22 @@ fn prune_mounts(extensions: &mut [Extension], blocked: &BTreeSet<String>) {
                     false
                 }
             });
-            let datasets: BTreeSet<_> = ext
+            let mut datasets: BTreeSet<_> = ext
                 .datasets
                 .iter()
                 .map(|dataset| {
                     oxplow_db::datasets::extension_view(&ext.namespace, &dataset.decl.name)
                 })
                 .collect();
+            // A shared model's generated views are its owner's published
+            // views too.
+            for model in &ext.shared_models.models {
+                datasets.insert(model.decl.view());
+                datasets.insert(model.decl.view_all());
+                if model.decl.search.is_some() {
+                    datasets.insert(model.decl.search_view());
+                }
+            }
             let core = ext.namespace == super::CORE_NAMESPACE;
             ext.resources.retain(|resource| {
                 let decl = &resource.decl;

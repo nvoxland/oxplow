@@ -59,6 +59,18 @@ pub struct ModelFile {
     change_event: Option<String>,
     #[schemars(with = "BTreeMap<String, serde_json::Value>")]
     columns: BTreeMap<String, Value>,
+    /// The text columns search indexes as an item's title and body; the
+    /// resource is searchable through a generated view unless it names its
+    /// own `searchable:`.
+    #[serde(default)]
+    search: Option<SearchFile>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchFile {
+    title: String,
+    body: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -242,6 +254,10 @@ fn model_of(raw: ModelFile, extension: &str, namespace: &str) -> Result<ModelSpe
         key: raw.key,
         store_param: raw.store_param.unwrap_or_else(|| "store".into()),
         columns,
+        search: raw.search.map(|s| oxplow_db::model_store::ModelSearch {
+            title: s.title,
+            body: s.body,
+        }),
     };
     // The store's rules for names, key and implicit columns.
     oxplow_db::model_store::check_decl(&decl).map_err(|e| e.to_string())?;

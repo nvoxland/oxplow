@@ -8,7 +8,7 @@ use serde_json::json;
 use crate::extension::extension_private_state_tests::write;
 use crate::test_fixtures::services_with_thread;
 
-const OWNER: &str = "manifest: 2\nname: shelf\nintent:\n  purpose: p\nresources:\n  - name: book\n    description: A book.\n    label: Book\n    params: { store: { required: true }, id: { required: true } }\nmodels:\n  - name: book\n    resource: book\n    open: true\n    key: id\n    change_event: shelf.book.changed\n    columns: { id: text, title: text }\n";
+const OWNER: &str = "manifest: 2\nname: shelf\nintent:\n  purpose: p\nresources:\n  - name: book\n    description: A book.\n    label: Book\n    params: { store: { required: true }, id: { required: true } }\nmodels:\n  - name: book\n    resource: book\n    open: true\n    key: id\n    change_event: shelf.book.changed\n    search: { title: title, body: title }\n    columns: { id: text, title: text }\n";
 
 const STORE: &str = "manifest: 2\nname: shelves\nintent:\n  purpose: p\nrequires: [shelf]\nfills:\n  - model: shelf/book\n    stores: [shelves]\ncollectors:\n  - id: books\n    runtime: starlark\n    entry: books.star\n    entities:\n      - { name: seen, key: id, columns: { id: text } }\n";
 
@@ -62,6 +62,37 @@ async fn a_script_sets_its_own_field_on_a_stores_item() {
         serde_json::from_str::<serde_json::Value>(&fields).unwrap(),
         json!({ "scorer": { "score": 9 } })
     );
+    // The model's resource is searchable through its generated view, and
+    // the index finds the store's item (the change loop, as boot runs it,
+    // over assets that settle fast).
+    let assets =
+        crate::assets::Assets::new(fx.svc.db.clone(), std::time::Duration::from_millis(50));
+    crate::datasets_changed::spawn(
+        fx.svc.db.clone(),
+        std::sync::Arc::new(crate::datasets_changed::DatasetWatermarks::default()),
+        fx.svc.events.clone(),
+        assets.clone(),
+        fx.svc.event_pump.clone(),
+        crate::pages::open_runs::PageRuns::default(),
+    );
+    assets.sync_search_kinds().await.unwrap();
+    let mut hits = Vec::new();
+    for _ in 0..100 {
+        hits = fx
+            .svc
+            .search_store
+            .search("Dune", None, &["shelf/book".to_string()], 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|h| h.uri)
+            .collect();
+        if !hits.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(hits, vec![DUNE.to_string()]);
     let direct = run(
         "oxplow.model.set_fields",
         json!({ "model": "shelf/book", "uri": DUNE, "values": { "score": 1 } }),

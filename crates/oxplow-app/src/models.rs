@@ -409,6 +409,7 @@ mod tests {
             resource: "shelf/book".into(),
             key: "id".into(),
             store_param: "store".into(),
+            search: None,
             columns: vec![
                 ModelColumn::new("id", ModelType::Text),
                 ModelColumn::new("title", ModelType::Text),

@@ -1237,7 +1237,7 @@ commands:
     scope: files.write
     op: extension_delete
     example: {"path": "shelf/dune.md"}
-  # model.write — a shared model's items (`.context/models.md`). A script composes it; it runs
+  # model.write — a shared model's items. A script composes it; it runs
   # as that extension and refuses any other caller.
   - name: model.set_fields
     summary: "Set the composing extension's own fields on an item of a shared model, as its `fields:` declares them (a null removes one). Only an extension's own script can compose it. Logs the model's change event with cause `fields`; returns `{ changed }`."

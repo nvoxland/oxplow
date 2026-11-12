@@ -2427,6 +2427,17 @@
         "columns": {
           "type": "object",
           "additionalProperties": true
+        },
+        "search": {
+          "description": "The text columns search indexes as an item's title and body; the\nresource is searchable through a generated view unless it names its\nown `searchable:`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SearchFile"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -2435,6 +2446,22 @@
         "resource",
         "key",
         "columns"
+      ]
+    },
+    "SearchFile": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "body"
       ]
     },
     "FillFile": {

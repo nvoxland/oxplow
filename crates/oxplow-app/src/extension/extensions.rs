@@ -2532,6 +2532,22 @@ fn load_one(files: &dyn ExtensionFiles, name: &str, rel: &str, origin: &str) -> 
             crate::extension::extension_resources::inline_svg_icons(resources, &mut errors, files);
         ext.errors.extend(errors);
     }
+    // A searchable shared model's resource is searched through the view its
+    // model generates, unless it names its own.
+    for model in &ext.shared_models.models {
+        if model.decl.search.is_none() {
+            continue;
+        }
+        if let Some(r) = ext
+            .resources
+            .iter_mut()
+            .find(|r| r.decl.name.to_string() == model.decl.resource)
+        {
+            if r.decl.searchable.is_none() {
+                r.decl.searchable = Some(model.decl.search_view());
+            }
+        }
+    }
     // After resources: a page that renders one is checked against it.
     let mut checked: Vec<crate::pages::schema::Page> = Vec::new();
     for page in std::mem::take(&mut ext.page_files) {
