@@ -196,7 +196,7 @@ pub(super) async fn observer_example(
             .await;
     host.settle().await;
     let got = match ran {
-        Ok(done) => json!({ "ok": true, "result": done.row_counts, "problems": [] }),
+        Ok(done) => json!({ "ok": true, "result": done.row_counts, "problems": done.problems }),
         Err(RunCollectorError::NotFound) => {
             report.errors.push(error(
                 shown,

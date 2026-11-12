@@ -60,6 +60,10 @@ pub struct CollectorRunReport {
     /// A fact collector's facts recorded.
     #[specta(type = oxplow_domain::JsNumber)]
     pub facts: i64,
+    /// What a run skipped and why: shared-model rows it quarantined, each
+    /// naming the row and column.
+    #[serde(default)]
+    pub problems: Vec<String>,
 }
 
 /// A declared collector with its last run.
@@ -1247,6 +1251,7 @@ async fn run_collector_once(
                         .zip(oxplow_db::collector_store::write_rows_tx(tx, &writes)?)
                         .collect();
                     let vocab = vocabulary.current();
+                    let mut problems: Vec<String> = Vec::new();
                     // Its observations of shared models, with its rows or
                     // not at all; their change events are caused by its
                     // `collector.synced`, logged below.
@@ -1271,6 +1276,7 @@ async fn run_collector_once(
                             &fields,
                         )
                         .map_err(DomainError::Invalid)?;
+                        problems = applied.problems;
                         for (model, by_op) in applied.counts {
                             for (op, n) in by_op {
                                 counts.insert(format!("{model}.{op}"), n as i64);
@@ -1302,17 +1308,21 @@ async fn run_collector_once(
                             &emitted.clone().with_cause(synced.id.clone()),
                         )?;
                     }
-                    Ok(counts)
+                    Ok((counts, problems))
                 }))
                 .await
                 .and_then(|committed| committed);
             match committed {
-                Ok(row_counts) => {
+                Ok((row_counts, problems)) => {
+                    for problem in &problems {
+                        tracing::warn!(collector = %format!("{owner}/{id}"), %problem, "a row was quarantined");
+                    }
                     return Ok(CollectorRunReport {
                         owner: owner.to_string(),
                         id: id.to_string(),
                         row_counts,
                         facts: 0,
+                        problems,
                     });
                 }
                 Err(e) => e.to_string(),
@@ -2033,6 +2043,7 @@ impl CollectorRunner {
                 id: id.to_string(),
                 row_counts: BTreeMap::new(),
                 facts: i64::try_from(facts).unwrap_or(i64::MAX),
+                problems: Vec::new(),
             });
         }
         let root = self.worktrees.resolve(None).await.into_local_path();

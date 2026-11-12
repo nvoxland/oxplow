@@ -27,7 +27,7 @@ async fn a_script_sets_its_own_field_on_a_stores_item() {
     write(
         root,
         ".oxplow/extensions/shelves/books.star",
-        "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}]}]}\n",
+        "def transform(x):\n    return {\"models\": [{\"model\": \"shelf/book\", \"store\": \"shelves\", \"snapshot\": [{\"id\": \"dune\", \"title\": \"Dune\"}, {\"id\": \"odd\", \"colour\": \"red\"}]}]}\n",
     );
     write(root, ".oxplow/extensions/scorer/extension.yaml", SCORER);
     write(
@@ -40,12 +40,18 @@ async fn a_script_sets_its_own_field_on_a_stores_item() {
     let run = |name: &'static str, input: serde_json::Value| {
         fx.svc.commands.run(&Actor::Human, name, input, false)
     };
-    run(
+    let synced = run(
         crate::collector_runner::SYNC,
         json!({ "collector": "shelves/books" }),
     )
     .await
     .unwrap();
+    // The bad row is skipped and named; the good one lands.
+    assert!(
+        synced.result.to_string().contains("colour"),
+        "{}",
+        synced.result
+    );
     run("scorer.book.score", json!({ "uri": DUNE, "score": 9 }))
         .await
         .unwrap();
