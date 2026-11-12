@@ -1,0 +1,21 @@
+requires: [oxplow-bundled, oxtask]
+given:
+  - { command: oxtask.task.create, input: { title: Old title, priority: low } }
+  - { command: oxtask.task.create, input: { title: Epic } }
+when: { command: oxtask.task.update, input: { id: tsk1, title: New title, priority: urgent, parent: tsk2, body: More } }
+expect: { ok: true }
+steps:
+  - when:
+      sql: |
+        SELECT title, body, parent, json_extract(fields, '$.oxtask.priority') AS priority
+        FROM v_oxplow_task_record WHERE id = 'tsk1'
+    expect:
+      rows:
+        - { title: New title, body: More, parent: "oxplow:oxplow/task?id=tsk2&provider=oxtask", priority: urgent }
+  - when: { undo: oxtask.task.update }
+    expect: { ok: true }
+  - when:
+      sql: |
+        SELECT title, body, parent, json_extract(fields, '$.oxtask.priority') AS priority
+        FROM v_oxplow_task_record WHERE id = 'tsk1'
+    expect: { rows: [{ title: Old title, body: null, parent: null, priority: low }] }

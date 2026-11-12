@@ -30,9 +30,14 @@ the later one; a run names the rows it quarantined.
 
 Also built: children ("Children" below).
 
+Also built: the edge repair over models (`model_store::repair_edges_tx`,
+run in the publication when a model's edge code, declaration or the
+vocabulary changed: `models::repair_edges_if_needed_tx`, recorded as
+`model_repair:<model>`); a stated row keeps its refs (`refs` column) so
+the repair restates them as written.
+
 Not yet: the provider `read` adapter, the owner's
-`oxplow.model.write`, bare-link patterns, the boot repair over models, the
-tombstone sweep's schedule, and the shipped-extension plumbing (F7).
+`oxplow.model.write`, bare-link patterns, the tombstone sweep's schedule, and the shipped-extension plumbing (F7).
 This doc is the contract for the rest. The other pieces
 have their contracts in their own docs:
 
@@ -241,6 +246,24 @@ fills:
   change to the provider program; its writes become its own commands (one
   per provider operation, as today). `TasksProjection` and
   `KnowledgeRecords` go once the adapter stands in for them.
+
+## A script that composes a store's write (decided 2026-11-12)
+
+oxtask surfaced it: a script runs once, before its steps, so its `result`
+and `inverse` can't use what its steps answered — a minted task id, so
+an agent can't learn the id it filed, and `create` / `comment` can't be
+undone. To build:
+
+- **`finish(x)`**: a script command's script may also define `finish`.
+  After all its steps have landed, the bus calls it with `x["input"]`,
+  `x["actor"]` and `x["steps"]` (`[{ name, input, result }]`, each step's
+  answer: a store write's `rows` carry the minted id), and it returns `{
+  result?, inverse? }`, which become the run's result and its undo
+  (replacing what `transform` said). Pure, like `transform`: no writes, no
+  composed commands. A run that stops partway calls no `finish`.
+- **`x["actor"]`** for `transform` and `finish`: who runs it (`{ kind:
+  agent | person | system, thread?: <uri>, uri: <uri> }`), so a store
+  records its author reliably.
 
 ## A store's folder and worktree streams (decided 2026-11-12)
 

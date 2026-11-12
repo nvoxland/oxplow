@@ -1,0 +1,26 @@
+# A store write is observed at once, as its command: the row is in the model
+# when the command returns, with the stage, its title, the bucket as `state`
+# and the priority as a field. The id was minted by the insert.
+requires: [oxplow-bundled, oxtask]
+when:
+  command: oxtask.task.create
+  input: { title: Fix the greeting, body: It says helo., stage: ready, priority: high, author: nate }
+expect: { ok: true, result: { stage: ready } }
+steps:
+  - when:
+      sql: |
+        SELECT id, title, body, state, stage, stage_title, store,
+               json_extract(fields, '$.oxtask.priority') AS priority,
+               json_extract(fields, '$.oxtask.author') AS author
+        FROM v_oxplow_task_record
+    expect:
+      rows:
+        - id: tsk1
+          title: Fix the greeting
+          body: It says helo.
+          state: todo
+          stage: ready
+          stage_title: Ready
+          store: oxtask
+          priority: high
+          author: nate

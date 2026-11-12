@@ -624,3 +624,52 @@ turn, written once by ingest, which cascades with its request and joins to
 `v_request`. A prompt's mention of the task is still also a `prompt_mention`
 edge in `page_ref`.
 
+
+## oxtask as a store (contract, being built)
+
+The observed-systems work (`.context/models.md`) makes oxtask an ordinary
+shipped extension, `extensions/oxtask` (namespace `oxtask`, off by default
+until the switch), that keeps its items in its own SQLite file and fills
+bundled's `task_record` model. It uses only what any extension can use.
+
+- **Its file** (`storage: { sqlite: true }`, migrations under
+  `storage/migrations/`): `task (n INTEGER PRIMARY KEY, id TEXT UNIQUE —
+  'tsk' || n, title, body, stage, parent, priority, author, created_at,
+  updated_at, closed_at, seq INTEGER, deleted INTEGER DEFAULT 0)`,
+  `task_link (task_id, to_uri, type, seq, deleted)`, `task_comment (id,
+  task_id, author, at, body, seq, deleted)`, and a `change_seq` counter.
+  **SQLite triggers** bump `seq` on every insert, update and soft delete,
+  so a write from anywhere (its commands, `oxplow-dev task`, a person's
+  sqlite3) is seen by the collector.
+- **Ids are minted in the write**: `INSERT INTO task (title, …) VALUES
+  (…) RETURNING id`, the id derived from `n` in the same statement or a
+  trigger; two agents filing at once can't collide. The new id is in the
+  write's `rows` (the run's children); the command's own `result` can't
+  name it (the script runs before the write).
+- **Stages**: oxtask's own — `backlog`, `ready` "Ready", `in_progress`,
+  `blocked`, `done`, `canceled` — each with its bucket; every row the
+  collector states carries `stage`, `stage_title` and the bucket as
+  `state`, so the change event says the bucket.
+- **The collector** `tasks`, `on: [start, { sqlite: own }]`, incremental:
+  `start` (or no cursor) states the whole store as a `snapshot`;
+  otherwise the rows with `seq > cursor` as `upsert` (with their whole
+  `links` and `comments` children sets) and the deleted ones as `delete`;
+  returns `cursor: { seq }`. A store write is observed at once, as its
+  command.
+- **Its fields**: `priority` (enum urgent, high, medium, low) and a
+  read-only `author`, in its `fills:` entry; `id_pattern: "tsk[0-9]+"`.
+- **Its commands** (its own shape, not the old generic verbs):
+  `oxtask.task.create { title, body?, stage?, parent?, priority? }`,
+  `oxtask.task.update { id, title?, body?, priority?, parent? }`,
+  `oxtask.task.move { id, stage }`, `oxtask.task.link { id, to, type }` /
+  `unlink`, `oxtask.task.comment { id, body }`, `oxtask.task.delete { id }`.
+  Each composes `oxplow.extension_store.write`, and returns an `inverse`
+  (its own command that makes the opposite write) where one exists, so
+  each is undoable. Assignment and rank are not oxtask's: they are
+  bundled's fields (`oxplow.task.assign`).
+- **Fixtures** prove each command and the collector on a throwaway oxplow
+  with bundled on: a create shows in `v_oxplow_task_record` when its command
+  returns, with its change event's turn; a move changes the bucket; link
+  and comment restate the children; undo restores; a write by SQL from
+  outside (a `given:` step that writes the file) is seen on the next
+  `sqlite` trigger; `start` reconciles.

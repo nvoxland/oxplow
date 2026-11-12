@@ -653,6 +653,52 @@ pub fn verify_pins_tx(
     Ok(wanted)
 }
 
+/// Restate the edges of every row `decl` keeps — its markdown's mentions
+/// (or its stated refs), its edge columns, its children's edges — from
+/// what is stored, by diff: the repair after a change to how edges are
+/// projected (a migration, a fixed projection). Pins already there are
+/// kept. How many rows it went over.
+pub fn repair_edges_tx(
+    conn: &rusqlite::Connection,
+    decl: &ModelDecl,
+    kinds: &oxplow_domain::uri::resources::ResourceRegistry,
+) -> Result<usize, DomainError> {
+    validate(decl)?;
+    let cols: Vec<String> = decl.columns.iter().map(|c| quote(&c.name)).collect();
+    let n = decl.columns.len();
+    let rows: Vec<(String, Vec<rusqlite::types::Value>, Option<String>)> = conn
+        .prepare(&format!(
+            "SELECT uri, {}, refs FROM {}",
+            cols.join(", "),
+            quote(&decl.table())
+        ))
+        .and_then(|mut st| {
+            st.query_map([], |r| {
+                let cells = (0..n)
+                    .map(|i| r.get::<_, rusqlite::types::Value>(i + 1))
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok((r.get(0)?, cells, r.get(n + 1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .map_err(map_sql_err)?;
+    let count = rows.len();
+    for (uri, cells, refs) in rows {
+        let row = Checked {
+            id: String::new(),
+            cells,
+            fields: BTreeMap::new(),
+            refs: refs.and_then(|r| serde_json::from_str(&r).ok()),
+            children: Vec::new(),
+        };
+        restate_edges_tx(conn, decl, kinds, &uri, &row)?;
+        if !decl.children.is_empty() {
+            restate_child_edges_tx(conn, decl, kinds, &uri)?;
+        }
+    }
+    Ok(count)
+}
+
 /// Whether `decl` is a model the store can keep: its names, key and
 /// columns (what a manifest's `models:` is checked against).
 pub fn check_decl(decl: &ModelDecl) -> Result<(), DomainError> {
@@ -665,6 +711,9 @@ fn shape(decl: &ModelDecl) -> Vec<(String, &'static str)> {
     out.extend(decl.columns.iter().map(|c| (c.name.clone(), c.ty.sql())));
     out.push(("written_at".to_string(), "TEXT"));
     out.push(("removed_at".to_string(), "TEXT"));
+    // The refs a store stated (JSON), kept so a repair restates its edges
+    // as the write did; NULL when its markdown was parsed.
+    out.push(("refs".to_string(), "TEXT"));
     out
 }
 
@@ -2195,6 +2244,16 @@ pub fn write_tx(
                 .map_err(map_sql_err)?;
         }
         if !change.changed.is_empty() || row.refs.is_some() {
+            conn.execute(
+                &format!("UPDATE {table} SET refs = ?2 WHERE uri = ?1"),
+                params![
+                    uri,
+                    row.refs
+                        .as_ref()
+                        .map(|r| serde_json::to_string(r).unwrap_or_default())
+                ],
+            )
+            .map_err(map_sql_err)?;
             restate_edges_tx(conn, decl, kinds, &uri, &row)?;
         }
         let mut children_moved = false;
@@ -3839,5 +3898,49 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(published, 1);
+    }
+
+    /// The repair restates a row's lost edges from what is stored —
+    /// a parsed body's and a stated one's alike — and leaves a current one
+    /// alone.
+    #[tokio::test]
+    async fn the_repair_restates_lost_edges_from_storage() {
+        let db = Database::in_memory();
+        write_decl(
+            &db,
+            book(),
+            vec![
+                row(json!({"id": "b1", "title": "t", "body": "see [[file:src/a.rs]]"})),
+                row(json!({"id": "b2", "title": "t", "body": "x", "refs": [B_RS]})),
+            ],
+        )
+        .await;
+        db.transaction(|tx| tx.execute("DELETE FROM page_ref", []).map_err(map_sql_err))
+            .await
+            .unwrap();
+        let n = db
+            .transaction(|tx| repair_edges_tx(tx, &book(), &kinds()))
+            .await
+            .unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(
+            edges(&db, B1).await,
+            vec![(A_RS.to_string(), "file_mention".to_string(), None)]
+        );
+        assert_eq!(
+            edges(&db, "oxplow:shelf/book?id=b2&store=s").await,
+            vec![(B_RS.to_string(), "file_mention".to_string(), None)],
+            "a stated row's edges come from its stored refs, not its body"
+        );
+        let mut rx = db.subscribe_changes();
+        db.transaction(|tx| repair_edges_tx(tx, &book(), &kinds()))
+            .await
+            .unwrap();
+        while let Ok(changed) = rx.try_recv() {
+            assert!(
+                !changed.contains("page_ref"),
+                "a current graph was rewritten"
+            );
+        }
     }
 }
